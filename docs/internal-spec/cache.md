@@ -1161,8 +1161,9 @@ a separate loader sharing the same Store) load the marshalled
 blob and skip the parse / resolve stages entirely.
 
 Producer id `"rbs.environment"`. Cache descriptor reuses
-{`RbsDescriptor.build`} so a single signature change or rbs gem
-bump invalidates this producer alongside the four
+{`RbsDescriptor.build`} so a single signature change, an rbs gem
+bump, or an engine edit in a checkout (§ "Engine identity in a
+computed-value key") invalidates this producer alongside the four
 post-translation caches.
 
 ### `RbsEnvironment.fetch(loader:, store:) -> ::RBS::Environment`

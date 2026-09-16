@@ -67,7 +67,12 @@ RSpec.describe "rbs.* producer cache invalidation on an engine-source edit" do
   producers.each do |producer_id, producer_class|
     describe producer_id do
       it "recomputes across an engine-source edit instead of serving the writing build's value" do
-        expect(session(producer_class, :old).first).to eq(:old)
+        first, writing_store = session(producer_class, :old)
+
+        expect(first).to eq(:old)
+        # The writing session has to have WRITTEN, or the second session's miss proves only that the first
+        # one never filled the slot — which every broken key would also satisfy.
+        expect(producer_stats(writing_store, producer_id)).to include(misses: 1, writes: 1)
 
         value, store = session(producer_class, :new)
 
@@ -83,24 +88,26 @@ RSpec.describe "rbs.* producer cache invalidation on an engine-source edit" do
         expect(value).to eq(:old)
         expect(producer_stats(store, producer_id)).to include(hits: 1, misses: 0)
       end
+
+      # An engine whose source cannot be digested must not be keyed by its RBS inputs alone — that is the
+      # weaker key the row exists to replace. `RbsDescriptor.build` lets
+      # {Rigor::Cache::EngineSource::Unavailable} out, the loader answers nil, and `RbsCacheProducer.fetch`
+      # computes uncached. Asserted per producer rather than once: `rbs.environment` writes a ~1.9 MB blob,
+      # so a slot that fell through to a weaker key here would be the most expensive one to get wrong.
+      it "runs uncached, writing no entry, when the engine cannot be identified" do
+        allow(Rigor::Cache::EngineSource).to receive(:process_identity)
+          .and_raise(Rigor::Cache::EngineSource::Unavailable)
+        allow(producer_class).to receive(:compute).and_return(:computed)
+        store = Rigor::Cache::Store.new(root: cache_root)
+        loader = Rigor::Environment::RbsLoader.new
+
+        expect(producer_class.fetch(loader: loader, store: store)).to eq(:computed)
+        expect(producer_class.fetch(loader: loader, store: store)).to eq(:computed)
+
+        expect(producer_class).to have_received(:compute).twice
+        expect(Dir.glob(File.join(cache_root, producer_id, "**", "*.entry"))).to be_empty
+      end
     end
-  end
-
-  # An engine whose source cannot be digested must not be keyed by its RBS inputs alone — that is the
-  # weaker key the row exists to replace. `RbsDescriptor.build` lets {Rigor::Cache::EngineSource::Unavailable}
-  # out, the loader answers nil, and `RbsCacheProducer.fetch` computes uncached.
-  it "runs the producer uncached when the engine cannot be identified" do
-    allow(Rigor::Cache::EngineSource).to receive(:process_identity)
-      .and_raise(Rigor::Cache::EngineSource::Unavailable)
-    allow(Rigor::Cache::RbsConstantTable).to receive(:compute).and_return(:computed)
-    store = Rigor::Cache::Store.new(root: cache_root)
-    loader = Rigor::Environment::RbsLoader.new
-
-    expect(Rigor::Cache::RbsConstantTable.fetch(loader: loader, store: store)).to eq(:computed)
-    expect(Rigor::Cache::RbsConstantTable.fetch(loader: loader, store: store)).to eq(:computed)
-
-    expect(Rigor::Cache::RbsConstantTable).to have_received(:compute).twice
-    expect(Dir.glob(File.join(cache_root, "rbs.constant_type_table", "**", "*.entry"))).to be_empty
   end
 
   describe Rigor::Cache::RbsDescriptor do

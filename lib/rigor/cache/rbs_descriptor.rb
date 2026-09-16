@@ -9,9 +9,10 @@ require_relative "file_digest"
 module Rigor
   module Cache
     # Shared descriptor builder for cache producers that depend on the RBS environment (constant table,
-    # known-class set, future Marshal-clean reflection artefacts). Every consumer attaches the same three
-    # slots, so factoring the construction here keeps the producers small and ensures invalidation behaves
-    # identically across them.
+    # known-class set, future Marshal-clean reflection artefacts). Every consumer attaches the same slots —
+    # the `rbs` gem row, a digest row per signature file, and the `rbs.libraries` / `rbs.virtual_rbs` /
+    # `rbs.deferred_signature_paths` / `engine-source` config rows — so factoring the construction here keeps
+    # the producers small and ensures invalidation behaves identically across them.
     module RbsDescriptor
       # The key every `rbs.*` producer shares ({RbsCacheProducer#fetch}): `rbs.environment`,
       # `rbs.constant_type_table`, `rbs.class_ancestor_table`, `rbs.known_class_names`,
@@ -35,11 +36,14 @@ module Rigor
       # @raise EngineSource::Unavailable — an engine that cannot be identified must not be keyed by its
       #   inputs alone; {RbsCacheProducer.fetch} turns this into an uncached compute.
       def self.build(loader)
+        # FIRST, before {.file_entries} digests the whole signature tree: the {EngineSource::Unavailable}
+        # path discards this descriptor entirely, and a SHA-256 of every `.rbs` under every signature root is
+        # the expensive way to reach that conclusion.
+        engine = EngineSource.key_config_entries
         Descriptor.new(
           gems: [rbs_gem_entry],
           files: file_entries(loader),
-          configs: config_entries(loader) + env_only_config_entries(loader) +
-                   EngineSource.key_config_entries
+          configs: config_entries(loader) + env_only_config_entries(loader) + engine
         )
       end
 

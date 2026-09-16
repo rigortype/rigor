@@ -3,7 +3,8 @@ Maintainer notes. Block-level HTML comments are stripped before this file enters
 
 - Claude Code reads CLAUDE.md, not AGENTS.md; CLAUDE.md imports this file.
 - This file is loaded in every session. Keep it under ~200 lines and put conditional detail behind
-  a pointer. The docs-check gate protects the budget and the ADR premise-set cap.
+  a pointer. The docs-check gate enforces the ADR premise-set cap (ADR-97); this file's own
+  line-count target is not mechanically gated and can quietly regrow if nobody rechecks it.
 - "RBS Authorship" and "Release Cadence" are cited section names; keep them stable.
 -->
 

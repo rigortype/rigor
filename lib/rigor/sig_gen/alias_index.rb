@@ -25,7 +25,8 @@ module Rigor
     #   Deliberately NOT `RbsLoader#signature_paths`: that is `resolved_paths` PLUS plugin signature paths,
     #   bundler-discovered gem `sig/` directories, the `rbs collection` tree and Rigor's own gem overlays.
     #   Keyed off the loader, a project that merely bundles a gem shipping RBS aliases would find that gem's
-    #   vocabulary in its proposals.
+    #   vocabulary in its proposals. A loaded plugin's own `sig/` is subtracted even when the project wired
+    #   it through `signature_paths:` itself (the #697 shape) — it is the plugin's vocabulary either way.
     # - **Lossless alias bodies only.** Neither translation nor erasure is injective. `Type::Intersection`
     #   erases to its FIRST member, `Refined` and `Difference` to their base, a proc type translates to a
     #   bare `Proc`, and an RBS intersection may not even survive translation. An alias
@@ -76,32 +77,31 @@ module Rigor
         new({})
       end
 
-      # @param signature_paths — the project's OWN resolved signature paths (directories or `.rbs` files).
+      # @param signature_paths — the project's OWN resolved signature paths.
+      # @param excluded_paths — signature paths that reached the list from somewhere other than the
+      #   author: a loaded plugin's own `sig/`, which #697 lets a project wire through `signature_paths:`
+      #   as well. Those aliases are the plugin's vocabulary, not this project's.
       #   Fail-soft in the ADR-5 sense: a loader that cannot enumerate aliases, and any alias whose body fails
       #   to translate, yields an entry-free index rather than an error, because a rendering nicety must never
       #   fail a run.
-      def self.build(environment:, signature_paths:)
+      def self.build(environment:, signature_paths:, excluded_paths: [])
         loader = environment&.rbs_loader
         return empty unless loader.respond_to?(:each_type_alias_decl)
 
-        project_files = project_sig_files(signature_paths)
+        project_files = project_sig_files(signature_paths) - project_sig_files(excluded_paths)
         return empty if project_files.empty?
 
         new(collect_entries(loader, project_files, environment))
       end
 
-      # Every `.rbs` file the project itself contributes, absolute. A `signature_paths:` entry may name a
-      # single `.rbs` file as well as a directory — `RbsLoader` accepts both — so both are expanded here.
+      # Every `.rbs` file under the given signature paths, absolute. Directories only, matching `RbsLoader`,
+      # which skips a `signature_paths:` entry that is not a directory.
       def self.project_sig_files(signature_paths)
         Array(signature_paths).flat_map do |path|
-          entry = path.is_a?(Pathname) ? path : Pathname(path.to_s)
-          if entry.directory?
-            Dir.glob(entry.join("**", "*.rbs").to_s).map { |p| File.expand_path(p) }
-          elsif entry.file? && entry.extname == ".rbs"
-            [File.expand_path(entry.to_s)]
-          else
-            []
-          end
+          dir = path.is_a?(Pathname) ? path : Pathname(path.to_s)
+          next [] unless dir.directory?
+
+          Dir.glob(dir.join("**", "*.rbs").to_s).map { |p| File.expand_path(p) }
         end.to_set
       end
 
@@ -130,9 +130,12 @@ module Rigor
         members = expanded_members(loader, environment, decl)
         return nil if members.nil?
 
-        name = type_name.to_s.delete_prefix("::")
-        { members: members, name: name, namespace: name.split("::")[0..-2].join("::"),
-          order: [file, declaration_line(decl), name] }
+        # The ABSOLUTE spelling. RBS resolves a relative type name innermost-first, so a bare
+        # `Deep::Inner::mood` written inside `Deep::Inner` would rebind if the project also declared a
+        # `Deep::Inner::Deep`. The leading `::` says exactly which alias the proposal means.
+        relative = type_name.to_s.delete_prefix("::")
+        { members: members, name: "::#{relative}", namespace: relative.split("::")[0..-2].join("::"),
+          order: [file, declaration_line(decl), relative] }
       end
 
       def self.declaration_file(decl)

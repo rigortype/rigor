@@ -263,17 +263,25 @@ but it does narrow the contract relative to `untyped`.
 
 ## Type aliases your project declares
 
-When a proposal's return is a union whose members are
-exactly the expansion of a `type` alias declared in your
-own `sig/`, the alias name is what gets emitted. For a
-method on `Rigor::Type::Combinator`, sig-gen emits
+When a proposal's type is a union whose members are exactly
+the expansion of a `type` alias declared in your own
+`sig/`, the alias name is what gets emitted. For a method
+on `Rigor::Type::Combinator`, sig-gen emits
 
 ```
-def hash_shape_keys: (untyped) -> Rigor::Type::t
+def hash_shape_keys: (untyped) -> ::Rigor::Type::t
 ```
 
 rather than the twenty-two members `Rigor::Type::t`
-expands to.
+expands to. The name is written in its absolute form so it
+cannot rebind to a nearer constant of the same spelling.
+
+This applies wherever sig-gen renders a type, not only to
+returns: `--params=observed` parameter positions, `attr_*`
+accessors, and `Data` / `Struct` members all fold the same
+way. The `--format=json` payload carries the folded
+spelling in its `rbs` field; `inferred_return` is the
+carrier the engine computed and stays expanded.
 
 The rule is member-set equality, so a proposal missing one
 arm of the alias still prints in full — the alias names a
@@ -287,11 +295,13 @@ guessing.
 **Your aliases only.** The candidates come from your
 configured `signature_paths:` (or `sig/` when you
 configured none) — not from gems in your bundle, not from
-an `rbs collection` tree, not from plugin signature paths,
-and not from core or stdlib RBS. Core declares
-`Warning::category` as `:deprecated | :experimental |
-:performance`; a project that never wrote that alias does
-not get it in its proposals.
+an `rbs collection` tree, and not from core or stdlib RBS.
+Core declares `Warning::category` as `:deprecated |
+:experimental | :performance`; a project that never wrote
+that alias does not get it in its proposals. A loaded
+plugin's own signature directory is subtracted even when
+you listed it in `signature_paths:` yourself — those
+aliases are the plugin's vocabulary.
 
 **Namespace proximity.** An alias is only offered to a
 method whose owner is inside the alias's own namespace, and
@@ -306,8 +316,9 @@ read as one of its members, a proc type as a bare `Proc`, a
 nested alias as whatever it expanded to. An alias whose
 body contains one of those is skipped, because a fold into
 it would put a type in your signature that the method does
-not return. Only class instances, literals, singletons,
-unions, optionals and tuples qualify.
+not return. Only class instances, singletons, literals,
+unions, optionals, tuples and the `nil` / `bool` / `bot`
+bases qualify.
 
 **Unions only, non-generic only.** A `type name = String`
 alias never rewrites an ordinary `String` return, and a

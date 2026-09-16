@@ -1166,7 +1166,11 @@ module Rigor
       # diagnostics, `rigor type-of` and the engine's own comparisons, and none of those should start naming a
       # project alias. Sig-gen's rendering preference is a CLI concern and stays on the CLI side.
       def alias_index
-        @alias_index ||= AliasIndex.build(environment: @environment, signature_paths: project_signature_paths)
+        @alias_index ||= AliasIndex.build(
+          environment: @environment,
+          signature_paths: project_signature_paths,
+          excluded_paths: plugin_signature_paths
+        )
       end
 
       # The project's OWN signature paths, resolved exactly as `Environment.for_project` resolves its
@@ -1180,6 +1184,14 @@ module Rigor
 
         default = Pathname(Dir.pwd) / "sig"
         default.directory? ? [default] : []
+      end
+
+      # A loaded plugin's own signature directory is the plugin's vocabulary, not the project's, whether the
+      # plugin tier contributed it or the project wired it into `signature_paths:` itself (#697).
+      def plugin_signature_paths
+        @environment&.plugin_registry&.signature_paths || []
+      rescue StandardError
+        []
       end
 
       # RBS / Steep require return-position unions to be parenthesised when they appear bare at the top level of

@@ -109,7 +109,7 @@ RSpec.describe "sig-gen alias rendering" do
   it "renders the alias when the inferred union is exactly the alias's expansion" do
     rbs = rendered_return({ "warner.rbs" => "type mood = :deprecated | :experimental | :performance\n" })
 
-    expect(rbs).to eq("def category: (untyped) -> mood")
+    expect(rbs).to eq("def category: (untyped) -> ::mood")
   end
 
   # Member-set equality, not textual similarity: dropping one arm makes the proposal a different type, and
@@ -152,7 +152,7 @@ RSpec.describe "sig-gen alias rendering" do
         "a_first.rbs" => "type early = :deprecated | :experimental | :performance\n" }
     )
 
-    expect(rbs).to eq("def category: (untyped) -> early")
+    expect(rbs).to eq("def category: (untyped) -> ::early")
   end
 
   it "resolves two aliases declared in the same file by line order" do
@@ -164,7 +164,7 @@ RSpec.describe "sig-gen alias rendering" do
       RBS
     )
 
-    expect(rbs).to eq("def category: (untyped) -> upper")
+    expect(rbs).to eq("def category: (untyped) -> ::upper")
   end
 
   # A single-type alias is never folded: doing so would rewrite every ordinary `String` return in a project
@@ -194,7 +194,7 @@ RSpec.describe "sig-gen alias rendering" do
       RBS
     )
 
-    expect(rbs).to eq("def category: (untyped) -> mood")
+    expect(rbs).to eq("def category: (untyped) -> ::mood")
   end
 
   # Issue #1002 review: the scope must be the project's OWN resolved `signature_paths:`, not the RBS loader's,
@@ -231,7 +231,7 @@ RSpec.describe "sig-gen alias rendering" do
     rbs = rendered_return({ "warner.rbs" => "type both = Integer | String\n" },
                           ruby: integer_or_string_method, method_name: :widened)
 
-    expect(rbs).to eq("def widened: (untyped) -> both")
+    expect(rbs).to eq("def widened: (untyped) -> ::both")
   end
 
   # A proc type translates to a bare `Proc`, losing the signature, so the same reasoning applies.
@@ -273,7 +273,7 @@ RSpec.describe "sig-gen alias rendering" do
     RBS
     rbs = rendered_return({ "warner.rbs" => sig }, ruby: nested)
 
-    expect(rbs).to eq("def category: (untyped) -> Deep::mood")
+    expect(rbs).to eq("def category: (untyped) -> ::Deep::mood")
   end
 
   # "Most specific, then declaration order": the nearer alias wins even though the farther one is declared in
@@ -301,6 +301,30 @@ RSpec.describe "sig-gen alias rendering" do
       ruby: nested
     )
 
-    expect(rbs).to eq("def category: (untyped) -> Deep::Inner::mood")
+    expect(rbs).to eq("def category: (untyped) -> ::Deep::Inner::mood")
+  end
+
+  # #697 lets a project wire a loaded plugin's own `sig/` into `signature_paths:`. Those aliases are the
+  # plugin's vocabulary, so the Generator subtracts `plugin_registry.signature_paths` from the index's scope.
+  # Pinned at the index, the seam the Generator passes those paths to, because standing up a real plugin
+  # registry would test the plugin loader rather than this rule.
+  describe Rigor::SigGen::AliasIndex do
+    def index_for(excluded)
+      write("sig/plugin_ish.rbs", "type mood = :deprecated | :experimental | :performance\n")
+      sig_dir = File.join(tmpdir, "sig")
+      environment = Rigor::Environment.for_project(root: tmpdir, signature_paths: [sig_dir])
+      described_class.build(environment: environment, signature_paths: [sig_dir],
+                            excluded_paths: excluded ? [sig_dir] : [])
+    end
+
+    let(:union) { ":deprecated | :experimental | :performance" }
+
+    it "folds an alias from a signature path that is not excluded" do
+      expect(index_for(false).fold(union, "Warner")).to eq("::mood")
+    end
+
+    it "ignores an alias from an excluded signature path" do
+      expect(index_for(true).fold(union, "Warner")).to eq(union)
+    end
   end
 end

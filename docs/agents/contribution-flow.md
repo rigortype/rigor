@@ -13,8 +13,12 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 
 ## Branches and pull requests
 
-- Markdown-only changes commit directly to `master`; CI skips an all-`.md` push. Do not open a PR for
-  only `docs/CURRENT_WORK.md`. Anything touching a non-`.md` file is code: use a branch.
+- **Small, uncontroversial docs** — a typo, a one-line fix, a `docs/CURRENT_WORK.md` update — commit
+  straight to `master`; CI skips an all-`.md` push, so a PR here buys nothing but a redundant run.
+  **Anything larger** — a multi-point revision, a new document, a reorganization — is a change worth
+  reviewing like any other: branch + PR. Touching even one non-`.md` file makes it code regardless of
+  size: branch + PR. When unsure which side a change is on, default to a branch — the direct-push
+  path is the one that's expensive to undo.
 - Push with an explicit refspec: `git push origin HEAD:refs/heads/<branch>`.
 - PRs start Draft and stay Draft until the user explicitly says they may land, with CI green and no
   standing stop instruction. A stop instruction means `gh pr ready --undo`. Never wait for an author

@@ -1,0 +1,1 @@
+- **[sig-gen]** A proposal whose return is a union matching the expansion of a type alias your own `sig/` declares now renders the alias name — `-> Rigor::Type::t` instead of its 22 members — across `--print`, `--diff`, `--write` and `--format=json`. [#1032](https://github.com/rigortype/rigor/pull/1032)

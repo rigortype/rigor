@@ -21,6 +21,7 @@ require_relative "../effects/collector"
 require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "indexed_narrowing"
+require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "mutation_widening"
@@ -3333,13 +3334,7 @@ module Rigor
           arg_types: arg_types,
           environment: scope.environment
         )
-        # ADR-16 Tier A: when a registered plugin's `block_as_methods` entry matches `(receiver_type,
-        # call_node.name)`, narrow the block body's `self_type` to the receiver class's instance type. The
-        # narrowing is `nil` for unmatched calls, leaving the existing scope contract unchanged.
-        narrowed_self = MacroBlockSelfType.narrow_self_type_for(
-          scope: scope, call_node: call_node, receiver_type: receiver_type
-        )
-        block_return_for(block_arg, expected, narrowed_self_type: narrowed_self)
+        block_return_for(block_arg, expected, narrowed_self_type: block_body_self_narrowing(call_node, receiver_type))
       rescue StandardError
         nil
       end
@@ -3380,16 +3375,32 @@ module Rigor
         receiver = receiver_override || call_receiver_type_for(call_node)
         return EMPTY_BREAK_ARMS if receiver.nil?
 
-        narrowed_self = MacroBlockSelfType.narrow_self_type_for(
-          scope: scope, call_node: call_node, receiver_type: receiver
-        )
         block_scope = block_entry_scope(
-          block_node, break_arm_param_types(call_node, receiver), narrowed_self_type: narrowed_self
+          block_node, break_arm_param_types(call_node, receiver),
+          narrowed_self_type: block_body_self_narrowing(call_node, receiver)
         )
         _result, collected = StatementEvaluator.with_break_value_sink do
           without_block_body_threading { block_scope.evaluate(body) }
         end
         collected.filter_map { |jump, type| type if targets.key?(jump) }
+      end
+
+      # The block body's narrowed `self_type`, or `nil` to leave the scope contract unchanged.
+      #
+      # ADR-16 Tier A: a registered plugin's `block_as_methods` entry matching `(receiver_type,
+      # call_node.name)` narrows to the receiver class's instance type.
+      #
+      # Issue #963: `define_method(:name) { ... }` installs its block as an instance method and runs it with
+      # `self` bound to the receiving instance, so the block body's `self` is the INSTANCE side of a class body's
+      # `Singleton[X]`. Both block-entry paths narrow it, so the value this pass computes cannot disagree with
+      # the one the statement evaluator records. The `class << self` exclusion {StatementEvaluator} applies is
+      # not available here — the frame stack is the evaluator's, and Rigor models no singleton rung — but this
+      # pass produces only the block's value type, which for a `define_method` call is discarded: the call
+      # answers `Symbol`, and no diagnostic reads the block's return.
+      def block_body_self_narrowing(call_node, receiver_type)
+        MacroBlockSelfType.narrow_self_type_for(
+          scope: scope, call_node: call_node, receiver_type: receiver_type
+        ) || DefineMethodBlockSelf.narrow_self_type_for(scope: scope, call_node: call_node)
       end
 
       def break_arm_param_types(call_node, receiver)

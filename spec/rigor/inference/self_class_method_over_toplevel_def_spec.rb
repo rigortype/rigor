@@ -526,7 +526,7 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
 
   # `class << self; define_method(:shout) { ... }; end` defines a CLASS method, whose `self` is the class
   # object — where an instance reader is NOT in the MRO. MRI reaches the top-level `def` there, and so
-  # must Rigor: the narrowing is for the instance side only.
+  # must Rigor: the narrowing is for the singleton class BODY only.
   it "still binds a top-level def inside a `define_method` block in a `class << self` body" do
     expect(upcase_errors(<<~RUBY)).not_to be_empty
       class Widget
@@ -535,6 +535,51 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
         class << self
           define_method(:shout) { text.upcase }
         end
+      end
+    RUBY
+  end
+
+  # ...and a `def` REACHED from that body is the other side of the same line. The singleton frame is still
+  # on the stack, but `self` inside `def install` is the class object, so `define_method` there defines an
+  # INSTANCE method and MRI runs the block on the instance — the shape the narrowing exists for.
+  it "reads an attr_reader inside a `define_method` block in a def nested in `class << self`" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        class << self
+          def install
+            define_method(:shout) { text.upcase }
+          end
+        end
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block in a `def self.` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        def self.install
+          define_method(:shout) { text.upcase }
+        end
+      end
+    RUBY
+  end
+
+  # The one shape whose direction the narrowing CHANGES: `def self.text` answers the singleton side, which is
+  # what the block used to be typed against. `define_method`'s block runs on an instance, where a class method
+  # is not in the MRO, so the top-level `def` binds and the call reports — the same answer the plain-`def`
+  # spelling has always given. This is the example a future regression of the narrowing would flip back.
+  it "still binds a top-level def inside a `define_method` block when only a `def self.` answers the name" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Cls
+        def self.text
+          "cls"
+        end
+
+        define_method(:shout) { text.upcase }
       end
     RUBY
   end

@@ -4868,6 +4868,26 @@ module Rigor
         alternatives.each(&:freeze).freeze
       end
 
+      # Issue #986 — the re-anchored bucket, also filed under the name the declaration was written with.
+      #
+      # A body written INSIDE the compact header does not see the rename: its `self_type` is the per-node
+      # `Singleton[Wrap::Outer::Leaf]` (§531 keeps `declaration_prefix` per-node on purpose), and the
+      # per-file ancestry tables `merge_ancestry_tables` lays over the seed are keyed the same way, with
+      # this site's chain alone. So `include Mixin` resolved to `Wrap::Mixin` outright for every call in
+      # that body — the collision's false positive, inside the declaration that causes it.
+      #
+      # The alias hands the un-renamed key the SAME bucket the re-anchored one got, which is the honest
+      # answer: they are one class, and the file's own chain then merges into the alternatives rather than
+      # standing alone. It is added only for a name the rename pass moved, and only to this table, so no
+      # name gains a declaration it did not have.
+      def alias_renamed_header_nestings(table, renames)
+        renames.each do |recorded, reanchored|
+          bucket = table[reanchored]
+          table[recorded] = bucket if bucket && !table.key?(recorded)
+        end
+        table
+      end
+
       def header_nesting_alternatives(entries)
         ambiguous_header_nesting?(entries) ? entries : [entries]
       end
@@ -4906,7 +4926,8 @@ module Rigor
         # bodies of one class landing on the same key are exactly the reopening whose disagreement must
         # make a name opaque.
         acc[:parameter_envelopes] = rekey_parameter_envelopes(acc[:parameter_envelopes], renames)
-        acc[:header_nestings] = rekey_header_nestings(acc[:header_nestings], renames)
+        renamed_nestings = rekey_header_nestings(acc[:header_nestings], renames)
+        acc[:header_nestings] = alias_renamed_header_nestings(renamed_nestings, renames)
         acc[:def_nestings].transform_values! do |chain|
           chain&.map { |entry| rename_compact_name(renames, entry) }
         end

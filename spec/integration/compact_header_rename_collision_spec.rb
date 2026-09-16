@@ -93,6 +93,39 @@ RSpec.describe "a compact-header rename colliding with a top-level declaration (
     RUBY
   end
 
+  # The compact site again, with the calls written INSIDE its own body: `new.shared` is the collision's
+  # false positive, `new.only_wrap` a method only this site's `Mixin` declares.
+  def compact_site_calling_itself
+    <<~RUBY
+      module Wrap
+        module Mixin
+          def shared(y) = y
+          def only_wrap(z) = z
+        end
+
+        class Outer::Leaf
+          include Mixin
+          new.shared(1, 2)
+          new.only_wrap(1, 2)
+        end
+      end
+    RUBY
+  end
+
+  def shared_top_level_site
+    <<~RUBY
+      class Outer; end
+
+      module Mixin
+        def shared = :top
+      end
+
+      class Outer::Leaf
+        include Mixin
+      end
+    RUBY
+  end
+
   def both_probe
     <<~RUBY
       Rigor.dump_type(Outer::Leaf.new.wrapped)
@@ -255,6 +288,21 @@ RSpec.describe "a compact-header rename colliding with a top-level declaration (
         /wrong number of arguments to `own'/, /wrong number of arguments to `from_base'/,
         /wrong number of arguments to `from_solo'/
       )
+    end
+  end
+
+  it "declines inside the compact declaration's own body too" do
+    # A body written inside the compact header does not see the rename: its `self_type` is the per-node
+    # `Singleton[Wrap::Outer::Leaf]`, and the per-file ancestry tables laid over the seed are keyed the same
+    # way with this site's chain ALONE — so `include Mixin` resolved to `Wrap::Mixin` outright and
+    # `new.shared(1, 2)` reported an arity the other site's `Mixin` contradicts. The re-anchored bucket is
+    # filed under the un-renamed name as well, which is what carries the alternatives in here.
+    [[compact_site_calling_itself, shared_top_level_site],
+     [shared_top_level_site, compact_site_calling_itself]].each do |first, second|
+      result = answers(first, second, "\n")
+      # The must-still-FIRE half, in the same body: `only_wrap` is declared by one site's `Mixin` only, so
+      # the alternatives do not disagree about it and it is answered whatever the load order.
+      expect(result[:other]).to contain_exactly(/wrong number of arguments to `only_wrap'/)
     end
   end
 

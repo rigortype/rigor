@@ -29,6 +29,10 @@ module Rigor
         # files, same libraries), so the loader memoises one build per process instead of re-digesting every
         # .rbs file once per producer.
         descriptor = loader.rbs_cache_descriptor
+        # Issue #1014 — nil is an engine the descriptor could not identify ({EngineSource::Unavailable}).
+        # Compute uncached rather than keying the value without the engine that produced it.
+        return compute(loader) if descriptor.nil?
+
         store.fetch_or_compute(producer_id: self::PRODUCER_ID, params: {}, descriptor: descriptor,
                                generation_cap: generation_cap) do
           compute(loader)

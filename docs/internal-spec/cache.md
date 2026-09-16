@@ -342,7 +342,10 @@ A cache whose value is a function of what the analyzer *computes* —
 `analysis.run-diagnostics`, `analysis.run-effects`,
 `protection.mutation-file-result`, the per-file
 `plugin.source_rbs_synthesizer` slot, every plugin producer
-(`plugin.<id>.<producer>`), and the
+(`plugin.<id>.<producer>`), the five `rbs.*` producers
+(`rbs.environment`, `rbs.constant_type_table`,
+`rbs.class_ancestor_table`, `rbs.known_class_names`,
+`rbs.class_type_param_names`), and the
 `IncrementalSnapshot` — MUST key on the engine's source, not only on
 `Rigor::VERSION`. The version pins the bytes for a gem installed from
 RubyGems and for nothing else, so on an edited working tree a warm run
@@ -378,9 +381,47 @@ sufficient. With the row in the synthesizer key, an engine edit
 re-synthesizes every annotated file; when the output is unchanged the
 `rbs.virtual_rbs` row is too, so `rbs.environment` still hits.
 
+**The same shape in the `rbs.*` producers
+([#1014](https://github.com/rigortype/rigor/issues/1014)).** All five
+`rbs.*` producers key through `RbsCacheProducer#fetch` on the one
+descriptor `RbsDescriptor.build` composes, which carried the RBS inputs
+(the `rbs` gem version, every signature file's digest, the library list,
+the synthesized virtual RBS, the deferred-path partition) and nothing
+about the engine. What they hold is not those inputs but what Rigor's own
+code made of them, so an engine edit moved the value while the key stood
+still. Two were reproduced serving a stale value across a build boundary
+on a fixture project, on runs whose `analysis.run-diagnostics` key had
+correctly *missed*: an edit to `Inference::RbsTypeTranslator.translate`
+left `rbs.constant_type_table: 1 hit` and dropped a true positive the
+same tree reports cold, and an edit to the ancestor walk left
+`rbs.class_ancestor_table: 1 hit` and served a `flow.unreachable-clause`
+false positive the same tree does not report cold. The row now rides in
+`RbsDescriptor.build` — once, for all five — and deliberately **not** in
+`RbsDescriptor.config_entries`: that half is what the run cache key reads
+through `.build_run`, and `RunCacheKey` contributes the identical row
+itself, so putting it there would duplicate it in the run key and would
+have to be reconstructible by the boot-slimming probe, which builds
+`config_entries` with no loader.
+
+The cost is the intended one and is paid once per engine build: an engine
+edit in a checkout invalidates the whole `rbs.*` family, including the
+~1.9 MB `rbs.environment` blob, on the first warm run after it — a run
+that is already a full re-analysis, because the run-result key moved for
+the same reason. An unchanged engine is unaffected, and a released gem
+adds no row at all.
+
 A caller that cannot identify the engine (`EngineSource::Unavailable`)
-runs the synthesizer or producer uncached for the run rather than keying
-it without the row.
+runs the synthesizer, the plugin producer, or the `rbs.*` producer
+uncached for the run rather than keying it without the row. For the
+`rbs.*` family that is `RbsLoader#rbs_cache_descriptor` answering `nil`,
+which `RbsCacheProducer.fetch` reads as "compute, do not store".
+
+No `Descriptor`-keyed cache slot deliberately omits the identity. The
+slots that carry no row of their own are the ones whose value the engine
+did not compute: the `Descriptor` file, gem, glob and config rows are
+statements about the project's inputs, and `RbsDescriptor.config_entries`
+is the shared half described above, whose one consumer supplies the row
+on its own behalf.
 
 `Cache::EngineSource.identity` supplies the slot, in two regimes:
 
@@ -994,7 +1035,7 @@ snapshot directory, a `.rb` edit between them, compared against a `--no-cache` f
 
 Every bundled RBS-derived producer documented below (`RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`) satisfies one shape — a class object responding to `fetch(loader:, store:)` and returning the cached or freshly computed value. This is codified as the structural interface `_CacheProducer` in [`sig/rigor/cache.rbs`](../../sig/rigor/cache.rbs): a structural interface (the RBS/Go sense), not an ADR-28 protocol contract, and distinct from the plugin-side producer surface in [`plugin-cache-producers.md`](plugin-cache-producers.md).
 
-The `fetch` body is identical across producers: read the shared RBS descriptor (`loader.rbs_cache_descriptor`, the per-loader memo around `RbsDescriptor.build`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:, generation_cap:)` yielding to the producer's `compute(loader)`. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base also declares `self.generation_cap` (2 — see § "Compaction"), which a subclass inherits and may override; no `rbs.*` producer can therefore be added without a compaction budget. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
+The `fetch` body is identical across producers: read the shared RBS descriptor (`loader.rbs_cache_descriptor`, the per-loader memo around `RbsDescriptor.build`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:, generation_cap:)` yielding to the producer's `compute(loader)` — or, when that descriptor is `nil` (an engine whose source could not be digested, #1014), call `compute(loader)` directly and store nothing. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base also declares `self.generation_cap` (2 — see § "Compaction"), which a subclass inherits and may override; no `rbs.*` producer can therefore be added without a compaction budget. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
 
 ## `Rigor::Cache::RbsConstantTable` (v0.0.8 slice 3)
 
@@ -1235,8 +1276,17 @@ Rigor::Cache::RbsDescriptor.build(loader)
 #    files   = [...]   # :digest entries for every .rbs under signature_paths
 #                      # + the vendored gem sigs + the core overlay
 #    configs = [{ key: "rbs.libraries",  value_hash: SHA256(sorted-libraries) },
-#               { key: "rbs.virtual_rbs", value_hash: SHA256(sorted-pairs) }]
+#               { key: "rbs.virtual_rbs", value_hash: SHA256(sorted-pairs) },
+#               { key: "engine-source",   value_hash: SHA256(engine identity) }]
 ```
+
+The `engine-source` row is the #1014 slot — see § "Engine identity in a
+computed-value key". It comes from `EngineSource.key_config_entries`, is
+absent for a version-pinned tree, and raises
+`EngineSource::Unavailable` out of `.build` for an engine that cannot be
+digested, which `RbsLoader#rbs_cache_descriptor` turns into `nil` and
+`RbsCacheProducer.fetch` into an uncached compute. It rides in `.build`
+only, never in `.config_entries`.
 
 The `rbs.virtual_rbs` row is the ADR-32 WD5 slot: it hashes the
 loader's plugin-contributed synthesised RBS strings so the env
@@ -1256,7 +1306,9 @@ record-and-validate cache. `RunDescriptor` is **not** a
 its four readers (`gems`, `configs`, `files`, `globs`) are consulted — so
 `files` can be deferred without costing soundness. `gems` and
 `configs` are supplied eagerly and are byte-identical to
-`.build`'s (the cache key is unchanged); `files` is computed on
+`.build`'s shared half — `RbsDescriptor.config_entries`, without the
+env-only rows and without the `engine-source` row, which `RunCacheKey`
+contributes on its own behalf (the run cache key is unchanged); `files` is computed on
 first access and memoised, so a warm HIT never digests the large
 vendored RBS tree at all. When it is read — only on a MISS, by
 the run's dependency descriptor — it uses the `:stat` comparator

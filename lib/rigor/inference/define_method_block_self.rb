@@ -28,6 +28,10 @@ module Rigor
     # singleton frame — a `def` reached from that body has the class object as its `self`, so the call defines
     # an instance method and the narrowing applies. `Scope#singleton_class_body?` is what draws that line, and
     # carrying it on the scope is what lets both block-entry paths apply it identically.
+    # A `module_function` module is the one shape where both answers are right at once: MRI makes the block
+    # BOTH an instance method, where the reader resolves, and a module function on the module object, where it
+    # does not. Narrowing silences the module-function half, which is the false-positive-averse direction
+    # AGENTS.md § Implementation Guidelines asks for.
     module DefineMethodBlockSelf
       module_function
 

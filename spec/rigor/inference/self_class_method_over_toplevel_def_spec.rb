@@ -584,6 +584,51 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # The positive half of the same pairing, and the only arm that fails without the return-typing path's own
+  # narrowing: inside a `def` reached from `class << self` the mark is cleared, so the block's `self` is the
+  # instance side and the declared `text` is what the block carries out through the generic signature.
+  it "reads an attr_reader through the return-typing path, in a def under `class << self`" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        class << self
+          def install
+            x = define_method(:shout) { text }
+            x.upcase
+          end
+        end
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).to be_empty
+  end
+
+  it "reads an attr_reader through the return-typing path, in a class body" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        x = define_method(:shout) { text }
+        x.upcase
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).to be_empty
+  end
+
   # Both block-entry paths must decline on the same bodies. The `class << self` exclusion rides on
   # `Scope#singleton_class_body?`, so the return-typing pass — which has no frame stack of its own — applies it
   # too. A project-declared generic `define_method` makes the block's own value observable, and with the block's

@@ -39,10 +39,11 @@ Nothing is implemented; the maintainer decides.
 ## What is worth picking up next
 
 - [#1002](https://github.com/rigortype/rigor/issues/1002) — `sig-gen` expands a 22-arm union that a
-  project-declared RBS alias already names. Ready for an agent as written.
-- [#1014](https://github.com/rigortype/rigor/issues/1014) — reproduce-first check of whether the
-  `rbs.*` translated-value cache producers share the engine-identity gap that #1012 closed for the
-  synthesizer. Closing it retires the caveat below.
+  project-declared RBS alias already names. Unimplemented, but the `sig/` rows it was filed against
+  were retired by #1000; the first step is finding a fresh position, as the issue now says.
+- [#1014](https://github.com/rigortype/rigor/issues/1014) — the static half is settled (no engine
+  identity reaches the five `rbs.*` keys; the issue records the evidence). What remains is the
+  warm-run reproduction and the fix or the documented reason. Closing it retires the caveat below.
 - [#1011](https://github.com/rigortype/rigor/issues/1011) needs a ruling before work starts: are the
   `sig-gen gap:` markers wrong, or is the gate's wording? [#1007](https://github.com/rigortype/rigor/issues/1007)
   and [#1008](https://github.com/rigortype/rigor/issues/1008) are engine gaps sitting behind two

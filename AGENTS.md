@@ -5,6 +5,10 @@ so these cost nothing:
 - Claude Code reads CLAUDE.md, not AGENTS.md; CLAUDE.md pulls this file in with `@AGENTS.md`.
 - Everything here loads into every session. Keep it under ~200 lines, and keep it INSTRUCTIONS.
   Explaining why a rule exists earns its place only when the why changes what you do.
+- Only the ADR list below is size-gated (ADR-97, `agent_index_spec.rb`); nothing gates this file's
+  own ~200-line target, and it now runs longer — legitimate incident-driven growth so far, not
+  restatement, but ADR-97's own lesson is that an ungated economy rule regrows silently. Trim by
+  gating the budget, not by feel; `/doctor` in an interactive session is a reasonable first pass.
 - Conditional material — needed only by a session already in its area — belongs in .claude/skills/
   or docs/, never here. ADR-97 carries the budget and the gate.
 - Section names are load-bearing: "RBS Authorship" and "Release Cadence" are cited by § name from

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "json"
+require "open3"
 
 # Ractor-readiness audit. Each constructor below SHOULD produce a value that's `Ractor.shareable?` so it can cross a
 # Ractor boundary without `Ractor.make_shareable` retro-fitting at every dispatch.
@@ -360,6 +362,104 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       from_worker = Ractor.new { Rigor::Analysis::FactStore::Target.local(:x) }.value
 
       expect(from_worker).to eq(interned)
+    end
+  end
+
+  # Issue #1064 — the constant tail. A non-main Ractor may read a constant only when its value is deeply
+  # shareable, so a `.freeze`d Hash whose inner Arrays stay mutable, a Hash of lambdas, or a
+  # `File.expand_path` String raises `Ractor::IsolationError` the first time a worker touches it. The Phase 4b.x
+  # rounds above pinned such tables one at a time as corpus runs tripped them; this is the mechanical sweep
+  # instead, so a new one fails here rather than on a survey project.
+  #
+  # The inventory has to include PRIVATE constants, which is where most of these tables live, and Ruby 4.0 has no
+  # reflective enumeration of them: `Module#constants` omits them. What does work is `const_defined?(name, false)`
+  # plus `const_get(name, false)` given a name, so the names come from the source — every constant write Prism finds
+  # under `lib/` and `plugins/*/lib` — and are probed on every module (and singleton class, for the `class << self`
+  # tables) reachable from `Rigor`. `const_source_location` then drops anything defined outside those trees.
+  #
+  # It runs in a subprocess because it requires every file under `lib/rigor/` and every bundled plugin, and a
+  # plugin's require registers it with `Rigor::Plugin`; doing that in the suite's process would leak registrations
+  # into whichever spec files share this worker. The bundler env is inherited on purpose: the child needs the bundle.
+  describe "#1064 — every constant under Rigor is Ractor.shareable?" do
+    def audit_script
+      <<~'RUBY'
+        Warning[:experimental] = false
+        require "json"
+        require "rigor"
+        require "prism"
+        root = Dir.pwd
+        load_failures = []
+        Dir["plugins/*/lib"].each { |dir| $LOAD_PATH.unshift(File.expand_path(dir)) }
+        (Dir["lib/rigor/**/*.rb"].sort + Dir["plugins/*/lib/**/*.rb"].sort).each do |file|
+          require File.expand_path(file)
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          load_failures << "#{file}: #{e.class}: #{e.message.lines.first}"
+        end
+
+        names = Set.new
+        (Dir["lib/**/*.rb"] + Dir["plugins/*/lib/**/*.rb"]).each do |file|
+          Prism.parse_file(file).value.breadth_first_search do |node|
+            case node
+            when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode then names << node.name
+            when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode
+              names << node.target.name if node.target.name
+            end
+            false
+          end
+        end
+
+        seen = {}.compare_by_identity
+        queue = [Rigor]
+        offenders = []
+        until queue.empty?
+          mod = queue.shift
+          next if seen[mod]
+
+          seen[mod] = true
+          [mod, mod.singleton_class].each do |owner|
+            (owner.constants(false) | names.select { |name| owner.const_defined?(name, false) }).each do |name|
+              value = owner.const_get(name, false)
+              if value.is_a?(Module)
+                queue << value if value.name&.start_with?("Rigor::")
+                next
+              end
+              file, line = owner.const_source_location(name, false)
+              next unless file&.start_with?("#{root}/lib/", "#{root}/plugins/")
+              next if Ractor.shareable?(value)
+
+              label = owner.singleton_class? ? "#{mod.name}.singleton_class::#{name}" : "#{mod.name}::#{name}"
+              offenders << "#{label} (#{value.class}, #{file.delete_prefix("#{root}/")}:#{line})"
+            end
+          end
+        end
+        puts JSON.generate(load_failures: load_failures, offenders: offenders.sort)
+      RUBY
+    end
+
+    # A constant that must stay unshareable, with the reason. Each entry is also asserted to still BE an offender, so
+    # an entry whose reason has gone away is removed rather than left to excuse a future regression by name.
+    def allowlist
+      {
+        # A frozen index that deliberately holds mutable per-run memo tables (`@owns_receiver_memo`, `@effect_memo`,
+        # `@contracts_by_path`) and writes them through its own frozen shell; deep-freezing it would raise
+        # `FrozenError` on the default path. A worker never reads it: it builds its own registry with
+        # `Registry.materialize`, and `EMPTY` is only a coordinator-side stand-in for a run with no plugins.
+        "Rigor::Plugin::Registry::EMPTY" => "per-run memo tables inside a frozen shell; workers materialise their own"
+      }.freeze
+    end
+
+    it "finds no unshareable constant outside the named allowlist" do
+      repo_root = File.expand_path("../..", __dir__)
+      stdout, stderr, status = Open3.capture3(RbConfig.ruby, "-I", File.join(repo_root, "lib"), "-e", audit_script,
+                                              chdir: repo_root)
+      expect(status.success?).to be(true), "audit subprocess failed:\n#{stderr}"
+
+      report = JSON.parse(stdout.lines.last)
+      expect(report.fetch("load_failures")).to eq([])
+
+      labels = report.fetch("offenders").to_h { |row| [row[/\A\S+/], row] }
+      expect(labels.except(*allowlist.keys).values).to eq([])
+      expect(allowlist.keys - labels.keys).to eq([])
     end
   end
 end

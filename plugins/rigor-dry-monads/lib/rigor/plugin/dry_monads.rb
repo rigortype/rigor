@@ -30,6 +30,7 @@ module Rigor
         source_path: __FILE__,
         source_line: __LINE__
       )
+      Ractor.make_shareable(RESULT_DEFINITION)
 
       MAYBE_DEFINITION = Inference::HktRegistry.definition_with_body_tree(
         uri: :"dry_monads::maybe",
@@ -38,6 +39,7 @@ module Rigor
         source_path: __FILE__,
         source_line: __LINE__
       )
+      Ractor.make_shareable(MAYBE_DEFINITION)
 
       CONSTRUCTOR_METHODS = %i[Success Failure Some None].freeze
       UNWRAP_METHODS = %i[value! failure value_or].freeze

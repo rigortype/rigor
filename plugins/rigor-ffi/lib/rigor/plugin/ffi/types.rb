@@ -20,7 +20,7 @@ module Rigor
         ].to_set.freeze
 
         # Regex anchor must match end of string \z
-        NOMINAL_OPAQUE_REGEX = Regexp.new("(_ptr|_handle|Ptr|Handle)\\z")
+        NOMINAL_OPAQUE_REGEX = Regexp.new("(_ptr|_handle|Ptr|Handle)\\z").freeze
 
         BOOL_TYPE = Rigor::Type::Combinator.union(
           Rigor::Type::Combinator.constant_of(true),

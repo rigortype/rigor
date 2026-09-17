@@ -47,10 +47,10 @@ module Rigor
       USAGE
 
       # The bundled docs live at `<gem_root>/docs/`. From `lib/rigor/cli/docs_command.rb` that is three directories up.
-      DOCS_ROOT = File.expand_path("../../../docs", __dir__)
-      MANUAL_ROOT = File.join(DOCS_ROOT, "manual")
-      HANDBOOK_ROOT = File.join(DOCS_ROOT, "handbook")
-      LLMS_INDEX = File.join(DOCS_ROOT, "llms.txt")
+      DOCS_ROOT = File.expand_path("../../../docs", __dir__).freeze
+      MANUAL_ROOT = File.join(DOCS_ROOT, "manual").freeze
+      HANDBOOK_ROOT = File.join(DOCS_ROOT, "handbook").freeze
+      LLMS_INDEX = File.join(DOCS_ROOT, "llms.txt").freeze
 
       # @return CLI exit status.
       def run

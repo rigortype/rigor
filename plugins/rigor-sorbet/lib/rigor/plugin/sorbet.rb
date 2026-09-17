@@ -441,6 +441,7 @@ module Rigor
       # Frozen empty bundle used when the `:catalog` producer failed (e.g. a project I/O error) so downstream
       # reads see a well-formed shape rather than nil.
       EMPTY_CATALOG_BUNDLE = { catalog: Catalog.new.freeze!, sigil_by_path: {}, parse_errors_by_path: {} }.freeze
+      Ractor.make_shareable(EMPTY_CATALOG_BUNDLE)
       private_constant :EMPTY_CATALOG_BUNDLE
 
       # @param root — directory or single file.

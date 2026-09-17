@@ -36,6 +36,7 @@ module Rigor
           File.expand_path("scan.rb", __dir__),
           File.expand_path(__FILE__)
         ].freeze
+        Ractor.make_shareable(SOURCE_FILES)
 
         # A file modified within this window of the recording instant is computed but never
         # recorded — the FileDigest racy-write guard, one tier simpler because a refused signature

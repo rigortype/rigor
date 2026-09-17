@@ -50,6 +50,7 @@ module Rigor
           Struct: %i[new],
           Data: %i[define]
         }.freeze
+        Ractor.make_shareable(DETACHED_CLASS_FACTORIES)
         private_constant :DETACHED_CLASS_FACTORIES
 
         EMPTY_METHODS = [].freeze

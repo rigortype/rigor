@@ -91,6 +91,7 @@ RSpec.describe "template units (#392)" do
     end
   ensure
     RigorViewDemoPlugin.spec_overrides = {}
+    Rigor::Plugin.unregister!("view-demo")
   end
 
   describe "the unit reaches the effect table" do
@@ -359,6 +360,31 @@ RSpec.describe "template units (#392)" do
         end
 
         expect(found.map { |d| [d.path, d.method_name] }).to eq([[logical, "nope_from_buffer"]])
+      end
+    end
+
+    # `didOpen` on a freshly created view: the file exists only in the editor, so `Dir.glob` cannot see it
+    # and the plugin was never offered it. The run then parsed the tmp bytes as plain top-level Ruby — no
+    # declared `self`, no seeds — so a helper call read as `call.unresolved-toplevel` and the finding the
+    # editor was looking at was missed.
+    it "compiles a buffer whose template does not exist on disk at all" do
+      Dir.mktmpdir("rigor-392-new-") do |dir|
+        build_project(dir, template: false)
+        buffer_path = File.join(dir, "buffer.rbx")
+        File.write(buffer_path, "render_header(@title.nope_from_buffer)\n")
+        logical = "app/views/users/new.rbx"
+        binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: buffer_path)
+        config = configuration(effects: false, workers: 0, plugins: true)
+
+        found = Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: config, cache_store: nil, buffer: binding,
+            plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+          )
+          guarded_run(runner, [logical]).diagnostics
+        end
+
+        expect(found.map { |d| [d.rule, d.method_name] }).to eq([["call.undefined-method", "nope_from_buffer"]])
       end
     end
   end

@@ -1318,7 +1318,7 @@ module Rigor
       # digested at the bytes the run actually read.
       def template_unit_file_entries
         template_units.source_paths.filter_map do |path|
-          physical = @buffer ? @buffer.resolve(path) : path
+          physical = template_units.physical_path(path, @buffer)
           next unless File.file?(physical)
 
           Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))

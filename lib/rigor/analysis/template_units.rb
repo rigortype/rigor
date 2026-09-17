@@ -97,13 +97,8 @@ module Rigor
       def self.collect_plugin(plugin, globs, root, entries, failures, buffer)
         id = plugin.manifest.id
         fallback = "#{id}@#{plugin.manifest.version}"
-        expand(globs, root).each do |path|
-          # Editor mode (#146) — the in-flight buffer's bytes stand in for the file on disk, exactly as
-          # `Runner#parse_source` reads them for a `.rb` file. Without this a `--tmp-file` / `--instead-of`
-          # pair naming a TEMPLATE compiled the saved file and the editor got diagnostics for bytes it had
-          # already replaced.
-          physical = buffer ? buffer.resolve(path) : path
-          source = read_source(physical == path ? File.join(root, path) : physical, path, id, failures)
+        expand(globs, root, buffer).each do |path|
+          source = read_source(physical_path(path, root, buffer), path, id, failures)
           next if source.nil?
 
           units = begin
@@ -118,6 +113,17 @@ module Rigor
       end
       private_class_method :collect_plugin
 
+      # Editor mode (#146) — the in-flight buffer's bytes stand in for the file on disk, exactly as
+      # `Runner#parse_source` reads them for a `.rb` file. Without this a `--tmp-file` / `--instead-of` pair
+      # naming a TEMPLATE compiled the saved file and the editor got diagnostics for bytes it had already
+      # replaced. `BufferBinding#resolve` is deliberately NOT used: it compares the logical path by string,
+      # and a unit path is project-relative while the editor names its buffer absolutely.
+      def self.physical_path(path, root, buffer)
+        return buffer.physical_path if buffer && relative(buffer.logical_path, root) == path
+
+        File.join(root, path)
+      end
+
       def self.read_source(physical, path, plugin_id, failures)
         File.binread(physical)
       rescue StandardError => e
@@ -129,11 +135,58 @@ module Rigor
 
       # Sorted so the run's analysed-path order — and therefore the run cache key's `paths` slot — is
       # independent of the filesystem's directory order.
-      def self.expand(globs, root)
-        globs.flat_map { |glob| Dir.glob(glob, base: root) }
-             .uniq.sort
-             .select { |path| File.file?(File.join(root, path)) }
+      #
+      # An editor buffer whose logical path MATCHES a claimed glob joins the set even when nothing is on
+      # disk at that path. That is the `didOpen` of a freshly created view: the file exists only in the
+      # editor, `Dir.glob` cannot see it, and without this the run fell through to parsing the tmp bytes as
+      # plain top-level Ruby — no declared `self`, no seeds, so a helper call read as
+      # `call.unresolved-toplevel` and the finding the editor was actually looking at was missed. The
+      # buffer's own bytes are what `collect_plugin` then reads, and nothing else changes: an editor run is
+      # read-only-cached, and `Runner#template_unit_file_entries` already skips a path with no physical file.
+      def self.expand(globs, root, buffer = nil)
+        paths = globs.flat_map { |glob| Dir.glob(glob, base: root) }
+                     .select { |path| File.file?(File.join(root, path)) }
+        buffered = buffer && relative(buffer.logical_path, root)
+        paths |= [buffered] if buffered && claims?(globs, buffered)
+        paths.uniq.sort
       end
+
+      # A path as the globs spell it. An analysed path may arrive ABSOLUTE — the language server names a
+      # buffer by its full filesystem path, and `rigor check /abs/path` does too — while a claimed glob and
+      # everything `Dir.glob(base:)` returns are project-relative. Every lookup and every claim test goes
+      # through this, so the two spellings name one unit instead of silently missing each other (which is
+      # how an LSP publish for an open `.rbx` reported `call.unresolved-toplevel` for every helper while the
+      # unit sat in the index under its relative name). A path outside the root is left alone.
+      def self.relative(path, root)
+        text = path.to_s
+        return text unless text.start_with?(File::SEPARATOR)
+
+        prefix = "#{File.expand_path(root.to_s)}#{File::SEPARATOR}"
+        return text.delete_prefix(prefix) if text.start_with?(prefix)
+
+        # The same directory reached through a symlink is the same directory. `Dir.pwd` is always the
+        # resolved form (`/private/var/…` on macOS) while an editor names a buffer by the path the user
+        # opened (`/var/…`), so a string compare alone loses the match — and `File.expand_path` does not
+        # resolve symlinks. `realpath` on the DIRECTORY, not the file, so a buffer for a view that does not
+        # exist on disk yet still resolves.
+        resolved = resolved_path(text)
+        resolved&.start_with?(prefix) ? resolved.delete_prefix(prefix) : text
+      end
+
+      def self.resolved_path(text)
+        File.join(File.realpath(File.dirname(text)), File.basename(text))
+      rescue StandardError
+        nil
+      end
+      private_class_method :resolved_path
+
+      # `FNM_PATHNAME` so `*` does not cross a directory separator (the same reading `Dir.glob` gives the
+      # pattern), `FNM_EXTGLOB` so a `{html,text}` alternation in a claimed glob matches here as it did
+      # there — the two flags together are what make this predicate agree with the expansion above.
+      def self.claims?(globs, path)
+        globs.any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME | File::FNM_EXTGLOB) }
+      end
+      private_class_method :claims?
       private_class_method :expand
 
       # A unit MUST name the file it was compiled from. Without the check a `path:` naming another project
@@ -192,11 +245,11 @@ module Rigor
       end
 
       def [](path)
-        @entries[path]
+        @entries[normalize(path)]
       end
 
       def key?(path)
-        @entries.key?(path)
+        @entries.key?(normalize(path))
       end
 
       # `{ path => ruby_source }` — what {Runner#parse_source} and {WorkerSession#parse_source} read
@@ -253,15 +306,21 @@ module Rigor
       # it compiles a partial's locals into the method's parameters, and it is what makes `locals:` mean
       # anything.
       def parse_scopes(path)
-        entry = @entries[path]
+        entry = @entries[normalize(path)]
         return nil if entry.nil? || entry.locals.empty?
 
         [entry.locals.keys.map(&:to_sym)]
       end
 
       # The `view:<logical_name>` effect-unit key for a path, or nil.
+      # The file whose bytes a unit's path was READ from: the editor's buffer when one is bound to it, the
+      # project file otherwise. Read by the run's dependency descriptor, so it digests what the run read.
+      def physical_path(path, buffer)
+        self.class.physical_path(path, @root, buffer)
+      end
+
       def unit_key_for(path)
-        @entries[path]&.unit_key
+        @entries[normalize(path)]&.unit_key
       end
 
       # Binds the declared `self`, locals and ivar seeds onto the per-file scope, so the unit's body types
@@ -275,7 +334,7 @@ module Rigor
       # the honest reading of "a receiver is declared and the analyzer cannot see it" (ADR-5), and it is
       # silent.
       def seed(scope, path)
-        entry = @entries[path]
+        entry = @entries[normalize(path)]
         return scope if entry.nil?
 
         scope = bind_self(scope, entry)
@@ -294,7 +353,7 @@ module Rigor
         return diagnostics if @entries.empty?
 
         diagnostics.map do |diagnostic|
-          entry = @entries[diagnostic.path]
+          entry = @entries[normalize(diagnostic.path)]
           next diagnostic if entry.nil?
 
           next diagnostic if entry.line_map.empty?
@@ -321,6 +380,10 @@ module Rigor
       end
 
       private
+
+      def normalize(path)
+        self.class.relative(path, @root)
+      end
 
       def bind_self(scope, entry)
         return scope if entry.self_type.nil?

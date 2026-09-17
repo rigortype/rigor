@@ -305,7 +305,8 @@ empty map claims no mapping at all, and its diagnostics pass through untouched.
   id + synthesis version** (`TemplateUnit::SYNTHESIS_VERSION`, bumped whenever
   the engine changes what it synthesises). Three rows carry it:
   - the ADR-45 run-result **key** gains a `template-units` `configs:` slot
-    hashing every unit digest AND every failure, keyed by path. The failures
+    hashing the claimed globs (so a plugin editing its own `template_globs:`
+    moves the key), every unit digest AND every failure. The failures
     are in it because a run that produced only failures still produced an
     answer; without them such a run's key equalled the no-templates key, which
     the ADR-87 boot-slim probe reconstructs exactly (it loads no plugin), so it

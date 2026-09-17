@@ -341,6 +341,16 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(shareable?(Rigor::Effects::Attribution.empty)).to be(true)
     end
 
+    # Reached from `Environment.for_project` — so also from inside the worker's constructor — whenever a
+    # source-RBS synthesizer is wired, which the ADR-93 `rigor-rbs-inline` auto-wire makes every real CLI
+    # run. Not eager-loadable (the memo is a 90 ms tree walk the coordinator pre-warms instead), so what
+    # this asserts is the other half: the memoised digest is FROZEN, which is what makes the worker's
+    # access a legal read.
+    it "Cache::EngineSource.process_identity memoises a frozen digest" do
+      identity = Rigor::Cache::EngineSource.process_identity
+      expect(identity.nil? || identity.frozen?).to be(true)
+    end
+
     # Not a singleton but the same hazard one layer in: `FactStore::Target.local` interns into a class-ivar Hash that
     # GROWS, so it cannot be made shareable and eager-loaded. The worker declines the interning instead — the saving
     # is allocations, never identity, since `Target` is a `Data` value — and this pins that the declined path returns

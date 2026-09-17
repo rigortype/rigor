@@ -10,6 +10,7 @@ require_relative "../run_stats"
 require_relative "../../effects/signature_sources"
 require_relative "../../rbs_extended/conformance_checker"
 require_relative "../../runtime/jit"
+require_relative "../../cache/engine_source"
 
 module Rigor
   module Analysis
@@ -501,6 +502,20 @@ module Rigor
           # it from a non-main Ractor would trip `Ractor::IsolationError`. Touching it here forces the
           # (shareable) registry into the class-ivar cache before any worker reads.
           Environment::ClassRegistry.default
+
+          # #1055 — the same treatment for the engine-source digest. Every worker's `Environment.for_project`
+          # reaches `Cache::EngineSource.key_config_entries` whenever a source-RBS synthesizer is wired (the
+          # ADR-93 `rigor-rbs-inline` auto-wire, on by default and off throughout the spec suite), and the
+          # memo behind it is a 90 ms tree walk that cannot be eager-loaded at require time. Warming it here
+          # is what makes the worker's access a READ of a frozen String rather than a forbidden class-ivar
+          # write. `Unavailable` is left to the worker: it raises rather than assigning, so it costs the pool
+          # no more than it costs a sequential run, and swallowing it here would hide a tree the engine
+          # cannot identify.
+          begin
+            Cache::EngineSource.process_identity
+          rescue Cache::EngineSource::Unavailable
+            nil
+          end
 
           # ADR-15 Phase 4b.x — pre-warm the RBS cache so workers serve every reflection query from the
           # Marshal blob on disk. Without this, the first cache MISS inside a worker falls through to

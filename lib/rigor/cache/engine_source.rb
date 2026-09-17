@@ -104,10 +104,19 @@ module Rigor
       # exists at all. The same reading covers the long-running `rigor lsp` process.
       #
       # {Unavailable} propagates and is deliberately NOT memoised: the ivar is only assigned on success.
+      #
+      # The memo is FROZEN because a Ractor-pool worker reads it (#1055): the auto-wired ADR-93
+      # `rigor-rbs-inline` synthesizer reaches `.key_config_entries` from inside
+      # `Environment.for_project`, which is inside `WorkerSession#initialize`, which is inside the worker's
+      # own Ractor — and a non-main Ractor may read a class/module ivar only when its value is shareable.
+      # An unfrozen digest String therefore killed every worker in its constructor on any run with the
+      # synthesizer on, which is every real CLI run (the spec suite pins it off). The worker never WRITES
+      # it: `PoolCoordinator#analyze_files_in_pool` pre-warms this on the main Ractor first, which is where
+      # the argument above already says the value belongs.
       def process_identity
         return @process_identity if defined?(@process_identity)
 
-        @process_identity = identity
+        @process_identity = identity.freeze
       end
 
       # The `engine-source` key row for a cache whose value this engine computed, built from

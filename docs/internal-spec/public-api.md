@@ -89,11 +89,11 @@ pins instance and singleton method sets for:
   `template_globs`.
 - `Rigor::Plugin::TemplateUnit` — the #392 template-unit carrier:
   `logical_name`, `path`, `ruby_source`, `line_map`, `self_type`,
-  `locals`, `ivar_seeds`, `transform_id`, plus `unit_key`,
-  `digest(fallback_transform_id = nil)`, `template_line(ruby_line)`
-  and the value-object trio (`==` / `eql?` / `hash` / `to_h`).
-  Spec'd in [`macro-substrate.md`](macro-substrate.md) § Template
-  units.
+  `locals`, `ivar_seeds`, `transform_id`, `suppressed_rules` (#393),
+  plus `unit_key`, `digest(fallback_transform_id = nil)`,
+  `template_line(ruby_line)` and the value-object trio (`==` / `eql?`
+  / `hash` / `to_h`). Spec'd in
+  [`macro-substrate.md`](macro-substrate.md) § Template units.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
   `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`.
 - `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,

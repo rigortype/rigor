@@ -162,13 +162,17 @@ Rails 7.1 strict-locals comment:
 <%# locals: (user:, admin: false) %>
 ```
 
-**Type checks are off inside templates by default.** `call.*` and
-`flow.*` findings are suppressed there while the synthesised
+**Type checks are off inside templates by default.** `call.*` **and
+`flow.*`** findings are suppressed there while the synthesised
 bindings are still coarse — measured on redmine and mastodon, the
 feature adds **zero** new findings to either
 ([the measurement note](../../notes/20260917-erb-template-units.md)).
 Set `view_type_checks: true` to opt in and have `@user.nmae` in
-`show.html.erb` reported like any other call.
+`show.html.erb` reported like any other call. It turns **both**
+families back on, flow folding included — which is the half with the
+known gap, since a partial's optional-local preamble reads as a
+definite `nil` until its render site's `locals:` are traced
+([#1047](https://github.com/rigortype/rigor/issues/1047)).
 
 ### Holding views to an effect budget
 
@@ -199,11 +203,16 @@ effects:
 
 Under either, an `io.db.write`, a `job.enqueue`, an `io.output.stdout`
 (`puts`), an `io.input` (`binding.pry`) or a `nondet.time` in a view
-is a finding. Only the labels each plugin in your `plugins:` list
-registers are known — `rails.i18n.translate` needs
-[`rigor-rails-i18n`](rigor-rails-i18n.md), and an unknown label is
-reported as `effect.unknown-label` rather than silently bounding
-nothing.
+is a finding.
+
+Only the labels the plugins in your `plugins:` list register are
+known, and both stanzas above name two that rigor-actionpack does not
+own: `rails.config.read` comes from
+`rigor-railties` and `rails.i18n.translate` from
+[`rigor-rails-i18n`](rigor-rails-i18n.md). Activate those alongside
+rigor-actionpack, or drop the labels — without them each is reported
+as `effect.unknown-label` and the entry bounds nothing, which is
+deliberately loud rather than a silent no-op.
 
 ## Limitations
 

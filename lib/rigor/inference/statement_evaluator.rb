@@ -88,6 +88,10 @@ module Rigor
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::ConstantWriteNode => :eval_constant_write,
         Prism::ConstantPathWriteNode => :eval_constant_write,
+        # Issue #963 — `Const ||= Struct.new(:a) do … end` opens the same class body. The handler's own result is
+        # the default expression pair, so routing the or-writes here adds the body entry and nothing else.
+        Prism::ConstantOrWriteNode => :eval_constant_write,
+        Prism::ConstantPathOrWriteNode => :eval_constant_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
         Prism::ElseNode => :eval_else,
@@ -425,12 +429,24 @@ module Rigor
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
         result = [scope.type_of(node, tracer: tracer), scope]
-        context = meta_new_constant_body_context(node)
+        call_node = meta_new_block_call(node)
+        return result if call_node.nil?
+
+        context = meta_new_constant_body_context(node, call_node)
         return result if context.nil?
 
-        call_node = node.value
         enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
         result
+      end
+
+      # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze`
+      # tail and the `||=` / `Const = Const || …` guard are unwrapped by {ScopeIndexer.meta_new_rvalue}, the same
+      # recognition the index walks under, so the two passes enter the same node or neither does. The recognition
+      # is still the loose one — a CallNode carrying a literal block — because the strict-argument shapes the
+      # index declines are entered under an anonymous name rather than dropped.
+      def meta_new_block_call(node)
+        rvalue = ScopeIndexer.meta_new_rvalue(node)
+        rvalue if rvalue.is_a?(Prism::CallNode) && rvalue.block.is_a?(Prism::BlockNode)
       end
 
       # The class context a meta-new rvalue block is entered under, or nil when the rvalue is not that shape. The
@@ -441,10 +457,7 @@ module Rigor
       # — the path spelling included since [#703](https://github.com/rigortype/rigor/issues/703). A shape the
       # ScopeIndexer's stricter argument check rejects (`Const = Struct.new(*names) do … end`) is registered under
       # the call site's anonymous name and is entered under that.
-      def meta_new_constant_body_context(node)
-        call_node = node.value
-        return nil unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
-
+      def meta_new_constant_body_context(node, call_node)
         constant = meta_new_constant_context(node)
         return constant if constant
 
@@ -460,9 +473,9 @@ module Rigor
         return nil unless ScopeIndexer.meta_new_block_body(node)
 
         case node
-        when Prism::ConstantWriteNode
+        when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode
           @class_context + [ClassFrame.new(name: node.name.to_s, singleton: false)]
-        when Prism::ConstantPathWriteNode
+        when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode
           frame = ClassFrame.new(name: Source::ConstantPath.qualified_name(node.target), singleton: false)
           Source::ConstantPath.rooted?(node.target) ? [frame] : @class_context + [frame]
         end

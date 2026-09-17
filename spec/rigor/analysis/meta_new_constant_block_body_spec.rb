@@ -46,6 +46,84 @@ RSpec.describe "meta-new block body at constant-write position" do
     RUBY
   end
 
+  # Issue #963 item 3 — the same repro in the three spellings the recognition used to miss. `Module#freeze`
+  # answers its receiver and `||=` assigns the rvalue wherever the constant is unset, so all three hold the
+  # class the factory created and all three must enter its body as a class body.
+  it "reports nothing for the `.freeze`-tailed spelling" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
+      Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+      p Line.new("a").shout
+    RUBY
+  end
+
+  it "reports nothing for the `||=` spelling" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
+      Line ||= Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end
+      p Line.new("a").shout
+    RUBY
+  end
+
+  it "reports nothing for a `.freeze`-tailed `Data.define` body" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
+      Point = Data.define(:text) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+      p Point
+    RUBY
+  end
+
+  # The must-still-fire arm of each, in the `lambda` shape the plain spelling is pinned by above: a member that
+  # shadows a `Kernel` private resolves as the struct's reader, and with one member fewer the same read falls
+  # through to `Kernel#lambda` and reports on the `Proc`. A build that stopped running the rule passes the three
+  # silences above and fails here.
+  it "resolves a `Kernel`-shadowing member of a `.freeze`-tailed body, and still reports without it" do
+    expect(rules_for(<<~SILENT)).not_to include("call.undefined-method")
+      Line = Struct.new(:lambda) do
+        def shout
+          lambda.upcase
+        end
+      end.freeze
+      p Line
+    SILENT
+    expect(diagnostics_for(<<~FIRES).map(&:message)).to include(/upcase.*Proc/)
+      Line = Struct.new(:other) do
+        def shout
+          lambda.upcase
+        end
+      end.freeze
+      p Line
+    FIRES
+  end
+
+  it "resolves a `Kernel`-shadowing member of a `||=` body, and still reports without it" do
+    expect(rules_for(<<~SILENT)).not_to include("call.undefined-method")
+      Line ||= Struct.new(:lambda) do
+        def shout
+          lambda.upcase
+        end
+      end
+      p Line
+    SILENT
+    expect(diagnostics_for(<<~FIRES).map(&:message)).to include(/upcase.*Proc/)
+      Line ||= Struct.new(:other) do
+        def shout
+          lambda.upcase
+        end
+      end
+      p Line
+    FIRES
+  end
+
   it "treats member reads, the member setter and a singleton def as the struct class's own" do
     expect(rules_for(<<~RUBY)).not_to include("call.unresolved-toplevel")
       Line = Struct.new(:text) do
@@ -348,6 +426,91 @@ RSpec.describe "meta-new block body at constant-write position" do
 
       expect(index[def_node.body].self_type).to eq(Rigor::Type::Combinator.nominal_of(name))
       expect(index[write].discovered_method?(name, :shout, :instance)).to be(true)
+    end
+
+    # Issue #963 item 3 — the identity half. The spellings below name the class exactly as the plain write
+    # does, so the discovered-method table and the body's `self_type` must be keyed by the constant in each of
+    # them. A `.freeze` tail previously left the body registered under the ANONYMOUS name (the walk fell past
+    # the constant write and reached the factory call as a bare child), and a `||=` write was not a recognised
+    # write shape at all, so its body stayed in the enclosing scope.
+    [
+      ["a `.freeze` tail", <<~FREEZE],
+        Line = Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end.freeze
+      FREEZE
+      ["a `||=` write", <<~OR_WRITE],
+        Line ||= Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end
+      OR_WRITE
+      ["a `Const = Const || …` guard", <<~GUARD]
+        Line = Line || Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end
+      GUARD
+    ].each do |label, source|
+      it "keys the body and the members by the constant for #{label}" do
+        index, program = index_and_program(source)
+        write = program.statements.body.first
+
+        expect(index[write].discovered_method?("Line", :shout, :instance)).to be(true)
+        expect(index[write].discovered_method?("Line", :text, :instance)).to be(true)
+      end
+    end
+
+    it "keys a `.freeze`-tailed path write by the namespace its own nesting gives it" do
+      index, program = index_and_program(<<~RUBY)
+        module Outer
+          class Holder; end
+
+          Holder::Line = Struct.new(:text) do
+            def shout
+              text.upcase
+            end
+          end.freeze
+        end
+      RUBY
+      write = program.statements.body.first.body.body[1]
+
+      expect(index[write].discovered_method?("Outer::Holder::Line", :shout, :instance)).to be(true)
+      expect(index[write].discovered_method?("Outer::Holder::Line", :text, :instance)).to be(true)
+    end
+
+    # The guard must be over the constant being written. `A = B || Struct.new(:text)` may well hold `B`, whose
+    # class `A` does not name, so the rvalue keeps its `OrNode` shape and nothing is keyed by `A`.
+    it "declines a guard over a different constant" do
+      index, program = index_and_program(<<~RUBY)
+        Line = Other || Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end
+      RUBY
+      write = program.statements.body.first
+
+      expect(index[write].discovered_method?("Line", :shout, :instance)).to be(false)
+    end
+
+    # Only the argumentless, blockless, receiverful `.freeze` is a value-preserving tail. Any other trailing
+    # call may answer a different object, so the write names nothing the factory created.
+    it "declines a trailing call that is not `.freeze`" do
+      index, program = index_and_program(<<~RUBY)
+        Line = Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end.members
+      RUBY
+      write = program.statements.body.first
+
+      expect(index[write].discovered_method?("Line", :shout, :instance)).to be(false)
     end
   end
 end

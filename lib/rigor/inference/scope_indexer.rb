@@ -2168,10 +2168,10 @@ module Rigor
               return
             end
           end
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
-            record_meta_new_facts(node.value, child_prefix, methods_acc)
+            record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc)
             walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
                                        source_path)
             # No anonymous registration here: the constant IS the name, and `StatementEvaluator#eval_constant_write`
@@ -2325,17 +2325,77 @@ module Rigor
       # `singleton(Struct)` and its instance `Struct`, a class RBS knows, so every member read and every override
       # call fired `call.undefined-method` on code Ruby runs. The name the write gives the class is
       # {#meta_new_child_prefix}'s, so every walk that pushes it agrees.
+      #
+      # Issue [#963](https://github.com/rigortype/rigor/issues/963) — the spelling of the WRITE and the tail of the
+      # rvalue are both incidental to the idiom, and both were load-bearing here. `Const = Struct.new(:a) do … end`
+      # was recognised while `Const ||= Struct.new(:a) do … end` and `Const = Struct.new(:a) do … end.freeze` were
+      # not, so the same body was walked as a class body in one spelling and left in the enclosing scope in the
+      # other two. {#meta_new_block_call} owns both unwrappings; every walk asks it, so no spelling can be
+      # recognised by one pass and missed by another.
       def meta_new_block_body(node)
-        return nil unless node.is_a?(Prism::ConstantWriteNode) || node.is_a?(Prism::ConstantPathWriteNode)
+        meta_new_block_call(node)&.block&.body
+      end
 
-        rvalue = node.value
-        return nil unless rvalue.is_a?(Prism::CallNode)
-        return nil unless data_define_call?(rvalue) ||
-                          struct_new_call?(rvalue) ||
-                          module_new_call?(rvalue) ||
-                          class_new_call?(rvalue)
+      # The class-creating call a constant write's rvalue ultimately is, or nil when the write is not the idiom.
+      # The single recognition point for {#meta_new_block_body} and every caller that needs the CALL rather than
+      # its body — `StatementEvaluator#eval_constant_write` enters the block through it, so the evaluator and the
+      # index cannot disagree about which node opened the class body.
+      def meta_new_block_call(node)
+        rvalue = meta_new_rvalue(node)
+        return nil unless rvalue.is_a?(Prism::CallNode) && meta_new_constant_rvalue?(rvalue)
 
-        rvalue.block&.body
+        rvalue
+      end
+
+      # The four constant-write spellings that name the class their rvalue creates. `Const ||= …` is the
+      # define-once idiom: where the constant is unset — the case the program is written for — Ruby evaluates the
+      # rvalue and names the class `Const`, exactly as the plain write does. `&&=` and the operator writes are NOT
+      # here: neither names a freshly created class.
+      META_CONSTANT_WRITE_NODES = [
+        Prism::ConstantWriteNode,
+        Prism::ConstantPathWriteNode,
+        Prism::ConstantOrWriteNode,
+        Prism::ConstantPathOrWriteNode
+      ].freeze
+      private_constant :META_CONSTANT_WRITE_NODES
+
+      # The rvalue a recognised constant write assigns, with the two value-preserving wrappers stripped: a
+      # `.freeze` tail (`Struct.new(:a) do … end.freeze` — `Module#freeze` returns the receiver, so the constant
+      # still holds the class the call created) and a `Const = Const || Struct.new(…)` guard, the long spelling of
+      # `||=`. Nil when `node` is not a constant write at all.
+      def meta_new_rvalue(node)
+        return nil unless META_CONSTANT_WRITE_NODES.any? { |kind| node.is_a?(kind) }
+
+        unwrap_freeze_tail(unwrap_or_guard(node, node.value))
+      end
+
+      # `Const = Const || <rvalue>` carries the same meaning as `Const ||= <rvalue>`, and only when the guarded
+      # name is the constant being written: `A = B || Struct.new(:x)` may hold `B`, whose class `A` does not name.
+      def unwrap_or_guard(node, value)
+        return value unless value.is_a?(Prism::OrNode)
+
+        written = meta_constant_write_name(node)
+        return value if written.nil?
+
+        Source::ConstantPath.qualified_name_or_nil(value.left) == written ? value.right : value
+      end
+
+      # A `.freeze` tail, repeated (`freeze.freeze` is legal and idempotent). Only the receiverful, argumentless,
+      # blockless call is unwrapped — anything else is a different method that may return a different object.
+      def unwrap_freeze_tail(value)
+        value = value.receiver while value.is_a?(Prism::CallNode) && value.name == :freeze &&
+                                     value.receiver && value.arguments.nil? && value.block.nil?
+        value
+      end
+
+      # The name a recognised constant write assigns, as written (`Const`, `Holder::Thing`). Used only to compare
+      # a `Const = Const || …` guard against its own target.
+      def meta_constant_write_name(node)
+        case node
+        when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode then node.name.to_s
+        when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode
+          Source::ConstantPath.qualified_name_or_nil(node.target)
+        end
       end
 
       # The qualified prefix a meta-new constant write names its class under, given the lexical prefix the write
@@ -2353,11 +2413,14 @@ module Rigor
       # read of `Loner` there with the `Admin::Loner` it invented. That is the same answer the equivalent
       # `class Loner::Made` header has always produced, from the same two functions: the two spellings of one
       # declaration stay consistent rather than one of them carrying a second approximation of its own.
+      #
+      # Issue #963 — `Const ||= …` names its class exactly as `Const = …` does, so the two or-write spellings take
+      # the branch of the write shape they are the conditional form of.
       def meta_new_child_prefix(node, qualified_prefix)
         case node
-        when Prism::ConstantWriteNode
+        when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode
           qualified_prefix + [node.name.to_s]
-        when Prism::ConstantPathWriteNode
+        when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode
           Source::ConstantPath.declaration_prefix(qualified_prefix, node.target)
         end
       end
@@ -2583,7 +2646,7 @@ module Rigor
               return
             end
           end
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
             walk_singleton_body(meta_new_block_body(node), child_prefix, false, accumulator)
@@ -3013,9 +3076,9 @@ module Rigor
             walk_data_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           child_prefix = meta_new_child_prefix(node, qualified_prefix)
-          record_data_member_layout(accumulator, child_prefix, node.value) if child_prefix
+          record_data_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
         end
 
         node.rigor_each_child do |child|
@@ -3064,9 +3127,9 @@ module Rigor
             walk_struct_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           child_prefix = meta_new_child_prefix(node, qualified_prefix)
-          record_struct_member_layout(accumulator, child_prefix, node.value) if child_prefix
+          record_struct_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
         end
 
         node.rigor_each_child do |child|
@@ -3315,7 +3378,7 @@ module Rigor
               return current_visibility
             end
           end
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
             walk_method_visibilities(meta_new_block_body(node), child_prefix, false, :public, accumulator)
@@ -4716,7 +4779,7 @@ module Rigor
             record_compact_header(compacts, qualified_prefix, node.constant_path, full) if compacts
             return collect_class_decls(node.body, child_prefix, accumulator, compacts) if node.body
           end
-        when Prism::ConstantWriteNode
+        when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode
           record_class_new_constant_decl(node, qualified_prefix, accumulator)
         end
 
@@ -4949,8 +5012,8 @@ module Rigor
       # Nested `Result` / `Entry` / `Config` Data constants shadowing a sibling are ordinary Ruby, and only the
       # DEFINING file's `in_source_constants` (never part of the project seed) knew about them.
       def record_class_new_constant_decl(node, qualified_prefix, accumulator)
-        rvalue = node.value
-        return unless meta_new_constant_rvalue?(rvalue)
+        rvalue = meta_new_rvalue(node)
+        return unless rvalue && meta_new_constant_rvalue?(rvalue)
 
         full = (qualified_prefix + [node.name.to_s]).join("::")
         accumulator[full] = Type::Combinator.singleton_of(
@@ -5058,7 +5121,7 @@ module Rigor
         case node
         when Prism::ModuleNode, Prism::ClassNode
           return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames)
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        when *META_CONSTANT_WRITE_NODES
           return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
@@ -5100,7 +5163,8 @@ module Rigor
       # The block body, if present, is recursed into so any nested class/module declarations in the override block (rare
       # but legal) still feed the discovered table.
       def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
-        factory_call = resolve_meta_factory_call(node.value)
+        rvalue = meta_new_rvalue(node)
+        factory_call = rvalue && resolve_meta_factory_call(rvalue)
         return false unless factory_call
 
         child_prefix = meta_new_child_prefix(node, qualified_prefix)

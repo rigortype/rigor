@@ -58,8 +58,8 @@ plugin contributes one:
    read off its resource — the `attributes` / `attribute` / `has_many` /
    `has_one` / `belongs_to` declarations it does not define itself, plus
    every `object.<name>` in its body — is a column, per-column predicate,
-   association, enum, alias or scope of that model, or a method your
-   project defines on it or an ancestor.
+   association, enum, alias, scope or macro-defined method of that model,
+   or a method your project defines on it or an ancestor.
 
 One unanswered name declines the whole serializer, because the resource
 is then something else — commonly a presenter or a decorator around the
@@ -126,14 +126,15 @@ plugins:
   site, not from the input class.
 - **`serializer:` / `each_serializer:` options.** They name the
   serializer for an association, never the model for a serializer.
-- **Model surface your schema and source do not state.** A `delegate`, an
-  association declared inside a concern's `included do`, and an
-  attachment macro are all things the model answers that the model index
-  does not yet see, so a serializer that reads one of them is declined.
-  On Mastodon that is 15 of the 52 serializers whose name resolves,
-  including its two largest; the fold belongs in `rigor-activerecord` and
-  is tracked as
-  [#1049](https://github.com/rigortype/rigor/issues/1049).
+- **Model surface your schema and source do not state.** A method the
+  model gets from `method_missing`, from a gem's macro `rigor-activerecord`
+  does not recognise, or from a module included at runtime is invisible to
+  the model index, so a serializer reading one is declined.
+  `rigor-activerecord` reads `delegate`, the associations a concern
+  declares in its `included do`, the Paperclip / Active Storage attachment
+  macros and `enum` value predicates
+  ([#1049](https://github.com/rigortype/rigor/issues/1049)); anything else
+  a macro defines is not folded yet.
 - **Some ways of reading the resource.** `object[:key]`, `object.title =`,
   `object.try(:name)`, `object.present?` and an `attribute(:x) { ... }`
   block are not read as evidence, so a serializer using one may decline

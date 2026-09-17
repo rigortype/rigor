@@ -108,11 +108,12 @@ module Rigor
           # name — {#resolve_table_name_decorator} keeps walking outward past it, exactly like Rails' own
           # `respond_to?(:table_name_prefix)` ancestor search.
           @namespace_table_name_decorators = {}
-          # `concern module name => [scope name]` — the `scope :x` declarations found inside a module's
-          # `included do … end` block (#534 item 5). Unlike {@type_override_columns} these are NOT global:
-          # a scope reaches a model only along a real `include` edge ({@include_edges}), so a same-named
-          # scope in a concern the model does not include contributes nothing.
-          @concern_scopes = {}
+          # `concern module name => { scopes:, associations:, macro_methods: }` — what a module contributes
+          # to every class that includes it (#534 item 5, #1049). Unlike {@type_override_columns} these are
+          # NOT global: a declaration reaches a model only along a real `include` edge ({@include_edges}),
+          # so a same-named `scope` / association / `delegate` in a concern the model does not include
+          # contributes nothing.
+          @concern_declarations = {}
           # `constant name => [raw included module name]` — every `include Foo` / `include Foo::Bar` a class
           # or module body spells, as written. Resolution against the walked module set happens after the
           # whole tree is read ({#resolve_concern_name}), because the including file may be walked first.
@@ -138,7 +139,7 @@ module Rigor
           # Every file is walked (and every module's `table_name_prefix` / `table_name_suffix` recorded)
           # before any row is resolved — a model's file may sort, and so be visited, before the file that
           # declares its enclosing module's decorator.
-          rows = fold_concern_scopes(resolve_models(candidates), superclass_map: superclass_map)
+          rows = fold_concern_declarations(resolve_models(candidates), superclass_map: superclass_map)
           attach_table_name_decorators(rows, superclass_map: superclass_map)
         end
 
@@ -229,7 +230,8 @@ module Rigor
             scopes: (Array(base[:scopes]) + Array(addition[:scopes])).uniq,
             validations: (Array(base[:validations]) + Array(addition[:validations])).uniq,
             callbacks: (Array(base[:callbacks]) + Array(addition[:callbacks])).uniq,
-            aliases: (base[:aliases] || {}).merge(addition[:aliases] || {})
+            aliases: (base[:aliases] || {}).merge(addition[:aliases] || {}),
+            macro_methods: (Array(base[:macro_methods]) + Array(addition[:macro_methods])).uniq
           )
         end
 
@@ -453,7 +455,8 @@ module Rigor
             scopes: lookup_scopes(node.body),
             validations: lookup_validations(node.body),
             callbacks: lookup_callbacks(node.body),
-            aliases: lookup_aliases(node.body)
+            aliases: lookup_aliases(node.body),
+            macro_methods: lookup_macro_methods(node.body)
           })
 
           # Recurse into the body in case nested classes exist.
@@ -471,7 +474,7 @@ module Rigor
           full_name = declared_constant_name(module_local_name, lexical_path)
           record_table_name_decorators(full_name, node.body, is_class: false)
           @module_names << full_name
-          record_concern_scopes(full_name, node.body)
+          record_concern_declarations(full_name, node.body)
           record_include_edges(full_name, node.body)
 
           inner_path = [full_name]
@@ -535,32 +538,48 @@ module Rigor
           type_arg.is_a?(Prism::ConstantReadNode) || type_arg.is_a?(Prism::ConstantPathNode)
         end
 
-        # Records the `scope :x` declarations a concern module spells inside its `included do … end` block
-        # (#534 item 5; mastodon's `scope :without_suspended` in `Account::Suspensions`). ActiveSupport::Concern
-        # evaluates that block against the INCLUDING class, so those scopes are declared on every model that
-        # includes the module — and on no other model, which is why they are kept per-module here rather than
-        # globally the way {#collect_type_overrides} keeps column names.
+        # Records what a concern module contributes to every class that includes it (#534 item 5, #1049;
+        # mastodon's `scope :without_suspended` in `Account::Suspensions`, `has_one :account_stat` and
+        # `delegate :statuses_count, …, to: :account_stat` in `Account::Counters`).
+        # ActiveSupport::Concern evaluates an `included do … end` block against the INCLUDING class, so
+        # whatever it declares is declared on every model that includes the module — and on no other model,
+        # which is why these are kept per-module here rather than globally the way {#collect_type_overrides}
+        # keeps column names.
         #
         # Concern-hood is recognised the way {#type_override_declaration_calls} already recognises it: by the
-        # `included do … end` block itself, not by an `extend ActiveSupport::Concern` line. A `scope :x` at the
-        # module body's own top level is NOT collected — there it is a plain send to the module object, not a
-        # class-level declaration on any model.
-        def record_concern_scopes(module_name, body)
-          names = included_block_scopes(body)
-          return if names.empty?
+        # `included do … end` block itself, not by an `extend ActiveSupport::Concern` line.
+        #
+        # The module's OWN top-level body contributes too, but only `delegate`: `delegate` is
+        # `Module#delegate`, so at a module's top level it defines ordinary INSTANCE methods on the module,
+        # which the including class then inherits through its ancestry — exactly the shape
+        # `Account::Counters` uses. A top-level `scope` / `has_one` / `has_attached_file` is by contrast a
+        # plain send to the module object (a runtime `NoMethodError`), never a class-level declaration on any
+        # model, so those are read from `included do … end` only.
+        def record_concern_declarations(module_name, body)
+          found = concern_declarations(body)
+          return if found.each_value.all?(&:empty?)
 
-          (@concern_scopes[module_name] ||= []).concat(names)
+          record = (@concern_declarations[module_name] ||= { scopes: [], associations: [], macro_methods: [] })
+          found.each { |key, values| record[key].concat(values) }
         end
 
-        def included_block_scopes(body)
-          return [] if body.nil?
+        def concern_declarations(body)
+          record = { scopes: [], associations: [], macro_methods: [] }
+          return record if body.nil?
 
-          body.compact_child_nodes.flat_map do |node|
-            next [] unless node.is_a?(Prism::CallNode) && node.name == :included && node.receiver.nil?
-            next [] unless node.block.is_a?(Prism::BlockNode)
+          body.compact_child_nodes.each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.receiver.nil?
 
-            lookup_scopes(node.block.body)
+            if node.name == :included && node.block.is_a?(Prism::BlockNode)
+              block_body = node.block.body
+              record[:scopes].concat(lookup_scopes(block_body))
+              record[:associations].concat(lookup_associations(block_body))
+              record[:macro_methods].concat(lookup_macro_methods(block_body))
+            elsif node.name == :delegate
+              record[:macro_methods].concat(delegate_method_names(node))
+            end
           end
+          record
         end
 
         # Records every `include Foo` / `include Foo::Bar` a class or module body spells, AS WRITTEN — the
@@ -592,10 +611,11 @@ module Rigor
           end
         end
 
-        # Adds each model's concern-declared scopes to the ones its own body declares. Attribution is by real
-        # `include` edge: a concern nobody includes contributes nothing, and a same-named `scope` in an
-        # unrelated concern does not leak onto this model. A concern that includes another concern is followed
-        # transitively (Ruby's own semantics — the inner module ends up in the model's ancestry either way).
+        # Adds each model's concern-declared scopes, associations and macro methods to the ones its own body
+        # declares. Attribution is by real `include` edge: a concern nobody includes contributes nothing, and
+        # a same-named `scope` / `has_one` / `delegate` in an unrelated concern does not leak onto this model.
+        # A concern that includes another concern is followed transitively (Ruby's own semantics — the inner
+        # module ends up in the model's ancestry either way).
         #
         # The model's SUPERCLASS chain is walked too, because a concern is routinely included once in
         # `ApplicationRecord` for every model to get. The chain is walked here rather than left to
@@ -603,36 +623,46 @@ module Rigor
         # discovered model, so `class Account < ApplicationRecord` has no `sti_parent` and the index's chain
         # stops at `Account`. (A `scope` written directly in the base class's own body is still not
         # propagated — that pre-existing gap is a different mechanism and is documented, not widened here.)
-        def fold_concern_scopes(rows, superclass_map: {})
-          return rows if @concern_scopes.empty?
+        #
+        # The model's OWN association rows are kept LAST so {#dedup_named_rows}'s last-wins rule lets a class
+        # body redeclaration override the concern's, which is what Ruby does: the class's own
+        # `has_one :user, class_name: "…"` beats the one the included module installed.
+        def fold_concern_declarations(rows, superclass_map: {})
+          return rows if @concern_declarations.empty?
 
           rows.map do |row|
-            inherited = ancestry_concern_scopes(row.fetch(:class_name), superclass_map)
-            next row if inherited.empty?
+            inherited = ancestry_concern_declarations(row.fetch(:class_name), superclass_map)
+            next row if inherited.each_value.all?(&:empty?)
 
-            row.merge(scopes: (Array(row[:scopes]) + inherited).uniq.freeze)
+            row.merge(
+              scopes: (Array(row[:scopes]) + inherited[:scopes]).uniq.freeze,
+              associations: dedup_named_rows(inherited[:associations] + Array(row[:associations])),
+              macro_methods: (Array(row[:macro_methods]) + inherited[:macro_methods]).uniq.freeze
+            )
           end
         end
 
-        # The concern scopes reaching `class_name` through its own includes and those of every superclass up
-        # the chain (`visited` stops a cycle a malformed source could spell).
-        def ancestry_concern_scopes(class_name, superclass_map)
-          scopes = []
+        # The concern declarations reaching `class_name` through its own includes and those of every
+        # superclass up the chain (`visited` stops a cycle a malformed source could spell).
+        def ancestry_concern_declarations(class_name, superclass_map)
+          found = { scopes: [], associations: [], macro_methods: [] }
           curr = class_name
           visited = Set.new
 
           while curr && visited.add?(curr)
-            scopes.concat(concern_scopes_for(curr))
+            concern_declarations_for(curr).each { |key, values| found[key].concat(values) }
             curr = superclass_map[curr]
           end
 
-          scopes.uniq
+          found[:scopes].uniq!
+          found[:macro_methods].uniq!
+          found
         end
 
         # Breadth-first over the `include` edges reachable from `class_name`, unioning each visited concern's
-        # scopes. `visited` makes a mutually-including pair of concerns terminate rather than loop.
-        def concern_scopes_for(class_name)
-          scopes = []
+        # declarations. `visited` makes a mutually-including pair of concerns terminate rather than loop.
+        def concern_declarations_for(class_name)
+          found = { scopes: [], associations: [], macro_methods: [] }
           queue = Array(@include_edges[class_name]).map { |raw| [raw, class_name] }
           visited = Set.new([class_name])
 
@@ -642,11 +672,11 @@ module Rigor
             next if visited.include?(resolved)
 
             visited << resolved
-            scopes.concat(Array(@concern_scopes[resolved]))
+            (@concern_declarations[resolved] || {}).each { |key, values| found[key].concat(values) }
             queue.concat(Array(@include_edges[resolved]).map { |inner| [inner, resolved] })
           end
 
-          scopes.uniq
+          found
         end
 
         # Resolves an `include`'s constant spelling against the modules actually walked, mirroring Ruby's
@@ -1491,6 +1521,171 @@ module Rigor
             aliases[new_name.unescaped] = old_name.unescaped
           end
           aliases.freeze
+        end
+
+        # The attachment macros whose reader names are folded, mapped to the reader SUFFIXES each one
+        # installs beside the bare accessor (#1049).
+        #
+        # Each key is the macro name of exactly one gem, and none of the three is a name another common
+        # library claims — `has_attached_file` is Paperclip's, `has_one_attached` / `has_many_attached` are
+        # Active Storage's — so the macro's presence in a model body IS the evidence that the project uses
+        # that gem. No lockfile probe is needed (and none would be sound for a vendored or path-sourced
+        # gem); a project that spells none of the three gets nothing folded.
+        #
+        # PAPERCLIP's set is deliberately minimal: `has_attached_file :file` installs `file`, `file=` and
+        # `file?`, and those are the names #1049's serializer table needs. The `file_file_name` /
+        # `file_content_type` / `file_file_size` / `file_updated_at` quartet is NOT listed because Paperclip
+        # backs it with four real schema columns, which the index already carries from `db/schema.rb`;
+        # synthesising them here would claim them on a model whose table lacks them.
+        #
+        # ACTIVE STORAGE's set is `avatar`, `avatar=`, `avatar_attachment`, `avatar_blob` for the singular
+        # macro and `images`, `images=`, `images_attachments`, `images_blobs` for the collection one — the
+        # `has_one_attached` / `has_many_attached` generated-methods surface, none of it column-backed.
+        # This is name MEMBERSHIP only, and does not overlap `rigor-activestorage`, which contributes the
+        # accessor's TYPE (`ActiveStorage::Attached::One`) and publishes no fact: a consumer that reads
+        # `:model_index` to ask "does this model answer `avatar`?" gets nothing from that plugin, and gets
+        # nothing at all when the project does not load it.
+        ATTACHMENT_MACROS = {
+          has_attached_file: ["", "=", "?"],
+          has_one_attached: ["", "=", "_attachment", "_blob"],
+          has_many_attached: ["", "=", "_attachments", "_blobs"]
+        }.freeze
+        private_constant :ATTACHMENT_MACROS
+
+        # Instance-method names a declaration macro installs that neither the schema nor the association /
+        # alias / scope lists already carry (#1049): `delegate`'s method names, the attachment macros'
+        # readers, and an `enum`'s per-value predicates. Names ONLY — what a delegate target returns is a
+        # separate question no consumer asks today.
+        #
+        # Every name here is spelled out by the declaration itself. A shape this walker cannot read off the
+        # source (a non-literal `prefix:`, a `to:` that is not a Symbol when `prefix: true` needs its
+        # spelling, a computed enum value list) contributes NOTHING rather than a guess: a consumer that
+        # fails closed on an unanswered name loses precision when a name is missing, but is answered WRONG
+        # when a name is invented.
+        def lookup_macro_methods(body)
+          return [] if body.nil?
+
+          names = []
+          declaration_calls(body).each do |node|
+            next if node.receiver
+
+            if node.name == :delegate
+              names.concat(delegate_method_names(node))
+            elsif ATTACHMENT_MACROS.key?(node.name)
+              names.concat(attachment_method_names(node))
+            elsif node.name == :enum
+              names.concat(enum_predicate_names(node))
+            end
+          end
+          names.uniq.freeze
+        end
+
+        # `delegate :a, :b, to: :x` → `["a", "b"]`; `prefix: true` prepends the `to:` target's own spelling
+        # (`delegate :can?, to: :user, prefix: true` → `"user_can?"`), and `prefix: :admin` prepends the
+        # given one. ActiveSupport builds the name by plain concatenation, so a `?` / `!` / `=` suffix rides
+        # along untouched.
+        #
+        # `allow_nil:` does not enter into it — it changes what the method RETURNS, never what it is called.
+        # `prefix: true` with a `to:` this walker cannot render as a name declines the whole call.
+        def delegate_method_names(node)
+          args = node.arguments&.arguments
+          return [] if args.nil? || args.empty?
+
+          names = args.filter_map { |arg| Rigor::Source::Literals.symbol_name(arg) }
+          return [] if names.empty?
+
+          prefix = delegate_prefix(args)
+          return [] if prefix == :unfoldable
+
+          names.map { |name| "#{prefix}#{name}" }
+        end
+
+        # The `"user_"`-style prefix a `delegate` call's `prefix:` option establishes: `""` when the option
+        # is absent or false, `:unfoldable` when it is present in a shape this walker cannot read.
+        def delegate_prefix(args)
+          value = keyword_option(args, "prefix")
+          return "" if value.nil? || value.is_a?(Prism::FalseNode)
+
+          if value.is_a?(Prism::TrueNode)
+            target = keyword_option(args, "to")
+            name = Rigor::Source::Literals.symbol_name(target)
+            return :unfoldable if name.nil? || name.empty?
+
+            return "#{name}_"
+          end
+
+          literal = Rigor::Source::Literals.symbol_name(value) || (value.is_a?(Prism::StringNode) ? value.unescaped : nil)
+          return :unfoldable if literal.nil? || literal.empty?
+
+          "#{literal}_"
+        end
+
+        # `has_attached_file :file` / `has_one_attached :avatar` / `has_many_attached :images` → the reader
+        # names {ATTACHMENT_MACROS} lists for that macro. A non-Symbol-literal name declines.
+        def attachment_method_names(node)
+          name = Rigor::Source::Literals.symbol_name(node.arguments&.arguments&.first)
+          return [] if name.nil? || name.empty?
+
+          ATTACHMENT_MACROS.fetch(node.name).map { |suffix| "#{name}#{suffix}" }
+        end
+
+        # An `enum`'s per-value predicates — `enum :visibility, { … limited: 4 }, suffix: :visibility` →
+        # `"limited_visibility?"` (mastodon's `Status::Visibility`). Rails composes the name as
+        # `"#{prefix}#{value}#{suffix}"`, where `prefix: true` / `suffix: true` use the enum's own column
+        # name and a Symbol / String uses that spelling; Rails 6's `_prefix:` / `_suffix:` keywords are read
+        # as the same option.
+        #
+        # Only the `?` predicate is folded. The bang (`limited_visibility!`) writes to the database and the
+        # same-named class-side scope is not an instance method at all; neither is a name a consumer of this
+        # fact asks about, and both would be invention beyond what the table needs.
+        #
+        # The enum's COLUMN and value list are deliberately not folded into the row's `enums:` from here —
+        # see {#concern_declarations}. This method contributes names, which every consumer of the fact
+        # WIDENS a known-name set with; `enums:` drives `Analyzer#validate_enum_value`, which FIRES.
+        def enum_predicate_names(node)
+          row = parse_enum_call(node)
+          return [] if row.nil? || row[:values].empty?
+
+          args = node.arguments&.arguments || []
+          prefix = enum_affix(args, %w[prefix _prefix], row[:column]) { |literal| "#{literal}_" }
+          suffix = enum_affix(args, %w[suffix _suffix], row[:column]) { |literal| "_#{literal}" }
+          return [] if prefix == :unfoldable || suffix == :unfoldable
+
+          row[:values].map { |value| "#{prefix}#{value}#{suffix}?" }
+        end
+
+        # The rendered `prefix:` / `suffix:` affix of an `enum` call, `""` when the option is absent or
+        # false and `:unfoldable` when it is present in a shape this walker cannot read.
+        def enum_affix(args, keys, column_name)
+          value = keys.filter_map { |key| keyword_option(args, key) }.first
+          return "" if value.nil? || value.is_a?(Prism::FalseNode)
+          return yield(column_name) if value.is_a?(Prism::TrueNode)
+
+          literal = Rigor::Source::Literals.symbol_name(value) || (value.is_a?(Prism::StringNode) ? value.unescaped : nil)
+          return :unfoldable if literal.nil? || literal.empty?
+
+          yield(literal)
+        end
+
+        # The VALUE node of a keyword argument, across every keyword hash in the call's argument list, or
+        # nil when the call does not spell that key. Unlike {#association_option} this hands back the node
+        # rather than a Boolean, because the callers need Symbol and String values too.
+        #
+        # A BRACED hash argument (`enum :visibility, { limited: 4 }, suffix: :visibility`) is a
+        # `Prism::HashNode` and is deliberately not scanned: there the braces hold the enum's own value map,
+        # and an enum value spelled `prefix:` would otherwise read as the call's `prefix:` option. Rails 6's
+        # `enum status: { … }, _prefix: true` puts both in ONE `KeywordHashNode`, which is scanned.
+        def keyword_option(args, key)
+          args.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.each do |pair|
+              next unless pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key)
+
+              return pair.value
+            end
+          end
+          nil
         end
 
         # Collects every Symbol-literal positional argument from a CallNode. Used by both

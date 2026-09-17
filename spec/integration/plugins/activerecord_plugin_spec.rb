@@ -1598,6 +1598,177 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  # #1049 — three macro families that define real, routinely-called model methods, folded into the entry and
+  # the published fact: `delegate`, associations declared in an included concern's `included do`, and the
+  # Paperclip / Active Storage attachment macros (plus an `enum`'s per-value predicates, which the issue's
+  # table counts with the concern family).
+  #
+  # The fixture mirrors mastodon's `Account`. Every example is paired with `Status`, which includes nothing
+  # and must answer exactly as it did before, because the risk of the whole rule is attribution by NAME:
+  # `Status::Hidden` declares the same `delegate`, the same association and the same attachment macro and is
+  # included by nobody.
+  describe "delegate / concern associations / attachment macros (#1049)" do
+    let(:macro_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "accounts", force: :cascade do |t|
+            t.string  "username"
+            t.integer "visibility"
+          end
+
+          create_table "statuses", force: :cascade do |t|
+            t.string "text"
+          end
+
+          create_table "account_stats", force: :cascade do |t|
+            t.integer "followers_count"
+          end
+        end
+      SCHEMA
+    end
+
+    let(:macro_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/account.rb" => <<~RUBY,
+          class Account < ApplicationRecord
+            include Account::Counters
+            include Account::Avatar
+
+            delegate :email, :can?, to: :user, prefix: true, allow_nil: true
+            delegate :chosen_languages, to: :user
+            has_one_attached :banner
+            has_many_attached :docs
+            enum :visibility, { public: 0, limited: 4 }, suffix: :visibility
+          end
+        RUBY
+        "app/models/concerns/account/counters.rb" => <<~RUBY,
+          module Account::Counters
+            extend ActiveSupport::Concern
+
+            included do
+              has_one :account_stat, inverse_of: :account
+              belongs_to :moved_to_account, class_name: 'Account', optional: true
+            end
+
+            delegate :followers_count, to: :account_stat
+          end
+        RUBY
+        "app/models/concerns/account/avatar.rb" => <<~RUBY,
+          module Account::Avatar
+            extend ActiveSupport::Concern
+
+            included do
+              has_attached_file :avatar, styles: { original: {} }
+            end
+          end
+        RUBY
+        "app/models/account_stat.rb" => "class AccountStat < ApplicationRecord\nend\n",
+        "app/models/status.rb" => <<~RUBY,
+          class Status < ApplicationRecord
+          end
+        RUBY
+        "app/models/concerns/status/hidden.rb" => <<~RUBY
+          module Status::Hidden
+            extend ActiveSupport::Concern
+
+            included do
+              has_one :account_stat
+              has_attached_file :avatar
+            end
+
+            delegate :followers_count, to: :account_stat
+          end
+        RUBY
+      }
+    end
+
+    def macro_index
+      _result, index = run_ar_with_index("x = 1\n", models: macro_models, schema: macro_schema)
+      index
+    end
+
+    it "records a model-body delegate, with and without a prefix" do
+      entry = macro_index.find("Account")
+
+      expect(entry.macro_methods).to include("user_email", "user_can?", "chosen_languages")
+      expect(entry.macro_method?("user_can?")).to be(true)
+      # `prefix: true` prepends the `to:` target's own spelling; the unprefixed call keeps the bare name.
+      expect(entry.macro_method?("email")).to be(false)
+      expect(entry.macro_method?("user_chosen_languages")).to be(false)
+    end
+
+    it "records a delegate written at an included concern's module top level" do
+      # `Module#delegate` there defines an instance method on the module, which the including class
+      # inherits — mastodon's `Account::Counters` shape.
+      expect(macro_index.find("Account").macro_method?("followers_count")).to be(true)
+    end
+
+    it "records the associations an included concern declares in its `included do`" do
+      entry = macro_index.find("Account")
+
+      expect(entry.association_names).to include("account_stat", "moved_to_account")
+      expect(entry.association("account_stat")[:kind]).to eq(:singular)
+      expect(entry.association("moved_to_account")[:target]).to eq("Account")
+    end
+
+    it "records the Paperclip and Active Storage attachment readers" do
+      entry = macro_index.find("Account")
+
+      expect(entry.macro_methods).to include("avatar", "avatar=", "avatar?")
+      expect(entry.macro_methods).to include("banner", "banner_attachment", "banner_blob")
+      expect(entry.macro_methods).to include("docs", "docs_attachments", "docs_blobs")
+      # Paperclip's `avatar_file_name` quartet is column-backed, and inventing it here would claim it on a
+      # model whose table lacks those columns.
+      expect(entry.macro_method?("avatar_file_name")).to be(false)
+    end
+
+    it "records an enum's per-value predicates, honouring `suffix:`" do
+      expect(macro_index.find("Account").macro_methods)
+        .to include("public_visibility?", "limited_visibility?")
+    end
+
+    it "does not attribute a same-named macro from a concern the model does not include" do
+      entry = macro_index.find("Status")
+
+      expect(entry.macro_methods).to be_empty
+      expect(entry.association_names).to be_empty
+      expect(entry.macro_method?("followers_count")).to be(false)
+      expect(entry.macro_method?("avatar")).to be(false)
+    end
+
+    it "leaves a genuinely undefined method reported exactly as before" do
+      result = run_ar("Account.new.no_such_method\n", models: macro_models, schema: macro_schema)
+      index = macro_index
+
+      expect(index.find("Account").macro_method?("no_such_method")).to be(false)
+      # The model's instance surface is open, so the call is silent here today; the point of the example is
+      # that the fold did not invent a member for it either.
+      expect(result.diagnostics.map(&:rule)).not_to include("unknown-column")
+    end
+
+    it "publishes the macro methods on the :model_index fact" do
+      index = macro_index
+      published = index.entries.transform_values { |e| e.macro_methods }
+
+      expect(published.fetch("Account")).to include("user_can?", "avatar", "banner_blob")
+      expect(published.fetch("Status")).to be_empty
+    end
+
+    it "declines a delegate whose prefix cannot be read off the source" do
+      models = macro_models.merge(
+        "app/models/account.rb" => <<~RUBY
+          class Account < ApplicationRecord
+            delegate :email, to: association_target, prefix: true
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: macro_schema)
+
+      expect(index.find("Account").macro_methods).to be_empty
+    end
+  end
+
   describe "validations + callbacks — v0.1.5" do
     # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
     VAL_CB_SCHEMA = <<~SCHEMA

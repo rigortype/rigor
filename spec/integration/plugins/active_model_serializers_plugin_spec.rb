@@ -603,6 +603,117 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
   end
 
+  # #1049 — the three macro families the `:model_index` fact could not see. Each name below declined the
+  # whole serializer before the fold, because `answers?` requires every name.
+  describe "the macro families the model index folds (#1049)" do
+    it "accepts a `delegate` name from the model body and from an included concern" do
+      types = dumped_types(files: {
+                             "app/models/account.rb" => <<~MODEL,
+                               class Account < ApplicationRecord
+                                 include Account::Counters
+
+                                 delegate :can?, to: :user, prefix: true
+                               end
+                             MODEL
+                             "app/models/concerns/account/counters.rb" => <<~MODEL,
+                               module Account::Counters
+                                 extend ActiveSupport::Concern
+
+                                 delegate :followers_count, to: :account_stat
+                               end
+                             MODEL
+                             "app/serializers/rest/account_serializer.rb" => <<~SRC
+                               class REST::AccountSerializer < ActiveModel::Serializer
+                                 attributes :followers_count
+
+                                 def probe
+                                   object.user_can?(:manage)
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "accepts an association declared in an included concern's `included do`" do
+      types = dumped_types(files: {
+                             "app/models/account.rb" => <<~MODEL,
+                               class Account < ApplicationRecord
+                                 include Account::Associations
+                               end
+                             MODEL
+                             "app/models/concerns/account/associations.rb" => <<~MODEL,
+                               module Account::Associations
+                                 extend ActiveSupport::Concern
+
+                                 included do
+                                   has_one :moved_to_account, class_name: 'Account'
+                                 end
+                               end
+                             MODEL
+                             "app/serializers/rest/account_serializer.rb" => <<~SRC
+                               class REST::AccountSerializer < ActiveModel::Serializer
+                                 has_one :moved_to_account
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "accepts a Paperclip attachment reader and its predicate" do
+      types = dumped_types(files: {
+                             "app/models/account.rb" => <<~MODEL,
+                               class Account < ApplicationRecord
+                                 has_attached_file :avatar
+                               end
+                             MODEL
+                             "app/serializers/rest/account_serializer.rb" => <<~SRC
+                               class REST::AccountSerializer < ActiveModel::Serializer
+                                 attributes :avatar
+
+                                 def probe
+                                   object.avatar?
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "still declines when the concern carrying the name is not included" do
+      types = dumped_types(files: {
+                             "app/models/account.rb" => "class Account < ApplicationRecord\nend\n",
+                             "app/models/concerns/account/counters.rb" => <<~MODEL,
+                               module Account::Counters
+                                 extend ActiveSupport::Concern
+
+                                 delegate :followers_count, to: :account_stat
+                               end
+                             MODEL
+                             "app/serializers/rest/account_serializer.rb" => <<~SRC
+                               class REST::AccountSerializer < ActiveModel::Serializer
+                                 attributes :followers_count
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
   describe "the declared framework constants" do
     it "does not fire `call.undefined-method` on the AMS surface a serializer inherits" do
       analyze(files: {

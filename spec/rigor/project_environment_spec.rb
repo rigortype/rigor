@@ -13,6 +13,9 @@ RSpec.describe Rigor::ProjectEnvironment do
   # source — a `gemspec_*`, a `gem_sig_*` — would be exactly the same bug and would pass a pattern silently.
   # The cost is that a new NON-discovery keyword has to be classified here; the failure message says so, and
   # that classification is the adjudication the gate exists to force.
+  #
+  # `locked_gems` is classified non-discovery: it is not an axis but a value already resolved FROM the
+  # `bundler_*` axes this helper does pass, supplied only by the Ractor pool's coordinator (#1064).
   def non_discovery_keywords
     %i[
       root
@@ -27,6 +30,7 @@ RSpec.describe Rigor::ProjectEnvironment do
       synthetic_method_index
       project_patched_methods
       source_files
+      locked_gems
     ].freeze
   end
 

@@ -49,6 +49,7 @@ module Rigor
           "shoryuken" => ["io.net"], "backburner" => ["io.net"], "sucker_punch" => [],
           "async" => [], "inline" => [], "test" => []
         }.freeze
+        Ractor.make_shareable(TRANSPORTS)
 
         # The meaning half, which is adapter-independent and is what a policy actually names.
         MEANING = ["rails.activejob.enqueue", "job.enqueue"].freeze

@@ -241,6 +241,7 @@ module Rigor
         ["CSV", :readlines,  :singleton] => CSV_PARSED_SPEC,
         ["CSV", :parse_line, :singleton] => CSV_ROW_SPEC
       }.freeze
+      Ractor.make_shareable(METHOD_RETURN_OVERRIDES)
 
       # @return the reduced HKT type for
       #   the given (class_name, method_name, kind) triple,

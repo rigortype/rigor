@@ -23,6 +23,7 @@ module Rigor
         response_body: -> { Rigor::Type::Combinator.nominal_of("String") },
         response_headers: -> { Rigor::Type::Combinator.nominal_of("String") }
       }.freeze
+      Ractor.make_shareable(EASY_RETURN_TYPES)
 
       dynamic_return receivers: ["Ethon::Easy"], methods: EASY_RETURN_TYPES.keys do |call_node, _scope|
         builder = EASY_RETURN_TYPES[call_node.name]

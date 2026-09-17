@@ -35,13 +35,14 @@ module Rigor
         suffix = "/#{gem_name}.rb"
         $LOADED_FEATURES.rfind { |feature| feature.end_with?(suffix) }
       end
+      Ractor.make_shareable(FEATURE_RESOLVER)
 
       # #194 slice 2 (ADR-93 WD5) — the engine's own root, anchored from THIS file's location: the loader
       # lives at `<root>/lib/rigor/plugin/loader.rb`, so three levels up is the engine root. It resolves
       # identically in a git checkout and inside an installed `rigortype` gem, because the gem packages the
       # `plugins/` tree at the same relative path — which is exactly what makes it a trustworthy anchor for
       # the engine's own bundled plugin copies.
-      ENGINE_ROOT = File.expand_path("../../..", __dir__)
+      ENGINE_ROOT = File.expand_path("../../..", __dir__).freeze
 
       # @param requirer — takes a gem name OR an absolute file path (#194 slice 2 — a bundled plugin is
       #   required by its {.bundled_plugin_path}) and returns truthy on successful require. Defaulted to

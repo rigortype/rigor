@@ -93,6 +93,7 @@ module Rigor
           assert_not_equal: [:literal_then_local, true],
           assert_match: [:regex_then_local, false]
         }.freeze
+        Ractor.make_shareable(ASSERT_FORM)
         private_constant :ASSERT_FORM
 
         def assert_form_fact(call_node, environment:)
@@ -126,6 +127,7 @@ module Rigor
           wont_equal: [:literal_arg, true],
           must_match: [:regex_arg, false]
         }.freeze
+        Ractor.make_shareable(SPEC_MATCHER_FORM)
         private_constant :SPEC_MATCHER_FORM
 
         # ADR-37 slice 2 — the method names this analyzer narrows on, for the plugin's

@@ -176,6 +176,7 @@ module Rigor
         # recovered by inspecting an arbitrary string.
         literal_string: ->(v) { v.is_a?(String) }
       }.freeze
+      Ractor.make_shareable(PREDICATES)
 
       # Maps `[base_class_name, predicate_id]` pairs to their kebab-case canonical name. Registered
       # shapes print through `describe`; unregistered combinations fall back to the operator form.

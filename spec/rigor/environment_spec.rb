@@ -511,6 +511,36 @@ RSpec.describe Rigor::Environment do
       end
     end
 
+    # #1064 — a Ractor pool worker cannot run Bundler's lockfile parser, so the coordinator resolves the map and
+    # hands it in. A supplied map must filter exactly as the lockfile it came from would, without the environment
+    # reading a lockfile of its own.
+    it "filters by a caller-resolved `locked_gems:` map without parsing a lockfile" do
+      Dir.mktmpdir do |tmpdir|
+        bundle = File.join(tmpdir, "bundle")
+        gems_dir = File.join(bundle, "ruby", "4.0.0", "gems")
+        write_sig(File.join(gems_dir, "acme_locked_1064-2.0.0", "sig"), "AcmeLocked1064")
+        write_sig(File.join(gems_dir, "acme_stale_1064-1.0.0", "sig"), "AcmeStale1064")
+        locked = {
+          "acme_locked_1064" => Rigor::Environment::LockfileResolver::LockedGem.new(
+            name: "acme_locked_1064", version: "2.0.0", platform: "ruby"
+          ),
+          "acme_stale_1064" => Rigor::Environment::LockfileResolver::LockedGem.new(
+            name: "acme_stale_1064", version: "2.0.0", platform: "ruby"
+          )
+        }.freeze
+        allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_call_original
+
+        env = described_class.for_project(
+          root: tmpdir, signature_paths: [], bundler_bundle_path: bundle, bundler_auto_detect: false,
+          locked_gems: locked
+        )
+
+        expect(env.nominal_for_name("AcmeLocked1064")&.class_name).to eq("AcmeLocked1064")
+        expect(env.nominal_for_name("AcmeStale1064")).to be_nil
+        expect(Rigor::Environment::LockfileResolver).not_to have_received(:locked_gems)
+      end
+    end
+
     it "ignores a directory that is not a gem sig root (control: the widened glob is not matching everything)" do
       Dir.mktmpdir do |tmpdir|
         bundle = File.join(tmpdir, "bundle")

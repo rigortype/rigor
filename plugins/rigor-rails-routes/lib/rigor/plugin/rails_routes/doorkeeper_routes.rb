@@ -63,6 +63,7 @@ module Rigor
             ["oauth_authorized_application_url",  1, "/oauth/authorized_applications/:id", :delete, :destroy]
           ]
         }.freeze
+        Ractor.make_shareable(CONTROLLER_HELPERS)
 
         module_function
 

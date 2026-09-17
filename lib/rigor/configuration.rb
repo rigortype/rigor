@@ -202,6 +202,7 @@ module Rigor
         "auto_detect" => true
       }
     }.freeze
+    Ractor.make_shareable(DEFAULTS)
 
     # Top-level keys whose values are file/directory paths that MUST be resolved relative to the config
     # file's directory. `exclude:` is intentionally NOT in this list — its entries are glob patterns

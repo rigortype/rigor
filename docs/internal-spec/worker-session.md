@@ -48,6 +48,11 @@ The constructor accepts only inputs that cross a worker boundary safely:
   constructed without it cannot resolve calls to methods defined in other
   project files and violates the equivalence contract with false
   `call.undefined-method` diagnostics.
+- `locked_gems` — optional, default `nil`. The project's resolved
+  `Gemfile.lock` map (`LockfileResolver.locked_gems`), frozen and
+  `Ractor.shareable?`. The Ractor backend supplies it because a worker
+  cannot run Bundler's parser (see below); `nil` resolves it inside the
+  environment build.
 
 ### Defaults the constructor reaches
 
@@ -85,6 +90,34 @@ as `FactStore::Target.local`'s) cannot be frozen and eagerly shared, so
 it MUST be guarded with `Ractor.main?` and the worker MUST take a path
 that produces an equal value without the table. That is only sound where
 the table is an allocation saving rather than an identity contract.
+
+Constants are bound by the same read rule, and a constant is read far
+more often than a class ivar. Every constant under `Rigor` — including
+private ones, `class << self` ones, and those of the bundled plugins,
+whose classes a worker materialises — **MUST** hold a `Ractor.shareable?`
+value. `.freeze` is not enough for a Hash or Array whose elements are
+Strings, Arrays, Hashes or lambdas, nor for a computed String
+(`File.expand_path(…)`) or a `Regexp.new(…)`; such a constant takes
+`Ractor.make_shareable` (or `.freeze`, for a String or Regexp with no
+mutable parts) at its definition, which costs nothing per call. A constant
+that must stay unshareable — today only `Plugin::Registry::EMPTY`, whose
+frozen shell holds per-run memo tables and which no worker reads — is
+named with its reason in the allowlist of
+`spec/rigor/ractor_readiness_spec.rb`, whose sweep fails on any other
+([#1064](https://github.com/rigortype/rigor/issues/1064)).
+
+The rule also binds what the constructor's `Environment` build reads from
+outside Rigor. Bundler's `Gemfile.lock` parser reads RubyGems module state
+a non-main Ractor may not touch, so a worker **MUST NOT** resolve the
+lockfile itself: the Ractor coordinator resolves
+`LockfileResolver.locked_gems` once on the main Ractor, makes the map
+shareable, and hands it to every worker as `locked_gems:` — the same
+value its cache-prewarm environment is built with — the way it hands over
+`source_files`. `locked_gems: nil`, which the fork backend and every other
+caller pass, resolves inside `Environment.for_project` exactly as before;
+the fork backend builds its session on the parent, so it already resolves
+there. A resolver that nonetheless meets `Ractor::IsolationError` reports
+it as that, not as a malformed lockfile.
 
 ## Ownership boundary
 

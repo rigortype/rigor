@@ -925,6 +925,7 @@ module Rigor
           since: "0.3.0"
         )
       }.freeze
+      Ractor.make_shareable(ENTRIES)
 
       module_function
 

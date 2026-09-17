@@ -43,7 +43,11 @@ module RbsEnvMemo
   CAPACITY = 3
 
   class << self
+    # Off inside a non-main Ractor: the LRU is a module ivar holding unshareable environments, which a Ractor
+    # pool worker may neither read nor write, so a memoised build there raised `Ractor::IsolationError` that a
+    # real `rigor check` never meets. The worker builds unmemoised, as the product does (#1064).
     def enabled?
+      return false unless Ractor.main?
       return false if ENV["RIGOR_SPEC_NO_ENV_MEMO"]
 
       !RSpec.current_example&.metadata&.fetch(:fresh_rbs_env, false)

@@ -274,7 +274,7 @@ module Rigor
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
-                      source_files: [])
+                      source_files: [], locked_gems: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
@@ -285,7 +285,10 @@ module Rigor
         # to the project root), use the locked gem set to filter the discovered `sig/` directories. Stale
         # gems in the bundle install tree (out-of-band installs, version drift after a `bundle update`) are
         # silently dropped so only gems the project actually declares contribute RBS.
-        locked = LockfileResolver.locked_gems(
+        #
+        # #1064 — `locked_gems:` is that same map resolved by the caller. The Ractor pool passes it because
+        # Bundler's parser cannot run in a non-main Ractor; every other caller leaves it nil and resolves here.
+        locked = locked_gems || LockfileResolver.locked_gems(
           lockfile_path: bundler_lockfile,
           project_root: root,
           auto_detect: bundler_auto_detect

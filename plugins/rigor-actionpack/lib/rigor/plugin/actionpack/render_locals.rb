@@ -58,11 +58,11 @@ module Rigor
       # Building the index compiles every template in the project, and `#template_units_for_file` is about
       # to compile each of them again. So the builder keeps what it compiled, keyed by path and guarded by
       # the template's own scrubbed bytes, and the hook reuses it — a full run does exactly the compile
-      # work it did before this feature, one pass instead of two. What it does not preserve is #1038's
-      # per-keystroke property: an editor buffer bound to ONE template still builds the whole index, so an
-      # LSP publish on a view costs one project-wide compile pass rather than one file. Recorded in the
-      # manual; the fix is an index that is itself carried, which is the same slice as making template
-      # units first-class incremental dependents.
+      # work it did before this feature, one pass instead of two. An editor buffer's bytes differ from the
+      # file's, so its template falls through to its own compile; the index itself is built once per
+      # plugin instance and revalidated once per collection pass against {Builder.fingerprint}, so an
+      # unsaved buffer's render sites are NOT read — its partials keep the locals the saved file passes
+      # until the save.
       class RenderLocals
         # What a name is seeded with when no site settled a type for it, or when two disagreed.
         UNKNOWN = ViewUnits::UNKNOWN_LOCAL
@@ -76,9 +76,15 @@ module Rigor
         # stripped — a partial's locals do not depend on which format rendered it.
         attr_reader :by_template
 
-        def initialize(by_template, compiled = {})
+        # The {Builder.fingerprint} of the sources this index was built from, taken BEFORE they were read —
+        # so an edit that lands during the build reads as a change on the next pass rather than being
+        # recorded as already seen. nil for {.empty}, which therefore never matches a real fingerprint.
+        attr_reader :fingerprint
+
+        def initialize(by_template, compiled = {}, fingerprint: nil)
           @by_template = by_template.freeze
           @compiled = compiled.freeze
+          @fingerprint = fingerprint
           freeze
         end
 
@@ -115,9 +121,39 @@ module Rigor
           end
 
           def build
+            fingerprint = self.class.fingerprint(
+              io_boundary: @io_boundary, controller_search_paths: @controller_search_paths,
+              view_search_paths: @view_search_paths
+            )
             harvest_controllers
             compiled = harvest_templates
-            RenderLocals.new(@sites.transform_values { |sites| merge(sites) }, compiled)
+            RenderLocals.new(@sites.transform_values { |sites| merge(sites) }, compiled, fingerprint: fingerprint)
+          end
+
+          # What the index was built from, as one String: every controller and template path with its size
+          # and mtime. A glob catches a file appearing or vanishing and a stat catches an edit; neither
+          # reads a byte, so revalidating costs one `stat` per file, once per collection pass.
+          def self.fingerprint(io_boundary:, controller_search_paths:, view_search_paths:)
+            files = source_files(io_boundary, controller_search_paths, "*.rb") +
+                    source_files(io_boundary, view_search_paths, "*.erb")
+            files.map do |path|
+              stat = File.stat(path)
+              "#{path}\0#{stat.size}\0#{stat.mtime.to_r}"
+            rescue SystemCallError
+              "#{path}\0gone"
+            end.join("\n")
+          end
+
+          # Project-relative paths, the spelling `#template_units_for_file` is handed and the spelling the
+          # compiled cache is keyed by.
+          def self.source_files(io_boundary, roots, pattern)
+            root_prefix = "#{Dir.pwd}#{File::SEPARATOR}"
+            roots.flat_map do |root|
+              absolute = File.expand_path(root)
+              next [] unless io_boundary.directory?(absolute)
+
+              Dir.glob(File.join(absolute, "**", pattern)).map { |path| path.delete_prefix(root_prefix) }
+            end
           end
 
           private
@@ -316,16 +352,8 @@ module Rigor
             base.start_with?("_") ? name : "#{directory}/_#{base}"
           end
 
-          # Project-relative paths, the spelling `#template_units_for_file` is handed and the spelling the
-          # compiled cache is keyed by.
           def source_files(roots, pattern)
-            root_prefix = "#{Dir.pwd}#{File::SEPARATOR}"
-            roots.flat_map do |root|
-              absolute = File.expand_path(root)
-              next [] unless @io_boundary.directory?(absolute)
-
-              Dir.glob(File.join(absolute, "**", pattern)).map { |path| path.delete_prefix(root_prefix) }
-            end
+            self.class.source_files(@io_boundary, roots, pattern)
           end
 
           def read(path)

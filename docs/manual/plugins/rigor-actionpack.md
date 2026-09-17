@@ -308,12 +308,14 @@ deliberately loud rather than a silent no-op.
   keyword is rewritten into a declared call on the view context so
   the body parses; what the inner template produced is never
   modelled.
-- **A view buffer costs a project-wide compile pass in the
-  language server.** Building the render-site index reads every
-  template, so an edit to one view no longer recompiles only that
-  view. A full `rigor check` does the same total work it did
-  before — the index hands its compiled sources to the unit
-  transform rather than compiling twice.
+- **Unsaved render sites are not read in the editor.** The
+  render-site index reads templates and controllers from disk, so a
+  `locals:` you have typed but not saved does not reach the partial
+  until the save. Saving a view recompiles every view in the
+  language server (a partial's locals can come from any of them);
+  a keystroke recompiles only the buffer. A full `rigor check` does
+  the same compile work it did before — the index hands its compiled
+  sources to the unit transform rather than compiling twice.
 - **ERB only, under `app/views`.** `template_globs:` is a manifest
   row, read without running plugin code, so it cannot consult
   `view_search_paths:`. Haml, Slim and Jbuilder are the same seam

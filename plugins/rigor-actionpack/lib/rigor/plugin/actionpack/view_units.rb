@@ -36,6 +36,28 @@ module Rigor
         LOCAL_NAME = /([a-z_][A-Za-z0-9_]*):/
         private_constant :LOCAL_NAME
 
+        # #1047 — the ways a template tests for its OWN optional local, each capturing the name:
+        # `defined?(size)` / `defined? size`, `local_assigns[:size]`, and `local_assigns.key?(:size)` with
+        # its `has_key?` / `include?` / `fetch` spellings.
+        SELF_DECLARED = [
+          /\bdefined\?\s*\(?\s*([a-z_][A-Za-z0-9_]*)\b(?![.(\[?!:])/,
+          /\blocal_assigns\s*\[\s*:([a-z_][A-Za-z0-9_]*)\s*\]/,
+          /\blocal_assigns\s*\.\s*(?:key\?|has_key\?|include\?|fetch)\s*\(?\s*:([a-z_][A-Za-z0-9_]*)/
+        ].freeze
+        private_constant :SELF_DECLARED
+
+        # A tested name that is a Ruby keyword or a pseudo-variable is not a local: `defined?(super)`,
+        # `defined?(yield)` and `defined?(self)` all read something else.
+        NOT_LOCALS = %w[
+          super yield self nil true false __method__ __FILE__ __LINE__ __dir__ __encoding__ binding
+          block_given
+        ].freeze
+        private_constant :NOT_LOCALS
+
+        # Every ERB tag — the only place a template's Ruby lives. `<%%` is literal text, not a tag.
+        RUBY_TAG = /<%(?!%).*?%>/m
+        private_constant :RUBY_TAG
+
         module_function
 
         # `app/views/users/show.html.erb` → `users/show.html`; `app/views/users/_card.html.erb` →
@@ -53,6 +75,33 @@ module Rigor
             return path.delete_prefix(prefix) if path.start_with?(prefix)
           end
           path
+        end
+
+        # #1047 — `{ "path" => UNKNOWN_LOCAL }` for every bare local a template tests for itself:
+        #
+        #     <% path = nil unless defined? path %>
+        #     <% size = local_assigns.fetch(:size, :md) %>
+        #
+        # That test IS the author's declaration that `path` is an optional local, and it needs no render
+        # site to be believed. It matters because a render site is not always readable: `locals: opts`
+        # passes a computed hash, `locals: { **opts }` a splat, a helper in `app/helpers` renders without
+        # being scanned, and an optional local with a default is by definition passed nowhere. Leaving any
+        # of those names unbound makes the preamble a fresh nil assignment in the compiled Ruby, and the
+        # `flow.` rules fold every branch it guards on a partial Rails renders correctly. Binding it costs
+        # nothing — over-binding is the safe direction ({RenderLocals}) — so every such name is seeded,
+        # typed `Dynamic`.
+        #
+        # A name the template ALSO assigns without such a test (`<% total = 0 %>`) is untouched: it is only
+        # seeded when it is tested, and a test on a name the body always assigns first is dead code the
+        # binding cannot make worse.
+        def self_declared_locals(source)
+          source.scan(RUBY_TAG).each_with_object({}) do |tag, locals|
+            SELF_DECLARED.each do |pattern|
+              tag.scan(pattern).flatten.each do |name|
+                locals[name] = UNKNOWN_LOCAL unless NOT_LOCALS.include?(name)
+              end
+            end
+          end
         end
 
         # `{ "user" => UNKNOWN_LOCAL }` for a template carrying the strict-locals comment, `{}` otherwise.

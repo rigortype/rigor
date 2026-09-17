@@ -527,6 +527,44 @@ RSpec.describe "template units (#392)" do
       end
     end
 
+    # #1047 — a transform may read the plugin's OTHER claimed templates (rigor-actionpack seeds a partial's
+    # locals from every view that renders it), so a per-path carry would reuse a unit whose inputs moved.
+    # An edit to any one template recompiles the plugin's whole claim.
+    it "recompiles a plugin's whole claim when any one of its templates changed" do
+      Dir.mktmpdir("rigor-1047-sibling-") do |dir|
+        build_project(dir)
+        File.write(File.join(dir, "app", "views", "users", "index.rbx"), "render_header(@title.upcase)\n")
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        File.write(File.join(dir, "app", "views", "users", "show.rbx"), "render_header(@title.downcase)\n")
+        before = transform_calls
+
+        collect(dir, registry, previous: warm)
+
+        expect(transform_calls - before).to eq(2)
+      end
+    end
+
+    # A declined template has no unit to carry, but it is READ, and its unchanged bytes must not read as an
+    # edit — or one layout the plugin could not compile would cost every warm run its whole carry.
+    it "still carries the claim past a template the plugin declined, while re-offering that one" do
+      Dir.mktmpdir("rigor-1047-declined-") do |dir|
+        build_project(dir)
+        File.write(File.join(dir, "app", "views", "users", "layout.rbx"), "yield\n")
+        RigorViewDemoPlugin.spec_overrides = { decline: ["layout.rbx"] }
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        before = transform_calls
+
+        carried = collect(dir, registry, previous: warm)
+
+        expect(transform_calls - before).to eq(1)
+        expect(carried["app/views/users/show.rbx"]).to equal(warm["app/views/users/show.rbx"])
+      end
+    ensure
+      RigorViewDemoPlugin.spec_overrides = {}
+    end
+
     # Only a re-expansion of the claimed globs notices a template that was not there before — a per-path
     # memo alone would carry the old set forever. Both directions, because a deleted template must stop
     # contributing its unit as surely as an added one must start.

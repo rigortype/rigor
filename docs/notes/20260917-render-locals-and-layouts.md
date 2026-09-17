@@ -131,7 +131,8 @@ accident elsewhere.
 ## 3. Determinism
 
 `rigor effects --format json --full` on redmine is **byte-identical** between `RIGOR_RACTOR_WORKERS=2` and
-sequential — the same 3 537 106 bytes, the same 506 `view:` rows, the same 140 residual taints. Nothing in
+sequential — the same 3 537 106 bytes (3 533 152 at the review head, § 5), the same 506 `view:` rows, the
+same 140 residual taints. Nothing in
 this slice adds a field to an edge or to a unit, so the #1057 sort-key hazard does not recur; the
 measurement is the negative control for the two indexes, which run on the parent and reach a worker only as
 already-frozen `TemplateUnit` data.
@@ -152,8 +153,8 @@ whose `line_map` is non-empty reports at column 1 by construction
 (`Analysis::TemplateUnits#remap`). The line map over a rewritten layout is still exact, pinned by spec.
 
 `String` is the widest honest reading and the narrowest thing that is not a fabrication. Rails' `yield`
-returns whatever the inner template's buffer holds and `yield :sidebar` returns a `content_for` buffer or
-nil; anything more specific would be the `Parameters#[]` trap one layer up. `content_for?(:x)` needed
+returns whatever the inner template's buffer holds and `yield :sidebar` returns a `content_for` buffer —
+an empty `SafeBuffer` when nothing was provided, never nil; anything more specific would be the `Parameters#[]` trap one layer up. `content_for?(:x)` needed
 nothing — it was always an ordinary method call on an open receiver.
 
 ### The index compiles once for two readers
@@ -164,11 +165,57 @@ guarded by the template's own scrubbed bytes, and the unit hook reuses it — so
 exactly the compile work it did before this feature, one pass instead of two, and an editor buffer (whose
 bytes differ) falls through to its own compile rather than being served a stale unit.
 
-What that does **not** preserve is [#1038](https://github.com/rigortype/rigor/issues/1038)'s per-keystroke
-property. A language-server publish on a view still builds the whole index, so it costs one project-wide
-compile pass rather than one file. Recorded in the manual rather than worked around: the fix is an index
-that is itself carried on the warm `ProjectScan`, which is the same slice as making template units
-first-class incremental dependents, and neither is this one.
+That claim was wrong in the first draft of this note, in the other direction: a publish did **not** rebuild
+the index, because the index is memoised on the plugin instance a long-lived `ProjectContext` keeps — so
+the real cost was **staleness**, and review found it (§ 5).
+
+## 5. What review found that the corpus could not
+
+Both are shapes neither corpus writes, and both would have cost a correct template a finding.
+
+### Render sites the index cannot read
+
+With `flow.` reporting, the standard optional-local preamble still fired `flow.always-truthy-condition` on a
+partial whose render sites the index cannot see: `locals: { **opts }`, `locals: some_hash`, a `render` in
+`app/helpers/*.rb` (never scanned), and — most ordinary of all — an optional local with a default that *no*
+site passes. The corpus did not hit any of them, which says more about redmine's style than about Rails.
+
+The fix is in the same over-binding spirit as the union: a template that writes `defined?(path)`,
+`defined? path`, `local_assigns[:path]` or `local_assigns.key?(:path)` (and `fetch` / `has_key?` /
+`include?`) is *declaring* `path` an optional local, and that declaration needs no render site. Every such
+name is seeded `Dynamic` (`ViewUnits.self_declared_locals`), beneath the render-site seeds and the
+strict-locals comment. All four shapes are pinned silent under the default posture, and each fails with the
+declaration reading switched off — so `flow.` stays unsuppressed.
+
+Re-measured at the review head, `rigor check` is still **byte-identical to `before`** on both projects (the
+three `_other.html.erb` names were already bound by their render sites), mastodon's effect table is
+unchanged, and redmine's moves in exactly one way: **52 units lose a spurious
+`unresolved-self-call` cause** — 51 `filedrop` and 1 `thumbnails` — because `attachments/_form.html.erb` and
+`attachments/_links.html.erb` test `defined?(filedrop)` / `defined?(thumbnails)`, and a tested local was being
+read as a call on the view context and propagated into every controller action that renders an attachment
+form. No label moves, no `exhaustive` flips, and `template-not-analysed` stays 140. Pooled == sequential still
+holds byte for byte (3 533 152 bytes).
+
+### A memo that outlived the render site
+
+`@render_locals ||=` lives on the plugin instance, and a `LanguageServer::ProjectContext` keeps that instance
+across publishes and across `invalidate!`. Meanwhile #1038's carry revalidated each template against its
+*own* bytes. Drop a local in `show.html.erb` on disk and `_card`'s unit kept the seed through every publish,
+through an `invalidate!`, and past the local being restored — a `flow.` row with no cause on disk.
+
+Two halves, both needed, both pinned (each spec fails with its half reverted):
+
+- **The collector decides a plugin's carry for its whole claim.** If any of its templates was edited, added
+  or deleted, none of its units is carried — because a transform may read its plugin's other templates, a
+  template's own freshness cannot vouch for its unit. The editor's buffer is exempt, so this costs a
+  recompile of the claim per *save*, never per keystroke; and a template read with no unit (declined) is
+  carried as a bare stat pack, so one layout the plugin cannot compile does not read as an edit on every run.
+- **The plugin revalidates its indexes once per collection pass**, at the pass's *first* hook call, against a
+  fingerprint of every controller and template they read (a glob and a `stat` per file). Revalidating when
+  the edited template's own bytes arrive would be too late: `_card.html.erb` globs before `show.html.erb`.
+
+What remains is stated in the manual: an unsaved `locals:` does not reach its partial until the save,
+because the index reads from disk.
 
 ## Not measured, deliberately
 

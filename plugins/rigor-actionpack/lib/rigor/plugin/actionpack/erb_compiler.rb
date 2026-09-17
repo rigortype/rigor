@@ -93,9 +93,10 @@ module Rigor
         # correspond"), so only the LINE count is load-bearing, and the replacement contains no newline.
         #
         # What the rewrite deliberately does not do is give the call a TYPE beyond `String`. Rails' `yield`
-        # returns whatever the inner template's buffer holds, and `yield :sidebar` returns the
-        # `content_for` buffer or nil; a lenient `String` is the widest honest reading, and inventing
-        # anything narrower would be the `Parameters#[]` trap one layer up.
+        # returns whatever the inner template's buffer holds, and `yield :sidebar` returns the `content_for`
+        # buffer — an empty `SafeBuffer` when nothing was provided, never nil. A lenient `String` is the
+        # widest honest reading, and inventing anything narrower would be the `Parameters#[]` trap one
+        # layer up.
         YIELD_METHOD = "__rigor_yield"
 
         # The `yield` keyword, and only the keyword: not `foo.yield`, not `:yield`, not `@yield`, not
@@ -107,7 +108,8 @@ module Rigor
         private_constant :YIELD_KEYWORD
 
         # Any ERB tag, non-greedy and multi-line — the region {YIELD_KEYWORD} is applied inside, so a
-        # `yield` in the template's HTML text is left exactly as it was written.
+        # `yield` in the template's HTML text is left exactly as it was written. A `<%%` opener is ERB's
+        # escape for a LITERAL `<%` in the output, so what follows it is text too and is skipped.
         ANY_TAG = /<%.*?%>/m
         private_constant :ANY_TAG
 
@@ -172,7 +174,7 @@ module Rigor
         def normalize_yields(text)
           return text unless text.match?(YIELD_KEYWORD)
 
-          text.gsub(ANY_TAG) { |tag| tag.gsub(YIELD_KEYWORD, YIELD_METHOD) }
+          text.gsub(ANY_TAG) { |tag| tag.start_with?("<%%") ? tag : tag.gsub(YIELD_KEYWORD, YIELD_METHOD) }
         end
 
         def normalize_block_expressions(text)

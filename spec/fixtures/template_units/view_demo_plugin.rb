@@ -44,6 +44,8 @@ class RigorViewDemoPlugin < Rigor::Plugin::Base
     overrides = self.class.spec_overrides || {}
     RigorViewDemoPlugin.transform_calls += 1
     raise "the demo transform was told to fail" if overrides[:raise_on_transform]
+    # #1047 — a template the plugin DECLINES, as an ERB layout it could not compile used to be.
+    return [] if overrides[:decline]&.any? { |suffix| path.end_with?(suffix) }
 
     text = source.dup.force_encoding(Encoding::UTF_8)
     name = logical_name_for(path)

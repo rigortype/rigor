@@ -385,13 +385,22 @@ preamble a partial writes when its render-site `locals:` are not traced.
   the `plugin_loader` rows with it.
   Three things rebuild the index wholesale, because each can change what a
   transform produces for bytes that never moved: a different root, a different
-  set of claimed globs, a different set of glob-claiming plugins. Separately,
+  set of claimed globs, a different set of glob-claiming plugins. One more
+  rebuilds a single plugin's claim wholesale
+  ([#1047](https://github.com/rigortype/rigor/issues/1047)): any of that
+  plugin's templates edited, added or deleted on disk. A transform may read its
+  plugin's OTHER claimed templates — rigor-actionpack seeds a partial's locals
+  from every view that renders it — so a template's own freshness cannot vouch
+  for its unit, and the seam does not ask a plugin to declare which of its units
+  are independent. The editor's buffer is exempt, so this costs a recompile per
+  save and never per keystroke, and a template the plugin declined is carried as
+  a bare stat pack so its unchanged bytes do not read as an edit. Separately,
   and whatever the rest of the index does, the path the editor's buffer is bound
   to is recompiled from the buffer's bytes on every publish and its unit never
   enters a shared index. The snapshot is
   frozen, so a template edited on disk **since the scan was built** is
   recompiled on every publish until the owner invalidates — one compile per
-  changed template, never the index, and a save fires
+  template in the changed template's claim, and a save fires
   `workspace/didChangeWatchedFiles`, which invalidates. A CLI run passes no
   `previous:` and builds the index from scratch exactly as before: its process
   ends with the run, so there is nothing to carry and no second cache to prove

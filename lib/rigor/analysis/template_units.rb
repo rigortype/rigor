@@ -52,6 +52,13 @@ module Rigor
     # each can change what a transform produces for bytes that never moved: a different root, a different
     # set of claimed globs, and a different set of glob-claiming plugins.
     #
+    # A fourth rebuilds one PLUGIN'S claim outright (#1047): any of that plugin's templates edited, added or
+    # deleted. A transform may read the plugin's other templates — rigor-actionpack seeds a partial's locals
+    # from the views that render it — so the freshness of `_card` alone cannot vouch for `_card`'s unit. The
+    # editor's buffer does not count as an edit (a keystroke is not a save), so this costs a recompile per
+    # SAVE, never per keystroke. A template read with no unit (declined, or raised) is carried as a bare
+    # stat pack for exactly this decision, so an unchanged declined file is not mistaken for an edit.
+    #
     # Separately, and whatever the rest of the index does, the editor's own buffer is never carried: a
     # path the buffer is bound to is recompiled from the buffer's bytes on every publish, and the compiled
     # result stays in THAT run's index — the warm index on the ProjectScan only ever holds units compiled
@@ -146,9 +153,12 @@ module Rigor
         return {} unless @claimed_globs == claimed_globs
         return {} unless @plugin_signature == plugin_signature
 
+        # A template that was READ but produced no unit (declined, or its transform raised) is carried as
+        # `[nil, pack]`: there is no unit to reuse, but its freshness still answers whether it CHANGED, which
+        # is what the collector's whole-claim decision needs (#1047) — without it one declined template
+        # would read as an edit on every run and cost the whole claim its carry.
         @stats.each_with_object({}) do |(path, packed), carried|
-          entry = @entries[path]
-          carried[path] = [entry, packed] if entry && packed
+          carried[path] = [@entries[path], packed] if packed
         end
       end
 

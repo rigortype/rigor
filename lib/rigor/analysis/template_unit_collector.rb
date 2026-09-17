@@ -96,11 +96,22 @@ module Rigor
       Collection = Data.define(:root, :buffer, :carried)
       private_constant :Collection
 
+      # #1047 — the carry is decided for a plugin's claim AS A WHOLE, not per path. A transform may read
+      # the plugin's OTHER claimed templates: rigor-actionpack seeds a partial's locals from the render
+      # sites in every view that renders it, so `users/_card`'s unit depends on the bytes of
+      # `users/show`. A per-path carry reused `_card`'s unit after `show` dropped the local it passed,
+      # and the stale seed survived every later publish. So if any of a plugin's claimed templates was
+      # edited, added or deleted since the carried index was built, none of its units is carried and the
+      # whole claim is recompiled. What stays exempt is the editor's buffer — a keystroke is not a save,
+      # so #1038's per-keystroke property holds — and a path an earlier plugin already claimed.
       def self.collect_plugin(plugin, globs, collection, state)
-        expand(globs, collection.root, collection.buffer).each do |path|
+        plan = expand(globs, collection.root, collection.buffer).map do |path|
           physical = physical_path(path, collection.root, collection.buffer)
-          carried = carried_entry(path, physical, collection, state)
-          if carried
+          [path, physical, carried_entry(path, physical, collection, state)]
+        end
+        whole = whole_carry?(plugin, plan, collection, state)
+        plan.each do |path, physical, carried|
+          if carried && whole
             state[:entries][path], state[:stats][path] = carried
           else
             compile(plugin, path, physical, state)
@@ -108,6 +119,31 @@ module Rigor
         end
       end
       private_class_method :collect_plugin
+
+      # True when nothing in this plugin's claim moved: every planned path is carried (or is exempt, see
+      # {.collect_plugin}), and no path the carried index held for this plugin has since vanished.
+      def self.whole_carry?(plugin, plan, collection, state)
+        return false if collection.carried.empty?
+
+        id = plugin.manifest.id
+        planned = plan.to_h { |path, _physical, _carried| [path, true] }
+        vanished = collection.carried.any? { |path, (entry, _packed)| entry&.plugin_id == id && !planned.key?(path) }
+        return false if vanished
+
+        plan.all? do |path, physical, carried|
+          carried || state[:entries].key?(path) || buffer_bound?(path, collection) ||
+            unchanged_without_unit?(path, physical, collection)
+        end
+      end
+      private_class_method :whole_carry?
+
+      # A template the carried index READ and got no unit for — declined, or its transform raised — whose
+      # bytes have not moved. It is re-offered to the plugin as before, but it is not an edit.
+      def self.unchanged_without_unit?(path, physical, collection)
+        entry, packed = collection.carried[path]
+        entry.nil? && !packed.nil? && fresh?(physical, packed)
+      end
+      private_class_method :unchanged_without_unit?
 
       # Reads one claimed template and hands its bytes to the plugin, recording the compiled unit and the
       # freshness token a LATER run revalidates the carry against. A transform that raises costs this file

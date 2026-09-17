@@ -261,6 +261,52 @@ RSpec.describe "plugins/rigor-actionpack — render-site locals and layouts (#10
       expect(diagnostics.map(&:rule).grep(/\Aflow\./)).to be_empty
     end
 
+    # #1047 review — render sites the index cannot read. Each partial opens with the standard optional-local
+    # preamble; each must be silent with `flow.` reporting, because the template's own `defined?` test is
+    # the declaration and needs no render site.
+    {
+      "a splatted locals hash" => {
+        "app/views/users/show.html.erb" => %(<%= render partial: "splat", locals: { **opts } %>\n),
+        "app/views/users/_splat.html.erb" => "<% s = nil unless defined?(s) %><% if s %>on<% end %>\n"
+      },
+      "a non-literal locals hash" => {
+        "app/views/users/show.html.erb" => %(<%= render partial: "hashvar", locals: some_hash %>\n),
+        "app/views/users/_hashvar.html.erb" => "<% s = nil unless defined?(s) %><% if s %>on<% end %>\n"
+      },
+      "a partial rendered only from a helper" => {
+        "app/helpers/users_helper.rb" =>
+          %(module UsersHelper\n  def orphan\n    render partial: "users/orphan", locals: { s: 1 }\n  end\nend\n),
+        "app/views/users/_orphan.html.erb" => "<% s = nil unless defined?(s) %><% if s %>on<% end %>\n"
+      },
+      "an optional local no site passes, beside one a site does" => {
+        "app/views/users/show.html.erb" => %(<%= render partial: "shapes", locals: { x: 1 } %>\n),
+        "app/views/users/_shapes.html.erb" => <<~ERB
+          <% x = nil unless defined?(x) %>
+          <% y = nil unless defined? y %>
+          <% z = local_assigns[:z] %>
+          <% if x %>x<% end %>
+          <% if y %>y<% end %>
+          <% if local_assigns.key?(:w) && w %>w<% end %>
+          <% if y.present? %>yy<% end %>
+        ERB
+      }
+    }.each do |shape, files|
+      it "reports no `flow.` finding for #{shape}" do
+        expect(run_project(files).map(&:rule).grep(/\Aflow\./)).to be_empty
+      end
+    end
+
+    it "reads a template's own optional-local tests as declarations" do
+      locals = Rigor::Plugin::Actionpack::ViewUnits.self_declared_locals(<<~ERB)
+        <% a = nil unless defined?(a) %><% b = nil unless defined? b %>
+        <% c = local_assigns[:c] %><% d = local_assigns.fetch(:d, 1) %><% if local_assigns.key?(:e) %><% end %>
+        <% if defined?(super) || defined?(@ivar) || defined?(Foo) || defined?(obj.meth) %><% end %>
+        <p>defined?(html_text)</p>
+      ERB
+
+      expect(locals).to eq(%w[a b c d e].to_h { |name| [name, dynamic] })
+    end
+
     it "no longer suppresses the family at all" do
       expect(Rigor::Plugin::Actionpack::SUPPRESSED_VIEW_RULES).to eq(["call."])
     end
@@ -296,6 +342,12 @@ RSpec.describe "plugins/rigor-actionpack — render-site locals and layouts (#10
       compiled, = compiler.compile("<p>the yield of this crop</p>\n")
 
       expect(compiled).to include("the yield of this crop")
+      expect(compiled).not_to include(Rigor::Plugin::Actionpack::ErbCompiler::YIELD_METHOD)
+    end
+
+    it "leaves an escaped `<%%` tag alone, which is literal output text" do
+      compiled, = compiler.compile("<%% yield %>\n")
+
       expect(compiled).not_to include(Rigor::Plugin::Actionpack::ErbCompiler::YIELD_METHOD)
     end
 
@@ -355,19 +407,27 @@ RSpec.describe "plugins/rigor-actionpack — render-site locals and layouts (#10
       end
     end
 
-    it "seeds nothing of its own for what `yield` returned" do
-      # The rewrite's whole restraint: the call is declared `-> String` in the bundled RBS and nothing
-      # about the inner template's buffer is claimed, so the layout unit carries no local and no ivar
-      # seed standing in for the rendered body.
-      plugin = Rigor::Plugin::Actionpack.new(services: nil, config: {})
-      plugin.init(nil)
-      units = plugin.template_units_for_file(
-        path: "app/views/layouts/application.html.erb", source: "<html><%= yield %></html>\n"
-      )
+    it "seeds nothing of its own for what `yield` returned, beyond what its render site passed" do
+      # The rewrite's whole restraint: the call is declared `-> String` in the bundled RBS and nothing about
+      # the inner template's buffer is claimed. The layout here IS rendered with `locals:`, through a real
+      # IO boundary, so the render-site local arriving proves the indexes were built rather than swallowed
+      # as empty — and it is the ONLY binding the unit carries.
+      Dir.mktmpdir("rigor-1047-layout-seeds-") do |dir|
+        write_files(dir, {
+                      "app/views/users/show.html.erb" =>
+                        %(<%= render layout: "layouts/wrapper", locals: { title: "Hi" } do %><p>x</p><% end %>\n),
+                      "app/views/layouts/_wrapper.html.erb" => "<h1><%= title %></h1><%= yield %>\n"
+                    })
+        Dir.chdir(dir) do
+          unit = real_plugin(dir).template_units_for_file(
+            path: "app/views/layouts/_wrapper.html.erb",
+            source: File.read("app/views/layouts/_wrapper.html.erb")
+          ).first
 
-      expect(units.length).to eq(1)
-      expect(units.first.locals).to be_empty
-      expect(units.first.ivar_seeds).to be_empty
+          expect(unit.locals).to eq("title" => dynamic)
+          expect(unit.ivar_seeds).to be_empty
+        end
+      end
     end
   end
 
@@ -388,6 +448,21 @@ RSpec.describe "plugins/rigor-actionpack — render-site locals and layouts (#10
   end
 
   # ---- harness -------------------------------------------------------------------------------------
+
+  def write_files(dir, files)
+    files.each do |relative, contents|
+      FileUtils.mkdir_p(File.join(dir, File.dirname(relative)))
+      File.write(File.join(dir, relative), contents)
+    end
+  end
+
+  # A plugin instance whose IO boundary is real, so its parent-side indexes actually read the tree.
+  def real_plugin(dir)
+    plugin = Rigor::Plugin::Actionpack.new(services: nil, config: {})
+    plugin.init(nil)
+    allow(plugin).to receive(:io_boundary).and_return(RENDER_LOCALS_BOUNDARY.new(dir))
+    plugin
+  end
 
   def unit(runner, key)
     runner.effect_table.find { |row| row.key == key }

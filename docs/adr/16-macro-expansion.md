@@ -393,6 +393,8 @@ quad (`current_user`, `user_signed_in?`, `authenticate_user!`,
 ### Tier D — External-Ruby-file inclusion under declared `self`
 
 > **Status (2026-06-13):** the `external_files:` manifest field was removed by [ADR-60 WD1](60-pre-freeze-plugin-contract-consolidation.md) (never wired to an engine consumer); the tier returns demand-gated together with its scanner in one change.
+>
+> **Status (2026-09-17):** the demand arrived, and the tier is back — as **template units**, in [#392](https://github.com/rigortype/rigor/issues/392). The field is `template_globs:` plus the `#template_units_for_file(path:, source:)` transform (the one thing this section's design lacked: the claimed file need not be Ruby, so a **source transform with a line map** runs ahead of parsing), and `bound_ivars:` is spelled `ivar_seeds:` on the returned `Rigor::Plugin::TemplateUnit`. The seam is specified in [`docs/internal-spec/macro-substrate.md`](../internal-spec/macro-substrate.md) § Template units; the motivating consumer is views (`docs/design/20260816-effect-labels.md` § 11.3) rather than the Redmine / tDiary cases below, which the same seam serves unchanged.
 
 Plugin declares: files matching a glob are evaluated as if their body
 were pasted at a declared call site, with `self` typed as a declared

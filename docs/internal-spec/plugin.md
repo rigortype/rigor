@@ -98,6 +98,39 @@ under another plugin's id. Plugin exceptions inside the hook isolate
 as a `:plugin_loader` `runtime-error` diagnostic rather than crashing
 `rigor check`.
 
+#### Template units — `template_globs:` / `#template_units_for_file` ([#392](https://github.com/rigortype/rigor/issues/392))
+
+`#template_units_for_file(path:, source:)` is the **source transform** half of the revived ADR-16 Tier-D
+seam: a plugin that declared `template_globs:` is offered each matched file's bytes and returns an
+`Array<Rigor::Plugin::TemplateUnit>` — the compiled Ruby plus the line map, the declared `self`, the render
+site's locals and the rendering action's ivar seeds. The default returns `[]`, so a plugin that declares no
+globs is never asked and one that does may still decline a file it cannot read.
+
+A returned unit MUST name the file it was offered (`unit.path == path`). A unit naming anything else is
+refused: without the check a `path:` naming another project file silently **replaced** that file's source
+(the engine serves a unit's bytes for its own path), and a `path:` naming something outside the project
+root was analysed with no dependency-descriptor row — both from one wrong string.
+
+A transform that **raises**, a template that cannot be **read**, and a unit naming the **wrong path** are
+each reported as one `:plugin_loader` `runtime-error` diagnostic positioned at the template file — the
+same isolation envelope a raise from `#diagnostics_for_file` produces (ADR-2 § "Plugin Trust and I/O
+Policy"). The file contributes no unit, the run continues, and the plugin author has something to read.
+
+Three properties make it safe to add to the contract at this point in the freeze:
+
+- **It runs once, on the parent, before analysis.** Everything downstream is the frozen, `Marshal`-clean
+  value object, so no plugin code runs inside the fork-pool worker, inside the effect scan (ADR-103 WD13
+  forbids it there), or on any per-file hot path.
+- **It isolates like `#diagnostics_for_file`.** A raise costs that file its unit and surfaces as the row
+  above; the run continues. A template compiler meeting a file it cannot read must never cost the run.
+- **It costs nothing when unused.** A run whose loaded plugins declare no `template_globs:` performs no
+  glob, calls no plugin, adds no cache-key slot and analyses exactly the files it analysed before. `rigor
+  check` on such a project is byte-identical.
+
+The value-object fields, the position mapping, the `view:<logical_name>` effect key, the cache identity and
+the `--incremental` bound are normative in
+[`macro-substrate.md`](macro-substrate.md#template-units--templateunit-template_globs--template_units_for_file-392).
+
 #### Node-scoped rules — `node_rule` / `#node_rule_diagnostics` (ADR-37)
 
 `node_rule(node_type) { |node, scope, path, file_context, context| … }`
@@ -629,7 +662,8 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `type_node_resolvers` | `Array` | `Plugin::TypeNodeResolver` entries contributing custom RBS type-name resolution (ADR-13). |
 | `protocol_contracts` | `Array<ProtocolContract>` | Path-scoped behavioural contracts (`path_glob` + `method_name` + `singleton` + param/return types + severity); provide-and-check (ADR-28). |
 | `source_rbs_synthesizer` | `#call(path) -> String?` | A callable that synthesises RBS from a project source file at env-build time (e.g. rbs-inline ingestion) (ADR-32). A synthesiser that must emit a member the source never gave a return type MUST annotate it `%a{rigor:v1:inferred-return}` ([rbs-extended.md](../type-specification/rbs-extended.md)) rather than declare a placeholder return, so the member stays declared while its callers keep the inferred type ([ADR-93](../adr/93-default-rbs-inline-ingestion.md) WD6). |
-| `block_as_methods`, `heredoc_templates`, `trait_registries` | `Array<Plugin::Macro::*>` | The ADR-16 macro / DSL expansion substrate tiers (A / C / B; the never-wired Tier D `external_files:` was removed by ADR-60 WD1). Value-object shapes spec'd in [`macro-substrate.md`](macro-substrate.md). |
+| `block_as_methods`, `heredoc_templates`, `trait_registries` | `Array<Plugin::Macro::*>` | The ADR-16 macro / DSL expansion substrate tiers (A / C / B). Value-object shapes spec'd in [`macro-substrate.md`](macro-substrate.md). |
+| `template_globs` | `Array<String>` | Project-relative globs whose files this plugin compiles into template units — the revived ADR-16 Tier D (`external_files:`, removed by ADR-60 WD1, returned demand-gated as template units in [#392](https://github.com/rigortype/rigor/issues/392)). Purely a claim: the transform itself is `#template_units_for_file` below. Absolute globs and `..` segments raise at manifest-build time. Spec'd in [`macro-substrate.md`](macro-substrate.md) § Template units. |
 | `nested_class_templates` | `Array<Plugin::Macro::NestedClassTemplate>` | Nested-subclass emission from an enum-shaped block DSL (`variant <Const>, <Type>`); the macro-substrate tier that mints classes, not just methods (ADR-36). Spec'd in [`macro-substrate.md`](macro-substrate.md). |
 | `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
 | `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods:, block_methods: }` entries declaring which non-`initialize` methods on a class (and its subclasses) also establish ivar state — `methods:` for `def`-form (`def setup`), `block_methods:` for call-with-block form (`before { … }`, `let(:x) { … }`); at least one must be non-empty. Feeds `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |

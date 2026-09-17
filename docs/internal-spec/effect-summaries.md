@@ -46,10 +46,13 @@ Effect units are keyed by the existing symbol tables:
 | `define_method(:literal) { … }` | `Class#literal`, the block as its body |
 | `attr_reader` / `attr_accessor` reader | `Class#name`, synthesised ∅ |
 | `attr_writer` / `attr_accessor` writer | `Class#name=`, synthesised `mutate.self` |
+| a **template unit** (#392) | `view:<logical_name>` — the whole compiled file as one unit |
 
 Reopenings **union**: every `def` of one key, in any file, joins into one summary. Runtime last-wins is unknowable at analysis time, so the union is the sound reading.
 
 A `define_method` with a literal name is a discovery extension made in the effects scanner, not in `ScopeIndexer`: the def-node tables skip it, and nothing outside effects needs it yet.
+
+A `view:` key is deliberately **not** a `MethodKey` shape — `MethodKey.split` returns nil for it — because a template has no owner class and no selector, and spelling one would put a method in the snapshot that no call site can name. The scanner takes the file's whole body as that one unit rather than minting one per `def` (`Scanner#scan_template_unit`), resolving the unit's implicit-self calls against the plugin's declared `self_type:`; `Runner#effect_sources` traces the key back to the template file the user wrote. The seam is specified in [`macro-substrate.md`](macro-substrate.md) § Template units, including its cache identity and the bound that template units are re-analysed on every run rather than participating in `--incremental` dependents.
 
 ## What a unit's scan records
 

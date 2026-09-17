@@ -39,12 +39,16 @@ module Rigor
 
       # Per-file, per-thread accumulator. Not frozen and never shared: it lives for one `analyze_file`.
       class Accumulator
-        attr_reader :path, :calls, :attribution, :envelopes, :plugin_facts
+        attr_reader :path, :calls, :attribution, :envelopes, :plugin_facts, :unit_key, :unit_owner
         attr_accessor :root
 
         def initialize(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                       plugin_facts: PluginFacts.empty)
+                       plugin_facts: PluginFacts.empty, unit_key: nil, unit_owner: nil)
           @path = path
+          # #392 — set for a template unit, where the whole file is ONE effect unit keyed
+          # `view:<logical_name>` under the plugin's declared `self`.
+          @unit_key = unit_key
+          @unit_owner = unit_owner
           @attribution = attribution
           @envelopes = envelopes
           @plugin_facts = plugin_facts
@@ -92,10 +96,11 @@ module Rigor
       # {EnvelopeIndex} of #386, carried the same way and for the same reason — the declared lane a call
       # site imports must not depend on which process typed the file.
       def collect_for(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                      plugin_facts: PluginFacts.empty)
+                      plugin_facts: PluginFacts.empty, unit_key: nil, unit_owner: nil)
         previous = Thread.current[KEY]
         accumulator = Accumulator.new(path.to_s, attribution: attribution, envelopes: envelopes,
-                                                 plugin_facts: plugin_facts)
+                                                 plugin_facts: plugin_facts, unit_key: unit_key,
+                                                 unit_owner: unit_owner)
         Thread.current[KEY] = accumulator
         @mutex.synchronize { @active_count += 1 }
         yield
@@ -207,7 +212,8 @@ module Rigor
         Scanner.scan(
           root: accumulator.root, path: accumulator.path, calls: accumulator.calls,
           attribution: accumulator.attribution, envelopes: accumulator.envelopes,
-          plugin_facts: accumulator.plugin_facts
+          plugin_facts: accumulator.plugin_facts, unit_key: accumulator.unit_key,
+          unit_owner: accumulator.unit_owner
         )
       rescue StandardError
         FileCollection.new(path: accumulator.path, failed: true)

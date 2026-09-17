@@ -23,11 +23,12 @@ All four classes live under the `Rigor::Plugin::Macro` namespace
 (`lib/rigor/plugin/macro/`) and are declared through the corresponding
 `Manifest` slots documented in [`plugin.md`](plugin.md#rigorpluginmanifest):
 `block_as_methods:`, `heredoc_templates:`, `trait_registries:`,
-`nested_class_templates:`. (The Tier D `ExternalFile` value object and its
-`external_files:` slot were removed by
-[ADR-60 WD1](../adr/60-pre-freeze-plugin-contract-consolidation.md) — the
-field had no engine consumer; it returns demand-gated together with its
-scanner.)
+`nested_class_templates:`. Tier D returned demand-gated as **template
+units** ([#392](https://github.com/rigortype/rigor/issues/392)); its value
+object is `Rigor::Plugin::TemplateUnit` (`lib/rigor/plugin/template_unit.rb`),
+specified in _Template units_ below rather than alongside the four above,
+because it is the one tier whose declaration is a compiled source rather
+than a call shape.
 
 ## Common value-object contract
 
@@ -170,6 +171,7 @@ The `sealed`-parent fact + `is_a?` cross-variant exhaustive narrowing
 | B | `TraitRegistry` | `trait_registries:` | Live (worked consumer: `rigor-devise`). |
 | C | `HeredocTemplate` (+ `Emit` / `ReturnsFromArg`) | `heredoc_templates:` | Live (worked consumers: `rigor-dry-struct` / `rigor-dry-types`); `returns_from_arg` per-call-site lookup is the ADR-18 layer. |
 | nested-class | `NestedClassTemplate` | `nested_class_templates:` | Live, Slice A (worked consumer: `rigor-mangrove`); sealed-parent exhaustiveness deferred. |
+| D | `TemplateUnit` | `template_globs:` + `#template_units_for_file` | Live as of #392 (worked consumer: the `spec/fixtures/template_units` view-demo fixture, identity transform); ERB is #393. See _Template units_ below. |
 
 Per [ADR-16 WD13](../adr/16-macro-expansion.md), substrate-produced output
 ships at a **floor** ("substrate-affected code parses cleanly and has its
@@ -190,6 +192,191 @@ The two formerly-unpinned objects (`NestedClassTemplate` per ADR-36 and
 `HeredocTemplate::ReturnsFromArg` per ADR-18) were pinned via the
 `PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE` and
 `PLUGIN_MACRO_HEREDOC_TEMPLATE_RETURNS_FROM_ARG_INSTANCE` snapshot constants.
+`Rigor::Plugin::TemplateUnit` joins them under
+`PLUGIN_TEMPLATE_UNIT_INSTANCE` (#392).
 None of these objects carry an `sig/rigor/*.rbs` signature yet, so they are
 guarded by the runtime instance-method snapshot only, not the RBS sig-drift
 dual.
+
+## Template units — `TemplateUnit` (`template_globs:` + `#template_units_for_file`, #392)
+
+The revived [ADR-16](../adr/16-macro-expansion.md) Tier D. Tier D declared
+`external_files:` — "files evaluated as if their body were pasted at a
+declared call site, with `self` typed as a declared class", plus
+`bound_ivars:` — and [ADR-60 WD1](../adr/60-pre-freeze-plugin-contract-consolidation.md)
+removed it for want of an engine consumer. The demand arrived with effects
+(`docs/design/20260816-effect-labels.md` § 11.3: the review question "what
+does this request do" ends at `render` with a taint), and the revived seam
+adds the one thing Tier D lacked: a **source transform with a line map**
+ahead of parsing.
+
+Unlike the four tiers above, this one is a **claim plus a hook** rather than
+one manifest row, because a template is compiled rather than pattern-matched:
+
+| Surface | Shape | Role |
+| --- | --- | --- |
+| `Manifest#template_globs` | `Array<String>` | Project-relative globs the plugin claims. Absolute globs and `..` segments are refused at manifest-build time. A plugin declaring none is never asked, and a run whose plugins declare none globs nothing. |
+| `Base#template_units_for_file(path:, source:)` | `-> Array<TemplateUnit>` | The transform. Called ONCE per matched file, on the parent, before any analysis. `[]` declines the file. |
+
+A returned unit MUST name the file it was offered (`unit.path == path`); a unit naming anything
+else is refused. Without that check a `path:` naming another project file silently **replaced** that
+file's source — the engine serves a unit's bytes for its own path — and a `path:` naming something
+outside the project root was analysed with no dependency-descriptor row, both from one wrong string.
+
+Three failure modes are reported rather than dropped, each as one `:plugin_loader` `runtime-error`
+diagnostic positioned at the template file: a transform that **raised**, a template that could not be
+**read**, and a unit naming the **wrong path**. That is the isolation envelope every other plugin
+hook reports through ([ADR-2](../adr/2-extension-api.md) § "Plugin Trust and I/O Policy"): the file
+contributes no unit, the run continues, and the plugin author has something to read.
+
+Two units may share a `logical_name` across different paths. That is not refused: the two are
+analysed separately and their summaries union under one `view:` key, the same reading a method
+reopened in two files gets. Two units for the same **path** cannot occur — the first claim wins, so a
+second plugin claiming a file another already compiled is dropped in registration order.
+
+### `TemplateUnit`
+
+`Rigor::Plugin::TemplateUnit.new(logical_name:, path:, ruby_source:,
+line_map: {}, self_type: nil, locals: {}, ivar_seeds: {}, transform_id: nil)`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `logical_name` | non-empty `String` | Handler-independent name — `users/show.html`, not `users/show.html.erb` — so an ERB → Haml rewrite is not a rename. Spells the `view:<logical_name>` effect-unit key. |
+| `path` | non-empty `String` | The template file as the user wrote it, project-relative. Every diagnostic and every `Runner#effect_sources` row names this path. |
+| `ruby_source` | `String` | The compiled Ruby. Parsed and typed as a file, NOT wrapped in a synthesised `class … def`; see the positions rule below. |
+| `line_map` | `Hash<Integer, Integer>` | `{ ruby_source line => template line }`, 1-based on both sides; a non-positive line on either side raises. An empty map is the identity. |
+| `self_type` | `String?` | Fully-qualified class the body's `self` is typed as. Also the owner an implicit-self call in the unit resolves against. |
+| `locals` | `Hash<String, String>` | `{ name => type name }` — the render site's parameters. |
+| `ivar_seeds` | `Hash<String, String>` | `{ "@name" => type name }` — the assigns the rendering action set. |
+| `transform_id` | `String?` | The compiler's identity (`"erubi-1.13"`). Defaults to the declaring plugin's `id@version`. |
+
+It satisfies the same common contract as the four tiers: frozen at
+construction, validated at construction (a malformed declaration raises
+`ArgumentError` at transform time, not at scan time), value identity, and a
+`#to_h` that round-trips. It is additionally **`Marshal`-clean**, which the
+fork pool depends on.
+
+A `self_type`, `locals` or `ivar_seeds` type name the environment cannot resolve is bound
+`Dynamic[top]` — not guessed, and **not left unbound**. The difference matters most for `self_type:`:
+leaving it unbound is not "no claim", it is the claim that the body runs at top level, so every
+helper call in the template reports `call.unresolved-toplevel` — a finding per line, caused by the
+plugin naming a class whose RBS the project does not ship (`ActionView::Base`, on the first real
+Rails app to try this). `Dynamic` is the honest reading of "a receiver is declared and the analyzer
+cannot see it" ([ADR-5](../adr/5-robustness-principle.md)), and it is silent.
+
+### Positions
+
+`ruby_source` is parsed as-is, under a per-file `Scope` the engine seeds with
+`self_type` / `locals` / `ivar_seeds` — the seeding
+`StatementEvaluator#build_method_entry_scope` performs at a method boundary,
+applied at the file boundary. Wrapping the body in a synthesised `class … def`
+would shift every line and force the engine to compose an offset of its own
+with the plugin's map; as it is, the only mapping in play is the plugin's.
+
+The `locals:` names are additionally passed to Prism as the parse's enclosing
+`scopes:`. Without that the seeding is inert: Prism parses a bare identifier
+with no assignment in sight as a **method call**, so `size` in a template was a
+`CallNode` and `Scope#local(:size)` was never consulted. Declaring them is what
+Rails itself does when it compiles a partial's locals into the compiled
+method's parameters.
+
+A diagnostic produced inside a unit is re-pointed through `line_map` before it
+leaves the run (`Analysis::TemplateUnits#remap`): the **path is already the
+template's** (the parse is stamped with it), so only the line moves, and the
+column drops to 1 — a compiler preserves lines and rewrites the text of each,
+so a column of the compiled Ruby names nothing in the template. An unmapped
+line anchors at the nearest mapped line before it, and at line 1 when there
+is none, so a finding always lands inside the file.
+
+The column rule applies whenever the unit carries a non-empty `line_map`, not
+only when the line actually moves: a compiler that happens to leave a line
+where it was still rewrote that line's text, and ERB is exactly that case — its
+map is near-identity and its columns are meaningless either way. A unit with an
+empty map claims no mapping at all, and its diagnostics pass through untouched.
+
+### Effects, cache and the pool
+
+- **Effect unit.** A template unit is ONE effect unit keyed
+  `view:<logical_name>` — not a `MethodKey`, because a view has no owner class
+  and no selector. The scanner takes the whole file body as that unit rather
+  than minting one per `def` (`Effects::Scanner#scan_template_unit`), and
+  `Runner#effect_sources` traces the key back to `path`.
+- **Cache identity.** Each unit's digest is **`ruby_source` bytes + transform
+  id + synthesis version** (`TemplateUnit::SYNTHESIS_VERSION`, bumped whenever
+  the engine changes what it synthesises). Three rows carry it:
+  - the ADR-45 run-result **key** gains a `template-units` `configs:` slot
+    hashing the claimed globs (so a plugin editing its own `template_globs:`
+    moves the key), every unit digest AND every failure. The failures
+    are in it because a run that produced only failures still produced an
+    answer; without them such a run's key equalled the no-templates key, which
+    the ADR-87 boot-slim probe reconstructs exactly (it loads no plugin), so it
+    served those rows after the template was fixed or deleted. The slot exists
+    whenever any plugin claimed a glob — the condition under which the probe's
+    key is knowingly unreconstructable, so the probe misses rather than hits.
+  - every template the run READ, successes and failures alike, joins the
+    recorded dependency descriptor as a `:stat` file row.
+  - every claimed `template_globs:` pattern joins it as a `:names` glob row,
+    whether or not it matched — the #979 mechanism. Only a glob row notices a
+    template APPEARING, which is what otherwise let a project's first template
+    stay invisible to every warm run until some `.rb` file changed.
+
+  A project whose plugins claim no globs adds none of the three, so no existing
+  key or descriptor moves.
+- **Fork pool.** The index is built on the parent and inherited by the one
+  pre-fork `WorkerSession`, so a worker analyses a unit from exactly the bytes
+  the parent compiled. Pooled output equals sequential output for both the
+  diagnostic stream and the effect table.
+- **`--incremental`.** Units do **not** participate in dependent closures:
+  nothing in the ADR-46 dependency graph names a synthesised file, so there is
+  no edge that could put one in a closure. The conservative reading is taken —
+  **a run always re-analyses every template unit** — which costs one parse per
+  template on the warm incremental path and can never serve a stale answer.
+  Making units first-class dependents is a later slice. Two mechanics carry it:
+  `Runner#target_files` narrows the `.rb` expansion FIRST and appends the units
+  second (appending first let the `analyze_only` select eat them), and
+  `IncrementalSession` keeps unit paths OUT of `@analyzed`, so a unit is never
+  served from the per-file cache and never reads as a project file that vanished.
+- **Editor mode.** A single-buffer publish (`buffer:` with no closure) answers
+  about the buffer the editor is showing, so the OTHER units do not join its
+  analysed set — appending every view would publish diagnostics for files the
+  editor did not ask about. When the buffer IS a template, that one unit is the
+  analysed set exactly as a `.rb` buffer would be, and the transform is run over
+  the **buffer's** bytes rather than the saved file's (`TemplateUnits.collect`
+  takes the `BufferBinding`), so `--tmp-file` / `--instead-of` naming a template
+  reports what the editor is showing. A `--incremental --tmp-file` recheck,
+  which has a closure, analyses every unit. The index is still rebuilt per run,
+  so a long-lived LSP session re-runs the plugin transform per publish;
+  [#1038](https://github.com/rigortype/rigor/issues/1038) carries it onto
+  `ProjectScan`.
+- **Path spellings.** A unit is keyed the way a claimed glob spells it —
+  project-relative, as `Dir.glob(base:)` returns it — and every other spelling
+  reduces to that one before a lookup or a claim test
+  (`Analysis::TemplateUnitPaths`). There are more of them than there look to
+  be: a language server names a buffer by its absolute path, a shell hands over
+  `./app/views/x.rbx` or `lib/../app/views/x.rbx`, and the same directory
+  reached through a symlink is the same directory (`Dir.pwd` is always
+  resolved; on macOS an editor's `/var/…` and pwd's `/private/var/…` are one
+  place, and the resolution walks to the nearest EXISTING ancestor so a view in
+  a directory the editor has not created yet still resolves). A path that is
+  still absolute after that reduction is **outside the project**, and an
+  unanchored claim (`**/*.rbx`) does not reach it: a plugin's glob is a claim
+  over the project, and `Dir.glob` could never have returned that path.
+- **Position probes.** `rigor type-of` and the `dump_type` helper read the file
+  from disk and parse those bytes directly — they do not consult the index, so
+  a probe against a template answers about the TEMPLATE's own text (and, for a
+  template whose raw bytes are not valid Ruby, declines with a parse error).
+  Routing them through the unit needs the INVERSE of everything the seam ships
+  — the user names a template position and the command has to find the compiled
+  node, through a map that is not injective — so it is
+  [#1040](https://github.com/rigortype/rigor/issues/1040) rather than part of
+  this slice. `rigor check` and `rigor effects` are unaffected.
+- **Other file sets.** A unit is an ANALYSED file, never a `source_files:` one:
+  the env-build-time `source_rbs_synthesizer` is offered the `.rb` expansion
+  alone, because a template's bytes are not Ruby an RBS synthesiser can read.
+  `RunStats#target_files` counts units, because they are files the run parsed.
+
+Worked consumer: `spec/fixtures/template_units/view_demo_plugin.rb`, with the
+identity transform this slice ships. ERB itself (Erubi when it resolves,
+stdlib `ERB` as the fallback — the [ADR-93](../adr/93-default-rbs-inline-ingestion.md)
+never-bundled posture) is [#393](https://github.com/rigortype/rigor/issues/393),
+and changes only `#template_units_for_file`.

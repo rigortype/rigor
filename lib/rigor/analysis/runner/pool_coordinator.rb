@@ -44,7 +44,7 @@ module Rigor
                        snapshots:, plugin_registry:, dependency_source_index:,
                        synthetic_method_index:, project_patched_methods:,
                        analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false,
-                       restored_run_level_rows: nil)
+                       restored_run_level_rows: nil, template_units: -> { TemplateUnits.empty })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -71,6 +71,10 @@ module Rigor
           @synthetic_method_index_reader = synthetic_method_index
           @project_patched_methods_reader = project_patched_methods
           @project_scope_seed_reader = project_scope_seed
+          # #392 — read through a proc, like every other runner-owned table here: the units are synthesised
+          # on the parent during the run and handed to the ONE pre-fork {WorkerSession}, so every child
+          # inherits the same compiled bytes.
+          @template_units_reader = template_units
           @analyze_file = analyze_file
           # Issues #796 / #794 — the previous full run's run-level rows, handed down by
           # {Analysis::IncrementalSession} on a NARROWED run only (a recheck's closure, a
@@ -641,7 +645,8 @@ module Rigor
             project_patched_methods: project_patched_methods,
             project_scope_seed: project_scope_seed,
             source_files: source_files,
-            record_dependencies: @record_dependencies
+            record_dependencies: @record_dependencies,
+            template_units: template_units
           )
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
           # rather than each rebuilding it after the fork.
@@ -1020,6 +1025,10 @@ module Rigor
 
         def project_patched_methods
           @project_patched_methods_reader.call
+        end
+
+        def template_units
+          @template_units_reader.call
         end
 
         def project_scope_seed

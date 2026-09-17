@@ -48,6 +48,7 @@ require_relative "runner/run_snapshots"
 require_relative "runner/project_pre_passes"
 require_relative "runner/pool_coordinator"
 require_relative "runner/diagnostic_aggregator"
+require_relative "template_units"
 require_relative "runner/effect_envelope_pass"
 require_relative "runner/effect_annotation_residual_pass"
 require_relative "runner/buffer_pool_dispatcher"
@@ -340,6 +341,10 @@ module Rigor
         # check reads.
         @no_tolerated_effects = no_tolerated_effects
         @file_effects = {}
+        # #392 — the run's template units, synthesised once per run after the plugins load (see
+        # {#template_units}). nil until then; a project whose plugins declare no `template_globs:` resolves
+        # to the shared empty index and pays one `Array#empty?` for the whole run.
+        @template_units = nil
         @effect_table = nil
         @effects_served_from_cache = false
         # #482 — set only by a run served from the summary entry: the two derived tables it carries, and
@@ -481,6 +486,9 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
+        # #392 — re-synthesise the template units each run: their source files can change between two runs
+        # of one long-lived Runner (the LSP's), and a unit is never served from a cache of its own.
+        @template_units = nil
         # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
         # run never builds two.
         @run_environment = nil
@@ -774,7 +782,10 @@ module Rigor
         @run_served_from_cache = false
         return assemble_run_diagnostics(expansion) unless run_result_cacheable?
 
-        environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        # #392 — `source_files:` is what a plugin's `source_rbs_synthesizer` is offered at env-build time,
+        # and a template unit is not Ruby the synthesiser can read (rbs-inline would be handed `.rbx`
+        # bytes). The `.rb` expansion is the right set here; the units join the ANALYSED set only.
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
         # Lazy-files descriptor: the cache KEY reads only `gems` + `configs`; the RBS signature-tree `files`
         # are digested solely by `run_dependency_descriptor` on a MISS, so a warm HIT never walks the tree.
         rbs_descriptor = if environment&.rbs_loader
@@ -1057,6 +1068,11 @@ module Rigor
         # untouched so its lazy build timing is unchanged.
         environment = seed_pre_eval_constants(expansion, environment)
         diagnostics = @diagnostic_aggregator.pre_file_diagnostics(expansion)
+        # #392 — a template transform that raised, a template that could not be read, or a unit naming a
+        # file it was not offered. Reported through the same `:plugin_loader` `runtime-error` envelope a
+        # raise from `#diagnostics_for_file` uses (ADR-2 § "Plugin Trust and I/O Policy"), rather than
+        # dropped in silence: a plugin author whose view stopped being analysed has nothing else to read.
+        diagnostics += template_unit_failure_diagnostics
         # ADR-46 — record which project files this run actually analyzed (the `analyze_only` subset, or
         # all of them). The incremental orchestrator serves every analyzed-but-not-affected file from the
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
@@ -1080,6 +1096,18 @@ module Rigor
         close_effect_graph
         diagnostics + post_analysis_diagnostic_streams
       end
+
+      def template_unit_failure_diagnostics
+        template_units.failures.map do |failure|
+          Diagnostic.new(
+            path: failure.path, line: 1, column: 1,
+            message: "plugin #{failure.plugin_id.inspect} produced no template unit for " \
+                     "#{failure.path}: #{failure.message}",
+            severity: :error, rule: "runtime-error", source_family: :plugin_loader
+          )
+        end
+      end
+      private :template_unit_failure_diagnostics
 
       # The rbs-coverage build-failure ladder plus every remaining post-analysis stream
       # `#assemble_run_diagnostics` appends, in their fixed contract order (see the comments at each call
@@ -1119,7 +1147,9 @@ module Rigor
       # re-stamps), sliced to the rows positioned at the targets. Returns the RAW return for the run's stream,
       # which is stamped once, at the end of `#run_analysis`.
       def analyze_targets(targets, environment:, project_files:)
-        raw = @pool_coordinator.analyze_files(targets, environment: environment, project_files: project_files)
+        raw = template_units.remap(
+          @pool_coordinator.analyze_files(targets, environment: environment, project_files: project_files)
+        )
         analysed = targets.to_set
         @per_file_diagnostics = @diagnostic_aggregator.apply_severity_profile(raw)
                                                       .select { |diagnostic| analysed.include?(diagnostic.path) }
@@ -1227,7 +1257,8 @@ module Rigor
         # reconstructs `rbs.libraries` from config) can never drift out of key agreement.
         RunCacheKey.descriptor(
           configuration: @configuration, files: expansion.fetch(:files),
-          explain: @explain, rbs_config_entries: rbs_descriptor.configs
+          explain: @explain, rbs_config_entries: rbs_descriptor.configs,
+          template_units_digest: template_units.digest
         )
       end
 
@@ -1244,11 +1275,11 @@ module Rigor
 
       def build_run_dependency_descriptor(expansion, rbs_descriptor)
         entries = analyzed_file_entries(expansion) + discovery_file_entries(expansion) +
-                  pre_eval_file_entries + rbs_descriptor.files
+                  pre_eval_file_entries + template_unit_file_entries + rbs_descriptor.files
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
-        globs = rbs_descriptor.globs.dup
+        globs = rbs_descriptor.globs + template_unit_glob_entries
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
@@ -1296,6 +1327,30 @@ module Rigor
       # expansion — so without this entry, editing one would leave the run-result cache serving diagnostics
       # computed against the previous version. The common case (a `lib/core_ext/` file that is also under
       # `paths:`) contributes a duplicate entry, which the descriptor's per-path validation absorbs.
+      # #392 — the TEMPLATE files behind the run's units. The key slot carries the compiled Ruby's digest
+      # (`template_units_digest`), which is what decides whether a cached answer describes this source; these
+      # entries are the validation half, so a template edited between two runs re-globs and re-digests here
+      # exactly as an analysed `.rb` file does. Both are needed: a transform that compiles two different
+      # templates to the same Ruby must still not resurrect the wrong PATH in a diagnostic.
+      # #392 — one `:names` row per claimed `template_globs:` pattern, whether or not it matched. The file
+      # rows below cover edits to templates that EXIST; only a glob row notices one appearing or vanishing,
+      # which is what let a project's first template stay invisible to every warm run.
+      def template_unit_glob_entries
+        template_units.glob_entries
+      end
+
+      # Every template the run READ, successes and failures alike: a `plugin_loader` row produced by a
+      # template that would not compile must not outlive the edit that fixes it, and a buffer-bound path is
+      # digested at the bytes the run actually read.
+      def template_unit_file_entries
+        template_units.source_paths.filter_map do |path|
+          physical = template_units.physical_path(path, @buffer)
+          next unless File.file?(physical)
+
+          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
+        end
+      end
+
       def pre_eval_file_entries
         @configuration.pre_eval.filter_map do |path|
           physical = @buffer ? @buffer.resolve(path) : path
@@ -1527,6 +1582,17 @@ module Rigor
       # The buffer's logical path is added to the file list even if it's not under `paths:` — per design §
       # "Failure envelope": "--instead-of=Y with Y not under any paths: directory → treated as a valid
       # logical identity for the buffer".
+      # #392 — the run's template units. Built once per run, on the parent, AFTER the plugin pre-pass has
+      # loaded the registry; a run whose plugins declare no `template_globs:` never globs and never calls a
+      # plugin.
+      def template_units
+        @template_units ||= if @plugin_registry.nil?
+                              TemplateUnits.empty
+                            else
+                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer)
+                            end
+      end
+
       def target_files(expansion)
         files = expansion.fetch(:files)
         # ADR-46 slice 2 — restrict the analyzed set to the affected closure while the pre-pass (run
@@ -1537,13 +1603,40 @@ module Rigor
           # the same allowance option A makes below.
           files = files.select { |path| @analyze_only.include?(path) }
           files |= [@buffer.logical_path] if @buffer && @analyze_only.include?(@buffer.logical_path)
-          return files
+          return template_unit_targets(files)
         end
-        return files if @buffer.nil?
+        return template_unit_targets(files) if @buffer.nil?
 
-        # Editor mode option A — no closure, so the buffer's single logical path IS the analyzed set.
+        # Editor mode option A — no closure, so the buffer's single logical path IS the analyzed set. The
+        # template units deliberately do NOT join it: a per-buffer publish answers about the buffer the
+        # editor is showing, and appending every view would publish diagnostics for files the editor did
+        # not ask about (and re-parse them on every keystroke).
         [@buffer.logical_path]
       end
+
+      # #392 — the template units join the analysed set AFTER any narrowing, so an `--incremental` recheck
+      # re-analyses every unit even when its closure is one `.rb` file. Nothing in the ADR-46 dependency
+      # graph names a synthesised file, so there is no edge that could put a unit in a closure — narrowing
+      # first and appending second is what makes "always re-analysed" true rather than a comment. The cost
+      # is one parse per template on the warm path; the alternative silently drops every template
+      # diagnostic from the second run onwards.
+      #
+      # Appended rather than merged in sorted order so the `.rb` expansion's own order — and every output
+      # that follows it — is byte-identical for a project with no units.
+      def template_unit_targets(files)
+        return files if template_units.empty?
+
+        files + (template_units.paths - files)
+      end
+      private :template_unit_targets
+
+      # #392 — the unit paths this run synthesised. Read by {IncrementalSession}, which keeps them OUT of
+      # its analysed-file set: a unit is never served from the per-file cache and never counts as a file
+      # that was removed from the project, because `#target_files` re-analyses it every run.
+      def template_unit_paths
+        template_units.paths
+      end
+      public :template_unit_paths
 
       # Editor mode (`buffer:` non-nil) auto-flips the cache store to `read_only: true` so multiple
       # debounced editor invocations against the same project don't churn the on-disk cache or race on
@@ -1581,6 +1674,7 @@ module Rigor
           synthetic_method_index: -> { @synthetic_method_index },
           project_patched_methods: -> { @project_patched_methods },
           project_scope_seed: -> { project_scope_seed_tables },
+          template_units: -> { template_units },
           analyze_file: ->(path, environment) { analyze_file(path, environment) },
           restored_run_level_rows: @restored_run_level_rows
         )
@@ -1627,7 +1721,9 @@ module Rigor
         RunStats.new(
           wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
           peak_rss_bytes: RunStats.peak_rss_bytes,
-          target_files: expansion.fetch(:files).size,
+          # #392 — the template units count too: they are files this run parsed and typed, and a stats line
+          # that omitted them would under-report exactly the work a views-heavy project added.
+          target_files: expansion.fetch(:files).size + template_units.paths.size,
           rbs_classes_total: snapshot.size,
           rbs_classes_project_sig: project_sig,
           rbs_classes_bundled: bundled,
@@ -1784,6 +1880,12 @@ module Rigor
       # so Prism's location data carries the LOGICAL path. Non-binding paths go through the cheaper
       # `Prism.parse_file` codepath unchanged.
       def parse_source(path)
+        entry = template_units[path]
+        if entry
+          return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby,
+                                           scopes: template_units.parse_scopes(path))
+        end
+
         if @in_memory_sources&.key?(path)
           return Prism.parse(@in_memory_sources[path], filepath: path, version: @configuration.target_ruby)
         end
@@ -2000,10 +2102,11 @@ module Rigor
       def analyze_with_effects(path, environment)
         return analyze_file_body(path, environment) unless @record_effects
 
+        entry = template_units[path]
         diagnostics = nil
         collection = Effects::Collector.collect_for(
           path, attribution: @effect_attribution, envelopes: effect_envelope_index(environment),
-                plugin_facts: effect_plugin_facts
+                plugin_facts: effect_plugin_facts, unit_key: entry&.unit_key, unit_owner: entry&.self_type
         ) do
           diagnostics = analyze_file_body(path, environment)
         end
@@ -2042,7 +2145,9 @@ module Rigor
         # is a per-FILE site, so one `Thread.current` read is already nothing. The per-dispatch site in
         # `ExpressionTyper#call_type_for` is the one that pays for the integer fast path.
         Effects::Collector.record_root(parse_result.value)
-        scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
+        scope = template_units.seed(
+          seed_project_scope(Scope.empty(environment: environment, source_path: path)), path
+        )
         # ADR-24 slice 4a/4 — record unresolved implicit-self calls during the typing pass ONLY (not
         # CheckRules, whose own `type_of` queries would otherwise re-trigger the choke-point).
         # `self_call_misses` feeds the `call.self-undefined-method` collector; the recorder is inert unless

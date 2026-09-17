@@ -162,7 +162,11 @@ module Rigor
         runner = build_runner(record_dependencies: true)
         diagnostics = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
-        @analyzed = runner.analyzed_files
+        # #392 — the template units are deliberately NOT in the analysed set. `Runner#target_files`
+        # re-analyses every unit on every run, so a unit must never be reused from the per-file cache and
+        # must never read as a file that VANISHED from the project on the next recheck (which is what
+        # `previous - current` would say, `current_files` being a `.rb` expansion).
+        @analyzed = runner.analyzed_files - runner.template_unit_paths
         @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
         @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.

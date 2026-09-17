@@ -85,6 +85,67 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       end
     end
 
+    # #392 — a template-unit buffer. The publisher's Runner path already carries the `BufferBinding` into
+    # `TemplateUnits.collect`, but the LSP entry itself was unpinned: a regression there would publish
+    # diagnostics computed from the saved file (or, for a view that exists only in the editor, from the
+    # buffer parsed as plain top-level Ruby with no declared `self`) on every keystroke.
+    it "publishes a `.rbx` buffer through its template unit, not as raw top-level Ruby" do
+      Dir.mktmpdir("rigor-lsp-template-unit-") do |tmpdir|
+        path = write_template_unit_project(tmpdir)
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: "render_header(@title.nope_in_buffer)\n", version: 1)
+        context = template_unit_context(tmpdir)
+
+        Dir.chdir(tmpdir) { publisher_for(context).publish_for(uri) }
+
+        messages = writer.payloads.first.dig(:params, :diagnostics).map { |d| d[:message] }
+        # The buffer's own call, resolved against the DECLARED `self` — `render_header` is silent and
+        # nothing reads as an unresolved top-level call.
+        expect(messages).to eq(["undefined method `nope_in_buffer' for String"])
+      end
+    ensure
+      # `Rigor::Plugin.register` is process-global; leaving the id registered makes a later spec's own
+      # registration read as "the gem registered nothing new" and fail its load.
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    def publisher_for(context)
+      described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
+    end
+
+    def fixture_plugin_path
+      File.expand_path("../../fixtures/template_units/view_demo_plugin.rb", __dir__)
+    end
+
+    # A view class, a template on disk whose saved bytes are CLEAN, and the fixture plugin that claims it.
+    # @return the template's absolute path — the way the editor names a buffer.
+    def write_template_unit_project(tmpdir)
+      FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+      File.write(File.join(tmpdir, "lib", "app.rb"), <<~RUBY)
+        class ViewContext
+          def render_header(text)
+            text
+          end
+        end
+      RUBY
+      path = File.join(tmpdir, "app", "views", "users", "show.rbx")
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "render_header(@title.upcase)\n")
+      path
+    end
+
+    # `ProjectContext` takes no `plugin_requirer:`, so the plugin loads the way a project loads one: a file
+    # on disk that registers itself, named by the configuration's `plugins:` entry.
+    def template_unit_context(tmpdir)
+      plugin_path = File.join(tmpdir, "rigor-view-demo.rb")
+      File.write(plugin_path, "#{File.read(fixture_plugin_path)}\nRigor::Plugin.register(RigorViewDemoPlugin)\n")
+      Rigor::LanguageServer::ProjectContext.new(
+        configuration: Rigor::Configuration.new(
+          "paths" => ["lib"], "plugins" => [{ "gem" => plugin_path, "id" => "view-demo" }]
+        )
+      )
+    end
+
     it "uses 0-based line / character positions per LSP spec" do
       Dir.mktmpdir("rigor-lsp-publish-zerobased-") do |tmpdir|
         path = File.join(tmpdir, "foo.rb")

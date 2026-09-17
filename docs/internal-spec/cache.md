@@ -1370,11 +1370,34 @@ ADR-45 `analysis.run-diagnostics` slot:
 | `:stat` file, per analyzed file | `analyzed_file_entries` | an edit to any file the run analyzed |
 | `:stat` file, per discovered-not-analyzed file | `discovery_file_entries` ([#684](https://github.com/rigortype/rigor/issues/684)) | an edit to a file a widened run only discovered |
 | `:stat` file, per `pre_eval:` file | `pre_eval_file_entries` ([#352](https://github.com/rigortype/rigor/issues/352)) | an edit to an ADR-17 pre-evaluated file |
+| `:stat` file, per **template** file the run READ — the ones that produced a unit AND the ones that failed | `template_unit_file_entries` ([#392](https://github.com/rigortype/rigor/issues/392)) | an edit to a `.erb` / `.rbx` / … a plugin claimed, including one whose transform raised or whose bytes could not be read |
+| names glob, per claimed `template_globs:` pattern | `template_unit_glob_entries` (#392) | a template APPEARING under or vanishing from a claimed glob |
 | `:stat` file, per `.rbs` under every signature root and under Rigor's own `data/` trees (`vendored_gem_sigs/`, `core_overlay/`, `capability_roles/`) | `RunDescriptor#files` → `RbsDescriptor.file_entries` | an edit to a signature file the run read |
 | names glob, per signature root (`**/*.rbs`) | `RunDescriptor#globs` (#979) | a `.rbs` APPEARING under or vanishing from a signature root |
 | `:stat` / `:exists` file, per plugin `IoBoundary` read | `IoBoundary#cache_descriptor` ([#577](https://github.com/rigortype/rigor/issues/577)) | an edit to — or the appearance of — a file a plugin read or probed |
 | glob, per plugin-listed directory | `IoBoundary#cache_descriptor` ([#954](https://github.com/rigortype/rigor/issues/954)) | a file appearing in a directory a plugin listed |
 | glob, per producer `watch:` pattern | `Plugin::Base#watch_glob_entries` (ADR-60 WD3) | an edit under a producer's declared watch |
+
+The two template rows are the validation half of a pair. The KEY carries a
+`template-units` `configs:` slot hashing **the claimed globs, every unit's
+compiled digest** (`ruby_source` bytes + transform id + synthesis version) **and
+every failure**, keyed by path — which is what decides whether a cached answer
+describes this world; the rows above are what notice that a template on disk
+moved, appeared or vanished. The failures are in the slot because a run that
+produced only failures still produced an ANSWER (one `plugin_loader` row per
+file): without them such a run's key equalled the no-templates key, and the
+answer outlived both the repair and the deletion of the template that caused
+it. The slot is nil — and so absent — only when no plugin claimed a glob at
+all, so a project with no template-unit plugin keeps exactly the key and
+descriptor it had.
+
+A plugin editing its own `template_globs:` therefore moves the key, because the
+sorted claimed patterns are hashed into the slot.
+
+The ADR-87 boot-slim probe loads no plugin and therefore reconstructs no
+`template-units` slot: on a project whose plugins claim any glob the probe
+simply misses and the full path takes over, the same forgone-fast-lane trade
+`rbs.virtual_rbs` already makes, and never a wrong hit.
 
 Non-file inputs (the engine source, the lockfiles, the resolved
 configuration, the RBS library list) belong to the cache KEY

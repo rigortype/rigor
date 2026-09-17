@@ -760,6 +760,16 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  it "still binds a top-level def inside a `Const = Const || ...` body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line = Line || Struct.new(:other) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
   # The control: the plain spelling the three above are variations of is unchanged, and so is a trailing call
   # that is NOT value-preserving — `.members` answers an Array, so the constant names no class the body owns.
   it "still binds a top-level def inside a body whose write ends in a non-`freeze` call" do

@@ -1882,6 +1882,12 @@ module Rigor
       # WRITTEN ({#constant_path_write_name}) rather than through the nesting, so naming the block's class here
       # would publish a `self::X = …` inside it under a name Ruby does not give it; declining suppresses the
       # name instead, which is the gradual direction. Moving it belongs with moving the census's own path key.
+      #
+      # Issue #963 — the `||=` spellings keep the opaque answer for the same reason the path spelling does. This
+      # census records every or-write UNPUBLISHABLE (the constant may already hold something else), so naming the
+      # block's class here would publish `Const::X` under a name the census has just declined to publish itself.
+      # The `.freeze` spelling is a plain `ConstantWriteNode` and is taken; its tail is threaded through by
+      # {#walk_constant_write_census}.
       def meta_new_block_owner(node, qualified_prefix)
         return nil unless node.is_a?(Prism::ConstantWriteNode) && meta_new_block_body(node)
 
@@ -2382,10 +2388,16 @@ module Rigor
 
       # A `.freeze` tail, repeated (`freeze.freeze` is legal and idempotent). Only the receiverful, argumentless,
       # blockless call is unwrapped — anything else is a different method that may return a different object.
+      # `&.freeze` is declined with them: its value is the receiver OR nil, and a rule that answers "the constant
+      # holds the class the factory made" must not be stated over a shape whose value can be nil.
       def unwrap_freeze_tail(value)
-        value = value.receiver while value.is_a?(Prism::CallNode) && value.name == :freeze &&
-                                     value.receiver && value.arguments.nil? && value.block.nil?
+        value = value.receiver while freeze_tail?(value)
         value
+      end
+
+      def freeze_tail?(value)
+        value.is_a?(Prism::CallNode) && value.name == :freeze && !value.safe_navigation? &&
+          value.receiver && value.arguments.nil? && value.block.nil?
       end
 
       # The name a recognised constant write assigns, as written (`Const`, `Holder::Thing`). Used only to compare
@@ -4528,7 +4540,14 @@ module Rigor
         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner)
         # A `ConstantWriteNode`'s only child is its rvalue, so this reaches exactly the call whose block the
         # constant names — and nil everywhere else, leaving every other descent as it was.
+        #
+        # Issue #963 — except where a `.freeze` tail sits BETWEEN the two. The write names the class one hop
+        # further down than it used to, so the name is carried through the tail rather than dropped at it;
+        # otherwise the factory call arrives with no owner and {#rebound_block_self} answers {OPAQUE_SELF},
+        # suppressing every `self::X = …` the block publishes. Only a tail passes the name on: a nil
+        # `child_meta_owner` at any other node still means "this node names nothing".
         child_meta_owner = meta_new_block_owner(node, qualified_prefix)
+        child_meta_owner ||= meta_owner unless unwrap_freeze_tail(node).equal?(node)
         node.rigor_each_child do |child|
           owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
           walk_constant_write_census(child, qualified_prefix, tables, owner, child_meta_owner)

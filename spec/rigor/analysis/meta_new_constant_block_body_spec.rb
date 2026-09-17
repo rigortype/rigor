@@ -71,14 +71,57 @@ RSpec.describe "meta-new block body at constant-write position" do
     RUBY
   end
 
-  it "reports nothing for a `.freeze`-tailed `Data.define` body" do
+  it "reports nothing for a `.freeze`-tailed `Data.define` body, singleton side included" do
     expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
       Point = Data.define(:text) do
         def shout
           text.upcase
         end
+
+        def self.build
+          new(text: "a")
+        end
+
+        class << self
+          def origin
+            build
+          end
+        end
       end.freeze
-      p Point
+      p Point.origin.shout
+    RUBY
+  end
+
+  it "reports nothing for a repeated `.freeze.freeze` tail" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to be_empty
+      Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end.freeze.freeze
+      p Line.new("a").shout
+    RUBY
+  end
+
+  # Issue #963 — the publication census names the block's class one hop further down when a `.freeze` tail sits
+  # between the write and the factory call. Without the thread-through the call arrives with no owner, its block's
+  # `self` is opaque, and `self::LIMIT = 7` publishes nothing: a LOST diagnostic, so the fire arm is the subject
+  # here and the silence arm is its control.
+  it "publishes a `self::X` written inside a `.freeze`-tailed block body" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to include(/nope.*7/)
+      Line = Struct.new(:text) do
+        self::LIMIT = 7
+      end.freeze
+      Line::LIMIT.nope
+    RUBY
+  end
+
+  it "publishes it for the plain spelling too" do
+    expect(diagnostics_for(<<~RUBY).map(&:message)).to include(/nope.*7/)
+      Line = Struct.new(:text) do
+        self::LIMIT = 7
+      end
+      Line::LIMIT.nope
     RUBY
   end
 
@@ -499,7 +542,8 @@ RSpec.describe "meta-new block body at constant-write position" do
     end
 
     # Only the argumentless, blockless, receiverful `.freeze` is a value-preserving tail. Any other trailing
-    # call may answer a different object, so the write names nothing the factory created.
+    # call may answer a different object, and `&.freeze` answers the receiver OR nil, so neither write names
+    # what the factory created.
     it "declines a trailing call that is not `.freeze`" do
       index, program = index_and_program(<<~RUBY)
         Line = Struct.new(:text) do
@@ -511,6 +555,33 @@ RSpec.describe "meta-new block body at constant-write position" do
       write = program.statements.body.first
 
       expect(index[write].discovered_method?("Line", :shout, :instance)).to be(false)
+    end
+
+    it "declines a safe-navigated `&.freeze` tail" do
+      index, program = index_and_program(<<~RUBY)
+        Line = Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end&.freeze
+      RUBY
+      write = program.statements.body.first
+
+      expect(index[write].discovered_method?("Line", :shout, :instance)).to be(false)
+    end
+
+    it "takes a repeated `.freeze.freeze` tail" do
+      index, program = index_and_program(<<~RUBY)
+        Line = Struct.new(:text) do
+          def shout
+            text.upcase
+          end
+        end.freeze.freeze
+      RUBY
+      write = program.statements.body.first
+
+      expect(index[write].discovered_method?("Line", :shout, :instance)).to be(true)
+      expect(index[write].discovered_method?("Line", :text, :instance)).to be(true)
     end
   end
 end

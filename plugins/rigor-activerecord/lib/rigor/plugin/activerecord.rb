@@ -64,6 +64,12 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.11.0, 2026-09-17 (#963 item 2) — an implicit-self read of a column / association / `column?`
+        # predicate inside the model's own `def` is answered `untyped` instead of reaching no path, so the
+        # engine's own-method veto sees the member and a same-named top-level `def` stops binding ahead of
+        # it. No producer payload changed shape, but the version is the cache key a project sees and this
+        # changes which calls the plugin claims — a warm run must not serve the pre-change stream.
+        #
         # 0.10.0, 2026-09-17 (#1049) — three macro families join the model entry and the published
         # `:model_index` fact: `delegate`, associations declared in an included concern's `included do`, and
         # the Paperclip / Active Storage attachment macros. `ModelIndex::Entry` gains a `macro_methods`
@@ -101,7 +107,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.10.0",
+        version: "0.11.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -332,7 +338,8 @@ module Rigor
             relation_call_return_type(call_node, scope, index) ||
             instance_call_return_type(call_node, scope, index)
         else
-          implicit_self_class_call_return_type(call_node, scope, index)
+          implicit_self_class_call_return_type(call_node, scope, index) ||
+            implicit_self_instance_member_type(call_node, scope, index)
         end
       end
 
@@ -372,6 +379,57 @@ module Rigor
 
         finder_return_type(call_node, entry) ||
           class_scope_return_type(call_node, entry)
+      end
+
+      # Implicit-self INSTANCE member read — `name` / `account` written without a receiver inside the
+      # model's own `def`, where `self` is `Nominal[Model]`. Both existing instance paths key on a WRITTEN
+      # receiver, so this spelling reached no path at all; issue #963 item 2 is what that costs beyond
+      # precision. The engine's own-method veto (#618) asks the dispatcher whether a plugin answers the
+      # name before letting a same-named top-level `def` bind, and a member no tier answers is a member the
+      # top-level `def` binds ahead of — typing `name.upcase` inside `def shout` as the def's `nil` and
+      # firing `undefined method 'upcase' for nil` on working Rails code.
+      #
+      # **`untyped`, not the column's type**, and the difference is measured rather than assumed. The
+      # precise variant (the same `association_return_type` / `column_return_type` pair the written-receiver
+      # path uses) was run over the corpus and added 57 diagnostics on mastodon and 5 on redmine, all new:
+      # `flow.always-truthy-condition` where a predicate reader now folds a guard to a constant, and
+      # `call.possible-nil-receiver` where a singular association's `nil` arm survives a `.compact` the
+      # engine does not fold. Those are precision questions about the reader's TYPE, and each is a false
+      # positive on correct code. What #963 needs is only that the member EXISTS, so the contribution is the
+      # ADR-82 WD4 answer `#ruby_type_to_type`'s decline already documents next door: the plugin knows the
+      # reader is there and declines to say more here. The site keeps the `Dynamic` it already had, gains
+      # the `framework_dsl_boundary` attribution, and the veto gets its answer.
+      #
+      # The project's OWN definition wins, and is not merely a precision preference: `def name` on the
+      # model — or on an ancestor it declares — is an override Ruby dispatches to, and the plugin tier sits
+      # ABOVE the engine's body-inference tiers, so answering here would displace the override's real return
+      # type with `Dynamic`. `discovered_method_through_ancestors?` is the same table the veto's own
+      # discovery arm reads, and it fails toward declining (a budget-exhausted walk answers true).
+      def implicit_self_instance_member_type(call_node, scope, index)
+        return nil if scope.nil?
+        return nil unless call_node.arguments.nil?
+        return nil unless call_node.block.nil?
+
+        self_type = scope.self_type
+        return nil unless self_type.is_a?(Rigor::Type::Nominal)
+
+        entry = index.find(self_type.class_name)
+        return nil if entry.nil?
+        return nil unless instance_member_name?(entry, call_node.name)
+        return nil if scope.discovered_method_through_ancestors?(self_type.class_name, call_node.name, :instance)
+
+        Rigor::Type::Combinator.untyped
+      end
+
+      # Whether the model entry declares `method_name` as an instance-side member: an association accessor,
+      # a column reader, or the ActiveRecord-generated `column?` predicate. The same three families
+      # `#recognised_method_names` puts in the dispatch gate, asked of ONE entry.
+      def instance_member_name?(entry, method_name)
+        name = method_name.to_s
+        return true unless entry.association(method_name).nil?
+
+        column_name = name.end_with?("?") ? name[0..-2] : name
+        !entry.column(column_name).nil?
       end
 
       # Class-side finders + the class-side relation entry points. `find` / `find_by!` return the model;

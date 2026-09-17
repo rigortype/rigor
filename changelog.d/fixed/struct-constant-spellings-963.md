@@ -1,0 +1,1 @@
+- **[inference]** `Const = Struct.new(:text) do … end.freeze` and `Const ||= Struct.new(:text) do … end` now open the constant's class body exactly as the plain write does, so a member read inside one resolves to the member instead of to a same-named top-level `def`. [#1035](https://github.com/rigortype/rigor/pull/1035)

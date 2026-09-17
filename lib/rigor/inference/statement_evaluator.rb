@@ -18,6 +18,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
+require_relative "define_method_block_self"
 require_relative "element_read_widening"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
@@ -2124,7 +2125,7 @@ module Rigor
         block = node.block
         return unless block.is_a?(Prism::BlockNode)
 
-        block_entry = build_block_entry_scope(node, block)
+        block_entry = narrow_define_method_block_self(node, build_block_entry_scope(node, block))
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
         # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
@@ -2140,6 +2141,23 @@ module Rigor
         enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
       end
 
+      # Issue #963 — `define_method(:name) { ... }` in a class body defines an INSTANCE method, and Ruby runs
+      # the block with `self` bound to the receiving instance. Without this the block inherits the class body's
+      # `Singleton[C]`, and #618's own-method veto asks the singleton side of a name the instance side answers.
+      # {DefineMethodBlockSelf} owns the match; a non-match leaves the entry scope exactly as it was.
+      #
+      # The exclusion — the `class << ...` BODY, where `self` is the singleton class and the call defines a class
+      # method — rides on `Scope#singleton_class_body?`, not on the frame stack: a `def` reached from that body
+      # still carries the singleton frame although its `self` is the class object, and it is an instance method
+      # the call defines there. Carrying the mark on the scope is also what lets the return-typing path apply the
+      # same exclusion, which has no frame stack of its own.
+      def narrow_define_method_block_self(call_node, block_entry)
+        narrowed = DefineMethodBlockSelf.narrow_self_type_for(
+          scope: scope, call_node: call_node
+        )
+        narrowed ? block_entry.with_self_type(narrowed) : block_entry
+      end
+
       # Enters a meta-new `block` as the body of the class `class_context` names: `self_type` is that class's
       # singleton, so a `def` inside binds an instance method on it through the ordinary
       # {#self_type_for_method_body} route, while `block_entry` keeps the outer locals visible. Shared by the two
@@ -2153,7 +2171,7 @@ module Rigor
       # frame is still pushed — it is what a nested `def` registers its method under — which is exactly the
       # divergence that makes the chain a separate record rather than a view of the frame stack.
       def enter_meta_class_body(block, block_entry, class_context)
-        entry = block_entry.with_self_type(self_type_for_class_body(class_context))
+        entry = block_entry.with_self_type(self_type_for_class_body(class_context)).with_singleton_class_body(false)
         sub_eval(block, stamp_nesting(entry, @lexical_nesting), class_context: class_context)
       end
 
@@ -2890,6 +2908,10 @@ module Rigor
         fresh = build_fresh_body_scope
         body_self = self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
+        # Issue #963 — `self` in a `class << ...` body is the SINGLETON class, which shares the `Singleton[X]`
+        # carrier a `class X` body gets. The mark is the only thing that tells the two apart downstream, and a
+        # `def` reached from this body clears it by starting from a fresh scope.
+        fresh = fresh.with_singleton_class_body(node.is_a?(Prism::SingletonClassNode))
         fresh = stamp_nesting(fresh, new_nesting)
         sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting)
       end

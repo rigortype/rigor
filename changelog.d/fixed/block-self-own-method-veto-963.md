@@ -1,0 +1,1 @@
+- **[inference]** A `define_method(:name) { ... }` block in a class body now reads the class's own members, `attr_*` readers and inherited methods instead of a same-named top-level `def`, so `class Line < Struct.new(:text); define_method(:shout) { text.upcase }; end` no longer reports `undefined method 'upcase' for nil`. [#1030](https://github.com/rigortype/rigor/pull/1030)

@@ -470,4 +470,230 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
       end
     RUBY
   end
+
+  # --- `define_method` block self (issue #963 item 1) ------------------------------------------------
+  #
+  # `Module#define_method` turns its block into an INSTANCE method, and Ruby runs the body with `self`
+  # bound to the receiving instance. The block still enters with `self` unmodelled, but the carrier it
+  # inherited was the class body's `Singleton[C]` — the wrong side of the class — so the veto asked
+  # whether `C.text` exists, found nothing, and let the top-level `def text` bind ahead of the reader.
+
+  it "reads a struct member inside a `define_method` block in a `class X < Struct.new(...)` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Line < Struct.new(:text)
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `define_method` block in a `Const = Struct.new(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Struct.new(:text) do
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block that takes a parameter" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        define_method(:shout) { |n| text.upcase * n }
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `define_method` block when the class answers nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Widget
+        attr_reader :other
+
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  # `class << self; define_method(:shout) { ... }; end` defines a CLASS method, whose `self` is the class
+  # object — where an instance reader is NOT in the MRO. MRI reaches the top-level `def` there, and so
+  # must Rigor: the narrowing is for the singleton class BODY only.
+  it "still binds a top-level def inside a `define_method` block in a `class << self` body" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Widget
+        attr_reader :text
+
+        class << self
+          define_method(:shout) { text.upcase }
+        end
+      end
+    RUBY
+  end
+
+  # ...and a `def` REACHED from that body is the other side of the same line. The singleton frame is still
+  # on the stack, but `self` inside `def install` is the class object, so `define_method` there defines an
+  # INSTANCE method and MRI runs the block on the instance — the shape the narrowing exists for.
+  it "reads an attr_reader inside a `define_method` block in a def nested in `class << self`" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        class << self
+          def install
+            define_method(:shout) { text.upcase }
+          end
+        end
+      end
+    RUBY
+  end
+
+  it "reads an attr_reader inside a `define_method` block in a `def self.` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        def self.install
+          define_method(:shout) { text.upcase }
+        end
+      end
+    RUBY
+  end
+
+  # The one shape whose direction the narrowing CHANGES: `def self.text` answers the singleton side, which is
+  # what the block used to be typed against. `define_method`'s block runs on an instance, where a class method
+  # is not in the MRO, so the top-level `def` binds and the call reports — the same answer the plain-`def`
+  # spelling has always given. This is the example a future regression of the narrowing would flip back.
+  it "still binds a top-level def inside a `define_method` block when only a `def self.` answers the name" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      class Cls
+        def self.text
+          "cls"
+        end
+
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  # The positive half of the same pairing, and the only arm that fails without the return-typing path's own
+  # narrowing: inside a `def` reached from `class << self` the mark is cleared, so the block's `self` is the
+  # instance side and the declared `text` is what the block carries out through the generic signature.
+  it "reads an attr_reader through the return-typing path, in a def under `class << self`" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        class << self
+          def install
+            x = define_method(:shout) { text }
+            x.upcase
+          end
+        end
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).to be_empty
+  end
+
+  it "reads an attr_reader through the return-typing path, in a class body" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        x = define_method(:shout) { text }
+        x.upcase
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).to be_empty
+  end
+
+  # Both block-entry paths must decline on the same bodies. The `class << self` exclusion rides on
+  # `Scope#singleton_class_body?`, so the return-typing pass — which has no frame stack of its own — applies it
+  # too. A project-declared generic `define_method` makes the block's own value observable, and with the block's
+  # `self` left on the singleton side the top-level `def text`'s `nil` is what it carries.
+  it "keeps the return-typing path on the evaluator's side of a `class << self` body" do
+    files = { "shadow.rb" => shadow_source, "subject.rb" => <<~SUBJECT }
+      class Widget
+        attr_reader :text
+
+        class << self
+          x = define_method(:shout) { text }
+          x.upcase
+        end
+      end
+    SUBJECT
+    signatures = { "widget.rbs" => <<~RBS }
+      class Widget
+        def self.define_method: [T] (Symbol) { () -> T } -> T
+        def text: () -> String
+      end
+    RBS
+
+    expect(messages_for(files, signatures: signatures).grep(/upcase/)).not_to be_empty
+  end
+
+  # --- `Class.new(...) do ... end` (issue #963 item 1, second shape) ---------------------------------
+
+  it "reads a struct member inside a `Const = Class.new(Struct.new(...)) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Anon = Class.new(Struct.new(:text)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `define_method` block in a `Class.new(Struct.new(...))` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Anon = Class.new(Struct.new(:text)) do
+        define_method(:shout) { text.upcase }
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `Class.new(...) do ... end` body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Anon = Class.new(Struct.new(:other)) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  # The control: a block whose `self` Rigor still does not model is untouched by the narrowing.
+  it "leaves a plain block inside an instance method alone" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      class Widget
+        attr_reader :text
+
+        def run
+          [1, 2].each { |n| text.upcase * n }
+        end
+      end
+    RUBY
+  end
 end

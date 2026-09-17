@@ -49,7 +49,10 @@ module Rigor
     #   come from controller instance variables not visible in the template). The view scan is a
     #   project-wide pass surfaced through the per-file diagnostic hook, so under `--workers` each fork-pool
     #   worker re-emits the full set; sequential `rigor check` is unaffected. The `load-error` path no longer
-    #   shares this: it is a run-scoped disclosure (#1051), emitted once per run at `.rigor.yml:1:1`.
+    #   shares this: it is a run-scoped disclosure (#1051), emitted once per run at `.rigor.yml:1:1`. The view
+    #   rows cannot take that route — each names a real view file and line, and `#disclose_once` positions
+    #   every row at `.rigor.yml`, which would be a claim about the config file rather than about the view.
+    #   Emitting them once per run needs a channel that keeps a registered batch's own positions (#1060).
     # - Pluralization (`t('errors.messages.too_short', count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's pluralization branches.
     # - YAML aliases / merges are accepted (Psych's standard `aliases: true`) but custom Ruby classes

@@ -109,12 +109,12 @@ module Rigor
         services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots, value: roots)
       end
 
-      # File-level only: the load-error emission. The per-call policy validation runs over the engine-owned
-      # walk via the node_rule below (ADR-37). The index is lazily loaded + memoised by `producer_value`,
-      # so both surfaces share one load.
+      # File-level only: the load-error disclosure. The per-call policy validation runs over the
+      # engine-owned walk via the node_rule below (ADR-37). The index is lazily loaded + memoised by
+      # `producer_value`, so both surfaces share one load.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:policy_index)
-        return [load_error_diagnostic(path)] if index.nil? && producer_error(:policy_index)
+        disclose_load_error if index.nil? && producer_error(:policy_index)
 
         []
       end
@@ -130,10 +130,17 @@ module Rigor
 
       private
 
-      def load_error_diagnostic(path)
+      # Issue #1056 — "the policy index did not load" is a fact about the run's INPUTS, not about the file
+      # being analysed, so it is handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
+      # issue #1051) rather than returned from the per-file hook. Returned, it carried no once-guard at
+      # all: the row repeated on EVERY analysed file, and `--workers N` re-multiplied that by the worker's
+      # own plugin instance. The engine de-duplicates by `(plugin id, key)` across the coordinator and
+      # every worker and emits one row per run at `.rigor.yml:1:1` — a disclosure has no source position it
+      # could be right about, and after #393 the file it happened to land on could be a view's `.erb` path.
+      def disclose_load_error
         error = producer_error(:policy_index)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
+        disclose_once(
+          :policy_index_load_failed,
           message: "rigor-pundit: failed to discover policies: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"

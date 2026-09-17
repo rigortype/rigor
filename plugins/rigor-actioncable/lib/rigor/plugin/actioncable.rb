@@ -123,12 +123,12 @@ module Rigor
         @protocol_contracts || manifest.protocol_contracts
       end
 
-      # File-level only: the load-error emission. Per-call broadcast validation runs over the
+      # File-level only: the load-error disclosure. Per-call broadcast validation runs over the
       # engine-owned walk via the node_rule below (ADR-37). The channel index is lazily loaded +
       # memoised by `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:channel_index)
-        return [load_error_diagnostic(path)] if index.nil? && producer_error(:channel_index)
+        disclose_load_error if index.nil? && producer_error(:channel_index)
 
         []
       end
@@ -151,10 +151,17 @@ module Rigor
         "#{base}/**/*.rb"
       end
 
-      def load_error_diagnostic(path)
+      # Issue #1056 — "the channel index did not load" is a fact about the run's INPUTS, not about the file
+      # being analysed, so it is handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
+      # issue #1051) rather than returned from the per-file hook. Returned, it carried no once-guard at
+      # all: the row repeated on EVERY analysed file, and `--workers N` re-multiplied that by the worker's
+      # own plugin instance. The engine de-duplicates by `(plugin id, key)` across the coordinator and
+      # every worker and emits one row per run at `.rigor.yml:1:1` — a disclosure has no source position it
+      # could be right about, and after #393 the file it happened to land on could be a view's `.erb` path.
+      def disclose_load_error
         error = producer_error(:channel_index)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
+        disclose_once(
+          :channel_index_load_failed,
           message: "rigor-actioncable: failed to discover channels: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"

@@ -33,7 +33,7 @@ authorize(Comment, :edit)   # error: no policy class CommentPolicy (did you mean
 | `plugin.pundit.policy-call` | info | an `authorize` / `policy` / `policy_scope` call resolved to a discovered policy |
 | `plugin.pundit.unknown-policy-class` | error | the record maps to a `<Type>Policy` with no entry in the index (with a did-you-mean) |
 | `plugin.pundit.unknown-policy-method` | error | the policy exists but the `:action` has no `<action>?` predicate (lists known predicates + a did-you-mean) |
-| `plugin.pundit.load-error` | warning | policy discovery failed (parse/read error) — once per file |
+| `plugin.pundit.load-error` | warning | policy discovery failed (parse/read error) — once per run, on `.rigor.yml` |
 
 The record maps to a policy by constant name or inferred
 `Nominal[T]` (`Post` → `PostPolicy`); `:update` normalises to
@@ -88,6 +88,13 @@ candidate rather than being guessed at.
   not validated when `local` has no inferred `Nominal[T]`.
 - **`Scope` policies** are validated for class existence, not for
   `Scope#resolve`.
+- **The "failed to discover policies" warning is run-scoped.** It is
+  a fact about your configuration, not about any one source file, so
+  it is reported once per run on `.rigor.yml` rather than repeated on
+  every analysed file. It is `:warning`, so if you baselined it at its
+  old position that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 
 ## Plugin internals
 

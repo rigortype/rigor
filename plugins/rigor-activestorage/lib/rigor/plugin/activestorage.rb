@@ -67,12 +67,15 @@ module Rigor
       def init(_services)
         @model_search_paths = Array(config.fetch("model_search_paths")).map(&:to_s)
         @attachment_index = nil
-        @load_errors = []
+        @load_errors = {}
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = attachment_index
-        return load_error_diagnostics(path) if index.nil?
+        if index.nil?
+          disclose_load_errors
+          return []
+        end
         return [] if index.empty?
 
         Analyzer.new(path: path, attachment_index: index).analyze(root).diagnostics
@@ -126,24 +129,34 @@ module Rigor
         # covers model-file additions.
         @attachment_index = cache_for(:attachment_index, params: {}).call
       rescue Plugin::AccessDeniedError => e
-        @load_errors << "rigor-activestorage: #{e.message}"
+        @load_errors["1-read-refused"] ||= "rigor-activestorage: #{e.message}"
         nil
       rescue StandardError => e
-        @load_errors << "rigor-activestorage: discovery failed: #{e.class}: #{e.message}"
+        @load_errors["2-discovery-failed"] ||=
+          "rigor-activestorage: discovery failed: #{e.class}: #{e.message}"
         nil
       end
 
-      def load_error_diagnostics(path)
-        @load_errors.uniq.map do |message|
-          Rigor::Analysis::Diagnostic.new(
-            path: path,
-            line: 1,
-            column: 1,
-            message: message,
-            severity: :warning,
-            rule: "load-error"
-          )
+      # Issue #1056 — "the attachment index did not load" is a fact about the run's INPUTS, not about the
+      # file being analysed, so both outcomes go to the engine's run-scoped channel
+      # ({Plugin::Base#disclose_once}, issue #1051) rather than being returned from the per-file hook.
+      # Returned, they carried no once-guard at all: the `.uniq` collapsed repeats within one instance's
+      # list, but the whole list was re-emitted on EVERY analysed file, and `--workers N` re-multiplied
+      # that by the worker's own plugin instance. The engine de-duplicates by `(plugin id, key)` across
+      # the coordinator and every worker and emits one row per run at `.rigor.yml:1:1`.
+      #
+      # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
+      # (#1051), and a refused read must still precede a discovery failure the way `@load_errors` records
+      # them — `@load_errors` is now keyed by that same string, which also caps it: `#attachment_index`
+      # re-attempts the load per call site, and the old Array appended a fresh interpolated string every
+      # time (the unbounded-growth shape #569 measured at 4.2 M retained strings on Redmine). The key, not
+      # the message, is the identity: a second refusal naming a different path collapses into the first row
+      # rather than adding one — the notice is "the index did not load", said once.
+      def disclose_load_errors
+        @load_errors.each do |key, message|
+          disclose_once(key, message: message, severity: :warning, rule: "load-error")
         end
+        nil
       end
     end
 

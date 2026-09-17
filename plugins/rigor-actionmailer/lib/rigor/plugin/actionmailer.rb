@@ -93,7 +93,10 @@ module Rigor
       # loaded + memoised, shared.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:mailer_index)
-        return [load_error_diagnostic(path)] if index.nil? && producer_error(:mailer_index)
+        if index.nil? && producer_error(:mailer_index)
+          disclose_load_error
+          return []
+        end
         return [] if index.nil? || index.empty?
 
         missing_view_diagnostics(path, index)
@@ -136,10 +139,19 @@ module Rigor
         File.expand_path(path)
       end
 
-      def load_error_diagnostic(path)
+      # Issue #1056 — "the mailer index did not load" is a fact about the run's INPUTS, not about the file
+      # being analysed, so it is handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
+      # issue #1051) rather than returned from the per-file hook. Returned, it carried no once-guard at
+      # all: the row repeated on EVERY analysed file, and `--workers N` re-multiplied that by the worker's
+      # own plugin instance. The engine de-duplicates by `(plugin id, key)` across the coordinator and
+      # every worker and emits one row per run at `.rigor.yml:1:1` — a disclosure has no source position it
+      # could be right about, and after #393 the file it happened to land on could be a view's `.erb` path.
+      # The missing-view rows this hook still returns are NOT disclosures: they name the mailer's own
+      # source file.
+      def disclose_load_error
         error = producer_error(:mailer_index)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
+        disclose_once(
+          :mailer_index_load_failed,
           message: "rigor-actionmailer: failed to discover mailers: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"

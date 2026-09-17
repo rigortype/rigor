@@ -484,4 +484,26 @@ RSpec.describe "plugins/rigor-actioncable" do
       expect(offending.size).to eq(2)
     end
   end
+
+  # Issue #1056 — the "channel index did not load" notice is a RUN-scoped disclosure, not a per-file
+  # diagnostic. It used to be returned from `#diagnostics_for_file` with no once-guard at all, so the row
+  # repeated on every analysed file (and `--workers N` re-multiplied that by each worker's own plugin
+  # instance). `spec/rigor/analysis/run_scoped_disclosure_spec.rb` pins the pooled half of the contract.
+  describe "the channel index load error is disclosed once per run (#1056)" do
+    before { allow(Rigor::Plugin::Actioncable::ChannelDiscoverer).to receive(:new).and_raise(RuntimeError, "boom") }
+
+    it "emits one row at .rigor.yml:1:1, not one per analysed file" do
+      result = run_plugin(
+        source: "ChatChannel.broadcast_to(room, {})\n",
+        files: DEFAULT_CHANNELS.merge("extra1.rb" => "a = 1\n", "extra2.rb" => "b = 2\n"),
+        paths: %w[demo.rb extra1.rb extra2.rb]
+      )
+      rows = plugin_diagnostics(result).select { |d| d.rule == "load-error" }
+
+      expect(rows.size).to eq(1)
+      expect([rows.first.path, rows.first.line, rows.first.column]).to eq([".rigor.yml", 1, 1])
+      expect(rows.first.severity).to eq(:warning)
+      expect(rows.first.message).to include("failed to discover channels")
+    end
+  end
 end

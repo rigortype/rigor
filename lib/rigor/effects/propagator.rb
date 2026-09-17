@@ -68,6 +68,7 @@ module Rigor
           targets = list.flat_map do |edge|
             resolved = index.targets_for(edge)
             taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
+            taint_unresolved_callee(state, caller_key, edge) if edge.taint_if_unresolved && resolved.empty?
             mark_unclaimed(state, caller_key) if edge.unclaimed && !edge.super_call && !index.owner_resolved?(edge)
             resolved
           end.uniq.sort
@@ -94,6 +95,26 @@ module Rigor
 
         entry[:exhaustive] = false
         entry[:causes] << ["unresolved-super", edge.selector].freeze
+      end
+
+      # #1048 — a `callee:` edge a plugin's row produced, whose named unit is not in the table: the
+      # template the render site pointed at was never analysed, so the row's `template-not-analysed` cause
+      # is seeded here after all.
+      #
+      # The taint is ADDED on failure rather than subtracted on success, which is what keeps the fixpoint
+      # monotone and the answer independent of visit order. It is also why a row whose rule declined
+      # outright — a computed `render foo`, a `render json:` — never reaches this: {UnitScan} tainted that
+      # site directly and recorded no edge, so nothing about an unresolvable render changed.
+      def taint_unresolved_callee(state, caller_key, edge)
+        entry = state[caller_key]
+        return if entry.nil?
+
+        entry[:exhaustive] = false
+        # Frozen here rather than trusted from the edge: `Marshal.load` of a `Data` bypasses
+        # `initialize`, so a pooled worker's collection restores the pair unfrozen while a sequential
+        # one has the scan's frozen original. A cause travels into a `Set` shared by the whole fixpoint,
+        # and the two paths must hand it the same value. `#freeze` on an already-frozen array is free.
+        entry[:causes] << edge.taint_if_unresolved.freeze
       end
 
       # #391 — an edge nothing bounded whose receiver's OWN ancestry holds no project definition: the
@@ -223,7 +244,8 @@ module Rigor
         end
       end
 
-      private_class_method :resolve_edges, :taint_unresolved_super, :mark_unclaimed, :seed, :iterate,
+      private_class_method :resolve_edges, :taint_unresolved_super, :taint_unresolved_callee,
+                           :mark_unclaimed, :seed, :iterate,
                            :reverse_edges, :absorb, :join_lane, :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per

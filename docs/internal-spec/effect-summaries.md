@@ -131,7 +131,7 @@ Arms that disagree project to nothing, because the record has room for one recei
 | `unknown-ownership` | a mutating call whose receiver ownership is not classifiable |
 | `collector-error` | the scan of that unit raised |
 
-`method-missing`, `plugin-attribution`, `template-not-analysed` and `budget` are in the enum and have no producer in this slice.
+`plugin-attribution` and `template-not-analysed` are recorded by the **plugin stratum** (§ The plugin stratum): the first at any non-discharging row's site, the second by a row that carries `taint:` — at the site when its `callee:` rule declined, and by the propagator when the rule's edge resolved to nothing. `method-missing` and `budget` are in the enum and have no producer.
 
 Taint never produces a finding. A non-exhaustive summary reads "these effects, and possibly more".
 
@@ -401,7 +401,7 @@ A chain that leaves project source is continued only by an **`effect_ancestry:` 
 
 The class an `on_result:` row keys on is resolved from the receiver **transitively**: the constant when the producing call names one, the unit's own class when the producing call is implicit-self, and the next link out when the producer is itself a builder. Between them those are how mail is actually sent — `issue_add(user, issue).deliver_later` inside a mailer's own `def self.deliver_*` wrapper, and `AdminMailer.with(recipient: a).new_trends(…).deliver_later!`, ActionMailer's parameterized form — and stopping at the first link found neither. A row still has to match the producer's ancestry AND the selector, so a chain ending somewhere unrelated contributes nothing rather than a wrong label.
 
-The labels land in `Summary#declared_bundles` under an `Origin` of source `:plugin`. Whether the site is **tainted** is what separates the two authorities:
+The labels land in `Summary#declared_bundles` under an `Origin` of source `:plugin` — never the proven lane, on ADR-103 WD17's ruling. Whether the site is **tainted** is what separates the two authorities:
 
 | Contributor | Taint | Reading |
 | --- | --- | --- |
@@ -409,6 +409,29 @@ The labels land in `Summary#declared_bundles` under an `Origin` of source `:plug
 | anyone else | `plugin-attribution` | "declared this, and possibly more" — identical to `effects.attribution:` |
 
 A discharging row additionally **bounds the site**, exactly as an imported envelope does: it suppresses the `dynamic-receiver` taint (a Rails app with no Rails RBS types `Rails` as `Dynamic`, and a taint no annotation could ever clear is noise), the `unresolved-self-call` taint (an implicit-self `render` rightly does not resolve — the definition is in Action Pack), and the ownership judgment on a receiver mutation (`session[:user_id] = id` writes an object nothing types, and the row's `mutate` is both more precise than `unknown-ownership` and already trusted). A row MAY still carry an explicit `taint:` of `template-not-analysed` or `opaque-callable`, which states the one thing the framework model genuinely cannot see.
+
+#### Callee rules: an attribution that is also an edge
+
+A row may name a `Effects::CalleeRule` rule in `callee:`, which turns the site into a **call-graph edge** as well as a coloured call ([#1048](https://github.com/rigortype/rigor/issues/1048)). `render :show` inside `UsersController` runs `view:users/show.html`, a unit of the very same table; `Propagator::Index#walk_ancestors` resolves `("view:users/show", :singleton, "html")` with no change, because a `view:` key is already in `@summaries` and the split is at the first dot.
+
+The module is shaped exactly like `Narrowing`: module functions dispatched by a `case` over a closed name set, never a Hash of procs, because the tables are built once per process and inherited across the fork pool. A rule reads the call's argument literals, `owner_class:` and `method_name:` (which is the unit key for a template unit) and nothing else — no dataflow, no filesystem, no typer question, so `UnitScan` stays observational.
+
+Applied in `UnitScan#callee_edge_taken?`, beside the label contribution. Three outcomes, and the second is the one the FP-first ordering turns on:
+
+- the rule answers a callee — an edge is recorded, carrying the row's `taint:` in `FileCollection::Edge#taint_if_unresolved` rather than at the site;
+- the rule answers **nil** — no edge, and `UnitScan` taints the site exactly as it did before the field existed. `render foo`, `render json: @user` and `render formats: computed` all land here;
+- the edge resolves to nothing at propagation — `Propagator.taint_unresolved_callee` seeds the carried cause into the caller's state, the same way `taint_unresolved_super` does and for the same reason: only the merged table can answer. A layout, which is a declined unit today ([#1047](https://github.com/rigortype/rigor/issues/1047)), is the measured case.
+
+The taint is therefore **added where the edge failed, never subtracted where it succeeded**, so every step of the fixpoint stays monotone and no consumer has to reason about a cause that might be removed later in the pass.
+
+`CalleeRule::UNIT_RULES` answer for a whole unit instead of a site, and are applied once in `UnitScan#apply_unit_callees` after the walk. Rails' implicit render is the whole of the case: the producing fact is a body that made no call, which neither a class-body harvest (`FrameworkUnits` cannot see which of a class's methods responded) nor a call-site rule can observe. Such a row contributes an **edge and nothing else** — no label, no taint — so an edge that resolves to nothing costs exactly nothing.
+
+Four conditions, and each of them exists because breaking it is a false positive:
+
+- **the unit's owner reaches the row's receiver** — the ordinary ancestry match;
+- **no `responds:` row fired at the unit's top level.** `responds:` marks a row whose call supplies the unit's answer; an action that called `render :edit` or `redirect_to` outright did not take the implicit render. **Conditional does not count**: `redirect_to root_path if @user.nil?` leaves the other path taking it, and a unit that recorded the response there would drop the template edge *and* read exhaustive — the one combination an effect summary may never produce. `UnitScan` counts branching ancestors and only a depth of zero records a response. Those are `If` / `Unless` / `Case` / loops / `And` / `Or` (modifier forms included, since Prism spells `render :x if y` as an `IfNode`), `Rescue` — which is the rescue **clause**, not the body it guards, so a `render` in the `begin` half of `begin … rescue … end` sits at depth zero, correctly, because that half runs — and a **`BlockNode`** or a **`LambdaNode`**, whose body a call may never make: `User.transaction { redirect_to "/" }`, `[1].each { redirect_to "/" }`, `x.presence&.then { … }` and `@after = -> { redirect_to "/" }` are the shapes that matter. The one exempt block is `respond_to` / `respond_with`'s own, which is a format dispatcher rather than a branch; its **arms** (`format.html { … }`) are ordinary branching blocks, so a `render json:` in the JSON arm no longer stands the HTML arm's implicit render down. Two residual over-approximations, both of which keep an edge that is not needed rather than dropping one that is: an `if`/`else` whose every branch responds, and a response inside a format arm. `redirect_to … and return` is a third, through `AndNode`; the corpus has no site of it;
+- **the unit is public.** `Effects::Visibility.non_public_names` reads a class body's `private` / `protected` regions and the `private def foo` / `private :foo` forms in source order, and a marked member is skipped: Rails' `action_methods` is a controller's public instance methods, so a `private def card` is never rendered as `users/card` however much a template of that name exists. `public :foo` **subtracts**, because `private; def reopened; end; public :reopened` is a public action; the array form (`private %i[a b]`) is read and a splat (`private(*names)`) is not, so a splatted member stays public; a `def self.x` in a private region marks nothing, because a region hides no singleton method and the instance method of that name is a different one;
+- **the unit is not a nested `def` and not a singleton method.** Neither is ever an action.
 
 #### Edges
 

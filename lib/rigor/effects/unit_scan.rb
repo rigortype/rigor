@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "attribution"
+require_relative "callee_rule"
 require_relative "catalog"
 require_relative "envelope_index"
 require_relative "file_collection"
@@ -40,6 +41,35 @@ module Rigor
       FRAME_LOCAL_GLOBALS = %w[$~ $_ $& $` $' $+ $!].to_set.freeze
 
       REFLECTIVE_SEND = %i[send public_send __send__].to_set.freeze
+
+      # The constructs under which a call may not run (#1048). Only the `responds:` bit reads this, and
+      # only to refuse to record a response the body might not perform: `render :edit if x` leaves the
+      # other path taking Rails' implicit render.
+      #
+      # The modifier forms need no entry of their own — Prism spells `render :x if y` as an ordinary
+      # `IfNode` — and `RescueNode` is the rescue CLAUSE rather than the body it guards, so a `render` in
+      # the `begin` half of `begin … rescue … end` is at depth zero, which is right: that half runs.
+      #
+      # A `LambdaNode` is here for the same reason and needs no exemption: `@after = -> { redirect_to
+      # "/" }` stores a response rather than performing one, and the body may never be called at all.
+      #
+      # A **block** is branching too, but is answered by {#branching?} rather than listed here, because
+      # only the CALL that owns it can say whether it is one. `User.transaction { redirect_to "/" }`,
+      # `[1].each { redirect_to "/" }` and `x.presence&.then { … }` all contain a call the body may not
+      # make, and recording a response from one would drop the implicit-render edge AND leave the unit
+      # reading exhaustive — the combination this bit exists to prevent.
+      BRANCHING = [
+        Prism::IfNode, Prism::UnlessNode, Prism::CaseNode, Prism::CaseMatchNode,
+        Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
+        Prism::RescueNode, Prism::RescueModifierNode, Prism::AndNode, Prism::OrNode,
+        Prism::LambdaNode
+      ].to_set.freeze
+
+      # The one block a response may be recorded through: `respond_to`'s own. It is the format dispatcher
+      # rather than a conditional, and it always runs — but its ARMS do not, so `f.html { … }` is an
+      # ordinary branching block and a `render json:` in the `f.json` arm no longer stands the `f.html`
+      # arm's implicit render down.
+      DISPATCH_SELECTORS = %i[respond_to respond_with].to_set.freeze
 
       # Selectors a per-class POSTURE default must never answer for, because a more specific reading of
       # the same site exists and would be swallowed: `send` and friends are the `dynamic-send` taint, and
@@ -113,9 +143,15 @@ module Rigor
       # @param method_name — this unit's own selector — what a `super` in its body names as
       #   the target the propagator resolves above `owner_class` (#446). With no name to state, a `super`
       #   taints instead.
+      # @param non_public — whether the class body declared this unit `private` or `protected`
+      #   (#1048). Only a UNIT callee rule reads it, and only to decline: Rails' `action_methods` is a
+      #   controller's PUBLIC instance methods, so a private helper is never implicitly rendered — while
+      #   a project that happens to ship a template of the same name would otherwise hand that
+      #   template's effects to the helper.
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
                      attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                     plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil)
+                     plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil,
+                     non_public: false)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
@@ -124,6 +160,7 @@ module Rigor
         @plugin_facts = plugin_facts
         @owner_class = owner_class
         @method_name = method_name
+        @non_public = non_public ? true : false
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
@@ -133,6 +170,19 @@ module Rigor
         @edges = []
         @nested = []
         @delegates_upward = false
+        # #1048 — whether a plugin row marked `responds:` fired **unconditionally** in this unit, i.e.
+        # the body supplied the framework's answer on every path through it. It is what stands a UNIT
+        # callee rule down: an action that called `render :edit` or `redirect_to` outright did not take
+        # Rails' implicit render.
+        #
+        # Conditional does not count, and that is the whole of the bit's care. `redirect_to root_path if
+        # @user.nil?` leaves the other path taking the implicit render, so a unit that recorded the
+        # response there would drop the template edge AND read exhaustive — the one combination an
+        # effect summary may never produce. {@conditional} counts the branching ancestors the walk is
+        # inside; only a depth of zero answers.
+        @responded = false
+        @conditional = 0
+        @transparent_blocks = Set.new.compare_by_identity
         # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
         @unclaimed = false
       end
@@ -155,6 +205,7 @@ module Rigor
       # Walks `body` and returns `[Summary, edges]`.
       def run(body)
         walk(body)
+        apply_unit_callees
         summary = Summary.new(
           bundles: @bundles, declared_bundles: @declared_bundles,
           exhaustive: @causes.empty?, causes: @causes, unclaimed: @unclaimed
@@ -185,7 +236,20 @@ module Rigor
         return if unit_boundary?(node)
 
         visit(node)
+        return node.rigor_each_child { |child| walk(child) } unless branching?(node)
+
+        @conditional += 1
         node.rigor_each_child { |child| walk(child) }
+        @conditional -= 1
+      end
+
+      # Whether the walk is entering a construct whose body may not run. A `BlockNode` answers from the
+      # call that owns it, which {#visit_call} has already marked — `walk` visits a node before its
+      # children, so the mark is always in place by the time the block is reached.
+      def branching?(node)
+        return !@transparent_blocks.include?(node) if node.is_a?(Prism::BlockNode)
+
+        BRANCHING.include?(node.class)
       end
 
       # A nested unit is recorded and NOT descended into: its body belongs to its own summary, and the
@@ -258,6 +322,7 @@ module Rigor
       end
 
       def visit_call(node)
+        mark_transparent_block(node)
         record = @calls[node]
         attribute(node, record)
         plugin = attribute_plugin(node, record)
@@ -270,6 +335,16 @@ module Rigor
         bound = envelope || (plugin&.discharge? ? plugin : nil)
         visit_uncatalogued(node, record, bound) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # `respond_to do |format| … end` — the block that is a dispatcher rather than a branch. Marked by
+      # identity, because a `BlockNode` cannot name the call it belongs to and two structurally equal
+      # blocks in one body are two blocks.
+      def mark_transparent_block(node)
+        return unless node.receiver.nil? && DISPATCH_SELECTORS.include?(node.name)
+
+        block = node.block
+        @transparent_blocks << block if block.is_a?(Prism::BlockNode)
       end
 
       # The **plugin stratum** (#387; ADR-103 WD6 / WD10): what the plugin that models a framework says
@@ -292,15 +367,78 @@ module Rigor
         row = plugin_row(node, record)
         return nil if row.nil?
 
+        @responded = true if row.responds && @conditional.zero?
+        edged = callee_edge_taken?(node, row)
         labels = row.narrow ? Narrowing.apply(row.narrow, node) : row.labels
-        return row if labels.nil? || labels.empty?
+        # A `narrow:` that narrowed to nothing says the call does nothing, and a call that does nothing
+        # taints nothing. A row that declares no labels at all is a different statement — since #1048 a
+        # row may contribute an EDGE and no label — so it falls through to the taints rather than
+        # returning here.
+        return row if row.narrow && (labels.nil? || labels.empty?)
 
-        add_declared(Origin.plugin(row.key), labels)
-        # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
-        # nothing about the template, which is not an effect unit yet (ADR-103 WD11).
-        taint(row.taint, row.key) if row.taint
-        taint("plugin-attribution", row.key) unless row.discharge?
+        add_declared(Origin.plugin(row.key), labels) unless labels.nil? || labels.empty?
+        record_plugin_taints(row, edged)
         row
+      end
+
+      # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
+      # nothing about the template. Where a {CalleeRule} named the template the taint rides the EDGE
+      # instead (#1048), so a render that reaches a real unit clears it and one that reaches nothing
+      # keeps it — decided by the propagator, which is the only thing that knows.
+      def record_plugin_taints(row, edged)
+        taint(row.taint, row.key) if row.taint && !edged
+        taint("plugin-attribution", row.key) unless row.discharge?
+      end
+
+      # #1048 — the call-graph edge a framework method IS, when the plugin's row named a {CalleeRule}.
+      # `render :show` inside `UsersController` runs `view:users/show.html`, which is a unit in the same
+      # table; the rule reads the call's argument literals and nothing else, and answers nil for anything
+      # it cannot settle — a computed target, an unmodelled option, a receiver whose class names no view
+      # directory. Nil leaves the site exactly as it was, taint included.
+      #
+      # @return whether an edge took the row's taint with it
+      def callee_edge_taken?(node, row)
+        return false if row.callee.nil? || !CalleeRule.site_rule?(row.callee)
+
+        callee = CalleeRule.site(row.callee, node, owner_class: @owner_class, unit_key: @method_name)
+        return false if callee.nil?
+
+        @edges << FileCollection::Edge.new(
+          receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false,
+          taint_if_unresolved: row.taint ? [row.taint, row.key].freeze : nil
+        )
+        !row.taint.nil?
+      end
+
+      # The UNIT callee rules (#1048): an edge a plugin declares for a body that made no call at all.
+      # Rails' implicit render is the whole of the case — an action that falls off its end renders
+      # `<controller>/<action>` — so the producing fact is the ABSENCE of a `responds:` row, which only a
+      # finished unit scan can observe.
+      #
+      # Contributes an edge and nothing else — no label, no taint — which is what keeps it from being
+      # wrong about a method that is not an action at all.
+      #
+      # Two units it never applies to, and both are the same false positive twice: a `private` /
+      # `protected` member (Rails' `action_methods` is public only) and a `def` nested inside another
+      # method. A project with `app/views/users/card.html.erb` and a `private def card` would otherwise
+      # hand that template's `io.db.write` to the helper.
+      def apply_unit_callees
+        return if @responded || @singleton || @non_public
+        return if @owner_class.nil? || @method_name.nil?
+
+        rows = @plugin_facts.unit_callee_rows
+        return if rows.empty?
+
+        rows.each do |row|
+          next unless @plugin_facts.descends_from?(@owner_class, row.receiver)
+
+          callee = CalleeRule.unit(row.callee, owner_class: @owner_class, unit_key: @method_name)
+          next if callee.nil?
+
+          @edges << FileCollection::Edge.new(
+            receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false
+          )
+        end
       end
 
       def plugin_row(node, record)

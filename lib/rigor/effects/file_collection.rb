@@ -50,8 +50,15 @@ module Rigor
       # it had something to read". Only sig-gen's annotation emission consults it, through
       # {EffectTable::Entry#unclaimed?}: writing `%a{pure}` is a claim about a callee nobody described,
       # and the emitter must decline rather than invent one.
+      # `taint_if_unresolved` is #1048's inversion of a taint. A `render :show` whose {CalleeRule} named
+      # `view:users/show.html` may or may not reach a unit — only the merged table knows, exactly as only
+      # the merged ancestry knows whether a `super` resolves — so the row's `template-not-analysed` cause
+      # travels ON the edge as a frozen `[cause, detail]` pair and {Propagator} seeds it only where the
+      # edge landed on nothing. Adding a cause where the walk failed rather than subtracting one where it
+      # succeeded keeps every step of the fixpoint monotone, and it is the same shape
+      # {Propagator.taint_unresolved_super} already has.
       Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call, :unclaimed,
-                         :constant_receiver) do
+                         :constant_receiver, :taint_if_unresolved) do
         # Defaulted because every producer but the `super` one records an ordinary call, and an ordinary
         # call is not a `super`, and because a producer that says nothing about `unclaimed` /
         # `constant_receiver` means the safe value of each.
@@ -60,7 +67,10 @@ module Rigor
         # whose member list has grown raises `TypeError: struct size differs`, which the store reads as a
         # miss. That is the right outcome and not the one relied on — the cache identity carries a schema
         # component ({Identity}, `schema:3`), so such an entry is never offered in the first place.
-        def initialize(super_call: false, unclaimed: false, constant_receiver: false, **) = super
+        def initialize(super_call: false, unclaimed: false, constant_receiver: false,
+                       taint_if_unresolved: nil, **)
+          super
+        end
       end
 
       # An ancestry entry that names nothing and can never resolve. The scanner records it where a class
@@ -203,7 +213,8 @@ module Rigor
 
       def edge_order(edge)
         [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0,
-         edge.super_call ? 1 : 0, edge.constant_receiver ? 1 : 0]
+         edge.super_call ? 1 : 0, edge.constant_receiver ? 1 : 0,
+         Array(edge.taint_if_unresolved).join("\x00")]
       end
     end
   end

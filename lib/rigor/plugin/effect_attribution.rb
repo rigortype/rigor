@@ -69,7 +69,7 @@ module Rigor
       SELF_HEAD = "self"
 
       attr_reader :receiver, :method, :singleton, :labels, :narrow, :discharge, :within, :on_result,
-                  :taint, :why
+                  :taint, :callee, :responds, :why
 
       # The taint causes a plugin row may name. A closed subset of
       # {Rigor::Effects::TaintCause::ALL}: a plugin may say "and there is more here I cannot see", but
@@ -85,13 +85,25 @@ module Rigor
       # @param narrow — a {Rigor::Effects::Narrowing} handler name, when the call's own
       #   argument literals settle a question the row cannot (`connection.execute("SELECT …")`)
       # @param discharge — see above; honoured only for a first-party bundled plugin
+      # @param callee — the name of a {Rigor::Effects::CalleeRule} rule, when a call to this
+      #   method is also a call **graph edge** the syntax does not contain: `render :show` runs
+      #   `app/views/users/show.html.erb`, which is an effect unit of its own (#393 / #1048). The rule
+      #   reads the call's own argument literals and names the callee key; the engine owns the strategy,
+      #   exactly as it does for `narrow:`.
+      # @param responds — whether a call to this method supplies the unit's answer, so a
+      #   {Rigor::Effects::CalleeRule::UNIT_RULES} rule on the same receiver must not also apply. `render`,
+      #   `redirect_to` and `head` each set it: an action that called one of them did not take Rails'
+      #   implicit render, and edging it to the conventional template would attribute a view the action
+      #   never rendered.
       # @param why — the audit justification, required exactly as `data/effects/core.yml` requires
       #   one of every row: a label with no stated reason is a claim nobody can review.
       def initialize(receiver:, method:, labels:, why:, singleton: false, narrow: nil, discharge: false, # rubocop:disable Metrics/ParameterLists
-                     within: nil, on_result: false, taint: nil)
+                     within: nil, on_result: false, taint: nil, callee: nil, responds: false)
         @receiver = validate_receiver!(receiver)
         @method = method.to_sym
         @singleton = singleton ? true : false
+        @callee = callee.nil? ? nil : callee.to_s.dup.freeze
+        @responds = responds ? true : false
         @labels = normalize_labels(labels)
         @narrow = narrow.nil? ? nil : narrow.to_s.dup.freeze
         @discharge = discharge ? true : false
@@ -125,7 +137,7 @@ module Rigor
         {
           "receiver" => @receiver, "method" => @method.to_s, "singleton" => @singleton,
           "labels" => @labels, "narrow" => @narrow, "discharge" => @discharge, "within" => @within,
-          "on_result" => @on_result, "taint" => @taint
+          "on_result" => @on_result, "taint" => @taint, "callee" => @callee, "responds" => @responds
         }
       end
 
@@ -166,9 +178,16 @@ module Rigor
         value.dup.freeze
       end
 
+      # A row normally has to say something. The one exception is a row whose whole contribution is a
+      # `callee:` EDGE — Rails' implicit render is a fact about an action that made no call at all, so
+      # there is no site to colour and no label to state; what the row buys is the edge to the template.
+      # Reading the edge and inventing a label beside it would put `rails.response.write` on every private
+      # helper a controller happens to define.
       def normalize_labels(labels)
         list = Array(labels).map { |label| label.to_s.dup.freeze }
-        raise ArgumentError, "effect attribution for #{@receiver} must declare at least one label" if list.empty?
+        if list.empty? && @callee.nil?
+          raise ArgumentError, "effect attribution for #{@receiver} must declare at least one label"
+        end
 
         list.uniq.sort.freeze
       end

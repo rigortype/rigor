@@ -196,7 +196,7 @@ module Rigor
       end
 
       # The uniqueness validator's own query. It rides the DECLARED lane with no taint, exactly as every
-      # other first-party plugin contribution does (ADR-103 WD6): the plugin read the app's own
+      # other first-party plugin contribution does (ADR-103 WD6 / WD17): the plugin read the app's own
       # `validates … uniqueness: true` and knows what Rails does with it, but the analyzer did not read a
       # body, so this is a trusted claim rather than a proof.
       def uniqueness_summary(class_name)

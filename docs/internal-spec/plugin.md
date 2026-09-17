@@ -799,7 +799,7 @@ duplication in `rigor effects explain`.
 ##### `EffectAttribution`
 
 `Rigor::Plugin::EffectAttribution.new(receiver:, method:, labels:, why:, singleton: false, narrow: nil,
-discharge: false, within: nil, on_result: false, taint: nil)`.
+discharge: false, within: nil, on_result: false, taint: nil, callee: nil, responds: false)`.
 
 `why:` is **required and non-empty**, exactly as every row of `data/effects/core.yml` requires one: a
 label with no stated reason is a claim nobody can review.
@@ -829,7 +829,77 @@ question the row cannot: `connection.execute("UPDATE …")` is a write and `exec
 `taint:` lets a row state a bound AND say the bound is not the whole story. It is restricted to
 `template-not-analysed` and `opaque-callable` — the only two things a framework model can honestly not
 see. `render` is the case: what the controller does is fully stated, and what the template does is
-unknown until views are effect units.
+unknown until the render site is edged to the template's own unit.
+
+##### `callee:` — a framework method that is also an EDGE ([#1048](https://github.com/rigortype/rigor/issues/1048))
+
+`callee:` names a `Rigor::Effects::CalleeRule` rule, and it is shaped exactly as `narrow:` is, for the
+same reason: the plugin supplies a **name** and the engine owns the strategy. A block would have to run
+inside the per-file effect scan — the one place [ADR-103](../adr/103-effect-labels.md) WD13 forbids
+anything that resolves, walks or types — and would not survive the fork-pool / Ractor boundary. A rule
+reads the call's own argument literals, the unit's owner class and the unit's own key, and **nothing
+else**: no dataflow, no typer question, no filesystem.
+
+`render :show` inside `UsersController` runs `app/views/users/show.html.erb`, synchronously and
+in-process, and since [#393](https://github.com/rigortype/rigor/issues/393) that template is an effect
+unit keyed `view:users/show.html` sitting in the same summaries table. `effect_edges:` could not spell
+it — its payload is a receiver *class name* and it mints units on a class body — so the edge is produced
+here, at the call site, from the literals the author wrote.
+
+| Rule | Applied | Reads |
+| --- | --- | --- |
+| `rails_render` | one call node, inside a controller | `render :show`, `render "show"`, `render "users/show"`, `render template:`, `render action:`, `render partial:` (with or without `collection:`) |
+| `rails_render_partial` | one call node, inside a template unit | the same, with a **bare argument read as a partial** and `layout:` read as one too — which is what a view means by them |
+| `rails_implicit_render` | once per unit, from its owner and its own key | nothing; the producing fact is that the body made no call at all |
+
+A rule that cannot settle the target from literals alone answers **nil**, and a nil leaves the site
+exactly as it was, `taint:` included. A rule that answers a key the run's table has no unit for produces
+an edge that resolves to nothing, and the row's `taint:` is seeded **by the propagator** from
+`FileCollection::Edge#taint_if_unresolved` — added on failure rather than subtracted on success, so
+every step of the fixpoint stays monotone. Between them those two rules are why `render foo`,
+`render json:`, and a `render` of a template the plugin declined (a layout,
+[#1047](https://github.com/rigortype/rigor/issues/1047)) all keep the `template-not-analysed` taint,
+while only a render that reached a real unit clears it.
+
+A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.
+Rails' implicit render is a fact about a method that made *no call*, so there is no site to colour and
+no class body that can see which of its methods responded — only a finished unit scan can. Such a row
+contributes an **edge and nothing else**: no label, no taint, so an edge that resolves to nothing costs
+exactly nothing. It is also the one case where `labels:` MAY be empty; every other row must still
+declare at least one.
+
+`responds: true` marks a row whose call supplies the unit's answer, so a unit rule on the same receiver
+stands down. `render`, `redirect_to`, `head`, `send_data` and `send_file` each carry it: an action that
+called one of them did not take Rails' implicit render, and edging it to the conventional template would
+attribute a view the action never runs. `render_to_string` deliberately does **not** — it builds a
+string and leaves the response unanswered.
+
+The engine narrows a unit rule three ways beyond the ancestry match, and each is a false positive it
+would otherwise produce:
+
+- a `responds:` call counts only at the unit's **top level**. `redirect_to root_path if @user.nil?`
+  leaves the other path taking the implicit render, and standing down there would drop the template
+  edge *and* leave the unit reading exhaustive. Branching ancestors are `If` / `Unless` / `Case` /
+  loops / `And` / `Or` (modifier forms included), `Rescue` — the rescue **clause**, not the body it
+  guards, so a `render` in the `begin` half of `begin … rescue … end` is at depth zero and stands the
+  rule down, correctly, because that half runs — and a **block or lambda**, whose body a call may never
+  make (`User.transaction { redirect_to "/" }`, `[1].each { … }`, `@after = -> { redirect_to "/" }`). The exception is `respond_to` /
+  `respond_with`'s own block, a format dispatcher rather than a branch; its arms are ordinary blocks,
+  so `format.json { render json: @user }` no longer stands the HTML arm's implicit render down. Three
+  over-approximations remain — an `if`/`else` whose every branch responds, a response inside a format
+  arm, and `redirect_to … and return` — and each keeps an edge that is not needed rather than
+  dropping one that is;
+- a **`private` or `protected`** member is skipped. Rails' `action_methods` is a controller's public
+  instance methods, so a `private def card` is never rendered as `users/card` — while a project that
+  happens to ship `app/views/users/card.html.erb` would otherwise hand that template's effects to the
+  helper. `Effects::Visibility` reads `private` / `protected` as a region and in their argument forms
+  (`private def foo`, `private :foo`, `private %i[foo bar]`), and `public` **subtracts** in all of
+  them; a `def self.x` inside a region marks nothing, since a region hides no singleton method. A
+  **splat** (`private(*names)`) is a value rather than syntax and is not read, so such a member stays
+  public. It reads the class body's own top
+  level in source order, and anything deeper — `send(:private, :card)`, a `class_eval`, a concern that
+  privatises on include — reads as public, which leaves today's behaviour intact rather than guessing;
+- a **nested `def`** and a **singleton method** are skipped outright. Neither is ever an action.
 
 ##### Discharge and first-party standing
 
@@ -869,6 +939,11 @@ that plugin's labels drop — one plugin overreaching must not un-name another's
 
 Either way the labels land in the **declared** lane, never the proven one. A discharging row is a trusted
 claim, not a proof: "this is what it does", not "the analyzer read the body and saw this".
+[ADR-103](../adr/103-effect-labels.md) WD17 weighed promoting a first-party row into `proven` and
+declined it — that would be a redefinition of `proven` rather than an extension, and it would stake
+`rigor check`'s red on the correctness of plugin authorship rather than on code Rigor read. The
+consequence a policy author feels is that `EnvelopeCheck` cannot judge a plugin-sourced label at all;
+the enforcement surface for one is `rigor effects check`.
 
 ##### `EffectEdge`
 

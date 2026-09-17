@@ -306,8 +306,10 @@ module Rigor
       end
 
       # Issue #1051 — the run-scoped disclosures ({Plugin::Base#disclose_once}) this session's plugin
-      # instances registered, each tagged with the plugin id the coordinator de-duplicates by. Marshal-clean
-      # (frozen Hashes of Strings and Symbols) so the fork pool ships them back like the three drains above;
+      # instances registered, each tagged with the plugin id the coordinator de-duplicates by — including the
+      # positioned batches of {Plugin::Base#emit_once} (#1060), which ride the same records. Marshal-clean
+      # (frozen Hashes of Strings and Symbols, and frozen `Diagnostic` copies for a batch) so the fork pool
+      # ships them back like the three drains above;
       # a registration made on the PARENT during `#prepare` is already visible to the coordinator through
       # the pre-fork session, and one a worker makes while analysing its slice arrives through the payload.
       # Entries are not cleared — a drain is a read, and the parent session is drained again on the degrade

@@ -245,6 +245,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     effect_edges()
     effect_entry_points()
     effect_labels()
+    emit_once(req:key,req:diagnostics)
     init(req:services)
     io_boundary()
     manifest()

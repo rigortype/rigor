@@ -173,11 +173,51 @@ to repeat. Adopting `#disclose_once` is the migration.
 The question that chooses the channel is whether the row has a
 position it could be **right** about. "The index did not load" does
 not — it goes here. A project-wide scan whose rows each name a real
-file and line does, and must keep it; surfacing such a batch through
-`#diagnostics_for_file` behind an `@emitted` flag still duplicates it
-per worker, and there is no run-scoped channel for a *positioned*
-batch yet ([#1060](https://github.com/rigortype/rigor/issues/1060)).
-`rigor-rails-i18n`'s view scan is the one bundled instance.
+file and line does, and must keep it — it goes to `#emit_once`, below.
+
+#### Project-wide positioned batches — `#emit_once` ([#1060](https://github.com/rigortype/rigor/issues/1060))
+
+`#emit_once(key, diagnostics)` is the positioned sibling of
+`#disclose_once`: it registers a **batch** of fully built
+`Rigor::Analysis::Diagnostic`s under `key` and emits it once per run,
+with every row keeping the `path` / `line` / `column` the plugin gave
+it. It exists for a project-wide scan whose rows name files that no
+single analysed file owns — `rigor-rails-i18n`'s view-template scan is
+the bundled case: the views are usually not analysed targets (an `.erb`
+reaches the engine only as a template unit a `template_globs:` plugin
+contributes), so there is no per-file return to anchor the rows to, and
+returning them from whichever file an instance analysed first repeated
+the batch once per fork-pool worker.
+
+It rides the `#disclose_once` registration table, so everything above
+about call sites, the `nil` return, the de-duplication sources, the
+Ractor-degrade exception and emission order applies unchanged. `key`
+shares one namespace per plugin with `#disclose_once`. The differences
+are binding:
+
+- *The rows keep their positions.* The engine stamps only
+  `source_family: "plugin.<manifest.id>"`, the stamp a
+  `#diagnostics_for_file` row gets, so the qualified rule and the file
+  a baseline entry keys on are unchanged. Moving a batch from an
+  `@emitted` flag to `#emit_once` is therefore **baseline-neutral** —
+  unlike moving a row to `#disclose_once`.
+- *De-duplication is by key alone, and the first registration wins
+  whole.* A later batch under the same key — from this instance or any
+  other worker's — is dropped entirely, never merged row by row: every
+  worker scans the same project, so a row-wise union could only add a
+  partial or divergent view.
+- *The batch is stamped into the file-positioned stream,* immediately
+  after the per-file rows and before the run-level block the
+  disclosures sit in; order is `(registry position, key)`, then the
+  batch's own row order, identically under `--workers 0` and
+  `--workers N`. It is not part of the per-file stream the incremental
+  cache stores for any one file, and it bypasses the template-unit
+  line remap: a plugin-authored row already names the template's own
+  line, not a line of a unit's compiled Ruby.
+
+Each row is copied and frozen on registration (Marshal- and
+Ractor-clean). A non-`Diagnostic` element raises `ArgumentError`,
+reported through the usual `runtime-error` isolation envelope.
 
 #### Template units — `template_globs:` / `#template_units_for_file` ([#392](https://github.com/rigortype/rigor/issues/392))
 

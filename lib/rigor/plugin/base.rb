@@ -493,9 +493,9 @@ module Rigor
         @fact_cache = {}
         @producer_value_cache = {}
         @producer_errors = {}
-        # Issue #1051 — the run-scoped disclosure table ({#disclose_once}). Allocated here for the same
-        # reason as the three memos above: a registration is a Hash-content mutation, so it stays sound on
-        # a plugin that freezes itself in `initialize`.
+        # Issue #1051 — the run-scoped disclosure table ({#disclose_once}, and since #1060 {#emit_once}).
+        # Allocated here for the same reason as the three memos above: a registration is a Hash-content
+        # mutation, so it stays sound on a plugin that freezes itself in `initialize`.
         @run_disclosures = {}
       end
 
@@ -753,9 +753,47 @@ module Rigor
         nil
       end
 
-      # Engine-facing reader for {#disclose_once}: this instance's registered disclosures in registration
-      # order. Plugin authors never call it — {Rigor::Analysis::Runner} and {Rigor::Analysis::WorkerSession}
-      # drain it, and the de-duplication across instances happens there.
+      # Issue #1060 — the POSITIONED sibling of {#disclose_once}: registers a whole batch of fully built
+      # diagnostics under `key`, emitted once per run however many plugin instances (fork-pool workers)
+      # register it. Each row keeps its own `path` / `line` / `column` — use this when a project-wide scan
+      # produces rows that are right about a position (a view template's line) but no single analysed file
+      # owns them, so returning them from `#diagnostics_for_file` would repeat them once per worker.
+      #
+      #     emit_once(:view_diagnostics, scan_view_files(index))
+      #
+      # The question that chooses between the two channels is whether the row has a position it could be
+      # right about: a notice about the run's inputs has none and goes through {#disclose_once}
+      # (`.rigor.yml:1:1`); a row naming a real file and line comes here and keeps it.
+      #
+      # De-duplication is by `key` alone and the first registration wins: a later batch under the same key
+      # is dropped whole, on this instance or on any other instance in the run, never merged row by row.
+      # Every worker scans the same project, so a row-wise union could only add a worker's partial or
+      # divergent view. `key` shares one namespace per plugin with {#disclose_once} — the two channels are
+      # one registration table.
+      #
+      # Callable from `#prepare`, `#diagnostics_for_file`, or a `node_rule` block; returns `nil` and emits
+      # nothing itself. The engine stamps `source_family: "plugin.<id>"` exactly as it does for a per-file
+      # row, so the qualified rule and the position a baseline keys on are the ones `#diagnostics_for_file`
+      # would have produced. Each row is copied and frozen on registration so the batch rides the fork
+      # payload and the Ractor `:done` message unchanged; a non-{Rigor::Analysis::Diagnostic} element
+      # raises `ArgumentError`, which the engine reports as this plugin's `runtime-error`.
+      def emit_once(key, diagnostics)
+        id = key.to_s
+        return nil if @run_disclosures.key?(id)
+
+        batch = Array(diagnostics).map do |row|
+          next row.dup.freeze if row.is_a?(Rigor::Analysis::Diagnostic)
+
+          raise ArgumentError, "emit_once expects Rigor::Analysis::Diagnostic rows, got #{row.class}"
+        end
+        @run_disclosures[id] = { key: id, diagnostics: batch.freeze }.freeze
+        nil
+      end
+
+      # Engine-facing reader for {#disclose_once} and {#emit_once}: this instance's registrations in
+      # registration order; a positioned batch is the record carrying `:diagnostics`. Plugin authors never
+      # call it — {Rigor::Analysis::Runner} and {Rigor::Analysis::WorkerSession} drain it, and the
+      # de-duplication across instances happens there.
       def run_disclosure_records
         @run_disclosures.values
       end

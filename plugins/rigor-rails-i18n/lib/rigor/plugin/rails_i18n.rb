@@ -46,13 +46,7 @@ module Rigor
     #   skipped — the controller/action scope cannot be statically determined there.
     # - View template lazy keys (`t('.key')` inside ERB / Haml / Slim) are validated for key existence and
     #   per-locale coverage. Interpolation variable validation is skipped for view templates (the hash may
-    #   come from controller instance variables not visible in the template). The view scan is a
-    #   project-wide pass surfaced through the per-file diagnostic hook, so under `--workers` each fork-pool
-    #   worker re-emits the full set; sequential `rigor check` is unaffected. The `load-error` path no longer
-    #   shares this: it is a run-scoped disclosure (#1051), emitted once per run at `.rigor.yml:1:1`. The view
-    #   rows cannot take that route — each names a real view file and line, and `#disclose_once` positions
-    #   every row at `.rigor.yml`, which would be a claim about the config file rather than about the view.
-    #   Emitting them once per run needs a channel that keeps a registered batch's own positions (#1060).
+    #   come from controller instance variables not visible in the template).
     # - Pluralization (`t('errors.messages.too_short', count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's pluralization branches.
     # - YAML aliases / merges are accepted (Psych's standard `aliases: true`) but custom Ruby classes
@@ -109,28 +103,26 @@ module Rigor
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
         @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
         @load_errors = []
-        @view_diagnostics_emitted = false
       end
 
-      # File-level only: the once-per-run YAML load errors + the runtime (cache-load) error + the
-      # view-template scan. Per-call `t('key')` validation runs over the engine-owned walk via the
-      # node_rule below (ADR-37). The locale index and view diagnostics are lazily loaded + memoised by
-      # `producer_value`.
+      # Returns no rows of its own: every file-level outcome here is run-scoped. The YAML load errors and the
+      # runtime (cache-load) errors are disclosures (#1051); the view-template scan is a positioned batch
+      # registered through `#emit_once` (#1060) — its rows name view files that are usually not analysed
+      # targets, so no per-file return could own them, and returning them from whichever file an instance
+      # saw first repeated the whole batch once per fork-pool worker. Per-call `t('key')` validation runs
+      # over the engine-owned walk via the node_rule below (ADR-37). The locale index and view diagnostics
+      # are lazily loaded + memoised by `producer_value`, so the repeat registrations are no-ops.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:locale_index)
-        diagnostics = []
         disclose_load_errors unless @load_errors.empty?
         disclose_locale_runtime_error if index.nil? && producer_error(:locale_index)
-        unless @view_diagnostics_emitted
-          view_diags = producer_value(:view_diagnostics) || []
-          if (view_err = producer_error(:view_diagnostics))
-            disclose_view_runtime_error(view_err)
-          else
-            diagnostics.concat(view_diags)
-          end
-          @view_diagnostics_emitted = true
+        view_diags = producer_value(:view_diagnostics) || []
+        if (view_err = producer_error(:view_diagnostics))
+          disclose_view_runtime_error(view_err)
+        else
+          emit_once(:view_diagnostics, view_diags)
         end
-        diagnostics
+        []
       end
 
       # The lazy-key (`t('.key')`) expansion needs the enclosing method (the controller action), supplied
@@ -231,7 +223,8 @@ module Rigor
 
       # #1051 — both of these say the plugin could not READ something the project configured, which is a
       # run-level fact with no source position; they were repeated on every analysed file (the locale one)
-      # or on each instance's first (the view one).
+      # or on each instance's first (the view one). A key distinct from the `:view_diagnostics` batch's:
+      # the two channels share one registration table per plugin.
       def disclose_locale_runtime_error
         error = producer_error(:locale_index)
         disclose_once(

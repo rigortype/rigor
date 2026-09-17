@@ -107,6 +107,11 @@ module Rigor
       # contributed nothing a sibling could have read from its unit, which is why that is left as stated
       # rather than tracked. What stays exempt is the editor's buffer — a keystroke is not a save,
       # so #1038's per-keystroke property holds — and a path an earlier plugin already claimed.
+      #
+      # #1065 widened what "any of that plugin's claimed templates" covers: rigor-actionpack now claims the
+      # handlers it DECLINES, so editing one `.haml` costs the whole ERB claim its carry. Measured on
+      # mastodon at +4 ms — the templates are recompiled from the {RenderLocals} memo rather than from
+      # scratch — which is why the claim is decided as a whole here rather than split per handler.
       def self.collect_plugin(plugin, globs, collection, state)
         start_pass(plugin)
         plan = expand(globs, collection.root, collection.buffer).map do |path|

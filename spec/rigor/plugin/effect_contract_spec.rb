@@ -246,6 +246,32 @@ RSpec.describe "the plugin effect contract" do
       end.to raise_error(ArgumentError, /may only taint with/)
     end
 
+    # #1065 — a lookup-order table is only meaningful on a row whose rule names a callee to retry.
+    it "refuses `callee_fallbacks:` without a `callee:`" do
+      expect do
+        Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: ["io"], why: "x",
+                                             callee_fallbacks: { "js" => ["html"] })
+      end.to raise_error(ArgumentError, /without a `callee:`/)
+    end
+
+    it "refuses a fallback selector that could never be spliced into a callee key" do
+      expect do
+        Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: [], why: "x",
+                                             callee: "rails_render_partial",
+                                             callee_fallbacks: { "js" => ["html.erb"] })
+      end.to raise_error(ArgumentError, /one lowercase segment/)
+    end
+
+    it "keeps each fallback list in order, frozen, without a selector falling back to itself" do
+      row = Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: [], why: "x",
+                                                 callee: "rails_render_partial",
+                                                 callee_fallbacks: { js: %i[js html text html] })
+
+      expect(row.callee_fallbacks).to eq("js" => %w[html text])
+      expect(row.callee_fallbacks).to be_frozen
+      expect(row.callee_fallbacks["js"]).to be_frozen
+    end
+
     # The enum IS the enforcement of "no `perform_later` edge" (ADR-103 WD4).
     it "closes the edge-strategy enum" do
       expect { Rigor::Plugin::EffectEdge.new(receiver: "A", target: :perform_later, why: "x") }

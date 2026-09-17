@@ -58,6 +58,19 @@ module Rigor
         # nothing at all and must not be coloured by a guess (see `why:`).
         IMPLICIT_RENDER = "default_render"
 
+        # Action View's own format lookup order for a template-side render, as DATA the engine's
+        # `rails_render_partial` rule copies onto the edge (#1065). While a `.js.erb` template renders, the
+        # lookup context holds `[:js, :html]` — `LookupContext#formats=` appends `:html` to a lone `:js` —
+        # so `render "watchers"` runs `_watchers.js.erb` where it exists and `_watchers.html.erb`
+        # otherwise. The propagator takes the first key a unit answers.
+        #
+        # `js` is the only entry, because it is the only fallback Action View itself hard-codes. What a
+        # `.json`, `.xml` or `.turbo_stream` template falls back to is whatever the REQUEST's formats
+        # happened to be (`prepend_formats` puts the template's format in front of them) — an `Accept`
+        # header the source never states, Turbo's included — so those keep their taint rather than guess.
+        FORMAT_FALLBACKS = { "js" => ["html"] }.freeze
+        Ractor.make_shareable(FORMAT_FALLBACKS)
+
         # The cookie jars a Rails app writes through.
         COOKIE_JARS = ["self.cookies", "self.cookies.signed", "self.cookies.encrypted",
                        "self.cookies.permanent"].freeze
@@ -98,6 +111,7 @@ module Rigor
             EffectAttribution.new(
               receiver: VIEW, method: :render, labels: [], discharge: true,
               taint: "template-not-analysed", callee: "rails_render_partial",
+              callee_fallbacks: FORMAT_FALLBACKS,
               why: "a `render` inside a template runs another template. The edge is the whole " \
                    "contribution — what a partial render DOES is what the partial does, and the row " \
                    "reaches it now — while a target the rule cannot resolve keeps the taint. In a view " \

@@ -69,7 +69,7 @@ module Rigor
       SELF_HEAD = "self"
 
       attr_reader :receiver, :method, :singleton, :labels, :narrow, :discharge, :within, :on_result,
-                  :taint, :callee, :responds, :why
+                  :taint, :callee, :callee_fallbacks, :responds, :why
 
       # The taint causes a plugin row may name. A closed subset of
       # {Rigor::Effects::TaintCause::ALL}: a plugin may say "and there is more here I cannot see", but
@@ -90,6 +90,12 @@ module Rigor
       #   `app/views/users/show.html.erb`, which is an effect unit of its own (#393 / #1048). The rule
       #   reads the call's own argument literals and names the callee key; the engine owns the strategy,
       #   exactly as it does for `narrow:`.
+      # @param callee_fallbacks — the framework's lookup ORDER for a callee the rule named, as data (#1065):
+      #   `{ "js" => ["html"] }` says a callee selector of `js` that no unit answers is retried as `html`
+      #   before the row's `taint:` is seeded. Keys and values are selectors; each list is tried in order
+      #   and the first that resolves wins. Meaningless — and refused — without `callee:`. Which rule
+      #   consults it, and for which targets, is the rule's call rather than the row's: a table a plugin
+      #   writes cannot know whether a format was inherited or written by the author.
       # @param responds — whether a call to this method supplies the unit's answer, so a
       #   {Rigor::Effects::CalleeRule::UNIT_RULES} rule on the same receiver must not also apply. `render`,
       #   `redirect_to` and `head` each set it: an action that called one of them did not take Rails'
@@ -98,7 +104,7 @@ module Rigor
       # @param why — the audit justification, required exactly as `data/effects/core.yml` requires
       #   one of every row: a label with no stated reason is a claim nobody can review.
       def initialize(receiver:, method:, labels:, why:, singleton: false, narrow: nil, discharge: false, # rubocop:disable Metrics/ParameterLists
-                     within: nil, on_result: false, taint: nil, callee: nil, responds: false)
+                     within: nil, on_result: false, taint: nil, callee: nil, callee_fallbacks: nil, responds: false)
         @receiver = validate_receiver!(receiver)
         @method = method.to_sym
         @singleton = singleton ? true : false
@@ -111,6 +117,7 @@ module Rigor
         @on_result = on_result ? true : false
         validate_on_result!
         @taint = validate_taint!(taint)
+        @callee_fallbacks = validate_callee_fallbacks!(callee_fallbacks)
         @why = validate_why!(why)
         freeze
       end
@@ -137,7 +144,8 @@ module Rigor
         {
           "receiver" => @receiver, "method" => @method.to_s, "singleton" => @singleton,
           "labels" => @labels, "narrow" => @narrow, "discharge" => @discharge, "within" => @within,
-          "on_result" => @on_result, "taint" => @taint, "callee" => @callee, "responds" => @responds
+          "on_result" => @on_result, "taint" => @taint, "callee" => @callee,
+          "callee_fallbacks" => @callee_fallbacks, "responds" => @responds
         }
       end
 
@@ -214,6 +222,33 @@ module Rigor
         raise ArgumentError,
               "effect attribution #{key} may only taint with one of #{TAINT_CAUSES.inspect}, " \
               "got #{taint.inspect}"
+      end
+
+      # A selector is one dot-free, space-free segment — the half of a callee key after the receiver
+      # (`html` in `view:users/show.html`). Anything else could never be spliced into a key a unit answers,
+      # and a fallback that silently resolved nothing would read to its author as the feature being broken.
+      FALLBACK_SELECTOR = /\A[a-z0-9_]+\z/
+      private_constant :FALLBACK_SELECTOR
+
+      def validate_callee_fallbacks!(fallbacks)
+        return nil if fallbacks.nil?
+        raise ArgumentError, "effect attribution #{key} names `callee_fallbacks:` without a `callee:`" if @callee.nil?
+        raise ArgumentError, "effect attribution #{key} `callee_fallbacks:` must be a Hash" unless fallbacks.is_a?(Hash)
+
+        fallbacks.to_h do |from, to|
+          list = Array(to).map { |selector| fallback_selector!(selector) }.uniq
+          selector = fallback_selector!(from)
+          list.delete(selector)
+          [selector, list.freeze]
+        end.sort.to_h.freeze
+      end
+
+      def fallback_selector!(selector)
+        value = selector.to_s
+        return value.dup.freeze if FALLBACK_SELECTOR.match?(value)
+
+        raise ArgumentError, "effect attribution #{key} `callee_fallbacks:` selector must be one lowercase " \
+                             "segment, got #{selector.inspect}"
       end
 
       def validate_why!(why)

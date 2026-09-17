@@ -68,10 +68,11 @@ module Rigor
       # re-ask who may discharge.
       # `callee` names a {CalleeRule} rule (#1048) and `responds` marks a row whose call supplies the
       # unit's answer, so a unit rule on the same receiver stands down. `receiver` is carried because a
-      # UNIT rule has no call node to read one off.
+      # UNIT rule has no call node to read one off. `callee_fallbacks` is the plugin's lookup-order table
+      # for the rule's answer (#1065), carried verbatim to the edge the rule records.
       Row = Data.define(:key, :labels, :narrow, :discharge, :within, :taint, :plugin_id, :receiver,
-                        :callee, :responds) do
-        def initialize(receiver: nil, callee: nil, responds: false, **) = super
+                        :callee, :callee_fallbacks, :responds) do
+        def initialize(receiver: nil, callee: nil, callee_fallbacks: nil, responds: false, **) = super
 
         def discharge? = discharge
       end
@@ -271,7 +272,8 @@ module Rigor
         row = Row.new(key: entry.key, labels: LabelSet.new(entry.labels), narrow: entry.narrow,
                       discharge: discharge_granted?(contribution, entry), within: entry.within,
                       taint: entry.taint, plugin_id: contribution.id, receiver: entry.receiver,
-                      callee: callee_rule_for(contribution, entry), responds: entry.responds)
+                      callee: callee_rule_for(contribution, entry), responds: entry.responds,
+                      callee_fallbacks: entry.callee_fallbacks)
         (bucket_for(entry)[entry.receiver] ||= {})[entry.method.to_s] = row
         @unit_callee_rows << row if row.callee && CalleeRule.unit_rule?(row.callee)
       end
@@ -368,7 +370,7 @@ module Rigor
           [receiver,
            rows.sort.map do |selector, row|
              [selector, row.labels.to_a, row.narrow, row.discharge, row.within, row.taint,
-              row.callee, row.responds]
+              row.callee, row.callee_fallbacks, row.responds]
            end]
         end
       end

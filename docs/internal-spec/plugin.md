@@ -863,7 +863,8 @@ duplication in `rigor effects explain`.
 ##### `EffectAttribution`
 
 `Rigor::Plugin::EffectAttribution.new(receiver:, method:, labels:, why:, singleton: false, narrow: nil,
-discharge: false, within: nil, on_result: false, taint: nil, callee: nil, responds: false)`.
+discharge: false, within: nil, on_result: false, taint: nil, callee: nil, callee_fallbacks: nil,
+responds: false)`.
 
 `why:` is **required and non-empty**, exactly as every row of `data/effects/core.yml` requires one: a
 label with no stated reason is a claim nobody can review.
@@ -921,10 +922,49 @@ exactly as it was, `taint:` included. A rule that answers a key the run's table 
 an edge that resolves to nothing, and the row's `taint:` is seeded **by the propagator** from
 `FileCollection::Edge#taint_if_unresolved` — added on failure rather than subtracted on success, so
 every step of the fixpoint stays monotone. Between them those two rules are why `render foo`,
-`render json:`, and a `render` of a template the plugin never compiled (a Haml view, or a
-format the lookup falls back on — [#1065](https://github.com/rigortype/rigor/issues/1065)) all keep the
-`template-not-analysed` taint,
+`render json:`, and a `render` of a template the plugin never compiled (a Haml view, or a partial
+that exists in neither the requested format nor its fallback) all keep the `template-not-analysed` taint,
 while only a render that reached a real unit clears it.
+
+##### `callee_fallbacks:` — the framework's lookup order, as data ([#1065](https://github.com/rigortype/rigor/issues/1065))
+
+`callee_fallbacks:` is a Hash from a callee **selector** to the ordered selectors to retry when no unit
+answers it — rigor-actionpack's view row carries `{ "js" => ["html"] }`, because while a `.js.erb`
+template renders, Action View's lookup context is `[:js, :html]`. Every key and value is one lowercase
+segment (`/\A[a-z0-9_]+\z/`); a selector listed as its own fallback is dropped; a row naming it without
+`callee:` is refused at construction.
+
+The table is plugin data rather than an engine constant because the lookup order is a fact about the
+framework, and the engine's rules stay declarative. **Whether** it is consulted is the rule's call, not
+the row's, because only the rule knows where the selector came from:
+
+| Rule | Consults the table | Why |
+| --- | --- | --- |
+| `rails_render_partial` | only for a format **inherited** from the enclosing template unit | a `formats:` / `format:` keyword or a format spelled into the name (`render "list.js"`) is the author's word, and the rule keeps the taint rather than guess at a lookup the call overrode |
+| `rails_render` | never | its format is either the author's literal or the `html` default standing in for a request format the rule cannot see |
+| `rails_implicit_render` | never | a unit rule's edge carries no taint to keep, and its `html` is the same stand-in |
+
+The rule copies the list onto the edge (`FileCollection::Edge#fallback_selectors`) and the **propagator**
+decides, because whether `view:watchers/_list.js` exists is a question about the merged table the
+per-file scan cannot ask. The first selector — the requested one, then each fallback in order — that
+resolves is the edge's only target; the row's `taint:` is seeded only when all of them fail. One ordered
+list rather than one edge per candidate, because two edges would join **both** units where both exist,
+and only one of them runs.
+
+A fallback is **not** tried past a requested key the run declined — a template the plugin claimed and
+produced no unit for, carried as `Analysis::TemplateUnits#declined_unit_keys` and handed to
+`Propagator.propagate` ([#1065](https://github.com/rigortype/rigor/issues/1065)). "No unit answers" and
+"no such template" are different facts, and only the second licenses the framework's next candidate: a
+`_row.js.haml` beside a `_row.html.erb` is run as Haml, so joining the ERB unit would be a label no
+execution produces. A plugin that wants that protection for a handler it does not compile must CLAIM the
+handler in `template_globs:` and decline it in `template_units_for_file`, which is what rigor-actionpack
+does for `{haml,slim,jbuilder,builder,rabl,ruby}`; an unclaimed handler is invisible to the engine and
+its fallback fires as if no template were there.
+
+One over-approximation remains and is accepted: a partial reached *through* a fallback renders its own
+partials in the format its own unit key carries, while the framework's lookup context is still the
+original list. Where a nested partial exists in both formats, the first template joins the wrong one's
+labels — labels, never a taint, and zero occurrences on the measured corpus.
 
 A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.
 Rails' implicit render is a fact about a method that made *no call*, so there is no site to colour and

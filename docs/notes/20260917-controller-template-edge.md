@@ -209,3 +209,78 @@ argument about presentation rather than about what `proven` means.
 - **`render partial:, collection:` counted rather than reached.** `collection:` changes how many times a
   partial runs and not which one, and an effect summary is an upper bound over the body rather than a
   count, so the rule reads the option and ignores it.
+
+## 2026-09-18 — the `.js` → `.html` format fallback ([#1065](https://github.com/rigortype/rigor/issues/1065))
+
+Taken against the branch `js-format-html-fallback-1065`, base `121620ed` (which carries #1066's
+render-site locals and layout units, so the base numbers are not § 2's), with the method above: private
+`rsync` copies, the baseline arm unpacked with `git archive`, the same bundler variables, `.rigor`
+removed before every arm.
+
+The change: rigor-actionpack's view `render` row carries `callee_fallbacks: { "js" => ["html"] }`,
+`rails_render_partial` copies it onto the edge for a format it inherited from the enclosing unit, and
+the propagator takes the first of `js`, `html` that a unit answers, seeding the row's taint only when
+neither does.
+
+### The false-positive gate
+
+| Project | diagnostics before → after | effects off |
+| --- | ---: | --- |
+| redmine | 435 → 435, **byte-identical** | byte-identical |
+| mastodon | 1180 → 1180, **byte-identical** | not run — its effect table is byte-identical too |
+
+### Taints, by the producing row
+
+| Project | `ActionController::Base#render` | `#render_to_string` | `ActionView::Base#render` | total |
+| --- | ---: | ---: | ---: | ---: |
+| redmine | 76 → 76 | 0 → 0 | 64 → **31** | 140 → 107 |
+| mastodon | 328 → 328 | 0 → 0 | 0 → 0 | 329 → 329 (one `render_to_body`) |
+
+`view:` units carrying a `template-not-analysed` cause on redmine: **50 → 17**. Of the 64 `.js` units,
+**34 carried one and 1 still does** — `imports/mapping.js.erb`, whose
+`render :partial => "#{import_partial_prefix}_mapping"` is a computed name the rule declines before any
+format question arises. The 15 `.html` units are untouched. mastodon's whole `effects --format json
+--full` output is byte-identical, which is the expected answer: it has no `.js.erb` view.
+
+### What the 33 resolved edges bought
+
+Less than the taint count suggests, and worth saying so:
+
+- **0 units became exhaustive.** Each of the 33 swaps its `template-not-analysed` cause for the causes
+  the HTML partial really carries — 348 `unresolved-self-call`, 30 `dynamic-receiver`, 10
+  `unknown-ownership` entries across them. That is the honest direction: the old cause said "not
+  analysed", the new ones say what the analysis found.
+- **4 units gained a label**, all views: `groups/add_users.js` and `members/edit.js` gain `io.db.read`,
+  `issues/edit.js` and `issues/new.js` gain `io.db.read` and `mutate.self`. No unit lost a label.
+- **0 controller actions gained anything.** redmine reaches its `.js.erb` templates through
+  `respond_to { |format| format.js }`, and the implicit-render rule edges an action to
+  `<controller>/<action>.html` only. So a partial's effects now reach the `.js` template, and stop
+  there until an action's `format.js` arm is edged to its `.js` unit — a separate change to the unit
+  rule, not to the fallback.
+
+One over-approximation the fallback makes newly reachable: a partial reached through it renders its
+own partials in `html`, while Action View's context is still `[:js, :html]` and would try `.js` first.
+Where a nested partial exists in both formats, the `.js` template gets the `.html` one's labels. The
+count on redmine is **0** — its only dual-format partials, `imports/_{issues,users,time_entries}_mapping`,
+are rendered only through a computed name.
+
+Two shapes the fallback must NOT resolve past, found in review and fixed before landing: a template
+whose file exists and whose plugin produced no unit — an ERB whose compiled Ruby does not parse, and a
+handler the plugin does not compile at all. Action View runs those files, so the other format's effects
+are not what the render produces. `TemplateUnits#declined_unit_keys` carries them (derived from the
+paths the plugin read and the root prefix its own logical names imply) and the propagator stops there.
+rigor-actionpack now claims `app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}` and declines every
+one of them, which is how the engine learns those templates exist: **313 declined keys on mastodon**
+(its Haml views) and **2 on redmine** (`common/feed.atom.builder`, `journals/index.builder`). Neither
+project has a case where the block changes an edge — redmine's 33 resolutions are unchanged and
+mastodon's effect table is byte-identical — so the block is protection rather than a measured recovery.
+An unclaimed handler stays invisible and its fallback fires as if no template were there.
+
+The zero in the controller-actions row is [#1071](https://github.com/rigortype/rigor/issues/1071):
+a `respond_to { |format| format.js }` arm is how redmine reaches a `.js.erb`, and the implicit-render
+unit rule edges only to `<action>.html`.
+
+### Pooled versus sequential
+
+redmine's `effects --format json --full` is **byte-identical** between `RIGOR_RACTOR_WORKERS=2` and `0`
+— 3 562 580 bytes. `fallback_selectors` is in `freeze_edges`' sort key.

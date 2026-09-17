@@ -48,12 +48,15 @@ module Rigor
       # @param collection — the run's merged per-file collections
       # @param discharge — the `effects.tolerated:` policy the undischarged lane is computed
       #   under; {Discharge.none} makes the two lanes equal.
-      def propagate(collection, discharge: Discharge.none)
+      # @param declined_unit_keys — unit keys the run KNOWS a source file for and has no summary for
+      #   (#1065): a template a plugin claimed and declined. An edge's fallback list is not tried past one
+      #   of them, because the file the framework runs is the one that produced nothing.
+      def propagate(collection, discharge: Discharge.none, declined_unit_keys: nil)
         return EffectTable.empty if collection.summaries.empty?
 
         summaries = collection.summaries
         state = seed(summaries, discharge)
-        edges = resolve_edges(collection, state)
+        edges = resolve_edges(collection, state, declined_unit_keys)
         iterate(state, edges)
         EffectTable.new(build_entries(summaries, edges, state))
       rescue StandardError
@@ -62,11 +65,11 @@ module Rigor
 
       # `{caller_key => [callee_key]}`, sorted and de-duplicated. Seeds the `unresolved-super` taint in
       # the same pass, because whether a `super` resolved is exactly what this resolution answers.
-      def resolve_edges(collection, state)
-        index = Index.new(collection)
+      def resolve_edges(collection, state, declined_unit_keys = nil)
+        index = Index.new(collection, declined_unit_keys: declined_unit_keys)
         collection.edges.each_with_object({}) do |(caller_key, list), out|
           targets = list.flat_map do |edge|
-            resolved = index.targets_for(edge)
+            resolved = index.resolve(edge)
             taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
             taint_unresolved_callee(state, caller_key, edge) if edge.taint_if_unresolved && resolved.empty?
             mark_unclaimed(state, caller_key) if edge.unclaimed && !edge.super_call && !index.owner_resolved?(edge)
@@ -251,8 +254,9 @@ module Rigor
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.
       class Index
-        def initialize(collection)
+        def initialize(collection, declined_unit_keys: nil)
           @summaries = collection.summaries
+          @declined = declined_unit_keys.nil? || declined_unit_keys.empty? ? nil : declined_unit_keys.to_a.to_set
           @superclasses = collection.superclasses
           @includes = collection.includes
           @classes = build_classes(collection)
@@ -282,6 +286,24 @@ module Rigor
           end
         end
 
+        # {#targets_for}, then — only where that answered nothing — the first of the edge's
+        # `fallback_selectors` that resolves (#1065), spelled as the same edge with that selector. A unit
+        # under the requested key therefore always wins and a fallback never joins a second target beside
+        # it: the lookup runs ONE template, and an edge to both would put a label on the caller that no
+        # execution of the render produces. Empty when every candidate fails, which is what lets the
+        # caller seed `taint_if_unresolved` exactly as before.
+        # A requested key the run **declined** — a template whose file exists and whose plugin produced no
+        # unit — stops there. "No unit answers" and "no such template" are different facts, and only the
+        # second licenses the framework's next candidate: an `_x.js.haml` beside an `_x.html.erb` is run by
+        # Action View as Haml, so joining the ERB unit would be a label no execution produces.
+        def resolve(edge)
+          resolved = targets_for(edge)
+          return resolved unless resolved.empty? && edge.fallback_selectors
+          return NO_TARGETS if declined?(edge)
+
+          fallback_targets(edge)
+        end
+
         # Whether the receiver's OWN ancestry holds a project definition of the selector — the half of
         # {#targets_for} the closed-world subclass join hides (#391).
         #
@@ -297,6 +319,18 @@ module Rigor
         end
 
         private
+
+        def declined?(edge)
+          !@declined.nil? && @declined.include?("#{edge.receiver_class}.#{edge.selector}")
+        end
+
+        def fallback_targets(edge)
+          edge.fallback_selectors.each do |selector|
+            resolved = targets_for(edge.with(selector: selector, fallback_selectors: nil))
+            return resolved unless resolved.empty?
+          end
+          NO_TARGETS
+        end
 
         def memo_key(edge)
           [edge.receiver_class, edge.kind, edge.selector, edge.super_call, edge.constant_receiver]

@@ -63,7 +63,10 @@ module Rigor
             # schema:4 — #1048 added {FileCollection::Edge#taint_if_unresolved}, so a marshalled edge
             # written under schema:3 no longer restores at all (`Data` with a grown member list raises
             # `TypeError`), and a warm entry would otherwise be offered and then read as a miss.
-            "schema:4",
+            #
+            # schema:5 — #1065 added {FileCollection::Edge#fallback_selectors}, which both grows the
+            # marshalled member list again and changes which unit a cached `view:` edge resolves to.
+            "schema:5",
             "vocabulary:#{registry.vocabulary_version}",
             "catalog:#{catalog.identity}",
             "effects:#{config_digest(configuration)}",

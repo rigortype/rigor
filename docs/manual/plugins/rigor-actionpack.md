@@ -229,6 +229,35 @@ template reaches the partials *it* renders — so an `io.db.write` in
 `app/views/users/_card.html.erb` shows up on `UsersController#show`
 three hops away, and `rigor effects explain` prints the path.
 
+A partial is looked up in the rendering template's own format, with
+the one fallback Action View itself hard-codes: a `.js.erb` template
+reaches `_list.js.erb` where it exists and `_list.html.erb`
+otherwise, which is how "a JS response that injects rendered HTML"
+works at all. Only one of the two is joined, never both. A `.json`,
+`.xml` or `.turbo_stream` template gets no fallback — what those fall
+back to depends on the request's `Accept` header, which the source
+does not say — and neither does a render site that names its format
+(`formats: [:js]`, `render "list.js"`) or a controller-side `render`.
+
+The fallback stops at a template that **exists and produced no
+unit**: a `_list.js.haml`, or a `_list.js.erb` whose compiled Ruby
+does not parse. Rails runs that file, so the `.html` one's effects
+are not what the render produces, and the taint stays. That is why
+this plugin claims `app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}`
+and compiles none of them: the claim is how the engine learns a
+template is there. A handler outside that list is invisible, and a
+render of one still falls back.
+
+Two approximations ride along, and each costs labels rather than a
+taint. A partial reached *through* the fallback renders its own
+partials in `html`, while Action View's context is still
+`[:js, :html]`; where a nested partial exists in both formats, the
+`.js` template gets the `.html` one's labels. And a template whose
+name carries no format at all (`_row.jbuilder`) blocks nothing, since
+its key has no format to block — which happens to agree with Rails,
+which ranks a formatted template above it. Both are zero occurrences
+on the measured corpus.
+
 The `template-not-analysed` taint on a `render` is discharged
 exactly when the edge lands on a real unit. It **stays** when it
 does not, and both cases are common enough to name:
@@ -238,8 +267,8 @@ does not, and both cases are common enough to name:
   literals only, so anything computed keeps the honest "and possibly
   more";
 - the target names no template this plugin compiled — a `render
-  partial: @thing`, or a `.js.erb` rendering an HTML-only partial
-  ([#1065](https://github.com/rigortype/rigor/issues/1065));
+  partial: @thing`, or a partial that exists in neither the requested
+  format nor its fallback;
 - the template is outside `app/views/**/*.erb` — a Haml, Slim or
   Jbuilder view, which this plugin does not claim.
 

@@ -1040,7 +1040,14 @@ module Rigor
       def close_effect_graph
         return unless @record_effects
 
-        @effect_table = Effects::Propagator.propagate(effect_collection, discharge: effect_discharge)
+        # `declined_unit_keys:` — #1065. The templates a plugin claimed and produced no unit for; a render
+        # edge's format fallback must not resolve past one of them, because the file exists and the
+        # framework runs it, so the other format's effects are not what that render produces.
+        @effect_table = Effects::Propagator.propagate(
+          effect_collection,
+          discharge: effect_discharge,
+          declined_unit_keys: template_units.declined_unit_keys
+        )
       rescue StandardError
         @effect_table = Effects::EffectTable.empty
       end

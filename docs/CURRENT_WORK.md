@@ -38,47 +38,46 @@ Nothing is implemented; the maintainer decides.
 
 ## What landed on 2026-09-17
 
-Two batches, each PR implemented by an Opus lane in its own worktree and taken through one to four
-rounds of adversarial review before landing. master is green through 0bd70a45; the #1050 merge run
-(cd550f31) was in progress when this was written.
+Four batches, each PR implemented by an Opus lane in its own worktree and taken through one to four
+rounds of adversarial review before landing. master is green through c03fd94d; the #1057 merge run
+(63bbfa33) was in progress when this was written.
 
-Batch 1: [#1029](https://github.com/rigortype/rigor/pull/1029) (#986),
-[#1030](https://github.com/rigortype/rigor/pull/1030) (#963 item 1),
-[#1031](https://github.com/rigortype/rigor/pull/1031) (#1014),
-[#1032](https://github.com/rigortype/rigor/pull/1032) (#1002).
-
-Batch 2: [#1034](https://github.com/rigortype/rigor/pull/1034) (#534 item 5),
-[#1035](https://github.com/rigortype/rigor/pull/1035) (#963 item 3),
-[#1036](https://github.com/rigortype/rigor/pull/1036) (#391, sig-gen `%a{pure}` with five withholding
-gates), [#1037](https://github.com/rigortype/rigor/pull/1037) (#392, template-unit seam),
-[#1041](https://github.com/rigortype/rigor/pull/1041) (#987), [#1042](https://github.com/rigortype/rigor/pull/1042)
-(#1039, `Const.new` → `#initialize` with an opaque-ancestry sentinel),
-[#1044](https://github.com/rigortype/rigor/pull/1044) (#534 item 6, closes #534),
-[#1050](https://github.com/rigortype/rigor/pull/1050) (#393, ERB units in rigor-actionpack).
+- Batch 1: #1029 (#986), #1030 (#963 item 1), #1031 (#1014), #1032 (#1002).
+- Batch 2: #1034 (#534 item 5), #1035 (#963 item 3), #1036 (#391), #1037 (#392), #1041 (#987),
+  #1042 (#1039), #1044 (#534 item 6, closes #534), #1050 (#393 slice; #393 stays open as umbrella).
+- Batch 3: #1052 (#1049), #1053 (#1038), #1054 (#1051), #1057 (#1048 edge; `Refs`, see below).
+- Batch 4: #1061 (#1055), #1062 (#1056; category 2 → #1060), #1063 (#963 item 2).
 
 Two `Scope` rows in `sig/rigor/scope.rbs` carry `# sig-gen gap: #1011` markers because no engine
 issue tracks the untyped-return gap; if #1011 rules otherwise, each is a one-line repoint.
 
+## Waiting on the maintainer
+
+- [#1059](https://github.com/rigortype/rigor/issues/1059) — whether first-party `discharge: true`
+  plugin rows may prove. #1057's first draft moved them to the proven lane; that contradicts ADR-103
+  WD17 (owner ruling 2026-08-24) and was reverted. Until ruled, `views: strict` and `views: lenient`
+  do not differ, and #1048 / #393 stay open on that acceptance line.
+- [#1011](https://github.com/rigortype/rigor/issues/1011) — the `sig-gen gap:` marker convention.
+
 ## What is worth picking up next
 
-- [#1043](https://github.com/rigortype/rigor/issues/1043) — `rigor check lib` allocations are +15.6%
-  over the v0.3.9 baseline; the release gate would fail today. Confirm on Linux, bisect the
-  2026-09-16/17 merges, then decide design cost vs accidental hot path. Recalibration is release prep.
-- [#1048](https://github.com/rigortype/rigor/issues/1048) and [#1047](https://github.com/rigortype/rigor/issues/1047)
-  — the two #393 acceptance lines that #1050 could not meet (controller → template edge and the
-  `render` taint; render-site `locals:` and layouts). #393 stays open as their umbrella.
-- [#1049](https://github.com/rigortype/rigor/issues/1049) — `:model_index` gaps (`delegate`,
-  concern-declared associations, attachment macros) that keep 15 correct mastodon serializers
-  declining in rigor-active-model-serializers.
-- [#1038](https://github.com/rigortype/rigor/issues/1038), [#1040](https://github.com/rigortype/rigor/issues/1040),
-  [#1051](https://github.com/rigortype/rigor/issues/1051) — template-unit follow-ups (LSP recompile
-  memo, `type-of` through units, per-worker duplicate load-error rows).
-- [#963](https://github.com/rigortype/rigor/issues/963) item 2 and [#394](https://github.com/rigortype/rigor/issues/394)
-  (views V2/V3, now unblocked by #393's slice).
-- [#1011](https://github.com/rigortype/rigor/issues/1011) needs a ruling before work starts.
+- [#1047](https://github.com/rigortype/rigor/issues/1047) — render-site `locals:` and layouts; a lane
+  was started on it from 63bbfa33 (branch `render-locals-and-layouts-1047`). If no PR exists, the
+  worktree under `rigor-wt/` is its state.
+- [#1043](https://github.com/rigortype/rigor/issues/1043) — allocations +15.6% over the v0.3.9
+  baseline; a separate session was bisecting it. Recalibration is release prep.
+- [#1065](https://github.com/rigortype/rigor/issues/1065) — `.js.erb` rendering an HTML partial
+  (34 of redmine's 72 remaining template-side taints): format fallback in the callee rule.
+- [#1064](https://github.com/rigortype/rigor/issues/1064) — the Ractor backend's remaining tail
+  (shallow-frozen constants, RBS-gem memo, Ruby Bug #22075, lockfile discovery); #1061 fixed the
+  constructor-time memos only.
+- [#1060](https://github.com/rigortype/rigor/issues/1060) — a positioned once-per-run channel for
+  rigor-rails-i18n's view batch.
+- [#1040](https://github.com/rigortype/rigor/issues/1040), [#394](https://github.com/rigortype/rigor/issues/394),
+  [#963](https://github.com/rigortype/rigor/issues/963)'s non-meta constant-write asymmetry.
 
 ## Where the worktrees are
 
-One remains: `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
+Two: `rigor-wt/render-locals-and-layouts-1047` (the #1047 lane) and `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
 #775 allocation work, not leftover scratch. The fifteen worktrees the previous handoff listed are
 gone, and every PR they carried is merged.

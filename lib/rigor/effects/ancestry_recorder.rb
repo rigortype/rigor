@@ -32,7 +32,7 @@ module Rigor
       # turns into an answer; such a class inherits a constructor built at load time, which is the
       # opposite of an absent one.
       def record_superclass(full_name, node, prefix)
-        return if node.superclass.nil?
+        return if node.superclass.nil? || opaque?(full_name)
 
         superclass = Source::ConstantPath.qualified_name(node.superclass)
         @superclasses[full_name] =
@@ -47,16 +47,27 @@ module Rigor
       # the load-time call built. It is the `class K < Struct.new(:a)` case in its other spelling.
       #
       # Only a **call**-valued assignment qualifies. A literal cannot be a class, and a constant-path value
-      # (`Alias = Real`) is a second name for a class whose own ancestry the scan already recorded. An
-      # assignment whose constant the project also declares with a real `<` keeps that, since a spelled
-      # superclass is strictly more than this says.
+      # (`Alias = Real`) is a second name for a class whose own ancestry the scan already recorded.
+      #
+      # The sentinel is **sticky**: it overwrites a spelled `< Base` and no later one displaces it, here or
+      # in {FileCollection.merge_all}. A reopening's `class Anon < Base` is not more than this says but
+      # less — `Anon = Class.new(Base) { def initialize; … end }` puts a constructor in the block, which the
+      # scan files under the enclosing namespace and cannot attribute to `Anon` at all, and the spelled
+      # superclass says nothing about it. Sticky is also what makes the answer independent of which file a
+      # run reads first.
+      #
+      # `Class.new(Base)` additionally keeps `Base` beside the sentinel. The sentinel still declines
+      # `Anon.new` itself, and the parent link is what files `Anon` under `Base` in the subclass index, so
+      # a `self.class.new` in `Base` — which the closed-world join says may construct `Anon` — sees an
+      # unreadable constructor below it and declines too.
       def record_constant_class(node, prefix)
-        return unless node.value.is_a?(Prism::CallNode)
+        value = node.value
+        return unless value.is_a?(Prism::CallNode)
 
         name = constant_write_name(node, prefix)
-        return if name.nil? || @superclasses.key?(name)
+        return if name.nil?
 
-        @superclasses[name] = [FileCollection::OPAQUE_ANCESTOR]
+        @superclasses[name] = [FileCollection::OPAQUE_ANCESTOR, *load_time_parent(value, prefix)]
       end
 
       # @param names — the constant paths an `include` / `prepend` named, as written
@@ -95,6 +106,25 @@ module Rigor
       end
 
       private
+
+      def opaque?(full_name)
+        @superclasses.fetch(full_name, []).include?(FileCollection::OPAQUE_ANCESTOR)
+      end
+
+      # The superclass a `Class.new(Base)` names, as candidates. Read from `Class.new` alone: it is the one
+      # load-time builder whose first argument IS the superclass, and inventing an ancestry edge from any
+      # other call's first constant argument would let an unrelated class's methods resolve through it.
+      def load_time_parent(value, prefix)
+        return [] unless value.name == :new && constant_receiver_name(value.receiver) == "Class"
+
+        argument = value.arguments&.arguments&.first
+        name = argument && Source::ConstantPath.qualified_name(argument)
+        name ? lexical_candidates(name, prefix) : []
+      end
+
+      def constant_receiver_name(receiver)
+        Source::ConstantPath.qualified_name(receiver) if receiver.is_a?(Prism::ConstantReadNode)
+      end
 
       # `alias_method :initialize, :setup` and `alias_method "initialize", "setup"` are the same
       # declaration; only an interpolated name is beyond the scan.

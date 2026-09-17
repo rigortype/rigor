@@ -137,7 +137,12 @@ module Rigor
 
           fold_summaries(summaries, collection.summaries)
           fold_lists(edges, collection.edges)
-          superclasses.update(collection.superclasses)
+          # The opaque sentinel is sticky across files as well as within one: a class whose constructor one
+          # file says is unreadable does not become readable because another file spells its `<`, and the
+          # fold must not depend on which file the run reads first.
+          superclasses.update(collection.superclasses) do |_key, mine, theirs|
+            mine.include?(OPAQUE_ANCESTOR) ? mine : theirs
+          end
           fold_lists(includes, collection.includes)
         end
 

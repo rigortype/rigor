@@ -413,6 +413,29 @@ RSpec.describe Rigor::Effects::Propagator do
     end
   end
 
+  # The sentinel has to survive a fold in either direction, or the answer depends on which file a pooled
+  # run finished first. `FileCollection.merge_all` is where that is decided.
+  describe "folding an opaque ancestry across files" do
+    def opaque
+      Rigor::Effects::FileCollection::OPAQUE_ANCESTOR
+    end
+
+    def built
+      collection(summaries: { "Anon#more" => summary }, superclasses: { "Anon" => [opaque, "Base"] })
+    end
+
+    def reopened
+      collection(summaries: { "Anon#more" => summary }, superclasses: { "Anon" => ["Base"] })
+    end
+
+    it "keeps the sentinel whichever file is folded first" do
+      expect(Rigor::Effects::FileCollection.merge_all([built, reopened]).superclasses["Anon"])
+        .to eq([opaque, "Base"])
+      expect(Rigor::Effects::FileCollection.merge_all([reopened, built]).superclasses["Anon"])
+        .to eq([opaque, "Base"])
+    end
+  end
+
   it "drops an edge that reaches no project definition rather than tainting" do
     table = described_class.propagate(
       collection(summaries: { "A#run" => summary }, edges: { "A#run" => [edge("String", "upcase")] })

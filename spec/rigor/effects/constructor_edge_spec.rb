@@ -138,6 +138,27 @@ RSpec.describe "a Const.new call in an effect summary" do
     expect(entry).to be_unclaimed
   end
 
+  # The sentinel is sticky. `Sticky` is built by `Class.new(BaseWriter) { def initialize … }` in `base.rb`
+  # and reopened as `class Sticky < BaseWriter` in `constructors.rb`; the block's constructor is filed under
+  # the enclosing namespace and cannot be attributed to the class, so the spelled superclass is less than
+  # the sentinel says, not more.
+  it "keeps the sentinel over a later reopening that spells a superclass" do
+    entry = table["ConstructorEdge::Reopener#sticky"]
+
+    expect(entry.proven).to be_empty
+    expect(entry.edges).to be_empty
+    expect(entry).to be_unclaimed
+  end
+
+  # `Class.new(Base)` keeps `Base` beside the sentinel, which is what files the built class as a subclass —
+  # so the closed-world join sees the unreadable constructor below `Widened` and declines.
+  it "declines a self.class.new whose load-time-built subclass is unreadable" do
+    entry = table["ConstructorEdge::Widened#dup2"]
+
+    expect(entry.proven).to be_empty
+    expect(entry).to be_unclaimed
+  end
+
   # The constructor lives in another file for the inherited case, so this is also the marshal round trip.
   it "answers identically when the collections come back from a pool worker" do
     pooled = analyze(configuration(workers: 2))
@@ -145,5 +166,6 @@ RSpec.describe "a Const.new call in an effect summary" do
     expect(pooled["ConstructorEdge::Client#record"].proven.to_a).to include("io.fs.write")
     expect(pooled["ConstructorEdge::Client#inherit"].proven.to_a).to include("io.fs.write")
     expect(pooled["ConstructorEdge::Client#bare"]).not_to be_unclaimed
+    expect(pooled["ConstructorEdge::Reopener#sticky"]).to be_unclaimed
   end
 end

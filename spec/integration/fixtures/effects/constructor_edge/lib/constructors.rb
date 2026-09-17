@@ -174,3 +174,30 @@ module ConstructorEdge
 
   end
 end
+
+module ConstructorEdge
+  class Sticky < BaseWriter
+    def more
+      "more"
+    end
+  end
+
+  # `self.class.new` on a base whose only load-time-built subclass has an unreadable constructor.
+  class Widened
+    def dup2
+      self.class.new
+    end
+  end
+
+  Grown = Class.new(Widened) do
+    def initialize
+      File.write("/tmp/grown", "x")
+    end
+  end
+
+  class Reopener
+    def sticky
+      Sticky.new("/tmp/sticky")
+    end
+  end
+end

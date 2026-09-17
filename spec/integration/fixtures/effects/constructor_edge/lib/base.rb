@@ -10,3 +10,12 @@ module ConstructorEdge
     end
   end
 end
+
+# A class built at load time whose constructor lives in the block — the scan files that `def` under the
+# enclosing namespace and cannot attribute it to `Sticky` at all. The reopening in `constructors.rb`
+# spells a superclass, and must not turn this into a readable ancestry.
+ConstructorEdge::Sticky = Class.new(ConstructorEdge::BaseWriter) do
+  def initialize(path)
+    File.write(path, "sticky")
+  end
+end

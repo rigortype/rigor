@@ -87,12 +87,22 @@ RSpec.describe "run-scoped positioned plugin batches (#1060)" do
       expect(Marshal.load(Marshal.dump(plugin.run_disclosure_records)).first[:diagnostics].first.line).to eq(12)
     end
 
-    it "shares one key namespace with #disclose_once" do
+    # The two channels share one table, so a key reused across them would otherwise drop one registration
+    # with no signal. A raise surfaces through the plugin's `runtime-error` envelope instead.
+    it "raises when a batch reuses a key already registered as a disclosure" do
       plugin = plugin_class.new(services: nil)
       plugin.disclose_once(:views, message: "a disclosure")
-      plugin.emit_once(:views, [view_row(12, "IGNORED — key already taken")])
 
+      expect { plugin.emit_once(:views, [view_row(12, "a batch")]) }.to raise_error(ArgumentError, /views/)
       expect(plugin.run_disclosure_records.map { |r| r.key?(:diagnostics) }).to eq([false])
+    end
+
+    it "raises when a disclosure reuses a key already registered as a batch" do
+      plugin = plugin_class.new(services: nil)
+      plugin.emit_once(:views, [view_row(12, "a batch")])
+
+      expect { plugin.disclose_once(:views, message: "a disclosure") }.to raise_error(ArgumentError, /views/)
+      expect(plugin.run_disclosure_records.map { |r| r.key?(:diagnostics) }).to eq([true])
     end
 
     it "rejects a row that is not a Diagnostic" do

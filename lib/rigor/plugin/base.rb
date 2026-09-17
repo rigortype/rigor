@@ -745,7 +745,7 @@ module Rigor
       # that differs between workers.
       def disclose_once(key, message:, severity: :info, rule: "load-error")
         id = key.to_s
-        return nil if @run_disclosures.key?(id)
+        return nil if run_registration_taken?(id, batch: false)
 
         @run_disclosures[id] = {
           key: id, message: message.to_s, severity: severity.to_sym, rule: rule.to_s
@@ -769,7 +769,9 @@ module Rigor
       # is dropped whole, on this instance or on any other instance in the run, never merged row by row.
       # Every worker scans the same project, so a row-wise union could only add a worker's partial or
       # divergent view. `key` shares one namespace per plugin with {#disclose_once} — the two channels are
-      # one registration table.
+      # one registration table — but a key keeps the kind it was first registered as: repeating a key on the
+      # same channel is a no-op, and reusing it on the OTHER channel (either order) raises `ArgumentError`
+      # rather than silently dropping a genuine batch or disclosure.
       #
       # Callable from `#prepare`, `#diagnostics_for_file`, or a `node_rule` block; returns `nil` and emits
       # nothing itself. The engine stamps `source_family: "plugin.<id>"` exactly as it does for a per-file
@@ -779,7 +781,7 @@ module Rigor
       # raises `ArgumentError`, which the engine reports as this plugin's `runtime-error`.
       def emit_once(key, diagnostics)
         id = key.to_s
-        return nil if @run_disclosures.key?(id)
+        return nil if run_registration_taken?(id, batch: true)
 
         batch = Array(diagnostics).map do |row|
           next row.dup.freeze if row.is_a?(Rigor::Analysis::Diagnostic)
@@ -797,6 +799,18 @@ module Rigor
       def run_disclosure_records
         @run_disclosures.values
       end
+
+      # #1060 — true when `id` is already registered on the same channel (the repeat is a no-op); raises when
+      # it is registered on the other one, because either answer there would drop a genuine registration.
+      def run_registration_taken?(id, batch:)
+        existing = @run_disclosures[id]
+        return false if existing.nil?
+        return true if existing.key?(:diagnostics) == batch
+
+        taken = batch ? "a #disclose_once disclosure" : "an #emit_once batch"
+        raise ArgumentError, "run-scoped key #{id.inspect} is already registered as #{taken}; use a distinct key"
+      end
+      private :run_registration_taken?
 
       # Boilerplate-reduction helper (review §1.3): the "did you mean …?" suggestion every
       # diagnostic-emitting plugin otherwise hand-rolls. Returns the closest of `candidates` to `name` via

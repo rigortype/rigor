@@ -192,8 +192,12 @@ the batch once per fork-pool worker.
 It rides the `#disclose_once` registration table, so everything above
 about call sites, the `nil` return, the de-duplication sources, the
 Ractor-degrade exception and emission order applies unchanged. `key`
-shares one namespace per plugin with `#disclose_once`. The differences
-are binding:
+shares one namespace per plugin with `#disclose_once`, but a key keeps
+the kind it was first registered as: repeating it on the same channel
+is a no-op, and reusing it on the other channel, in either order,
+raises `ArgumentError` (reported through the `runtime-error` envelope)
+instead of silently dropping one of the two registrations. The
+differences are binding:
 
 - *The rows keep their positions.* The engine stamps only
   `source_family: "plugin.<manifest.id>"`, the stamp a
@@ -211,9 +215,17 @@ are binding:
   disclosures sit in; order is `(registry position, key)`, then the
   batch's own row order, identically under `--workers 0` and
   `--workers N`. It is not part of the per-file stream the incremental
-  cache stores for any one file, and it bypasses the template-unit
-  line remap: a plugin-authored row already names the template's own
-  line, not a line of a unit's compiled Ruby.
+  cache stores for any one file.
+- *Rows carry source positions; the engine does not relocate them.* A
+  batch bypasses the template-unit line remap, so each row MUST name
+  the position in the file the user edits (the template's own line,
+  or `1:1`). A row built from a line of a unit's compiled Ruby is
+  emitted at that compiled line, unrelocated.
+
+A batch is re-registered only by a run that reaches the registering
+hook. A narrowed `--incremental` recheck that analyses no file calls
+no plugin, so it does not replay a batch registered from
+`#diagnostics_for_file` — the same as a disclosure.
 
 Each row is copied and frozen on registration (Marshal- and
 Ractor-clean). A non-`Diagnostic` element raises `ArgumentError`,

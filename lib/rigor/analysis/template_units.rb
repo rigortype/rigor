@@ -48,7 +48,15 @@ module Rigor
       # `path` is both the file the user wrote AND the logical path the engine analyses under: a diagnostic
       # the parse produces already carries it, so nothing has to rewrite a path — only a LINE.
       Entry = Data.define(:logical_name, :path, :source, :line_map, :self_type, :locals, :ivar_seeds,
-                          :digest, :unit_key, :plugin_id) do
+                          :digest, :unit_key, :plugin_id, :suppressed_rules) do
+        # #393 — the per-unit rule posture. True when the plugin declared that this family of finding is
+        # not meaningful in its compiled output.
+        def suppresses?(rule)
+          return false if rule.nil? || suppressed_rules.empty?
+
+          suppressed_rules.any? { |prefix| rule.to_s.start_with?(prefix) }
+        end
+
         # See {Plugin::TemplateUnit#template_line}. Re-implemented on the flattened entry so a worker never
         # needs the plugin value object (or the plugin) to position a diagnostic.
         def template_line(ruby_line)
@@ -177,7 +185,7 @@ module Rigor
           logical_name: unit.logical_name, path: unit.path, source: unit.ruby_source,
           line_map: unit.line_map, self_type: unit.self_type, locals: unit.locals,
           ivar_seeds: unit.ivar_seeds, digest: unit.digest(fallback), unit_key: unit.unit_key,
-          plugin_id: plugin_id
+          plugin_id: plugin_id, suppressed_rules: unit.suppressed_rules
         )
       end
       private_class_method :record
@@ -312,15 +320,22 @@ module Rigor
         scope
       end
 
-      # Re-points a diagnostic produced inside a unit at the template's own line. Every other diagnostic
-      # passes through untouched, so it is safe to stamp a whole run's stream through this.
+      # Re-points a diagnostic produced inside a unit at the template's own line, and drops the ones the
+      # unit's plugin declared it does not report (#393). Every other diagnostic passes through untouched,
+      # so it is safe to stamp a whole run's stream through this.
+      #
+      # The suppression is per unit rather than global because it is a claim about ONE compiler's output:
+      # a plugin whose synthesised receivers are still coarse suppresses `call.` so the view layer can be
+      # analysed for its EFFECTS — which need no receiver precision — without the typing half costing the
+      # project a diagnostic per template line. It is deliberately not a `disable:` entry: `disable:` would
+      # silence the rule in the project's `.rb` files too, which is the opposite of what is wanted.
       def remap(diagnostics)
         return diagnostics if @entries.empty?
 
-        diagnostics.map do |diagnostic|
+        diagnostics.filter_map do |diagnostic|
           entry = @entries[normalize(diagnostic.path)]
           next diagnostic if entry.nil?
-
+          next nil if entry.suppresses?(diagnostic.rule)
           next diagnostic if entry.line_map.empty?
 
           relocate(diagnostic, entry.template_line(diagnostic.line))

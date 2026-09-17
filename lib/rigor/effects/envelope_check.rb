@@ -157,7 +157,7 @@ module Rigor
       # synthesized `attr_*` / `define_method` members the effects scanner adds.
       def keys_by_class(table)
         table.keys.each_with_object({}) do |key, out|
-          owner = MethodKey.owner(key)
+          owner = MethodKey.envelope_owner(key)
           next if owner.nil?
 
           (out[owner] ||= []) << key

@@ -127,8 +127,14 @@ Three properties make it safe to add to the contract at this point in the freeze
   glob, calls no plugin, adds no cache-key slot and analyses exactly the files it analysed before. `rigor
   check` on such a project is byte-identical.
 
-The value-object fields, the position mapping, the `view:<logical_name>` effect key, the cache identity and
-the `--incremental` bound are normative in
+A unit may also declare `suppressed_rules:` — rule-id prefixes the engine drops for that unit's diagnostics
+([#393](https://github.com/rigortype/rigor/issues/393)). It is the per-unit rule posture: only the plugin
+knows which families of finding its own compiler's output can support, and the alternative — a project-wide
+`disable:` entry — would silence the rule in the project's `.rb` files too. rigor-actionpack declares
+`["call.", "flow."]` for an ERB unit while its `view_type_checks:` is off.
+
+The value-object fields, the position mapping, the `view:<logical_name>` effect key, the rule posture, the
+cache identity and the `--incremental` bound are normative in
 [`macro-substrate.md`](macro-substrate.md#template-units--templateunit-template_globs--template_units_for_file-392).
 
 #### Node-scoped rules — `node_rule` / `#node_rule_diagnostics` (ADR-37)

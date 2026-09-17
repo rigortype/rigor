@@ -429,6 +429,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     path()
     ruby_source()
     self_type()
+    suppressed_rules()
     template_line(req:ruby_line)
     to_h()
     transform_id()

@@ -12,6 +12,11 @@ module Rigor
     # key, and `effects.attribution:` in `.rigor.yml` names one. A key the loader accepts and the scanner
     # would never produce is a table that silently matches nothing.
     module MethodKey
+      # #393 — the prefix a template unit's key carries (`Plugin::TemplateUnit::KEY_PREFIX`, repeated here
+      # rather than required so the effects layer keeps no dependency on the plugin layer; the two are
+      # pinned equal by a spec).
+      TEMPLATE_UNIT_PREFIX = "view:"
+
       module_function
 
       # @return `[owner, separator, selector]`, or nil when `key` is
@@ -34,6 +39,22 @@ module Rigor
       # The owner half, or nil. What `keys_by_class`-shaped groupings ask for.
       def owner(key)
         split(key)&.first
+      end
+
+      # #393 — a template unit's key: `view:users/show.html`. Deliberately NOT a method key — a view has
+      # no owner class and no selector — but {.split} cannot tell, because the format segment gives the
+      # string a dot: `owner("view:users/show.html")` answers `"view:users/show"`, a class name no run
+      # ever produced. Anything grouping keys by their envelope-bearing owner has to ask this first.
+      def template_unit?(key)
+        key.to_s.start_with?(TEMPLATE_UNIT_PREFIX)
+      end
+
+      # The name an `effects.envelopes:` entry selects a key by: the owner class for a method key, and the
+      # unit key ITSELF for a template unit. A view is its own envelope subject — there is no class to
+      # hang the bound on, and `Runner#effect_sources` already knows which file the key came from, which
+      # is what a `match:` entry needs.
+      def envelope_owner(key)
+        template_unit?(key) ? key.to_s : owner(key)
       end
     end
   end

@@ -250,9 +250,7 @@ module Rigor
           )
         end
 
-        def table_class_names
-          @effect_table.keys.filter_map { |key| Effects::MethodKey.owner(key) }.uniq
-        end
+        def table_class_names = @effect_table.keys.filter_map { |k| Effects::MethodKey.envelope_owner(k) }.uniq
 
         def judge(scan)
           Effects::EnvelopeCheck.run(
@@ -301,7 +299,7 @@ module Rigor
 
         def build_diagnostic(finding)
           Diagnostic.new(
-            path: finding.path || ".rigor.yml",
+            path: finding.path || unit_source_path(finding.key) || ".rigor.yml",
             line: finding.line,
             column: 1,
             message: message_for(finding),
@@ -311,6 +309,13 @@ module Rigor
             method_name: method_name_of(finding.key)
           )
         end
+
+        # #393 — a template unit has no `def` for {Effects::EnvelopeCheck::Positions} to find, so a view
+        # finding would land on `.rigor.yml` — the config file, not the template the reviewer has to open.
+        # `Runner#effect_sources` already records the file every unit key came from; the line stays at the
+        # finding's own (1 for a whole-file unit), because the bound is exceeded by the unit, not by one
+        # line of it, and the explanation chain names the origin site.
+        def unit_source_path(key) = Effects::MethodKey.template_unit?(key) ? @unit_sources[key.to_s]&.first : nil
 
         def message_for(finding)
           EnvelopeMessages.exceeded(finding)

@@ -54,6 +54,7 @@ plugins:
     config:
       controller_search_paths: ["app/controllers"]  # default
       view_search_paths: ["app/views"]               # default
+      view_type_checks: false                        # default
 ```
 
 ## What it types
@@ -111,8 +112,136 @@ reason `ActionController::Parameters` and the `ActionDispatch` readers
 above stay undeclared; their leniency is what makes the `params`
 typing safe.
 
+## ERB templates as effect units
+
+Every `app/views/**/*.erb` is compiled to Ruby and analysed as one
+**effect unit**, keyed `view:users/show.html` — Rails' own logical
+name with the handler dropped, so an ERB → Haml rewrite is not a
+rename. Nothing has to be enabled: activating the plugin is what
+claims the templates.
+
+What that buys is the answer to *"what does this request actually
+do"* past the `render` line. A partial that calls `@user.update`
+reports `io.db.write` at `app/views/users/_card.html.erb`, a
+`Time.now` in a layout fragment reports `nondet.time`, a leftover
+`binding.pry` reports `io.input` — all of it in `rigor effects` and
+in the snapshot, so a template that starts writing shows up in a
+diff.
+
+```
+$ rigor effects
+view:users/_card.html: [mutate.local, nondet.time] ≤ [io.db.write] …?
+view:users/show.html:  [mutate.local]              ≤ [io.db.read]  …?
+```
+
+**The compiler** is Erubi when it resolves in your project's bundle
+— Rails' own — and stdlib `ERB` otherwise. Erubi is never added to
+your Gemfile and is not a Rigor dependency
+([ADR-90](../../adr/90-target-library-resolution-from-project-bundle.md)).
+Either way the line map is measured rather than assumed, so a
+finding names the template's own line; the column is always 1,
+because a compiler rewrites the text of each line and a column of
+the compiled Ruby would name nothing you wrote.
+
+**What `self` is.** `ActionView::Base`, declared so the name
+resolves and **open** so its method surface stays lenient. That is
+what keeps `link_to`, `form_with`, `t`, `content_for`, your own
+`ApplicationHelper` methods and every route helper from drawing a
+finding per line.
+
+**What is in scope.** `@ivars` are seeded from the controller
+actions that render the template — the implicit render
+(`UsersController#show` → `users/show`) and explicit
+`render :edit` / `render "admin/form"`. Two restrictions keep a seed
+from claiming a type the template will not find: only assignments
+whose right-hand side cannot be `nil` contribute (`User.find`,
+`Model.new`; never `find_by`), and only assignments the action
+reaches on **every** path — not one inside an `if`, a `case`, a
+`rescue`, a loop or a block, and nothing from a `before_action`
+carrying `if:` / `unless:`. Anything else leaves the ivar unseeded,
+which reads as `Dynamic` and is silent. A partial inherits the
+assigns of its own directory, because an ivar is not a local. Locals
+come from the Rails 7.1 strict-locals comment:
+
+```erb
+<%# locals: (user:, admin: false) %>
+```
+
+**Type checks are off inside templates by default.** `call.*` **and
+`flow.*`** findings are suppressed there while the synthesised
+bindings are still coarse — measured on redmine and mastodon, the
+feature adds **zero** new findings to either
+([the measurement note](../../notes/20260917-erb-template-units.md)).
+Set `view_type_checks: true` to opt in and have `@user.nmae` in
+`show.html.erb` reported like any other call. It turns **both**
+families back on, flow folding included — which is the half with the
+known gap, since a partial's optional-local preamble reads as a
+definite `nil` until its render site's `locals:` are traced
+([#1047](https://github.com/rigortype/rigor/issues/1047)).
+
+### Holding views to an effect budget
+
+A view unit is an `effects.envelopes:` subject like any class, and a
+finding is positioned in the template. The two presets the design
+note describes are written like this — pick one, or neither:
+
+```yaml
+# views: lenient — reads are fine (lazy loading is the Rails default)
+effects:
+  envelopes:
+    - match: "app/views/**/*"
+      effect: [mutate.local, io.db.read, cache.read, cache.write,
+               rails.config.read, rails.i18n.translate,
+               rails.session.read, telemetry]
+```
+
+```yaml
+# views: strict — the static twin of `strict_loading`: every datum is
+# loaded in the controller
+effects:
+  envelopes:
+    - match: "app/views/**/*"
+      effect: [mutate.local, cache.read, cache.write,
+               rails.config.read, rails.i18n.translate,
+               rails.session.read, telemetry]
+```
+
+Under either, an `io.db.write`, a `job.enqueue`, an `io.output.stdout`
+(`puts`), an `io.input` (`binding.pry`) or a `nondet.time` in a view
+is a finding.
+
+Only the labels the plugins in your `plugins:` list register are
+known, and both stanzas above name two that rigor-actionpack does not
+own: `rails.config.read` comes from
+`rigor-railties` and `rails.i18n.translate` from
+[`rigor-rails-i18n`](rigor-rails-i18n.md). Activate those alongside
+rigor-actionpack, or drop the labels — without them each is reported
+as `effect.unknown-label` and the entry bounds nothing, which is
+deliberately loud rather than a silent no-op.
+
 ## Limitations
 
+- **Layouts get no unit.** A layout's `<%= yield %>` is not valid
+  Ruby outside a method body, so its compiled form does not parse
+  and the file is declined — silently, because two parse errors on
+  a template Rails renders perfectly would be worse than no unit.
+  Any template whose compiled Ruby does not parse is declined the
+  same way. See
+  [#1047](https://github.com/rigortype/rigor/issues/1047).
+- **Render-site `locals:` are not traced.** A partial's parameters
+  are known only from a strict-locals comment; without one they
+  read as helper calls on the view context. That is why `flow.*` is
+  suppressed in templates by default — see the measurement note and
+  [#1047](https://github.com/rigortype/rigor/issues/1047).
+- **No controller → template edge yet.** A controller action's own
+  summary does not include what its template does, and `render`
+  keeps its `template-not-analysed` taint;
+  [#1048](https://github.com/rigortype/rigor/issues/1048) carries
+  it.
+- **ERB only, under `app/views`.** `template_globs:` is a manifest
+  row, read without running plugin code, so it cannot consult
+  `view_search_paths:`. Haml, Slim and Jbuilder are the same seam
+  behind a different compiler and are not claimed.
 - **Implicit-self helpers only.** `*_path` / `*_url` calls with an
   explicit receiver (`Rails.application.routes.url_helpers.x_path`)
   are passed through.

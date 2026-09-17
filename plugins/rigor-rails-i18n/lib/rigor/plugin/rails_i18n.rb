@@ -48,8 +48,8 @@ module Rigor
     #   per-locale coverage. Interpolation variable validation is skipped for view templates (the hash may
     #   come from controller instance variables not visible in the template). The view scan is a
     #   project-wide pass surfaced through the per-file diagnostic hook, so under `--workers` each fork-pool
-    #   worker re-emits the full set (the same once-per-run limitation the `load-error` path carries);
-    #   sequential `rigor check` is unaffected.
+    #   worker re-emits the full set; sequential `rigor check` is unaffected. The `load-error` path no longer
+    #   shares this: it is a run-scoped disclosure (#1051), emitted once per run at `.rigor.yml:1:1`.
     # - Pluralization (`t('errors.messages.too_short', count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's pluralization branches.
     # - YAML aliases / merges are accepted (Psych's standard `aliases: true`) but custom Ruby classes
@@ -106,7 +106,6 @@ module Rigor
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
         @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
         @load_errors = []
-        @load_errors_emitted = false
         @view_diagnostics_emitted = false
       end
 
@@ -117,12 +116,12 @@ module Rigor
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:locale_index)
         diagnostics = []
-        diagnostics.concat(consume_load_error_diagnostics(path)) unless @load_errors.empty?
-        diagnostics << runtime_error_diagnostic(path) if index.nil? && producer_error(:locale_index)
+        disclose_load_errors unless @load_errors.empty?
+        disclose_locale_runtime_error if index.nil? && producer_error(:locale_index)
         unless @view_diagnostics_emitted
           view_diags = producer_value(:view_diagnostics) || []
           if (view_err = producer_error(:view_diagnostics))
-            diagnostics << view_runtime_error_diagnostic(path, view_err)
+            disclose_view_runtime_error(view_err)
           else
             diagnostics.concat(view_diags)
           end
@@ -211,35 +210,38 @@ module Rigor
       end
 
       # The runner only invokes `diagnostics_for_file` for Ruby files (`paths:` is filtered to `.rb`). YAML
-      # parse errors therefore can't be anchored on the offending locale file directly; instead, we emit
-      # them once per run on the first analyzed Ruby file, naming the offending YAML path in the message.
-      def consume_load_error_diagnostics(path)
-        return [] if @load_errors_emitted
-
-        @load_errors_emitted = true
-        @load_errors.map do |err|
-          Rigor::Analysis::Diagnostic.new(
-            path: path, line: 1, column: 1,
+      # parse errors therefore can't be anchored on the offending locale file directly, and the row used to
+      # be pinned to the first analysed Ruby file — once per plugin INSTANCE, so once per fork-pool worker
+      # (#1051). They go through the run-scoped channel instead: keyed by the locale path that failed, so a
+      # project with two broken YAML files still discloses both, each exactly once, at `.rigor.yml:1:1`.
+      def disclose_load_errors
+        @load_errors.each do |err|
+          disclose_once(
+            "locale-parse:#{err.path}",
             message: "rigor-rails-i18n: failed to parse `#{err.path}`: #{err.message}",
             severity: :warning,
             rule: "load-error"
           )
         end
+        nil
       end
 
-      def runtime_error_diagnostic(path)
+      # #1051 — both of these say the plugin could not READ something the project configured, which is a
+      # run-level fact with no source position; they were repeated on every analysed file (the locale one)
+      # or on each instance's first (the view one).
+      def disclose_locale_runtime_error
         error = producer_error(:locale_index)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
+        disclose_once(
+          :locale_index_failed,
           message: "rigor-rails-i18n: failed to load locales: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )
       end
 
-      def view_runtime_error_diagnostic(path, error)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
+      def disclose_view_runtime_error(error)
+        disclose_once(
+          :view_scan_failed,
           message: "rigor-rails-i18n: failed to scan view templates: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"

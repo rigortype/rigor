@@ -192,18 +192,12 @@ module Rigor
         publish_reachability_roots(services, table)
       end
 
-      # File-level only: the once-per-run load-error emission. Per-call helper validation runs over the
-      # engine-owned walk via the node_rule below (ADR-37), with the same-file `shadowing` set built once
-      # as the node-rule file context.
+      # File-level only: the run-scoped load-error disclosure (#1051). Per-call helper validation runs over
+      # the engine-owned walk via the node_rule below (ADR-37), with the same-file `shadowing` set built
+      # once as the node-rule file context.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         table = helper_table_or_nil
-        if table.nil? && @load_error
-          return [] if @load_error_emitted
-
-          @load_error_emitted = true
-          return [load_error_diagnostic(path)]
-        end
-
+        disclose_load_error if table.nil? && @load_error
         []
       end
 
@@ -265,13 +259,11 @@ module Rigor
         nil
       end
 
-      def load_error_diagnostic(path)
-        Rigor::Analysis::Diagnostic.new(
-          path: path, line: 1, column: 1,
-          message: @load_error,
-          severity: :warning,
-          rule: "load-error"
-        )
+      # #1051 — "the routes file did not load" is a fact about the project, not about the file that
+      # happened to be analysed first by this instance, so it goes through the run-scoped channel and the
+      # engine positions it at `.rigor.yml:1:1`, once per run rather than once per fork-pool worker.
+      def disclose_load_error
+        disclose_once(:routes_load_failed, message: @load_error, severity: :warning, rule: "load-error")
       end
     end
 

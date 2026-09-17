@@ -198,7 +198,9 @@ close every model in the project.
   the column-dependent half stands down — column readers stay
   untyped and `where(col:)` keys are not validated, exactly as they
   are for a table the schema does not describe. The plugin says so
-  once per run at `:info`. Committing a schema dump (or pointing
+  once per run at `:info`, positioned on `.rigor.yml` — it is a
+  fact about your configuration, not about any one source file,
+  and you get the same single row with `--workers` as without. Committing a schema dump (or pointing
   `schema_file` / `structure_sql_file` at one) turns the column half
   back on from the next cold run — a warm cache keeps serving the
   reduced index until it is invalidated, so use `rigor check

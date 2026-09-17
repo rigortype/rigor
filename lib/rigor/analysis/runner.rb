@@ -1133,6 +1133,11 @@ module Rigor
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
         diagnostics += @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+        # Issue #1051 — read after `analyze_targets` for the same reason the refusal stream below is: a
+        # plugin may register a disclosure from `#prepare` (the usual case) or while analysing a file, and
+        # both have to be in before the table is harvested. Ordered before the refusals so the run-level
+        # plugin rows read plugin-authored notice first, engine-authored envelope second.
+        diagnostics += @diagnostic_aggregator.plugin_run_disclosure_diagnostics
         # Issue #959 — read LAST (after `analyze_targets`, which already ran before this method is called),
         # so every per-file plugin call has had its chance to record a refusal on its (per-plugin-instance
         # memoised) `IoBoundary`, alongside the prepare-time refusals the same boundary instance may
@@ -1694,7 +1699,8 @@ module Rigor
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
-          conformance_results_snapshot: -> { @snapshots.conformance_results }
+          conformance_results_snapshot: -> { @snapshots.conformance_results },
+          pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures }
         )
       end
 

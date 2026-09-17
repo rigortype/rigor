@@ -417,8 +417,31 @@ module Rigor
         return nil if entry.nil?
         return nil unless instance_member_name?(entry, call_node.name)
         return nil if scope.discovered_method_through_ancestors?(self_type.class_name, call_node.name, :instance)
+        return nil if rbs_declared_on_model?(self_type.class_name, call_node.name, scope)
 
         Rigor::Type::Combinator.untyped
+      end
+
+      # A signature the project wrote ABOUT THIS MODEL is authorship, and this tier sits above `RbsDispatch`
+      # — so answering `untyped` for a name a `sig/user.rbs` declares would displace the declared type at the
+      # implicit-self spelling ONLY, leaving `name` and `self.name` typed differently in one method body.
+      # Declining restores both: RBS answers the call, and the engine's own veto still sees the member
+      # through its pre-`::Object` RBS arm, so a top-level `def` of the name does not bind either.
+      #
+      # `defined_in == class_name` mirrors `ExpressionTyper#rbs_declared_on_class?`: a declaration reached
+      # through an ancestor is a lookup convenience, and for a model that ancestor is `Object` / `Kernel`,
+      # whose names sit at or after a top-level `def`'s own rung. Fail-soft — an unreadable environment
+      # declines to claim a declaration exists, which leaves the member visible to the veto.
+      def rbs_declared_on_model?(class_name, method_name, scope)
+        definition = services.reflection.instance_method_definition(class_name, method_name, scope: scope)
+        return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+        defined_in = definition.defined_in
+        return false if defined_in.nil?
+
+        defined_in.to_s.delete_prefix("::") == class_name.to_s.delete_prefix("::")
+      rescue StandardError
+        false
       end
 
       # Whether the model entry declares `method_name` as an instance-side member: an association accessor,

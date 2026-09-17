@@ -9,7 +9,7 @@
 # spellings — and every one of them is a source the ENGINE walks.
 #
 # A plugin-supplied member is not. A rigor-activerecord column reader, an association, a scope, an ADR-16
-# synthetic method: Ruby dispatches to each of them ahead of `Object`'s private top-level `def`, and the
+# Tier C synthesised reader: Ruby dispatches to each of them ahead of `Object`'s private top-level `def`, and the
 # veto could see none of them. A project with a top-level `def name` in a script or spec-support file read
 # `name.upcase` inside the model's own `def shout` as the top-level def's `nil` and fired
 # `undefined method 'upcase' for nil` on working Rails code — #618's false positive, at a source the veto
@@ -73,7 +73,7 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
     end
   RUBY
 
-  def run_project(files, plugins:, requirer: nil)
+  def run_project(files, plugins:, requirer: nil, signatures: {})
     Rigor::Plugin.unregister!
     Dir.mktmpdir do |dir|
       files.each do |relative, source|
@@ -81,11 +81,13 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
         FileUtils.mkdir_p(File.dirname(full))
         File.write(full, source)
       end
-      configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge(
-          "paths" => ["app", "shadow.rb"], "plugins" => plugins
-        )
-      )
+      signatures.each do |relative, source|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", relative), source)
+      end
+      settings = { "paths" => ["app", "shadow.rb"], "plugins" => plugins }
+      settings["signature_paths"] = [File.join(dir, "sig")] unless signatures.empty?
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(settings))
       Dir.chdir(dir) do
         runner = Rigor::Analysis::Runner.new(
           configuration: configuration, cache_store: nil, plugin_requirer: requirer
@@ -115,9 +117,20 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
     end
   end
 
-  def ar_messages(model_body, schema: schema_source, plugins: ["rigor-activerecord"])
-    run_project(ar_files(model_body, schema: schema), plugins: plugins, requirer: ar_requirer).map(&:message)
+  def ar_messages(model_body, schema: schema_source, plugins: ["rigor-activerecord"], signatures: {})
+    run_project(
+      ar_files(model_body, schema: schema),
+      plugins: plugins, requirer: ar_requirer, signatures: signatures
+    ).map(&:message)
   end
+
+  # A project sidecar declaring the reader and an association, for the arm below.
+  def user_rbs = <<~RBS
+    class User
+      def name: () -> String
+      def posts: () -> Array[String]
+    end
+  RBS
 
   # `errors` is the issue's second name. It is NOT an enumerable member of any rigor-activerecord model —
   # the plugin's bundled `sig/active_record/framework.rbs` deliberately declines to declare
@@ -142,10 +155,14 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
     klass
   end
 
-  # The second tier the veto asks. A Tier C `heredoc_templates` emission — and the Tier B
-  # `Plugin::Macro::TraitRegistry` explosions that share its table — put the member in
+  # The second tier the veto asks. A Tier C `heredoc_templates` emission puts the member in
   # `SyntheticMethodIndex` rather than in any `dynamic_return` block, so the two tiers have to be asked
   # separately; asking only the first would leave every macro-synthesised reader shadowed.
+  #
+  # Tier B (`Plugin::Macro::TraitRegistry`) shares that table but is NOT exercised here, and could not be:
+  # the production pre-pass calls `SyntheticMethodScanner.scan` with `environment: nil`, and the scanner
+  # short-circuits to an empty index when only trait registries contribute (#476). A rigor-devise fixture
+  # still reports today. This arm needs no change when #476 lands — the index is the same table.
   let(:synthetic_plugin) do
     klass = Class.new(Rigor::Plugin::Base) do
       manifest(
@@ -236,6 +253,32 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
         name.no_such_integer_method
       end
     RUBY
+  end
+
+  # A signature the project wrote ABOUT THIS MODEL is authorship, and this tier sits ABOVE `RbsDispatch` —
+  # so a blanket `untyped` here would displace the declared type at the implicit-self spelling only, leaving
+  # `name` and `self.name` typed differently in one body. The plugin declines instead: all three reads keep
+  # their declared types and all three true positives still fire. There is no top-level `def` in play for
+  # `posts`, and `name`'s is shadowed by the declaration through the veto's own pre-`::Object` RBS arm.
+  it "keeps a project-declared RBS type at the implicit-self spelling" do
+    messages = ar_messages(<<~RUBY, signatures: { "user.rbs" => user_rbs })
+      has_many :posts
+
+      def shout
+        name.upcase_zzz
+      end
+
+      def shout_explicitly
+        self.name.upcase_zzz
+      end
+
+      def listing
+        posts.upcase_zzz
+      end
+    RUBY
+    expect(messages.grep(/upcase_zzz/).size).to eq(3)
+    expect(messages).to include(/undefined method .upcase_zzz. for String/)
+    expect(messages).to include(/undefined method .upcase_zzz. for Array\[String\]/)
   end
 
   # --- a fixture plugin's `dynamic_return` member -----------------------------------------------------

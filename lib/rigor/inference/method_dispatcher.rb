@@ -455,15 +455,17 @@ module Rigor
       #
       # `ExpressionTyper#try_local_def_dispatch` has to decide whether the call's own `self` answers the
       # name before a same-named top-level `def` may bind, and a plugin-supplied member is an answer Ruby
-      # really dispatches to: a model's column reader, an association, a scope, a `TraitRegistry`
-      # explosion. The veto asked neither tier, so a top-level `def name` bound ahead of the member and
+      # really dispatches to: a model's column reader, an association, a scope, a macro-synthesised
+      # reader. The veto asked neither tier, so a top-level `def name` bound ahead of the member and
       # typed the read as the def's `nil` — #618's false positive at a source the veto could not see.
       #
       # The question is asked HERE, of the same two tiers `resolve` consults and in the same order, rather
       # than reconstructed in the veto: a name this reports as answered is a name the dispatch really would
       # resolve, and no plugin knowledge moves into the engine's veto. The tiers are the gated
-      # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C emissions, and the Tier B
-      # `Plugin::Macro::TraitRegistry` explosions that share its table).
+      # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C `heredoc_templates` emissions
+      # today; the Tier B `Plugin::Macro::TraitRegistry` explosions share that table but cannot populate it
+      # until #476 threads a real environment into the pre-pass that builds it, so no trait member reaches
+      # this predicate in production yet — it will when #476 lands, with no change here).
       #
       # It is a predicate, not a type: the veto's job is to stop the top-level bind, after which the call
       # falls through to the ordinary dispatch chain and the tier that answered here answers there too. The

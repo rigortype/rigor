@@ -173,11 +173,63 @@ to repeat. Adopting `#disclose_once` is the migration.
 The question that chooses the channel is whether the row has a
 position it could be **right** about. "The index did not load" does
 not — it goes here. A project-wide scan whose rows each name a real
-file and line does, and must keep it; surfacing such a batch through
-`#diagnostics_for_file` behind an `@emitted` flag still duplicates it
-per worker, and there is no run-scoped channel for a *positioned*
-batch yet ([#1060](https://github.com/rigortype/rigor/issues/1060)).
-`rigor-rails-i18n`'s view scan is the one bundled instance.
+file and line does, and must keep it — it goes to `#emit_once`, below.
+
+#### Project-wide positioned batches — `#emit_once` ([#1060](https://github.com/rigortype/rigor/issues/1060))
+
+`#emit_once(key, diagnostics)` is the positioned sibling of
+`#disclose_once`: it registers a **batch** of fully built
+`Rigor::Analysis::Diagnostic`s under `key` and emits it once per run,
+with every row keeping the `path` / `line` / `column` the plugin gave
+it. It exists for a project-wide scan whose rows name files that no
+single analysed file owns — `rigor-rails-i18n`'s view-template scan is
+the bundled case: the views are usually not analysed targets (an `.erb`
+reaches the engine only as a template unit a `template_globs:` plugin
+contributes), so there is no per-file return to anchor the rows to, and
+returning them from whichever file an instance analysed first repeated
+the batch once per fork-pool worker.
+
+It rides the `#disclose_once` registration table, so everything above
+about call sites, the `nil` return, the de-duplication sources, the
+Ractor-degrade exception and emission order applies unchanged. `key`
+shares one namespace per plugin with `#disclose_once`, but a key keeps
+the kind it was first registered as: repeating it on the same channel
+is a no-op, and reusing it on the other channel, in either order,
+raises `ArgumentError` (reported through the `runtime-error` envelope)
+instead of silently dropping one of the two registrations. The
+differences are binding:
+
+- *The rows keep their positions.* The engine stamps only
+  `source_family: "plugin.<manifest.id>"`, the stamp a
+  `#diagnostics_for_file` row gets, so the qualified rule and the file
+  a baseline entry keys on are unchanged. Moving a batch from an
+  `@emitted` flag to `#emit_once` is therefore **baseline-neutral** —
+  unlike moving a row to `#disclose_once`.
+- *De-duplication is by key alone, and the first registration wins
+  whole.* A later batch under the same key — from this instance or any
+  other worker's — is dropped entirely, never merged row by row: every
+  worker scans the same project, so a row-wise union could only add a
+  partial or divergent view.
+- *The batch is stamped into the file-positioned stream,* immediately
+  after the per-file rows and before the run-level block the
+  disclosures sit in; order is `(registry position, key)`, then the
+  batch's own row order, identically under `--workers 0` and
+  `--workers N`. It is not part of the per-file stream the incremental
+  cache stores for any one file.
+- *Rows carry source positions; the engine does not relocate them.* A
+  batch bypasses the template-unit line remap, so each row MUST name
+  the position in the file the user edits (the template's own line,
+  or `1:1`). A row built from a line of a unit's compiled Ruby is
+  emitted at that compiled line, unrelocated.
+
+A batch is re-registered only by a run that reaches the registering
+hook. A narrowed `--incremental` recheck that analyses no file calls
+no plugin, so it does not replay a batch registered from
+`#diagnostics_for_file` — the same as a disclosure.
+
+Each row is copied and frozen on registration (Marshal- and
+Ractor-clean). A non-`Diagnostic` element raises `ArgumentError`,
+reported through the usual `runtime-error` isolation envelope.
 
 #### Template units — `template_globs:` / `#template_units_for_file` ([#392](https://github.com/rigortype/rigor/issues/392))
 
@@ -212,7 +264,19 @@ A unit may also declare `suppressed_rules:` — rule-id prefixes the engine drop
 ([#393](https://github.com/rigortype/rigor/issues/393)). It is the per-unit rule posture: only the plugin
 knows which families of finding its own compiler's output can support, and the alternative — a project-wide
 `disable:` entry — would silence the rule in the project's `.rb` files too. rigor-actionpack declares
-`["call.", "flow."]` for an ERB unit while its `view_type_checks:` is off.
+`["call."]` for an ERB unit while its `view_type_checks:` is off (`flow.` left the set in
+[#1047](https://github.com/rigortype/rigor/issues/1047), once render-site locals were traced).
+
+`#template_units_pass_started` ([#1047](https://github.com/rigortype/rigor/issues/1047)) is called once at
+the start of every collection pass over the plugin's claim — before its first `#template_units_for_file`,
+and even when the pass compiles nothing because every unit was carried. It exists for a transform that reads
+state gathered across its claimed files and memoises it on the plugin instance: a long-lived owner
+(`LanguageServer::ProjectContext`) keeps that instance across passes, and a warm pass offers only the
+editor's buffer, so no order of `#template_units_for_file` calls can tell one pass from the next. The
+default does nothing, and a raise is swallowed — the pass proceeds, only the plugin's own revalidation is
+skipped. The same cross-file dependency is why the collector carries a plugin's claim as a whole: if any
+of its templates was edited, added or deleted since the carried index was built, none of its units is
+reused (a deleted template that had produced no unit is the one change that rule does not see).
 
 The value-object fields, the position mapping, the `view:<logical_name>` effect key, the rule posture, the
 cache identity and the `--incremental` bound are normative in
@@ -857,8 +921,9 @@ exactly as it was, `taint:` included. A rule that answers a key the run's table 
 an edge that resolves to nothing, and the row's `taint:` is seeded **by the propagator** from
 `FileCollection::Edge#taint_if_unresolved` — added on failure rather than subtracted on success, so
 every step of the fixpoint stays monotone. Between them those two rules are why `render foo`,
-`render json:`, and a `render` of a template the plugin declined (a layout,
-[#1047](https://github.com/rigortype/rigor/issues/1047)) all keep the `template-not-analysed` taint,
+`render json:`, and a `render` of a template the plugin never compiled (a Haml view, or a
+format the lookup falls back on — [#1065](https://github.com/rigortype/rigor/issues/1065)) all keep the
+`template-not-analysed` taint,
 while only a render that reached a real unit clears it.
 
 A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.

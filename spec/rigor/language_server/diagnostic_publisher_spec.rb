@@ -135,16 +135,20 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Rigor::Plugin.unregister!("view-demo")
     end
 
-    # ... and the other half of the trade: the carry is revalidated per template against the filesystem, so
-    # an edit made outside the editor (a `git checkout`, another buffer's save) is compiled on the next
-    # publish without anything invalidating the ProjectContext — and ONLY that template is, which is the
-    # bound that matters for a project with hundreds of views.
+    # ... and the other half of the trade: the carry is revalidated against the filesystem, so an edit made
+    # outside the editor (a `git checkout`, another buffer's save) is compiled on the next publish without
+    # anything invalidating the ProjectContext.
     #
-    # The snapshot itself does not move: it is frozen, so it keeps seeding from the pre-edit unit and the
-    # changed template is recompiled on every publish until the owner invalidates (a save fires
-    # `didChangeWatchedFiles`, which does exactly that). The second edited publish below pins that, so the
-    # cost is stated rather than assumed: one compile per template changed SINCE the scan, never the index.
-    it "recompiles exactly the template that changed on disk, and no other" do
+    # Since #1047 the unit of that revalidation is the claiming plugin's WHOLE claim, not the one template:
+    # a transform may read the plugin's other templates (rigor-actionpack seeds a partial's locals from the
+    # views that render it), so reusing an untouched sibling's unit after an edit could serve a stale seed.
+    # The bound is therefore one transform per claimed template per publish, until the owner invalidates —
+    # which a save does (`didChangeWatchedFiles`), and an edit on disk IS a save. Keystrokes are not: the
+    # buffer-bound path never costs the carry (see the no-change example above).
+    #
+    # The snapshot itself does not move: it is frozen, so it keeps seeding from the pre-edit index and the
+    # claim is recompiled on every publish until then. The second edited publish pins that.
+    it "recompiles the changed template's whole claim on disk, on every publish until invalidated" do
       Dir.mktmpdir("rigor-lsp-template-edited-") do |tmpdir|
         template = write_template_unit_project(tmpdir)
         File.write(File.join(File.dirname(template), "index.rbx"), "render_header(@title.upcase)\n")
@@ -161,12 +165,126 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
           edited = RigorViewDemoPlugin.transform_calls
           publisher.publish_for(uri)
 
-          expect(edited - before).to eq(1)
-          expect(RigorViewDemoPlugin.transform_calls - edited).to eq(1)
+          expect(edited - before).to eq(2)
+          expect(RigorViewDemoPlugin.transform_calls - edited).to eq(2)
         end
       end
     ensure
       Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # #1047 — a render site edited on disk must reach the partial it renders, on the next publish, through
+    # a long-lived ProjectContext whose plugin instance memoises the render-locals index. The observable is
+    # a TYPED seed: `show` passes `s: String.new`, so `s.nope_from_seed` in the partial is an undefined
+    # method on String; once `show` passes a computed value instead, `s` is `Dynamic` and the row must go.
+    # Before the fix the memo was never revalidated and the carry reused the partial's unit, so the row
+    # survived every publish until something invalidated the context. The `invalidate!` steps pin that a
+    # cold rebuild agrees with the warm answer in both directions.
+    it "re-reads a render site edited on disk into the partial it renders" do
+      Dir.mktmpdir("rigor-lsp-render-locals-") do |tmpdir|
+        show = write_render_locals_project(tmpdir, "String.new")
+        card = File.join(tmpdir, "app", "views", "users", "_card.html.erb")
+        uri = "file://#{card}"
+        buffer_table.open(uri: uri, bytes: File.read(card), version: 1)
+        context = render_locals_context(tmpdir)
+        publisher = publisher_for(context)
+
+        Dir.chdir(tmpdir) do
+          expect(published_messages(publisher, uri)).to include(a_string_including("nope_from_seed"))
+
+          File.write(show, render_locals_show("params[:s]"))
+          expect(published_messages(publisher, uri)).not_to include(a_string_including("nope_from_seed"))
+
+          context.invalidate!
+          expect(published_messages(publisher, uri)).not_to include(a_string_including("nope_from_seed"))
+
+          File.write(show, render_locals_show("String.new(\"restored\")"))
+          context.invalidate!
+          expect(published_messages(publisher, uri)).to include(a_string_including("nope_from_seed"))
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("actionpack")
+    end
+
+    # #1047 review — a warm publish offers the collector only the buffer's path, so no order of paths can
+    # tell one pass from the next. Switching buffers after a render site changed on disk must still read the
+    # new site, whichever way the two buffers sort; `template_units_pass_started` is what makes it so.
+    it "re-reads an edited render site after switching to a buffer, in either sort direction" do
+      Dir.mktmpdir("rigor-lsp-render-locals-switch-") do |tmpdir|
+        uris, write_show = write_switch_project(tmpdir)
+        publisher = publisher_for(render_locals_context(tmpdir))
+
+        Dir.chdir(tmpdir) do
+          # mid (cold), edit, then card — which sorts BEFORE mid.
+          expect(published_messages(publisher, uris["m/_mid"])).to include(a_string_including("nope_from_seed"))
+          write_show.call("params[:s]")
+          expect(published_messages(publisher, uris["a/_card"])).not_to include(a_string_including("nope_from_seed"))
+
+          # restore, then mid — which sorts AFTER card.
+          write_show.call("String.new(\"back\")")
+          expect(published_messages(publisher, uris["m/_mid"])).to include(a_string_including("nope_from_seed"))
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("actionpack")
+    end
+
+    # Two partials that sort on either side of nothing in particular (`a/_card`, `m/_mid`), both open as
+    # buffers, both rendered with a typed local from `z/show`. Returns their URIs and a writer for `show`.
+    def write_switch_project(tmpdir)
+      views = File.join(tmpdir, "app", "views")
+      uris = %w[a/_card m/_mid].to_h do |name|
+        path = File.join(views, "#{name}.html.erb")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "<p><%= s.nope_from_seed %></p>\n")
+        buffer_table.open(uri: "file://#{path}", bytes: File.read(path), version: 1)
+        [name, "file://#{path}"]
+      end
+      show = File.join(views, "z", "show.html.erb")
+      FileUtils.mkdir_p(File.dirname(show))
+      write_show = lambda do |value|
+        File.write(show, %(<%= render partial: "a/card", locals: { s: #{value} } %>\n) +
+                         %(<%= render partial: "m/mid", locals: { s: #{value} } %>\n))
+      end
+      write_show.call("String.new")
+      [uris, write_show]
+    end
+
+    def published_messages(publisher, uri)
+      writer.payloads.clear
+      publisher.publish_for(uri)
+      writer.payloads.flat_map { |payload| payload.dig(:params, :diagnostics).map { |d| d[:message] } }
+    end
+
+    def render_locals_show(value)
+      %(<%= render partial: "card", locals: { s: #{value} } %>\n)
+    end
+
+    def write_render_locals_project(tmpdir, value)
+      FileUtils.mkdir_p(File.join(tmpdir, "app", "views", "users"))
+      File.write(File.join(tmpdir, "app", "views", "users", "_card.html.erb"), "<p><%= s.nope_from_seed %></p>\n")
+      show = File.join(tmpdir, "app", "views", "users", "show.html.erb")
+      File.write(show, render_locals_show(value))
+      show
+    end
+
+    # rigor-actionpack, loaded the way a project loads a plugin: a file on disk that registers it, with
+    # `view_type_checks:` on so the typed seed is observable as a `call.` row.
+    def render_locals_context(tmpdir)
+      lib = File.expand_path("../../../plugins/rigor-actionpack/lib", __dir__)
+      plugin_path = File.join(tmpdir, "rigor-actionpack-lsp.rb")
+      File.write(plugin_path, <<~RUBY)
+        $LOAD_PATH.unshift(#{lib.inspect}) unless $LOAD_PATH.include?(#{lib.inspect})
+        require "rigor-actionpack"
+        Rigor::Plugin.register(Rigor::Plugin::Actionpack)
+      RUBY
+      Rigor::LanguageServer::ProjectContext.new(
+        configuration: Rigor::Configuration.new(
+          "paths" => ["app"],
+          "plugins" => [{ "gem" => plugin_path, "id" => "actionpack", "config" => { "view_type_checks" => true } }]
+        )
+      )
     end
 
     # ADR-87's racy guard is what makes a carried pack trustworthy, and it only exists inside a

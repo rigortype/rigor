@@ -75,6 +75,44 @@ module Rigor
         TRIM_CLOSE = /-%>/
         private_constant :TRIM_CLOSE
 
+        # #1047 — a LAYOUT's `yield`. `<%= yield %>`, `<%= yield :sidebar %>` and `<% if content_for?(:x) %>`
+        # are what a layout is made of, and the first two are legal ERB and illegal Ruby anywhere outside a
+        # method body — so every layout's compiled source failed to parse and the file was declined (four of
+        # redmine's 506 templates, two of mastodon's 46; `docs/notes/20260917-erb-template-units.md` § 3).
+        #
+        # The seam deliberately does NOT wrap a unit's body in a synthesised method
+        # (`docs/internal-spec/macro-substrate.md` § Positions: wrapping would shift every line and compose
+        # a second line map onto the plugin's), so the fix is a rewrite of the TEMPLATE, in the same pre-pass
+        # {BLOCK_EXPR} and {TRIM_OPEN} live in: the `yield` KEYWORD inside an ERB tag becomes a call to
+        # {YIELD_METHOD}, an ordinary implicit-self method on the synthesised view context, declared in
+        # `sig/action_view.rbs` as returning `String`.
+        #
+        # Unlike the other two rewrites this one is NOT width-preserving, and it does not have to be: a unit
+        # whose `line_map` is non-empty reports at column 1 by construction
+        # ({Analysis::TemplateUnits#remap} — "the template's lines and the compiled Ruby's columns do not
+        # correspond"), so only the LINE count is load-bearing, and the replacement contains no newline.
+        #
+        # What the rewrite deliberately does not do is give the call a TYPE beyond `String`. Rails' `yield`
+        # returns whatever the inner template's buffer holds, and `yield :sidebar` returns the `content_for`
+        # buffer — an empty `SafeBuffer` when nothing was provided, never nil. A lenient `String` is the
+        # widest honest reading, and inventing anything narrower would be the `Parameters#[]` trap one
+        # layer up.
+        YIELD_METHOD = "__rigor_yield"
+
+        # The `yield` keyword, and only the keyword: not `foo.yield`, not `:yield`, not `@yield`, not
+        # `yielding`. A `yield` inside a STRING literal in a tag (`<%= t("yield") %>`) is rewritten too —
+        # the pre-pass is a Regexp over the tag, not a Ruby lexer — which changes a literal's bytes in a
+        # body that is never executed and that no rule reads the contents of. Recorded rather than guarded,
+        # because a lexer here would be a second Ruby parser to keep honest.
+        YIELD_KEYWORD = /(?<![A-Za-z0-9_.:@$])yield(?![A-Za-z0-9_?!])/
+        private_constant :YIELD_KEYWORD
+
+        # Any ERB tag, non-greedy and multi-line — the region {YIELD_KEYWORD} is applied inside, so a
+        # `yield` in the template's HTML text is left exactly as it was written. A `<%%` opener is ERB's
+        # escape for a LITERAL `<%` in the output, so what follows it is text too and is skipped.
+        ANY_TAG = /<%.*?%>/m
+        private_constant :ANY_TAG
+
         # `<%= … %>` and `<%== … %>`, non-greedy and multi-line. No capture group: the block below reads
         # the tag it was handed rather than `Regexp.last_match`, whose group is `String?` however sure
         # the pattern makes it — and a rewrite that depends on global match state is the harder one to
@@ -127,7 +165,16 @@ module Rigor
         # Rewrites every block-opening output tag into a statement tag; see {BLOCK_EXPR}. Line- and
         # width-preserving by construction: only the tag's `=` characters are replaced, by spaces.
         def normalize(text)
-          normalize_block_expressions(text.gsub(TRIM_OPEN, "<% ").gsub(TRIM_CLOSE, " %>"))
+          normalize_block_expressions(normalize_yields(text.gsub(TRIM_OPEN, "<% ").gsub(TRIM_CLOSE, " %>")))
+        end
+
+        # Rewrites the `yield` keyword inside every ERB tag into a call on the view context; see
+        # {YIELD_METHOD}. Runs BEFORE {#normalize_block_expressions} so that pass reads the tag bodies it
+        # will actually hand to the compiler.
+        def normalize_yields(text)
+          return text unless text.match?(YIELD_KEYWORD)
+
+          text.gsub(ANY_TAG) { |tag| tag.start_with?("<%%") ? tag : tag.gsub(YIELD_KEYWORD, YIELD_METHOD) }
         end
 
         def normalize_block_expressions(text)

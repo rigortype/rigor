@@ -493,9 +493,9 @@ module Rigor
         @fact_cache = {}
         @producer_value_cache = {}
         @producer_errors = {}
-        # Issue #1051 — the run-scoped disclosure table ({#disclose_once}). Allocated here for the same
-        # reason as the three memos above: a registration is a Hash-content mutation, so it stays sound on
-        # a plugin that freezes itself in `initialize`.
+        # Issue #1051 — the run-scoped disclosure table ({#disclose_once}, and since #1060 {#emit_once}).
+        # Allocated here for the same reason as the three memos above: a registration is a Hash-content
+        # mutation, so it stays sound on a plugin that freezes itself in `initialize`.
         @run_disclosures = {}
       end
 
@@ -568,6 +568,19 @@ module Rigor
       def template_units_for_file(path:, source:) # rubocop:disable Lint/UnusedMethodArgument
         []
       end
+
+      # #1047 — called once at the start of every template-unit COLLECTION PASS over this plugin's claim,
+      # before any `#template_units_for_file` of that pass and whether or not the pass ends up calling it
+      # (a warm pass may carry every unit and compile none). A plugin whose transform reads state gathered
+      # ACROSS its claimed files — rigor-actionpack seeds a partial's locals from the render sites in every
+      # view — memoises that state on its instance, and a long-lived owner keeps the instance across
+      # passes; this is where such a plugin learns that the memo may now be stale. The collector's
+      # per-call order is not a substitute: a warm pass offers only the editor's buffer, so no sequence of
+      # paths can tell one pass from the next.
+      #
+      # The default does nothing. A raise is swallowed: the pass continues, and the plugin's own
+      # revalidation simply does not run for it.
+      def template_units_pass_started; end
 
       # ADR-37 slice 1 — runs the plugin's declared {.node_rule}s over one file and returns their
       # diagnostics. The engine owns the single AST walk here so plugin authors never hand-roll a traversal:
@@ -745,7 +758,7 @@ module Rigor
       # that differs between workers.
       def disclose_once(key, message:, severity: :info, rule: "load-error")
         id = key.to_s
-        return nil if @run_disclosures.key?(id)
+        return nil if run_registration_taken?(id, batch: false)
 
         @run_disclosures[id] = {
           key: id, message: message.to_s, severity: severity.to_sym, rule: rule.to_s
@@ -753,12 +766,64 @@ module Rigor
         nil
       end
 
-      # Engine-facing reader for {#disclose_once}: this instance's registered disclosures in registration
-      # order. Plugin authors never call it — {Rigor::Analysis::Runner} and {Rigor::Analysis::WorkerSession}
-      # drain it, and the de-duplication across instances happens there.
+      # Issue #1060 — the POSITIONED sibling of {#disclose_once}: registers a whole batch of fully built
+      # diagnostics under `key`, emitted once per run however many plugin instances (fork-pool workers)
+      # register it. Each row keeps its own `path` / `line` / `column` — use this when a project-wide scan
+      # produces rows that are right about a position (a view template's line) but no single analysed file
+      # owns them, so returning them from `#diagnostics_for_file` would repeat them once per worker.
+      #
+      #     emit_once(:view_diagnostics, scan_view_files(index))
+      #
+      # The question that chooses between the two channels is whether the row has a position it could be
+      # right about: a notice about the run's inputs has none and goes through {#disclose_once}
+      # (`.rigor.yml:1:1`); a row naming a real file and line comes here and keeps it.
+      #
+      # De-duplication is by `key` alone and the first registration wins: a later batch under the same key
+      # is dropped whole, on this instance or on any other instance in the run, never merged row by row.
+      # Every worker scans the same project, so a row-wise union could only add a worker's partial or
+      # divergent view. `key` shares one namespace per plugin with {#disclose_once} — the two channels are
+      # one registration table — but a key keeps the kind it was first registered as: repeating a key on the
+      # same channel is a no-op, and reusing it on the OTHER channel (either order) raises `ArgumentError`
+      # rather than silently dropping a genuine batch or disclosure.
+      #
+      # Callable from `#prepare`, `#diagnostics_for_file`, or a `node_rule` block; returns `nil` and emits
+      # nothing itself. The engine stamps `source_family: "plugin.<id>"` exactly as it does for a per-file
+      # row, so the qualified rule and the position a baseline keys on are the ones `#diagnostics_for_file`
+      # would have produced. Each row is copied and frozen on registration so the batch rides the fork
+      # payload and the Ractor `:done` message unchanged; a non-{Rigor::Analysis::Diagnostic} element
+      # raises `ArgumentError`, which the engine reports as this plugin's `runtime-error`.
+      def emit_once(key, diagnostics)
+        id = key.to_s
+        return nil if run_registration_taken?(id, batch: true)
+
+        batch = Array(diagnostics).map do |row|
+          next row.dup.freeze if row.is_a?(Rigor::Analysis::Diagnostic)
+
+          raise ArgumentError, "emit_once expects Rigor::Analysis::Diagnostic rows, got #{row.class}"
+        end
+        @run_disclosures[id] = { key: id, diagnostics: batch.freeze }.freeze
+        nil
+      end
+
+      # Engine-facing reader for {#disclose_once} and {#emit_once}: this instance's registrations in
+      # registration order; a positioned batch is the record carrying `:diagnostics`. Plugin authors never
+      # call it — {Rigor::Analysis::Runner} and {Rigor::Analysis::WorkerSession} drain it, and the
+      # de-duplication across instances happens there.
       def run_disclosure_records
         @run_disclosures.values
       end
+
+      # #1060 — true when `id` is already registered on the same channel (the repeat is a no-op); raises when
+      # it is registered on the other one, because either answer there would drop a genuine registration.
+      def run_registration_taken?(id, batch:)
+        existing = @run_disclosures[id]
+        return false if existing.nil?
+        return true if existing.key?(:diagnostics) == batch
+
+        taken = batch ? "a #disclose_once disclosure" : "an #emit_once batch"
+        raise ArgumentError, "run-scoped key #{id.inspect} is already registered as #{taken}; use a distinct key"
+      end
+      private :run_registration_taken?
 
       # Boilerplate-reduction helper (review §1.3): the "did you mean …?" suggestion every
       # diagnostic-emitting plugin otherwise hand-rolls. Returns the closest of `candidates` to `name` via

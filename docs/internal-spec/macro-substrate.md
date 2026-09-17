@@ -385,13 +385,29 @@ preamble a partial writes when its render-site `locals:` are not traced.
   the `plugin_loader` rows with it.
   Three things rebuild the index wholesale, because each can change what a
   transform produces for bytes that never moved: a different root, a different
-  set of claimed globs, a different set of glob-claiming plugins. Separately,
+  set of claimed globs, a different set of glob-claiming plugins. One more
+  rebuilds a single plugin's claim wholesale
+  ([#1047](https://github.com/rigortype/rigor/issues/1047)): any of that
+  plugin's templates edited, added or deleted on disk (a
+  deleted template that had produced no unit is the one change this does not
+  see; it contributed nothing a sibling could read). A transform may read its
+  plugin's OTHER claimed templates — rigor-actionpack seeds a partial's locals
+  from every view that renders it — so a template's own freshness cannot vouch
+  for its unit, and the seam does not ask a plugin to declare which of its units
+  are independent. The editor's buffer is exempt, so this never costs a
+  keystroke, and it bites only on an on-disk edit the owner has not invalidated
+  for (a save fires `didChangeWatchedFiles`, which rebuilds cold anyway); a
+  template the plugin declined is carried as a bare stat pack so its unchanged
+  bytes do not read as an edit. A plugin whose transform memoises such
+  cross-file state learns that a pass began through
+  `Plugin::Base#template_units_pass_started`, called once per pass before any
+  `#template_units_for_file` and even when every unit is carried. Separately,
   and whatever the rest of the index does, the path the editor's buffer is bound
   to is recompiled from the buffer's bytes on every publish and its unit never
   enters a shared index. The snapshot is
   frozen, so a template edited on disk **since the scan was built** is
   recompiled on every publish until the owner invalidates — one compile per
-  changed template, never the index, and a save fires
+  template in the changed template's claim, and a save fires
   `workspace/didChangeWatchedFiles`, which invalidates. A CLI run passes no
   `previous:` and builds the index from scratch exactly as before: its process
   ends with the run, so there is nothing to carry and no second cache to prove
@@ -436,14 +452,21 @@ Two things #392 expected that consumer to need, and it did not:
   `view:` unit key to be an `effects.envelopes:` subject (`Effects::MethodKey.envelope_owner` — a view
   has no owner class, and `MethodKey.split` would have grouped `view:users/show.html` under the
   class name `view:users/show`, which no run ever produced).
-- A template whose compiled Ruby does not **parse** is declined by the plugin rather than handed over:
-  a layout's `<%= yield %>` is legal ERB and illegal Ruby outside a method, so the alternative was two
-  parse diagnostics per layout on templates Rails renders. The seam's `[]` door is what that decline
-  goes through. Layouts therefore have no unit yet
-  ([#1047](https://github.com/rigortype/rigor/issues/1047)).
+- A template whose compiled Ruby does not **parse** is declined by the plugin rather than handed over,
+  through the seam's `[]` door. A layout was the measured case: `<%= yield %>` is legal ERB and illegal
+  Ruby outside a method, so the alternative was two parse diagnostics per layout on templates Rails
+  renders. [#1047](https://github.com/rigortype/rigor/issues/1047) resolved it **in the transform, not
+  in the seam** — the plugin rewrites the `yield` keyword into a call on its synthesised view context
+  before either compiler runs, which is the shape this section's Positions rule forces: wrapping the
+  body in a synthesised method would shift every line and compose a second map onto the plugin's, so a
+  body that must parse as written has to be rewritten as written. The rewrite is not width-preserving
+  and does not need to be — a unit with a non-empty `line_map` reports at column 1 by construction.
 - A controller action **is** edged to the template it renders
   ([#1048](https://github.com/rigortype/rigor/issues/1048)), through an attribution row's `callee:`
   rule rather than through anything in this seam: the unit key a template unit already carries is the
   callee key the edge names, so the two halves meet in the summaries table with no new resolution.
-  The `render` taint survives exactly where the edge does not resolve — a computed target, and a
-  layout, which is why #1047 is still what unblocks the `template -> layout` half.
+  The `render` taint survives exactly where the edge does not resolve — a computed target, or a name no
+  unit answers. Since #1047 a layout **is** a unit, so a view-side `render layout:` discharges like any
+  other partial render; what remains unedged is the layout Rails wraps an *action's* template in, whose
+  name is a class-body declaration plus a convention lookup and therefore outside what a callee rule may
+  read.

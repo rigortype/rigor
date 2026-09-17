@@ -1092,6 +1092,11 @@ module Rigor
         # override re-stamps it; and a pool backend folds `.rigor.yml`-positioned prepare / pool-degraded rows
         # into the same return, which the slice drops. The run's own stream is stamped once, at the end.
         diagnostics += analyze_targets(targets, environment: environment, project_files: expansion.fetch(:files))
+        # Issue #1060 — the positioned batches plugins registered through `Plugin::Base#emit_once`, read once
+        # every worker payload has been merged. Kept beside the per-file stream (their rows name files and
+        # lines) but outside `#per_file_diagnostics`, which `analyze_targets` has already sliced, so no one
+        # file's incremental cache entry carries a project-wide batch.
+        diagnostics += @diagnostic_aggregator.plugin_run_emission_diagnostics
         # ADR-103 WD12 — the effect fixpoint, in the post-pool aggregation slot beside the conformance
         # results. Graph-only over a finite lattice, so it is a plain worklist to a true fixpoint; it
         # contributes NO diagnostics and its result leaves through `#effect_table`, never through the

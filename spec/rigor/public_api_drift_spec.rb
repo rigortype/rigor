@@ -245,6 +245,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     effect_edges()
     effect_entry_points()
     effect_labels()
+    emit_once(req:key,req:diagnostics)
     init(req:services)
     io_boundary()
     manifest()
@@ -260,6 +261,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     services()
     signature_paths()
     template_units_for_file(keyreq:path,keyreq:source)
+    template_units_pass_started()
   ].freeze
 
   # ADR-30 / issue #727: `ffi_binding_recognizer` and `ffi_binding_recognizers` are defined on

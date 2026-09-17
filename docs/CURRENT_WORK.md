@@ -38,34 +38,44 @@ Nothing is implemented; the maintainer decides.
 
 ## What landed on 2026-09-17
 
-Four PRs, each implemented by an Opus lane in its own worktree and taken through two or three rounds
-of adversarial review before landing; master is green at 02d96189.
+Two batches, each PR implemented by an Opus lane in its own worktree and taken through one to four
+rounds of adversarial review before landing. master is green through 0bd70a45; the #1050 merge run
+(cd550f31) was in progress when this was written.
 
-- [#1029](https://github.com/rigortype/rigor/pull/1029) closed #986 — colliding compact-header
-  buckets are kept as alternatives; a name the two crefs resolve to different project classes declines.
-- [#1030](https://github.com/rigortype/rigor/pull/1030) closed #963 item 1 — a `define_method`
-  block's `self` is the class instance on both evaluation paths. Items 2 and 3 stay open on #963.
-- [#1031](https://github.com/rigortype/rigor/pull/1031) closed #1014 — engine identity reaches the
-  five `rbs.*` producer keys; the caveat that used to sit below this section is retired.
-- [#1032](https://github.com/rigortype/rigor/pull/1032) closed #1002 — `sig-gen` renders a project
-  alias whose lossless expansion equals the union, scoped by namespace proximity.
+Batch 1: [#1029](https://github.com/rigortype/rigor/pull/1029) (#986),
+[#1030](https://github.com/rigortype/rigor/pull/1030) (#963 item 1),
+[#1031](https://github.com/rigortype/rigor/pull/1031) (#1014),
+[#1032](https://github.com/rigortype/rigor/pull/1032) (#1002).
+
+Batch 2: [#1034](https://github.com/rigortype/rigor/pull/1034) (#534 item 5),
+[#1035](https://github.com/rigortype/rigor/pull/1035) (#963 item 3),
+[#1036](https://github.com/rigortype/rigor/pull/1036) (#391, sig-gen `%a{pure}` with five withholding
+gates), [#1037](https://github.com/rigortype/rigor/pull/1037) (#392, template-unit seam),
+[#1041](https://github.com/rigortype/rigor/pull/1041) (#987), [#1042](https://github.com/rigortype/rigor/pull/1042)
+(#1039, `Const.new` → `#initialize` with an opaque-ancestry sentinel),
+[#1044](https://github.com/rigortype/rigor/pull/1044) (#534 item 6, closes #534),
+[#1050](https://github.com/rigortype/rigor/pull/1050) (#393, ERB units in rigor-actionpack).
 
 Two `Scope` rows in `sig/rigor/scope.rbs` carry `# sig-gen gap: #1011` markers because no engine
 issue tracks the untyped-return gap; if #1011 rules otherwise, each is a one-line repoint.
 
 ## What is worth picking up next
 
-- [#963](https://github.com/rigortype/rigor/issues/963) items 2 and 3, and
-  [#534](https://github.com/rigortype/rigor/issues/534) items 5 and 6 — the issue bodies carry the
-  live status; each item is independently assignable.
-- [#1011](https://github.com/rigortype/rigor/issues/1011) needs a ruling before work starts: are the
-  `sig-gen gap:` markers wrong, or is the gate's wording? [#1007](https://github.com/rigortype/rigor/issues/1007)
-  and [#1008](https://github.com/rigortype/rigor/issues/1008) are engine gaps sitting behind two
-  marked `sig/` rows.
-- The "`rigor check` misses `call.wrong-arity`" report from the #986 lane was an oracle mistake,
-  not an engine gap: the CLI answers for the tree its `exe/rigor` was loaded from, so a CLI resolved
-  from the main clone analyses a different engine than a worktree's harness. Recorded in
-  `docs/agents/measurement.md` by [#1033](https://github.com/rigortype/rigor/pull/1033).
+- [#1043](https://github.com/rigortype/rigor/issues/1043) — `rigor check lib` allocations are +15.6%
+  over the v0.3.9 baseline; the release gate would fail today. Confirm on Linux, bisect the
+  2026-09-16/17 merges, then decide design cost vs accidental hot path. Recalibration is release prep.
+- [#1048](https://github.com/rigortype/rigor/issues/1048) and [#1047](https://github.com/rigortype/rigor/issues/1047)
+  — the two #393 acceptance lines that #1050 could not meet (controller → template edge and the
+  `render` taint; render-site `locals:` and layouts). #393 stays open as their umbrella.
+- [#1049](https://github.com/rigortype/rigor/issues/1049) — `:model_index` gaps (`delegate`,
+  concern-declared associations, attachment macros) that keep 15 correct mastodon serializers
+  declining in rigor-active-model-serializers.
+- [#1038](https://github.com/rigortype/rigor/issues/1038), [#1040](https://github.com/rigortype/rigor/issues/1040),
+  [#1051](https://github.com/rigortype/rigor/issues/1051) — template-unit follow-ups (LSP recompile
+  memo, `type-of` through units, per-worker duplicate load-error rows).
+- [#963](https://github.com/rigortype/rigor/issues/963) item 2 and [#394](https://github.com/rigortype/rigor/issues/394)
+  (views V2/V3, now unblocked by #393's slice).
+- [#1011](https://github.com/rigortype/rigor/issues/1011) needs a ruling before work starts.
 
 ## Where the worktrees are
 

@@ -644,8 +644,9 @@ module Rigor
         # from `#diagnostics_for_file` IS recovered, because the re-analysis below runs the coordinator-side
         # plugin instances that {DiagnosticAggregator#plugin_run_disclosure_diagnostics} reads directly.
         # Left as is: recovering the rest means running `#prepare` on the coordinator registry, which would
-        # re-publish every cross-plugin fact for a degrade, and this backend is off by default and today
-        # cannot complete a run at all (see the `TemplateUnits.empty` isolation bug filed alongside #1051).
+        # re-publish every cross-plugin fact for a degrade, and this backend is off by default. Since #1055
+        # the path is also rare rather than universal — it used to be taken on every run, because every
+        # worker died in its constructor on a class-ivar memo.
         def reanalyze_degraded_in_process(degraded, results_by_path, source_files:)
           return if degraded.empty?
 

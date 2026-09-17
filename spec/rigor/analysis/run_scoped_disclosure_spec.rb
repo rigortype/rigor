@@ -22,6 +22,15 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
     diagnostics.map { |d| [d.path, d.line, d.column, d.rule, d.source_family, d.message] }.sort
   end
 
+  # #1055 — a pooled run must analyse its files IN the pool. Every Ractor worker used to die in
+  # `WorkerSession#initialize` on a class-level `@memo ||= …` (a class-ivar write a non-main Ractor may not
+  # perform), so the coordinator re-analysed the whole file set in process and this row was the only thing
+  # that said so. The multiset comparisons below would notice too, but only by way of a row they do not name;
+  # this asserts the pool actually ran.
+  def expect_no_pool_degrade(diagnostics)
+    expect(diagnostics.map(&:rule)).not_to include("pool-degraded")
+  end
+
   # Six files so a two-worker split gives each worker a different FIRST file — the condition under which
   # the old per-instance flag positioned its copies differently.
   def write_fixture(dir, count: 6)
@@ -92,9 +101,10 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
     it "emits exactly one row under workers: 2, never positioned at an analysed file" do
       Dir.mktmpdir do |dir|
         paths = write_fixture(dir)
-        rows = run_with(dir, paths, plugin_class, "rigor-disclosing-plugin", workers: 2)
-               .select { |d| d.message == "schema file not found" }
+        pooled = run_with(dir, paths, plugin_class, "rigor-disclosing-plugin", workers: 2)
+        expect_no_pool_degrade(pooled)
 
+        rows = pooled.select { |d| d.message == "schema file not found" }
         expect(rows.size).to eq(1)
         expect(rows.first.path).to eq(".rigor.yml")
       end
@@ -106,6 +116,7 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
         sequential = run_with(dir, paths, plugin_class, "rigor-disclosing-plugin")
         pooled = run_with(dir, paths, plugin_class, "rigor-disclosing-plugin", workers: 2)
 
+        expect_no_pool_degrade(pooled)
         expect(diag_keys(pooled)).to eq(diag_keys(sequential))
       end
     end
@@ -132,9 +143,10 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
     it "is de-duplicated to one row across workers" do
       Dir.mktmpdir do |dir|
         paths = write_fixture(dir)
-        rows = run_with(dir, paths, plugin_class, "rigor-late-disclosing-plugin", workers: 2)
-               .select { |d| d.message == "routes file not found" }
+        pooled = run_with(dir, paths, plugin_class, "rigor-late-disclosing-plugin", workers: 2)
+        expect_no_pool_degrade(pooled)
 
+        rows = pooled.select { |d| d.message == "routes file not found" }
         expect(rows.size).to eq(1)
         expect([rows.first.path, rows.first.severity]).to eq([".rigor.yml", :warning])
       end
@@ -146,6 +158,7 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
         sequential = run_with(dir, paths, plugin_class, "rigor-late-disclosing-plugin")
         pooled = run_with(dir, paths, plugin_class, "rigor-late-disclosing-plugin", workers: 2)
 
+        expect_no_pool_degrade(pooled)
         expect(diag_keys(pooled)).to eq(diag_keys(sequential))
       end
     end

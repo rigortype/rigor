@@ -1,0 +1,1 @@
+- **[plugins]** The new `rigor-active-model-serializers` plugin types the implicit-self `object` reader inside an `ActiveModel::Serializer` subclass as the model the serializer's name resolves to, so `object.username` reads that column's type, and leaves `object` alone wherever no project model corroborates the name. [#1044](https://github.com/rigortype/rigor/pull/1044)

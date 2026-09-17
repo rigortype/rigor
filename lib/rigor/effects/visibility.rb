@@ -75,11 +75,19 @@ module Rigor
         arguments = node.arguments&.arguments
         return NONE if arguments.nil? || arguments.empty?
 
-        arguments.filter_map do |argument|
-          case argument
-          when Prism::DefNode then argument.name.to_s
-          when Prism::SymbolNode, Prism::StringNode then argument.unescaped
-          end
+        arguments.flat_map { |argument| names_in(argument) }
+      end
+
+      # One argument's names. The array form (`private %i[a b]`, `private [:a, :b]`) is read because it
+      # is ordinary and costs a line; a **splat** (`private(*names)`) is not, because the names are a
+      # value rather than syntax, and such a member reads as public — the direction that leaves
+      # today's behaviour intact rather than guessing.
+      def names_in(argument)
+        case argument
+        when Prism::DefNode then [argument.name.to_s]
+        when Prism::SymbolNode, Prism::StringNode then [argument.unescaped]
+        when Prism::ArrayNode then argument.elements.flat_map { |element| names_in(element) }
+        else NONE
         end
       end
 
@@ -87,7 +95,7 @@ module Rigor
         node.receiver.nil? && node.arguments.nil? && node.block.nil?
       end
 
-      private_class_method :region_after, :apply_targets, :argument_names, :bare?
+      private_class_method :region_after, :apply_targets, :argument_names, :names_in, :bare?
     end
   end
 end

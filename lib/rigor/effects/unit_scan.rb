@@ -50,15 +50,19 @@ module Rigor
       # `IfNode` — and `RescueNode` is the rescue CLAUSE rather than the body it guards, so a `render` in
       # the `begin` half of `begin … rescue … end` is at depth zero, which is right: that half runs.
       #
-      # A **block** is branching too, and is handled separately because only its CALL can say so
-      # ({#transparent_block?}). `User.transaction { redirect_to "/" }`, `[1].each { redirect_to "/" }`
-      # and `x.presence&.then { … }` all contain a call the body may not make, and recording a response
-      # from one would drop the implicit-render edge AND leave the unit reading exhaustive — the
-      # combination this bit exists to prevent.
+      # A `LambdaNode` is here for the same reason and needs no exemption: `@after = -> { redirect_to
+      # "/" }` stores a response rather than performing one, and the body may never be called at all.
+      #
+      # A **block** is branching too, but is answered by {#branching?} rather than listed here, because
+      # only the CALL that owns it can say whether it is one. `User.transaction { redirect_to "/" }`,
+      # `[1].each { redirect_to "/" }` and `x.presence&.then { … }` all contain a call the body may not
+      # make, and recording a response from one would drop the implicit-render edge AND leave the unit
+      # reading exhaustive — the combination this bit exists to prevent.
       BRANCHING = [
         Prism::IfNode, Prism::UnlessNode, Prism::CaseNode, Prism::CaseMatchNode,
         Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
-        Prism::RescueNode, Prism::RescueModifierNode, Prism::AndNode, Prism::OrNode
+        Prism::RescueNode, Prism::RescueModifierNode, Prism::AndNode, Prism::OrNode,
+        Prism::LambdaNode
       ].to_set.freeze
 
       # The one block a response may be recorded through: `respond_to`'s own. It is the format dispatcher

@@ -801,8 +801,8 @@ would otherwise produce:
   edge *and* leave the unit reading exhaustive. Branching ancestors are `If` / `Unless` / `Case` /
   loops / `And` / `Or` (modifier forms included), `Rescue` — the rescue **clause**, not the body it
   guards, so a `render` in the `begin` half of `begin … rescue … end` is at depth zero and stands the
-  rule down, correctly, because that half runs — and a **block**, whose body a call may never make
-  (`User.transaction { redirect_to "/" }`, `[1].each { … }`). The exception is `respond_to` /
+  rule down, correctly, because that half runs — and a **block or lambda**, whose body a call may never
+  make (`User.transaction { redirect_to "/" }`, `[1].each { … }`, `@after = -> { redirect_to "/" }`). The exception is `respond_to` /
   `respond_with`'s own block, a format dispatcher rather than a branch; its arms are ordinary blocks,
   so `format.json { render json: @user }` no longer stands the HTML arm's implicit render down. Three
   over-approximations remain — an `if`/`else` whose every branch responds, a response inside a format
@@ -812,8 +812,10 @@ would otherwise produce:
   instance methods, so a `private def card` is never rendered as `users/card` — while a project that
   happens to ship `app/views/users/card.html.erb` would otherwise hand that template's effects to the
   helper. `Effects::Visibility` reads `private` / `protected` as a region and in their argument forms
-  (`private def foo`, `private :foo`), and `public` **subtracts** in both; a `def self.x` inside a
-  region marks nothing, since a region hides no singleton method. It reads the class body's own top
+  (`private def foo`, `private :foo`, `private %i[foo bar]`), and `public` **subtracts** in all of
+  them; a `def self.x` inside a region marks nothing, since a region hides no singleton method. A
+  **splat** (`private(*names)`) is a value rather than syntax and is not read, so such a member stays
+  public. It reads the class body's own top
   level in source order, and anything deeper — `send(:private, :card)`, a `class_eval`, a concern that
   privatises on include — reads as public, which leaves today's behaviour intact rather than guessing;
 - a **nested `def`** and a **singleton method** are skipped outright. Neither is ever an action.

@@ -102,6 +102,10 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
       User.transaction { redirect_to "/" }
     end
 
+    def stored_lambda
+      @after = -> { redirect_to "/" }
+    end
+
     def dispatched
       respond_to do |format|
         format.html { render :show }
@@ -122,6 +126,14 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
       @user.touch
     end
     public :reopened
+
+    def listed
+      @user.touch
+    end
+    def also_listed
+      @user.touch
+    end
+    public %i[listed also_listed]
 
     def self.klass_helper
       1
@@ -186,7 +198,8 @@ TEMPLATE_EDGE_FILES = {
   "app/views/users/card.html.erb" => TEMPLATE_EDGE_PRIVATE_ERB,
   "app/views/users/show.json.erb" => TEMPLATE_EDGE_JSON_ERB
 }.merge(
-  %w[maybe rescued bare_html_arm in_transaction reopened dispatched klass_helper]
+  %w[maybe rescued bare_html_arm in_transaction stored_lambda reopened listed also_listed
+     dispatched klass_helper]
     .to_h { |action| ["app/views/users/#{action}.html.erb", TEMPLATE_EDGE_MAYBE_ERB] }
 ).freeze
 
@@ -291,17 +304,22 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
       end
     end
 
-    it "keeps the implicit render when the response is inside a block that may not run" do
-      in_project do |runner, _result|
-        # `respond_to { |f| f.html; f.json { render json: @user } }` is the shape that matters most:
-        # the `render json:` is the JSON arm's answer and says nothing about the HTML arm, which takes
-        # the implicit render. `User.transaction { redirect_to "/" }` is the same question with a
-        # different block — a call the body may not make, recorded as if it always did.
-        %w[bare_html_arm in_transaction].each do |action|
+    # Three callable bodies whose call the unit may never make, checked one example each so a
+    # regression in any one of them is independently red. Each would otherwise record a response at
+    # depth zero and leave the action with no edge AND `exhaustive: true`.
+    {
+      "bare_html_arm" => "an arm-less `format.html` beside a `render json:` in the JSON arm",
+      "in_transaction" => "a `redirect_to` inside `User.transaction { … }`",
+      "stored_lambda" => "a `redirect_to` inside a lambda the action only stores"
+    }.each do |action, shape|
+      it "keeps the implicit render for #{shape}" do
+        in_project do |runner, _result|
           entry = unit(runner, "UsersController##{action}")
 
-          expect(entry.edges).to include("view:users/#{action}.html"), "expected ##{action} to keep the edge"
-          expect(entry.declared.to_a).to include("io.db.write")
+          aggregate_failures do
+            expect(entry.edges).to include("view:users/#{action}.html")
+            expect(entry.declared.to_a).to include("io.db.write")
+          end
         end
       end
     end
@@ -337,6 +355,18 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
         # `private; def reopened; end; public :reopened` is a public action. An answer that only ever
         # grew would read it as private and drop its edge.
         expect(unit(runner, "UsersController#reopened").edges).to include("view:users/reopened.html")
+      end
+    end
+
+    it "reads the array form of a visibility marker too" do
+      in_project do |runner, _result|
+        # `public %i[listed also_listed]` is ordinary and costs a line to read. A SPLAT is not read —
+        # `private(*names)` is a value rather than syntax — and such a member stays public, which is
+        # the direction that leaves today's behaviour intact.
+        aggregate_failures do
+          expect(unit(runner, "UsersController#listed").edges).to include("view:users/listed.html")
+          expect(unit(runner, "UsersController#also_listed").edges).to include("view:users/also_listed.html")
+        end
       end
     end
 

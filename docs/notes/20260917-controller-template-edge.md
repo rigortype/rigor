@@ -75,18 +75,32 @@ corpus is silent about the lane by construction.
 
 The net hides the thing worth reporting, so the causes are split by the row that produced them:
 
-| Project | `ActionController::Base#render` | `ActionView::Base#render` |
-| --- | ---: | ---: |
-| redmine | 251 → **76** | 0 → **72** |
-| mastodon | 328 → 328 | 0 → 0 |
+| Project | `ActionController::Base#render` | `ActionController::Base#render_to_string` | `ActionView::Base#render` |
+| --- | ---: | ---: | ---: |
+| redmine | 251 → **76** | 2 → **0** | 0 → **72** |
+| mastodon | 328 → 328 | 0 → 0 | 0 → 0 |
 
-**175 of redmine's controller render taints are discharged** — that is the feature. The 72 that appear
-on the template side are not a regression and not a loss: before this change a `render` *inside* a
-template contributed nothing at all, and a partial-rendering view read exhaustive while saying nothing
-about what it rendered. They are the plugin saying, for the first time, "this template renders
-something I did not analyse", and almost all of them are the layout gap
-([#1047](https://github.com/rigortype/rigor/issues/1047)). They propagate into their controllers like
-any other cause, which is the whole of the difference between 175 and the net 105.
+**177 of redmine's controller-side render taints are discharged** — that is the feature. The 72 that
+appear on the template side are not a regression and not a loss: before this change a `render` *inside*
+a template contributed nothing at all, and a partial-rendering view read exhaustive while saying nothing
+about what it rendered. They are the plugin saying, for the first time, "this template renders something
+I did not analyse". They propagate into their controllers like any other cause, which is the whole of
+the difference between 177 and the net 105.
+
+### What those 72 actually are
+
+Worth listing, because the obvious guess is wrong. 57 `view:` units carry a cause of their own and the
+other ~15 are propagations. **No edge in either group points at a unit that exists**, so the resolver is
+not dropping anything it could have found — and 34 of the 57 are one shape:
+
+| Group | units | What |
+| --- | ---: | --- |
+| `.js.erb` rendering an HTML-only partial | **34** | `watchers/_set_watcher.js.erb` does `render partial: 'watchers/watchers'`, which exists only as `_watchers.html.erb`. The format travels from the enclosing unit, so the key is `view:watchers/_watchers.js` — and Rails resolves it, because a request for `[:js]` falls back through `[:js, :html]`. Filed as [#1065](https://github.com/rigortype/rigor/issues/1065). |
+| `.html.erb`, mixed | 22 | dynamic partial names (`render partial: @thing`), the view-side `render :layout => "…"` form, and layouts, which are still declined units ([#1047](https://github.com/rigortype/rigor/issues/1047)). |
+| one `.js` layout render | 1 | the same as the row above, one format over. |
+
+So the largest single remaining gap is a **format fallback**, not the layout gap. That was the useful
+thing this attribution produced, and it was not visible from the net.
 
 **298 of redmine's controller actions gained at least one effect label**, and 342 units in total did.
 Every label is one a template it really renders carries: redmine's view units carrying an `io.db.*`
@@ -97,13 +111,15 @@ Four of the rules move the count, and every one of them came out of review rathe
 corpus — which is worth saying plainly: **the corpus could not have found any of them**, because each
 is a shape whose cost is a missing or a spurious label and neither is a diagnostic.
 
-- a `responds:` call is only recorded at the unit's **top level**, and a **block is branching**.
+- a `responds:` call is only recorded at the unit's **top level**, and a **block or lambda is
+  branching**.
   `redirect_to "/" if @user.nil?` answers on one path and leaves the other taking the implicit render;
   so does `User.transaction { redirect_to "/" }`, and so does the HTML arm of
   `respond_to { |f| f.html; f.json { render json: @user } }` — the single most common Rails idiom,
-  where the JSON arm's answer was standing the HTML arm's template down. Recording a response there
-  drops the template edge *and* leaves the action reading exhaustive. Took the controller-action count
-  from 270 to 298;
+  where the JSON arm's answer was standing the HTML arm's template down. So does `@after = -> {
+  redirect_to "/" }`, which stores a response rather than performing one. Recording a response in any
+  of them drops the template edge *and* leaves the action reading exhaustive. Took the
+  controller-action count from 270 to 298;
 - the exception is `respond_to`'s **own** block, which is a format dispatcher rather than a branch. Its
   arms are ordinary blocks, so `format.html { render :show }` keeps the conventional edge beside the
   one the `render` names — an accepted over-approximation, since an edge is labels and never a taint;
@@ -121,7 +137,7 @@ the render sites resolve to keys no unit answers, the edge is dropped, and the r
 back by the propagator. It is the negative control this feature most needed: a render whose template
 was never analysed must not read as exhaustive, and 329 of them still do not.
 
-The two numbers to keep are **175 controller render taints discharged and 0 new diagnostics**.
+The two numbers to keep are **177 controller-side render taints discharged and 0 new diagnostics**.
 
 ### Pooled versus sequential
 
@@ -185,8 +201,9 @@ argument about presentation rather than about what `proven` means.
   the decision in #1059 cannot be settled by a corpus sweep.
 - **Layouts.** Every layout is still a declined unit ([#1047](https://github.com/rigortype/rigor/issues/1047)),
   so a `render layout:` inside a template keeps its taint. That is deliberate and pinned by spec; it is
-  also most of the 148 residual taints on redmine — 72 of them are the template-side `render` rows that
-  this change made visible for the first time — rather than a measurement of them.
+  part of the 148 residual taints on redmine rather than a measurement of them — and a smaller part
+  than the `.js` → `.html` format fallback of
+  [#1065](https://github.com/rigortype/rigor/issues/1065), which is 34 of the 57 tainted `view:` units.
 - **Haml / Slim / Jbuilder.** Same seam, different compiler, still unclaimed — and mastodon is now the
   evidence for how much that costs.
 - **`render partial:, collection:` counted rather than reached.** `collection:` changes how many times a

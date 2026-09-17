@@ -400,12 +400,14 @@ module Rigor
       def callee_edge_taken?(node, row)
         return false if row.callee.nil? || !CalleeRule.site_rule?(row.callee)
 
-        callee = CalleeRule.site(row.callee, node, owner_class: @owner_class, unit_key: @method_name)
+        callee = CalleeRule.site(row.callee, node, owner_class: @owner_class, unit_key: @method_name,
+                                                   fallbacks: row.callee_fallbacks)
         return false if callee.nil?
 
         @edges << FileCollection::Edge.new(
           receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false,
-          taint_if_unresolved: row.taint ? [row.taint, row.key].freeze : nil
+          taint_if_unresolved: row.taint ? [row.taint, row.key].freeze : nil,
+          fallback_selectors: callee.fallbacks
         )
         !row.taint.nil?
       end

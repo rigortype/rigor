@@ -229,6 +229,16 @@ template reaches the partials *it* renders — so an `io.db.write` in
 `app/views/users/_card.html.erb` shows up on `UsersController#show`
 three hops away, and `rigor effects explain` prints the path.
 
+A partial is looked up in the rendering template's own format, with
+the one fallback Action View itself hard-codes: a `.js.erb` template
+reaches `_list.js.erb` where it exists and `_list.html.erb`
+otherwise, which is how "a JS response that injects rendered HTML"
+works at all. Only one of the two is joined, never both. A `.json`,
+`.xml` or `.turbo_stream` template gets no fallback — what those fall
+back to depends on the request's `Accept` header, which the source
+does not say — and neither does a render site that names its format
+(`formats: [:js]`, `render "list.js"`) or a controller-side `render`.
+
 The `template-not-analysed` taint on a `render` is discharged
 exactly when the edge lands on a real unit. It **stays** when it
 does not, and both cases are common enough to name:
@@ -238,8 +248,8 @@ does not, and both cases are common enough to name:
   literals only, so anything computed keeps the honest "and possibly
   more";
 - the target names no template this plugin compiled — a `render
-  partial: @thing`, or a `.js.erb` rendering an HTML-only partial
-  ([#1065](https://github.com/rigortype/rigor/issues/1065));
+  partial: @thing`, or a partial that exists in neither the requested
+  format nor its fallback;
 - the template is outside `app/views/**/*.erb` — a Haml, Slim or
   Jbuilder view, which this plugin does not claim.
 

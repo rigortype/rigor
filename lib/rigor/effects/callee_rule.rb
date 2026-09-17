@@ -45,7 +45,13 @@ module Rigor
     module CalleeRule
       # The callee an applied rule names, as the two halves {FileCollection::Edge} carries. The key the
       # propagator reconstructs is `"#{receiver}.#{selector}"` — `view:users/show` + `html`.
-      Callee = Data.define(:receiver, :selector)
+      #
+      # `fallbacks` is the ordered list of selectors the propagator retries when `selector` resolves to
+      # nothing (#1065), or nil for none. The rule only COPIES it off the plugin's table: whether
+      # `view:users/_row.js` exists is a question about the merged table, which the scan cannot ask.
+      Callee = Data.define(:receiver, :selector, :fallbacks) do
+        def initialize(fallbacks: nil, **) = super
+      end
 
       # Must agree with {MethodKey::TEMPLATE_UNIT_PREFIX} and `Plugin::TemplateUnit::KEY_PREFIX`; pinned
       # equal by spec.
@@ -95,12 +101,14 @@ module Rigor
       # @param owner_class — the unit's owner (`"UsersController"`, `"ActionView::Base"`)
       # @param unit_key — the unit's own key: a selector for a method, `view:users/show.html` for a
       #   template unit
+      # @param fallbacks — the row's `callee_fallbacks:` table (#1065). Only a rule whose selector the
+      #   CONTEXT supplied consults it; see {rails_render_partial}.
       # @return the {Callee} the rule named, or nil whenever it cannot settle the target from
       #   literals alone
-      def site(name, node, owner_class:, unit_key: nil)
+      def site(name, node, owner_class:, unit_key: nil, fallbacks: nil)
         case name.to_s
         when "rails_render" then rails_render(node, owner_class)
-        when "rails_render_partial" then rails_render_partial(node, unit_key)
+        when "rails_render_partial" then rails_render_partial(node, unit_key, fallbacks)
         end
       end
 
@@ -116,6 +124,11 @@ module Rigor
       # `render` inside a controller. The positional form names an **action template**
       # (`render :show` → `users/show`), which is the one place a controller and a view disagree about
       # what a bare string means.
+      #
+      # Never consults a format fallback (#1065). The format here is either one the author wrote, or
+      # Rails' `html` default standing in for a REQUEST format the rule cannot see — and the lookup order
+      # a controller-side render follows is derived from that request (`request.formats`, an `Accept`
+      # header), not from anything in the source.
       def rails_render(node, owner_class)
         directory = controller_directory(owner_class)
         return nil if directory.nil?
@@ -132,18 +145,31 @@ module Rigor
       # file, because `RenderingHelper#render` rewrites `layout:` to `partial:` when a block is given.
       # Since #1047 a layout compiles to a unit like any other template, so such an edge resolves where
       # the named partial exists and keeps its taint where it does not.
-      def rails_render_partial(node, unit_key)
-        directory, format = template_context(unit_key)
+      #
+      # **The format fallback (#1065).** The format travels from the enclosing unit, and while a `.js.erb`
+      # template is rendering Rails' lookup context holds `[:js, :html]` — `LookupContext#formats=` appends
+      # `:html` to a lone `:js`, and `AbstractRenderer#prepend_formats` puts the template's own format in
+      # front of the request's. So `render partial: "watchers"` from `_set_watcher.js.erb` runs
+      # `_watchers.js.erb` where one exists and `_watchers.html.erb` otherwise. The rule copies the row's
+      # table for the inherited format onto the callee, and the propagator takes the first key that
+      # resolves.
+      #
+      # The table is consulted only for an INHERITED format. A `formats:` / `format:` keyword or a format
+      # spelled into the name is the author's word, and the fallback stands down: that is the direction
+      # that keeps a taint rather than guessing at a lookup the call overrode.
+      def rails_render_partial(node, unit_key, fallbacks)
+        directory, inherited = template_context(unit_key)
         return nil if directory.nil?
 
-        format = format_for(node, format)
+        format = format_for(node, inherited)
         return nil if format.nil?
 
+        retry_formats = format_keyword?(node) ? nil : fallbacks&.fetch(format, nil)
         explicit = keyword_name(node, "template")
-        return template_callee(qualify(explicit, directory), format) if explicit
+        return template_callee(qualify(explicit, directory), format, retry_formats) if explicit
 
         name = partial_name(node, directory) || positional_partial(node, directory)
-        name.nil? ? nil : template_callee(name, format)
+        name.nil? ? nil : template_callee(name, format, retry_formats)
       end
 
       # Rails' implicit render: an action that never rendered still renders `<controller>/<action>`.
@@ -232,6 +258,10 @@ module Rigor
         literal&.split(".")&.last
       end
 
+      def format_keyword?(node)
+        !(keyword_argument(node, "formats") || keyword_argument(node, "format")).nil?
+      end
+
       def non_template?(node)
         NON_TEMPLATE_OPTIONS.any? { |option| keyword_argument(node, option) }
       end
@@ -240,12 +270,16 @@ module Rigor
         node.elements.first if node.is_a?(Prism::ArrayNode)
       end
 
-      def template_callee(name, format)
+      # `fallbacks` survives only when the name spelled no format of its own: `render "row.json"` from a
+      # `.js` template is the author naming `json`, and a `js` table has nothing to say about it.
+      def template_callee(name, format, fallbacks = nil)
+        spelled = split_suffixes(name, nil).last
         name, format = split_suffixes(name, format)
         return nil if name.nil? || name.empty? || format.nil? || format.empty?
         return nil if name.include?(" ") || format.include?(" ") || format.include?(".")
 
-        Callee.new(receiver: "#{TEMPLATE_PREFIX}#{name}", selector: format)
+        fallbacks = nil unless spelled.nil? && fallbacks && !fallbacks.empty?
+        Callee.new(receiver: "#{TEMPLATE_PREFIX}#{name}", selector: format, fallbacks: fallbacks)
       end
 
       # Splits a written handler and format off the name's last segment, so `render "show.json"` names
@@ -317,7 +351,8 @@ module Rigor
       private_class_method :rails_render, :rails_render_partial, :rails_implicit_render,
                            :controller_directory, :template_context, :template_name,
                            :positional_template, :positional_partial, :partial_name,
-                           :format_for, :non_template?, :array_head, :template_callee, :split_suffixes, :partialize,
+                           :format_for, :format_keyword?, :non_template?, :array_head, :template_callee,
+                           :split_suffixes, :partialize,
                            :qualify, :keyword_name, :literal_name, :positional, :keyword_argument,
                            :underscore
     end

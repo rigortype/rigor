@@ -66,7 +66,7 @@ module Rigor
         index = Index.new(collection)
         collection.edges.each_with_object({}) do |(caller_key, list), out|
           targets = list.flat_map do |edge|
-            resolved = index.targets_for(edge)
+            resolved = index.resolve(edge)
             taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
             taint_unresolved_callee(state, caller_key, edge) if edge.taint_if_unresolved && resolved.empty?
             mark_unclaimed(state, caller_key) if edge.unclaimed && !edge.super_call && !index.owner_resolved?(edge)
@@ -282,6 +282,19 @@ module Rigor
           end
         end
 
+        # {#targets_for}, then — only where that answered nothing — the first of the edge's
+        # `fallback_selectors` that resolves (#1065), spelled as the same edge with that selector. A unit
+        # under the requested key therefore always wins and a fallback never joins a second target beside
+        # it: the lookup runs ONE template, and an edge to both would put a label on the caller that no
+        # execution of the render produces. Empty when every candidate fails, which is what lets the
+        # caller seed `taint_if_unresolved` exactly as before.
+        def resolve(edge)
+          resolved = targets_for(edge)
+          return resolved unless resolved.empty? && edge.fallback_selectors
+
+          fallback_targets(edge)
+        end
+
         # Whether the receiver's OWN ancestry holds a project definition of the selector — the half of
         # {#targets_for} the closed-world subclass join hides (#391).
         #
@@ -297,6 +310,14 @@ module Rigor
         end
 
         private
+
+        def fallback_targets(edge)
+          edge.fallback_selectors.each do |selector|
+            resolved = targets_for(edge.with(selector: selector, fallback_selectors: nil))
+            return resolved unless resolved.empty?
+          end
+          NO_TARGETS
+        end
 
         def memo_key(edge)
           [edge.receiver_class, edge.kind, edge.selector, edge.super_call, edge.constant_receiver]

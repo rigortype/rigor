@@ -445,6 +445,57 @@ RSpec.describe Rigor::Effects::Propagator do
     expect(table["A#run"].edges).to be_empty
   end
 
+  # #1065 — a `callee:` edge carrying an ordered fallback list: the first selector a unit answers is the
+  # target, and the carried taint is seeded only when every one of them fails.
+  describe "fallback selectors" do
+    let(:taint) { ["template-not-analysed", "ActionView::Base#render"] }
+
+    def view_edge(selector, fallbacks)
+      Rigor::Effects::FileCollection::Edge.new(
+        receiver_class: "view:w/_list", kind: :singleton, selector: selector, self_call: false,
+        taint_if_unresolved: taint, fallback_selectors: fallbacks
+      )
+    end
+
+    def run(units, fallbacks: %w[html text])
+      summaries = { "view:w/set.js" => summary }.merge(units.to_h { |key, label| [key, summary(label)] })
+      described_class.propagate(
+        collection(summaries: summaries, edges: { "view:w/set.js" => [view_edge("js", fallbacks)] })
+      )["view:w/set.js"]
+    end
+
+    it "takes the first fallback a unit answers, and seeds no taint" do
+      entry = run({ "view:w/_list.html" => "io", "view:w/_list.text" => "exit" })
+
+      expect(entry.edges).to eq(["view:w/_list.html"])
+      expect(entry.proven.to_a).to eq(["io"])
+      expect(entry).to be_exhaustive
+    end
+
+    it "skips a fallback no unit answers and tries the next" do
+      expect(run({ "view:w/_list.text" => "exit" }).edges).to eq(["view:w/_list.text"])
+    end
+
+    it "never joins a fallback beside the requested selector that resolved" do
+      entry = run({ "view:w/_list.js" => "io", "view:w/_list.html" => "exit" })
+
+      expect(entry.edges).to eq(["view:w/_list.js"])
+      expect(entry.proven.to_a).to eq(["io"])
+    end
+
+    it "seeds the carried taint when neither the selector nor any fallback resolves" do
+      entry = run({})
+
+      expect(entry.edges).to be_empty
+      expect(entry).not_to be_exhaustive
+      expect(entry.causes).to eq([taint])
+    end
+
+    it "is inert on an edge that carries no fallback" do
+      expect(run({ "view:w/_list.html" => "io" }, fallbacks: nil).causes).to eq([taint])
+    end
+  end
+
   # Fail-soft (ADR-103 WD13): propagation is a report surface, so a bug in it costs the report and never
   # the run that produced the summaries.
   it "answers an empty table rather than raising when propagation fails" do

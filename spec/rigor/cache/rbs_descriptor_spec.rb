@@ -11,11 +11,16 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
   let(:loader) { Rigor::Environment::RbsLoader.new }
 
   describe ".build_run (lazy-files run descriptor)" do
-    it "carries the same gems + configs as the eager .build (the cache key is unchanged)" do
+    it "carries the same gems + shared configs as the eager .build (the cache key is unchanged)" do
       eager = described_class.build(loader)
       run = described_class.build_run(loader)
       expect(run.gems).to eq(eager.gems)
-      expect(run.configs).to eq(eager.configs)
+      # Issue #1014 — `.build`'s configs add the env-only rows and the `engine-source` row on top; the run
+      # descriptor carries exactly the shared half, and `RunCacheKey` contributes its own engine-source row
+      # from the same `EngineSource.key_config_entries`, so the run key is unchanged.
+      expect(run.configs).to eq(described_class.config_entries(loader))
+      expect(eager.configs.first(run.configs.size)).to eq(run.configs)
+      expect(run.configs.map(&:key)).not_to include(Rigor::Cache::EngineSource::CONFIG_KEY)
     end
 
     it "does not digest the RBS signature tree until #files is read" do

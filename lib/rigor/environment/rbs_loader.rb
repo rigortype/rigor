@@ -2027,11 +2027,21 @@ module Rigor
       # Building it digests every `.rbs` file under `signature_paths` + the vendored gem sigs, and the
       # result is identical across producers, so one build is memoised per loader (on `@state`, alongside
       # `:env` — the env itself is loader-lifetime-memoised, so this adds no new staleness class).
+      #
+      # Issue #1014 — nil when the engine's source cannot be digested ({Cache::EngineSource::Unavailable});
+      # {Cache::RbsCacheProducer.fetch} then computes uncached. Memoised through `key?` rather than `||=` so
+      # that answer is reached once: rebuilding it would re-digest the whole signature tree per producer to
+      # arrive at the same nil.
       def rbs_cache_descriptor
-        @state[:rbs_cache_descriptor] ||= begin
-          require_relative "../cache/rbs_descriptor"
-          Cache::RbsDescriptor.build(self)
-        end
+        return @state[:rbs_cache_descriptor] if @state.key?(:rbs_cache_descriptor)
+
+        require_relative "../cache/rbs_descriptor"
+        @state[:rbs_cache_descriptor] =
+          begin
+            Cache::RbsDescriptor.build(self)
+          rescue Cache::EngineSource::Unavailable
+            nil
+          end
       end
 
       # ADR-15 Phase 2b — return the loader's read-only query surface as a frozen, `Ractor.shareable?`

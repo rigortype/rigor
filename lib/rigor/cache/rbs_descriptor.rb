@@ -3,20 +3,47 @@
 require "digest"
 
 require_relative "descriptor"
+require_relative "engine_source"
 require_relative "file_digest"
 
 module Rigor
   module Cache
     # Shared descriptor builder for cache producers that depend on the RBS environment (constant table,
-    # known-class set, future Marshal-clean reflection artefacts). Every consumer attaches the same three
-    # slots, so factoring the construction here keeps the producers small and ensures invalidation behaves
-    # identically across them.
+    # known-class set, future Marshal-clean reflection artefacts). Every consumer attaches the same slots —
+    # the `rbs` gem row, a digest row per signature file, and the `rbs.libraries` / `rbs.virtual_rbs` /
+    # `rbs.deferred_signature_paths` / `engine-source` config rows — so factoring the construction here keeps
+    # the producers small and ensures invalidation behaves identically across them.
     module RbsDescriptor
+      # The key every `rbs.*` producer shares ({RbsCacheProducer#fetch}): `rbs.environment`,
+      # `rbs.constant_type_table`, `rbs.class_ancestor_table`, `rbs.known_class_names`,
+      # `rbs.class_type_param_names`.
+      #
+      # Issue #1014 — the engine-source row is here, not in {.config_entries}, because these are
+      # computed-value slots: what they hold is not the RBS the descriptor digests but what Rigor's own code
+      # made of it. `rbs.constant_type_table` stores `Inference::RbsTypeTranslator.translate` output and
+      # `rbs.class_ancestor_table` the chains `RbsClassAncestorTable.compute` walks out of
+      # `instance_definition`, so an engine edit to either moved the value while the key stood still: the
+      # run-result key moved (#285) and the run re-analysed, then read the previous build's table. Both were
+      # reproduced cross-build on a fixture — a true positive dropped, and a `flow.unreachable-clause` false
+      # positive served — before this row was added.
+      #
+      # {.config_entries} deliberately does NOT get it: that half is what the ADR-45 run cache key reads
+      # ({.build_run}), and `RunCacheKey` already contributes the identical row from
+      # `EngineSource.key_config_entries` itself. Adding it there would duplicate the row in the run key and
+      # would have to be reconstructible by the boot-slimming probe, which builds `config_entries` without a
+      # loader.
+      #
+      # @raise EngineSource::Unavailable — an engine that cannot be identified must not be keyed by its
+      #   inputs alone; {RbsCacheProducer.fetch} turns this into an uncached compute.
       def self.build(loader)
+        # FIRST, before {.file_entries} digests the whole signature tree: the {EngineSource::Unavailable}
+        # path discards this descriptor entirely, and a SHA-256 of every `.rbs` under every signature root is
+        # the expensive way to reach that conclusion.
+        engine = EngineSource.key_config_entries
         Descriptor.new(
           gems: [rbs_gem_entry],
           files: file_entries(loader),
-          configs: config_entries(loader) + env_only_config_entries(loader)
+          configs: config_entries(loader) + env_only_config_entries(loader) + engine
         )
       end
 
@@ -25,8 +52,10 @@ module Rigor
       # MISS, by the dependency descriptor ({Runner#run_dependency_descriptor}). So a warm HIT never digests
       # the (large, vendored) RBS tree. {RunDescriptor} is NOT a {Descriptor} — it is never composed, hashed,
       # or `==`'d, only its four readers are consulted — so deferring `files` costs no soundness, and `gems`
-      # / `configs` match {.build}'s shared slots (the key is unchanged; the one slot the env key adds on
-      # top, {.env_only_config_entries}, is never read here).
+      # / `configs` match {.build}'s shared slots (the key is unchanged; the slots the env key adds on top,
+      # {.env_only_config_entries} and the #1014 `engine-source` row, are never read here — `RunCacheKey`
+      # contributes the identical engine-source row itself, from the same
+      # `EngineSource.key_config_entries`).
       def self.build_run(loader)
         RunDescriptor.new(loader: loader, gems: [rbs_gem_entry], configs: config_entries(loader))
       end
@@ -112,7 +141,8 @@ module Rigor
       # overlays. Rigor's own `data/` trees ({RbsLoader.vendored_gem_sig_paths}, `.core_overlay_sig_paths`,
       # `.capability_role_sig_paths`) are engine-owned: a file appears under one only when the engine tree is
       # edited, which normally arrives with the `lib/` change that reads it and so re-keys every
-      # computed-value slot through {EngineSource}. They get file rows and no glob — a glob there would cost
+      # computed-value slot through {EngineSource} — including, since #1014, this descriptor itself, which
+      # until then carried no such row. They get file rows and no glob — a glob there would cost
       # every project a stat walk of the vendored gem-signature tree per warm run to catch an
       # engine-development edit.
       def self.glob_entries(loader)

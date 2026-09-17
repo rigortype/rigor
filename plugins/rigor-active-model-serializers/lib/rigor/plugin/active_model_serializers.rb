@@ -196,16 +196,22 @@ module Rigor
       end
 
       # Whether the model ANSWERS the serializer — see the class comment for why this is required and why
-      # it is required of every name rather than most of them. A serializer that reads nothing off its
-      # resource states nothing to check, and is declined for that reason rather than admitted for it.
+      # it is required of every name rather than most of them. A serializer that declares nothing and
+      # reads nothing states nothing to check, and is declined for that reason rather than admitted for
+      # it.
       def answers?(entry, row, model_name, scope)
-        required = entry.required_names
-        return false if required.empty?
+        declarations = entry.unhandled_declarations
+        reads = entry.resource_reads
+        return false if declarations.empty? && reads.empty?
 
         members = model_members(row)
-        required.all? do |name|
-          members.include?(name) || project_defines?(model_name, name, scope)
-        end
+        # A declaration the serializer itself renders is not a read of the resource at all. The entry
+        # subtracts the serializer's OWN methods; a base serializer's `def formatted` is only visible to
+        # the engine's ancestor walk, and a declaration it handles says nothing about the model.
+        declarations.all? do |name|
+          project_defines?(entry.class_name, name, scope) ||
+            members.include?(name) || project_defines?(model_name, name, scope)
+        end && reads.all? { |name| members.include?(name) || project_defines?(model_name, name, scope) }
       end
 
       # Every name the model answers that its `:model_index` row states. The `?` forms are Active
@@ -219,13 +225,14 @@ module Rigor
         (columns + columns.map { |c| "#{c}?" } + associations + enums + aliases + scopes).to_set
       end
 
-      # The other half of "answers": a method the project writes in Ruby on the model or an ancestor of
-      # it — `Account#local?`, a concern's reader, an `attr_accessor`. The model index cannot see these,
-      # and without them the check would decline nearly every real serializer.
-      def project_defines?(model_name, method_name, scope)
+      # A method the project writes in Ruby on `class_name` or an ancestor of it. On the model side that
+      # is `Account#local?` or a concern's reader — the model index cannot see these, and without them
+      # the check would decline nearly every real serializer. On the serializer side it is a base
+      # serializer's own rendering method, which is not a read of the resource at all.
+      def project_defines?(class_name, method_name, scope)
         return false unless scope.respond_to?(:user_def_through_ancestors)
 
-        !scope.user_def_through_ancestors(model_name, method_name.to_sym).first.nil?
+        !scope.user_def_through_ancestors(class_name, method_name.to_sym).first.nil?
       end
 
       # `REST::AccountSerializer` offers two readings — the namespaced `REST::Account` and the

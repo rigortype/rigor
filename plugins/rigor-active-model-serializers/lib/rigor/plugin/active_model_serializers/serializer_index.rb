@@ -19,8 +19,14 @@ module Rigor
       class SerializerIndex
         Entry = Data.define(:class_name, :superclass_name, :file_path, :declared_names, :object_reads,
                             :own_method_names) do
-          # The names the resource must answer for this serializer to be the serializer OF that resource.
-          def required_names = (declared_names - own_method_names) | object_reads
+          # The declarations AMS will render by calling the name on the resource — unless an ancestor of
+          # this serializer defines it, which only the engine's ancestor walk can say, so that half is
+          # left to the caller.
+          def unhandled_declarations = declared_names - own_method_names
+
+          # Reads of the resource itself. Unlike a declaration, one of these is a read of the resource
+          # whatever the serializer or its ancestors define.
+          def resource_reads = object_reads
 
           def defines_object? = own_method_names.include?("object")
         end

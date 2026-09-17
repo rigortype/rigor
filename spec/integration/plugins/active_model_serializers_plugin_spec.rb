@@ -399,6 +399,133 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
   end
 
+  describe "a class-level body" do
+    it "does not treat a `class << self` `def object` as the reader it answers over" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
+                                 class << self
+                                   def object = 2
+                                 end
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "does not count an `object.` read inside `class << self` against the model" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
+                                 class << self
+                                   def reader = object.nothing_account_has
+                                 end
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+  end
+
+  describe "a declaration an ancestor serializer renders" do
+    it "does not require the model to answer a name a base serializer defines" do
+      types = dumped_types(files: {
+                             "app/serializers/base.rb" => <<~BASE,
+                               class BaseSerializer < ActiveModel::Serializer
+                                 def formatted
+                                   "rendered here, never read off the resource"
+                                 end
+                               end
+                             BASE
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < BaseSerializer
+                                 attributes :username, :formatted
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "still requires the model to answer an `object.` read a base serializer also defines" do
+      types = dumped_types(files: {
+                             "app/serializers/base.rb" => <<~BASE,
+                               class BaseSerializer < ActiveModel::Serializer
+                                 def formatted
+                                   "rendered here"
+                                 end
+                               end
+                             BASE
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < BaseSerializer
+                                 def probe
+                                   object.formatted
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
+  describe "an `object` reader written as a macro" do
+    it "does not answer over `attr_reader :object`" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
+                                 attr_reader :object
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "does not answer over `delegate :object, to: :wrapper`" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
+                                 delegate :object, to: :wrapper
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
   describe "the underivable case emits nothing" do
     it "emits no diagnostic of its own, on either arm" do
       analyze(files: {

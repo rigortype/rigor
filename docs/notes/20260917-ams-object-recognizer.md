@@ -53,17 +53,17 @@ the same run.
 | precise expressions, `app/serializers` | 4893 / 9575 (51.1 %) | 5093 / 9575 (53.2 %) |
 
 The sorted `path:line:column:rule:message` sets are byte-identical. Reach: **173 serializers
-discovered, 52 resolve a unique model name, 33 derive.**
+discovered, 52 resolve a unique model name, 34 derive.**
 
 The byte-identical set is also the answer to the one risky thing the bundled signature does.
 `ActiveModel::Serializer` is declared with an empty body and 93 of Mastodon's serializers inherit
 from it directly; `ActiveModelSerializers::Model` is subclassed by eight of its models. Every member
 the signature omits stayed lenient, as the manifest's `open_receivers:` rows intend.
 
-## The 19 declines that are the model index's gap, not the serializer's
+## The 18 declines, and why 15 of them are the model index's gap
 
-Of the 52 serializers that resolve a name, 19 are declined by the surface check. Three are the
-genuine misses above. The other 16 name a model that IS the right one and whose surface the
+Of the 52 serializers that resolve a name, 18 are declined by the surface check. Three are the
+genuine misses above. The other 15 name a model that IS the right one and whose surface the
 `:model_index` fact cannot fully see:
 
 | serializer | unanswered | why the model does answer it |
@@ -74,10 +74,12 @@ genuine misses above. The other 16 name a model that IS the right one and whose 
 | `REST::PreviewCardSerializer` | `image`, `image?`, `original_url` | attachment macros + a concern |
 
 The cause is one thing wearing three hats: `delegate`, concern-declared associations, and attachment
-macros are all model surface that `rigor-activerecord`'s discoverer does not fold. #534 item 5 just
-landed the same fold for concern-declared SCOPES; extending it to associations and `delegate` is the
-lever that would recover Mastodon's two largest serializers here, and it belongs in that plugin
-rather than this one.
+macros are all model surface that `rigor-activerecord`'s discoverer does not fold. #534 item 5 landed
+the same fold for concern-declared SCOPES and nothing covers these three, so the follow-up is filed
+as [#1049](https://github.com/rigortype/rigor/issues/1049), with the full per-serializer table and an
+acceptance gate that re-runs the reach probe below. It belongs in that plugin rather than this one:
+the other consumers of `:model_index` fail OPEN on an unseen name and are merely quieter for it,
+while this one fails closed and is the reason the gap is now visible.
 
 Declining is the safe direction — the site keeps the answer it had — so this ships as it is rather
 than loosening the check. A proportional or best-candidate rule was considered and rejected: a
@@ -99,6 +101,15 @@ Membership of that closure is the ONLY serializer gate. An earlier version also 
 whose name ended with `Serializer`, which typed `object` inside a `Json::ConversationSerializer` with
 no serializer ancestry and an `object` method of its own — erasing a true positive. `object` is an
 ordinary method name and the suffix is not evidence.
+
+## Reader spellings the check does not read
+
+A handful of ways to read the resource are not collected as evidence, so a serializer that uses one
+declines even where the model is right: `object[:key]`, `object.title = x`, `object.try(:name)`,
+`object.present?` (an ActiveSupport method, absent from the model's index row), and an
+`attribute(:x) { ... }` block form, whose name is still required of the model although the block
+renders it. Each is the safe direction — a decline, not a wrong type — and none of them occurs in
+Mastodon's `app/serializers`, so the measured reach above is unaffected.
 
 ## Deliberately not measured
 

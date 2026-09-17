@@ -130,9 +130,15 @@ plugins:
   association declared inside a concern's `included do`, and an
   attachment macro are all things the model answers that the model index
   does not yet see, so a serializer that reads one of them is declined.
-  On Mastodon that is 16 of the 52 serializers whose name resolves,
+  On Mastodon that is 15 of the 52 serializers whose name resolves,
   including its two largest; the fold belongs in `rigor-activerecord` and
-  is tracked with #534's concern work.
+  is tracked as
+  [#1049](https://github.com/rigortype/rigor/issues/1049).
+- **Some ways of reading the resource.** `object[:key]`, `object.title =`,
+  `object.try(:name)`, `object.present?` and an `attribute(:x) { ... }`
+  block are not read as evidence, so a serializer using one may decline
+  even where the model is right. Always the safe direction — a decline,
+  never a wrong type.
 - **Serializers for plain objects** — `ActiveModelSerializers::Model`
   subclasses, Structs, presenters. Use `model_overrides` where the class
   you want is a real constant you are happy to have checked.

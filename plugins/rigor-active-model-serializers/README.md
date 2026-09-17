@@ -138,8 +138,14 @@ serializers with `["app/serializers"]` alone, 173 with `app/lib` added.
   declared in a concern's `included do`, and attachment macros are all
   things the model answers and the `:model_index` fact does not carry, so
   a serializer reading one is declined. That fold belongs in
-  `rigor-activerecord`; the note records which Mastodon serializers it
-  would recover.
+  `rigor-activerecord` and is filed as
+  [#1049](https://github.com/rigortype/rigor/issues/1049); the note
+  records which Mastodon serializers it would recover.
+- **A few reader spellings.** `object[:key]`, `object.title =`,
+  `object.try(:name)`, `object.present?` and the `attribute(:x) { ... }`
+  block form are not collected as evidence, so a serializer using one may
+  decline. Safe direction, and zero occurrences in Mastodon's
+  `app/serializers`.
 
 ## Related
 

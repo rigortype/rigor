@@ -24,14 +24,37 @@ module Rigor
       # Every class in the scanned tree is recorded first and filtered afterwards, because the file that
       # defines a base serializer may be parsed after the files that inherit from it.
       class SerializerDiscoverer
+        # A `class << self` body is class-level for the same reason a `def self.x` body is, and it is a
+        # separate node type: without this arm a receiver-less `def object` inside one would register as
+        # an instance method, and an `object.<name>` there as a read of the resource.
+        SKIPPED_SCOPES = [Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+
         # AMS's resource-backed declaration macros. Each names something the serializer renders by
         # calling it on the resource, unless the serializer defines a method of that name itself.
         DECLARATION_MACROS = %i[attributes attribute has_many has_one belongs_to].freeze
 
-        # `object.tap`, `object.nil?`, `object.is_a?` and their siblings say nothing about which class
-        # the resource is, so they are not evidence. Read from Ruby rather than listed, so the set cannot
-        # drift from the Object the analysed code actually runs against.
-        UNIVERSAL_METHODS = Object.instance_methods.to_set(&:to_s).freeze
+        # Macros that DEFINE a method on the serializer rather than declaring one to read off the
+        # resource. `delegate :object, to: :wrapper` and `attr_reader :object` are both real ways to
+        # override AMS's reader, and neither writes a `def` for an ancestor walk to find; a name defined
+        # this way is also not a name the resource has to answer.
+        DEFINITION_MACROS = %i[attr_reader attr_accessor attr_writer delegate alias_method].freeze
+
+        # `object.tap`, `object.nil?`, `object.is_a?` and their siblings say nothing about which class the
+        # resource is, so they are not evidence.
+        #
+        # Listed rather than read from `Object.instance_methods`, which was the first shape and is
+        # process-dependent: `to_json`, `to_yaml` and `pretty_print` are on Object only because some
+        # library in the ANALYSER's process required them, so whether a serializer derived could change
+        # with Rigor's own load order. These are the public instance methods every Ruby object has from
+        # `Object` / `Kernel` alone.
+        UNIVERSAL_METHODS = %w[
+          ! != !~ <=> == === =~ __id__ __send__ class clone define_singleton_method display dup
+          enum_for eql? equal? extend freeze frozen? hash inspect instance_of? instance_variable_defined?
+          instance_variable_get instance_variable_set instance_variables is_a? itself kind_of? method
+          methods nil? object_id private_methods public_method public_methods public_send
+          remove_instance_variable respond_to? send singleton_class singleton_method singleton_methods
+          taint tainted? tap then to_enum to_s trust untaint untrust untrusted? yield_self
+        ].to_set.freeze
 
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
@@ -128,7 +151,7 @@ module Rigor
         end
 
         def collect_from(node, facts)
-          return if node.nil? || node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+          return if node.nil? || SKIPPED_SCOPES.any? { |kind| node.is_a?(kind) }
 
           case node
           when Prism::DefNode
@@ -145,6 +168,8 @@ module Rigor
         def record_call(node, facts)
           if node.receiver.nil? && DECLARATION_MACROS.include?(node.name)
             symbol_arguments(node).each { |name| facts[:declared_names] << name }
+          elsif node.receiver.nil? && DEFINITION_MACROS.include?(node.name)
+            symbol_arguments(node).each { |name| facts[:own_method_names] << name }
           elsif object_reader?(node.receiver) && !UNIVERSAL_METHODS.include?(node.name.to_s)
             facts[:object_reads] << node.name.to_s
           end

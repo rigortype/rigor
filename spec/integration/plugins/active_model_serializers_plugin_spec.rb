@@ -13,24 +13,28 @@ $LOAD_PATH.unshift(AMS_ACTIVERECORD_LIB) unless $LOAD_PATH.include?(AMS_ACTIVERE
 require "rigor-active-model-serializers"
 require "rigor-activerecord"
 
-# The whole plugin is one contributed return type, so every example here reads a `Rigor.dump_type`
+# The whole plugin is one contributed return type, so most examples here read a `Rigor.dump_type`
 # trace rather than a plugin diagnostic — the plugin emits none.
 #
-# `rigor-activerecord` runs alongside in every example because the `:model_index` fact is what
-# corroborates the naming convention. The pair is the unit under test: the derivation is only ever as
-# good as the model set some other plugin proved exists.
+# `rigor-activerecord` runs alongside in every example because the `:model_index` fact is both what
+# resolves the serializer's name and what the serializer is then CHECKED against. The pair is the
+# unit under test.
 AMS_SCHEMA = <<~SCHEMA
   ActiveRecord::Schema[8.0].define(version: 1) do
     create_table "accounts", force: :cascade do |t|
       t.string "username", null: false
     end
+
+    create_table "conversations", force: :cascade do |t|
+      t.string "uri"
+    end
   end
 SCHEMA
 
-AMS_ACCOUNT_MODEL = <<~MODEL
-  class Account < ApplicationRecord
-  end
-MODEL
+AMS_MODELS = {
+  "app/models/account.rb" => "class Account < ApplicationRecord\nend\n",
+  "app/models/conversation.rb" => "class Conversation < ApplicationRecord\nend\n"
+}.freeze
 
 RSpec.describe "plugins/rigor-active-model-serializers" do
   before { Rigor::Plugin.unregister! }
@@ -38,15 +42,10 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
 
   let(:plugin_class) { Rigor::Plugin::ActiveModelSerializers }
 
-  # Runs both plugins over a project whose `app/serializers` holds `serializers`, and returns the
-  # analysis result.
-  def analyze(serializers:, config: nil, schema: AMS_SCHEMA)
+  # Runs both plugins over a project whose `app/` holds `files`, and yields the analysis result.
+  def analyze(files:, config: nil, schema: AMS_SCHEMA)
     Dir.mktmpdir do |dir|
-      files = serializers.merge(
-        "app/models/account.rb" => AMS_ACCOUNT_MODEL,
-        "db/schema.rb" => schema
-      )
-      files.each do |relative, contents|
+      AMS_MODELS.merge(files).merge("db/schema.rb" => schema).each do |relative, contents|
         full = File.join(dir, relative)
         FileUtils.mkdir_p(File.dirname(full))
         File.write(full, contents)
@@ -89,25 +88,17 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
   end
 
-  # The same probe with `rigor-activerecord` absent — the `run_plugin` helper registers `plugin_class`
-  # and nothing else, which is exactly the one-plugin project this asserts about.
-  def alone_dumped_types(source)
-    result = run_plugin(
-      source: source,
-      files: { "app/models/account.rb" => AMS_ACCOUNT_MODEL, "db/schema.rb" => AMS_SCHEMA }
-    )
-    result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
-  end
-
   def undefined_method_messages(result)
     result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
   end
 
   describe "the derivable case" do
-    it "types `object` as the model the serializer's name resolves to" do
-      types = dumped_types(serializers: {
+    it "types `object` as the model whose name resolves AND whose surface answers the serializer" do
+      types = dumped_types(files: {
                              "app/serializers/rest/account_serializer.rb" => <<~SRC
                                class REST::AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
                                  def probe
                                    Rigor.dump_type(object)
                                  end
@@ -119,10 +110,12 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
 
     it "types the same serializer written as a nested `module REST`" do
-      types = dumped_types(serializers: {
+      types = dumped_types(files: {
                              "app/serializers/rest/account_serializer.rb" => <<~SRC
                                module REST
                                  class AccountSerializer < ActiveModel::Serializer
+                                   attributes :username
+
                                    def probe
                                      Rigor.dump_type(object)
                                    end
@@ -135,7 +128,7 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
 
     it "carries the model's column types through a read on `object`" do
-      types = dumped_types(serializers: {
+      types = dumped_types(files: {
                              "app/serializers/account_serializer.rb" => <<~SRC
                                class AccountSerializer < ActiveModel::Serializer
                                  def probe
@@ -148,14 +141,19 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       expect(types).to eq(["dump_type: String"])
     end
 
-    it "reaches a serializer that descends through a project base serializer" do
-      types = dumped_types(serializers: {
-                             "app/serializers/base.rb" => <<~BASE,
-                               class ApplicationSerializer < ActiveModel::Serializer
+    it "accepts a name the model answers with a Ruby `def` rather than a column" do
+      types = dumped_types(files: {
+                             "app/models/account.rb" => <<~MODEL,
+                               class Account < ApplicationRecord
+                                 def acct
+                                   username
+                                 end
                                end
-                             BASE
+                             MODEL
                              "app/serializers/account_serializer.rb" => <<~SRC
-                               class AccountSerializer < ApplicationSerializer
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :acct
+
                                  def probe
                                    Rigor.dump_type(object)
                                  end
@@ -166,11 +164,33 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       expect(types).to eq(["dump_type: Account"])
     end
 
-    it "honours a `model_overrides` entry for a serializer the convention cannot resolve" do
+    it "reaches a serializer that descends through a project base serializer" do
+      types = dumped_types(files: {
+                             "app/serializers/base.rb" => <<~BASE,
+                               class ApplicationSerializer < ActiveModel::Serializer
+                               end
+                             BASE
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ApplicationSerializer
+                                 attributes :username
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "honours a `model_overrides` entry, which the surface check does not re-examine" do
       types = dumped_types(
-        serializers: {
+        files: {
           "app/serializers/profile_serializer.rb" => <<~SRC
             class ProfileSerializer < ActiveModel::Serializer
+              attributes :nothing_account_has
+
               def probe
                 Rigor.dump_type(object)
               end
@@ -184,11 +204,17 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
     end
   end
 
-  describe "the underivable case" do
-    it "leaves `object` Dynamic when no model matches the serializer's name" do
-      types = dumped_types(serializers: {
-                             "app/serializers/context_serializer.rb" => <<~SRC
-                               class ContextSerializer < ActiveModel::Serializer
+  describe "a name that resolves to the wrong model" do
+    # Mastodon's own `REST::ConversationSerializer`: the name resolves to the real `Conversation`
+    # model, and the resource is an `AccountConversation`. `unread` and `last_status` are what say so.
+    it "declines when the model does not answer a declared name" do
+      types = dumped_types(files: {
+                             "app/serializers/rest/conversation_serializer.rb" => <<~SRC
+                               class REST::ConversationSerializer < ActiveModel::Serializer
+                                 attributes :id, :unread
+
+                                 has_one :last_status
+
                                  def probe
                                    Rigor.dump_type(object)
                                  end
@@ -199,8 +225,183 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       expect(types).to eq(["dump_type: Dynamic[top]"])
     end
 
+    it "declines when the model does not answer an `object.` read" do
+      types = dumped_types(files: {
+                             "app/serializers/conversation_serializer.rb" => <<~SRC
+                               class ConversationSerializer < ActiveModel::Serializer
+                                 def probe
+                                   object.participant_accounts
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "does not count a name the serializer defines itself against the model" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username, :computed
+
+                                 def computed
+                                   "not read off the resource"
+                                 end
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "declines when the serializer reads nothing off its resource, so nothing checks the name" do
+      types = dumped_types(files: {
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ActiveModel::Serializer
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "declines when two readings of the name both resolve to a real model" do
+      types = dumped_types(files: {
+                             "app/models/admin/account.rb" => <<~MODEL,
+                               class Admin::Account < ApplicationRecord
+                                 self.table_name = "accounts"
+                               end
+                             MODEL
+                             "app/serializers/admin/account_serializer.rb" => <<~SRC
+                               class Admin::AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
+  describe "a class that is not an AMS serializer" do
+    it "stays out of a `*Serializer` class with no serializer ancestry, keeping its true positive" do
+      analyze(files: {
+                "app/serializers/json/conversation_serializer.rb" => <<~SRC
+                  module Json
+                    class ConversationSerializer
+                      def object = 42
+
+                      def probe
+                        Rigor.dump_type(object)
+                        object.no_such_integer_method
+                      end
+                    end
+                  end
+                SRC
+              }) do |result|
+        types = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(types).to eq(["dump_type: 42"])
+        expect(undefined_method_messages(result)).to include(a_string_including("no_such_integer_method"))
+      end
+    end
+
+    it "stays out of a `*Serializer` whose superclass is not a serializer" do
+      types = dumped_types(files: {
+                             "app/serializers/oj/account_serializer.rb" => <<~SRC
+                               module Oj
+                                 class AccountSerializer < SimpleDelegator
+                                   attributes :username
+
+                                   def probe
+                                     Rigor.dump_type(object)
+                                   end
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "leaves `object` alone outside a class named `*Serializer` entirely" do
+      types = dumped_types(files: {
+                             "app/serializers/presenter.rb" => <<~SRC
+                               class AccountPresenter
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
+
+  describe "an explicit `def object`" do
+    it "does not answer over a serializer's own definition, keeping its true positive" do
+      analyze(files: {
+                "app/serializers/account_serializer.rb" => <<~SRC
+                  class AccountSerializer < ActiveModel::Serializer
+                    attributes :username
+
+                    def object
+                      "overridden"
+                    end
+
+                    def probe
+                      Rigor.dump_type(object)
+                      object.no_such_string_method
+                    end
+                  end
+                SRC
+              }) do |result|
+        types = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(types).to eq(['dump_type: "overridden"'])
+        expect(undefined_method_messages(result)).to include(a_string_including("no_such_string_method"))
+      end
+    end
+
+    it "does not answer over a definition inherited from a project base serializer" do
+      types = dumped_types(files: {
+                             "app/serializers/base.rb" => <<~BASE,
+                               class ApplicationSerializer < ActiveModel::Serializer
+                                 def object
+                                   "overridden"
+                                 end
+                               end
+                             BASE
+                             "app/serializers/account_serializer.rb" => <<~SRC
+                               class AccountSerializer < ApplicationSerializer
+                                 attributes :username
+
+                                 def probe
+                                   Rigor.dump_type(object)
+                                 end
+                               end
+                             SRC
+                           })
+
+      expect(types).to eq(['dump_type: "overridden"'])
+    end
+  end
+
+  describe "the underivable case emits nothing" do
     it "emits no diagnostic of its own, on either arm" do
-      analyze(serializers: {
+      analyze(files: {
                 "app/serializers/context_serializer.rb" => <<~SRC
                   class ContextSerializer < ActiveModel::Serializer
                     def probe
@@ -214,38 +415,37 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       end
     end
 
-    it "leaves `object` Dynamic outside a serializer entirely" do
-      types = dumped_types(serializers: {
-                             "app/serializers/not_one.rb" => <<~SRC
-                               class AccountPresenter
-                                 def probe
-                                   Rigor.dump_type(object)
-                                 end
-                               end
-                             SRC
-                           })
-
-      expect(types).to eq(["dump_type: Dynamic[top]"])
-    end
-
     it "declines with no `:model_index` fact, so the plugin alone changes nothing" do
-      # The designed degradation: without `rigor-activerecord` nothing corroborates the naming
-      # convention, so every non-overridden serializer keeps the answer it had.
-      types = alone_dumped_types(<<~SRC)
-        class AccountSerializer < ActiveModel::Serializer
-          def probe
-            Rigor.dump_type(object)
-          end
-        end
-      SRC
+      # The designed degradation: without `rigor-activerecord` nothing resolves the name, so every
+      # non-overridden serializer keeps the answer it had.
+      result = run_plugin(
+        source: "",
+        paths: ["app"],
+        files: {
+          "app/models/account.rb" => AMS_MODELS.fetch("app/models/account.rb"),
+          "db/schema.rb" => AMS_SCHEMA,
+          "app/serializers/account_serializer.rb" => <<~SRC
+            class AccountSerializer < ActiveModel::Serializer
+              attributes :username
+
+              def probe
+                Rigor.dump_type(object)
+              end
+            end
+          SRC
+        }
+      )
+      types = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
 
       expect(types).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "does not answer for `something.object` or `object(arg)`" do
-      types = dumped_types(serializers: {
+      types = dumped_types(files: {
                              "app/serializers/account_serializer.rb" => <<~SRC
                                class AccountSerializer < ActiveModel::Serializer
+                                 attributes :username
+
                                  def probe(other)
                                    Rigor.dump_type(other.object)
                                    Rigor.dump_type(object(1))
@@ -260,9 +460,11 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
 
   describe "what the derived model is then held to" do
     it "still fires `call.undefined-method` on a bogus method of a derived column's type" do
-      analyze(serializers: {
+      analyze(files: {
                 "app/serializers/account_serializer.rb" => <<~SRC
                   class AccountSerializer < ActiveModel::Serializer
+                    attributes :username
+
                     def probe
                       object.username.no_such_string_method
                     end
@@ -276,16 +478,30 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
 
   describe "the declared framework constants" do
     it "does not fire `call.undefined-method` on the AMS surface a serializer inherits" do
-      analyze(serializers: {
+      analyze(files: {
                 "app/serializers/account_serializer.rb" => <<~SRC
                   class AccountSerializer < ActiveModel::Serializer
-                    attributes :id, :username
+                    attributes :username
 
                     def probe
                       read_attribute_for_serialization(:username)
                       scope
                     end
                   end
+                SRC
+              }) do |result|
+        expect(undefined_method_messages(result)).to be_empty
+      end
+    end
+
+    it "does not fire `call.undefined-method` on the canonical AMS initializer" do
+      analyze(files: {
+                "app/initializers/active_model_serializers.rb" => <<~SRC
+                  ActiveModelSerializers.config.adapter = :json_api
+                  ActiveModelSerializers.config.key_transform = :unaltered
+                  ActiveModelSerializers::Adapter.register(:custom, CustomAdapter)
+                  ActiveModelSerializers::SerializableResource.new(Account.new)
+                  ActiveModel::Serializer::CollectionSerializer.new([])
                 SRC
               }) do |result|
         expect(undefined_method_messages(result)).to be_empty

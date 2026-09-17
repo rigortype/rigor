@@ -1,7 +1,5 @@
 paths:
   - app
-  - demo.rb
-  - errors_demo.rb
 
 plugins:
   - rigor-activerecord

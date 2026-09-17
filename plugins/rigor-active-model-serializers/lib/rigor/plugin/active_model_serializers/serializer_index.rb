@@ -6,11 +6,24 @@ module Rigor
       # The serializer classes {SerializerDiscoverer} found under the configured search paths, keyed by
       # the class's fully-qualified name as the source spells it (`"REST::AccountSerializer"`).
       #
-      # The index answers one question — "is `self` a serializer here?" — and carries the declared
-      # superclass only so the discoverer can close the chain. Nothing downstream reads a member list,
-      # because the plugin asserts nothing about a serializer's method surface.
+      # Each entry carries the declared superclass (so the discoverer can close the ancestry chain) and
+      # the three name sets that let a candidate model be CHECKED rather than guessed:
+      #
+      # - `declared_names` — the names the serializer will read off the resource at render time: the
+      #   symbols of `attributes` / `attribute` / `has_many` / `has_one` / `belongs_to`, minus the ones
+      #   the serializer defines itself (AMS calls the serializer's own method when it has one, and only
+      #   falls through to `object.<name>` when it does not).
+      # - `object_reads` — every `object.<name>` the body writes, minus the methods every Object has.
+      # - `own_method_names` — the serializer's own instance `def`s, which is both what subtracts from
+      #   `declared_names` and how an explicit `def object` is detected.
       class SerializerIndex
-        Entry = Data.define(:class_name, :superclass_name, :file_path)
+        Entry = Data.define(:class_name, :superclass_name, :file_path, :declared_names, :object_reads,
+                            :own_method_names) do
+          # The names the resource must answer for this serializer to be the serializer OF that resource.
+          def required_names = (declared_names - own_method_names) | object_reads
+
+          def defines_object? = own_method_names.include?("object")
+        end
 
         attr_reader :entries
 
@@ -20,8 +33,8 @@ module Rigor
           freeze
         end
 
-        def find(class_name) = @by_name[strip_leading_namespace(class_name)]
-        def known?(class_name) = @by_name.key?(strip_leading_namespace(class_name))
+        def find(class_name) = @by_name[derooted(class_name)]
+        def known?(class_name) = @by_name.key?(derooted(class_name))
         def empty? = @entries.empty?
         def size = @entries.size
         def names = @by_name.keys
@@ -30,9 +43,7 @@ module Rigor
 
         # A query may arrive rooted (`::REST::AccountSerializer`) while entries are keyed by the
         # de-rooted spelling, the same normalisation `rigor-activerecord`'s ModelIndex settled on in #583.
-        def strip_leading_namespace(class_name)
-          class_name.to_s.delete_prefix("::")
-        end
+        def derooted(class_name) = class_name.to_s.delete_prefix("::")
       end
     end
   end

@@ -1,17 +1,14 @@
 # frozen_string_literal: true
 
 module REST
-  # `REST::AccountSerializer` names `Account`, which the project's model index carries, so `object`
-  # types as `Account` and its column readers resolve.
+  # Every name this serializer reads off its resource — `username`, `locked` and `acct` from the
+  # declarations, `display_name` from the body — is something `Account` answers, so `object` is
+  # `Account` and the reads below it are checked.
   class AccountSerializer < ActiveModel::Serializer
-    attributes :id, :username, :display_name, :locked
+    attributes :username, :locked, :acct, :display_name
 
     def display_name
       object.display_name
-    end
-
-    def locked
-      object.locked
     end
   end
 end

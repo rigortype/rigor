@@ -53,9 +53,13 @@ module Rigor
       Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call, :unclaimed,
                          :constant_receiver) do
         # Defaulted because every producer but the `super` one records an ordinary call, and an ordinary
-        # call is not a `super`. `unclaimed` defaults false so a Marshal-restored edge from a cache
-        # written before the field existed reads as claimed — the cache identity carries a schema
-        # component ({Identity}) so such an entry is never served in the first place.
+        # call is not a `super`, and because a producer that says nothing about `unclaimed` /
+        # `constant_receiver` means the safe value of each.
+        #
+        # The defaults do NOT rescue a cache written before a member existed: `Marshal.load` of a `Data`
+        # whose member list has grown raises `TypeError: struct size differs`, which the store reads as a
+        # miss. That is the right outcome and not the one relied on — the cache identity carries a schema
+        # component ({Identity}, `schema:3`), so such an entry is never offered in the first place.
         def initialize(super_call: false, unclaimed: false, constant_receiver: false, **) = super
       end
 

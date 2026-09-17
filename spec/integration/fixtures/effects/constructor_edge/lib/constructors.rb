@@ -124,3 +124,53 @@ module ConstructorEdge
     end
   end
 end
+
+# A class built at load time and assigned to a constant, then reopened. The reopening is all the scan
+# would otherwise see: project-known, no `<`, and a constructor the `Class.new` call already supplied.
+module ConstructorEdge
+  class RealSub < BaseWriter
+  end
+
+  Anon = Class.new(RealSub)
+
+  class Anon
+    def more
+      "more"
+    end
+  end
+
+  Point = Struct.new(:x)
+
+  class Point
+    def label
+      "point"
+    end
+  end
+
+  # An aliased constructor on a SUBCLASS, which only the downward half of the question finds. Its own
+  # hierarchy, so the plain closed-world join above stays testable. The alias is written with string
+  # arguments, which is the same declaration as the symbol one.
+  class Widening
+    def clone_like
+      self.class.new
+    end
+  end
+
+  class AliasedChild < Widening
+    def setup
+      File.write("/tmp/child", "x")
+    end
+    alias_method "initialize", "setup"
+  end
+
+  class Reopener
+    def anon
+      Anon.new("/tmp/anon")
+    end
+
+    def point
+      Point.new(1)
+    end
+
+  end
+end

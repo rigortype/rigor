@@ -39,6 +39,26 @@ module Rigor
           superclass ? lexical_candidates(superclass, prefix) : [FileCollection::OPAQUE_ANCESTOR]
       end
 
+      # A class BUILT AT LOAD TIME and assigned to a constant — `Anon = Class.new(Base)`,
+      # `Point = Struct.new(:x)`, `Rec = Data.define(:x)`, `Dele = DelegateClass(X)` — records the opaque
+      # sentinel (#1039). Without it a later `class Point; def more; end; end` reopening is the only thing
+      # the scan sees: the class becomes project-known, nothing says what is above it, and the constructor
+      # rule would read that silence as "no constructor anywhere" when the constructor is precisely what
+      # the load-time call built. It is the `class K < Struct.new(:a)` case in its other spelling.
+      #
+      # Only a **call**-valued assignment qualifies. A literal cannot be a class, and a constant-path value
+      # (`Alias = Real`) is a second name for a class whose own ancestry the scan already recorded. An
+      # assignment whose constant the project also declares with a real `<` keeps that, since a spelled
+      # superclass is strictly more than this says.
+      def record_constant_class(node, prefix)
+        return unless node.value.is_a?(Prism::CallNode)
+
+        name = constant_write_name(node, prefix)
+        return if name.nil? || @superclasses.key?(name)
+
+        @superclasses[name] = [FileCollection::OPAQUE_ANCESTOR]
+      end
+
       # @param names — the constant paths an `include` / `prepend` named, as written
       def record_includes(class_name, names, prefix)
         candidates = names.flat_map { |name| lexical_candidates(name, prefix) }
@@ -57,9 +77,9 @@ module Rigor
       # receiver-less `alias_method` whose first symbol argument is the new name.
       def alias_to_initialize?(node)
         case node
-        when Prism::AliasMethodNode then symbol_name(node.new_name) == "initialize"
+        when Prism::AliasMethodNode then literal_name(node.new_name) == "initialize"
         when Prism::CallNode
-          node.receiver.nil? && node.name == :alias_method && symbol_name(first_argument(node)) == "initialize"
+          node.receiver.nil? && node.name == :alias_method && literal_name(first_argument(node)) == "initialize"
         else false
         end
       end
@@ -76,8 +96,26 @@ module Rigor
 
       private
 
-      def symbol_name(node)
-        node.unescaped if node.is_a?(Prism::SymbolNode)
+      # `alias_method :initialize, :setup` and `alias_method "initialize", "setup"` are the same
+      # declaration; only an interpolated name is beyond the scan.
+      def literal_name(node)
+        node.unescaped if node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+      end
+
+      # The key a constant assignment declares, qualified by the nesting it is written in.
+      def constant_write_name(node, prefix)
+        case node
+        when Prism::ConstantWriteNode then [*prefix, node.name.to_s].join("::")
+        when Prism::ConstantPathWriteNode then qualified_write_name(node, prefix)
+        end
+      end
+
+      def qualified_write_name(node, prefix)
+        target = Source::ConstantPath.qualified_name(node.target)
+        return nil if target.nil?
+        return target if prefix.empty? || target.start_with?("#{prefix.join('::')}::")
+
+        [*prefix, target].join("::")
       end
 
       def first_argument(node)

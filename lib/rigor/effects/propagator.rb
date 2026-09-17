@@ -330,11 +330,7 @@ module Rigor
         #
         # @return the targets, or `nil` when the rewrite does not apply and ordinary resolution should run
         def constructor_targets(edge, memo_key)
-          return nil unless edge.kind == :singleton && edge.selector == NEW_SELECTOR
-          return nil if RESERVED_CONSTRUCTOR_OWNERS.include?(edge.receiver_class)
-          return nil unless project_class?(edge.receiver_class)
-          return nil if resolve_owner(edge.receiver_class, ".", NEW_SELECTOR)
-          return nil if opaque_ancestry?(edge.receiver_class)
+          return nil unless constructor_edge?(edge)
 
           owner = resolve_owner(edge.receiver_class, "#", INITIALIZE_SELECTOR)
           return nil unless owner || empty_constructor?(edge.receiver_class)
@@ -345,6 +341,19 @@ module Rigor
           targets.uniq.freeze
         end
 
+        # Whether the `new` rewrite applies to this edge at all — the guards of {#constructor_targets},
+        # each of which can only decline: a singleton `new` on a project class that is not one of Ruby's
+        # own class builders, whose singleton ancestry defines no `new` of its own, and whose constructor
+        # the scan could read both above it and (where the join applies) below it.
+        def constructor_edge?(edge)
+          edge.kind == :singleton && edge.selector == NEW_SELECTOR &&
+            !RESERVED_CONSTRUCTOR_OWNERS.include?(edge.receiver_class) &&
+            project_class?(edge.receiver_class) &&
+            resolve_owner(edge.receiver_class, ".", NEW_SELECTOR).nil? &&
+            !opaque_ancestry?(edge.receiver_class) &&
+            (edge.constant_receiver || !opaque_descendant?(edge.receiver_class))
+        end
+
         # Every constructor a subclass of `class_name` supplies — its own `#initialize`, and its own
         # `.new` where it overrides one. The closed-world join of step 2, spelled for the two keys a
         # constructor can live under.
@@ -352,6 +361,18 @@ module Rigor
           descendant_closure(class_name).each_with_object([]) do |subclass, keys|
             keys << "#{subclass}##{INITIALIZE_SELECTOR}" if @summaries.key?("#{subclass}##{INITIALIZE_SELECTOR}")
             keys << "#{subclass}.#{NEW_SELECTOR}" if @summaries.key?("#{subclass}.#{NEW_SELECTOR}")
+          end
+        end
+
+        # The same question DOWNWARD, and only where the closed-world join applies. A subclass whose own
+        # constructor is unreadable — `class AliasedChild < Parent; alias initialize setup` — is reached by
+        # `self.class.new` in `Parent`, and {#subclass_constructors} would find no `AliasedChild#initialize`
+        # key and say nothing. The join is the whole reason this edge may construct a subclass at all, so an
+        # unreadable one in the closure declines the edge instead.
+        def opaque_descendant?(class_name)
+          descendant_closure(class_name).any? do |subclass|
+            @includes.fetch(subclass, []).include?(FileCollection::OPAQUE_ANCESTOR) ||
+              @superclasses.fetch(subclass, []).include?(FileCollection::OPAQUE_ANCESTOR)
           end
         end
 

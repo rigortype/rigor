@@ -348,13 +348,44 @@ RSpec.describe Rigor::Effects::Propagator do
     it "declines when a superclass expression was not readable" do
       table = described_class.propagate(
         collection(
-          summaries: { "A#run" => summary, "K#label" => summary },
+          summaries: { "A#run" => summary, "K#initialize" => summary("io.fs.write") },
           edges: { "A#run" => [new_edge("K")] }, superclasses: { "K" => [opaque] }
         )
       )
 
+      expect(table["A#run"].proven).to be_empty
       expect(table["A#run"].edges).to be_empty
       expect(table["A#run"]).to be_unclaimed
+    end
+
+    # The sentinel is looked for DOWNWARD as well, and only where the join applies: the join is the whole
+    # reason a non-constant receiver may construct a subclass, and an unreadable subclass constructor is a
+    # key {Index#subclass_constructors} cannot find.
+    it "declines when a subclass reachable through the join is opaque" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#setup" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Base", constant: false)] },
+          superclasses: { "Sub" => ["Base"] }, includes: { "Sub" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # ... and a written constant, which cannot reach that subclass, is unaffected by it.
+    it "keeps resolving a written constant although a subclass is opaque" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#initialize" => summary("io.fs.read"), "Sub#setup" => summary },
+          edges: { "A#run" => [new_edge("Base")] },
+          superclasses: { "Sub" => ["Base"] }, includes: { "Sub" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["io.fs.read"])
+      expect(table["A#run"]).not_to be_unclaimed
     end
 
     # The sentinel declines even where the ancestry DOES answer: an aliased `initialize` is not the

@@ -120,6 +120,24 @@ RSpec.describe "a Const.new call in an effect summary" do
     expect(entry).to be_unclaimed
   end
 
+  # The `class K < Struct.new(:a)` case in its other spelling: the class is built by a load-time call and
+  # only its REOPENING is a `class` body, so the scan would otherwise see a project-known class with no
+  # ancestry at all and read the silence as "no constructor anywhere".
+  it "declines on a reopened class that a load-time call built" do
+    expect(table["ConstructorEdge::Reopener#anon"].edges).to be_empty
+    expect(table["ConstructorEdge::Reopener#anon"]).to be_unclaimed
+    expect(table["ConstructorEdge::Reopener#point"]).to be_unclaimed
+  end
+
+  # The alias sentinel has to be looked for DOWNWARD too: the closed-world join is the only reason this
+  # edge may construct `AliasedChild` at all, and `AliasedChild#initialize` is a key that does not exist.
+  it "declines when a subclass reachable through the join has an unreadable constructor" do
+    entry = table["ConstructorEdge::Widening#clone_like"]
+
+    expect(entry.proven).to be_empty
+    expect(entry).to be_unclaimed
+  end
+
   # The constructor lives in another file for the inherited case, so this is also the marshal round trip.
   it "answers identically when the collections come back from a pool worker" do
     pooled = analyze(configuration(workers: 2))

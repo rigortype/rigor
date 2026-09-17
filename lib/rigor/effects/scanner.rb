@@ -98,6 +98,8 @@ module Rigor
           return walk(node.body, prefix, true) if node.body
         when Prism::DefNode
           return enter_def(node, prefix, singleton)
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          @ancestry.record_constant_class(node, prefix)
         when Prism::AliasMethodNode
           return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
         when Prism::CallNode

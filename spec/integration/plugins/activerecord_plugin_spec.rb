@@ -1749,7 +1749,7 @@ RSpec.describe "plugins/rigor-activerecord" do
 
     it "publishes the macro methods on the :model_index fact" do
       index = macro_index
-      published = index.entries.transform_values { |e| e.macro_methods }
+      published = index.entries.transform_values(&:macro_methods)
 
       expect(published.fetch("Account")).to include("user_can?", "avatar", "banner_blob")
       expect(published.fetch("Status")).to be_empty

@@ -92,8 +92,13 @@ module Rigor
         end
       end
 
-      def self.empty
-        @empty ||= new({})
+      # The index a run with no template-claiming plugin analyses under. Eagerly built on the main Ractor
+      # at load time (bottom of the class body) rather than memoised on first use: `@empty ||= new({})` is
+      # a class-ivar WRITE, which a non-main Ractor may not perform. {WorkerSession#initialize} reaches it
+      # whenever `template_units:` is not supplied, which is exactly how the Ractor backend constructs its
+      # workers — so the lazy memo killed every worker in its constructor and degraded every run (#1055).
+      class << self
+        attr_reader :empty
       end
 
       # Expands every loaded plugin's `template_globs:` and runs its transform. The work lives in
@@ -318,6 +323,13 @@ module Rigor
 
         Type::Combinator.nominal_of(type_name)
       end
+
+      # Populates the `@empty` singleton on the main Ractor at load time. `Ractor.make_shareable` rather
+      # than `freeze` so a worker's READ of the class ivar is legal too: a non-main Ractor may read a
+      # class/module ivar only when the value is deeply shareable, and `#initialize` freezes the index
+      # itself but leaves `@root` — a fresh `Dir.pwd` String — unfrozen. The baked root is inert here: an
+      # index with no entries and no claimed globs answers nothing and carries nothing over.
+      @empty = Ractor.make_shareable(new({}))
     end
   end
 end

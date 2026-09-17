@@ -21,8 +21,17 @@ module Rigor
         # #775 — a target is an immutable value keyed by its name, and the local target is built on every
         # binding (`Scope#with_local` invalidates through it) and every local-fact read: ~350k times on
         # the lib self-check for a few thousand distinct names. One shared instance per name.
+        #
+        # #1055 — the table is a class ivar holding an unshareable Hash, and a non-main Ractor may neither
+        # write one nor read one. A pool worker therefore pays the allocation instead of sharing the
+        # instance: the interning is a per-process ALLOCATION saving, never an identity contract (`Target`
+        # is a `Data` value and compares by value), so declining it changes nothing a caller can observe.
+        # The guard is a C-level predicate on the hot path, which is what keeps the sequential run's
+        # saving intact.
         def self.local(name)
           name = name.to_sym
+          return new(kind: :local, name: name) unless Ractor.main?
+
           @local_targets[name] ||= new(kind: :local, name: name)
         end
         @local_targets = {}

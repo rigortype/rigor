@@ -324,4 +324,42 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(shareable?(table)).to be(true)
     end
   end
+
+  # Issue #1055 — the singletons {Rigor::Analysis::WorkerSession#initialize} reaches on EVERY project, whatever the
+  # run was asked to do. A lazy `@empty ||= new(…)` here is a class-ivar WRITE, which a non-main Ractor may not
+  # perform, so a worker died in its constructor and the whole pool degraded to in-process re-analysis. Both are
+  # eager-initialised on the main Ractor at load time now; these assert the other half of the fix, that the value a
+  # worker READS is deeply shareable (a non-main Ractor may not read an unshareable class ivar either).
+  describe "#1055 — eager singletons on the worker's constructor path" do
+    it "Rigor::Analysis::TemplateUnits.empty is Ractor.shareable?" do
+      require "rigor/analysis/template_units"
+      expect(shareable?(Rigor::Analysis::TemplateUnits.empty)).to be(true)
+    end
+
+    it "Rigor::Effects::Attribution.empty is Ractor.shareable?" do
+      require "rigor/effects/attribution"
+      expect(shareable?(Rigor::Effects::Attribution.empty)).to be(true)
+    end
+
+    # Reached from `Environment.for_project` — so also from inside the worker's constructor — whenever a
+    # source-RBS synthesizer is wired, which the ADR-93 `rigor-rbs-inline` auto-wire makes every real CLI
+    # run. Not eager-loadable (the memo is a 90 ms tree walk the coordinator pre-warms instead), so what
+    # this asserts is the other half: the memoised digest is FROZEN, which is what makes the worker's
+    # access a legal read.
+    it "Cache::EngineSource.process_identity memoises a frozen digest" do
+      identity = Rigor::Cache::EngineSource.process_identity
+      expect(identity.nil? || identity.frozen?).to be(true)
+    end
+
+    # Not a singleton but the same hazard one layer in: `FactStore::Target.local` interns into a class-ivar Hash that
+    # GROWS, so it cannot be made shareable and eager-loaded. The worker declines the interning instead — the saving
+    # is allocations, never identity, since `Target` is a `Data` value — and this pins that the declined path returns
+    # a value equal to the interned one.
+    it "FactStore::Target.local answers from a non-main Ractor with the value the main one interns" do
+      interned = Rigor::Analysis::FactStore::Target.local(:x)
+      from_worker = Ractor.new { Rigor::Analysis::FactStore::Target.local(:x) }.value
+
+      expect(from_worker).to eq(interned)
+    end
+  end
 end

@@ -49,6 +49,43 @@ The constructor accepts only inputs that cross a worker boundary safely:
   project files and violates the equivalence contract with false
   `call.undefined-method` diagnostics.
 
+### Defaults the constructor reaches
+
+Every input above is optional, and the value the constructor substitutes
+for an omitted one is reached **inside the worker** — on the Ractor
+backend, inside a non-main Ractor, where a class/module instance variable
+may not be written at all and may be read only when its value is deeply
+shareable. So a singleton the constructor falls back to (the empty
+template-unit index `TemplateUnits.empty`, the empty effect-attribution
+table `Effects::Attribution.empty`) **MUST** be eagerly built on the main
+Ractor at load time and **MUST** be `Ractor.shareable?`. A lazy
+`@empty ||= new(…)` is a class-ivar write: it raises
+`Ractor::IsolationError`, and because the raise happens in the
+constructor it kills the worker before it analyses anything, on every
+project, whatever the run was asked to do — the coordinator then observes
+the termination and degrades the whole file set to in-process
+re-analysis ([#1055](https://github.com/rigortype/rigor/issues/1055)).
+
+The rule is not confined to the arguments. Anything the constructor
+reaches on its way to building the worker's `Environment` is bound by it
+too, including `Cache::EngineSource.process_identity`, which
+`Environment.for_project` reaches through
+`EngineSource.key_config_entries` whenever a source-RBS synthesizer is
+wired — which the ADR-93 `rigor-rbs-inline` auto-wire makes every real
+CLI run. That memo is a directory walk and cannot be eager-loaded at
+require time, so it takes the other shape the rule allows: the
+coordinator **MUST** pre-warm it on the main Ractor before spawning the
+pool, and the memoised value **MUST** be frozen so the worker's access is
+a legal read. A spec suite that pins the synthesizer off does not
+exercise this, which is how it reached `master`.
+
+The same rule binds any process-wide table the per-file analysis reaches
+later, with one relaxation: a table that **grows** (an intern cache such
+as `FactStore::Target.local`'s) cannot be frozen and eagerly shared, so
+it MUST be guarded with `Ractor.main?` and the worker MUST take a path
+that produces an equal value without the table. That is only sound where
+the table is an allocation saving rather than an identity contract.
+
 ## Ownership boundary
 
 The session **owns and never shares** the mutable machinery a run

@@ -26,8 +26,12 @@ module Rigor
       EMPTY_ROWS = {}.freeze
       private_constant :EMPTY_ROWS
 
-      def self.empty
-        @empty ||= new({})
+      # The run's empty table. Eagerly built on the main Ractor at load time (bottom of the class body)
+      # rather than memoised on first use: `@empty ||= new({})` is a class-ivar WRITE, which a non-main
+      # Ractor may not perform, and every project that configures no attribution reaches it — including
+      # from inside {Analysis::WorkerSession#initialize}, which is where a Ractor-pool worker runs (#1055).
+      class << self
+        attr_reader :empty
       end
 
       # @param table — `Configuration#effects_attribution` — method key to
@@ -69,6 +73,11 @@ module Rigor
           out[key.to_s] = set unless set.empty?
         end.freeze
       end
+
+      # Populates the `@empty` singleton on the main Ractor at load time. `Ractor.make_shareable` rather
+      # than `freeze` so a worker's READ of the class ivar is legal too: a non-main Ractor may read a
+      # class/module ivar only when the value is deeply shareable.
+      @empty = Ractor.make_shareable(new({}))
     end
   end
 end

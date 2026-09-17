@@ -1442,6 +1442,137 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  # #534 item 5 — a `scope` declared in a concern's `included do … end` block belongs to every model that
+  # includes the concern. The fixture mirrors mastodon's shape: `scope :without_suspended` lives in
+  # `app/models/concerns/account/suspensions.rb`, and `Account` includes `Account::Suspensions`.
+  #
+  # Every example is paired with the model that does NOT include the concern, because the whole risk of this
+  # rule is attribution by name: `Status` declares no scope, includes nothing, and must answer exactly as it
+  # did before — including for `without_suspended`, which an unrelated concern (`Status::Hidden`, included by
+  # nobody) also declares.
+  describe "concern-declared scopes (#534)" do
+    let(:concern_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "accounts", force: :cascade do |t|
+            t.string   "username"
+            t.datetime "suspended_at"
+          end
+
+          create_table "statuses", force: :cascade do |t|
+            t.string "text"
+          end
+        end
+      SCHEMA
+    end
+
+    let(:concern_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/account.rb" => <<~RUBY,
+          class Account < ApplicationRecord
+            include Account::Suspensions
+          end
+        RUBY
+        "app/models/concerns/account/suspensions.rb" => <<~RUBY,
+          module Account::Suspensions
+            extend ActiveSupport::Concern
+
+            included do
+              scope :without_suspended, -> { where(suspended_at: nil) }
+            end
+          end
+        RUBY
+        "app/models/status.rb" => <<~RUBY,
+          class Status < ApplicationRecord
+          end
+        RUBY
+        "app/models/concerns/status/hidden.rb" => <<~RUBY
+          module Status::Hidden
+            extend ActiveSupport::Concern
+
+            included do
+              scope :without_suspended, -> { where(text: nil) }
+            end
+          end
+        RUBY
+      }
+    end
+
+    def concern_undefined_methods(source)
+      result = run_ar(source, models: concern_models, schema: concern_schema)
+      result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+    end
+
+    def concern_dumped_types(source)
+      result = run_ar(source, models: concern_models, schema: concern_schema)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }
+            .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    it "records the concern's scope on the including model, and on no other model" do
+      _result, index = run_ar_with_index("x = 1\n", models: concern_models, schema: concern_schema)
+
+      expect(index.find("Account").scopes).to contain_exactly("without_suspended")
+      expect(index.find("Account").scope?("without_suspended")).to be(true)
+      expect(index.find("Status").scopes).to be_empty
+      expect(index.find("Status").scope?("without_suspended")).to be(false)
+    end
+
+    it "types the concern scope as the including model's relation" do
+      result = run_ar("Rigor.dump_type(Account.without_suspended)\n",
+                      models: concern_models, schema: concern_schema)
+      dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }
+                     .map { |d| d.message.sub("dump_type: ", "") }
+
+      expect(dumped.first).to include("Account")
+      expect(dumped.first).not_to include("untyped")
+      expect(concern_undefined_methods("Account.without_suspended\n")).to be_empty
+    end
+
+    it "does not attribute the same-named scope of a concern the model does not include" do
+      # Unchanged from before the rule: the model's singleton is an open receiver, so an unrecognised
+      # class-side call is `Dynamic[top]` and silent — not a relation.
+      expect(concern_dumped_types("Rigor.dump_type(Status.without_suspended)\n")).to eq(["Dynamic[top]"])
+      expect(concern_undefined_methods("Status.without_suspended\n")).to be_empty
+    end
+
+    it "still reports an undeclared scope on the including model" do
+      expect(concern_dumped_types("Rigor.dump_type(Account.no_such_scope)\n")).to eq(["Dynamic[top]"])
+      expect(concern_undefined_methods("Account.no_such_scope\n")).to be_empty
+    end
+
+    it "follows a concern that includes another concern" do
+      models = concern_models.merge(
+        "app/models/concerns/account/suspensions.rb" => <<~RUBY,
+          module Account::Suspensions
+            extend ActiveSupport::Concern
+            include Account::Deletions
+
+            included do
+              scope :without_suspended, -> { where(suspended_at: nil) }
+            end
+          end
+        RUBY
+        "app/models/concerns/account/deletions.rb" => <<~RUBY
+          module Account::Deletions
+            extend ActiveSupport::Concern
+
+            included do
+              scope :without_deleted, -> { where(suspended_at: nil) }
+            end
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: concern_schema)
+
+      expect(index.find("Account").scopes).to contain_exactly("without_suspended", "without_deleted")
+      expect(index.find("Status").scopes).to be_empty
+    end
+  end
+
   describe "validations + callbacks — v0.1.5" do
     # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
     VAL_CB_SCHEMA = <<~SCHEMA

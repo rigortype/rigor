@@ -76,6 +76,14 @@ Chained query methods keep the element type, and iteration
 scope invoked on a typed relation (`User.where(...).published`)
 never surfaces a false `call.undefined-method`.
 
+A `scope` declared inside a concern's `included do ... end` block
+counts as the including model's own. `Account.without_suspended`
+types as `ActiveRecord::Relation[Account]` when `Account` includes
+the concern that declares the scope — directly, or through another
+concern that concern includes. Attribution follows the `include`
+you wrote, not the name: a model that includes nothing gets
+nothing, whatever some other concern in the project declares.
+
 If the project also installs `activerecord` through
 `rbs collection install`, the collection declares
 `ActiveRecord::Relation` without a type parameter while the

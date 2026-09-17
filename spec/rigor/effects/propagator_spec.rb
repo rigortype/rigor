@@ -204,6 +204,118 @@ RSpec.describe Rigor::Effects::Propagator do
     end
   end
 
+  # #1039 — `new` is the one selector whose dispatch target is spelled under a different key. The end-to-end
+  # shapes are `spec/rigor/effects/constructor_edge_spec.rb`.
+  describe "a singleton `new` edge" do
+    def new_edge(receiver)
+      Rigor::Effects::FileCollection::Edge.new(
+        receiver_class: receiver, kind: :singleton, selector: "new", self_call: false, unclaimed: true
+      )
+    end
+
+    it "resolves to the receiver's own #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Const#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Const")] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["io.fs.write"])
+      expect(table["A#run"].edges).to eq(["Const#initialize"])
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    it "resolves through the superclass chain to an inherited #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to eq(["Base#initialize"])
+    end
+
+    # The design choice: an ancestry that closes inside the project with no `#initialize` anywhere is
+    # constructed by `BasicObject#initialize`, whose footprint is ∅. Resolved to nothing, and claimed —
+    # without a summary row being invented for a definition the project does not contain.
+    it "resolves to nothing and claims the caller when the project ancestry defines no #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Bare#label" => summary },
+          edges: { "A#run" => [new_edge("Bare")] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    # ... which the walk may only say when it never left the project. A class whose superclass is a gem's
+    # inherits that gem's constructor, and nobody described it.
+    it "leaves the caller unclaimed when the ancestry leaves the project" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Sub#label" => summary },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["ActiveRecord::Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # An `include` is the same question, and the collection's flat candidate list cannot answer it: a
+    # module is free to define `initialize`, and the table cannot say whether the module is the project's.
+    it "leaves the caller unclaimed when the class includes anything" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Bare#label" => summary },
+          edges: { "A#run" => [new_edge("Bare")] }, includes: { "Bare" => ["Comparable"] }
+        )
+      )
+
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    it "prefers a project `def self.new` over #initialize, including an inherited one" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base.new" => summary("exit"), "Sub#initialize" => summary("io") },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to eq(["Base.new"])
+      expect(table["A#run"].proven.to_a).to eq(["exit"])
+    end
+
+    # `Class.new` builds an anonymous class. Even a project that reopens `Class` must not turn it into a
+    # call on that reopening.
+    it "never resolves Class.new, Module.new, Struct.new or Data.new to a project #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Class#initialize" => summary("io"), "Struct#initialize" => summary("io") },
+          edges: { "A#run" => [new_edge("Class"), new_edge("Struct")] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # A class the project never defines is a gem's, and its constructor is as undescribed as before.
+    it "leaves a receiver the project does not define unclaimed" do
+      table = described_class.propagate(
+        collection(summaries: { "A#run" => summary }, edges: { "A#run" => [new_edge("Net::HTTP")] })
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+  end
+
   it "drops an edge that reaches no project definition rather than tainting" do
     table = described_class.propagate(
       collection(summaries: { "A#run" => summary }, edges: { "A#run" => [edge("String", "upcase")] })

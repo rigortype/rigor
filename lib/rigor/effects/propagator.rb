@@ -251,7 +251,12 @@ module Rigor
         def targets_for(edge)
           @targets[memo_key(edge)] ||= begin
             separator = edge.kind == :singleton ? "." : "#"
-            edge.super_call ? super_targets(edge, separator) : call_targets(edge, memo_key(edge), separator)
+            key = memo_key(edge)
+            if edge.super_call
+              super_targets(edge, separator)
+            else
+              constructor_targets(edge, key) || call_targets(edge, key, separator)
+            end
           end
         end
 
@@ -273,6 +278,114 @@ module Rigor
 
         def memo_key(edge)
           [edge.receiver_class, edge.kind, edge.selector, edge.super_call]
+        end
+
+        NEW_SELECTOR = "new"
+        INITIALIZE_SELECTOR = "initialize"
+        private_constant :NEW_SELECTOR, :INITIALIZE_SELECTOR
+
+        # Class objects whose `new` is Ruby's own reflective constructor rather than a project class's
+        # (#1039). `Class.new` allocates an anonymous class and runs `Class#initialize`, NOT the
+        # `#initialize` of whatever the project happens to have named `Class`; the same holds for
+        # `Module.new`, and for `Struct.new` / `Data.define`, which build a class rather than an instance.
+        # Listed by name rather than left to the project-known guard below, because a project that reopens
+        # `Class` at all would otherwise turn every `Class.new` in it into a call on that reopening.
+        RESERVED_CONSTRUCTOR_OWNERS = %w[Class Module Struct Data].freeze
+        private_constant :RESERVED_CONSTRUCTOR_OWNERS
+
+        # Superclass spellings whose `#initialize` is Ruby's own and empty. A project chain that ends here
+        # — or ends implicitly, with no `<` at all — has no constructor body anywhere, which is what
+        # {#empty_constructor?} has to establish before it may say ∅ rather than "undescribed".
+        EMPTY_CONSTRUCTOR_ROOTS = %w[Object BasicObject].freeze
+        private_constant :EMPTY_CONSTRUCTOR_ROOTS
+
+        # #1039 — `Const.new` on a class the project defines, resolved to that class's `#initialize`.
+        #
+        # The collector records the call as `(Const, :singleton, "new")`, because that is what the typer
+        # saw; nothing in the project defines `Const.new`, so the edge resolved to nothing and every
+        # constructor body stayed out of its caller's closure. `new` is the one selector in Ruby whose
+        # dispatch target is spelled under a different key, and this is the rewrite: the same ancestor walk
+        # {#resolve_owner} performs, on the instance side, for `initialize`.
+        #
+        # Three boundaries, and each of them can only narrow:
+        #
+        # - a project `def self.new` **wins**. It is the definition `Const.new` actually reaches, and a
+        #   constructor that overrides `new` is the case where `#initialize` is not the answer. Resolved
+        #   through the singleton ancestry, so an inherited `self.new` wins too.
+        # - the receiver must be a class the project defines, and must not be one of
+        #   {RESERVED_CONSTRUCTOR_OWNERS}. `Class.new { … }` is not a constructor call on a project class
+        #   and must never reach a project `#initialize`; a gem class the project only calls `new` on is
+        #   undescribed exactly as it was, and stays unclaimed.
+        # - **no closed-world override join.** This is the `super` argument (see {#super_targets}), not the
+        #   ordinary-call one: `Const.new` names the class object it constructs, and `Sub#initialize` runs
+        #   only for `Sub.new`, which records its own edge. Joining it would put a proven label on the
+        #   caller that no execution of that call site can produce — the direction this project weighs
+        #   heaviest, since an emitted annotation is enforced.
+        #
+        # @return the targets, or `nil` when the rewrite does not apply and ordinary resolution should run
+        def constructor_targets(edge, memo_key)
+          return nil unless edge.kind == :singleton && edge.selector == NEW_SELECTOR
+          return nil if RESERVED_CONSTRUCTOR_OWNERS.include?(edge.receiver_class)
+          return nil unless project_class?(edge.receiver_class)
+          return nil if resolve_owner(edge.receiver_class, ".", NEW_SELECTOR)
+
+          owner = resolve_owner(edge.receiver_class, "#", INITIALIZE_SELECTOR)
+          if owner
+            @owner_resolved[memo_key] = true
+            [owner].freeze
+          elsif empty_constructor?(edge.receiver_class)
+            @owner_resolved[memo_key] = true
+            NO_TARGETS
+          end
+        end
+
+        # Whether `class_name`'s constructor is *known* to be `BasicObject#initialize`, whose footprint is
+        # ∅ (#1039).
+        #
+        # This is the design choice in the rewrite. "No `#initialize` in the ancestry" has two readings —
+        # the project defines none and none exists (a plain `class Bare; end`, constructed by Ruby's own
+        # empty constructor), or the project defines none and a gem's base class does. The first resolves
+        # to a known-empty definition: the edge contributes nothing AND leaves its caller claimed, because
+        # the callee was read — there is simply nothing in it. The second is undescribed and must keep
+        # marking its caller unclaimed. Only an ancestry that closes inside the project can tell them
+        # apart, so that is what this walks, and it answers `false` the moment the walk leaves.
+        #
+        # No summary row is invented for `BasicObject#initialize`. A row would be a *method of the
+        # project* in every table that lists them — the snapshot, `rigor effects`, the pure report — for a
+        # definition the project does not contain; the answer belongs to the edge, and the edge is already
+        # the thing {#owner_resolved?} is asked about.
+        #
+        # An `include` anywhere in the chain ends the walk conservatively. The collection's include table
+        # is a flat list of as-written *candidate spellings* (`include Foo` inside `module A` records both
+        # `A::Foo` and `Foo`), so it cannot say whether a class includes one project module or one gem
+        # module the project cannot see — and a module is free to define `initialize`. Such a class keeps
+        # exactly today's behaviour: its `new` edge resolves to nothing and its callers stay unclaimed.
+        def empty_constructor?(class_name)
+          queue = [class_name]
+          seen = Set.new
+          until queue.empty?
+            current = queue.shift
+            next unless seen.add?(current)
+            return false unless project_class?(current)
+            return false unless @includes.fetch(current, []).empty?
+
+            parents = @superclasses.fetch(current, [])
+            next if parents.empty?
+
+            known = parents.find { |candidate| project_class?(candidate) }
+            return false if known.nil? && parents.none? { |candidate| EMPTY_CONSTRUCTOR_ROOTS.include?(candidate) }
+
+            queue << known if known
+          end
+          true
+        end
+
+        # Whether the project defines this class at all: it defines a method on it, declares its
+        # superclass, or declares what it includes. Any one of the three is a `class` body the scanner
+        # read, which is what licenses reading its silence about `initialize` as an answer.
+        def project_class?(class_name)
+          !class_name.nil? &&
+            (@classes.include?(class_name) || @superclasses.key?(class_name) || @includes.key?(class_name))
         end
 
         def call_targets(edge, memo_key, separator)

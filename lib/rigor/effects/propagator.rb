@@ -110,7 +110,11 @@ module Rigor
         return if entry.nil?
 
         entry[:exhaustive] = false
-        entry[:causes] << edge.taint_if_unresolved
+        # Frozen here rather than trusted from the edge: `Marshal.load` of a `Data` bypasses
+        # `initialize`, so a pooled worker's collection restores the pair unfrozen while a sequential
+        # one has the scan's frozen original. A cause travels into a `Set` shared by the whole fixpoint,
+        # and the two paths must hand it the same value. `#freeze` on an already-frozen array is free.
+        entry[:causes] << edge.taint_if_unresolved.freeze
       end
 
       # #391 — an edge nothing bounded whose receiver's OWN ancestry holds no project definition: the

@@ -783,16 +783,31 @@ while only a render that reached a real unit clears it.
 A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.
 Rails' implicit render is a fact about a method that made *no call*, so there is no site to colour and
 no class body that can see which of its methods responded — only a finished unit scan can. Such a row
-contributes an **edge and nothing else**: no label, no taint. That is what keeps it FP-safe on the
-private helper a controller also defines, which gets an edge to `view:users/load_user.html`, is answered
-by nothing, and ends byte-identical to what it was. It is also the one case where `labels:` MAY be
-empty; every other row must still declare at least one.
+contributes an **edge and nothing else**: no label, no taint, so an edge that resolves to nothing costs
+exactly nothing. It is also the one case where `labels:` MAY be empty; every other row must still
+declare at least one.
 
 `responds: true` marks a row whose call supplies the unit's answer, so a unit rule on the same receiver
 stands down. `render`, `redirect_to`, `head`, `send_data` and `send_file` each carry it: an action that
 called one of them did not take Rails' implicit render, and edging it to the conventional template would
 attribute a view the action never runs. `render_to_string` deliberately does **not** — it builds a
 string and leaves the response unanswered.
+
+The engine narrows a unit rule three ways beyond the ancestry match, and each is a false positive it
+would otherwise produce:
+
+- a `responds:` call counts only at the unit's **top level**. `redirect_to root_path if @user.nil?`
+  leaves the other path taking the implicit render, and standing down there would drop the template
+  edge *and* leave the unit reading exhaustive. Branching ancestors are `If` / `Unless` / `Case` /
+  loops / `Rescue` / `And` / `Or`, modifier forms included; a block is not one, because
+  `respond_to { |f| f.html { render :show } }` is how an action answers and always runs;
+- a **`private` or `protected`** member is skipped. Rails' `action_methods` is a controller's public
+  instance methods, so a `private def card` is never rendered as `users/card` — while a project that
+  happens to ship `app/views/users/card.html.erb` would otherwise hand that template's effects to the
+  helper. The three spellings (`private` as a region, `private def foo`, `private :foo`) are read off
+  the class body's own top level in source order; anything nested deeper reads as public, which leaves
+  today's behaviour intact rather than guessing;
+- a **nested `def`** and a **singleton method** are skipped outright. Neither is ever an action.
 
 ##### Discharge and first-party standing
 
@@ -830,22 +845,13 @@ diagnostics: a plugin the user chose is not the project's mistake to be flagged 
 neither exists nor belongs to the extender is refused outright (`Registry::OwnershipError`), and only
 that plugin's labels drop — one plugin overreaching must not un-name another's vocabulary.
 
-##### Which lane a row's labels land in
-
-A **discharging** row's labels are **proven**; every other row's are **declared**
-([#1048](https://github.com/rigortype/rigor/issues/1048); normative in
-[`effect-labels.md`](../type-specification/effect-labels.md) § The plugin stratum).
-
-The granting fact is the one above: the engine bundles this plugin, the row is reviewed in this
-repository and gated by `make check-plugins`. That makes it the same kind of artifact as a row of
-`data/effects/core.yml`, which has always been proven — and the catalogue is not proven because the
-analyzer read `Net::HTTP.get`'s body, but because a reviewer signed off on what that method does. A row
-the engine already trusts enough to declare the call site **exhaustive** is one it trusts enough to say
-what the site does.
-
-Everything else keeps the declared lane, which is the whole of the separation that matters: a
-third-party plugin's `discharge: true` is demoted at load, and the project's own `effects.attribution:`
-table never discharged in the first place. A claim nobody audited still cannot manufacture a finding.
+Either way the labels land in the **declared** lane, never the proven one. A discharging row is a trusted
+claim, not a proof: "this is what it does", not "the analyzer read the body and saw this".
+[ADR-103](../adr/103-effect-labels.md) WD17 weighed promoting a first-party row into `proven` and
+declined it — that would be a redefinition of `proven` rather than an extension, and it would stake
+`rigor check`'s red on the correctness of plugin authorship rather than on code Rigor read. The
+consequence a policy author feels is that `EnvelopeCheck` cannot judge a plugin-sourced label at all;
+the enforcement surface for one is `rigor effects check`.
 
 ##### `EffectEdge`
 

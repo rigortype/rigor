@@ -401,14 +401,12 @@ A chain that leaves project source is continued only by an **`effect_ancestry:` 
 
 The class an `on_result:` row keys on is resolved from the receiver **transitively**: the constant when the producing call names one, the unit's own class when the producing call is implicit-self, and the next link out when the producer is itself a builder. Between them those are how mail is actually sent — `issue_add(user, issue).deliver_later` inside a mailer's own `def self.deliver_*` wrapper, and `AdminMailer.with(recipient: a).new_trends(…).deliver_later!`, ActionMailer's parameterized form — and stopping at the first link found neither. A row still has to match the producer's ancestry AND the selector, so a chain ending somewhere unrelated contributes nothing rather than a wrong label.
 
-The labels land under an `Origin` of source `:plugin`, and **which lane** they land in is the same question as whether the site is tainted ([#1048](https://github.com/rigortype/rigor/issues/1048); normative in [`effect-labels.md`](../type-specification/effect-labels.md) § The plugin stratum):
+The labels land in `Summary#declared_bundles` under an `Origin` of source `:plugin` — never the proven lane, on ADR-103 WD17's ruling. Whether the site is **tainted** is what separates the two authorities:
 
-| Contributor | Carrier | Taint | Reading |
-| --- | --- | --- | --- |
-| first-party bundled plugin, `discharge: true` | `Summary#bundles` — **proven** | none | "this is what it does" — the accepted-signature standing of ADR-103 WD6 |
-| anyone else | `Summary#declared_bundles` | `plugin-attribution` | "declared this, and possibly more" — identical to `effects.attribution:` |
-
-`UnitScan#record_plugin_labels` is the one line that decides it. The grant `discharge:` reads is "the engine bundles this plugin", which is what makes such a row the same kind of artifact as a hand-audited `data/effects/core.yml` row — and the catalogue has always been proven. Keeping them apart put a Rails application's whole effect surface out of reach of its own envelopes, which is what [#393](https://github.com/rigortype/rigor/issues/393) measured when `views: strict` and `views: lenient` turned out to bound the same thing.
+| Contributor | Taint | Reading |
+| --- | --- | --- |
+| first-party bundled plugin, `discharge: true` | none | "this is what it does" — the accepted-signature standing of ADR-103 WD6 |
+| anyone else | `plugin-attribution` | "declared this, and possibly more" — identical to `effects.attribution:` |
 
 A discharging row additionally **bounds the site**, exactly as an imported envelope does: it suppresses the `dynamic-receiver` taint (a Rails app with no Rails RBS types `Rails` as `Dynamic`, and a taint no annotation could ever clear is noise), the `unresolved-self-call` taint (an implicit-self `render` rightly does not resolve — the definition is in Action Pack), and the ownership judgment on a receiver mutation (`session[:user_id] = id` writes an object nothing types, and the row's `mutate` is both more precise than `unknown-ownership` and already trusted). A row MAY still carry an explicit `taint:` of `template-not-analysed` or `opaque-callable`, which states the one thing the framework model genuinely cannot see.
 
@@ -418,7 +416,7 @@ A row may name a `Effects::CalleeRule` rule in `callee:`, which turns the site i
 
 The module is shaped exactly like `Narrowing`: module functions dispatched by a `case` over a closed name set, never a Hash of procs, because the tables are built once per process and inherited across the fork pool. A rule reads the call's argument literals, `owner_class:` and `method_name:` (which is the unit key for a template unit) and nothing else — no dataflow, no filesystem, no typer question, so `UnitScan` stays observational.
 
-Applied in `UnitScan#record_callee_edge`, beside the label contribution. Three outcomes, and the second is the one the FP-first ordering turns on:
+Applied in `UnitScan#callee_edge_taken?`, beside the label contribution. Three outcomes, and the second is the one the FP-first ordering turns on:
 
 - the rule answers a callee — an edge is recorded, carrying the row's `taint:` in `FileCollection::Edge#taint_if_unresolved` rather than at the site;
 - the rule answers **nil** — no edge, and `UnitScan` taints the site exactly as it did before the field existed. `render foo`, `render json: @user` and `render formats: computed` all land here;
@@ -426,7 +424,14 @@ Applied in `UnitScan#record_callee_edge`, beside the label contribution. Three o
 
 The taint is therefore **added where the edge failed, never subtracted where it succeeded**, so every step of the fixpoint stays monotone and no consumer has to reason about a cause that might be removed later in the pass.
 
-`CalleeRule::UNIT_RULES` answer for a whole unit instead of a site, and are applied once in `UnitScan#apply_unit_callees` after the walk, for a unit whose owner reaches the row's receiver and in which **no `responds:` row fired**. Rails' implicit render is the whole of the case: the producing fact is a body that made no call, which neither a class-body harvest (`FrameworkUnits` cannot see which of a class's methods responded) nor a call-site rule can observe. Such a row contributes an **edge and nothing else** — no label, no taint — which is what keeps a controller's private helpers byte-identical: each gets an edge to a `view:` key nothing answers, and an edge that resolves to nothing is dropped.
+`CalleeRule::UNIT_RULES` answer for a whole unit instead of a site, and are applied once in `UnitScan#apply_unit_callees` after the walk. Rails' implicit render is the whole of the case: the producing fact is a body that made no call, which neither a class-body harvest (`FrameworkUnits` cannot see which of a class's methods responded) nor a call-site rule can observe. Such a row contributes an **edge and nothing else** — no label, no taint — so an edge that resolves to nothing costs exactly nothing.
+
+Four conditions, and each of them exists because breaking it is a false positive:
+
+- **the unit's owner reaches the row's receiver** — the ordinary ancestry match;
+- **no `responds:` row fired at the unit's top level.** `responds:` marks a row whose call supplies the unit's answer; an action that called `render :edit` or `redirect_to` outright did not take the implicit render. **Conditional does not count**: `redirect_to root_path if @user.nil?` leaves the other path taking it, and a unit that recorded the response there would drop the template edge *and* read exhaustive — the one combination an effect summary may never produce. `UnitScan` counts branching ancestors (`If` / `Unless` / `Case` / loops / `Rescue` / `And` / `Or`, modifier forms included, since Prism spells `render :x if y` as an `IfNode`) and only a depth of zero records a response. A **block** is deliberately not branching: `respond_to do |format| format.html { render :show } end` is how a Rails action answers, and counting it would add the conventional template's edge beside the one the `render` already names. The residual over-approximation is an `if`/`else` whose every branch responds, which keeps the edge it does not need — far rarer than the guard-clause redirect, and the direction that cannot hide an effect;
+- **the unit is public.** `Scanner#non_public_names` reads a class body's `private` / `protected` regions and the `private def foo` / `private :foo` forms in source order, and a marked member is skipped: Rails' `action_methods` is a controller's public instance methods, so a `private def card` is never rendered as `users/card` however much a template of that name exists;
+- **the unit is not a nested `def` and not a singleton method.** Neither is ever an action.
 
 #### Edges
 

@@ -244,15 +244,15 @@ Under either, an `io.db.write`, a `job.enqueue`, an `io.output.stdout`
 (`puts`), an `io.input` (`binding.pry`) or a `nondet.time` in a view
 is a finding.
 
-The two presets **differ**: a lazy `<%= user.posts.count %>` is a
-finding under `strict` and silent under `lenient`. That is newer than
-the stanzas — until
-[#1048](https://github.com/rigortype/rigor/issues/1048) a first-party
-plugin's statement about a framework method rode the declared (`≤`)
-lane, which the envelope check does not read, so the two bounded the
-same thing. A row the engine bundles, reviews and gates is now proven
-like a catalogue row, which is also why an envelope on a **controller**
-that forbids `io.db.read` now fires on a plain `User.find`.
+**The two presets do not yet differ in behaviour.** A plugin's statement
+about a framework method — `User.find` is `io.db.read` — rides the
+declared (`≤`) lane, and the envelope check reads the proven one, so
+neither preset can report the lazy `<%= user.posts.count %>` that
+separates them on paper. That is a property of the whole Rails effect
+layer rather than of views ([ADR-103](../../adr/103-effect-labels.md)
+WD17 ruled on the lane and named `rigor effects check` as the
+enforcement surface for a plugin-sourced label); the open question is
+[#1059](https://github.com/rigortype/rigor/issues/1059).
 
 Only the labels the plugins in your `plugins:` list register are
 known, and both stanzas above name two that rigor-actionpack does not

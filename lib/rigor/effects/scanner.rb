@@ -14,6 +14,7 @@ require_relative "framework_units"
 require_relative "plugin_facts"
 require_relative "summary"
 require_relative "unit_scan"
+require_relative "visibility"
 
 module Rigor
   module Effects
@@ -84,6 +85,9 @@ module Rigor
         @summaries = {}
         @edges = {}
         @ancestry = AncestryRecorder.new
+        # #1048 — `{class name => Set[method name]}` for the `private` / `protected` members each class
+        # body declared. Read only by a UNIT callee rule, and only to decline.
+        @non_public = {}
         # ADR-103 WD10 / #387 — the class-body facts the framework-edge strategies read, harvested only
         # when a loaded plugin declared one. A run with no `effect_edges:` never allocates them.
         @harvest = plugin_facts.edges? ? {} : nil
@@ -147,12 +151,16 @@ module Rigor
         return node.rigor_each_child { |child| walk(child, prefix, false) } if nested.nil?
 
         @ancestry.record_superclass(nested.join("::"), node, prefix) if node.is_a?(Prism::ClassNode)
-        walk(node.body, nested, false) if node.body
+        return if node.body.nil?
+
+        @non_public[nested.join("::")] = Visibility.non_public_names(node.body)
+        walk(node.body, nested, false)
       end
 
       def enter_def(node, prefix, singleton)
         own_singleton = singleton || !node.receiver.nil?
-        scan = add_unit(class_name_for(prefix), node.name.to_s, own_singleton, node.body, node.parameters)
+        scan = add_unit(class_name_for(prefix), node.name.to_s, own_singleton, node.body, node.parameters,
+                        non_public: non_public?(prefix, node.name.to_s))
         harvest_def(prefix, node.name.to_s, own_singleton, scan) if @harvest && !prefix.empty?
       end
 
@@ -198,6 +206,10 @@ module Rigor
         end || false
       end
 
+      def non_public?(prefix, name)
+        prefix.empty? ? false : @non_public[class_name_for(prefix)]&.include?(name) || false
+      end
+
       def harvest_for(prefix)
         @harvest[class_name_for(prefix)] ||= { defs: [], units: {}, macros: {}, uniqueness: false }
       end
@@ -221,7 +233,7 @@ module Rigor
       # `collector-error` and its siblings are unaffected.
       #
       # @return the finished scan, or nil when the unit failed soft
-      def add_unit(class_name, method_name, singleton, body, parameters)
+      def add_unit(class_name, method_name, singleton, body, parameters, non_public: false)
         key = "#{class_name}#{singleton ? '.' : '#'}#{method_name}"
         names = parameter_names(parameters)
         scan = UnitScan.new(
@@ -229,12 +241,14 @@ module Rigor
           block_parameter: block_parameter_name(parameters),
           owned_locals: LocalOwnership.owned(body, names), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
-          owner_class: class_name, method_name: method_name
+          owner_class: class_name, method_name: method_name, non_public: non_public
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)
         scan.nested.each do |name, nested_singleton, nested_body, nested_parameters|
-          add_unit(class_name, name, singleton || nested_singleton, nested_body, nested_parameters)
+          # A `def` inside a method is never an action, whatever the enclosing body's visibility.
+          add_unit(class_name, name, singleton || nested_singleton, nested_body, nested_parameters,
+                   non_public: true)
         end
         scan
       rescue StandardError

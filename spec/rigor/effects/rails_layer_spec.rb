@@ -84,15 +84,6 @@ RSpec.describe "the Rails effect layer" do
     table[key] or raise "no effect-table entry for #{key.inspect}"
   end
 
-  # #1048 — a first-party bundled plugin's DISCHARGING row is proven, on the same grant that lets it
-  # declare the call site exhaustive: the row is Rigor's own reviewed statement about a framework method,
-  # which is what a `data/effects/core.yml` row is too. Every Rails row below is one, so every assertion
-  # here reads the proven lane. {#declared} is kept for the paired arm — an unaudited claim, which still
-  # cannot produce a finding.
-  def proven(key)
-    entry(key).proven.to_a
-  end
-
   def declared(key)
     entry(key).declared.to_a
   end
@@ -101,7 +92,7 @@ RSpec.describe "the Rails effect layer" do
     # The row is written on `ActiveRecord::Base`; the app writes `User.find`. What connects them is
     # `User < ApplicationRecord < ActiveRecord::Base`, read off the project's own source.
     it "reaches a model finder through the project's inheritance chain" do
-      expect(proven("UsersController#show")).to include("io.db.read")
+      expect(declared("UsersController#show")).to include("io.db.read")
     end
 
     # The truthful reading of laziness (design note § 11.2): `where` composes and issues nothing. This is
@@ -113,14 +104,14 @@ RSpec.describe "the Rails effect layer" do
     end
 
     it "colours a persistence call as a write" do
-      expect(proven("UsersController#create")).to include("io.db.write")
+      expect(declared("UsersController#create")).to include("io.db.write")
     end
 
     # `sql_verb` narrowing on the spelling a Rails app actually uses, where the connection object has no
     # declared type and the class that handed it over does.
     it "narrows raw SQL by the statement's own leading verb" do
-      expect(proven("Report#raw")).to include("io.db.write")
-      expect(proven("Report#raw")).not_to include("io.db.read")
+      expect(declared("Report#raw")).to include("io.db.write")
+      expect(declared("Report#raw")).not_to include("io.db.read")
     end
   end
 
@@ -128,12 +119,12 @@ RSpec.describe "the Rails effect layer" do
     # `save` runs `before_save :normalize_email` and `after_commit :notify`; `notify` logs. None of that
     # is visible at the call site, and all of it is the caller's own code.
     it "carries a model's callbacks into its caller" do
-      expect(proven("UsersController#create")).to include("telemetry")
+      expect(declared("UsersController#create")).to include("telemetry")
     end
 
     # `validates :email, uniqueness: true` is a SELECT before the write.
     it "carries a uniqueness validator's query into save" do
-      expect(proven("User#save")).to include("io.db.read")
+      expect(declared("User#save")).to include("io.db.read")
     end
 
     it "runs a job's perform through perform_now" do
@@ -143,15 +134,12 @@ RSpec.describe "the Rails effect layer" do
     # The rule the whole deferred-execution section exists to protect (ADR-103 WD4). `perform` writes a
     # global; if an enqueue edged into it, that write would appear here.
     it "never edges an enqueue into the job body" do
-      # The enqueue's OWN labels are proven since #1048 — what must never appear is the job body's
-      # `global.write`, which is what an edge from `perform_later` to `perform` would carry here.
-      expect(proven("UsersController#enqueue")).to include("job.enqueue")
-      expect(proven("UsersController#enqueue")).not_to include("global.write")
-      expect(entry("UsersController#enqueue").edges).to be_empty
+      expect(entry("UsersController#enqueue").proven).to be_empty
+      expect(declared("UsersController#enqueue")).not_to include("global.write")
     end
 
     it "runs a mailer body through the class-method mapping" do
-      expect(proven("UsersController#deliver")).to include("io.db.read")
+      expect(declared("UsersController#deliver")).to include("io.db.read")
     end
   end
 
@@ -167,7 +155,7 @@ RSpec.describe "the Rails effect layer" do
     # example per method rather than one for `save`, because the defect was structural and they shared it.
     %w[save save! update update! update_attribute touch increment! decrement!].each do |selector|
       it "reports the write on an inherited ##{selector}" do
-        expect(proven("User##{selector}")).to include("io.db.write")
+        expect(declared("User##{selector}")).to include("io.db.write")
       end
     end
 
@@ -175,39 +163,39 @@ RSpec.describe "the Rails effect layer" do
     # come off a second code path and a fix that only reached the save group would leave them behind.
     %w[destroy destroy! delete].each do |selector|
       it "reports the write on a destroy-side ##{selector}" do
-        expect(proven("Audit##{selector}")).to include("io.db.write")
+        expect(declared("Audit##{selector}")).to include("io.db.write")
       end
     end
 
     it "reports the write on the singleton twins a callback synthesises" do
-      expect(proven("User.create")).to include("io.db.write")
-      expect(proven("User.create!")).to include("io.db.write")
+      expect(declared("User.create")).to include("io.db.write")
+      expect(declared("User.create!")).to include("io.db.write")
     end
 
     it "keeps the validator's read beside the write rather than instead of it" do
-      expect(proven("User#save")).to include("io.db.read", "io.db.write")
+      expect(declared("User#save")).to include("io.db.read", "io.db.write")
     end
 
     # `valid?` runs the validators and issues no INSERT; a fix that reached for the write list by name
     # would have coloured this one too.
     it "leaves a read-only trigger a read" do
-      expect(proven("User#valid?")).to include("io.db.read")
-      expect(proven("User#valid?")).not_to include("io.db.write")
+      expect(declared("User#valid?")).to include("io.db.read")
+      expect(declared("User#valid?")).not_to include("io.db.write")
     end
 
     # The guard rail. A model that spells out `def save` and never reaches `super` has replaced the
     # framework's implementation, and the report must keep saying what that body really does.
     it "does not paint the write onto an override that never delegates upward" do
-      expect(proven("RefusedAudit#save")).not_to include("io.db.write")
+      expect(declared("RefusedAudit#save")).not_to include("io.db.write")
     end
 
     # …while the same class's *un*-overridden siblings still carry it, so the exemption is per selector.
     it "keeps the write on the siblings such an override did not replace" do
-      expect(proven("RefusedAudit#save!")).to include("io.db.write")
+      expect(declared("RefusedAudit#save!")).to include("io.db.write")
     end
 
     it "keeps the write on an override that wraps the framework with super" do
-      expect(proven("WrappedAudit#save")).to include("io.db.write")
+      expect(declared("WrappedAudit#save")).to include("io.db.write")
     end
 
     # A model with neither a callback nor a uniqueness validator earns no synthetic unit at all, and the
@@ -222,12 +210,12 @@ RSpec.describe "the Rails effect layer" do
     # `config/application.rb` says `:solid_queue`, so the enqueue is an INSERT and a "no database on this
     # path" envelope is right to object to it.
     it "narrows the enqueue transport from config.active_job.queue_adapter" do
-      expect(proven("UsersController#enqueue"))
+      expect(declared("UsersController#enqueue"))
         .to include("io.db.write", "rails.activejob.enqueue", "job.enqueue")
     end
 
     it "reads a set(...) builder as pure and its enqueue as the effect" do
-      expect(proven("UsersController#enqueue_later")).to include("io.db.write", "rails.activejob.enqueue")
+      expect(declared("UsersController#enqueue_later")).to include("io.db.write", "rails.activejob.enqueue")
     end
 
     it "falls back to bare io when no adapter is declared" do
@@ -251,7 +239,7 @@ RSpec.describe "the Rails effect layer" do
 
   describe "ActionMailer and ActionPack" do
     it "colours deliver_now as a send" do
-      expect(proven("UsersController#deliver")).to include("email.send", "rails.actionmailer.deliver")
+      expect(declared("UsersController#deliver")).to include("email.send", "rails.actionmailer.deliver")
     end
 
     # #456 — `job.enqueue` shipped in the vocabulary and nothing produced it: across Redmine and Mastodon
@@ -259,47 +247,47 @@ RSpec.describe "the Rails effect layer" do
     # A Sidekiq worker has no base class, so no spelling of the row could have matched until the
     # plugin-fact ancestry learned to walk `include`.
     it "colours a Sidekiq enqueue through the marker module the worker includes" do
-      expect(proven("UsersController#enqueue")).to include("job.enqueue", "io.net")
+      expect(declared("UsersController#enqueue")).to include("job.enqueue", "io.net")
     end
 
     # #456 — the two shapes a real application actually writes, neither of which names the mailer class
     # at the `deliver_*` call site. Both were silent: `email.send` appeared zero times across Redmine and
     # Mastodon, on 97 and 39 delivery sites respectively.
     it "colours a delivery whose builder is an implicit self-call" do
-      expect(proven("UserMailer.deliver_welcome")).to include("email.send", "job.enqueue")
+      expect(declared("UserMailer.deliver_welcome")).to include("email.send", "job.enqueue")
     end
 
     it "colours a delivery through ActionMailer's parameterized `with` builder" do
-      expect(proven("UsersController#deliver_parameterized")).to include("email.send", "job.enqueue")
+      expect(declared("UsersController#deliver_parameterized")).to include("email.send", "job.enqueue")
     end
 
     # `session[:user_id] = 1` is `[]=` on a receiver nothing types; the self-path row is what reaches it.
     it "colours a session write through the self-path row" do
-      expect(proven("UsersController#login")).to include("mutate", "rails.session.write")
+      expect(declared("UsersController#login")).to include("mutate", "rails.session.write")
     end
 
     # `render` is `mutate.self`, not `io` — Rack writes the socket later, outside any project method.
     it "colours render as a response mutation and keeps the template taint" do
-      expect(proven("UsersController#render_page")).to include("mutate.self", "rails.response.write")
+      expect(declared("UsersController#render_page")).to include("mutate.self", "rails.response.write")
       expect(entry("UsersController#render_page").causes.map(&:first)).to include("template-not-analysed")
     end
   end
 
   describe "the Rails namespace" do
     it "colours the cache" do
-      expect(proven("Report#cached")).to include("cache.read", "io")
+      expect(declared("Report#cached")).to include("cache.read", "io")
     end
 
     it "colours the environment as a global read" do
-      expect(proven("Report#environment")).to include("global.read", "rails.config.read")
+      expect(declared("Report#environment")).to include("global.read", "rails.config.read")
     end
 
     it "colours a translation lookup" do
-      expect(proven("Report#translated")).to include("global.read", "rails.i18n.translate")
+      expect(declared("Report#translated")).to include("global.read", "rails.i18n.translate")
     end
 
     it "colours the zone-aware clock" do
-      expect(proven("Report#stamp")).to include("nondet.time", "global.read")
+      expect(declared("Report#stamp")).to include("nondet.time", "global.read")
     end
   end
 
@@ -335,7 +323,7 @@ RSpec.describe "the Rails effect layer" do
         table = runner.effect_table
       end
 
-      expect(table["UsersController#show"].proven.to_a).to include("io.db.read")
+      expect(table["UsersController#show"].declared.to_a).to include("io.db.read")
     end
   end
 

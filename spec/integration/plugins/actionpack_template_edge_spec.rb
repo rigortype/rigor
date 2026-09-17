@@ -77,7 +77,29 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
       redirect_to "/"
     end
 
+    def maybe
+      redirect_to "/" if @user.nil?
+    end
+
+    def rescued
+      @user.reload
+    rescue StandardError
+      redirect_to "/"
+    end
+
+    def handler_suffix
+      render template: "users/show.html.erb"
+    end
+
+    def json_suffix
+      render "show.json"
+    end
+
     private
+
+    def card
+      @user = User.find(1)
+    end
 
     def set_user
       @user = User.find(1)
@@ -104,6 +126,21 @@ TEMPLATE_EDGE_ROW_ERB = <<~ERB
   <span><%= @user.posts.count %></span>
 ERB
 
+# Templates named after the units a unit rule must NOT fire on: a conditional responder still takes the
+# implicit render (so `maybe` and `rescued` must reach theirs), and a private helper never does (so
+# `card` must not reach its).
+TEMPLATE_EDGE_MAYBE_ERB = <<~ERB
+  <p><% @user.touch %></p>
+ERB
+
+TEMPLATE_EDGE_PRIVATE_ERB = <<~ERB
+  <p><% @user.destroy %></p>
+ERB
+
+TEMPLATE_EDGE_JSON_ERB = <<~ERB
+  <%= @user.name %>
+ERB
+
 RSpec.describe "plugins/rigor-actionpack — the controller → template effect edge (#1048)" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -117,6 +154,10 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
     File.write(File.join(dir, "app", "views", "users", "show.html.erb"), TEMPLATE_EDGE_SHOW_ERB)
     File.write(File.join(dir, "app", "views", "users", "_card.html.erb"), TEMPLATE_EDGE_CARD_ERB)
     File.write(File.join(dir, "app", "views", "users", "_row.html.erb"), TEMPLATE_EDGE_ROW_ERB)
+    File.write(File.join(dir, "app", "views", "users", "maybe.html.erb"), TEMPLATE_EDGE_MAYBE_ERB)
+    File.write(File.join(dir, "app", "views", "users", "rescued.html.erb"), TEMPLATE_EDGE_MAYBE_ERB)
+    File.write(File.join(dir, "app", "views", "users", "card.html.erb"), TEMPLATE_EDGE_PRIVATE_ERB)
+    File.write(File.join(dir, "app", "views", "users", "show.json.erb"), TEMPLATE_EDGE_JSON_ERB)
     effects = {}
     effects["envelopes"] = envelopes if envelopes
     Rigor::Configuration.new(
@@ -169,9 +210,9 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
       in_project do |runner, _result|
         # `show` renders nothing explicitly — Rails renders `users/show`, which renders `_card`, which
         # writes. Two hops, and the second one is a template → partial edge.
-        expect(unit(runner, "UsersController#show").proven.to_a).to include("io.db.write")
-        expect(unit(runner, "UsersController#edit").proven.to_a).to include("io.db.write")
-        expect(unit(runner, "view:users/show.html").proven.to_a).to include("io.db.write")
+        expect(unit(runner, "UsersController#show").declared.to_a).to include("io.db.write")
+        expect(unit(runner, "UsersController#edit").declared.to_a).to include("io.db.write")
+        expect(unit(runner, "view:users/show.html").declared.to_a).to include("io.db.write")
       end
     end
 
@@ -180,9 +221,9 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
         action = unit(runner, "UsersController#show")
         template = unit(runner, "view:users/show.html")
 
-        expect(template.proven.to_a).not_to be_empty
-        expect(action.proven.to_a).to include(*template.proven.to_a)
+        expect(template.declared.to_a).not_to be_empty
         expect(action.declared.to_a).to include(*template.declared.to_a)
+        expect(action.proven.to_a).to include(*template.proven.to_a)
       end
     end
 
@@ -191,6 +232,41 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
         # `redirect_to` renders no template, so the implicit-render rule must stand down: the
         # conventional `users/away` would be a view this action never runs.
         expect(unit(runner, "UsersController#away").edges).to be_empty
+      end
+    end
+
+    it "keeps the implicit render for a CONDITIONAL responder, on the path that still takes it" do
+      in_project do |runner, _result|
+        # `redirect_to "/" if @user.nil?` answers on one path and not the other, so `users/maybe` is
+        # still rendered. Dropping the edge here would lose the template's `io.db.write` AND leave the
+        # action reading exhaustive — the one combination a summary may never produce.
+        %w[maybe rescued].each do |action|
+          entry = unit(runner, "UsersController##{action}")
+
+          expect(entry.edges).to include("view:users/#{action}.html"), "expected ##{action} to keep the edge"
+          expect(entry.declared.to_a).to include("io.db.write")
+        end
+      end
+    end
+
+    it "never renders a PRIVATE helper, however much a template shares its name" do
+      in_project do |runner, _result|
+        # Rails' `action_methods` is a controller's public instance methods. `app/views/users/card.html.erb`
+        # exists and destroys a record; `private def card` must not be handed its effects.
+        entry = unit(runner, "UsersController#card")
+
+        expect(entry.edges).not_to include("view:users/card.html")
+        expect(entry.declared.to_a).not_to include("io.db.destroy")
+        expect(entry.proven.to_a).not_to include("io.db.write")
+      end
+    end
+
+    it "strips a written handler and reads a written format off the name" do
+      in_project do |runner, _result|
+        # `render template: "users/show.html.erb"` and `render "show.json"` — a logical name carries no
+        # handler, and a key of `view:users/show.html.erb.html` would answer nothing for ever.
+        expect(unit(runner, "UsersController#handler_suffix").edges).to include("view:users/show.html")
+        expect(unit(runner, "UsersController#json_suffix").edges).to include("view:users/show.json")
       end
     end
 
@@ -257,59 +333,27 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
     end
   end
 
-  describe "`views: strict` against `views: lenient`" do
-    # The two presets of the manual, trimmed to the labels this fixture's plugins register: `lenient`
-    # admits `io.db.read` in a view and `strict` does not, which is the whole difference under test.
-    let(:lenient) do
-      [{ "match" => "app/views/**/*",
-         "effect" => ["mutate.local", "mutate.self", "io.db.read"] }]
-    end
-
-    let(:strict) do
-      [{ "match" => "app/views/**/*", "effect" => ["mutate.local", "mutate.self"] }]
-    end
-
-    # The `_row` partial is the one whose only effect is the lazy `@user.posts.count`. `_card` writes,
-    # and a write is a finding under BOTH presets, which is what the manual already says.
-    def row_findings(result)
-      result.diagnostics.select do |diagnostic|
-        diagnostic.rule.to_s.include?("envelope") && diagnostic.path.to_s.end_with?("_row.html.erb")
-      end
-    end
-
-    it "reports a lazy relation read in a view under `strict` and not under `lenient`" do
-      in_project(envelopes: strict) do |_runner, result|
-        expect(row_findings(result).map(&:message).join("\n")).to include("io.db.read")
-      end
-      in_project(envelopes: lenient) do |_runner, result|
-        expect(row_findings(result)).to be_empty
-      end
-    end
-
-    # The paired arm, both halves.
-    #
-    # What moved into the proven lane is a FIRST-PARTY BUNDLED plugin's DISCHARGING row — the engine's own
-    # audited statement about a framework method, which ADR-103 WD6 already trusts enough to declare the
-    # call site exhaustive. That move is deliberately Rails-layer-wide rather than scoped to templates:
-    # `UsersController#set_user` calls `User.find` and now proves `io.db.read` for exactly the same
-    # reason the view does, and a rule that answered differently on the two would be a coincidence
-    # dressed as a principle.
-    it "moves a non-template method's first-party claim into the same lane, deliberately" do
+  # #1059 — `views: strict` and `views: lenient` still bound the same thing, because a first-party
+  # plugin's `io.db.read` rides the DECLARED lane and `EnvelopeCheck` reads the proven one. ADR-103
+  # WD17 ruled on that lane, so #1048 does not move it; what is pinned here is today's behaviour, which
+  # is the premise the open question rests on.
+  describe "the lane a plugin row lands in (ADR-103 WD17)" do
+    it "keeps a first-party discharging row in the declared lane, so no envelope can judge it" do
       in_project do |runner, _result|
-        expect(unit(runner, "UsersController#set_user").proven.to_a).to include("io.db.read")
+        entry = unit(runner, "UsersController#set_user")
+
+        expect(entry.declared.to_a).to include("io.db.read")
+        expect(entry.proven.to_a).not_to include("io.db.read")
       end
     end
 
-    it "leaves an unaudited claim declared, so it can still never manufacture a finding" do
-      row = Rigor::Effects::PluginFacts::Row.new(
-        key: "Vendor::Client#call", labels: Rigor::Effects::LabelSet.new(["io.net.http"]), narrow: nil,
-        discharge: false, within: nil, taint: nil, plugin_id: "third-party"
-      )
+    it "keeps a view's read declared too, which is why neither preset reports it" do
+      in_project do |runner, _result|
+        row = unit(runner, "view:users/_row.html")
 
-      # A third-party plugin's `discharge: true` is demoted at load ({PluginFacts#discharge_granted?}),
-      # and the project's own `effects.attribution:` table never discharged at all — both keep the
-      # declared lane, and `EnvelopeCheck` still reads proven only.
-      expect(row.discharge?).to be(false)
+        expect(row.declared.to_a).to include("io.db.read")
+        expect(row.proven.to_a).not_to include("io.db.read")
+      end
     end
   end
 end

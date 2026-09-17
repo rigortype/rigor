@@ -262,16 +262,12 @@ Three properties follow, and they are the whole point of the channel:
 
 > **Implemented as of this writing** ([#387](https://github.com/rigortype/rigor/issues/387)): plugin attribution and plugin framework edges, with the whole Rails vocabulary of [ADR-103](../adr/103-effect-labels.md) WD10 built on them. The manifest surface is [`plugin.md`](../internal-spec/plugin.md) § Effect contributions; how the tables are compiled and consulted is [`effect-summaries.md`](../internal-spec/effect-summaries.md) § The plugin stratum.
 
-A plugin that models a framework attributes calls into it, through `effect_attributions:` in its manifest or through a `%a{…}` annotation in the RBS it ships. Which **lane** the labels land in and whether the site is **tainted** are one question, and it follows [ADR-103](../adr/103-effect-labels.md) WD6's ladder rather than the channel:
+A plugin that models a framework attributes calls into it, through `effect_attributions:` in its manifest or through a `%a{…}` annotation in the RBS it ships. Both land in the **declared** lane, exactly as `effects.attribution:` does — `proven` means "the analyzer read the code", and a plugin row is not read code ([ADR-103](../adr/103-effect-labels.md) WD17 weighed promoting a first-party row into the proven lane and declined it as a redefinition of `proven` rather than an extension). What differs is the taint, and it follows WD6's ladder rather than the channel:
 
-| Contributor | Lane | Taint at the site | Reading |
-| --- | --- | --- | --- |
-| a **first-party bundled** plugin's `discharge: true` row, or an annotation in its shipped RBS | **proven** | none | "this is what it does" — the accepted-signature tier |
-| any other plugin, and the project's own YAML table | declared | `plugin-attribution` | "declared this, and possibly more" |
-
-A discharging row's labels are **proven**, and that is a deliberate reading of what the grant means ([#1048](https://github.com/rigortype/rigor/issues/1048)). `discharge: true` is available only to a plugin the engine bundles, reviewed in this repository and gated by `make check-plugins` — the same standing the hand-audited `data/effects/core.yml` has, whose rows have always been proven. The catalogue is not proven because the analyzer read `Net::HTTP.get`'s body; it is proven because a reviewer signed off on what that method does. Holding the two apart put a Rails application's whole effect surface out of reach of its own envelopes: `UsersController#index` read `[mutate.self] ≤ [io.db.read]` for a plain `User.find`, so a `views: strict` bound forbidding `io.db.read` and a `views: lenient` one admitting it bounded the same thing.
-
-Everything else keeps the **declared** lane. A third-party plugin's `discharge: true` is demoted at load and the project's own `effects.attribution:` table never discharged, so an unaudited claim still cannot manufacture a finding — which is the separation "as strict as proven" actually needs.
+| Contributor | Taint at the site | Reading |
+| --- | --- | --- |
+| a **first-party bundled** plugin's `discharge: true` row, or an annotation in its shipped RBS | none | "this is what it does" — the accepted-signature tier |
+| any other plugin, and the project's own YAML table | `plugin-attribution` | "declared this, and possibly more" |
 
 A discharging row also **bounds the site**: `dynamic-receiver`, `unresolved-self-call` and the ownership judgment on a receiver mutation are all already answered by a trusted statement of what the call does, and a taint beside it would be one no annotation could ever clear. A row MAY nonetheless carry an explicit taint of `template-not-analysed` or `opaque-callable` — the two things a framework model can honestly not see.
 

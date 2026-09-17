@@ -42,6 +42,20 @@ module Rigor
 
       REFLECTIVE_SEND = %i[send public_send __send__].to_set.freeze
 
+      # The constructs under which a call may not run (#1048). Only the `responds:` bit reads this, and
+      # only to refuse to record a response the body might not perform: `render :edit if x` leaves the
+      # other path taking Rails' implicit render.
+      #
+      # A **block** is deliberately absent. `respond_to do |format| format.html { render :show } end` is
+      # how a Rails action answers, the block always runs, and counting it would add the conventional
+      # template's edge beside the one the `render` already names. The modifier forms need no entry of
+      # their own: Prism spells `render :x if y` as an ordinary `IfNode`.
+      BRANCHING = [
+        Prism::IfNode, Prism::UnlessNode, Prism::CaseNode, Prism::CaseMatchNode,
+        Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
+        Prism::RescueNode, Prism::RescueModifierNode, Prism::AndNode, Prism::OrNode
+      ].to_set.freeze
+
       # Selectors a per-class POSTURE default must never answer for, because a more specific reading of
       # the same site exists and would be swallowed: `send` and friends are the `dynamic-send` taint, and
       # `call` is the `opaque-callable` one. An explicit ROW still wins (`Fiddle::Function#call` is
@@ -114,9 +128,15 @@ module Rigor
       # @param method_name — this unit's own selector — what a `super` in its body names as
       #   the target the propagator resolves above `owner_class` (#446). With no name to state, a `super`
       #   taints instead.
+      # @param non_public — whether the class body declared this unit `private` or `protected`
+      #   (#1048). Only a UNIT callee rule reads it, and only to decline: Rails' `action_methods` is a
+      #   controller's PUBLIC instance methods, so a private helper is never implicitly rendered — while
+      #   a project that happens to ship a template of the same name would otherwise hand that
+      #   template's effects to the helper.
       def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
                      attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                     plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil)
+                     plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil,
+                     non_public: false)
         @singleton = singleton
         @block_parameter = block_parameter
         @calls = calls
@@ -125,6 +145,7 @@ module Rigor
         @plugin_facts = plugin_facts
         @owner_class = owner_class
         @method_name = method_name
+        @non_public = non_public ? true : false
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
@@ -134,10 +155,18 @@ module Rigor
         @edges = []
         @nested = []
         @delegates_upward = false
-        # #1048 — whether a plugin row marked `responds:` fired in this unit, i.e. the body supplied the
-        # framework's answer itself. It is what stands a UNIT callee rule down: an action that called
-        # `render :edit` or `redirect_to` did not take Rails' implicit render.
+        # #1048 — whether a plugin row marked `responds:` fired **unconditionally** in this unit, i.e.
+        # the body supplied the framework's answer on every path through it. It is what stands a UNIT
+        # callee rule down: an action that called `render :edit` or `redirect_to` outright did not take
+        # Rails' implicit render.
+        #
+        # Conditional does not count, and that is the whole of the bit's care. `redirect_to root_path if
+        # @user.nil?` leaves the other path taking the implicit render, so a unit that recorded the
+        # response there would drop the template edge AND read exhaustive — the one combination an
+        # effect summary may never produce. {@conditional} counts the branching ancestors the walk is
+        # inside; only a depth of zero answers.
         @responded = false
+        @conditional = 0
         # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
         @unclaimed = false
       end
@@ -191,7 +220,11 @@ module Rigor
         return if unit_boundary?(node)
 
         visit(node)
+        return node.rigor_each_child { |child| walk(child) } unless BRANCHING.include?(node.class)
+
+        @conditional += 1
         node.rigor_each_child { |child| walk(child) }
+        @conditional -= 1
       end
 
       # A nested unit is recorded and NOT descended into: its body belongs to its own summary, and the
@@ -298,7 +331,7 @@ module Rigor
         row = plugin_row(node, record)
         return nil if row.nil?
 
-        @responded = true if row.responds
+        @responded = true if row.responds && @conditional.zero?
         edged = callee_edge_taken?(node, row)
         labels = row.narrow ? Narrowing.apply(row.narrow, node) : row.labels
         # A `narrow:` that narrowed to nothing says the call does nothing, and a call that does nothing
@@ -307,7 +340,7 @@ module Rigor
         # returning here.
         return row if row.narrow && (labels.nil? || labels.empty?)
 
-        record_plugin_labels(row, labels) unless labels.nil? || labels.empty?
+        add_declared(Origin.plugin(row.key), labels) unless labels.nil? || labels.empty?
         record_plugin_taints(row, edged)
         row
       end
@@ -346,10 +379,16 @@ module Rigor
       # `<controller>/<action>` — so the producing fact is the ABSENCE of a `responds:` row, which only a
       # finished unit scan can observe.
       #
-      # Contributes an edge and nothing else. A controller's private helper gets one too, no unit answers
-      # it, and the unit is byte-identical to what it was: no label, no taint, nothing to be wrong about.
+      # Contributes an edge and nothing else — no label, no taint — which is what keeps it from being
+      # wrong about a method that is not an action at all.
+      #
+      # Two units it never applies to, and both are the same false positive twice: a `private` /
+      # `protected` member (Rails' `action_methods` is public only) and a `def` nested inside another
+      # method. A project with `app/views/users/card.html.erb` and a `private def card` would otherwise
+      # hand that template's `io.db.write` to the helper.
       def apply_unit_callees
-        return if @responded || @singleton || @owner_class.nil? || @method_name.nil?
+        return if @responded || @singleton || @non_public
+        return if @owner_class.nil? || @method_name.nil?
 
         rows = @plugin_facts.unit_callee_rows
         return if rows.empty?
@@ -364,27 +403,6 @@ module Rigor
             receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false
           )
         end
-      end
-
-      # Which lane a plugin row's labels land in (#1048).
-      #
-      # A **discharging** row is proven. ADR-103 WD6 grants `discharge: true` only to a plugin the engine
-      # BUNDLES, gated by `make check-plugins`, and what the grant means is that the row is Rigor's own
-      # audited statement about a framework method — the same kind of artifact as a `data/effects/core.yml`
-      # row, which has always been proven. The catalogue is not proven because the analyzer read
-      # `Net::HTTP.get`'s body; it is proven because a reviewer signed off on what that method does. A row
-      # the engine already trusts enough to declare the SITE exhaustive is a row it trusts enough to say
-      # what the site does, and holding the two apart is what made `views: strict` and `views: lenient`
-      # bound the same thing (#393).
-      #
-      # Everything else stays declared, which is the whole of the separation that matters: a third-party
-      # plugin's row is demoted to non-discharging at load, and the project's own `effects.attribution:`
-      # table ({#attribute}) never discharged in the first place. A claim nobody audited can still never
-      # manufacture a finding.
-      def record_plugin_labels(row, labels)
-        return add(Origin.plugin(row.key), labels) if row.discharge?
-
-        add_declared(Origin.plugin(row.key), labels)
       end
 
       def plugin_row(node, record)

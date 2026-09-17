@@ -68,6 +68,12 @@ module Rigor
       # which is the conservative answer for a shape this rule does not model.
       NON_TEMPLATE_OPTIONS = %w[json xml plain text html body js inline file nothing].freeze
 
+      # Template handlers, which a logical name never carries: `Plugin::TemplateUnit#logical_name` is
+      # `users/show.html`, not `users/show.html.erb`. An author may still write the handler out —
+      # `render template: "users/show.html.erb"` is legal Rails — so it is stripped rather than left to
+      # build a key no unit could ever answer.
+      HANDLERS = %w[erb haml slim jbuilder builder rabl ruby].freeze
+
       module_function
 
       def known?(name)
@@ -234,10 +240,28 @@ module Rigor
       end
 
       def template_callee(name, format)
+        name, format = split_suffixes(name, format)
         return nil if name.nil? || name.empty? || format.nil? || format.empty?
         return nil if name.include?(" ") || format.include?(" ") || format.include?(".")
 
         Callee.new(receiver: "#{TEMPLATE_PREFIX}#{name}", selector: format)
+      end
+
+      # Splits a written handler and format off the name's last segment, so `render "show.json"` names
+      # `view:users/show` + `json` and `render template: "users/show.html.erb"` names
+      # `view:users/show` + `html` rather than the impossible `view:users/show.html.erb.html`. A name
+      # that spells a format wins over the rule's default, because the author said so; a name that
+      # spells only a handler keeps the default.
+      def split_suffixes(name, format)
+        return [name, format] if name.nil?
+
+        directory, separator, base = name.rpartition("/")
+        segments = base.split(".")
+        return [name, format] if segments.length <= 1
+
+        stem = segments.shift
+        segments.reject! { |segment| HANDLERS.include?(segment) }
+        ["#{directory}#{separator}#{stem}", segments.first || format]
       end
 
       # `"card"` in `users` → `"users/_card"`; `"admin/card"` → `"admin/_card"`. A name already spelled
@@ -292,7 +316,7 @@ module Rigor
       private_class_method :rails_render, :rails_render_partial, :rails_implicit_render,
                            :controller_directory, :template_context, :template_name,
                            :positional_template, :positional_partial, :partial_name,
-                           :format_for, :non_template?, :array_head, :template_callee, :partialize,
+                           :format_for, :non_template?, :array_head, :template_callee, :split_suffixes, :partialize,
                            :qualify, :keyword_name, :literal_name, :positional, :keyword_argument,
                            :underscore
     end

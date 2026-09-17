@@ -260,6 +260,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     services()
     signature_paths()
     template_units_for_file(keyreq:path,keyreq:source)
+    template_units_pass_started()
   ].freeze
 
   # ADR-30 / issue #727: `ffi_binding_recognizer` and `ffi_binding_recognizers` are defined on

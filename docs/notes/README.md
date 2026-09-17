@@ -88,6 +88,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-17 | [ERB templates as effect units — the false-positive measurement](20260917-erb-template-units.md) |
 | 2026-09-17 | [The controller → template effect edge — corpus measurement](20260917-controller-template-edge.md) |
 | 2026-09-17 | [Plugin-supplied members as an own-method veto source — sizing the corpus first (issue #963)](20260917-plugin-member-veto.md) |
+| 2026-09-17 | [Render-site locals and layouts — corpus measurement](20260917-render-locals-and-layouts.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

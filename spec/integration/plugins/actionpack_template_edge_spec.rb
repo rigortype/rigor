@@ -428,7 +428,10 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
       end
     end
 
-    it "stays on a layout, which is a declined unit today (#1047)" do
+    it "stays on a `render layout:` whose partial the fixture does not ship" do
+      # `render layout: "wrapper"` names `view:users/_wrapper.html` — a view's `layout:` IS a partial
+      # (`RenderingHelper#render` rewrites it when a block is given). #1047 gave layouts a unit, so what
+      # keeps this taint is the missing file rather than the family.
       in_project do |runner, _result|
         expect(causes_of(runner, "view:users/show.html"))
           .to include(["template-not-analysed", "ActionView::Base#render"])

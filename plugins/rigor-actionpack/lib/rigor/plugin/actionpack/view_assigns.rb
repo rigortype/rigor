@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "rigor/source/node_children"
-
 require "prism"
+
+require_relative "controller_scan"
 
 module Rigor
   module Plugin
@@ -123,45 +123,19 @@ module Rigor
             result = Prism.parse(contents)
             return unless result.errors.empty?
 
-            each_controller(result.value, []) do |node, namespace|
+            ControllerScan.each_controller(result.value, []) do |node, namespace|
               harvest_controller(node, namespace, by_template)
             end
           rescue Plugin::AccessDeniedError, Errno::ENOENT
             nil
           end
 
-          # Mirrors {ControllerDiscoverer#walk_declarations}'s qualification, reduced to the class shapes
-          # that can carry an action: `class Admin::UsersController` and `module Admin; class
-          # UsersController`.
-          def each_controller(node, namespace, &)
-            return unless node.is_a?(Prism::Node)
-
-            if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-              yield node, namespace if node.is_a?(Prism::ClassNode)
-              inner = namespace + constant_segments(node.constant_path)
-              each_controller(node.body, inner, &) if node.body
-              return
-            end
-
-            node.rigor_each_child { |child| each_controller(child, namespace, &) }
-          end
-
-          def constant_segments(path)
-            case path
-            when Prism::ConstantReadNode then [path.name.to_s]
-            when Prism::ConstantPathNode then constant_segments(path.parent) + [path.name.to_s]
-            else []
-            end
-          end
-
           def harvest_controller(node, namespace, by_template)
-            segments = namespace + constant_segments(node.constant_path)
-            return unless segments.last&.end_with?("Controller")
-
-            prefix = controller_path(segments)
+            segments = namespace + ControllerScan.constant_segments(node.constant_path)
+            prefix = ControllerScan.controller_path(segments)
             return if prefix.nil?
 
-            methods = method_bodies(node)
+            methods = ControllerScan.method_bodies(node)
             filters = filter_chain(node)
             methods.each do |name, body|
               assigns = filter_assigns(filters, name, methods).merge(ivar_assigns(body))
@@ -171,38 +145,6 @@ module Rigor
                 merge_seeds(by_template, template, assigns)
               end
             end
-          end
-
-          # `["Admin", "UsersController"]` → `"admin/users"`. `ApplicationController` and the other
-          # abstract bases have no views of their own; they are not excluded here because an action they
-          # define really is inherited, and a template under their own path simply never exists.
-          def controller_path(segments)
-            parts = segments.map { |segment| underscore(segment) }
-            parts[-1] = parts[-1].sub(/_controller\z/, "")
-            return nil if parts[-1].empty?
-
-            parts.join("/")
-          end
-
-          # The ASCII-only inflection this needs: a controller constant is a CamelCase identifier, and
-          # nothing here has to invert an irregular plural (`ActiveSupport::Inflector` is the analysed
-          # project's, not Rigor's).
-          def underscore(segment)
-            segment.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-                   .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-                   .downcase
-          end
-
-          # `{ :show => body_node }` for every `def` directly in the class body.
-          def method_bodies(node)
-            body = node.body
-            return {} if body.nil?
-
-            body.child_nodes.compact.filter_map do |child|
-              next nil unless child.is_a?(Prism::DefNode) && child.receiver.nil?
-
-              [child.name, child.body]
-            end.to_h
           end
 
           # `before_action :set_user, only: %i[show edit]` → `[[:set_user, [:show, :edit], nil]]`.
@@ -338,7 +280,7 @@ module Rigor
             receiver = value.receiver
             return nil unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
 
-            name = constant_segments(receiver).join("::")
+            name = ControllerScan.constant_segments(receiver).join("::")
             name.empty? ? nil : name
           end
 
@@ -346,27 +288,20 @@ module Rigor
           # recognisable still gets its implicit template — that is Rails' default, not a guess.
           def templates_for(action, body, prefix)
             templates = ["#{prefix}/#{action}"]
-            walk_renders(body, prefix) { |target| templates << target }
+            ControllerScan.each_render(body) do |node|
+              target = render_target(node, prefix)
+              templates << target if target
+            end
             templates.uniq
           end
 
-          def walk_renders(node, prefix, &)
-            return unless node.is_a?(Prism::Node)
-
-            yield_render_target(node, prefix, &) if node.is_a?(Prism::CallNode)
-            node.rigor_each_child { |child| walk_renders(child, prefix, &) }
-          end
-
           # `render :edit` and `render "admin/shared/form"` only. `render partial:` is excluded: a partial's
-          # bindings are the render site's `locals:`, not the action's assigns, and seeding it with the
-          # latter would state something the call site did not.
-          def yield_render_target(node, prefix)
-            return unless node.receiver.nil? && node.name == :render
-
-            first = node.arguments&.arguments&.first
-            case first
-            when Prism::SymbolNode then yield "#{prefix}/#{first.unescaped}"
-            when Prism::StringNode then yield first.unescaped
+          # bindings are the render site's `locals:` — which {RenderLocals} reads — not the action's
+          # assigns, and seeding it with the latter would state something the call site did not.
+          def render_target(node, prefix)
+            case (first = node.arguments&.arguments&.first)
+            when Prism::SymbolNode then "#{prefix}/#{first.unescaped}"
+            when Prism::StringNode then first.unescaped
             end
           end
 

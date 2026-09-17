@@ -129,8 +129,9 @@ module Rigor
 
       # `render` inside a template. A bare positional argument is a **partial** here, and so is `layout:`
       # — in a view `render layout: "shared/wrapper"` names `shared/_wrapper`, not an `app/views/layouts`
-      # file. A layout has no unit today (#1047), so that edge resolves to nothing and the render keeps
-      # its taint, which is the honest answer rather than a silent discharge.
+      # file, because `RenderingHelper#render` rewrites `layout:` to `partial:` when a block is given.
+      # Since #1047 a layout compiles to a unit like any other template, so such an edge resolves where
+      # the named partial exists and keeps its taint where it does not.
       def rails_render_partial(node, unit_key)
         directory, format = template_context(unit_key)
         return nil if directory.nil?

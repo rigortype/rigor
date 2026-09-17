@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "../cache/descriptor"
+require_relative "template_unit_paths"
 require_relative "../plugin/template_unit"
 require_relative "../type/combinator"
 require_relative "diagnostic"
@@ -119,7 +120,7 @@ module Rigor
       # replaced. `BufferBinding#resolve` is deliberately NOT used: it compares the logical path by string,
       # and a unit path is project-relative while the editor names its buffer absolutely.
       def self.physical_path(path, root, buffer)
-        return buffer.physical_path if buffer && relative(buffer.logical_path, root) == path
+        return buffer.physical_path if buffer && TemplateUnitPaths.relative(buffer.logical_path, root) == path
 
         File.join(root, path)
       end
@@ -146,47 +147,11 @@ module Rigor
       def self.expand(globs, root, buffer = nil)
         paths = globs.flat_map { |glob| Dir.glob(glob, base: root) }
                      .select { |path| File.file?(File.join(root, path)) }
-        buffered = buffer && relative(buffer.logical_path, root)
-        paths |= [buffered] if buffered && claims?(globs, buffered)
+        buffered = buffer && TemplateUnitPaths.relative(buffer.logical_path, root)
+        paths |= [buffered] if buffered && TemplateUnitPaths.claims?(globs, buffered)
         paths.uniq.sort
       end
 
-      # A path as the globs spell it. An analysed path may arrive ABSOLUTE — the language server names a
-      # buffer by its full filesystem path, and `rigor check /abs/path` does too — while a claimed glob and
-      # everything `Dir.glob(base:)` returns are project-relative. Every lookup and every claim test goes
-      # through this, so the two spellings name one unit instead of silently missing each other (which is
-      # how an LSP publish for an open `.rbx` reported `call.unresolved-toplevel` for every helper while the
-      # unit sat in the index under its relative name). A path outside the root is left alone.
-      def self.relative(path, root)
-        text = path.to_s
-        return text unless text.start_with?(File::SEPARATOR)
-
-        prefix = "#{File.expand_path(root.to_s)}#{File::SEPARATOR}"
-        return text.delete_prefix(prefix) if text.start_with?(prefix)
-
-        # The same directory reached through a symlink is the same directory. `Dir.pwd` is always the
-        # resolved form (`/private/var/…` on macOS) while an editor names a buffer by the path the user
-        # opened (`/var/…`), so a string compare alone loses the match — and `File.expand_path` does not
-        # resolve symlinks. `realpath` on the DIRECTORY, not the file, so a buffer for a view that does not
-        # exist on disk yet still resolves.
-        resolved = resolved_path(text)
-        resolved&.start_with?(prefix) ? resolved.delete_prefix(prefix) : text
-      end
-
-      def self.resolved_path(text)
-        File.join(File.realpath(File.dirname(text)), File.basename(text))
-      rescue StandardError
-        nil
-      end
-      private_class_method :resolved_path
-
-      # `FNM_PATHNAME` so `*` does not cross a directory separator (the same reading `Dir.glob` gives the
-      # pattern), `FNM_EXTGLOB` so a `{html,text}` alternation in a claimed glob matches here as it did
-      # there — the two flags together are what make this predicate agree with the expansion above.
-      def self.claims?(globs, path)
-        globs.any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME | File::FNM_EXTGLOB) }
-      end
-      private_class_method :claims?
       private_class_method :expand
 
       # A unit MUST name the file it was compiled from. Without the check a `path:` naming another project
@@ -382,7 +347,7 @@ module Rigor
       private
 
       def normalize(path)
-        self.class.relative(path, @root)
+        TemplateUnitPaths.relative(path, @root)
       end
 
       def bind_self(scope, entry)

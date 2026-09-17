@@ -389,6 +389,90 @@ RSpec.describe "template units (#392)" do
     end
   end
 
+  # #392 review round 4 — the path spellings a shell, an editor and a symlinked checkout produce are not
+  # the spelling `Dir.glob` returns, and every one of them used to miss the unit and fall through to
+  # parsing the template as plain Ruby.
+  describe "the spellings an analysed path arrives in" do
+    def buffer_run(dir, logical, bytes, root: dir)
+      buffer_path = File.join(dir, "buffer.rbx")
+      File.write(buffer_path, bytes)
+      binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: buffer_path)
+      config = configuration(effects: false, workers: 0, plugins: true)
+      Dir.chdir(root) do
+        runner = Rigor::Analysis::Runner.new(
+          configuration: config, cache_store: nil, buffer: binding,
+          plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+        )
+        guarded_run(runner, [logical]).diagnostics
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # `rigor check --instead-of=./app/views/…` and `…/lib/../app/views/…` are both what a shell hands over.
+    %w[./app/views/users/show.rbx lib/../app/views/users/show.rbx].each do |spelling|
+      it "resolves #{spelling.inspect} to the unit rather than parsing it as plain Ruby" do
+        Dir.mktmpdir("rigor-392-spell-") do |dir|
+          build_project(dir)
+          found = buffer_run(dir, spelling, "render_header(@title.nope_from_buffer)\n")
+
+          expect(found.map(&:method_name)).to eq(["nope_from_buffer"])
+        end
+      end
+    end
+
+    # A symlinked project root AND a view in a directory that does not exist yet — the two halves that
+    # together defeated a `realpath` of the whole dirname (it raises `ENOENT`, and a nil answer dropped the
+    # unit for exactly the file most likely to be open).
+    it "resolves a buffer in a new directory under a symlinked root" do
+      Dir.mktmpdir("rigor-392-link-") do |dir|
+        real = File.join(dir, "real")
+        link = File.join(dir, "link")
+        FileUtils.mkdir_p(real)
+        build_project(real, template: false)
+        File.symlink(real, link)
+        logical = File.join(link, "app", "views", "reports", "new.rbx")
+        found = buffer_run(dir, logical, "render_header(@title.nope_from_buffer)\n", root: real)
+
+        expect(found.map(&:method_name)).to eq(["nope_from_buffer"])
+      end
+    end
+
+    # An unanchored claim (`**/*.rbx`) must not reach outside the project. Without the guard the plugin is
+    # handed an absolute `path:` for a file the project does not contain, and the run compiles, analyses
+    # and digests it — a plugin's glob is a claim over the PROJECT, and `Dir.glob` could never have
+    # returned that path.
+    it "does not make a unit of a buffer outside the project root" do
+      Dir.mktmpdir("rigor-392-out-") do |dir|
+        build_project(dir, template: false)
+        Dir.mktmpdir("rigor-392-elsewhere-") do |outside|
+          logical = File.join(outside, "x.rbx")
+          # The tmp file lives outside the project too: an unanchored claim would match it inside, and the
+          # example is about the LOGICAL path the editor named, not about where the bytes happen to sit.
+          buffer_path = File.join(outside, "buffer.rbx")
+          File.write(buffer_path, "render_header(1)\n")
+          binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: buffer_path)
+          config = Rigor::Configuration.new(
+            Rigor::Configuration::DEFAULTS.merge("paths" => ["lib"], "plugins" => ["rigor-view-demo-global"])
+          )
+
+          paths = Dir.chdir(dir) do
+            runner = Rigor::Analysis::Runner.new(
+              configuration: config, cache_store: nil, buffer: binding,
+              plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoGlobalPlugin) }
+            )
+            guarded_run(runner, [logical])
+            runner.template_unit_paths
+          end
+
+          expect(paths).to eq([])
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo-global")
+    end
+  end
+
   # The control the lane contract asks for: effects OFF, and no template-unit plugin at all, must be what
   # the engine was before this seam existed.
   describe "a project with no template-unit plugin" do

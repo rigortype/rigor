@@ -348,6 +348,19 @@ empty map claims no mapping at all, and its diagnostics pass through untouched.
   so a long-lived LSP session re-runs the plugin transform per publish;
   [#1038](https://github.com/rigortype/rigor/issues/1038) carries it onto
   `ProjectScan`.
+- **Path spellings.** A unit is keyed the way a claimed glob spells it —
+  project-relative, as `Dir.glob(base:)` returns it — and every other spelling
+  reduces to that one before a lookup or a claim test
+  (`Analysis::TemplateUnitPaths`). There are more of them than there look to
+  be: a language server names a buffer by its absolute path, a shell hands over
+  `./app/views/x.rbx` or `lib/../app/views/x.rbx`, and the same directory
+  reached through a symlink is the same directory (`Dir.pwd` is always
+  resolved; on macOS an editor's `/var/…` and pwd's `/private/var/…` are one
+  place, and the resolution walks to the nearest EXISTING ancestor so a view in
+  a directory the editor has not created yet still resolves). A path that is
+  still absolute after that reduction is **outside the project**, and an
+  unanchored claim (`**/*.rbx`) does not reach it: a plugin's glob is a claim
+  over the project, and `Dir.glob` could never have returned that path.
 - **Position probes.** `rigor type-of` and the `dump_type` helper read the file
   from disk and parse those bytes directly — they do not consult the index, so
   a probe against a template answers about the TEMPLATE's own text (and, for a

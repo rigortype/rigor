@@ -57,3 +57,16 @@ class RigorViewDemoPlugin < Rigor::Plugin::Base
     ]
   end
 end
+
+# The same transform behind an UNANCHORED claim. A glob with no directory prefix matches a `.rbx` anywhere,
+# which is the shape that can reach outside the project root once an editor buffer joins the expansion by
+# its absolute path — so the "a claim is over the project" guard needs a plugin that actually claims that
+# widely to be testable at all.
+class RigorViewDemoGlobalPlugin < RigorViewDemoPlugin
+  manifest(
+    id: "view-demo-global",
+    version: "0.1.0",
+    description: "Template-unit seam fixture with an unanchored claim (#392)",
+    template_globs: ["**/*.rbx"]
+  )
+end

@@ -501,39 +501,6 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
     end
 
-    def fixture_plugin_path
-      File.expand_path("../../fixtures/template_units/view_demo_plugin.rb", __dir__)
-    end
-
-    # A view class, a template on disk whose saved bytes are CLEAN, and the fixture plugin that claims it.
-    # @return the template's absolute path — the way the editor names a buffer.
-    def write_template_unit_project(tmpdir)
-      FileUtils.mkdir_p(File.join(tmpdir, "lib"))
-      File.write(File.join(tmpdir, "lib", "app.rb"), <<~RUBY)
-        class ViewContext
-          def render_header(text)
-            text
-          end
-        end
-      RUBY
-      path = File.join(tmpdir, "app", "views", "users", "show.rbx")
-      FileUtils.mkdir_p(File.dirname(path))
-      File.write(path, "render_header(@title.upcase)\n")
-      path
-    end
-
-    # `ProjectContext` takes no `plugin_requirer:`, so the plugin loads the way a project loads one: a file
-    # on disk that registers itself, named by the configuration's `plugins:` entry.
-    def template_unit_context(tmpdir)
-      plugin_path = File.join(tmpdir, "rigor-view-demo.rb")
-      File.write(plugin_path, "#{File.read(fixture_plugin_path)}\nRigor::Plugin.register(RigorViewDemoPlugin)\n")
-      Rigor::LanguageServer::ProjectContext.new(
-        configuration: Rigor::Configuration.new(
-          "paths" => ["lib"], "plugins" => [{ "gem" => plugin_path, "id" => "view-demo" }]
-        )
-      )
-    end
-
     def diagnostics_for(uri)
       payload = writer.payloads.rfind { |p| p.dig(:params, :uri) == uri }
       payload&.dig(:params, :diagnostics)

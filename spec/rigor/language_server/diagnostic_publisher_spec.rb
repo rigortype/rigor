@@ -109,6 +109,66 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Rigor::Plugin.unregister!("view-demo")
     end
 
+    # #1038 — the warm-path acceptance. A per-buffer publish against a long-lived ProjectContext must not
+    # re-run the plugin transform: before the index was carried on the ProjectScan, every keystroke
+    # re-globbed the claimed patterns, re-read every template and compiled every one of them — for ERB
+    # (#393) an Erubi compile of every view in the project, per keystroke.
+    it "re-runs no template transform on a publish when nothing changed on disk" do
+      Dir.mktmpdir("rigor-lsp-template-warm-") do |tmpdir|
+        write_template_unit_project(tmpdir)
+        path = File.join(tmpdir, "lib", "app.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        context = template_unit_context(tmpdir)
+        publisher = publisher_for(context)
+
+        Dir.chdir(tmpdir) do
+          context.project_scan # the cold build, which is where the one compile belongs
+          compiled = RigorViewDemoPlugin.transform_calls
+          publisher.publish_for(uri)
+          publisher.publish_for(uri)
+
+          expect(RigorViewDemoPlugin.transform_calls).to eq(compiled)
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # ... and the other half of the trade: the carry is revalidated per template against the filesystem, so
+    # an edit made outside the editor (a `git checkout`, another buffer's save) is compiled on the next
+    # publish without anything invalidating the ProjectContext — and ONLY that template is, which is the
+    # bound that matters for a project with hundreds of views.
+    #
+    # The snapshot itself does not move: it is frozen, so it keeps seeding from the pre-edit unit and the
+    # changed template is recompiled on every publish until the owner invalidates (a save fires
+    # `didChangeWatchedFiles`, which does exactly that). The second edited publish below pins that, so the
+    # cost is stated rather than assumed: one compile per template changed SINCE the scan, never the index.
+    it "recompiles exactly the template that changed on disk, and no other" do
+      Dir.mktmpdir("rigor-lsp-template-edited-") do |tmpdir|
+        template = write_template_unit_project(tmpdir)
+        File.write(File.join(File.dirname(template), "index.rbx"), "render_header(@title.upcase)\n")
+        path = File.join(tmpdir, "lib", "app.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        publisher = publisher_for(template_unit_context(tmpdir))
+
+        Dir.chdir(tmpdir) do
+          publisher.publish_for(uri) # warms the scan: both templates compiled once
+          before = RigorViewDemoPlugin.transform_calls
+          File.write(template, "render_header(@title.downcase)\n")
+          publisher.publish_for(uri)
+          edited = RigorViewDemoPlugin.transform_calls
+          publisher.publish_for(uri)
+
+          expect(edited - before).to eq(1)
+          expect(RigorViewDemoPlugin.transform_calls - edited).to eq(1)
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
     def publisher_for(context)
       described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
     end

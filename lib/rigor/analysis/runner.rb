@@ -486,8 +486,11 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
-        # #392 — re-synthesise the template units each run: their source files can change between two runs
-        # of one long-lived Runner (the LSP's), and a unit is never served from a cache of its own.
+        # #392 — re-derive the template units each run: their source files can change between two runs of
+        # one long-lived Runner (the LSP's), and a unit is never served from a cache of its own. Since
+        # #1038 "re-derive" is not "recompile": a `prebuilt:` runner carries the snapshot's warm index into
+        # {#template_units}, which still re-expands every claim and revalidates every template against the
+        # filesystem, and only compiles what actually moved.
         @template_units = nil
         # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
         # run never builds two.
@@ -1585,11 +1588,19 @@ module Rigor
       # #392 — the run's template units. Built once per run, on the parent, AFTER the plugin pre-pass has
       # loaded the registry; a run whose plugins declare no `template_globs:` never globs and never calls a
       # plugin.
+      #
+      # #1038 — a runner built with `prebuilt:` hands the snapshot's warm index to `collect(previous:)`, so
+      # a per-buffer publish against a long-lived {LanguageServer::ProjectContext} re-runs the transform
+      # only for a template that actually moved on disk (and for the buffer's own, always). The globs are
+      # still re-expanded and every surviving template is still revalidated, so an added, deleted or edited
+      # template is seen on the next publish without the owner invalidating anything. A runner with no
+      # `prebuilt:` — every CLI run — passes no `previous:` and builds the index exactly as before.
       def template_units
         @template_units ||= if @plugin_registry.nil?
                               TemplateUnits.empty
                             else
-                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer)
+                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer,
+                                                    previous: @prebuilt&.template_units)
                             end
       end
 

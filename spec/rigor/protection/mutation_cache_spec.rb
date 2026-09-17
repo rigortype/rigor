@@ -30,7 +30,8 @@ RSpec.describe Rigor::Protection::MutationCache do
       synthetic_method_index: Rigor::Inference::SyntheticMethodIndex.new,
       project_patched_methods: Rigor::Inference::ProjectPatchedMethods::EMPTY,
       plugin_prepare_diagnostics: [],
-      pre_eval_diagnostics: []
+      pre_eval_diagnostics: [],
+      template_units: Rigor::Analysis::TemplateUnits.empty
     )
   end
   let(:sampling) { described_class::Sampling.new(limit: nil, seed: 1, site_selector: :biteable) }

@@ -1394,6 +1394,14 @@ descriptor it had.
 A plugin editing its own `template_globs:` therefore moves the key, because the
 sorted claimed patterns are hashed into the slot.
 
+Both halves are unchanged by [#1038](https://github.com/rigortype/rigor/issues/1038),
+which lets a long-lived owner (`LanguageServer::ProjectContext`) carry the
+compiled index across runs on its `Analysis::ProjectScan`. A carried unit is
+reused only when the template's own ADR-87 stat-then-digest pack still validates
+against the file on disk, so a reused unit has, by construction, exactly the
+digest a freshly compiled one would have had: the key slot and both descriptor
+rows are byte-identical either way, and the carry is invisible to this cache.
+
 The ADR-87 boot-slim probe loads no plugin and therefore reconstructs no
 `template-units` slot: on a project whose plugins claim any glob the probe
 simply misses and the full path takes over, the same forgone-fast-lane trade

@@ -75,10 +75,16 @@ module Rigor
         TRIM_CLOSE = /-%>/
         private_constant :TRIM_CLOSE
 
-        # `<%= … %>` and `<%== … %>`, non-greedy and multi-line. `<%%` is ERB's literal escape and is not
-        # a tag; the leading `(?<!%)` keeps it out.
-        OUTPUT_TAG = /<%={1,2}(?!=)(.*?)%>/m
+        # `<%= … %>` and `<%== … %>`, non-greedy and multi-line. No capture group: the block below reads
+        # the tag it was handed rather than `Regexp.last_match`, whose group is `String?` however sure
+        # the pattern makes it — and a rewrite that depends on global match state is the harder one to
+        # read anyway.
+        OUTPUT_TAG = /<%={1,2}(?!=).*?%>/m
         private_constant :OUTPUT_TAG
+
+        # The `<%=` / `<%==` opener of a matched tag, which is all that gets rewritten.
+        OUTPUT_OPENER = /\A<%=+/
+        private_constant :OUTPUT_OPENER
 
         module_function
 
@@ -116,10 +122,13 @@ module Rigor
 
         def normalize_block_expressions(text)
           text.gsub(OUTPUT_TAG) do |tag|
-            body = Regexp.last_match(1)
+            opener = tag[OUTPUT_OPENER]
+            next tag if opener.nil?
+
+            body = tag[opener.length...-2].to_s
             next tag unless body.match?(BLOCK_EXPR)
 
-            tag.sub(/\A<%=+/) { |opener| "<%#{' ' * (opener.length - 2)}" }
+            "<%#{' ' * (opener.length - 2)}#{body}%>"
           end
         end
 

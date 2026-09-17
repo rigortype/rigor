@@ -109,6 +109,18 @@ RSpec.describe Rigor::Analysis::TemplateUnitPositions do
     expect(map.node_at(line: 3, column: 1)).to eq(:ambiguous)
   end
 
+  # A literal the spill run CONTAINS is one the tag wrote, not hoisted text: its quotes are the template's
+  # own bytes, so it satisfies "wholly inside the run" and the probe answered about that tag's string for
+  # an HTML attribute that merely spells the same word. A hoisted literal is never inside its own run.
+  it "does not answer about a tag's own string literal found on the spill line" do
+    map = positions("<%= link_to \"Edit\", path %>\n\n<div class=\"Edit\"><%= v %></div>\n",
+                    "_e.<<(( link_to \"Edit\", path ).to_s); _e.<< \"\\n\\n<div class=\\\"Edit\\\">\".freeze\n\n" \
+                    "; _e.<<(( v ).to_s); _e.<< \"</div>\".freeze\n",
+                    { 1 => 1, 2 => 2, 3 => 3 })
+
+    expect(map.node_at(line: 3, column: 13)).to eq(:not_verbatim).or eq(:ambiguous)
+  end
+
   it "still answers a tag on the line after another tag with the same name" do
     map = positions("<%= v %>\n<%= v %>\n", "_e.<<(( v ).to_s)\n_e.<<(( v ).to_s)\n", { 1 => 1, 2 => 2 })
 

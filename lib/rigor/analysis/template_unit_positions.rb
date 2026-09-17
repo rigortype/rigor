@@ -177,9 +177,14 @@ module Rigor
       # span would answer instead
       # (see the PR), and the follow-up this rule is deliberately conservative ahead of.
       #
-      # `spill` is the previous template line's compiled lines, where a hoisted leading-text literal lives.
-      # Only a STRING literal there counts: a code node on the line above is ordinary compiled code, and
-      # counting it would decline every `<%= v %>` that repeats on consecutive template lines.
+      # `spill` is the nearest NON-BLANK compiled line above this template line's own, where a hoisted
+      # leading-text literal lives. Only a string literal the run does NOT contain counts there. A code
+      # node up there is ordinary compiled code, and counting it would decline every `<%= v %>` that
+      # repeats on consecutive template lines; a literal the run DOES contain is a literal the TAG wrote
+      # (`<%= link_to "Edit", path %>`), whose quotes are template bytes, so it passes `inside?` and the
+      # probe answered about that tag's string from an HTML attribute that happened to spell it. A
+      # hoisted literal is never inside its own run — the quotes around it are the compiler's — so spill
+      # runs can only ever form ties, which is all they exist to do.
       def resolve(text, offset, targets, spill = [])
         runs = collect_runs(text, offset, targets)
         runs += collect_runs(text, offset, spill).select { |run| hoisted_text?(run, offset) }
@@ -207,7 +212,8 @@ module Rigor
       end
 
       def hoisted_text?(run, offset)
-        node_for(run, offset).is_a?(Prism::StringNode)
+        node = node_for(run, offset)
+        node.is_a?(Prism::StringNode) && !inside?(node, run)
       end
 
       def node_for(run, offset)

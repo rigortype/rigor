@@ -32,6 +32,14 @@ TEMPLATE_TYPE_OF_SHOW_ERB = <<~ERB
   name <%= @user.name %>
 ERB
 
+# The attribute case: a tag writes a string, a gap follows, and an HTML attribute on a later line spells
+# the same word. The compiler puts that tag's literal on the spill line the attribute's probe searches.
+TEMPLATE_TYPE_OF_ATTR_ERB = <<~ERB
+  <%= link_to "Edit", path %>
+
+  <div class="Edit"><%= @user.name %></div>
+ERB
+
 TEMPLATE_TYPE_OF_LAYOUT_ERB = <<~ERB
   <body>
   <%= yield %>
@@ -55,6 +63,7 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       end
     RUBY
     write("app/views/users/show.html.erb", TEMPLATE_TYPE_OF_SHOW_ERB)
+    write("app/views/users/attr.html.erb", TEMPLATE_TYPE_OF_ATTR_ERB)
     write("app/views/layouts/application.html.erb", TEMPLATE_TYPE_OF_LAYOUT_ERB)
     write(".rigor.yml", "plugins:\n  - gem: rigor-actionpack\n    id: actionpack\n")
   end
@@ -184,6 +193,19 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       expect(out).to eq("")
       expect(status).to eq(1)
       expect(err).to include("no expression found at app/views/users/show.html.erb:10:1")
+    end
+
+    # A literal the spill run CONTAINS is one a TAG wrote (line 8's `: "x"`), whose quotes are template
+    # bytes — so it passed "wholly inside the run" and the probe answered about that tag's string for an
+    # HTML attribute that merely spells the same word.
+    it "declines an HTML attribute that spells a string a tag on an earlier line wrote" do
+      status, out, err = run_cli("type-of", "app/views/users/attr.html.erb:3:13",
+                                 "app/views/users/attr.html.erb:3:26")
+
+      expect(status).to eq(0)
+      expect(err).to include("no expression found at app/views/users/attr.html.erb:3:13")
+      # Not a blanket decline of the line: the tag beside the attribute still answers.
+      expect(out).to include("app/views/users/attr.html.erb:3:26", "node:    Prism::InstanceVariableReadNode")
     end
 
     # A name repeated INSIDE one tag is one copy read from both ends, not a second reading: the rival's

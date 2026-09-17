@@ -473,6 +473,113 @@ RSpec.describe "template units (#392)" do
     end
   end
 
+  # #1038 — the index a long-lived owner carries across runs. The engine-level half of the acceptance the
+  # LSP spec drives end to end (`spec/rigor/language_server/diagnostic_publisher_spec.rb`): what a carried
+  # index reuses, and the four things that make it refuse.
+  describe "carrying a warm index across runs" do
+    def registry_for(*plugins)
+      instance_double(Rigor::Plugin::Registry, plugins: plugins)
+    end
+
+    def plugin_instance(klass = RigorViewDemoPlugin)
+      klass.new(services: nil)
+    end
+
+    def collect(dir, registry, previous: nil, buffer: nil)
+      Dir.chdir(dir) do
+        Rigor::Analysis::TemplateUnits.collect(registry: registry, previous: previous, buffer: buffer)
+      end
+    end
+
+    # The counter is what distinguishes a reuse from a recompile: the two produce the same index.
+    def transform_calls
+      RigorViewDemoPlugin.transform_calls
+    end
+
+    it "reuses the compiled unit of a template whose bytes did not move, and calls no plugin" do
+      Dir.mktmpdir("rigor-1038-warm-") do |dir|
+        build_project(dir)
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        before = transform_calls
+
+        carried = collect(dir, registry, previous: warm)
+
+        expect(transform_calls).to eq(before)
+        expect(carried.paths).to eq(warm.paths)
+        expect(carried.digest).to eq(warm.digest)
+        expect(carried["app/views/users/show.rbx"]).to equal(warm["app/views/users/show.rbx"])
+      end
+    end
+
+    it "recompiles a template whose bytes changed, and says so in the index digest" do
+      Dir.mktmpdir("rigor-1038-edit-") do |dir|
+        build_project(dir)
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        File.write(File.join(dir, "app", "views", "users", "show.rbx"), "render_header(@title.downcase)\n")
+        before = transform_calls
+
+        carried = collect(dir, registry, previous: warm)
+
+        expect(transform_calls - before).to eq(1)
+        expect(carried.digest).not_to eq(warm.digest)
+      end
+    end
+
+    # Only a re-expansion of the claimed globs notices a template that was not there before — a per-path
+    # memo alone would carry the old set forever. Both directions, because a deleted template must stop
+    # contributing its unit as surely as an added one must start.
+    it "re-expands the claim, so a template added or deleted since is seen" do
+      Dir.mktmpdir("rigor-1038-glob-") do |dir|
+        build_project(dir)
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        File.write(File.join(dir, "app", "views", "users", "index.rbx"), "render_header(@title.upcase)\n")
+
+        grown = collect(dir, registry, previous: warm)
+        File.unlink(File.join(dir, "app", "views", "users", "show.rbx"))
+        shrunk = collect(dir, registry, previous: grown)
+
+        expect(grown.paths).to eq(["app/views/users/index.rbx", "app/views/users/show.rbx"])
+        expect(shrunk.paths).to eq(["app/views/users/index.rbx"])
+      end
+    end
+
+    # A unit compiled from an editor's in-flight bytes is the one thing that must never be served from a
+    # carried index — the saved file is not what the user is looking at, and the warm index is shared by
+    # every later publish.
+    it "never carries the template the editor's buffer is bound to" do
+      Dir.mktmpdir("rigor-1038-buffer-") do |dir|
+        build_project(dir, body: "render_header(@title.upcase)\n")
+        registry = registry_for(plugin_instance)
+        warm = collect(dir, registry)
+        buffer_path = File.join(dir, "buffer.rbx")
+        File.write(buffer_path, "render_header(@title.nope_from_buffer)\n")
+        binding = Rigor::Analysis::BufferBinding.new(
+          logical_path: "app/views/users/show.rbx", physical_path: buffer_path
+        )
+
+        carried = collect(dir, registry, previous: warm, buffer: binding)
+
+        expect(carried["app/views/users/show.rbx"].source).to include("nope_from_buffer")
+      end
+    end
+
+    it "rebuilds wholesale when the set of glob-claiming plugins changed" do
+      Dir.mktmpdir("rigor-1038-plugins-") do |dir|
+        build_project(dir)
+        warm = collect(dir, registry_for(plugin_instance))
+        before = transform_calls
+
+        carried = collect(dir, registry_for(plugin_instance(RigorViewDemoGlobalPlugin)), previous: warm)
+
+        expect(transform_calls - before).to eq(1)
+        expect(carried.paths).to eq(warm.paths)
+      end
+    end
+  end
+
   # The control the lane contract asks for: effects OFF, and no template-unit plugin at all, must be what
   # the engine was before this seam existed.
   describe "a project with no template-unit plugin" do

@@ -220,7 +220,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       prepare_diagnostics = [:prepare_diag]
       pre_eval_diagnostics = [:pre_eval_diag]
       result = described_class::Result.new(
-        plugin_registry: :registry_marker, dependency_source_index: :dsi_marker,
+        plugin_registry: Rigor::Plugin::Registry::EMPTY, dependency_source_index: :dsi_marker,
         cached_plugin_prepare_diagnostics: prepare_diagnostics,
         synthetic_method_index: :synth_marker, project_patched_methods: :patched_marker,
         pre_eval_diagnostics_from_scanner: pre_eval_diagnostics
@@ -229,10 +229,13 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
 
       scan = pre_passes.build_project_scan(result)
 
-      expect(scan.plugin_registry).to eq(:registry_marker)
+      expect(scan.plugin_registry).to eq(Rigor::Plugin::Registry::EMPTY)
       expect(scan.dependency_source_index).to eq(:dsi_marker)
       expect(scan.synthetic_method_index).to eq(:synth_marker)
       expect(scan.project_patched_methods).to eq(:patched_marker)
+      # #1038 — the one slot built here rather than copied off the Result. A registry claiming no
+      # `template_globs:` produces an empty index and calls no plugin.
+      expect(scan.template_units).to be_empty
       expect(scan.plugin_prepare_diagnostics).to eq([:prepare_diag])
       expect(scan.plugin_prepare_diagnostics.frozen?).to be(true)
       expect(scan.plugin_prepare_diagnostics).not_to equal(prepare_diagnostics)
@@ -247,7 +250,8 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       scan = Rigor::Analysis::ProjectScan.new(
         plugin_registry: :registry_marker, dependency_source_index: :dsi_marker,
         synthetic_method_index: :synth_marker, project_patched_methods: :patched_marker,
-        plugin_prepare_diagnostics: [:prepare_diag], pre_eval_diagnostics: [:pre_eval_diag]
+        plugin_prepare_diagnostics: [:prepare_diag], pre_eval_diagnostics: [:pre_eval_diag],
+        template_units: Rigor::Analysis::TemplateUnits.empty
       )
       pre_passes = build_pre_passes
 

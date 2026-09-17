@@ -109,6 +109,126 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Rigor::Plugin.unregister!("view-demo")
     end
 
+    # #1038 — the warm-path acceptance. A per-buffer publish against a long-lived ProjectContext must not
+    # re-run the plugin transform: before the index was carried on the ProjectScan, every keystroke
+    # re-globbed the claimed patterns, re-read every template and compiled every one of them — for ERB
+    # (#393) an Erubi compile of every view in the project, per keystroke.
+    it "re-runs no template transform on a publish when nothing changed on disk" do
+      Dir.mktmpdir("rigor-lsp-template-warm-") do |tmpdir|
+        write_template_unit_project(tmpdir)
+        path = File.join(tmpdir, "lib", "app.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        context = template_unit_context(tmpdir)
+        publisher = publisher_for(context)
+
+        Dir.chdir(tmpdir) do
+          context.project_scan # the cold build, which is where the one compile belongs
+          compiled = RigorViewDemoPlugin.transform_calls
+          publisher.publish_for(uri)
+          publisher.publish_for(uri)
+
+          expect(RigorViewDemoPlugin.transform_calls).to eq(compiled)
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # ... and the other half of the trade: the carry is revalidated per template against the filesystem, so
+    # an edit made outside the editor (a `git checkout`, another buffer's save) is compiled on the next
+    # publish without anything invalidating the ProjectContext — and ONLY that template is, which is the
+    # bound that matters for a project with hundreds of views.
+    #
+    # The snapshot itself does not move: it is frozen, so it keeps seeding from the pre-edit unit and the
+    # changed template is recompiled on every publish until the owner invalidates (a save fires
+    # `didChangeWatchedFiles`, which does exactly that). The second edited publish below pins that, so the
+    # cost is stated rather than assumed: one compile per template changed SINCE the scan, never the index.
+    it "recompiles exactly the template that changed on disk, and no other" do
+      Dir.mktmpdir("rigor-lsp-template-edited-") do |tmpdir|
+        template = write_template_unit_project(tmpdir)
+        File.write(File.join(File.dirname(template), "index.rbx"), "render_header(@title.upcase)\n")
+        path = File.join(tmpdir, "lib", "app.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        publisher = publisher_for(template_unit_context(tmpdir))
+
+        Dir.chdir(tmpdir) do
+          publisher.publish_for(uri) # warms the scan: both templates compiled once
+          before = RigorViewDemoPlugin.transform_calls
+          File.write(template, "render_header(@title.downcase)\n")
+          publisher.publish_for(uri)
+          edited = RigorViewDemoPlugin.transform_calls
+          publisher.publish_for(uri)
+
+          expect(edited - before).to eq(1)
+          expect(RigorViewDemoPlugin.transform_calls - edited).to eq(1)
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # ADR-87's racy guard is what makes a carried pack trustworthy, and it only exists inside a
+    # `Cache::FileDigest.with_run` scope. `ProjectContext#project_scan` is NOT inside one, so without the
+    # wrap in `TemplateUnitCollector.collect_for_scan` the recording instant is taken AFTER the pack's own
+    # `File.stat` and can never be racy — a write landing between the collector's read and that stat would
+    # be recorded as the OLD digest beside the NEW stat tuple, and every later publish would validate it on
+    # the tuple fast path and serve a unit compiled from bytes no longer on disk.
+    #
+    # The property is asserted on the PACK, against the moment the bytes were read, rather than by staging
+    # a real write race: whether the guard can fire for a given write depends on the filesystem's timestamp
+    # granularity (ADR-87's own trade, and a coarse-granularity mount is exactly what `RIGOR_STRICT_VALIDATION`
+    # exists for), so a race-shaped example measures the runner's filesystem instead of this code. The
+    # instant preceding the read is what the wrap is FOR, and it is platform-independent.
+    it "stamps a scan-built pack with an instant taken before the template was read" do
+      Dir.mktmpdir("rigor-lsp-template-racy-") do |tmpdir|
+        write_template_unit_project(tmpdir)
+        context = template_unit_context(tmpdir)
+        read_at = capture_read_instant(File.join(tmpdir, "app", "views", "users", "show.rbx"))
+
+        index = Dir.chdir(tmpdir) { context.project_scan.template_units }
+
+        expect(read_at.value).not_to be_nil # the stub matched the collector's spelling of the path
+        expect(recording_instant(index, "app/views/users/show.rbx")).to be <= read_at.value
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # Notes when `target`'s bytes were read, and holds the read open long enough that an instant taken
+    # after it is unmistakably later — the window a concurrent editor or `git checkout` writes into.
+    def capture_read_instant(target)
+      seen = Struct.new(:value).new(nil)
+      allow(File).to receive(:binread).and_wrap_original do |original, *args|
+        bytes = original.call(*args)
+        if same_file?(args.first, target)
+          seen.value = Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond)
+          sleep 0.01
+        end
+        bytes
+      end
+      seen
+    end
+
+    # The collector reads through `Dir.pwd`, which is always resolved — on macOS a tmpdir's `/var/…` and
+    # pwd's `/private/var/…` are one file — and a relative spelling is a third. Both comparisons, so the
+    # stub matches the path whichever way the runner spells it.
+    def same_file?(candidate, target)
+      candidate = candidate.to_s
+      return true if File.expand_path(candidate) == File.expand_path(target)
+
+      File.exist?(candidate) && File.identical?(candidate, target)
+    end
+
+    # The `recording_instant_ns` field of the ADR-87 pack the scan recorded for `path` (see
+    # `Cache::FileDigest.pack_stat`). Read off the index's private table: it is deliberately not part of
+    # the index's public surface — a stat is not an answer, only the question of whether a carried answer
+    # still holds.
+    def recording_instant(index, path)
+      Integer(index.instance_variable_get(:@stats).fetch(path).split.fetch(5), 10)
+    end
+
     def publisher_for(context)
       described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
     end

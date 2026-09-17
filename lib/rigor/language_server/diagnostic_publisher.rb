@@ -268,8 +268,9 @@ module Rigor
 
       # Runs `Analysis::Runner` with a `BufferBinding` so the buffer bytes (instead of the on-disk file) drive
       # the parse. The `Rigor::Analysis::ProjectScan` cached on the ProjectContext is passed through
-      # `prebuilt:` so plugin `#prepare`, the dependency-source walker, and the synthetic-method /
-      # project-patched scanners do not re-run per publish. The snapshot rebuilds only when
+      # `prebuilt:` so plugin `#prepare`, the dependency-source walker, the synthetic-method /
+      # project-patched scanners and (#1038) the template-unit transforms do not re-run per publish — the
+      # last of those is an Erubi compile of every view for an ERB project. The snapshot rebuilds only when
       # `ProjectContext#invalidate!` fires (watched-file or configuration change). Returns the LSP-shaped
       # Diagnostic Array, ready to serialize into the notification's `params.diagnostics` field.
       def run_analysis(path:, bytes:)

@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "../cache/descriptor"
+require_relative "template_unit_collector"
 require_relative "template_unit_paths"
 require_relative "../plugin/template_unit"
 require_relative "../type/combinator"
@@ -37,6 +38,29 @@ module Rigor
     # costs a parse per template on the warm incremental path and can never serve a stale answer. Making
     # units first-class dependents is a later slice's work, and needs a decision the design note does not
     # settle.
+    #
+    # ## Carrying an index across runs (#1038)
+    #
+    # A long-lived {LanguageServer::ProjectContext} holds one warm {ProjectScan}, which carries the index it
+    # built, and every per-buffer publish hands it back through `collect(previous:)`. A path whose template
+    # has not moved on disk REUSES the unit already compiled for it, so a keystroke runs no plugin code —
+    # for ERB (#393) that is an Erubi compile of every view in the project, per keystroke, which is what
+    # this exists to remove. What is re-done per run is cheap and is what notices a change: the globs are
+    # re-expanded (only a glob notices a template APPEARING or vanishing) and each surviving path is
+    # revalidated through the ADR-87 stat-then-digest choke point ({Cache::FileDigest.stat_fresh?}), whose
+    # authority is the content digest, not the stat tuple. Three things rebuild the index outright, because
+    # each can change what a transform produces for bytes that never moved: a different root, a different
+    # set of claimed globs, and a different set of glob-claiming plugins.
+    #
+    # Separately, and whatever the rest of the index does, the editor's own buffer is never carried: a
+    # path the buffer is bound to is recompiled from the buffer's bytes on every publish, and the compiled
+    # result stays in THAT run's index — the warm index on the ProjectScan only ever holds units compiled
+    # from files on disk. A template the plugin DECLINES, or whose transform raised, likewise produces no
+    # unit to carry and is re-offered every run.
+    #
+    # A sequential CLI run passes no `previous:` and so builds the index from scratch exactly as before: it
+    # has no warm index to carry, its process ends with the run, and adding a cross-process memo would be a
+    # second cache to prove sound for no measurable gain (the index is built once per `rigor check`).
     class TemplateUnits
       # What a declared type name binds to when nothing resolves it. `Dynamic[top]` — the analyzer's own
       # "a value is here and I cannot see its class".
@@ -72,123 +96,15 @@ module Rigor
         @empty ||= new({})
       end
 
-      # Expands every loaded plugin's `template_globs:` and runs its transform.
+      # Expands every loaded plugin's `template_globs:` and runs its transform. The work lives in
+      # {TemplateUnitCollector}, which owns the glob expansion, the failure isolation, the editor-buffer
+      # substitution and the #1038 carry; this class is what the rest of the run READS.
       #
-      # A plugin whose glob matches nothing, or whose hook returns `[]`, contributes nothing. A plugin that
-      # RAISES contributes nothing and does not break the run — the same failure isolation
-      # `#diagnostics_for_file` has, and for the same reason: a template compiler meeting a file it cannot
-      # read must cost that file's typing, never the run.
-      #
-      # Two plugins claiming one path is a conflict with no principled winner, so registration order decides
-      # and the later claim is dropped; the loser is not a diagnostic (the project chose both plugins).
-      def self.collect(registry:, root: Dir.pwd, buffer: nil)
-        entries = {}
-        failures = []
-        claimed = []
-        registry.plugins.each do |plugin|
-          # A plugin whose manifest cannot be read claims nothing. `Plugin::Base#manifest` raises for a
-          # class that declared none, and a registry is not guaranteed to hold only well-formed plugins
-          # (the loader reports such a failure through its own channel); refusing to glob is the quiet,
-          # correct answer here rather than a second report of the same defect.
-          globs = begin
-            plugin.manifest.template_globs
-          rescue StandardError
-            []
-          end
-          next if globs.empty?
-
-          claimed.concat(globs)
-          collect_plugin(plugin, globs, root, entries, failures, buffer)
-        end
-        new(entries, failures, claimed.uniq, root)
+      # @param previous — a warm index from an earlier run of the same project (#1038). Every unit in it
+      #   whose template is unchanged on disk is carried over instead of recompiled; see the class note.
+      def self.collect(registry:, root: Dir.pwd, buffer: nil, previous: nil)
+        TemplateUnitCollector.collect(registry: registry, root: root, buffer: buffer, previous: previous)
       end
-
-      def self.collect_plugin(plugin, globs, root, entries, failures, buffer)
-        id = plugin.manifest.id
-        fallback = "#{id}@#{plugin.manifest.version}"
-        expand(globs, root, buffer).each do |path|
-          source = read_source(physical_path(path, root, buffer), path, id, failures)
-          next if source.nil?
-
-          units = begin
-            Array(plugin.template_units_for_file(path: path, source: source))
-          rescue StandardError => e
-            failures << Failure.new(plugin_id: id, path: path,
-                                    message: "#{e.class}: #{e.message}")
-            next
-          end
-          units.each { |unit| record(entries, unit, path, fallback, id, failures) }
-        end
-      end
-      private_class_method :collect_plugin
-
-      # Editor mode (#146) — the in-flight buffer's bytes stand in for the file on disk, exactly as
-      # `Runner#parse_source` reads them for a `.rb` file. Without this a `--tmp-file` / `--instead-of` pair
-      # naming a TEMPLATE compiled the saved file and the editor got diagnostics for bytes it had already
-      # replaced. `BufferBinding#resolve` is deliberately NOT used: it compares the logical path by string,
-      # and a unit path is project-relative while the editor names its buffer absolutely.
-      def self.physical_path(path, root, buffer)
-        return buffer.physical_path if buffer && TemplateUnitPaths.relative(buffer.logical_path, root) == path
-
-        File.join(root, path)
-      end
-
-      def self.read_source(physical, path, plugin_id, failures)
-        File.binread(physical)
-      rescue StandardError => e
-        failures << Failure.new(plugin_id: plugin_id, path: path,
-                                message: "could not be read (#{e.class}: #{e.message})")
-        nil
-      end
-      private_class_method :read_source
-
-      # Sorted so the run's analysed-path order — and therefore the run cache key's `paths` slot — is
-      # independent of the filesystem's directory order.
-      #
-      # An editor buffer whose logical path MATCHES a claimed glob joins the set even when nothing is on
-      # disk at that path. That is the `didOpen` of a freshly created view: the file exists only in the
-      # editor, `Dir.glob` cannot see it, and without this the run fell through to parsing the tmp bytes as
-      # plain top-level Ruby — no declared `self`, no seeds, so a helper call read as
-      # `call.unresolved-toplevel` and the finding the editor was actually looking at was missed. The
-      # buffer's own bytes are what `collect_plugin` then reads, and nothing else changes: an editor run is
-      # read-only-cached, and `Runner#template_unit_file_entries` already skips a path with no physical file.
-      def self.expand(globs, root, buffer = nil)
-        paths = globs.flat_map { |glob| Dir.glob(glob, base: root) }
-                     .select { |path| File.file?(File.join(root, path)) }
-        buffered = buffer && TemplateUnitPaths.relative(buffer.logical_path, root)
-        paths |= [buffered] if buffered && TemplateUnitPaths.claims?(globs, buffered)
-        paths.uniq.sort
-      end
-
-      private_class_method :expand
-
-      # A unit MUST name the file it was compiled from. Without the check a `path:` naming another project
-      # file silently REPLACED that file's source (the engine serves a unit's bytes for its own path), and a
-      # `path:` naming something outside the project root was analysed with no dependency-descriptor row —
-      # both from a plugin that only had to get one string wrong. A mismatch is reported, not dropped in
-      # silence, because a plugin author whose unit vanished has nothing to read.
-      def self.record(entries, unit, claimed_path, fallback, plugin_id, failures)
-        return unless unit.is_a?(Plugin::TemplateUnit)
-
-        unless unit.path == claimed_path
-          failures << Failure.new(plugin_id: plugin_id, path: claimed_path,
-                                  message: "returned a unit for #{unit.path.inspect}, which is not the " \
-                                           "file it was offered; a unit may only name its own source")
-          return
-        end
-        # First claim wins — see {.collect}. A duplicate `logical_name` across two DIFFERENT paths is NOT
-        # refused: the two units are analysed separately and their summaries union under one `view:` key,
-        # which is the same reading a method reopened in two files gets.
-        return if entries.key?(unit.path)
-
-        entries[unit.path] = Entry.new(
-          logical_name: unit.logical_name, path: unit.path, source: unit.ruby_source,
-          line_map: unit.line_map, self_type: unit.self_type, locals: unit.locals,
-          ivar_seeds: unit.ivar_seeds, digest: unit.digest(fallback), unit_key: unit.unit_key,
-          plugin_id: plugin_id, suppressed_rules: unit.suppressed_rules
-        )
-      end
-      private_class_method :record
 
       # One template file a plugin claimed and did not deliver a usable unit for — a transform that raised,
       # a file that could not be read, or a unit naming the wrong path. Reported as a `plugin_loader`
@@ -196,17 +112,40 @@ module Rigor
       # every other plugin hook reports through (ADR-2 § "Plugin Trust and I/O Policy").
       Failure = Data.define(:plugin_id, :path, :message)
 
-      def initialize(entries, failures = [], claimed_globs = [], root = Dir.pwd)
+      def initialize(entries, failures: [], claimed_globs: [], root: Dir.pwd, stats: {},
+                     plugin_signature: [])
         @entries = entries.freeze
         @failures = failures.freeze
         # The globs the loaded plugins claimed, whether or not anything matched. They are the CACHE's
         # business, not the analysis's: see {#glob_entries}.
         @claimed_globs = claimed_globs.freeze
         @root = root
+        # #1038 — the freshness token per template this index READ successfully: the ADR-87
+        # `(digest, size, mtime_ns, ctime_ns, inode)` pack over the bytes the transform was handed. Not part
+        # of the index's own identity ({#digest}) — a stat is not an answer, only the question of whether a
+        # carried answer still holds.
+        @stats = stats.freeze
+        @plugin_signature = plugin_signature.freeze
         freeze
       end
 
       attr_reader :failures
+
+      # #1038 — the `{ path => [entry, stat_pack] }` a later run may reuse, or `{}` when the whole index has
+      # to be rebuilt. The three whole-index refusals live here rather than per path because each of them
+      # can change what a transform PRODUCES for a template whose bytes never moved: a different root is a
+      # different project, a different claim set can hand a path to a different plugin, and a different
+      # plugin set is different code.
+      def carry_over(root:, claimed_globs:, plugin_signature:)
+        return {} unless @root.to_s == root.to_s
+        return {} unless @claimed_globs == claimed_globs
+        return {} unless @plugin_signature == plugin_signature
+
+        @stats.each_with_object({}) do |(path, packed), carried|
+          entry = @entries[path]
+          carried[path] = [entry, packed] if entry && packed
+        end
+      end
 
       def empty?
         @entries.empty?
@@ -289,7 +228,7 @@ module Rigor
       # The file whose bytes a unit's path was READ from: the editor's buffer when one is bound to it, the
       # project file otherwise. Read by the run's dependency descriptor, so it digests what the run read.
       def physical_path(path, buffer)
-        self.class.physical_path(path, @root, buffer)
+        TemplateUnitCollector.physical_path(path, @root, buffer)
       end
 
       def unit_key_for(path)

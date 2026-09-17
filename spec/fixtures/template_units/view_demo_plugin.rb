@@ -30,11 +30,19 @@ class RigorViewDemoPlugin < Rigor::Plugin::Base
   # transform) without a second plugin class per case. Production plugins carry nothing like this.
   class << self
     attr_accessor :spec_overrides
+
+    # #1038 — how many times the transform actually ran, across this class AND its subclass below. A
+    # per-keystroke publish is supposed to add nothing to it, and only a counter can say so: the index it
+    # produces is identical either way, so every other observation of a warm publish looks the same whether
+    # the transform ran or was skipped.
+    attr_accessor :transform_calls
   end
   self.spec_overrides = {}
+  self.transform_calls = 0
 
   def template_units_for_file(path:, source:)
     overrides = self.class.spec_overrides || {}
+    RigorViewDemoPlugin.transform_calls += 1
     raise "the demo transform was told to fail" if overrides[:raise_on_transform]
 
     text = source.dup.force_encoding(Encoding::UTF_8)

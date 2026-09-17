@@ -120,6 +120,13 @@ module Rigor
       # user makes most often: the same `sig-gen` invocation would withhold on its first run and emit on
       # its second. `@run_environment` is resolved before the cache is consulted, so the warm build reads
       # the same strata the cold one does.
+      #
+      # `@run_environment` is nil only when the run resolved no environment at all — a run over zero
+      # project files, or one that never reached {#compute_run_diagnostics}. The build then falls back to
+      # the configuration-only strata (`sig/` annotations, class-level ones and `effects.envelopes:`,
+      # without the accepted signatures or the rbs-inline virtual RBS), which is the narrower answer but
+      # not a wrong one: a run with no environment analysed no file, so there is no candidate for the
+      # missing strata to have bounded.
       def effect_envelopes
         return @effect_envelope_index if @effect_envelope_index
 

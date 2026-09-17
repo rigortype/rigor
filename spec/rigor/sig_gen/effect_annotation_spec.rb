@@ -247,6 +247,45 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
     out.string
   end
 
+  # A `match:` glob is written against the tree the author sees; an invocation may name the same file
+  # through a symlink. `sig-gen alias/presented.rb` where `alias` links to `lib` used to emit `%a{pure}`
+  # over a stanza that bounds the file, while `sig-gen lib/presented.rb` and a bare `sig-gen` withheld —
+  # the same method, three spellings, two answers.
+  describe "a match: entry reached through a symlink" do
+    let(:root) do
+      Dir.mktmpdir.tap do |dir|
+        FileUtils.cp_r(File.join(fixture, "."), dir)
+        FileUtils.ln_s("lib", File.join(dir, "alias"))
+      end
+    end
+
+    after { FileUtils.remove_entry(root) }
+
+    def title_row(path)
+      config = configuration
+      table, index = analysis(root, config)
+      annotator = described_class::Annotator.new(
+        table: table, envelope_index: index,
+        config_envelopes: Rigor::Effects::ConfigEnvelopes.build(
+          entries: config.effects_envelopes, registry: Rigor::Effects::Registry.for_configuration(config)
+        )
+      )
+      rows = Dir.chdir(root) do
+        Rigor::SigGen::Generator.new(configuration: config, paths: [path], effect_annotator: annotator).run
+      end
+      rows.find { |c| c.method_name == :title }
+    end
+
+    it "withholds whichever spelling of the file the invocation used" do
+      expect(title_row("lib/presented.rb").effect_reason).to eq(:withheld_declared)
+      expect(title_row("alias/presented.rb").effect_reason).to eq(:withheld_declared)
+    end
+
+    it "withholds for an absolute path too" do
+      expect(title_row(File.join(root, "lib/presented.rb")).effect_reason).to eq(:withheld_declared)
+    end
+  end
+
   describe "the writer" do
     let(:root) do
       Dir.mktmpdir.tap { |dir| FileUtils.cp_r(File.join(fixture, "."), dir) }

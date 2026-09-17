@@ -161,19 +161,40 @@ module Rigor
         def config_selected?(class_name, path)
           return false if @config_envelopes.empty? || class_name.nil?
 
-          paths = [path, relative_path(path)].compact.uniq
-          @config_envelopes.any? { |entry| Effects::ConfigEnvelopes.selects?(entry, class_name, paths) }
+          @config_envelopes.any? { |entry| Effects::ConfigEnvelopes.selects?(entry, class_name, match_paths(path)) }
         end
 
-        # A `match:` glob is project-relative, and a candidate's path is whatever the invocation named —
-        # relative when `paths:` supplied it, absolute when the user typed one. Both spellings are tried
-        # rather than one normalised: `Dir.pwd` is not guaranteed to be the project root either.
+        # Every spelling of the candidate's file a `match:` glob might be written against.
+        #
+        # A glob is matched `Dir.pwd`-relative (`ConfigEnvelopes.for_classes` defaults `project_root:` to
+        # the same thing, so the two sides agree and both agree with `rigor check`), while a candidate's
+        # path is whatever the invocation named: relative when `paths:` supplied it, absolute when the
+        # user typed one, and neither when it arrives through a symlink — `sig-gen alias/presented.rb`
+        # where `alias` links to `lib` is a real invocation, and the glob its author wrote says `lib/`.
+        #
+        # All three are tried rather than one canonical form. Normalising to the real path alone would
+        # break a project whose own `paths:` entry is the symlink (the glob would then be written against
+        # the link), and normalising to `Dir.pwd` alone is what let the symlink through.
+        def match_paths(path)
+          [path, relative_path(path), relative_path(real_path(path))].compact.uniq
+        end
+
         def relative_path(path)
           return nil if path.nil?
 
           expanded = File.expand_path(path.to_s)
           root = "#{File.expand_path(Dir.pwd)}#{File::SEPARATOR}"
           expanded.start_with?(root) ? expanded.delete_prefix(root) : nil
+        end
+
+        # Resolved through every symlink on the way, or nil when the file is gone — a candidate names a
+        # file the generator just read, so a miss here is a race rather than a shape to handle.
+        def real_path(path)
+          return nil if path.nil?
+
+          File.realpath(path.to_s)
+        rescue SystemCallError
+          nil
         end
       end
     end

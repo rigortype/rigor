@@ -138,6 +138,28 @@ truncation explicit. `--trace` records fail-soft fallbacks,
 after the rows of a line table in text output. The editor-mode
 `--tmp-file` / `--instead-of` pair is accepted as on `check`.
 
+A template a plugin compiles into Ruby (an ERB view under
+`rigor-actionpack`) is probed the way `rigor check` analyses
+it: the compiled Ruby is typed under the view's declared
+`self`, locals and instance variables, and `LINE:COL` are the
+template's own. A column answers only when it lies in Ruby the
+compiler copied verbatim — the `@user.name` in
+`<%= @user.name %>` — and denotes exactly one compiled
+expression. A column in HTML text, in code the plugin rewrote
+(a layout's `<%= yield %>`), or in bytes copied to more than
+one place prints `no expression found at …` with the reason
+and exits `1`; the command never answers about a nearby
+node instead. Two tags that name the same thing (`<%= v %>`
+beside `<% if "a" <= v %>`, or `<%= v %> <%= v.to_s %>`)
+decline for that reason as well; a name repeated inside ONE
+tag still answers. A bare `FILE:LINE` lists only the expressions
+that map back to a template column. `--trace` fallbacks are
+reported at the template line, and a JSON fallback carries a
+`column` only when its position maps back to one. A template
+the plugin declined to compile prints
+`plugin declined the template; probing its bytes as Ruby`
+and is probed as plain Ruby, parse error included.
+
 The four probe commands — `type-of`, `type-scan`, `trace` and
 `annotate` — build their environment fresh on every invocation
 and never read or write the persistent cache. That is why none

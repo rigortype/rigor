@@ -135,6 +135,19 @@ RSpec.describe "template units (#392)" do
     end
   end
 
+  # #1040 — `dump_type` has no probe path of its own: it is a `rigor check` diagnostic, so it already reads
+  # the compiled unit under the seeded scope, and the line map moves it to the template's line.
+  describe "a `dump_type` inside the unit" do
+    it "reports the seeded type at the template's own line" do
+      in_project(effects: false, template_body: "render_header(size)\nRigor.dump_type(size)\n") do |_runner, result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }
+
+        expect(dumps.map { |d| [d.path, d.line, d.message] })
+          .to eq([["app/views/users/show.rbx", 2, "dump_type: String"]])
+      end
+    end
+  end
+
   describe "the declared self, locals and ivar seeds" do
     # Each of the three is exercised by a line of the template that would otherwise be a finding:
     # `render_header` resolves only through the declared `self`, `size` only through the locals, and

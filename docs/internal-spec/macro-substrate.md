@@ -425,15 +425,71 @@ preamble a partial writes when its render-site `locals:` are not traced.
   still absolute after that reduction is **outside the project**, and an
   unanchored claim (`**/*.rbx`) does not reach it: a plugin's glob is a claim
   over the project, and `Dir.glob` could never have returned that path.
-- **Position probes.** `rigor type-of` and the `dump_type` helper read the file
-  from disk and parse those bytes directly — they do not consult the index, so
-  a probe against a template answers about the TEMPLATE's own text (and, for a
-  template whose raw bytes are not valid Ruby, declines with a parse error).
-  Routing them through the unit needs the INVERSE of everything the seam ships
-  — the user names a template position and the command has to find the compiled
-  node, through a map that is not injective — so it is
-  [#1040](https://github.com/rigortype/rigor/issues/1040) rather than part of
-  this slice. `rigor check` and `rigor effects` are unaffected.
+- **Position probes.** `rigor type-of` on a path a loaded plugin's
+  `template_globs:` claims builds the run's index, parses the unit's COMPILED
+  source with `parse_scopes`, seeds the file scope through `seed`, and resolves
+  the requested TEMPLATE position through the inverse map
+  (`Analysis::TemplateUnitPositions`,
+  [#1040](https://github.com/rigortype/rigor/issues/1040)). A path no plugin
+  claims builds no index and probes exactly as before; a claimed template whose
+  transform raised reports the failure and exits 1; one the plugin declined
+  says so and is then probed as the command always probed a file. The inverse is chosen, not
+  derived, because nothing the seam ships runs that way:
+  - **Lines.** A template line names the SET of compiled lines whose
+    `template_line` is that line — the same set a diagnostic from it reports
+    from — since `line_map` is not injective.
+  - **Columns.** They do not correspond, so a column is resolved through the
+    **longest verbatim run**: the template byte at the column is placed against
+    every matching byte on those compiled lines, each placement is extended
+    while the bytes agree, and the longest wins. The answer is the deepest
+    compiled node at the mapped offset, and it is accepted only when that
+    longest run is UNIQUE (a tie is two readings — declined as ambiguous), the
+    node lies wholly inside the run on one line, and no OTHER placement's node
+    lies inside its own run AND outside the winning run's compiled span. The
+    "wholly inside" condition rejects markup: a compiler copies template text
+    into a string literal, and the literal's quotes are never template bytes.
+    It equally rejects code a compiler REWROTE rather than copied
+    (rigor-actionpack's `yield` → `__rigor_yield`).
+    The rival-placement condition is there because a longer run is not on its
+    own a better reading: the compiler's own punctuation joins template bytes
+    into runs the template never had, so the `=` of `<%=` matches the `=` of
+    `<=`, `==`, `+=` or an assignment and `"= v "` (4 bytes, ending in the
+    WRONG `v`) outruns the tag body `" v "`. Without it
+    `<%= v %><% if 1 <= v %>` answered about the other `v`, with exit 0 and a
+    type `rigor check` disagreed with. A repeat INSIDE the winning run is not
+    a rival, because one tag body is copied once and the second occurrence is
+    that copy seen from the other end: without that exemption
+    `<%= @author.nil? ? l(:a) : l(:b, f(@author)) %>` declined, and the busy
+    lines of a real view lost a third of their answers. What still declines is
+    the CROSS-TAG repeat — `<%= v %> <%= v.to_s %>`, or `<%= v %><%= "v" %>`
+    probed at the string's `v` — the price of not knowing where the tags are; a tag span exported by the
+    plugin would answer those, and is the follow-up this rule is conservative
+    ahead of.
+  - **Hoisted text.** The nearest NON-BLANK compiled line above this template
+    line's own joins the search as a SPILL target, and only a string literal
+    found there counts. stdlib ERB emits a line's leading text on the line
+    above (`_erbout.<< "\nname ".freeze`), so for a probe in that text the
+    literal it has to tie with is not on this template line's compiled lines at
+    all: without the spill, `name <%= name %>` probed at the HTML word typed as
+    the tag's code. It is the nearest non-blank line rather than "the compiled
+    lines of template line L-1" because ONE text gap is ONE literal and the
+    compiler pads the lines it swallowed with blanks, so the literal sits on
+    the last line that emitted anything — L-1 only when L-1 carried a tag
+    itself. A CODE node up there must not count, or every `<%= v %>` repeated
+    on consecutive template lines would decline.
+    Tie-breaking by "the placement whose node looks like code" was rejected for
+    the same family of reason: preferring the code would type a word of text.
+  A bare `FILE:LINE` lists only the expressions on those compiled lines whose
+  span maps back to a template column that the exact form then resolves to a
+  node starting where that expression does, so the table never prints a column
+  `FILE:LINE:COL` would decline. A `--trace` fallback
+  is reported at the template line, and at a template column only when its
+  location lies in a verbatim run. The rule knows nothing about ERB: an identity
+  transform is one run per line and an ERB compiler one per tag body. The
+  `dump_type` helper has no probe path of its own — it is a `rigor check`
+  diagnostic, so it already types the compiled unit under the seeded scope and
+  reports at the template line. The language server's hover does not route
+  through the unit yet.
 - **Other file sets.** A unit is an ANALYSED file, never a `source_files:` one:
   the env-build-time `source_rbs_synthesizer` is offered the `.rb` expansion
   alone, because a template's bytes are not Ruby an RBS synthesiser can read.

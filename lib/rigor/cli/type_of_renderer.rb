@@ -84,7 +84,7 @@ module Rigor
           @out.puts("fallbacks: none")
         else
           @out.puts("fallbacks (#{tracer.size}):")
-          tracer.each { |event| @out.puts("  - #{format_fallback_text(event, result.file)}") }
+          tracer.each { |event| @out.puts("  - #{format_fallback_text(event, result)}") }
         end
       end
 
@@ -118,21 +118,31 @@ module Rigor
           type: result.type.describe,
           erased: result.type.erase_to_rbs
         }
-        payload[:fallbacks] = result.tracer.map { |event| fallback_to_h(event) } if result.tracer
+        payload[:fallbacks] = result.tracer.map { |event| fallback_to_h(event, result) } if result.tracer
         payload
       end
 
-      def format_fallback_text(event, file)
-        "#{event.node_class} (#{event.family}) @ #{location_text(event.location, file)}"
+      def format_fallback_text(event, result)
+        "#{event.node_class} (#{event.family}) @ #{location_text(event.location, result)}"
       end
 
-      def location_text(location, file)
+      def location_text(location, result)
         return "<no location>" unless location.respond_to?(:start_line)
 
-        "#{file}:#{location.start_line}:#{location.start_column + 1}"
+        line, column = fallback_position(location, result)
+        column ? "#{result.file}:#{line}:#{column}" : "#{result.file}:#{line}"
       end
 
-      def fallback_to_h(event)
+      # A template unit's result (#1040) maps the compiled location back; a column that names nothing in the
+      # template is left out rather than printed as a column of bytes the user never wrote.
+      def fallback_position(location, result)
+        mapper = result.location_mapper
+        return [location.start_line, location.start_column + 1] if mapper.nil?
+
+        mapper.call(location)
+      end
+
+      def fallback_to_h(event, result)
         hash = {
           node_class: event.node_class.name,
           family: event.family,
@@ -140,8 +150,9 @@ module Rigor
         }
         location = event.location
         if location.respond_to?(:start_line)
-          hash[:line] = location.start_line
-          hash[:column] = location.start_column + 1
+          line, column = fallback_position(location, result)
+          hash[:line] = line
+          hash[:column] = column if column
         end
         hash
       end

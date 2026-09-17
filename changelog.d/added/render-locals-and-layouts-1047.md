@@ -1,0 +1,1 @@
+- **[rigor-actionpack]** Binds a partial's locals from the sites that render it and compiles layouts into effect units, so a view's `flow.*` checks report by default and a `render layout:` reaches the template it names ([#1066](https://github.com/rigortype/rigor/pull/1066)).

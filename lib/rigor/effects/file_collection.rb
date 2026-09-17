@@ -35,10 +35,20 @@ module Rigor
       # selector rather than a receiver's, and the propagator resolves it against the ancestry *above* that
       # class with no closed-world override join — a different question from every other edge, which is why
       # it is a field rather than a convention over the other three.
-      Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call) do
+      #
+      # `unclaimed` marks a site NOTHING bounded: no catalogue row, no plugin row, no imported envelope
+      # (#391). It is not a taint and never becomes one — an unresolved edge here is overwhelmingly an
+      # inherited or gem call the catalogue simply has no row for, which is why the model drops it — but
+      # it IS the difference between "the analyzer read every callee" and "the analyzer read the callees
+      # it had something to read". Only sig-gen's annotation emission consults it, through
+      # {EffectTable::Entry#unclaimed?}: writing `%a{pure}` is a claim about a callee nobody described,
+      # and the emitter must decline rather than invent one.
+      Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call, :unclaimed) do
         # Defaulted because every producer but the `super` one records an ordinary call, and an ordinary
-        # call is not a `super`.
-        def initialize(super_call: false, **) = super
+        # call is not a `super`. `unclaimed` defaults false so a Marshal-restored edge from a cache
+        # written before the field existed reads as claimed — the cache identity carries a schema
+        # component ({Identity}) so such an entry is never served in the first place.
+        def initialize(super_call: false, unclaimed: false, **) = super
       end
 
       NO_TABLE = {}.freeze

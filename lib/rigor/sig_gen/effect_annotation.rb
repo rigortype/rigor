@@ -26,11 +26,21 @@ module Rigor
     #    `docs/type-specification/effect-labels.md` § Discharge by policy, invariant 4 ("emission uses
     #    undischarged sets") and ADR-10 WD7's "opportunistic shapes never round-trip" are the same rule:
     #    a tolerated `telemetry` origin does not earn a written `%a{pure}`. `withheld-tolerated`.
-    # 4. **Proven pure** — exhaustive, undischarged, nothing outside `{mutate.local}`. `%a{pure}`, the
-    #    ecosystem's existing purity spelling (design § 6.3), which hands Steep users better narrowing.
-    # 5. **Proven effectful** — exhaustive and undischarged, with real labels. `%a{rigor:v1:effect …}` only
-    #    when the caller asked for envelopes; otherwise nothing, because the labelled spelling is Rigor's
-    #    own and writing it into a project's `sig/` unbidden is a bigger commitment than a purity tag.
+    # 4. **Unclaimed callee** ({Effects::EffectTable::Entry#unclaimed?}) — the method, or something it
+    #    reaches, called something NOTHING described: no catalogue row, no plugin row, no envelope, and no
+    #    project definition the closure could read. The summary is exhaustive, because every call
+    #    RESOLVED — but "every call resolved" and "every callee's footprint is known" are different
+    #    questions, and only the second one licenses a written bound. `withheld-unclaimed-callee`.
+    # 5. **A surviving declared label** ({Effects::EffectTable::Entry#trivial?}) — the proven lane is empty
+    #    and the `≤` lane is not, which is a method whose callee stated a bound the analyzer never proved
+    #    away. `%a{pure}` there would contradict a claim the project already carries.
+    #    `withheld-declared`.
+    # 6. **Proven pure** — exhaustive, undischarged, claimed, and nothing outside `{mutate.local}` in
+    #    either lane. `%a{pure}`, the ecosystem's existing purity spelling (design § 6.3), which hands
+    #    Steep users better narrowing.
+    # 7. **Proven effectful** — the same, with real labels. `%a{rigor:v1:effect …}` only when the caller
+    #    asked for envelopes; otherwise nothing, because the labelled spelling is Rigor's own and writing
+    #    it into a project's `sig/` unbidden is a bigger commitment than a purity tag.
     module EffectAnnotation
       # The `sig.*` telemetry identifiers for this emission, alongside {Classification::DIAGNOSTIC_IDS} and
       # {Classification::SKIP_DIAGNOSTIC_IDS}. Documented in `docs/type-specification/diagnostic-policy.md`
@@ -42,6 +52,10 @@ module Rigor
         withheld_tolerated: "sig.effect.withheld-tolerated",
         # Withheld: some call this method reaches could not be resolved.
         withheld_non_exhaustive: "sig.effect.withheld-non-exhaustive",
+        # Withheld: some call it reaches resolved, and nothing anywhere says what that callee does.
+        withheld_unclaimed_callee: "sig.effect.withheld-unclaimed-callee",
+        # Withheld: the `≤` lane carries a label the proven lane does not already admit.
+        withheld_declared: "sig.effect.withheld-declared",
         # Write-time: the target declaration already carries annotations, so its bytes were left alone.
         left_unreadable: "sig.effect.left-unreadable"
       }.freeze
@@ -63,9 +77,19 @@ module Rigor
         return [[], nil] if entry.nil?
         return [[], :withheld_non_exhaustive] unless entry.exhaustive?
         return [[], :withheld_tolerated] unless entry.proven == entry.undischarged
-
-        return [["%a{pure}"], :emitted] if entry.proven.subsumed_by?(Effects::Summary::TRIVIAL_BOUND)
+        return [[], :withheld_unclaimed_callee] if entry.unclaimed?
+        # `trivial?` is the report's own "nothing to say about this method" test, and it is the emission
+        # test too: exhaustive, nothing beyond `mutate.local` proven, and NOTHING SURVIVING in the `≤`
+        # lane. The last conjunct is what a bare `proven.subsumed_by?` misses — a callee's imported
+        # envelope lands in the declared lane with no taint and no proven label, so a method whose whole
+        # body is one `Remote.fetch` reads `[] ≤ [io.net.http]` while proving nothing at all.
+        return [["%a{pure}"], :emitted] if entry.trivial?
+        return [[], :withheld_declared] if entry.proven.subsumed_by?(Effects::Summary::TRIVIAL_BOUND)
         return [[], nil] unless envelopes
+        # A surviving declared label is not spelled either. The envelope grammar carries ONE bound per
+        # declaration and has no way to say "proves this, claims that", so writing the proven set alone
+        # would publish a bound narrower than the claim the project already carries.
+        return [[], :withheld_declared] unless entry.rendered_declared.empty?
         # `top?` is the unbounded reading: it names no labels, so there is no envelope to spell.
         return [[], nil] if entry.proven.top? || entry.proven.empty?
 

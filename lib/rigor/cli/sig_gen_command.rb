@@ -2,7 +2,6 @@
 
 require "optionparser"
 
-require_relative "../cache/store"
 require_relative "../configuration"
 require_relative "options"
 require_relative "../sig_gen"
@@ -90,10 +89,16 @@ module Rigor
           return nil
         end
 
-        require_relative "../analysis/runner"
-        runner = Analysis::Runner.new(configuration: configuration,
-                                      cache_store: Cache::Store.new(root: configuration.cache_path),
-                                      collect_stats: false, workers: 0)
+        require_relative "check_runner_factory"
+        # Through the same factory `rigor check` and `rigor doctor` use, so the LRU cap, the worker
+        # resolution and the tolerated-effects switch cannot drift from the command whose cache this run
+        # shares. `workers: 0` because a collecting run is pinned to the sequential path anyway, and
+        # `--no-cache` mirrors `rigor check`'s flag of the same name.
+        runner = CheckRunnerFactory.build(
+          configuration: configuration,
+          options: { no_cache: options.fetch(:no_cache), explain: false, stats: false, workers: 0 },
+          buffer: nil, cache_root: configuration.cache_path
+        )
         runner.run((configuration.paths + paths).uniq)
         SigGen::EffectAnnotation::Annotator.new(table: runner.effect_table,
                                                 envelopes: options.fetch(:effect_envelopes))
@@ -222,6 +227,7 @@ module Rigor
           observe: [],
           include_private: false,
           effect_envelopes: false,
+          no_cache: false,
           config: nil
         }
         build_option_parser(options).parse!(@argv)
@@ -248,6 +254,9 @@ module Rigor
           opts.on("--effect-envelopes", "Also emit %a{rigor:v1:effect ...} for effectful methods " \
                                         "(requires the effects: opt-in)") do
             options[:effect_envelopes] = true
+          end
+          opts.on("--no-cache", "Do not read or write the analysis cache (effect collection only)") do
+            options[:no_cache] = true
           end
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|

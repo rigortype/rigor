@@ -57,6 +57,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(rows.fetch("label").fetch("effect_reason")).to eq("sig.effect.emitted")
     expect(rows.fetch("note").fetch("effect_reason")).to eq("sig.effect.withheld-tolerated")
     expect(rows.fetch("dispatch").fetch("effect_reason")).to eq("sig.effect.withheld-non-exhaustive")
+    expect(rows.fetch("via_envelope").fetch("effect_reason")).to eq("sig.effect.withheld-declared")
+    expect(rows.fetch("via_gem").fetch("effect_reason")).to eq("sig.effect.withheld-unclaimed-callee")
   end
 
   it "names the withheld reasons once on stderr in text mode" do
@@ -64,6 +66,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(err).to include("sig.effect.withheld-tolerated: 1")
     expect(err).to include("sig.effect.withheld-non-exhaustive: 1")
+    expect(err).to include("sig.effect.withheld-declared: 1")
+    expect(err).to include("sig.effect.withheld-unclaimed-callee: 2")
   end
 
   # The acceptance criteria's control: a project with no `effects:` block pays nothing and sees nothing.

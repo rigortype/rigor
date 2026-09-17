@@ -123,8 +123,8 @@ The `sig.skipped.*` reasons are:
 
 If your `.rigor.yml` carries an `effects:` block, `sig-gen`
 writes one more thing: `%a{pure}`, the purity annotation rbs
-and Steep already understand, above the methods Rigor proved
-do nothing.
+and Steep already understand, above the methods whose whole
+footprint Rigor read and found to be nothing.
 
 ```ruby
 class Label
@@ -146,11 +146,11 @@ class Label
 end
 ```
 
-Two conditions have to hold before an annotation is written,
-and both exist to keep a wrong one off the page. An emitted
-annotation is not a hint — the effects opt-in reads it back
-as an **envelope** and enforces it on the method and on
-everything the method reaches, so a `%a{pure}` `sig-gen`
+Four conditions have to hold before an annotation is written,
+and all four exist to keep a wrong one off the page. An
+emitted annotation is not a hint — the effects opt-in reads
+it back as an **envelope** and enforces it on the method and
+on everything the method reaches, so a `%a{pure}` `sig-gen`
 invented would put `effect.envelope-exceeded` on code that
 is correct.
 
@@ -165,6 +165,19 @@ is correct.
   clean to *your* project and to nobody else — not to a
   consumer reading your shipped `sig/`, and not to your own
   `--no-tolerated-effects` audit.
+- Every callee must be **described by something**: a
+  catalogue row, a plugin, an envelope, or a definition in
+  your own project. "Every call resolved" and "every callee's
+  footprint is known" are different questions. A method whose
+  body is one call into a gem nobody has written a row or an
+  envelope for is exhaustive and tells you nothing, so it is
+  left bare rather than called pure.
+- The `≤` lane must be **empty**. A callee that states its
+  own bound puts that claim in your method's declared lane
+  without proving anything, so `rigor effects` shows
+  `[] ≤ [io.net.http]` where the proven lane is empty. Rigor
+  will not write `%a{pure}` over a claim it never proved
+  away.
 
 `--effect-envelopes` adds the labelled spelling,
 `%a{rigor:v1:effect io.db, nondet.time}`, for methods that
@@ -188,8 +201,20 @@ The `sig.effect.*` reasons are:
   clean under `effects.tolerated:`.
 - `sig.effect.withheld-non-exhaustive` — some call the
   method reaches could not be resolved.
+- `sig.effect.withheld-unclaimed-callee` — some call it
+  reaches resolved, and nothing anywhere says what that
+  callee does.
+- `sig.effect.withheld-declared` — a label survives in the
+  `≤` lane.
 - `sig.effect.left-unreadable` — the target declaration
   already carries annotations, so nothing was written there.
+
+One limit worth knowing: annotations ride on the signature
+lines `sig-gen` proposes, so a method whose declaration is
+already exactly right gets none. An up-to-date `sig/` is
+therefore not annotated in place; the reader for those is
+`rigor effects --pure`, and writing them is still a hand
+edit.
 
 With no `effects:` block in `.rigor.yml`, none of this runs
 and the output is byte-for-byte what it was before.

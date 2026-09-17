@@ -51,6 +51,10 @@ module Rigor
       def digest(configuration:, registry: Registry.default, catalog: Catalog.default, plugin_facts: nil)
         Digest::SHA256.hexdigest(
           [
+            # #391 — the summary schema itself. A cached collection written before {Summary#unclaimed?}
+            # existed restores with the bit false, which is the direction sig-gen's emission must never
+            # guess, so such an entry must not be served rather than merely read carefully.
+            "schema:2",
             "vocabulary:#{registry.vocabulary_version}",
             "catalog:#{catalog.identity}",
             "effects:#{config_digest(configuration)}",

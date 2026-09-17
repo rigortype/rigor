@@ -78,6 +78,35 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
       expect(row.effect_reason).to eq(:withheld_non_exhaustive)
     end
 
+    # The blocker a proven-lane-only reading misses. `Remote.fetch` states its bound, so the label lands
+    # in the DECLARED lane with no taint and no proven label: `Zoo#via_envelope` reads `[] <= [io.net.http]`
+    # and a `proven.subsumed_by?(TRIVIAL_BOUND)` test calls it pure. `Entry#trivial?` is the test that
+    # does not, and it is the one the report already uses for "nothing to say about this method".
+    it "withholds from a method whose callee's envelope survives in the declared lane" do
+      row = rows.fetch("Annotated::Zoo#via_envelope")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_declared)
+    end
+
+    # And the other half: `Vendor.get` resolves to a declaration nothing describes, so the edge lands on
+    # no project method and is dropped. Every call RESOLVED, so the summary is exhaustive — "exhaustive"
+    # answers a different question from "every callee's footprint is known", and only the second licenses
+    # a written bound.
+    it "withholds from a method calling a resolved callee nothing describes" do
+      row = rows.fetch("Annotated::Zoo#via_gem")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_unclaimed_callee)
+    end
+
+    it "withholds one hop above that call too" do
+      row = rows.fetch("Annotated::Caller#go")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_unclaimed_callee)
+    end
+
     # The labelled spelling is Rigor's own, so an effectful method stays bare until the flag asks for it.
     it "says nothing about an effectful method without --effect-envelopes" do
       row = rows.fetch("Annotated::Loud#shout")
@@ -95,11 +124,12 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
 
     # `--effect-envelopes` never widens WHICH methods are annotated, only what an already-eligible one
     # says: the two withholding gates run before the flag is consulted.
-    it "still withholds from the tolerated and non-exhaustive methods under --effect-envelopes" do
+    it "still withholds from every withheld method under --effect-envelopes" do
       rows = by_key(candidates(fixture, envelopes: true))
 
-      expect(rows.fetch("Annotated::Chatty#note").annotations).to be_empty
-      expect(rows.fetch("Annotated::Opaque#dispatch").annotations).to be_empty
+      expect(rows.values_at("Annotated::Chatty#note", "Annotated::Opaque#dispatch",
+                            "Annotated::Zoo#via_envelope", "Annotated::Zoo#via_gem",
+                            "Annotated::Caller#go").map(&:annotations)).to all(be_empty)
     end
   end
 
@@ -220,7 +250,7 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
         expect(written).not_to include("%a{pure}")
         expect(result.left_unreadable.map(&:method_name)).to eq([:label])
         expect(result.to_h.fetch(:effect_left_unreadable).first[:effect_reason])
-          .to eq("sig.effect.emitted")
+          .to eq("sig.effect.left-unreadable")
       end
 
       it "keeps every other annotation on the declaration when the line is replaced" do

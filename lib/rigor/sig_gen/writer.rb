@@ -743,7 +743,9 @@ module Rigor
         return source if candidate.annotations.empty?
 
         unless member.annotations.empty?
-          state.left_unreadable << candidate
+          # Rebuilt so the reported row carries the reason it was actually given. The generator stamped
+          # `:emitted` when it decided the annotation; only the writer knows the declaration refused it.
+          state.left_unreadable << candidate.with_effect_annotation(candidate.annotations, :left_unreadable)
           return source
         end
 

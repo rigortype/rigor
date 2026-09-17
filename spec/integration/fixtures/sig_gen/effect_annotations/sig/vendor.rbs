@@ -1,0 +1,14 @@
+# Two classes this project declares and never defines — the shapes a proven-lane-only emitter calls
+# pure. `Remote.fetch` states its bound, which lands in the DECLARED lane with no taint; `Vendor.get`
+# states nothing at all, and the call resolves to no project method, so it is dropped silently.
+#
+# Top level rather than under `Annotated` because a call-site envelope import is keyed by the receiver
+# path AS WRITTEN, and the fixture's calls write the bare constant.
+class Remote
+  %a{rigor:v1:effect io.net.http}
+  def self.fetch: (String) -> String
+end
+
+class Vendor
+  def self.get: (String) -> String
+end

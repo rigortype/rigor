@@ -68,6 +68,7 @@ module Rigor
           targets = list.flat_map do |edge|
             resolved = index.targets_for(edge)
             taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
+            mark_unclaimed(state, caller_key) if edge.unclaimed && !edge.super_call && resolved.empty?
             resolved
           end.uniq.sort
           out[caller_key] = targets.freeze unless targets.empty?
@@ -95,6 +96,20 @@ module Rigor
         entry[:causes] << ["unresolved-super", edge.selector].freeze
       end
 
+      # #391 — an edge nothing bounded that lands on no project definition: the callee's footprint was
+      # described by nobody, so the closure is "what the analyzer read", not "what the method does".
+      #
+      # Decided HERE for the same reason the `super` taint is: only the merged ancestry can say whether
+      # the edge resolves. Unlike that taint it is not a cause and does not touch exhaustiveness — every
+      # existing consumer reads exactly what it read before. Its one reader is sig-gen's emission, which
+      # must not write `%a{pure}` about a callee nobody described.
+      def mark_unclaimed(state, caller_key)
+        entry = state[caller_key]
+        return if entry.nil?
+
+        entry[:unclaimed] = true
+      end
+
       # Causes are carried as a Set through the fixpoint and flattened back to a sorted Array in
       # {build_entries}. A Set is what {absorb} needs: unioning one along an edge must cost the source's
       # size and allocate NOTHING when it adds nothing, and the array-concat-and-uniq it replaces
@@ -105,7 +120,8 @@ module Rigor
             proven: summary.proven,
             undischarged: discharge.inert? ? summary.proven : discharge.undischarged(summary.bundles),
             declared: summary.declared,
-            exhaustive: summary.exhaustive?, causes: Set.new(summary.causes)
+            exhaustive: summary.exhaustive?, causes: Set.new(summary.causes),
+            unclaimed: summary.unclaimed?
           }
         end
       end
@@ -164,6 +180,10 @@ module Rigor
           target[:exhaustive] = false
           changed = true
         end
+        if !target[:unclaimed] && source[:unclaimed]
+          target[:unclaimed] = true
+          changed = true
+        end
         causes = target[:causes]
         source[:causes].each { |cause| changed = true if causes.add?(cause) }
         changed
@@ -190,13 +210,14 @@ module Rigor
             declared: closed[:declared],
             exhaustive: closed[:exhaustive],
             causes: closed[:causes].sort_by { |cause, detail| [cause, detail.to_s] }.freeze,
-            edges: edges.fetch(key, NO_EDGES)
+            edges: edges.fetch(key, NO_EDGES),
+            unclaimed: closed[:unclaimed]
           )
         end
       end
 
-      private_class_method :resolve_edges, :taint_unresolved_super, :seed, :iterate, :reverse_edges,
-                           :absorb, :join_lane, :build_entries
+      private_class_method :resolve_edges, :taint_unresolved_super, :mark_unclaimed, :seed, :iterate,
+                           :reverse_edges, :absorb, :join_lane, :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.

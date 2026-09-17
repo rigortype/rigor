@@ -483,16 +483,20 @@ rigor sig-gen [paths]
 | `--observe=PATH` | Scan `PATH` for call-site observations. Repeatable. |
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--effect-envelopes` | Also emit `%a{rigor:v1:effect …}` for effectful methods. Needs the `effects:` opt-in. |
+| `--no-cache` | Do not read or write the analysis cache. Only effect collection uses it. |
 | `--format=text\|json` | Output format. |
 
 When `.rigor.yml` carries an `effects:` block, sig-gen also writes
 `%a{pure}` above a method whose effect summary is **exhaustive**
-(every call it reaches was resolved) and **undischarged** (nothing
-in its footprint is only invisible because `effects.tolerated:`
-says so). Nothing else is annotated, and `--effect-envelopes` adds
-Rigor's own labelled spelling for methods that do have a footprint.
-With no `effects:` block the output is byte-for-byte what it was
-before. See [handbook chapter 11](../handbook/11-sig-gen.md#emitting-effect-annotations).
+(every call it reaches was resolved), **undischarged** (nothing in
+its footprint is only invisible because `effects.tolerated:` says
+so), **claimed** (every callee is described by a catalogue row, a
+plugin, an envelope or a project definition) and free of surviving
+labels in the `≤` lane. Nothing else is annotated, and
+`--effect-envelopes` adds Rigor's own labelled spelling for methods
+that do have a footprint. With no `effects:` block the output is
+byte-for-byte what it was before. See
+[handbook chapter 11](../handbook/11-sig-gen.md#emitting-effect-annotations).
 
 Every signature is parsed before it is emitted. A method whose
 generated RBS does not parse is **skipped** (`sig.skipped.unrenderable-rbs`)

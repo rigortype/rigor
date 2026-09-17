@@ -20,6 +20,8 @@ module Rigor
     #   from {#bundles} because nothing declared is ever proven: diagnostics read {#proven} only, so an
     #   attributed label can never manufacture an `effect.envelope-exceeded`.
     # - {#exhaustive} — false when some call this method makes could not be resolved.
+    # - {#unclaimed} — true when some call it makes was described by nothing at all. A separate question
+    #   from exhaustiveness, with a single reader; see {#unclaimed?}.
     # - {#causes} — why, from {TaintCause}'s closed enum, as `[cause, detail]` pairs. Empty when exhaustive.
     #
     # {#proven} is the flat projection of {#bundles}: the join of every bundle. It is computed once at
@@ -53,10 +55,12 @@ module Rigor
 
       attr_reader :bundles, :declared_bundles, :declared, :causes, :proven
 
-      def initialize(bundles: NO_BUNDLES, declared_bundles: NO_BUNDLES, exhaustive: true, causes: NO_CAUSES)
+      def initialize(bundles: NO_BUNDLES, declared_bundles: NO_BUNDLES, exhaustive: true, causes: NO_CAUSES,
+                     unclaimed: false)
         @bundles = normalize_bundles(bundles)
         @declared_bundles = normalize_bundles(declared_bundles)
         @exhaustive = exhaustive ? true : false
+        @unclaimed = unclaimed ? true : false
         @causes = normalize_causes(causes)
         @proven = flatten(@bundles)
         @declared = flatten(@declared_bundles)
@@ -67,6 +71,24 @@ module Rigor
       # more" and MUST NOT on its own produce a finding.
       def exhaustive?
         @exhaustive
+      end
+
+      # Whether this method made a call NOTHING described — no catalogue row, no plugin row, no imported
+      # envelope, and no project definition for the edge to land on (#391).
+      #
+      # It is deliberately **not** a taint. "Every call was resolved" and "every callee's footprint is
+      # known" are different questions, and the model answers the first one everywhere: an unresolved
+      # ordinary edge is dropped rather than tainted, because most such calls are inherited or gem calls
+      # the catalogue has no row for, and tainting them would make almost every method in almost every
+      # project non-exhaustive. That posture is right for a report and for a judgment, both of which read
+      # the proven lane.
+      #
+      # It is wrong for EMISSION. `%a{pure}` written onto a method that calls an undescribed gem method
+      # is a contract nothing re-derives, enforced on that method's callers from then on. So the second
+      # question gets its own bit, read by `rigor sig-gen` and by nothing else: not by the report, not by
+      # the snapshot, not by `effect.envelope-exceeded`, and not by `trivial?`.
+      def unclaimed?
+        @unclaimed
       end
 
       # Whether this summary is worth showing at all: an exhaustive method whose whole proven footprint is
@@ -93,18 +115,19 @@ module Rigor
           bundles: merge_bundles(@bundles, other.bundles),
           declared_bundles: merge_bundles(@declared_bundles, other.declared_bundles),
           exhaustive: @exhaustive && other.exhaustive?,
-          causes: @causes + other.causes
+          causes: @causes + other.causes,
+          unclaimed: @unclaimed || other.unclaimed?
         )
       end
 
       def ==(other)
         other.is_a?(Summary) && other.bundles == @bundles && other.declared_bundles == @declared_bundles &&
-          other.exhaustive? == @exhaustive && other.causes == @causes
+          other.exhaustive? == @exhaustive && other.causes == @causes && other.unclaimed? == @unclaimed
       end
       alias eql? ==
 
       def hash
-        [self.class, @bundles, @declared_bundles, @exhaustive, @causes].hash
+        [self.class, @bundles, @declared_bundles, @exhaustive, @causes, @unclaimed].hash
       end
 
       def inspect

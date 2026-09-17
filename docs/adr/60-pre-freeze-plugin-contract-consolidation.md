@@ -58,6 +58,14 @@ remains a recorded design; when a concrete target (Redmine webhook payloads,
 tDiary plugin loader) demands it, the field returns **with** its scanner in
 one change.
 
+> **Status (2026-09-17):** the removal stands and the return happened as this
+> paragraph specified — one change carrying both the declaration and its engine
+> consumer. [#392](https://github.com/rigortype/rigor/issues/392) revived the
+> tier as **template units**: `template_globs:` plus a
+> `#template_units_for_file` source transform with a line map. `external_files:`
+> and `Macro::ExternalFile` stay deleted; the returning surface is spelled
+> differently because the demand (views) needs a compiler, not a glob.
+
 ## WD2 — Normalize macro value-object naming
 
 | Object | Old keyword | New keyword |

@@ -23,11 +23,12 @@ All four classes live under the `Rigor::Plugin::Macro` namespace
 (`lib/rigor/plugin/macro/`) and are declared through the corresponding
 `Manifest` slots documented in [`plugin.md`](plugin.md#rigorpluginmanifest):
 `block_as_methods:`, `heredoc_templates:`, `trait_registries:`,
-`nested_class_templates:`. (The Tier D `ExternalFile` value object and its
-`external_files:` slot were removed by
-[ADR-60 WD1](../adr/60-pre-freeze-plugin-contract-consolidation.md) — the
-field had no engine consumer; it returns demand-gated together with its
-scanner.)
+`nested_class_templates:`. Tier D returned demand-gated as **template
+units** ([#392](https://github.com/rigortype/rigor/issues/392)); its value
+object is `Rigor::Plugin::TemplateUnit` (`lib/rigor/plugin/template_unit.rb`),
+specified in _Template units_ below rather than alongside the four above,
+because it is the one tier whose declaration is a compiled source rather
+than a call shape.
 
 ## Common value-object contract
 
@@ -170,6 +171,7 @@ The `sealed`-parent fact + `is_a?` cross-variant exhaustive narrowing
 | B | `TraitRegistry` | `trait_registries:` | Live (worked consumer: `rigor-devise`). |
 | C | `HeredocTemplate` (+ `Emit` / `ReturnsFromArg`) | `heredoc_templates:` | Live (worked consumers: `rigor-dry-struct` / `rigor-dry-types`); `returns_from_arg` per-call-site lookup is the ADR-18 layer. |
 | nested-class | `NestedClassTemplate` | `nested_class_templates:` | Live, Slice A (worked consumer: `rigor-mangrove`); sealed-parent exhaustiveness deferred. |
+| D | `TemplateUnit` | `template_globs:` + `#template_units_for_file` | Live as of #392 (worked consumer: the `spec/fixtures/template_units` view-demo fixture, identity transform); ERB is #393. See _Template units_ below. |
 
 Per [ADR-16 WD13](../adr/16-macro-expansion.md), substrate-produced output
 ships at a **floor** ("substrate-affected code parses cleanly and has its
@@ -190,6 +192,102 @@ The two formerly-unpinned objects (`NestedClassTemplate` per ADR-36 and
 `HeredocTemplate::ReturnsFromArg` per ADR-18) were pinned via the
 `PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE` and
 `PLUGIN_MACRO_HEREDOC_TEMPLATE_RETURNS_FROM_ARG_INSTANCE` snapshot constants.
+`Rigor::Plugin::TemplateUnit` joins them under
+`PLUGIN_TEMPLATE_UNIT_INSTANCE` (#392).
 None of these objects carry an `sig/rigor/*.rbs` signature yet, so they are
 guarded by the runtime instance-method snapshot only, not the RBS sig-drift
 dual.
+
+## Template units — `TemplateUnit` (`template_globs:` + `#template_units_for_file`, #392)
+
+The revived [ADR-16](../adr/16-macro-expansion.md) Tier D. Tier D declared
+`external_files:` — "files evaluated as if their body were pasted at a
+declared call site, with `self` typed as a declared class", plus
+`bound_ivars:` — and [ADR-60 WD1](../adr/60-pre-freeze-plugin-contract-consolidation.md)
+removed it for want of an engine consumer. The demand arrived with effects
+(`docs/design/20260816-effect-labels.md` § 11.3: the review question "what
+does this request do" ends at `render` with a taint), and the revived seam
+adds the one thing Tier D lacked: a **source transform with a line map**
+ahead of parsing.
+
+Unlike the four tiers above, this one is a **claim plus a hook** rather than
+one manifest row, because a template is compiled rather than pattern-matched:
+
+| Surface | Shape | Role |
+| --- | --- | --- |
+| `Manifest#template_globs` | `Array<String>` | Project-relative globs the plugin claims. Absolute globs and `..` segments are refused at manifest-build time. A plugin declaring none is never asked, and a run whose plugins declare none globs nothing. |
+| `Base#template_units_for_file(path:, source:)` | `-> Array<TemplateUnit>` | The transform. Called ONCE per matched file, on the parent, before any analysis. `[]` declines the file. A raise isolates: that file contributes no unit and the run continues. |
+
+### `TemplateUnit`
+
+`Rigor::Plugin::TemplateUnit.new(logical_name:, path:, ruby_source:,
+line_map: {}, self_type: nil, locals: {}, ivar_seeds: {}, transform_id: nil)`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `logical_name` | non-empty `String` | Handler-independent name — `users/show.html`, not `users/show.html.erb` — so an ERB → Haml rewrite is not a rename. Spells the `view:<logical_name>` effect-unit key. |
+| `path` | non-empty `String` | The template file as the user wrote it, project-relative. Every diagnostic and every `Runner#effect_sources` row names this path. |
+| `ruby_source` | `String` | The compiled Ruby. Parsed and typed as a file, NOT wrapped in a synthesised `class … def`; see the positions rule below. |
+| `line_map` | `Hash<Integer, Integer>` | `{ ruby_source line => template line }`, 1-based on both sides; a non-positive line on either side raises. An empty map is the identity. |
+| `self_type` | `String?` | Fully-qualified class the body's `self` is typed as. Also the owner an implicit-self call in the unit resolves against. |
+| `locals` | `Hash<String, String>` | `{ name => type name }` — the render site's parameters. |
+| `ivar_seeds` | `Hash<String, String>` | `{ "@name" => type name }` — the assigns the rendering action set. |
+| `transform_id` | `String?` | The compiler's identity (`"erubi-1.13"`). Defaults to the declaring plugin's `id@version`. |
+
+It satisfies the same common contract as the four tiers: frozen at
+construction, validated at construction (a malformed declaration raises
+`ArgumentError` at transform time, not at scan time), value identity, and a
+`#to_h` that round-trips. It is additionally **`Marshal`-clean**, which the
+fork pool depends on.
+
+A `self_type`, `locals` or `ivar_seeds` type name the environment cannot
+resolve is **skipped**, not guessed: the binding stays `Dynamic`, which
+taints honestly ([ADR-5](../adr/5-robustness-principle.md)) rather than
+asserting a class the plugin could not justify.
+
+### Positions
+
+`ruby_source` is parsed as-is, under a per-file `Scope` the engine seeds with
+`self_type` / `locals` / `ivar_seeds` — the seeding
+`StatementEvaluator#build_method_entry_scope` performs at a method boundary,
+applied at the file boundary. Wrapping the body in a synthesised `class … def`
+would shift every line and force the engine to compose an offset of its own
+with the plugin's map; as it is, the only mapping in play is the plugin's.
+
+A diagnostic produced inside a unit is re-pointed through `line_map` before it
+leaves the run (`Analysis::TemplateUnits#remap`): the **path is already the
+template's** (the parse is stamped with it), so only the line moves, and the
+column drops to 1 — a compiler preserves lines and rewrites the text of each,
+so a column of the compiled Ruby names nothing in the template. An unmapped
+line anchors at the nearest mapped line before it, and at line 1 when there
+is none, so a finding always lands inside the file.
+
+### Effects, cache and the pool
+
+- **Effect unit.** A template unit is ONE effect unit keyed
+  `view:<logical_name>` — not a `MethodKey`, because a view has no owner class
+  and no selector. The scanner takes the whole file body as that unit rather
+  than minting one per `def` (`Effects::Scanner#scan_template_unit`), and
+  `Runner#effect_sources` traces the key back to `path`.
+- **Cache identity.** Each unit's digest is **`ruby_source` bytes + transform
+  id + synthesis version** (`TemplateUnit::SYNTHESIS_VERSION`, bumped whenever
+  the engine changes what it synthesises). The run's units hash into one
+  `template-units` slot of the ADR-45 run-result key descriptor; the template
+  FILES join the recorded dependency descriptor. A project with no units adds
+  no slot, so no existing key moves.
+- **Fork pool.** The index is built on the parent and inherited by the one
+  pre-fork `WorkerSession`, so a worker analyses a unit from exactly the bytes
+  the parent compiled. Pooled output equals sequential output for both the
+  diagnostic stream and the effect table.
+- **`--incremental`.** Units do **not** participate in dependent closures:
+  nothing in the ADR-46 dependency graph names a synthesised file, so there is
+  no edge that could put one in a closure. The conservative reading is taken —
+  **a run always re-analyses every template unit** — which costs one parse per
+  template on the warm incremental path and can never serve a stale answer.
+  Making units first-class dependents is a later slice.
+
+Worked consumer: `spec/fixtures/template_units/view_demo_plugin.rb`, with the
+identity transform this slice ships. ERB itself (Erubi when it resolves,
+stdlib `ERB` as the fallback — the [ADR-93](../adr/93-default-rbs-inline-ingestion.md)
+never-bundled posture) is [#393](https://github.com/rigortype/rigor/issues/393),
+and changes only `#template_units_for_file`.

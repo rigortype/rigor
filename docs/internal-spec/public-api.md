@@ -80,11 +80,20 @@ pins instance and singleton method sets for:
   `producer`, `node_rule`, `node_file_context`, and FFI recognition
   (`ffi_binding_recognizer`, `ffi_binding_recognizers`) DSLs;
   instance-level `services` / `config` / `manifest`, the override
-  hooks `#init` / `#prepare` / `#diagnostics_for_file`, the engine-owned-walk dispatcher
+  hooks `#init` / `#prepare` / `#diagnostics_for_file` /
+  `#template_units_for_file`, the engine-owned-walk dispatcher
   `#node_rule_diagnostics`, and the `#diagnostic(node, …)` builder.
-  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727).
+  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727) + #392.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
-  `protocol_contracts`, `config_schema`, `validate_config(config)`.
+  `protocol_contracts`, `config_schema`, `validate_config(config)`,
+  `template_globs`.
+- `Rigor::Plugin::TemplateUnit` — the #392 template-unit carrier:
+  `logical_name`, `path`, `ruby_source`, `line_map`, `self_type`,
+  `locals`, `ivar_seeds`, `transform_id`, plus `unit_key`,
+  `digest(fallback_transform_id = nil)`, `template_line(ruby_line)`
+  and the value-object trio (`==` / `eql?` / `hash` / `to_h`).
+  Spec'd in [`macro-substrate.md`](macro-substrate.md) § Template
+  units.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
   `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`.
 - `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,

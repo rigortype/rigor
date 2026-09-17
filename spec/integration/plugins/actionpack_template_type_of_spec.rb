@@ -22,8 +22,10 @@ require "rigor-actionpack"
 TEMPLATE_TYPE_OF_SHOW_ERB = <<~ERB
   <h1>Users</h1>
   <p><%= @user.name %></p>
-  <p><%= @user.name %> of <%= @user.email %></p>
+  <p><%= @user.name %> of <%= "x".upcase %></p>
   <%= @user.email %><%= @user.email %>
+  <% v = @user.name %>
+  <%= v %><% if "a" <= v %><% end %>
 ERB
 
 TEMPLATE_TYPE_OF_LAYOUT_ERB = <<~ERB
@@ -123,12 +125,12 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
 
     it "resolves each expression on a multi-expression line to its own tag" do
       status, out, err = run_cli("type-of", "--format=json", "app/views/users/show.html.erb:3:14",
-                                 "app/views/users/show.html.erb:3:35")
+                                 "app/views/users/show.html.erb:3:33")
 
       expect(err).to eq("")
       expect(status).to eq(0)
       results = JSON.parse(out).fetch("results")
-      expect(results.map { |row| [row["column"], row["type"]] }).to eq([[14, "String"], [35, "String"]])
+      expect(results.map { |row| [row["column"], row["type"]] }).to eq([[14, "String"], [33, '"X"']])
     end
 
     it "lists a multi-expression line's expressions at their template columns" do
@@ -140,10 +142,21 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
         [
           %w[8 CallNode String],
           %w[8 InstanceVariableReadNode User],
-          %w[29 CallNode String],
-          %w[29 InstanceVariableReadNode User]
+          ["29", "CallNode", '"X"'],
+          ["29", "StringNode", '"x"']
         ]
       )
+    end
+
+    # The compiler's own punctuation joins template bytes into runs the template never had: the `=` of
+    # `<%=` matches the `=` of `<=`, so a longer run can end in ANOTHER occurrence of the same name. The
+    # probe used to answer about that one, with exit 0 and a type `rigor check` disagreed with.
+    it "declines a tag whose name recurs after a `<=` later on the line" do
+      status, out, err = run_cli("type-of", "app/views/users/show.html.erb:6:5")
+
+      expect(out).to eq("")
+      expect(status).to eq(1)
+      expect(err).to include("no expression found at app/views/users/show.html.erb:6:5")
     end
 
     it "declines a position whose bytes were copied to more than one place" do

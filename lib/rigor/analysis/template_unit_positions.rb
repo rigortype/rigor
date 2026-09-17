@@ -75,13 +75,7 @@ module Rigor
         candidates = compiled_lines_for(line)
         return :no_compiled_line if candidates.empty?
 
-        run = unique_run(text, offset, candidates.map { |number| [number, @compiled_lines[number - 1]] })
-        return run if run.is_a?(Symbol)
-
-        node = deepest(@root, compiled_offset(run.line, offset + run.shift))
-        return :not_verbatim unless inside?(node, run)
-
-        node
+        resolve(text, offset, candidates.map { |number| [number, @compiled_lines[number - 1]] })
       end
 
       # `[[template_column, node], …]` for the expressions starting on the compiled lines a template line
@@ -111,7 +105,7 @@ module Rigor
         text = @template_lines[@entry.template_line(location.start_line) - 1]
         return nil if text.nil? || location.start_line != location.end_line
 
-        column_of_span(location.start_line, location.start_column, location.end_column, text)
+        column_of_span(location, text)
       end
 
       private
@@ -125,29 +119,62 @@ module Rigor
         location = node.location
         return nil unless location.start_line == location.end_line
 
-        column_of_span(location.start_line, location.start_column, location.end_column, text)
+        column_of_span(location, text)
       end
 
-      # Forward, compiled span → template column, confirmed by running the inverse from the answer: the
-      # column is reported only if a probe AT it would resolve through the very same run.
-      def column_of_span(compiled_line, start_column, end_column, text)
+      # Forward, compiled span → template column, confirmed by probing BACK from the answer: the column is
+      # reported only when {#node_at} at it resolves to a node starting where this one does. Anything the
+      # table prints is therefore a column the exact form answers, declines included.
+      def column_of_span(location, text)
+        compiled_line = location.start_line
         compiled = @compiled_lines[compiled_line - 1]
-        return nil if compiled.nil? || start_column >= compiled.bytesize
+        return nil if compiled.nil? || location.start_column >= compiled.bytesize
 
-        forward = unique_run(compiled, start_column, [[compiled_line, text]])
-        return nil if forward.is_a?(Symbol) || end_column > forward.from_end
+        forward = resolve_run(compiled, location.start_column, [[compiled_line, text]])
+        return nil if forward.is_a?(Symbol) || location.end_column > forward.from_end
 
-        template_offset = start_column + forward.shift
-        back = unique_run(text, template_offset, compiled_lines_for(@entry.template_line(compiled_line))
-                                                   .map { |number| [number, @compiled_lines[number - 1]] })
-        return nil if back.is_a?(Symbol) || back.line != compiled_line || back.shift != -forward.shift
+        template_offset = location.start_column + forward.shift
+        back = node_at(line: @entry.template_line(compiled_line), column: template_offset + 1)
+        return nil unless back.is_a?(Prism::Node) && back.location.start_offset == location.start_offset
 
         template_offset + 1
       end
 
+      # The one compiled node a template offset denotes, through the verbatim runs, or the Symbol reason.
+      #
+      # The LONGEST run decides, and it must be unique: two placements of equal length are two readings.
+      # But a longer run is not on its own a better reading, because a compiler's own punctuation joins the
+      # template's bytes into runs the template never had — the `=` of `<%=` matches the `=` of `<=`, `==`,
+      # `+=` or an assignment, so `"= v "` (4 bytes, ending in the WRONG `v`) outran the tag body `" v "`
+      # (3 bytes) and the probe answered about another `v` on the line. So every placement whose own deepest
+      # node lies inside its own run is a rival reading, and more than one rival is `:ambiguous`. That is
+      # strictly a decline: `<%= v %> <%= v.to_s %>` and `<%= x + x %>` decline too, which is the price of
+      # not knowing where the tags are. A plugin-exported tag span would answer these instead of declining
+      # (see the PR), and is the follow-up this rule is deliberately conservative ahead of.
+      def resolve(text, offset, targets)
+        runs = []
+        targets.each { |number, to| runs_through(text, offset, to, number) { |run| runs << run } }
+        return :not_verbatim if runs.empty?
+
+        longest = runs.max_by(&:length)
+        return :ambiguous if runs.count { |run| run.length == longest.length } > 1
+
+        answer = deepest(@root, compiled_offset(longest.line, offset + longest.shift))
+        return :not_verbatim unless inside?(answer, longest)
+
+        rival = runs.any? do |run|
+          next false if run.equal?(longest)
+
+          node = deepest(@root, compiled_offset(run.line, offset + run.shift))
+          inside?(node, run) && !node.equal?(answer)
+        end
+        rival ? :ambiguous : answer
+      end
+
       # The longest verbatim run through `from[offset]` across every placement on the `targets` lines, or
-      # `:not_verbatim` when the byte appears nowhere and `:ambiguous` when two placements tie.
-      def unique_run(from, offset, targets)
+      # `:not_verbatim` when the byte appears nowhere and `:ambiguous` when two placements tie. The
+      # compiled → template direction, where the node is already known, so only the run's length decides.
+      def resolve_run(from, offset, targets)
         best = nil
         tied = false
         targets.each do |number, to|

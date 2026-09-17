@@ -146,6 +146,22 @@ RSpec.describe "rigor type-of on a template unit (#1040)" do
       expect(with_plugin.first).to eq(0)
     end
 
+    # A plugin declines a template it cannot compile (stdlib ERB gives up on a `case` split across tags),
+    # and the raw-Ruby fallback then reports Prism errors about bytes the user did not write. The decline
+    # is stated so the error has an explanation.
+    it "says so when the claiming plugin declined the template, then probes its bytes as Ruby" do
+      RigorViewDemoPlugin.spec_overrides = { decline: ["show.rbx"] }
+      write_template("size.upcase\n")
+
+      status, out, err = run_cli("type-of", "app/views/users/show.rbx:1:1")
+
+      expect(err).to include("plugin declined the template; probing its bytes as Ruby")
+      expect(status).to eq(0)
+      expect(out).to include("node:    Prism::CallNode")
+    ensure
+      RigorViewDemoPlugin.spec_overrides = {}
+    end
+
     it "keeps today's parse error for a non-Ruby file no plugin claims" do
       File.write(File.join(dir, "lib", "notes.erb"), "<%= 1 %>\n")
 

@@ -57,11 +57,28 @@ RSpec.describe Rigor::Analysis::TemplateUnitPositions do
   end
 
   it "reads every compiled line that maps to the template line, and lists only verbatim expressions" do
-    map = positions("<% x = 1 %><%= x.succ %>\n", "_b = +''\n x = 1 ; _b << (( x.succ ).to_s)\n", { 2 => 1 })
+    map = positions("<% x = 1 %><%= 2.succ %>\n", "_b = +''\n x = 1 ; _b << (( 2.succ ).to_s)\n", { 2 => 1 })
 
     rows, total = map.line_nodes(1)
 
-    expect(rows.map { |column, node| [column, node.slice] }).to include([4, "x = 1"], [16, "x.succ"])
+    expect(rows.map { |column, node| [column, node.slice] }).to include([4, "x = 1"], [16, "2.succ"])
     expect(total).to eq(rows.length)
+  end
+
+  # The compiler's own punctuation joins template bytes into runs the template never had: the `=` of `<%=`
+  # matches the `=` of `<=`, so `"= v "` (4 bytes, ending in the v of `1 <= v`) outran the tag body `" v "`
+  # (3 bytes) and the probe answered about the WRONG `v` — with exit 0, no fallbacks, and a type `rigor
+  # check` disagreed with. Every placement whose node lies inside its own run is a rival reading now.
+  it "declines when a longer run ends in another occurrence of the same identifier" do
+    map = positions("<%= v %><% if 1 <= v %><% end %>\n",
+                    "_b << (( v ).to_s);  if 1 <= v ; ;  end \n", { 1 => 1 })
+
+    expect(map.node_at(line: 1, column: 5)).to eq(:ambiguous)
+  end
+
+  it "declines an assignment that puts the same name after `= `" do
+    map = positions("<%= v %><% w = v %>\n", "_b << (( v ).to_s);  w = v ;\n", { 1 => 1 })
+
+    expect(map.node_at(line: 1, column: 5)).to eq(:ambiguous)
   end
 end

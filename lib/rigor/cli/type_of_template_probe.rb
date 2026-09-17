@@ -29,10 +29,11 @@ module Rigor
         no_compiled_line: "the template compiler emitted no Ruby for this line",
         not_verbatim: "the position is in template markup, or in code the template compiler rewrote " \
                       "rather than copied, so no compiled expression is made of the bytes there",
-        ambiguous: "the bytes there were copied to more than one place in the compiled Ruby, " \
-                   "so the position does not name a single expression"
+        ambiguous: "the bytes there are template markup, or code the compiler copied to more than one " \
+                   "place, so the position does not name a single compiled expression"
       }.freeze
       private_constant :DECLINE_MESSAGES
+      Ractor.make_shareable(DECLINE_MESSAGES)
 
       private
 
@@ -46,9 +47,14 @@ module Rigor
         entry = units[file]
         return [units, entry] if entry
 
-        # A template the plugin DECLINED is not a unit, and is probed as the command always probed it.
+        # A template the plugin DECLINED is not a unit, and is probed as the command always probed it —
+        # which for a template that is not Ruby is a Prism error about bytes the user did not write, so
+        # the decline is stated first rather than left to be inferred from the error.
         failures = template_failures(units, file)
-        return nil if failures.empty?
+        if failures.empty?
+          @err.puts("type-of: #{file}: plugin declined the template; probing its bytes as Ruby")
+          return nil
+        end
 
         failures.each do |failure|
           @err.puts("type-of: #{file}: plugin #{failure.plugin_id} could not compile the template: " \

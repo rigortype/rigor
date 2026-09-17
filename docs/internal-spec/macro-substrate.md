@@ -432,8 +432,8 @@ preamble a partial writes when its render-site `locals:` are not traced.
   (`Analysis::TemplateUnitPositions`,
   [#1040](https://github.com/rigortype/rigor/issues/1040)). A path no plugin
   claims builds no index and probes exactly as before; a claimed template whose
-  transform raised reports the failure and exits 1; one the plugin declined is
-  probed as the command always probed a file. The inverse is chosen, not
+  transform raised reports the failure and exits 1; one the plugin declined
+  says so and is then probed as the command always probed a file. The inverse is chosen, not
   derived, because nothing the seam ships runs that way:
   - **Lines.** A template line names the SET of compiled lines whose
     `template_line` is that line — the same set a diagnostic from it reports
@@ -443,17 +443,28 @@ preamble a partial writes when its render-site `locals:` are not traced.
     every matching byte on those compiled lines, each placement is extended
     while the bytes agree, and the longest wins. The answer is the deepest
     compiled node at the mapped offset, and it is accepted only when that
-    longest run is UNIQUE (a tie is two readings — declined as ambiguous) and
-    the node lies wholly inside the run on one line. The second condition is
-    what rejects markup: a compiler copies template text into a string
-    literal, and the literal's quotes are never template bytes. It equally
-    rejects code a compiler REWROTE rather than copied (rigor-actionpack's
-    `yield` → `__rigor_yield`). Tie-breaking by "the placement whose node looks
-    like code" was rejected: the HTML word `name` beside `<%= name %>` ties with
-    the tag, and preferring the code would type a word of text.
+    longest run is UNIQUE (a tie is two readings — declined as ambiguous), the
+    node lies wholly inside the run on one line, and NO OTHER placement's own
+    node lies inside its own run. The "wholly inside" condition rejects markup:
+    a compiler copies template text into a string literal, and the literal's
+    quotes are never template bytes. It equally rejects code a compiler REWROTE
+    rather than copied (rigor-actionpack's `yield` → `__rigor_yield`). The
+    rival-placement condition is there because a longer run is not on its own a
+    better reading: the compiler's own punctuation joins template bytes into
+    runs the template never had, so the `=` of `<%=` matches the `=` of `<=`,
+    `==`, `+=` or an assignment and `"= v "` (4 bytes, ending in the WRONG `v`)
+    outruns the tag body `" v "`. Without it `<%= v %><% if 1 <= v %>` answered
+    about the other `v`, with exit 0 and a type `rigor check` disagreed with.
+    It also declines `<%= v %> <%= v.to_s %>` and `<%= x + x %>`, which is the
+    price of not knowing where the tags are; a tag span exported by the plugin
+    would answer those, and is the follow-up this rule is conservative ahead of.
+    Tie-breaking by "the placement whose node looks like code" was rejected for
+    the same family of reason: the HTML word `name` beside `<%= name %>` ties
+    with the tag, and preferring the code would type a word of text.
   A bare `FILE:LINE` lists only the expressions on those compiled lines whose
-  span maps back to a template column through the same run (confirmed from both
-  sides), so every column in the table is the template's. A `--trace` fallback
+  span maps back to a template column that the exact form then resolves to a
+  node starting where that expression does, so the table never prints a column
+  `FILE:LINE:COL` would decline. A `--trace` fallback
   is reported at the template line, and at a template column only when its
   location lies in a verbatim run. The rule knows nothing about ERB: an identity
   transform is one run per line and an ERB compiler one per tag body. The

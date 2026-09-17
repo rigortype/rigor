@@ -653,7 +653,8 @@ module Rigor
         # The fork backend needs none of this: it re-analyses on the parent {WorkerSession} and drains it.
         #
         # Issue #1051, known exception: run-scoped disclosures a plugin registered from `#prepare` are NOT
-        # recovered here. There is no session to drain — this backend builds none on the coordinator — and
+        # recovered here — nor, since #1060, a positioned `#emit_once` batch registered there, which rides
+        # the same table. There is no session to drain — this backend builds none on the coordinator — and
         # `#prepare` deliberately does not run on the coordinator-side registry under pool mode, so a
         # prepare-time disclosure lives only inside the Ractor that died with it. A disclosure registered
         # from `#diagnostics_for_file` IS recovered, because the re-analysis below runs the coordinator-side

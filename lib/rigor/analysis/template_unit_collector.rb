@@ -42,6 +42,24 @@ module Rigor
                           stats: state[:stats], plugin_signature: signature)
       end
 
+      # The entry point the LSP-facing {ProjectScan} is built through (#1038): the index a later run
+      # CARRIES, so it is compiled with no buffer binding — a unit compiled from an editor's in-flight bytes
+      # must never reach a snapshot someone reuses.
+      #
+      # Wrapped in {Cache::FileDigest.with_run} because ADR-87's racy guard is what makes the packs
+      # recorded here trustworthy: the recording instant has to be taken BEFORE the bytes are read, so a
+      # template written between the read and the stat is recorded as racy and always re-digested.
+      # `prepare_project_scan` is not itself inside a run scope (only `Runner#run` is), and with no active
+      # table `pack_stat` falls back to an instant taken AFTER its own `File.stat`, which can never be racy
+      # — a pack pairing the OLD digest with the NEW stat tuple, which every later publish would validate
+      # on the tuple fast path and serve stale. `strict:` rides along for the reason `Runner#run` carries
+      # it: under `cache.validation: digest` the stat tier is skipped, here as everywhere else.
+      def self.collect_for_scan(registry:, strict: false)
+        return TemplateUnits.empty if registry.nil?
+
+        Cache::FileDigest.with_run(strict: strict) { collect(registry: registry, buffer: nil) }
+      end
+
       # The `(plugin, globs)` pairs of every plugin that claimed one, in registration order — which is what
       # decides a contested path (see {.collect}).
       #
@@ -123,15 +141,15 @@ module Rigor
       # #1038 — the `[entry, stat_pack]` a warm index already compiled for `path`, when nothing that could
       # change it has moved; nil means "compile it".
       #
-      # Three refusals, each load-bearing. A path another plugin already claimed is left to the loop that
-      # follows, so a second claimant still runs and is still reported the way it was before this memo
-      # existed. A path the editor's buffer is bound to is ALWAYS recompiled, from the buffer's bytes: the
-      # saved file is not what the user is looking at, and a unit compiled from a buffer must never end up
-      # in an index a later run carries. Otherwise the file's own freshness decides, through the ADR-87
-      # pack — a moved stat tuple falls back to the content digest, so a touched-but-unedited template is
-      # still a reuse and an edited one never is. Any stat failure (the template was deleted between the
-      # glob and here) reads as "not fresh", which sends the path down the ordinary read path and produces
-      # the ordinary failure row.
+      # Three per-path refusals, each load-bearing; the whole-index ones are {TemplateUnits#carry_over}'s.
+      # A path another plugin already claimed is left to the loop that follows, so a second claimant still
+      # runs and is still reported the way it was before this memo existed. A path the editor's buffer is
+      # bound to is ALWAYS recompiled, from the buffer's bytes: the saved file is not what the user is
+      # looking at, and a unit compiled from a buffer must never end up in an index a later run carries.
+      # Otherwise the file's own freshness decides, through the ADR-87 pack — a moved stat tuple falls back
+      # to the content digest, so a touched-but-unedited template is still a reuse and an edited one never
+      # is. Any stat failure (the template was deleted between the glob and here) reads as "not fresh",
+      # which sends the path down the ordinary read path and produces the ordinary failure row.
       def self.carried_entry(path, physical, collection, state)
         return nil if state[:entries].key?(path)
 

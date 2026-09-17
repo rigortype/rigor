@@ -48,12 +48,15 @@ module Rigor
     # this exists to remove. What is re-done per run is cheap and is what notices a change: the globs are
     # re-expanded (only a glob notices a template APPEARING or vanishing) and each surviving path is
     # revalidated through the ADR-87 stat-then-digest choke point ({Cache::FileDigest.stat_fresh?}), whose
-    # authority is the content digest, not the stat tuple. Three things refuse reuse outright: a different
-    # root, a different set of claimed globs, and a different set of glob-claiming plugins.
+    # authority is the content digest, not the stat tuple. Three things rebuild the index outright, because
+    # each can change what a transform produces for bytes that never moved: a different root, a different
+    # set of claimed globs, and a different set of glob-claiming plugins.
     #
-    # The editor's own buffer is never carried: a path the buffer is bound to is recompiled from the
-    # buffer's bytes on every publish, and the compiled result stays in THAT run's index — the warm index
-    # on the ProjectScan only ever holds units compiled from files on disk.
+    # Separately, and whatever the rest of the index does, the editor's own buffer is never carried: a
+    # path the buffer is bound to is recompiled from the buffer's bytes on every publish, and the compiled
+    # result stays in THAT run's index — the warm index on the ProjectScan only ever holds units compiled
+    # from files on disk. A template the plugin DECLINES, or whose transform raised, likewise produces no
+    # unit to carry and is re-offered every run.
     #
     # A sequential CLI run passes no `previous:` and so builds the index from scratch exactly as before: it
     # has no warm index to carry, its process ends with the run, and adding a cross-process memo would be a

@@ -9,6 +9,7 @@ require_relative "../../inference/project_patched_scanner"
 require_relative "../dependency_source_inference"
 require_relative "../project_scan"
 require_relative "../template_units"
+require_relative "../template_unit_collector"
 
 module Rigor
   module Analysis
@@ -184,11 +185,11 @@ module Rigor
         # Builds the LSP-facing {ProjectScan} snapshot from a fresh pre-pass run. The runner adopts `result`
         # onto its ivars first so the same registry object that ran `#prepare` (and so the populated
         # `services.fact_store`) is the one the snapshot carries.
-        # ... and, since #1038, the template-unit index, compiled here so a long-lived owner's per-buffer
-        # publishes carry it instead of re-running every plugin transform per keystroke. Deliberately built
-        # with NO buffer binding even when this collaborator has one: a unit compiled from an editor's
-        # in-flight bytes must not reach a snapshot a later run reuses, and the per-publish runner compiles
-        # its own buffer's template itself (see `TemplateUnits.collect`).
+        #
+        # Since #1038 the snapshot also carries the template-unit index, so a long-lived owner's per-buffer
+        # publishes carry it instead of re-running every plugin transform per keystroke. It is built through
+        # {TemplateUnitCollector.collect_for_scan}, which owns both of that slot's rules — no buffer binding,
+        # and an ADR-87 run scope around the packs a later run revalidates against.
         def build_project_scan(result)
           ProjectScan.new(
             plugin_registry: result.plugin_registry,
@@ -197,14 +198,10 @@ module Rigor
             project_patched_methods: result.project_patched_methods,
             plugin_prepare_diagnostics: result.cached_plugin_prepare_diagnostics.dup.freeze,
             pre_eval_diagnostics: result.pre_eval_diagnostics_from_scanner.dup.freeze,
-            template_units: build_template_units(result.plugin_registry)
+            template_units: TemplateUnitCollector.collect_for_scan(
+              registry: result.plugin_registry, strict: @configuration.cache_validation_strict?
+            )
           )
-        end
-
-        def build_template_units(plugin_registry)
-          return TemplateUnits.empty if plugin_registry.nil?
-
-          TemplateUnits.collect(registry: plugin_registry, buffer: nil)
         end
 
         # Translates a prebuilt {ProjectScan} snapshot supplied to `Runner.new(prebuilt: ...)` into a

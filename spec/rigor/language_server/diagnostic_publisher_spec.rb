@@ -169,6 +169,46 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Rigor::Plugin.unregister!("view-demo")
     end
 
+    # ADR-87's racy guard is what makes a carried pack trustworthy, and it only exists inside a
+    # `Cache::FileDigest.with_run` scope. `ProjectContext#project_scan` is NOT inside one, so without the
+    # wrap in `ProjectPrePasses#build_template_units` the recording instant is taken AFTER the pack's own
+    # `File.stat` and can never be racy — a write landing between the collector's read and that stat is
+    # recorded as the OLD digest beside the NEW stat tuple, and every later publish validates it on the
+    # tuple fast path and serves a unit compiled from bytes that are no longer on disk. The stub below is
+    # that window, made deterministic.
+    it "does not carry a unit whose template was rewritten while the scan was reading it" do
+      Dir.mktmpdir("rigor-lsp-template-racy-") do |tmpdir|
+        template = write_template_unit_project(tmpdir)
+        path = File.join(tmpdir, "lib", "app.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        context = template_unit_context(tmpdir)
+        rewrite_after_read(template)
+
+        Dir.chdir(tmpdir) do
+          context.project_scan
+          compiled = RigorViewDemoPlugin.transform_calls
+          publisher_for(context).publish_for(uri)
+
+          expect(RigorViewDemoPlugin.transform_calls - compiled).to eq(1)
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("view-demo")
+    end
+
+    # Rewrites `target` the instant its bytes are read — the read-then-stat window a concurrent editor or
+    # `git checkout` occupies for real, which is otherwise not reproducible from a spec.
+    def rewrite_after_read(target)
+      allow(File).to receive(:binread).and_wrap_original do |original, *args|
+        bytes = original.call(*args)
+        # Compared by identity, not by string: the collector reads through `Dir.pwd`, which macOS
+        # resolves (`/private/var/…` for the tmpdir's `/var/…`).
+        File.write(target, "render_header(@title.rewritten)\n") if File.identical?(args.first.to_s, target)
+        bytes
+      end
+    end
+
     def publisher_for(context)
       described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
     end

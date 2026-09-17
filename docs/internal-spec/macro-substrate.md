@@ -373,11 +373,22 @@ preamble a partial writes when its render-site `locals:` are not traced.
   revalidated through the ADR-87 stat-then-digest pack
   (`Cache::FileDigest.stat_fresh?`, whose authority is the content digest, so a
   touched-but-unedited template is still a reuse and an edited one never is).
-  Four things refuse a reuse: a different root, a different set of claimed
-  globs, a different set of glob-claiming plugins (each of those three rebuilds
-  the index wholesale — the transform itself may have changed), and the path the
-  editor's buffer is bound to, which is recompiled from the buffer's bytes on
-  every publish and whose unit never enters a shared index. The snapshot is
+  The pack is recorded inside a `Cache::FileDigest.with_run` scope
+  (`ProjectPrePasses#build_template_units`), which is what puts ADR-87's racy
+  guard behind it: without a scope the recording instant is taken after the
+  pack's own `File.stat` and can never be racy, so a template rewritten between
+  the collector's read and that stat would be recorded as the old digest beside
+  the new stat tuple and served from the tuple fast path forever after. A
+  template the plugin DECLINES (or whose transform raised) produces no unit, so
+  there is nothing to carry and it is re-offered on every publish — the cost is
+  one transform per declining template, and a negative cache would have to carry
+  the `plugin_loader` rows with it.
+  Three things rebuild the index wholesale, because each can change what a
+  transform produces for bytes that never moved: a different root, a different
+  set of claimed globs, a different set of glob-claiming plugins. Separately,
+  and whatever the rest of the index does, the path the editor's buffer is bound
+  to is recompiled from the buffer's bytes on every publish and its unit never
+  enters a shared index. The snapshot is
   frozen, so a template edited on disk **since the scan was built** is
   recompiled on every publish until the owner invalidates — one compile per
   changed template, never the index, and a save fires

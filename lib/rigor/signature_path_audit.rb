@@ -32,7 +32,7 @@ module Rigor
     # requiring the loader from here fails outright. `signature_path_audit_spec` pins the two
     # anchors equal, and pins this discovery against `Loader.bundled_plugin_sig_path`, so the
     # duplication cannot drift unnoticed.
-    BUNDLED_PLUGINS_ROOT = File.expand_path("../../plugins", __dir__)
+    BUNDLED_PLUGINS_ROOT = File.expand_path("../../plugins", __dir__).freeze
 
     # One configured `signature_paths:` entry's resolution status.
     #

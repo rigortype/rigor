@@ -200,7 +200,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     "key:boundary_cross_reporter,key:source_rbs_synthesis_reporter," \
     "key:bundler_bundle_path,key:bundler_auto_detect," \
     "key:bundler_lockfile,key:rbs_collection_lockfile,key:rbs_collection_auto_detect," \
-    "key:synthetic_method_index,key:project_patched_methods,key:source_files)"
+    "key:synthetic_method_index,key:project_patched_methods,key:source_files,key:locked_gems)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[
@@ -245,6 +245,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     effect_edges()
     effect_entry_points()
     effect_labels()
+    emit_once(req:key,req:diagnostics)
     init(req:services)
     io_boundary()
     manifest()

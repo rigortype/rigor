@@ -70,6 +70,7 @@ module Rigor
         "Array" => ->(removed) { removed.is_a?(Tuple) && removed.elements.empty? },
         "Hash" => ->(removed) { removed.is_a?(HashShape) && removed.pairs.empty? }
       }.freeze
+      Ractor.make_shareable(EMPTY_WITNESS_PREDICATES)
       private_constant :EMPTY_WITNESS_PREDICATES
 
       def top

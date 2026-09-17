@@ -88,20 +88,16 @@ view templates containing lazy `t('.key')` calls.
   may come from controller instance variables not visible in the
   template source. Configure `view_search_paths:` to override the
   default `["app/views"]`.
-- **View diagnostics duplicate under `--workers`** — the view
-  scan is a project-wide pass surfaced through the per-file
-  diagnostic hook, so each fork-pool worker re-emits the full set.
-  Default `rigor check` (sequential) is unaffected. These rows name
-  a real view file and line, so they cannot move to `.rigor.yml` the
-  way the `load-error` rows did; emitting them once per run needs an
-  engine channel that keeps a batch's own positions
-  ([#1060](https://github.com/rigortype/rigor/issues/1060)). The plugin's
-  `load-error` rows no longer share this limitation: they are
-  run-scoped disclosures, reported once per run on `.rigor.yml`.
-  They are `:warning`, so if you baselined one at its old position
-  that entry no longer matches and the row fails a
+- **`load-error` rows are reported on `.rigor.yml`** — a locale
+  file that does not parse, or a locale or view scan that fails,
+  is reported once per run at `.rigor.yml:1:1`. They are
+  `:warning`, so if you baselined one at its old position on a
+  Ruby file, that entry no longer matches and the row fails a
   `--fail-on=warning` run — regenerate with `rigor baseline
-  regenerate`.
+  regenerate`. View diagnostics keep their view file position and
+  are reported once per run whatever `--workers` is set to
+  ([#1060](https://github.com/rigortype/rigor/issues/1060)); a
+  baseline entry recorded against a view still matches.
 - **Pluralization is recognised but not validated** — `count:` is
   treated as a reserved option; whether the locale defines
   `:zero` / `:one` / `:other` is not checked.

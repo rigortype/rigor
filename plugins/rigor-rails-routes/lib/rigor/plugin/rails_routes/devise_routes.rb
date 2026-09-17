@@ -58,6 +58,7 @@ module Rigor
             [nil, "registration", :get, :show]
           ]
         }.freeze
+        Ractor.make_shareable(CONTROLLER_HELPERS)
 
         # Dynamic-provider helper patterns. `_omniauth_authorize_path` and `_omniauth_callback_path` are
         # generated per configured provider (Facebook, GitHub, …) by an initializer this parser does not
@@ -135,6 +136,7 @@ module Rigor
           unlocks: %w[new_unlock_path unlock_path],
           registrations: %w[cancel_registration_path new_registration_path edit_registration_path registration_path]
         }.freeze
+        Ractor.make_shareable(SCOPED_HELPERS)
         private_constant :SCOPED_HELPERS
 
         def scoped_helpers(skip_set)

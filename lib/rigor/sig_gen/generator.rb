@@ -1266,6 +1266,7 @@ module Rigor
         attr_writer: [:writer],
         attr_accessor: %i[reader writer]
       }.freeze
+      Ractor.make_shareable(ATTR_KINDS)
       private_constant :ATTR_KINDS
 
       # Per-file context the attr_* walker threads through its recursive descent. Keeps parameter lists in

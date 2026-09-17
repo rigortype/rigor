@@ -74,7 +74,7 @@ module Rigor
 
       # The bundled skills live at `<gem_root>/skills/`. From `lib/rigor/cli/skill_command.rb` that is three directories
       # up.
-      SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
+      SKILLS_ROOT = File.expand_path("../../../skills", __dir__).freeze
 
       # @return CLI exit status.
       def run

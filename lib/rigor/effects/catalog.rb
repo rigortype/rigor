@@ -36,7 +36,7 @@ module Rigor
       class Error < StandardError
       end
 
-      DATA_PATH = File.expand_path("../../../data/effects/core.yml", __dir__)
+      DATA_PATH = File.expand_path("../../../data/effects/core.yml", __dir__).freeze
 
       # The mutator sets a value class may name, by reference. Adding a name here is the only way a
       # class gets one — the data file may not spell a selector list of its own.

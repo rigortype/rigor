@@ -35,7 +35,7 @@ module Rigor
         ANNOTATION_BRACKETS.map do |opener, closer|
           /%a#{Regexp.escape(opener)}\s*(?:pure\s*#{Regexp.escape(closer)}|rigor:v1:effect\b)/
         end
-      )
+      ).freeze
 
       # A `virtual:<plugin-id>:<source path>` buffer is rbs-inline's (or a plugin's) synthesized RBS for
       # a Ruby file the author actually wrote in. Naming that file is what a reader can act on, so the

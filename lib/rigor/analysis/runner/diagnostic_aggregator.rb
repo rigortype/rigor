@@ -991,8 +991,33 @@ module Rigor
         # both modes share.
         #
         # Position is `.rigor.yml:1:1` for every row; see {Plugin::Base#disclose_once} for why that and not
-        # the first analysed file.
+        # the first analysed file. A positioned batch ({Plugin::Base#emit_once}) shares the table but not
+        # this stream — see {#plugin_run_emission_diagnostics}.
         def plugin_run_disclosure_diagnostics
+          ordered_run_disclosure_records
+            .reject { |record| record.key?(:diagnostics) }
+            .map { |record| run_disclosure_diagnostic(record) }
+        end
+
+        # Issue #1060 — the positioned batches ({Plugin::Base#emit_once}) from the same table, de-duplicated
+        # by the same `[plugin id, key]` identity over the same sources, so the first registration of a key
+        # wins whole and a batch is never merged row by row across workers. Unlike a disclosure, every row
+        # keeps the position the plugin gave it; the engine only stamps `source_family: "plugin.<id>"`, the
+        # same stamp a `#diagnostics_for_file` row gets, so a baseline keyed to the row's own file and
+        # qualified rule matches it before and after a plugin moves onto this channel.
+        #
+        # Order is `(registry position, key)` and then the batch's own row order — the same
+        # `--workers`-independent order the disclosure stream uses. The runner appends this stream right
+        # after the per-file stream rather than into the run-level block: these rows are about files, and
+        # the files they name are usually not among the analysed targets (a view template), so there is no
+        # file slot to splice them into.
+        def plugin_run_emission_diagnostics
+          ordered_run_disclosure_records
+            .select { |record| record.key?(:diagnostics) }
+            .flat_map { |record| record[:diagnostics].map { |row| run_emission_diagnostic(row, record[:plugin_id]) } }
+        end
+
+        def ordered_run_disclosure_records
           registry = plugin_registry
           return [] if registry.empty?
 
@@ -1000,7 +1025,6 @@ module Rigor
           registry.plugins.each_with_index { |plugin, index| positions[disclosure_plugin_id(plugin)] ||= index }
           collect_run_disclosure_records(registry)
             .sort_by { |record| [positions.fetch(record[:plugin_id], positions.size), record[:key].to_s] }
-            .map { |record| run_disclosure_diagnostic(record) }
         end
 
         def collect_run_disclosure_records(registry)
@@ -1026,6 +1050,16 @@ module Rigor
             severity: record.fetch(:severity),
             rule: record.fetch(:rule),
             source_family: "plugin.#{record[:plugin_id]}"
+          )
+        end
+
+        def run_emission_diagnostic(row, plugin_id)
+          Diagnostic.new(
+            path: row.path, line: row.line, column: row.column,
+            message: row.message,
+            severity: row.severity,
+            rule: row.rule,
+            source_family: "plugin.#{plugin_id}"
           )
         end
 

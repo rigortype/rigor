@@ -60,9 +60,9 @@ module Rigor
 
       # The bundled plugins/examples/source live at `<gem_root>/...`. From `lib/rigor/cli/plugin_command.rb` the gem
       # root is three directories up (matching SkillCommand::SKILLS_ROOT).
-      GEM_ROOT     = File.expand_path("../../..", __dir__)
-      PLUGINS_ROOT = File.join(GEM_ROOT, "plugins")
-      EXAMPLES_ROOT = File.join(GEM_ROOT, "examples")
+      GEM_ROOT     = File.expand_path("../../..", __dir__).freeze
+      PLUGINS_ROOT = File.join(GEM_ROOT, "plugins").freeze
+      EXAMPLES_ROOT = File.join(GEM_ROOT, "examples").freeze
 
       # @return CLI exit status.
       def run

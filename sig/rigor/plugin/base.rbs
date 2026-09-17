@@ -64,6 +64,7 @@ class Rigor::Plugin::Base
   def producer_value: (untyped id, ?params: untyped) -> untyped
   def producer_error: (untyped id) -> untyped
   def disclose_once: (untyped key, message: untyped, ?severity: untyped, ?rule: untyped) -> nil
+  def emit_once: (untyped key, untyped diagnostics) -> nil
   def run_disclosure_records: () -> Array[untyped]
   def manifest: () -> Rigor::Plugin::Manifest
   def signature_paths: () -> Array[String]

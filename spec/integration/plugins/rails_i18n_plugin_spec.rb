@@ -459,6 +459,43 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       info = diags.find { |d| d.rule == "translation-call" && d.message.include?("talks.card.nested.deep.key") }
       expect(info).not_to be_nil
     end
+
+    # Issue #1060 — the view scan is registered through `#emit_once`, so it is emitted once per RUN at each
+    # row's own view position. It used to be returned from whichever file a plugin instance analysed first,
+    # behind a per-instance flag, which `--workers 2` turned into two copies of every view row.
+    describe "under the fork pool" do
+      def view_rows_for(dir, workers:)
+        configuration = build_plugin_configuration(
+          dir: dir, plugin_entry: default_plugin_entry, paths: Array.new(6) { |i| "file_#{i}.rb" }
+        )
+        runner = Rigor::Analysis::Runner.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: build_plugin_requirer,
+          **(workers ? { workers: workers } : {})
+        )
+        diagnostics = Dir.chdir(dir) { guarded_run(runner).diagnostics }
+        expect(diagnostics.map(&:rule)).not_to include("pool-degraded")
+        diagnostics.select { |d| d.source_family == "plugin.rails-i18n" && d.path.start_with?("app/views/") }
+                   .map { |d| [d.path, d.line, d.column, d.severity, d.rule, d.message] }
+      end
+
+      it "emits each view row exactly once, at its view position, identically sequential and pooled" do
+        Dir.mktmpdir do |dir|
+          materialize_files(dir, view_locales.merge(
+                                   "app/views/setting/index.html.erb" => "<h1><%= t('.nonexistent') %></h1>\n",
+                                   "app/views/home/index.html.erb" => "<%= t('.title') %>\n"
+                                 ))
+          6.times { |i| File.write(File.join(dir, "file_#{i}.rb"), "x_#{i} = #{i}\n") }
+
+          sequential = view_rows_for(dir, workers: nil)
+          pooled = view_rows_for(dir, workers: 2)
+
+          expect(sequential.map(&:first)).to contain_exactly("app/views/home/index.html.erb",
+                                                             "app/views/setting/index.html.erb")
+          expect(sequential.map { |row| row[4] }).to contain_exactly("translation-call", "unknown-key")
+          expect(pooled).to eq(sequential)
+        end
+      end
+    end
   end
 
   describe "load errors" do

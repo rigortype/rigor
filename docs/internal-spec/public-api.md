@@ -85,8 +85,9 @@ pins instance and singleton method sets for:
   the engine-owned-walk dispatcher
   `#node_rule_diagnostics`, the `#diagnostic(node, …)` builder, and
   the run-scoped disclosure channel `#disclose_once(key, message:,
-  severity:, rule:)` / `#run_disclosure_records` (#1051).
-  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727) + #392 + #1051.
+  severity:, rule:)` / `#run_disclosure_records` (#1051), and its
+  positioned sibling `#emit_once(key, diagnostics)` (#1060).
+  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727) + #392 + #1051 + #1060.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
   `protocol_contracts`, `config_schema`, `validate_config(config)`,
   `template_globs`.

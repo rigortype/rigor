@@ -737,4 +737,29 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       [d.path, d.line, d.column, d.rule, d.source_family, d.message]
     end.sort
   end
+
+  # #1064 — a Ractor worker cannot parse the lockfile, so the coordinator hands the resolved map in. The session
+  # must forward that map to its environment build, and must keep resolving it there (nil) when none is given,
+  # which is how the fork backend and every other caller construct it.
+  describe "locked_gems:" do
+    def captured_locked_gems(**session_options)
+      captured = []
+      allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+        captured << kwargs.fetch(:locked_gems)
+        original.call(**kwargs)
+      end
+      described_class.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil,
+                          **session_options)
+      captured
+    end
+
+    it "forwards a caller-resolved map to Environment.for_project" do
+      locked = Ractor.make_shareable({})
+      expect(captured_locked_gems(locked_gems: locked).map(&:object_id)).to eq([locked.object_id])
+    end
+
+    it "leaves resolution to Environment.for_project when none is given" do
+      expect(captured_locked_gems).to eq([nil])
+    end
+  end
 end

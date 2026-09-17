@@ -20,6 +20,7 @@ module Rigor
       class MethodCatalog
         FOLDABLE_PURITIES = Set["leaf", "trivial", "leaf_when_numeric"].freeze
         EMPTY_CATALOG = { "classes" => {} }.freeze
+        Ractor.make_shareable(EMPTY_CATALOG)
 
         # Selectors that are classified `:leaf` by the C-body analysis (they read no global mutable state
         # in the C sense) but whose result is NOT reproducible across Ruby processes, so they must never
@@ -37,7 +38,7 @@ module Rigor
 
         # Shared root for the offline-generated catalogues. Resolving it here keeps the repo-relative
         # `../../../../` hop in one place instead of copying it into every per-topic loader.
-        DATA_ROOT = File.expand_path("../../../../data/builtins/ruby_core", __dir__)
+        DATA_ROOT = File.expand_path("../../../../data/builtins/ruby_core", __dir__).freeze
         private_constant :DATA_ROOT
 
         # Build a catalog for a named topic, resolving its YAML path under {DATA_ROOT}. Equivalent to

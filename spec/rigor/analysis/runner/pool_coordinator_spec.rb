@@ -1306,8 +1306,21 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         bundler_lockfile: configuration.bundler_lockfile,
         rbs_collection_lockfile: configuration.rbs_collection_lockfile,
         rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
-        source_files: ["a.rb", "b.rb"]
+        source_files: ["a.rb", "b.rb"], locked_gems: nil
       )
+    end
+
+    # #1064 — the Ractor pool resolves the lockfile once on the coordinator and hands the same map to this
+    # build and to every worker, so the warm environment filters gem signatures the way the workers' will.
+    it "forwards a coordinator-resolved locked_gems map to the environment build" do
+      coordinator = build_coordinator
+      warm_env = instance_double(Rigor::Environment, rbs_loader: nil)
+      allow(Rigor::Environment).to receive(:for_project).and_return(warm_env)
+      locked = Ractor.make_shareable({})
+
+      coordinator.send(:prewarm_rbs_cache_for_pool, source_files: [], locked_gems: locked)
+
+      expect(Rigor::Environment).to have_received(:for_project).with(hash_including(locked_gems: locked))
     end
 
     it "tolerates a warm Environment whose rbs_loader is nil, rather than raising" do
@@ -1434,7 +1447,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       coordinator.analyze_files_in_pool([], source_files: ["plain.rb", "memo.rb"])
 
-      expect(coordinator).to have_received(:prewarm_rbs_cache_for_pool).with(source_files: ["plain.rb", "memo.rb"])
+      expect(coordinator).to have_received(:prewarm_rbs_cache_for_pool)
+        .with(source_files: ["plain.rb", "memo.rb"], locked_gems: anything)
       expect(snapshots.effect_annotation_carrier.map(&:first)).to eq(["virtual:x:memo.rb"])
     end
   end

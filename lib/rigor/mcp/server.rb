@@ -134,6 +134,7 @@ module Rigor
           }
         }
       ].freeze
+      Ractor.make_shareable(TOOLS)
 
       def initialize(config_path: nil, err: $stderr)
         @config_path = config_path

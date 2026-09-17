@@ -29,6 +29,7 @@ module Rigor
 
         # The `_later` twins enqueue an ActiveJob that broadcasts, so they carry the enqueue meaning too.
         TURBO_LATER_SELECTORS = TURBO_SELECTORS.map { |name| "#{name.delete_suffix('_to')}_later_to" }.freeze
+        Ractor.make_shareable(TURBO_LATER_SELECTORS)
 
         LATER = (BROADCASTING + ["rails.activejob.enqueue", "job.enqueue"]).freeze
 

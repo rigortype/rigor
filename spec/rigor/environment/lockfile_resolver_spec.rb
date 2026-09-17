@@ -127,6 +127,24 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(result).to eq({})
     end
 
+    # #1064 — inside a Ractor worker Bundler's parser raises `Ractor::IsolationError` on a lockfile that is fine.
+    # Driven by a stub rather than a real Ractor: the wording is what is under test, and the Ractor pool itself
+    # never reaches this rescue any more (its coordinator resolves the lockfile and hands the map in).
+    it "does not call a Ractor isolation failure a malformed lockfile" do
+      require "bundler"
+      path = write_lockfile(simple_lockfile_body)
+      allow(Bundler::LockfileParser).to receive(:new).and_raise(Ractor::IsolationError.new("can not access"))
+
+      warning = /rigor: cannot read \S*Gemfile\.lock inside a Ractor worker.*Ractor::IsolationError: can not access\)\n/
+      results = []
+      expect do
+        results << described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+        results << described_class.direct_dependency_names(lockfile_path: path, project_root: tmpdir,
+                                                           auto_detect: false)
+      end.to output(/\A(?:#{warning}){2}\z/).to_stderr
+      expect(results).to eq([{}, Set.new])
+    end
+
     it "warns to stderr and returns empty when bundler cannot be required" do
       # The LoadError rescue: bundler is always present in the test env, so stub the require to drive the branch that
       # tells the user their lockfile could not be read.

@@ -28,7 +28,7 @@ module Rigor
       class InvalidLabelError < Error
       end
 
-      DATA_PATH = File.expand_path("../../../data/effects/registry.yml", __dir__)
+      DATA_PATH = File.expand_path("../../../data/effects/registry.yml", __dir__).freeze
 
       # How far a misspelling may be from a known label before {#suggest} declines to guess. Two
       # edits catches a transposition or a dropped segment character ("io.nte", "nondet.tim")

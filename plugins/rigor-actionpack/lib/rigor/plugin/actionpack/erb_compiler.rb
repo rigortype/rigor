@@ -46,7 +46,7 @@ module Rigor
         # BELOW it, so a text probe reads as a collapse when the line numbering is in fact intact. That
         # padding is exactly the property being measured, and a tag probe measures it without tripping
         # over how the padding is spelled.
-        PROBE = (1..3).map { |n| "<% RIGOR_ERB_PROBE_#{n} %>\n" }.join
+        PROBE = (1..3).map { |n| "<% RIGOR_ERB_PROBE_#{n} %>\n" }.join.freeze
         private_constant :PROBE
 
         # An output tag whose Ruby OPENS A BLOCK: `<%= form_with(model: @user) do |f| %>`, the single most

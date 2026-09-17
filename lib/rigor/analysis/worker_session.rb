@@ -85,7 +85,7 @@ module Rigor
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
                      project_scope_seed: {}, source_files: [], record_dependencies: false,
-                     template_units: nil)
+                     template_units: nil, locked_gems: nil)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
@@ -114,6 +114,11 @@ module Rigor
         # frozen data. A worker analyses a unit from the same bytes the parent compiled, which is what makes
         # pooled and sequential agree about a file that does not exist on disk in the form being parsed.
         @template_units = template_units || TemplateUnits.empty
+        # #1064 — the project's `Gemfile.lock` map, resolved by the PARENT. Bundler's lockfile parser reads
+        # RubyGems module state a non-main Ractor may not touch, so a Ractor worker that resolved it here got
+        # `Ractor::IsolationError` and an empty map — no gem `sig/` directories, no ADR-72 overlays. nil (the
+        # fork backend and every other caller) resolves inside `Environment.for_project` exactly as before.
+        @locked_gems = locked_gems
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths` is process-global
         # state. Writing it from a non-main Ractor would raise `Ractor::IsolationError`, so the session does
@@ -146,7 +151,8 @@ module Rigor
           **ProjectEnvironment.dependency_discovery_options(configuration),
           synthetic_method_index: @synthetic_method_index,
           project_patched_methods: @project_patched_methods,
-          source_files: @source_files
+          source_files: @source_files,
+          locked_gems: @locked_gems
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

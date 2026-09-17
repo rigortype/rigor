@@ -48,20 +48,21 @@ module Rigor
         # Symbol keys are the alias names as they appear under `RBS::Types::Alias#name.to_s` (the `name` is
         # a `TypeName` whose `to_s` includes the `::` prefix). Values are an Array of class names whose
         # Nominal[..] form is the alias's strict-arm matcher.
-        ALIAS_STRICT_NOMINALS = {
-          "::int" => ["Integer"],
-          "::string" => ["String"],
-          "::interned" => %w[Symbol String],
-          "::io" => ["IO"],
-          "::encoding" => %w[Encoding String],
-          "::path" => ["String"],
-          "::boolean" => %w[TrueClass FalseClass],
-          # `range[T] = Range[T] | _Range[T]`. Generic, unlike the others, but the strict arm is still a
-          # single nominal and the args are irrelevant to this pass. rbs 4.1 rewrote `Array#[]`'s slicing
-          # overload from `(::Range[::Integer?])` to `(range[int])`; without the entry both it and the
-          # `(int) -> E` overload look alias-typed, so `a[1..2]` resolved to the element type.
-          "::range" => ["Range"]
-        }.freeze
+        #
+        # `range[T] = Range[T] | _Range[T]` is generic, unlike the others, but its strict arm is still a single
+        # nominal and the args are irrelevant to this pass. rbs 4.1 rewrote `Array#[]`'s slicing overload from
+        # `(::Range[::Integer?])` to `(range[int])`; without the entry both it and the `(int) -> E` overload look
+        # alias-typed, so `a[1..2]` resolved to the element type.
+        ALIAS_STRICT_NOMINALS = Ractor.make_shareable({
+                                                        "::int" => ["Integer"],
+                                                        "::string" => ["String"],
+                                                        "::interned" => %w[Symbol String],
+                                                        "::io" => ["IO"],
+                                                        "::encoding" => %w[Encoding String],
+                                                        "::path" => ["String"],
+                                                        "::boolean" => %w[TrueClass FalseClass],
+                                                        "::range" => ["Range"]
+                                                      })
         private_constant :ALIAS_STRICT_NOMINALS
 
         # @param arg_types — caller-provided types in positional order. Empty when

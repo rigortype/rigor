@@ -64,6 +64,7 @@ module Rigor
         "non-nan-float" => -> { Type::Combinator.non_nan_float },
         "finite-float" => -> { Type::Combinator.finite_float }
       }.freeze
+      Ractor.make_shareable(REGISTRY)
       private_constant :REGISTRY
 
       # `name[T]` / `name[K, V]` — type-arg parameterised refinements. Each builder takes an
@@ -141,6 +142,7 @@ module Rigor
           Type::Combinator.readonly_of(args.first)
         }
       }.freeze
+      Ractor.make_shareable(PARAMETERISED_TYPE_BUILDERS)
       private_constant :PARAMETERISED_TYPE_BUILDERS
 
       # `Class[range]` — a numeric class head bounded by a Ruby range literal (ADR-109). The
@@ -176,6 +178,7 @@ module Rigor
           Type::Combinator.float_range(lo, hi, exclude_end: exclusive)
         }
       }.freeze
+      Ractor.make_shareable(RANGE_HEAD_BUILDERS)
       private_constant :RANGE_HEAD_BUILDERS
 
       # `name<min, max>` — the PHPStan-style integer-bound form ADR-109 deprecates: still parsed so
@@ -193,6 +196,7 @@ module Rigor
           Type::Combinator.integer_range(bounds[0], bounds[1])
         }
       }.freeze
+      Ractor.make_shareable(PARAMETERISED_INT_BUILDERS)
       private_constant :PARAMETERISED_INT_BUILDERS
 
       module_function

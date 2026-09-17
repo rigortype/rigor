@@ -1550,6 +1550,7 @@ module Rigor
           has_one_attached: ["", "=", "_attachment", "_blob"],
           has_many_attached: ["", "=", "_attachments", "_blobs"]
         }.freeze
+        Ractor.make_shareable(ATTACHMENT_MACROS)
         private_constant :ATTACHMENT_MACROS
 
         # Instance-method names a declaration macro installs that neither the schema nor the association /

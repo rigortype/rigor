@@ -3762,6 +3762,7 @@ module Rigor
         cattr_writer: [false, true, false], cattr_accessor: [true, true, false],
         class_attribute: [true, true, true]
       }.freeze
+      Ractor.make_shareable(MODULE_ATTR_MACROS)
 
       # Both kinds, unconditionally. `instance_accessor: false` (and its `instance_reader:` /
       # `instance_writer:` / `instance_predicate:` siblings) narrows the real surface, and honouring them here

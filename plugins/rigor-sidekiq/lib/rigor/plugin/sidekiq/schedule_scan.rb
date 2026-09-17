@@ -41,6 +41,7 @@ module Rigor
         # `schedule.yml` IS the schedule map — and the nested paths are `sidekiq-scheduler`'s, whose entries
         # live under `:scheduler: :schedule:` (with the bare `:schedule:` form kept for pre-3.0 layouts).
         SCHEDULE_BLOCK_KEY_PATHS = [[], %w[scheduler schedule], %w[schedule]].freeze
+        Ractor.make_shareable(SCHEDULE_BLOCK_KEY_PATHS)
 
         # Errno classes that mean "this path is not readable as a schedule" — swallowed so one bad path does
         # not cost the roots the other paths supply.

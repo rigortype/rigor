@@ -246,10 +246,10 @@ module Rigor
       # The local and ivar arms differ only in which pair of `Scope` accessors they use, so they are read out
       # of one table rather than written twice: a carrier the widening responds to must not be widened on one
       # kind of binding and left on the other.
-      ALIAS_ACCESSORS = {
-        Prism::LocalVariableReadNode => %i[local with_local],
-        Prism::InstanceVariableReadNode => %i[ivar with_ivar]
-      }.freeze
+      ALIAS_ACCESSORS = Ractor.make_shareable({
+                                                Prism::LocalVariableReadNode => %i[local with_local],
+                                                Prism::InstanceVariableReadNode => %i[ivar with_ivar]
+                                              })
       private_constant :ALIAS_ACCESSORS
 
       def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES)

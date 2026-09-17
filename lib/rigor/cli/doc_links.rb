@@ -31,7 +31,7 @@ module Rigor
       private_constant :MARKDOWN_LINK
 
       # Where the gem's `docs/` tree sits, so a rendered path can be made repository-relative.
-      GEM_ROOT = File.expand_path("../../..", __dir__)
+      GEM_ROOT = File.expand_path("../../..", __dir__).freeze
       private_constant :GEM_ROOT
 
       module_function

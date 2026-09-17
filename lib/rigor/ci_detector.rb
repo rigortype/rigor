@@ -61,6 +61,7 @@ module Rigor
       { id: "ci", name: "CI", format: nil, tier: :reviewdog,
         var: "CI", match: :truthy }
     ].freeze
+    Ractor.make_shareable(PROVIDERS)
 
     module_function
 

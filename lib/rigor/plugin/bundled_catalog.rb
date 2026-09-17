@@ -24,7 +24,7 @@ module Rigor
       # One bundled plugin: the gem name a `plugins:` entry spells, and the gems it models.
       Entry = Data.define(:gem_name, :plugin_id, :target_gems)
 
-      BUNDLED_PLUGINS_ROOT = File.join(Loader::ENGINE_ROOT, "plugins")
+      BUNDLED_PLUGINS_ROOT = File.join(Loader::ENGINE_ROOT, "plugins").freeze
 
       @entries = nil
       @load_failures = {}

@@ -93,6 +93,7 @@ module Rigor
         ["IO", :read, :singleton] => IO_READ_NO_LENGTH,
         ["File", :read, :singleton] => IO_READ_NO_LENGTH
       }.freeze
+      Ractor.make_shareable(OVERRIDES)
       private_constant :OVERRIDES
 
       # Looks up a refined return type for the given call.
@@ -124,6 +125,7 @@ module Rigor
         acc[mname] ||= []
         acc[mname] << owner unless acc[mname].include?(owner)
       end.freeze
+      Ractor.make_shareable(OWNERS_BY_METHOD)
       private_constant :OWNERS_BY_METHOD
 
       # @return the candidate owner class names for a bare method-name

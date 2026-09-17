@@ -108,6 +108,17 @@ module Rigor
           # name — {#resolve_table_name_decorator} keeps walking outward past it, exactly like Rails' own
           # `respond_to?(:table_name_prefix)` ancestor search.
           @namespace_table_name_decorators = {}
+          # `concern module name => [scope name]` — the `scope :x` declarations found inside a module's
+          # `included do … end` block (#534 item 5). Unlike {@type_override_columns} these are NOT global:
+          # a scope reaches a model only along a real `include` edge ({@include_edges}), so a same-named
+          # scope in a concern the model does not include contributes nothing.
+          @concern_scopes = {}
+          # `constant name => [raw included module name]` — every `include Foo` / `include Foo::Bar` a class
+          # or module body spells, as written. Resolution against the walked module set happens after the
+          # whole tree is read ({#resolve_concern_name}), because the including file may be walked first.
+          @include_edges = {}
+          # Every module declaration walked, for resolving an `include`'s relative constant spelling.
+          @module_names = Set.new
         end
 
         attr_reader :type_override_columns
@@ -127,7 +138,8 @@ module Rigor
           # Every file is walked (and every module's `table_name_prefix` / `table_name_suffix` recorded)
           # before any row is resolved — a model's file may sort, and so be visited, before the file that
           # declares its enclosing module's decorator.
-          attach_table_name_decorators(resolve_models(candidates), superclass_map: superclass_map)
+          rows = fold_concern_scopes(resolve_models(candidates), superclass_map: superclass_map)
+          attach_table_name_decorators(rows, superclass_map: superclass_map)
         end
 
         private
@@ -423,6 +435,7 @@ module Rigor
           superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
 
           collect_type_overrides(node.body)
+          record_include_edges(full_name, node.body)
           # Rails' `full_table_name_prefix` walks `module_parents.detect { respond_to?(:table_name_prefix) }`
           # — lexical nesting, which does not care whether the namespace container was written `module Blog`
           # or `class Blog`. A `class` used purely as a namespace holder (or a model class that happens to
@@ -457,6 +470,9 @@ module Rigor
 
           full_name = declared_constant_name(module_local_name, lexical_path)
           record_table_name_decorators(full_name, node.body, is_class: false)
+          @module_names << full_name
+          record_concern_scopes(full_name, node.body)
+          record_include_edges(full_name, node.body)
 
           inner_path = [full_name]
           walk_for_classes(node.body, inner_path, &) if node.body
@@ -517,6 +533,150 @@ module Rigor
         def custom_type_attribute?(node)
           type_arg = node.arguments&.arguments&.[](1)
           type_arg.is_a?(Prism::ConstantReadNode) || type_arg.is_a?(Prism::ConstantPathNode)
+        end
+
+        # Records the `scope :x` declarations a concern module spells inside its `included do … end` block
+        # (#534 item 5; mastodon's `scope :without_suspended` in `Account::Suspensions`). ActiveSupport::Concern
+        # evaluates that block against the INCLUDING class, so those scopes are declared on every model that
+        # includes the module — and on no other model, which is why they are kept per-module here rather than
+        # globally the way {#collect_type_overrides} keeps column names.
+        #
+        # Concern-hood is recognised the way {#type_override_declaration_calls} already recognises it: by the
+        # `included do … end` block itself, not by an `extend ActiveSupport::Concern` line. A `scope :x` at the
+        # module body's own top level is NOT collected — there it is a plain send to the module object, not a
+        # class-level declaration on any model.
+        def record_concern_scopes(module_name, body)
+          names = included_block_scopes(body)
+          return if names.empty?
+
+          (@concern_scopes[module_name] ||= []).concat(names)
+        end
+
+        def included_block_scopes(body)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode) && node.name == :included && node.receiver.nil?
+            next [] unless node.block.is_a?(Prism::BlockNode)
+
+            lookup_scopes(node.block.body)
+          end
+        end
+
+        # Records every `include Foo` / `include Foo::Bar` a class or module body spells, AS WRITTEN — the
+        # constant is resolved only once the whole tree has been walked ({#resolve_concern_name}), because the
+        # concern's file may well sort after the file that includes it. An `include` inside a concern's own
+        # `included do … end` block counts too: that block runs against the including class, so the module
+        # lands on the model exactly as a body-level `include` does. A non-constant argument
+        # (`include build_module`) renders as nil and declines.
+        def record_include_edges(constant_name, body)
+          names = include_call_targets(body)
+          return if names.empty?
+
+          (@include_edges[constant_name] ||= []).concat(names)
+        end
+
+        def include_call_targets(body)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+
+            if node.name == :included && node.block.is_a?(Prism::BlockNode)
+              include_call_targets(node.block.body)
+            elsif node.name == :include
+              Array(node.arguments&.arguments).filter_map { |arg| constant_path_name(arg) }
+            else
+              []
+            end
+          end
+        end
+
+        # Adds each model's concern-declared scopes to the ones its own body declares. Attribution is by real
+        # `include` edge: a concern nobody includes contributes nothing, and a same-named `scope` in an
+        # unrelated concern does not leak onto this model. A concern that includes another concern is followed
+        # transitively (Ruby's own semantics — the inner module ends up in the model's ancestry either way).
+        #
+        # The model's SUPERCLASS chain is walked too, because a concern is routinely included once in
+        # `ApplicationRecord` for every model to get. The chain is walked here rather than left to
+        # {ModelIndex.sti_chain}, which only links a model to another MODEL: a configured base class is not a
+        # discovered model, so `class Account < ApplicationRecord` has no `sti_parent` and the index's chain
+        # stops at `Account`. (A `scope` written directly in the base class's own body is still not
+        # propagated — that pre-existing gap is a different mechanism and is documented, not widened here.)
+        def fold_concern_scopes(rows, superclass_map: {})
+          return rows if @concern_scopes.empty?
+
+          rows.map do |row|
+            inherited = ancestry_concern_scopes(row.fetch(:class_name), superclass_map)
+            next row if inherited.empty?
+
+            row.merge(scopes: (Array(row[:scopes]) + inherited).uniq.freeze)
+          end
+        end
+
+        # The concern scopes reaching `class_name` through its own includes and those of every superclass up
+        # the chain (`visited` stops a cycle a malformed source could spell).
+        def ancestry_concern_scopes(class_name, superclass_map)
+          scopes = []
+          curr = class_name
+          visited = Set.new
+
+          while curr && visited.add?(curr)
+            scopes.concat(concern_scopes_for(curr))
+            curr = superclass_map[curr]
+          end
+
+          scopes.uniq
+        end
+
+        # Breadth-first over the `include` edges reachable from `class_name`, unioning each visited concern's
+        # scopes. `visited` makes a mutually-including pair of concerns terminate rather than loop.
+        def concern_scopes_for(class_name)
+          scopes = []
+          queue = Array(@include_edges[class_name]).map { |raw| [raw, class_name] }
+          visited = Set.new([class_name])
+
+          until queue.empty?
+            raw, from_name = queue.shift
+            resolved = resolve_concern_name(raw, from_name)
+            next if visited.include?(resolved)
+
+            visited << resolved
+            scopes.concat(Array(@concern_scopes[resolved]))
+            queue.concat(Array(@include_edges[resolved]).map { |inner| [inner, resolved] })
+          end
+
+          scopes.uniq
+        end
+
+        # Resolves an `include`'s constant spelling against the modules actually walked, mirroring Ruby's
+        # lexical lookup closely enough for the shapes concerns use: a rooted name (`include ::Suspendable`)
+        # names the top-level constant, a relative one is tried under the including constant and each of its
+        # enclosing namespaces first (`include Suspensions` inside `class Account` → `Account::Suspensions`,
+        # which is what Ruby resolves), and otherwise it is taken as written. A name no walked module answers
+        # to simply contributes nothing.
+        #
+        # Two known imprecisions, both cheap only to state:
+        #
+        # - The enclosing-namespace attempts are made for a COMPACT declaration too (`module A::B`'s own
+        #   `include C` tries `A::B::C` then `A::C`), where Ruby's cref would only see `A::B` and the top
+        #   level. Harmless: the extra candidates must match a module that was actually walked, and a
+        #   project with both `A::B::C` and a top-level `C` concern would have to want the latter.
+        # - The final bare-name fall-back attributes BY SPELLING. A nearer constant declared outside
+        #   `model_search_paths` — `Account::Suspensions` in `lib/`, say, while the concern roots hold a
+        #   top-level `Suspensions` — is invisible to this walker, so the wrong one can win. Reading
+        #   further than the model roots needs its own cache descriptor (see {#discover}'s `watch:` note),
+        #   so the spelling is trusted instead.
+        def resolve_concern_name(raw, from_name)
+          name = strip_root(raw)
+          return name if raw.start_with?("::")
+
+          ([from_name] + namespace_ancestors(from_name)).each do |prefix|
+            candidate = "#{prefix}::#{name}"
+            return candidate if @module_names.include?(candidate)
+          end
+
+          name
         end
 
         # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String, keeping the

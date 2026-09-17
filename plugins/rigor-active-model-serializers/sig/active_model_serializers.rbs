@@ -1,0 +1,45 @@
+# The ActiveModelSerializers gem's own constants — issue #534 item 6.
+#
+# The 2026-09-01 corpus opacity sweep counted `ActiveModel::Serializer` 101 times on Mastodon,
+# `ActiveModelSerializers::Model` 29 and `ActiveModelSerializers::SerializableResource` 25, every
+# one of them resolving to `untyped` because nothing in the bundle named the constant. This file
+# names them, and nothing more.
+#
+# ## The admission rule
+#
+# The same rule `plugins/rigor-activerecord/sig/active_record/framework.rbs` states: declaring a
+# constant makes it RBS-KNOWN, and a known class with an incomplete signature turns every member the
+# signature omits into a false `call.undefined-method`. Every class here is therefore ALSO listed in
+# the manifest's `open_receivers:` (ADR-26), which is what keeps the members this file does not
+# enumerate lenient.
+#
+# That pairing is load-bearing rather than defensive here, because — unlike the Active Record
+# exception hierarchy, which is rescued and not dispatched on — `ActiveModel::Serializer` and
+# `ActiveModelSerializers::Model` are exactly the "class a project INHERITS from" shape the Active
+# Record file declines to declare. `class REST::AccountSerializer < ActiveModel::Serializer` is what
+# an AMS application looks like, and `object`, `scope`, `read_attribute_for_serialization`,
+# `attributes`, `has_many` and the rest of the AMS surface are not enumerated below. The Mastodon
+# before/after diff recorded in `docs/notes/20260917-ams-object-recognizer.md` is the evidence that
+# the pairing holds on a real application.
+#
+# `ActiveModel` is declared as a module by `rigor-activerecord` as well; RBS reopens a module across
+# files, so the two declarations compose rather than collide, and neither plugin depends on the
+# other being enabled.
+
+module ActiveModel
+  class Serializer
+    class CollectionSerializer
+    end
+  end
+end
+
+module ActiveModelSerializers
+  class Model
+  end
+
+  class SerializableResource
+  end
+
+  module Adapter
+  end
+end

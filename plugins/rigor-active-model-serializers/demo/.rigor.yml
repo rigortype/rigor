@@ -1,0 +1,11 @@
+paths:
+  - app
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - rigor-activerecord
+  - rigor-active-model-serializers
+
+cache:
+  path: tmp/.rigor/cache

@@ -55,15 +55,27 @@ module Rigor
       WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
       private_constant :WRITER_SUMMARY
 
+      # Every argument is one collection input the scan reads; a context object would move the same list
+      # one call further out.
+      # rubocop:disable Metrics/ParameterLists
       def self.scan(root:, path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                    plugin_facts: PluginFacts.empty)
+                    plugin_facts: PluginFacts.empty, unit_key: nil, unit_owner: nil)
         new(path: path, calls: calls, attribution: attribution, envelopes: envelopes,
-            plugin_facts: plugin_facts).scan(root)
+            plugin_facts: plugin_facts, unit_key: unit_key, unit_owner: unit_owner).scan(root)
       end
 
       def initialize(path:, calls:, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
-                     plugin_facts: PluginFacts.empty)
+                     plugin_facts: PluginFacts.empty, unit_key: nil, unit_owner: nil)
+        # rubocop:enable Metrics/ParameterLists
         @path = path
+        # #392 — a template unit: the WHOLE file is one effect unit, keyed `view:<logical_name>`. A
+        # template has no `def` to key on and no owner class of its own, so the ordinary walk — which only
+        # ever mints a unit at a `def` — would report nothing for a file that calls into the project all
+        # the way down.
+        @unit_key = unit_key
+        # The declared `self` the unit's implicit-self calls resolve against — the plugin's `self_type:`.
+        # Without it a helper call in a template reads as an unresolved self-call and taints the unit.
+        @unit_owner = unit_owner
         @calls = calls
         @attribution = attribution
         @envelopes = envelopes
@@ -78,6 +90,8 @@ module Rigor
       end
 
       def scan(root)
+        return scan_template_unit(root) if @unit_key
+
         walk(root, [], false)
         synthesize_framework_units
         FileCollection.new(
@@ -87,6 +101,23 @@ module Rigor
       end
 
       private
+
+      # The whole file body as one unit under {@unit_key}. Deliberately NOT combined with the ordinary
+      # walk: a compiled template is straight-line statements, a `def` inside one would be a method the
+      # render site cannot call, and a second keying rule over the same nodes would double-count every
+      # origin in the file.
+      def scan_template_unit(root)
+        summary, edges = UnitScan.new(
+          singleton: false, parameters: [], block_parameter: nil,
+          owned_locals: LocalOwnership.owned(root, []), calls: @calls,
+          attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
+          owner_class: @unit_owner, method_name: @unit_key
+        ).run(root)
+        merge_unit(@unit_key, summary, edges)
+        FileCollection.new(path: @path, summaries: @summaries, edges: @edges)
+      rescue StandardError
+        FileCollection.new(path: @path, summaries: { @unit_key => Summary.tainted("collector-error", @unit_key) })
+      end
 
       def walk(node, prefix, singleton)
         return unless node.is_a?(Prism::Node)

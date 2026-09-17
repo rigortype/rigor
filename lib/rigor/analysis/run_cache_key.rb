@@ -82,15 +82,23 @@ module Rigor
 
       # @param rbs_config_entries — the RBS-derived config slots
       #   (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key disables the cache.
-      def descriptor(configuration:, files:, explain:, rbs_config_entries:)
+      # @param template_units_digest — #392 — the run's template-unit identity
+      #   ({Analysis::TemplateUnits#digest}: every unit's source bytes + transform id + synthesis version).
+      #   nil for a project whose plugins declare no `template_globs:`, which is every project today, and a
+      #   nil contributes NO slot — so no existing key moves. A project that DOES have units produces a key
+      #   the ADR-87 boot-slim probe (which loads no plugin and so passes nil) cannot reconstruct: the probe
+      #   simply misses and the full path takes over, the same forgone-fast-lane trade the `rbs.virtual_rbs`
+      #   slot already makes, and never a wrong hit.
+      def descriptor(configuration:, files:, explain:, rbs_config_entries:, template_units_digest: nil)
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
-          configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) + [
-            config_entry("configuration", Marshal.dump(configuration.to_h)),
-            config_entry("engine",
-                         "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
-            config_entry("paths", files.sort.join("\n"))
-          ]
+          configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) +
+                   template_unit_entries(template_units_digest) + [
+                     config_entry("configuration", Marshal.dump(configuration.to_h)),
+                     config_entry("engine",
+                                  "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
+                     config_entry("paths", files.sort.join("\n"))
+                   ]
         )
       rescue StandardError
         nil
@@ -104,6 +112,10 @@ module Rigor
       #
       # {Cache::EngineSource::Unavailable} is left to propagate into `descriptor`'s rescue, which disables
       # the cache for the run: an engine we cannot identify must not be keyed by its version alone.
+      def template_unit_entries(digest)
+        digest.nil? ? [] : [config_entry("template-units", digest)]
+      end
+
       def engine_source_entries
         Cache::EngineSource.key_config_entries
       end

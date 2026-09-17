@@ -22,6 +22,7 @@ require_relative "dependency_recorder"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
+require_relative "template_units"
 
 module Rigor
   module Analysis
@@ -83,7 +84,8 @@ module Rigor
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
-                     project_scope_seed: {}, source_files: [], record_dependencies: false)
+                     project_scope_seed: {}, source_files: [], record_dependencies: false,
+                     template_units: nil)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
@@ -108,6 +110,10 @@ module Rigor
         # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
         @source_files = source_files
+        # #392 — the run's template units, synthesised on the PARENT before the fork and inherited here as
+        # frozen data. A worker analyses a unit from the same bytes the parent compiled, which is what makes
+        # pooled and sequential agree about a file that does not exist on disk in the form being parsed.
+        @template_units = template_units || TemplateUnits.empty
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths` is process-global
         # state. Writing it from a non-main Ractor would raise `Ractor::IsolationError`, so the session does
@@ -164,10 +170,12 @@ module Rigor
       def analyze_with_effects(path)
         return analyze_body(path) unless @record_effects
 
+        entry = @template_units[path]
         diagnostics = nil
         collection = Effects::Collector.collect_for(
           path, attribution: @effect_attribution, envelopes: effect_envelope_index,
-                plugin_facts: effect_plugin_facts
+                plugin_facts: effect_plugin_facts, unit_key: entry&.unit_key,
+                unit_owner: entry&.self_type
         ) do
           diagnostics = analyze_body(path)
         end
@@ -207,7 +215,9 @@ module Rigor
         end
 
         Effects::Collector.record_root(parse_result.value)
-        scope = seed_project_scope(Scope.empty(environment: @environment, source_path: path))
+        scope = @template_units.seed(
+          seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path
+        )
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
         node_collectors = CheckRules.build_node_collectors(path, index)
@@ -310,6 +320,9 @@ module Rigor
       # physical bytes but stamp the parse buffer's `filepath:` as the LOGICAL path so downstream
       # diagnostics carry the logical path.
       def parse_source(path)
+        entry = @template_units[path]
+        return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby) if entry
+
         physical = @buffer ? @buffer.resolve(path) : path
         return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path
 

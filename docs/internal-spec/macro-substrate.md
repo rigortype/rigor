@@ -444,23 +444,37 @@ preamble a partial writes when its render-site `locals:` are not traced.
     while the bytes agree, and the longest wins. The answer is the deepest
     compiled node at the mapped offset, and it is accepted only when that
     longest run is UNIQUE (a tie is two readings — declined as ambiguous), the
-    node lies wholly inside the run on one line, and NO OTHER placement's own
-    node lies inside its own run. The "wholly inside" condition rejects markup:
-    a compiler copies template text into a string literal, and the literal's
-    quotes are never template bytes. It equally rejects code a compiler REWROTE
-    rather than copied (rigor-actionpack's `yield` → `__rigor_yield`). The
-    rival-placement condition is there because a longer run is not on its own a
-    better reading: the compiler's own punctuation joins template bytes into
-    runs the template never had, so the `=` of `<%=` matches the `=` of `<=`,
-    `==`, `+=` or an assignment and `"= v "` (4 bytes, ending in the WRONG `v`)
-    outruns the tag body `" v "`. Without it `<%= v %><% if 1 <= v %>` answered
-    about the other `v`, with exit 0 and a type `rigor check` disagreed with.
-    It also declines `<%= v %> <%= v.to_s %>` and `<%= x + x %>`, which is the
-    price of not knowing where the tags are; a tag span exported by the plugin
-    would answer those, and is the follow-up this rule is conservative ahead of.
+    node lies wholly inside the run on one line, and no OTHER placement's node
+    lies inside its own run AND outside the winning run's compiled span. The
+    "wholly inside" condition rejects markup: a compiler copies template text
+    into a string literal, and the literal's quotes are never template bytes.
+    It equally rejects code a compiler REWROTE rather than copied
+    (rigor-actionpack's `yield` → `__rigor_yield`).
+    The rival-placement condition is there because a longer run is not on its
+    own a better reading: the compiler's own punctuation joins template bytes
+    into runs the template never had, so the `=` of `<%=` matches the `=` of
+    `<=`, `==`, `+=` or an assignment and `"= v "` (4 bytes, ending in the
+    WRONG `v`) outruns the tag body `" v "`. Without it
+    `<%= v %><% if 1 <= v %>` answered about the other `v`, with exit 0 and a
+    type `rigor check` disagreed with. A repeat INSIDE the winning run is not
+    a rival, because one tag body is copied once and the second occurrence is
+    that copy seen from the other end: without that exemption
+    `<%= @author.nil? ? l(:a) : l(:b, f(@author)) %>` declined, and the busy
+    lines of a real view lost a third of their answers. What still declines is
+    the CROSS-TAG repeat (`<%= v %> <%= v.to_s %>`, `<%= v %><%= "v" %>`),
+    the price of not knowing where the tags are; a tag span exported by the
+    plugin would answer those, and is the follow-up this rule is conservative
+    ahead of.
+  - **Hoisted text.** The previous template line's compiled lines join the
+    search as SPILL targets, and only a string literal found there counts.
+    stdlib ERB emits a line's leading text on the line above
+    (`_erbout.<< "\nname ".freeze`), so for a probe in that text the literal it
+    has to tie with is not on this template line's compiled lines at all:
+    without the spill, `name <%= name %>` probed at the HTML word typed as the
+    tag's code. A CODE node on the line above must not count, or every
+    `<%= v %>` repeated on consecutive template lines would decline.
     Tie-breaking by "the placement whose node looks like code" was rejected for
-    the same family of reason: the HTML word `name` beside `<%= name %>` ties
-    with the tag, and preferring the code would type a word of text.
+    the same family of reason: preferring the code would type a word of text.
   A bare `FILE:LINE` lists only the expressions on those compiled lines whose
   span maps back to a template column that the exact form then resolves to a
   node starting where that expression does, so the table never prints a column

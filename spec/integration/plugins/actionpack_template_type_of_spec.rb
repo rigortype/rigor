@@ -26,6 +26,8 @@ TEMPLATE_TYPE_OF_SHOW_ERB = <<~ERB
   <%= @user.email %><%= @user.email %>
   <% v = @user.name %>
   <%= v %><% if "a" <= v %><% end %>
+  name <%= @user.name %>
+  <%= @user.name.empty? ? @user.name : "x" %>
 ERB
 
 TEMPLATE_TYPE_OF_LAYOUT_ERB = <<~ERB
@@ -118,9 +120,11 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       expect(status).to eq(1)
       expect(out).to eq("")
       expect(err.lines.length).to eq(2)
-      expect(err).to include("no expression found at app/views/users/show.html.erb:2:2: the position is in " \
-                             "template markup")
-      expect(err).to include("no expression found at app/views/users/show.html.erb:1:6")
+      # Which decline it is depends on where the compiler put the text — stdlib ERB hoists a line's leading
+      # text onto the line above, so the literal ties with the tag there and Erubi's spans lines instead —
+      # but both name markup, and neither answers.
+      expect(err.lines.first).to include("no expression found at app/views/users/show.html.erb:2:2", "markup")
+      expect(err.lines.last).to include("no expression found at app/views/users/show.html.erb:1:6", "markup")
     end
 
     it "resolves each expression on a multi-expression line to its own tag" do
@@ -157,6 +161,27 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       expect(out).to eq("")
       expect(status).to eq(1)
       expect(err).to include("no expression found at app/views/users/show.html.erb:6:5")
+    end
+
+    # stdlib ERB hoists a line's LEADING text onto the previous compiled line, so the literal a probe in
+    # that text must tie with is not on this template line's compiled lines at all. Without the previous
+    # line's literals as spill targets the tie never formed and the HTML word typed as the tag's code.
+    it "declines a word of HTML text at the start of a line" do
+      status, out, err = run_cli("type-of", "app/views/users/show.html.erb:7:1")
+
+      expect(out).to eq("")
+      expect(status).to eq(1)
+      expect(err).to include("no expression found at app/views/users/show.html.erb:7:1")
+    end
+
+    # A name repeated INSIDE one tag is one copy read from both ends, not a second reading: the rival's
+    # node lies within the winning run's own compiled span. Real views are full of these.
+    it "answers a name that repeats inside a single tag" do
+      status, out, err = run_cli("type-of", "app/views/users/show.html.erb:8:5")
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("node:    Prism::InstanceVariableReadNode", "type:    User")
     end
 
     it "declines a position whose bytes were copied to more than one place" do

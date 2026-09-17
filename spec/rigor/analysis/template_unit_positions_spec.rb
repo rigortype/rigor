@@ -76,6 +76,38 @@ RSpec.describe Rigor::Analysis::TemplateUnitPositions do
     expect(map.node_at(line: 1, column: 5)).to eq(:ambiguous)
   end
 
+  # stdlib ERB hoists a line's leading text onto the PREVIOUS compiled line, so the literal the HTML word
+  # lives in is not on this template line's compiled lines: without the line above as a spill target the
+  # tie never forms and the word types as the tag's code. Only a string literal up there counts — a code
+  # node on the line above is ordinary compiled code, and counting it would decline every `<%= v %>` that
+  # repeats on consecutive template lines.
+  it "declines leading HTML text the compiler hoisted onto the previous compiled line" do
+    map = positions("<%= v %>\nname <%= name %>\n",
+                    "_e.<<(( v ).to_s); _e.<< \"\\nname \".freeze\n; _e.<<(( name ).to_s)\n",
+                    { 1 => 1, 2 => 2 })
+
+    expect(map.node_at(line: 2, column: 1)).to eq(:ambiguous)
+  end
+
+  it "still answers a tag on the line after another tag with the same name" do
+    map = positions("<%= v %>\n<%= v %>\n", "_e.<<(( v ).to_s)\n_e.<<(( v ).to_s)\n", { 1 => 1, 2 => 2 })
+
+    expect(map.node_at(line: 2, column: 5)).to be_a(Prism::Node)
+  end
+
+  # One tag body is copied ONCE: the second occurrence is the same copy seen from the other end, and the
+  # rival's node lies inside the winning run's own compiled span. Declining these cost real answers on the
+  # busy lines of a real view.
+  it "answers a name that repeats inside one tag" do
+    map = positions("<%= a.nil? ? l(:x) : l(:y, a) %>\n", "_e.<<(( a.nil? ? l(:x) : l(:y, a) ).to_s)\n",
+                    { 1 => 1 })
+
+    node = map.node_at(line: 1, column: 5)
+
+    expect(node).to be_a(Prism::Node)
+    expect(node.slice).to eq("a")
+  end
+
   it "declines an assignment that puts the same name after `= `" do
     map = positions("<%= v %><% w = v %>\n", "_b << (( v ).to_s);  w = v ;\n", { 1 => 1 })
 

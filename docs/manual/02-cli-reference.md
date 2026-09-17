@@ -149,9 +149,10 @@ expression. A column in HTML text, in code the plugin rewrote
 (a layout's `<%= yield %>`), or in bytes copied to more than
 one place prints `no expression found at …` with the reason
 and exits `1`; the command never answers about a nearby
-node instead. Two tags on one line that name the same thing
-(`<%= v %>` beside `<% if "a" <= v %>`) decline for that
-reason as well. A bare `FILE:LINE` lists only the expressions
+node instead. Two tags that name the same thing (`<%= v %>`
+beside `<% if "a" <= v %>`, or `<%= v %> <%= v.to_s %>`)
+decline for that reason as well; a name repeated inside ONE
+tag still answers. A bare `FILE:LINE` lists only the expressions
 that map back to a template column. `--trace` fallbacks are
 reported at the template line, and a JSON fallback carries a
 `column` only when its position maps back to one. A template

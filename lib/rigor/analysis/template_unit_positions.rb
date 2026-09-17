@@ -75,7 +75,14 @@ module Rigor
         candidates = compiled_lines_for(line)
         return :no_compiled_line if candidates.empty?
 
-        resolve(text, offset, candidates.map { |number| [number, @compiled_lines[number - 1]] })
+        # The PREVIOUS template line's compiled lines join as spill targets: stdlib ERB hoists a line's
+        # leading text onto the line before it (`_erbout.<< "\nname ".freeze`), so the literal a probe in
+        # that text has to tie with is not on this template line's compiled lines at all.
+        resolve(text, offset, targets_for(candidates), targets_for(compiled_lines_for(line - 1)))
+      end
+
+      def targets_for(numbers)
+        numbers.map { |number| [number, @compiled_lines[number - 1]] }
       end
 
       # `[[template_column, node], …]` for the expressions starting on the compiled lines a template line
@@ -146,29 +153,51 @@ module Rigor
       # But a longer run is not on its own a better reading, because a compiler's own punctuation joins the
       # template's bytes into runs the template never had — the `=` of `<%=` matches the `=` of `<=`, `==`,
       # `+=` or an assignment, so `"= v "` (4 bytes, ending in the WRONG `v`) outran the tag body `" v "`
-      # (3 bytes) and the probe answered about another `v` on the line. So every placement whose own deepest
-      # node lies inside its own run is a rival reading, and more than one rival is `:ambiguous`. That is
-      # strictly a decline: `<%= v %> <%= v.to_s %>` and `<%= x + x %>` decline too, which is the price of
-      # not knowing where the tags are. A plugin-exported tag span would answer these instead of declining
-      # (see the PR), and is the follow-up this rule is deliberately conservative ahead of.
-      def resolve(text, offset, targets)
-        runs = []
-        targets.each { |number, to| runs_through(text, offset, to, number) { |run| runs << run } }
+      # (3 bytes) and the probe answered about another `v` on the line. So a placement whose own deepest
+      # node lies inside its own run is a RIVAL reading, and a rival declines the position.
+      #
+      # A repeat INSIDE the winning run is not a rival: `<%= @author.nil? ? l(:a) : l(:b, f(@author)) %>`
+      # copies one tag body once, and the second `@author` is the same copy seen from the other end, not a
+      # second reading. Only a node OUTSIDE the winning run's own compiled span counts, which is what keeps
+      # the busy lines of a real view answerable while the cross-tag repeat (`<%= v %> <%= v.to_s %>`,
+      # `<%= v %><%= "v" %>`) still declines — the family a plugin-exported tag span would answer instead
+      # (see the PR), and the follow-up this rule is deliberately conservative ahead of.
+      #
+      # `spill` is the previous template line's compiled lines, where a hoisted leading-text literal lives.
+      # Only a STRING literal there counts: a code node on the line above is ordinary compiled code, and
+      # counting it would decline every `<%= v %>` that repeats on consecutive template lines.
+      def resolve(text, offset, targets, spill = [])
+        runs = collect_runs(text, offset, targets)
+        runs += collect_runs(text, offset, spill).select { |run| hoisted_text?(run, offset) }
         return :not_verbatim if runs.empty?
 
         longest = runs.max_by(&:length)
         return :ambiguous if runs.count { |run| run.length == longest.length } > 1
 
-        answer = deepest(@root, compiled_offset(longest.line, offset + longest.shift))
+        answer = node_for(longest, offset)
         return :not_verbatim unless inside?(answer, longest)
 
         rival = runs.any? do |run|
           next false if run.equal?(longest)
 
-          node = deepest(@root, compiled_offset(run.line, offset + run.shift))
-          inside?(node, run) && !node.equal?(answer)
+          node = node_for(run, offset)
+          inside?(node, run) && !node.equal?(answer) && !inside?(node, longest)
         end
         rival ? :ambiguous : answer
+      end
+
+      def collect_runs(text, offset, targets)
+        runs = []
+        targets.each { |number, to| runs_through(text, offset, to, number) { |run| runs << run } }
+        runs
+      end
+
+      def hoisted_text?(run, offset)
+        node_for(run, offset).is_a?(Prism::StringNode)
+      end
+
+      def node_for(run, offset)
+        deepest(@root, compiled_offset(run.line, offset + run.shift))
       end
 
       # The longest verbatim run through `from[offset]` across every placement on the `targets` lines, or

@@ -2,6 +2,7 @@
 
 require "digest"
 
+require_relative "callee_rule"
 require_relative "entry_points"
 require_relative "label_set"
 require_relative "registry"
@@ -65,13 +66,23 @@ module Rigor
       # `discharge` is the RESOLVED grant, not the manifest's request: {.build} has already demoted a
       # non-first-party plugin's `true` to `false` and recorded a warning, so nothing downstream has to
       # re-ask who may discharge.
-      Row = Data.define(:key, :labels, :narrow, :discharge, :within, :taint, :plugin_id) do
+      # `callee` names a {CalleeRule} rule (#1048) and `responds` marks a row whose call supplies the
+      # unit's answer, so a unit rule on the same receiver stands down. `receiver` is carried because a
+      # UNIT rule has no call node to read one off.
+      Row = Data.define(:key, :labels, :narrow, :discharge, :within, :taint, :plugin_id, :receiver,
+                        :callee, :responds) do
+        def initialize(receiver: nil, callee: nil, responds: false, **) = super
+
         def discharge? = discharge
       end
 
       # One compiled framework-edge strategy: the base class a plugin pointed the engine at, and which
       # plugin pointed.
       Edge = Data.define(:target, :receiver, :selector, :plugin_id)
+
+      # The rows whose `callee:` names a {CalleeRule::UNIT_RULES} rule — applied once per unit by
+      # {UnitScan}, from the unit's own owner and key rather than from a call node.
+      attr_reader :unit_callee_rows
 
       def self.empty
         @empty ||= new(contributions: [], superclasses: NO_ROWS, includes: NO_ROWS)
@@ -110,6 +121,7 @@ module Rigor
         @self_rows = {}
         @result_rows = {}
         @edges = []
+        @unit_callee_rows = []
         @labels_by_owner = {}
         @entry_points = []
         @declared_ancestry = {}
@@ -146,9 +158,7 @@ module Rigor
       # @param owner — the receiver's class name as the syntax or the typer named it
       # @param singleton — whether the call is `Owner.selector`
       def class_row(owner, singleton, selector)
-        return nil if owner.nil? || @class_rows.empty?
-
-        bucket = @class_rows[singleton]
+        bucket = owner.nil? ? nil : @class_rows[singleton]
         return nil if bucket.nil?
 
         ancestry(owner).each do |candidate|
@@ -161,9 +171,7 @@ module Rigor
       # The row colouring `path`'s `selector`, where `path` is a receiver expression (`"Rails.cache"`).
       # Exact — a receiver path names one object and has no ancestry to walk.
       def path_row(path, selector)
-        return nil if path.nil? || @path_rows.empty?
-
-        @path_rows[path]&.[](selector)
+        path.nil? ? nil : @path_rows[path]&.[](selector)
       end
 
       # The row colouring `path`'s `selector` for a receiver rooted at implicit self (`"self.flash.now"`),
@@ -171,11 +179,8 @@ module Rigor
       # `owner_class`'s project ancestry — a receiver-less `session` outside a controller is a different
       # `session`.
       def self_path_row(path, selector, owner_class)
-        return nil if path.nil? || @self_rows.empty?
-
-        row = @self_rows[path]&.[](selector)
-        return nil if row.nil?
-        return nil unless descends_from?(owner_class, row.within)
+        row = path.nil? ? nil : @self_rows[path]&.[](selector)
+        return nil if row.nil? || !descends_from?(owner_class, row.within)
 
         row
       end
@@ -201,9 +206,7 @@ module Rigor
 
       # Whether `class_name` is `ancestor`, or reaches it through the project's own `class … <` lines.
       def descends_from?(class_name, ancestor)
-        return false if class_name.nil?
-
-        ancestry(class_name).include?(ancestor)
+        !class_name.nil? && ancestry(class_name).include?(ancestor)
       end
 
       # `registry` extended with every plugin's `effect_labels:`, each under its own owner so
@@ -225,10 +228,10 @@ module Rigor
         note_root_demotion(contribution)
         (@labels_by_owner[contribution.owner] ||= []).concat(contribution.labels)
         contribution.attributions.each { |entry| absorb_attribution(contribution, entry) }
-        contribution.edges.each do |entry|
-          @edges << Edge.new(target: entry.target, receiver: entry.receiver, selector: entry.method,
-                             plugin_id: contribution.id)
-        end
+        @edges.concat(contribution.edges.map do |entry|
+          Edge.new(target: entry.target, receiver: entry.receiver, selector: entry.method,
+                   plugin_id: contribution.id)
+        end)
         @entry_points.concat(contribution.entry_points)
         contribution.ancestry.each { |entry| absorb_ancestry(contribution, entry) }
       end
@@ -267,8 +270,21 @@ module Rigor
       def absorb_attribution(contribution, entry)
         row = Row.new(key: entry.key, labels: LabelSet.new(entry.labels), narrow: entry.narrow,
                       discharge: discharge_granted?(contribution, entry), within: entry.within,
-                      taint: entry.taint, plugin_id: contribution.id)
+                      taint: entry.taint, plugin_id: contribution.id, receiver: entry.receiver,
+                      callee: callee_rule_for(contribution, entry), responds: entry.responds)
         (bucket_for(entry)[entry.receiver] ||= {})[entry.method.to_s] = row
+        @unit_callee_rows << row if row.callee && CalleeRule.unit_rule?(row.callee)
+      end
+
+      # #1048 — a `callee:` naming a rule the engine does not implement is dropped with a warning rather
+      # than silently doing nothing, for the reason {#note_root_demotion} gives: a contribution that
+      # quietly evaporates reads to its author as the feature being broken.
+      def callee_rule_for(contribution, entry)
+        return entry.callee if entry.callee.nil? || CalleeRule.known?(entry.callee)
+
+        @warnings << "plugin #{contribution.id.inspect} names an unknown callee rule " \
+                     "#{entry.callee.inspect} on #{entry.key}; the row contributes no edge"
+        nil
       end
 
       # Which index a row lands in, from its receiver spelling.
@@ -351,22 +367,16 @@ module Rigor
         bucket.sort.map do |receiver, rows|
           [receiver,
            rows.sort.map do |selector, row|
-             [selector, row.labels.to_a, row.narrow, row.discharge, row.within, row.taint]
+             [selector, row.labels.to_a, row.narrow, row.discharge, row.within, row.taint,
+              row.callee, row.responds]
            end]
         end
       end
 
       def finalize
-        @class_rows.each_value { |bucket| bucket.each_value(&:freeze) }
-        @class_rows.each_value(&:freeze)
-        @class_rows.freeze
-        @path_rows.each_value(&:freeze)
-        @path_rows.freeze
-        @self_rows.each_value(&:freeze)
-        @self_rows.freeze
-        @result_rows.each_value(&:freeze)
-        @result_rows.freeze
-        @edges.freeze
+        @class_rows.each_value { |bucket| bucket.each_value(&:freeze).freeze }
+        [@path_rows, @self_rows, @result_rows].each { |bucket| bucket.each_value(&:freeze).freeze }
+        [@class_rows, @edges, @unit_callee_rows].each(&:freeze)
         @labels_by_owner.each_value(&:uniq!)
         @labels_by_owner.reject! { |_, labels| labels.empty? }
         @labels_by_owner.freeze

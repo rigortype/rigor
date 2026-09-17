@@ -59,7 +59,11 @@ module Rigor
             # reaches that class's `#initialize`. The warm lanes serve a propagated `EffectTable` (and its
             # `unclaimed` bits) rather than re-resolving, so an entry written under the old rule would
             # answer the old closure for source nothing changed.
-            "schema:3",
+            #
+            # schema:4 — #1048 added {FileCollection::Edge#taint_if_unresolved}, so a marshalled edge
+            # written under schema:3 no longer restores at all (`Data` with a grown member list raises
+            # `TypeError`), and a warm entry would otherwise be offered and then read as a miss.
+            "schema:4",
             "vocabulary:#{registry.vocabulary_version}",
             "catalog:#{catalog.identity}",
             "effects:#{config_digest(configuration)}",

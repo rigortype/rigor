@@ -31,6 +31,11 @@ module Rigor
       module Effects
         CONTROLLER = "ActionController::Base"
 
+        # The view context a template unit's body runs under — the `self_type:` the plugin declares on
+        # every {Rigor::Plugin::TemplateUnit}. A `render` inside a template is an implicit-self call on
+        # it, which is what lets one row colour the template → partial edge (#1048).
+        VIEW = "ActionView::Base"
+
         RESPONSE = ["mutate.self", "rails.response.write"].freeze
         SESSION_WRITE = ["mutate", "rails.session.write"].freeze
         SESSION_READ = ["io", "rails.session.read"].freeze
@@ -46,6 +51,13 @@ module Rigor
         # the one genuinely misleading row in the whole Rails layer.
         RENDERERS = %w[render render_to_string render_to_body].freeze
 
+        # Rails' own name for the implicit render — what `ActionController::Base` calls when an action
+        # returns without having answered. The project never writes it, which is exactly the point: the
+        # row exists so the engine's unit-level {Rigor::Effects::CalleeRule} has a declaration to read,
+        # and it carries no labels because an action that implicitly renders has already been coloured by
+        # nothing at all and must not be coloured by a guess (see `why:`).
+        IMPLICIT_RENDER = "default_render"
+
         # The cookie jars a Rails app writes through.
         COOKIE_JARS = ["self.cookies", "self.cookies.signed", "self.cookies.encrypted",
                        "self.cookies.permanent"].freeze
@@ -59,35 +71,66 @@ module Rigor
         def response_rows
           RESPONSE_WRITERS.map do |selector|
             EffectAttribution.new(
-              receiver: CONTROLLER, method: selector, labels: RESPONSE, discharge: true,
+              receiver: CONTROLLER, method: selector, labels: RESPONSE, discharge: true, responds: true,
               why: "sets the response on the controller instance — Rack writes the socket later, outside " \
                    "any project method, so this is `mutate.self` and deliberately not `io`"
             )
-          end + render_rows
+          end + render_rows + [implicit_render_row]
         end
 
+        # `render` and its two `*_to_string` twins. Each carries a `callee:` so the render site edges to
+        # the template's own effect unit (#1048), and each keeps the `template-not-analysed` taint — which
+        # now rides the edge: a render whose template produced a unit discharges it, and one whose
+        # template the plugin declined (a layout, #1047) or whose target is computed keeps it.
+        #
+        # Only `render` sets `responds:`. `render_to_string` builds a string and leaves the response
+        # unanswered, so an action that calls it and returns still takes Rails' implicit render.
         def render_rows
           RENDERERS.map do |selector|
             EffectAttribution.new(
               receiver: CONTROLLER, method: selector, labels: RESPONSE, discharge: true,
-              taint: "template-not-analysed",
+              taint: "template-not-analysed", callee: "rails_render", responds: selector == "render",
               why: "sets the response body from a template. The controller half is fully stated; the " \
-                   "template's own effects are unknown until views become effect units, and the taint " \
-                   "is how the summary says so rather than reading exhaustive"
+                   "template's own effects reach it through the `rails_render` callee edge, and the " \
+                   "taint survives on the edge for a target the rule cannot resolve"
             )
-          end
+          end + [
+            EffectAttribution.new(
+              receiver: VIEW, method: :render, labels: [], discharge: true,
+              taint: "template-not-analysed", callee: "rails_render_partial",
+              why: "a `render` inside a template runs another template. The edge is the whole " \
+                   "contribution — what a partial render DOES is what the partial does, and the row " \
+                   "reaches it now — while a target the rule cannot resolve keeps the taint. In a view " \
+                   "a bare argument names a PARTIAL and `layout:` names one too, which is why this is a " \
+                   "separate rule from the controller's"
+            )
+          ]
+        end
+
+        # The implicit render, as an EDGE and nothing else. An action that never answered still renders
+        # `<controller>/<action>`, so its summary must include that template's effects — but the fact is
+        # the absence of a call, so there is no site to colour, and inventing a `rails.response.write`
+        # here would put it on every private helper a controller defines as well.
+        def implicit_render_row
+          EffectAttribution.new(
+            receiver: CONTROLLER, method: IMPLICIT_RENDER, labels: [], discharge: true,
+            callee: "rails_implicit_render",
+            why: "Rails renders `<controller>/<action>` for an action that answered nothing. The edge " \
+                 "is the whole contribution: no label, because an implicit render is observed from a " \
+                 "body that made no call, and a label read off an absence would colour every helper"
+          )
         end
 
         # `send_file` streams from disk; `send_data` does not.
         def file_rows
           [
             EffectAttribution.new(
-              receiver: CONTROLLER, method: :send_data, labels: RESPONSE, discharge: true,
+              receiver: CONTROLLER, method: :send_data, labels: RESPONSE, discharge: true, responds: true,
               why: "sets the response body from an in-memory string"
             ),
             EffectAttribution.new(
               receiver: CONTROLLER, method: :send_file, labels: RESPONSE + ["io.fs.read"], discharge: true,
-              why: "sets the response AND reads the named file off disk"
+              responds: true, why: "sets the response AND reads the named file off disk"
             )
           ]
         end

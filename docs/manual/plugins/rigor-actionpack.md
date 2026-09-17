@@ -179,6 +179,40 @@ known gap, since a partial's optional-local preamble reads as a
 definite `nil` until its render site's `locals:` are traced
 ([#1047](https://github.com/rigortype/rigor/issues/1047)).
 
+### The controller → template edge
+
+A controller action's summary **includes what its template does**.
+`render :show`, `render "show"`, `render "admin/form"`,
+`render template:`, `render action:`, `render partial:` (with or
+without `collection:`) and the implicit render of
+`<controller>/<action>` all reach the template's own unit, and a
+template reaches the partials *it* renders — so an `io.db.write` in
+`app/views/users/_card.html.erb` shows up on `UsersController#show`
+three hops away, and `rigor effects explain` prints the path.
+
+The `template-not-analysed` taint on a `render` is discharged
+exactly when the edge lands on a real unit. It **stays** when it
+does not, and both cases are common enough to name:
+
+- the target is computed — `render params[:view]`, or
+  `render formats: some_format`. The render site is read from
+  literals only, so anything computed keeps the honest "and possibly
+  more";
+- the target is a **layout**, which has no unit today
+  ([#1047](https://github.com/rigortype/rigor/issues/1047));
+- the template is outside `app/views/**/*.erb` — a Haml, Slim or
+  Jbuilder view, which this plugin does not claim.
+
+`render json:`, `render plain:` and the rest of the non-template
+family are left alone: they render no template, the rule declines,
+and the row reads exactly as it did before.
+
+An action that answered for itself is **not** edged to the
+conventional template. `redirect_to`, `head`, `send_data` and
+`send_file` each mean the implicit render did not happen, and
+attributing `users/away` to an action that redirects would be a view
+it never runs.
+
 ### Holding views to an effect budget
 
 A view unit is an `effects.envelopes:` subject like any class, and a
@@ -210,6 +244,16 @@ Under either, an `io.db.write`, a `job.enqueue`, an `io.output.stdout`
 (`puts`), an `io.input` (`binding.pry`) or a `nondet.time` in a view
 is a finding.
 
+The two presets **differ**: a lazy `<%= user.posts.count %>` is a
+finding under `strict` and silent under `lenient`. That is newer than
+the stanzas — until
+[#1048](https://github.com/rigortype/rigor/issues/1048) a first-party
+plugin's statement about a framework method rode the declared (`≤`)
+lane, which the envelope check does not read, so the two bounded the
+same thing. A row the engine bundles, reviews and gates is now proven
+like a catalogue row, which is also why an envelope on a **controller**
+that forbids `io.db.read` now fires on a plain `User.find`.
+
 Only the labels the plugins in your `plugins:` list register are
 known, and both stanzas above name two that rigor-actionpack does not
 own: `rails.config.read` comes from
@@ -233,11 +277,6 @@ deliberately loud rather than a silent no-op.
   read as helper calls on the view context. That is why `flow.*` is
   suppressed in templates by default — see the measurement note and
   [#1047](https://github.com/rigortype/rigor/issues/1047).
-- **No controller → template edge yet.** A controller action's own
-  summary does not include what its template does, and `render`
-  keeps its `template-not-analysed` taint;
-  [#1048](https://github.com/rigortype/rigor/issues/1048) carries
-  it.
 - **ERB only, under `app/views`.** `template_globs:` is a manifest
   row, read without running plugin code, so it cannot consult
   `view_search_paths:`. Haml, Slim and Jbuilder are the same seam

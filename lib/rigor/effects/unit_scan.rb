@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "attribution"
+require_relative "callee_rule"
 require_relative "catalog"
 require_relative "envelope_index"
 require_relative "file_collection"
@@ -133,6 +134,10 @@ module Rigor
         @edges = []
         @nested = []
         @delegates_upward = false
+        # #1048 — whether a plugin row marked `responds:` fired in this unit, i.e. the body supplied the
+        # framework's answer itself. It is what stands a UNIT callee rule down: an action that called
+        # `render :edit` or `redirect_to` did not take Rails' implicit render.
+        @responded = false
         # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
         @unclaimed = false
       end
@@ -155,6 +160,7 @@ module Rigor
       # Walks `body` and returns `[Summary, edges]`.
       def run(body)
         walk(body)
+        apply_unit_callees
         summary = Summary.new(
           bundles: @bundles, declared_bundles: @declared_bundles,
           exhaustive: @causes.empty?, causes: @causes, unclaimed: @unclaimed
@@ -292,15 +298,93 @@ module Rigor
         row = plugin_row(node, record)
         return nil if row.nil?
 
+        @responded = true if row.responds
+        edged = callee_edge_taken?(node, row)
         labels = row.narrow ? Narrowing.apply(row.narrow, node) : row.labels
-        return row if labels.nil? || labels.empty?
+        # A `narrow:` that narrowed to nothing says the call does nothing, and a call that does nothing
+        # taints nothing. A row that declares no labels at all is a different statement — since #1048 a
+        # row may contribute an EDGE and no label — so it falls through to the taints rather than
+        # returning here.
+        return row if row.narrow && (labels.nil? || labels.empty?)
+
+        record_plugin_labels(row, labels) unless labels.nil? || labels.empty?
+        record_plugin_taints(row, edged)
+        row
+      end
+
+      # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
+      # nothing about the template. Where a {CalleeRule} named the template the taint rides the EDGE
+      # instead (#1048), so a render that reaches a real unit clears it and one that reaches nothing
+      # keeps it — decided by the propagator, which is the only thing that knows.
+      def record_plugin_taints(row, edged)
+        taint(row.taint, row.key) if row.taint && !edged
+        taint("plugin-attribution", row.key) unless row.discharge?
+      end
+
+      # #1048 — the call-graph edge a framework method IS, when the plugin's row named a {CalleeRule}.
+      # `render :show` inside `UsersController` runs `view:users/show.html`, which is a unit in the same
+      # table; the rule reads the call's argument literals and nothing else, and answers nil for anything
+      # it cannot settle — a computed target, an unmodelled option, a receiver whose class names no view
+      # directory. Nil leaves the site exactly as it was, taint included.
+      #
+      # @return whether an edge took the row's taint with it
+      def callee_edge_taken?(node, row)
+        return false if row.callee.nil? || !CalleeRule.site_rule?(row.callee)
+
+        callee = CalleeRule.site(row.callee, node, owner_class: @owner_class, unit_key: @method_name)
+        return false if callee.nil?
+
+        @edges << FileCollection::Edge.new(
+          receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false,
+          taint_if_unresolved: row.taint ? [row.taint, row.key].freeze : nil
+        )
+        !row.taint.nil?
+      end
+
+      # The UNIT callee rules (#1048): an edge a plugin declares for a body that made no call at all.
+      # Rails' implicit render is the whole of the case — an action that falls off its end renders
+      # `<controller>/<action>` — so the producing fact is the ABSENCE of a `responds:` row, which only a
+      # finished unit scan can observe.
+      #
+      # Contributes an edge and nothing else. A controller's private helper gets one too, no unit answers
+      # it, and the unit is byte-identical to what it was: no label, no taint, nothing to be wrong about.
+      def apply_unit_callees
+        return if @responded || @singleton || @owner_class.nil? || @method_name.nil?
+
+        rows = @plugin_facts.unit_callee_rows
+        return if rows.empty?
+
+        rows.each do |row|
+          next unless @plugin_facts.descends_from?(@owner_class, row.receiver)
+
+          callee = CalleeRule.unit(row.callee, owner_class: @owner_class, unit_key: @method_name)
+          next if callee.nil?
+
+          @edges << FileCollection::Edge.new(
+            receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false
+          )
+        end
+      end
+
+      # Which lane a plugin row's labels land in (#1048).
+      #
+      # A **discharging** row is proven. ADR-103 WD6 grants `discharge: true` only to a plugin the engine
+      # BUNDLES, gated by `make check-plugins`, and what the grant means is that the row is Rigor's own
+      # audited statement about a framework method — the same kind of artifact as a `data/effects/core.yml`
+      # row, which has always been proven. The catalogue is not proven because the analyzer read
+      # `Net::HTTP.get`'s body; it is proven because a reviewer signed off on what that method does. A row
+      # the engine already trusts enough to declare the SITE exhaustive is a row it trusts enough to say
+      # what the site does, and holding the two apart is what made `views: strict` and `views: lenient`
+      # bound the same thing (#393).
+      #
+      # Everything else stays declared, which is the whole of the separation that matters: a third-party
+      # plugin's row is demoted to non-discharging at load, and the project's own `effects.attribution:`
+      # table ({#attribute}) never discharged in the first place. A claim nobody audited can still never
+      # manufacture a finding.
+      def record_plugin_labels(row, labels)
+        return add(Origin.plugin(row.key), labels) if row.discharge?
 
         add_declared(Origin.plugin(row.key), labels)
-        # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
-        # nothing about the template, which is not an effect unit yet (ADR-103 WD11).
-        taint(row.taint, row.key) if row.taint
-        taint("plugin-attribution", row.key) unless row.discharge?
-        row
       end
 
       def plugin_row(node, record)

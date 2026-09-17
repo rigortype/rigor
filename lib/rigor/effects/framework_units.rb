@@ -144,7 +144,7 @@ module Rigor
         selectors.map do |selector|
           row = framework_row(class_name, selector, singleton, plugin_facts, own_units)
           unit("#{class_name}#{singleton ? '.' : '#'}#{selector}", edges,
-               declared_bundles(read, row), causes(row))
+               proven_bundles(read, row), causes(row))
         end
       end
 
@@ -174,7 +174,13 @@ module Rigor
         own_units.key?(key) && !own_units[key]
       end
 
-      def declared_bundles(read, row)
+      # #1048 — a synthetic unit's labels land in the same lane the call site's would. Both halves come
+      # from a FIRST-PARTY BUNDLED plugin's discharging row: `ActiveRecord::Base#save` is `io.db.write`
+      # because a reviewer in this repository said so, and the uniqueness validator's `SELECT` because
+      # the plugin read the app's own `validates … uniqueness: true`. A rule that answered `proven` at
+      # `user.save` and `declared` on the `User#save` row a reviewer actually reads would be two
+      # spellings of one fact.
+      def proven_bundles(read, row)
         bundles = read ? read.dup : {}
         bundles[Origin.plugin(row.key)] = row.labels if row
         bundles
@@ -195,16 +201,16 @@ module Rigor
         names.flat_map { |name| macros[name] || [] }.uniq
       end
 
-      # The uniqueness validator's own query. It rides the DECLARED lane with no taint, exactly as every
-      # other first-party plugin contribution does (ADR-103 WD6): the plugin read the app's own
-      # `validates … uniqueness: true` and knows what Rails does with it, but the analyzer did not read a
-      # body, so this is a trusted claim rather than a proof.
+      # The uniqueness validator's own query — proven with no taint, exactly as every other first-party
+      # bundled contribution is since #1048 (ADR-103 WD6): the plugin read the app's own
+      # `validates … uniqueness: true` and is Rigor's own reviewed statement about what Rails does with
+      # it, which is the same standing a `data/effects/core.yml` row has.
       def uniqueness_summary(class_name)
         { Origin.plugin("#{class_name}:uniqueness-validator") => IO_DB_READ }
       end
 
-      def unit(key, edges, declared = nil, causes = [])
-        summary = Summary.new(declared_bundles: declared || {}, exhaustive: causes.empty?, causes: causes)
+      def unit(key, edges, bundles = nil, causes = [])
+        summary = Summary.new(bundles: bundles || {}, exhaustive: causes.empty?, causes: causes)
         [key, summary, edges]
       end
 
@@ -214,7 +220,7 @@ module Rigor
       end
 
       private_class_method :active_record_units, :mailer_units, :triggers, :framework_row, :replaced?,
-                           :declared_bundles, :causes, :callbacks, :uniqueness_summary, :unit, :edge_to
+                           :proven_bundles, :causes, :callbacks, :uniqueness_summary, :unit, :edge_to
     end
   end
 end

@@ -71,6 +71,17 @@ evidence rather than faking discrimination with a fixture that cannot fail.
   genuine nominal source when the tier under test is RBS dispatch.
 - **`BUNDLE_PATH` is the relative `vendor/bundle`**, so a Flake command with cwd outside the repo
   falls back to host gems and dies on a native-extension mismatch. `BUNDLE_GEMFILE` does not fix it.
+- **`rigor check` is only an oracle for the tree it was loaded from.** `exe/rigor` puts the `lib/`
+  beside it first on the load path, so the path you typed picks the engine, not the branch you are
+  on: `<main clone>/exe/rigor` run from a worktree analyses `master`, and a bare `rigor` outside
+  `bundle exec` runs whatever release is installed on the host. Neither errors, and every one of them
+  prints the same `--version`. A spec-style `Analysis::Runner` harness in the worktree and a CLI
+  resolved this way then disagree on exactly the behaviour the branch changes, and "the CLI is silent
+  where the harness fires, even with `--no-cache`" reads as an engine or worker-pool gap. It is not
+  one: a same-tree `Runner`, `check --no-cache --workers=0` and `--workers=2` report the same
+  diagnostics (#1029's fixtures, cold and warm). Before diffing the two, prove they share a tree —
+  `bundle exec ruby -e 'require "rigor/cli"; puts $LOADED_FEATURES.grep(%r{rigor/cli\.rb$})'` under
+  the same `BUNDLE_GEMFILE` — or add a control call that only the branch answers.
 
 The rule that covers all of them: **when a probe says "no", prove the harness can say "yes" first.**
 Pair every silence probe with a control that must fire. A fixture built on an undefined class name

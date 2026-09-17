@@ -173,10 +173,14 @@ is correct.
   envelope for is exhaustive and tells you nothing, so it is
   left bare rather than called pure.
 - The method must not **already carry a bound of its own**.
-  If your `sig/` (or an rbs-inline `# @rbs %a{…}`) declares
-  what this method may do, that is a contract you wrote about
-  this body; sig-gen will not replace it with an inference
-  about the same body.
+  An annotation on the method or on its class — in `sig/` or
+  as an rbs-inline `# @rbs %a{…}` — or an `effects.envelopes:`
+  stanza selecting it by `namespace:` or by `match:`, is a
+  contract you wrote about this body; sig-gen will not replace
+  it with an inference about the same body. A bound whose
+  label is misspelled counts too: it bounds nothing, but
+  overwriting it would delete the annotation the
+  `effect.unknown-label` report points at.
 - The `≤` lane must be **empty**. A callee that states its
   own bound puts that claim in your method's declared lane
   without proving anything, so `rigor effects` shows

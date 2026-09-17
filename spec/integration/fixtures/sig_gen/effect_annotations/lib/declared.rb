@@ -11,5 +11,9 @@ module Annotated
     def persist
       3
     end
+
+    def typoed
+      4
+    end
   end
 end

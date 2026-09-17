@@ -20,18 +20,27 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
   after { FileUtils.remove_entry(root) }
 
-  def config_file(effects:)
+  def config_file(effects:, inline: false)
     body = +"paths:\n  - lib\nsignature_paths:\n  - sig\n"
+    if inline
+      body << <<~YAML
+        plugins:
+          - gem: rigor-rbs-inline
+            id: rbs-inline
+            config:
+              require_magic_comment: false
+      YAML
+    end
     body << "effects:\n  tolerated:\n    - telemetry\n" if effects
     path = File.join(root, ".rigor.yml")
     File.write(path, body)
     path
   end
 
-  def run(*argv, effects: true)
+  def run(*argv, effects: true, inline: false)
     out = StringIO.new
     err = StringIO.new
-    status = described_class.new(argv: argv + ["--config=#{config_file(effects: effects)}"],
+    status = described_class.new(argv: argv + ["--config=#{config_file(effects: effects, inline: inline)}"],
                                  out: out, err: err).run
     [status, out.string, err.string]
   end
@@ -61,6 +70,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(rows.fetch("via_gem").fetch("effect_reason")).to eq("sig.effect.withheld-unclaimed-callee")
     expect(rows.fetch("u").fetch("effect_reason")).to eq("sig.effect.withheld-unclaimed-callee")
     expect(rows.fetch("store").fetch("effect_reason")).to eq("sig.effect.withheld-declared")
+    expect(rows.fetch("typoed").fetch("effect_reason")).to eq("sig.effect.withheld-declared")
   end
 
   it "names the withheld reasons once on stderr in text mode" do
@@ -68,8 +78,43 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(err).to include("sig.effect.withheld-tolerated: 1")
     expect(err).to include("sig.effect.withheld-non-exhaustive: 1")
-    expect(err).to include("sig.effect.withheld-declared: 2")
+    expect(err).to include("sig.effect.withheld-declared: 3")
     expect(err).to include("sig.effect.withheld-unclaimed-callee: 3")
+  end
+
+  # ADR-45's whole-run cache serves the propagated table without analysing a file, so nothing on the
+  # per-file path runs on the second invocation — including the one that used to be the only builder of
+  # the envelope index. A gate that exists only on a cold run is a gate that does not exist: the same
+  # command would withhold the first time a user ran it and emit the second. This is the class of defect
+  # `project_warm_run_fast_path_skips_appended_diagnostics` records, so the emission is judged both ways.
+  describe "on a warm whole-run cache hit" do
+    def reasons(*argv, **)
+      _status, out, = run(*argv, "--format=json", **)
+      JSON.parse(out).fetch("candidates").to_h { |row| [row["method"], row["effect_reason"]] }
+    end
+
+    it "still withholds from a method whose sig/ declaration states a bound" do
+      cold = reasons("--print")
+      warm = reasons("--print")
+      third = reasons("--print")
+
+      expect(cold.fetch("store")).to eq("sig.effect.withheld-declared")
+      expect(warm.fetch("store")).to eq("sig.effect.withheld-declared")
+      expect(third.fetch("store")).to eq("sig.effect.withheld-declared")
+    end
+
+    # The rbs-inline half is the one a warm miss would actually WRITE: the annotation lives in the `.rb`
+    # file, so the writer's `.rbs` target carries none and the left-unreadable rule does not catch it.
+    it "still withholds from the rbs-inline spelling" do
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+
+      cold = reasons("--print", inline: true)
+      warm = reasons("--print", inline: true)
+
+      expect(cold.fetch("persist")).to eq("sig.effect.withheld-declared")
+      expect(warm.fetch("persist")).to eq("sig.effect.withheld-declared")
+    end
   end
 
   # The cache is `rigor check`'s, reached through the same factory, so the flag that turns it off is

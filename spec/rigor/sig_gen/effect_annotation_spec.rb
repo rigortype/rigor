@@ -21,7 +21,18 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
   # `tolerated: [telemetry]` is what makes `Annotated::Chatty#note` the fourth-invariant case: its whole
   # proven footprint (`io`, `telemetry`) arrives through one `Logger#info` origin the policy discharges,
   # so the JUDGMENT reads as clean as `Annotated::Pure#label` does and the RECORD does not.
-  def configuration(effects: { "tolerated" => ["telemetry"] }, inline: false)
+  # The `match:`-selected stanza the envelope index deliberately drops. `lib/presented.rb` is the only
+  # file it names, so it bounds exactly one class and every other expectation in this file is untouched.
+  def match_envelope
+    { "match" => "lib/presented.rb", "effect" => ["io.db"] }
+  end
+
+  def default_effects
+    { "tolerated" => ["telemetry"], "envelopes" => [match_envelope] }
+  end
+
+  def configuration(effects: :default, inline: false)
+    effects = default_effects if effects == :default
     data = { "paths" => ["lib"], "signature_paths" => ["sig"] }
     data["effects"] = effects unless effects == :absent
     # `Configuration.new` never auto-wires `rigor-rbs-inline` (only `Configuration.load` does), so the
@@ -42,14 +53,20 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
     end
   end
 
-  def candidates(root, envelopes: false, effects: { "tolerated" => ["telemetry"] }, inline: false)
+  def candidates(root, envelopes: false, effects: :default, inline: false)
+    effects = default_effects if effects == :default
     config = configuration(effects: effects, inline: inline)
     annotator =
       if effects == :absent
         nil
       else
         table, index = analysis(root, config)
-        described_class::Annotator.new(table: table, envelopes: envelopes, envelope_index: index)
+        described_class::Annotator.new(
+          table: table, envelopes: envelopes, envelope_index: index,
+          config_envelopes: Rigor::Effects::ConfigEnvelopes.build(
+            entries: config.effects_envelopes, registry: Rigor::Effects::Registry.for_configuration(config)
+          )
+        )
       end
     Dir.chdir(root) do
       Rigor::SigGen::Generator.new(configuration: config, paths: ["lib"], effect_annotator: annotator).run
@@ -135,9 +152,43 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
       expect(row.effect_reason).to eq(:withheld_declared)
     end
 
+    # `EnvelopeIndex#[]` refuses a ⊤ envelope, and rightly: a bound that bounds nothing must not be
+    # IMPORTED at a call site. Emission asks the other question. The author wrote about this method and
+    # got the label wrong; `%a{pure}` written over it would delete the very annotation
+    # `effect.unknown-label` exists to point at.
+    it "withholds from a method whose authored bound names an unknown label" do
+      row = rows.fetch("Annotated::Declared#typoed")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_declared)
+    end
+
+    # A `match:` stanza never reaches the envelope index — a path glob is a fact about where a class is
+    # defined, which a per-file collection window cannot see. A sig-gen candidate carries its defining
+    # file, so emission can answer what import cannot.
+    it "withholds from a method bounded by a match:-selected effects.envelopes: entry" do
+      row = rows.fetch("Annotated::Presented#title")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_declared)
+    end
+
+    # The plugin class needs registering by hand, once per process. The suite pervasively calls
+    # `Rigor::Plugin.unregister!` while `require` is a once-per-process no-op, so a shard that runs this
+    # example after one of those — and never alongside `generator_spec`, which registers it for its own
+    # ADR-93 example — reaches the loader with an emptied registry, ingests no inline annotation, and
+    # would then assert the wrong thing quietly. `generator_spec` and `cli_spec`'s `:rbs_inline_autowire`
+    # context do the same dance for the same reason.
     it "withholds from the rbs-inline spelling of the same bound" do
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+
       row = by_key(candidates(fixture, inline: true)).fetch("Annotated::Declared#persist")
 
+      # The precondition, asserted rather than assumed: ADR-93 synthesises `def persist: () -> untyped`
+      # from the annotation-only comment, so a `declared_return_rbs` of `untyped` is proof the inline
+      # lane actually ran. Without it a plugin that failed to load looks exactly like a passing test.
+      expect(row.declared_return_rbs).to eq("untyped")
       expect(row.annotations).to be_empty
       expect(row.effect_reason).to eq(:withheld_declared)
     end
@@ -165,7 +216,8 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
       expect(rows.values_at("Annotated::Chatty#note", "Annotated::Opaque#dispatch",
                             "Annotated::Zoo#via_envelope", "Annotated::Zoo#via_gem",
                             "Annotated::Caller#go", "Annotated::Use3#u",
-                            "Annotated::Declared#store").map(&:annotations)).to all(be_empty)
+                            "Annotated::Declared#store", "Annotated::Declared#typoed",
+                            "Annotated::Presented#title").map(&:annotations)).to all(be_empty)
     end
   end
 
@@ -233,8 +285,23 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
       Dir.chdir(root) do
         runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
                                              collect_stats: false, workers: 0)
+        guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule == "effect.envelope-exceeded" }
+      end
+    end
+
+    # `effect.envelope-exceeded` specifically, not every `effect.*`: the fixture deliberately carries one
+    # `%a{rigor:v1:effect bogus.nonsense}`, so an `effect.unknown-label` is an expected constant of this
+    # tree rather than something a write could introduce. Pinned as such below so the narrowing cannot
+    # quietly absorb a second finding.
+    it "reports exactly the one effect finding the fixture is built to carry" do
+      write_all(envelopes: true)
+      all = Dir.chdir(root) do
+        runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil,
+                                             collect_stats: false, workers: 0)
         guarded_run(runner, ["lib"]).diagnostics.select { |d| d.rule.start_with?("effect.") }
       end
+
+      expect(all.map(&:rule)).to eq(["effect.unknown-label"])
     end
 
     # The round trip the acceptance criteria turns on: what sig-gen wrote is read back as an ENFORCED

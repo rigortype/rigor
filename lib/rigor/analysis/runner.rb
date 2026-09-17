@@ -107,13 +107,23 @@ module Rigor
         @effect_table || Effects::EffectTable.empty
       end
 
-      # ADR-103 WD9 (#391) — the envelope index this run built, for `rigor sig-gen`'s annotation emission
-      # to consult. Public for the same reason {#effect_table} is: a consumer outside the diagnostic
-      # stream needs what the run already computed, and rebuilding it would read a different set of
-      # strata (the accepted signatures and the rbs-inline virtual RBS both come from the built
-      # environment). Empty until a collecting run has resolved one.
+      # ADR-103 WD9 (#391) — the envelope index this run resolved, for `rigor sig-gen`'s annotation
+      # emission to consult. Public for the same reason {#effect_table} is: a consumer outside the
+      # diagnostic stream needs what the run already computed, and rebuilding it from configuration
+      # alone would read a narrower set of strata — the accepted signatures and the rbs-inline virtual
+      # RBS both come from the built environment.
+      #
+      # Built on demand when the run never analysed a file. A WARM whole-run cache hit serves the
+      # propagated table from cache, so {#analyze_with_effects} — the only caller of
+      # {#effect_envelope_index} — never runs and the ivar stays nil. Returning an empty index there
+      # would silently drop sig-gen's "the author already declared a bound" gate on exactly the runs a
+      # user makes most often: the same `sig-gen` invocation would withhold on its first run and emit on
+      # its second. `@run_environment` is resolved before the cache is consulted, so the warm build reads
+      # the same strata the cold one does.
       def effect_envelopes
-        @effect_envelope_index || Effects::EnvelopeIndex.empty
+        return @effect_envelope_index if @effect_envelope_index
+
+        effect_envelope_index(@run_environment)
       end
 
       # ADR-103 WD2 / WD6 / WD10 / #387 — the loaded plugins' effect contributions, compiled once per

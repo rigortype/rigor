@@ -4,5 +4,10 @@ module Annotated
   class Declared
     %a{rigor:v1:effect io.db}
     def store: () -> untyped
+
+    # A bound that bounds nothing: the label is not in the vocabulary, so the tag reads as TOP. The
+    # author still wrote about this method, which is the only question emission may ask here.
+    %a{rigor:v1:effect bogus.nonsense}
+    def typoed: () -> untyped
   end
 end

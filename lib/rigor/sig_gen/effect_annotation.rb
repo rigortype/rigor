@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "../effects/config_envelopes"
 require_relative "../effects/label_set"
 require_relative "../effects/method_key"
 require_relative "../effects/summary"
@@ -17,11 +18,14 @@ module Rigor
     #
     # The gates, in order:
     #
-    # 0. **Already declared** — the method's own signature (or its class's, or `effects.envelopes:`, or
-    #    an rbs-inline `# @rbs %a{…}`) states a bound. The author has spoken and sig-gen has nothing to
-    #    add; writing its own answer over that would silently replace a contract with an inference.
-    #    `withheld-declared`. This is a DIFFERENT lane from gate 5: an envelope on the method itself goes
-    #    to {Effects::EnvelopeCheck} and never enters the summary's `≤` lane, so the table cannot see it.
+    # 0. **Already declared** — the method's own signature, its class's, an `effects.envelopes:` entry
+    #    (by `namespace:` OR by `match:`), or an rbs-inline `# @rbs %a{…}` states a bound. The author has
+    #    spoken and sig-gen has nothing to add; writing its own answer over that would silently replace a
+    #    contract with an inference. `withheld-declared`. This is a DIFFERENT lane from gate 5: an
+    #    envelope on the method ITSELF goes to {Effects::EnvelopeCheck} and never enters the summary's
+    #    `≤` lane, so the table cannot see it. An annotation carrying an unknown label counts: it reads
+    #    as ⊤ and bounds nothing, but the author still wrote about this method, and replacing their typo
+    #    with `%a{pure}` would delete the only thing `effect.unknown-label` has to point at.
     # 1. **No summary** — the method is not an effect unit this run collected. Nothing is emitted and nothing
     #    is reported: the absence is about the run, not about the method.
     # 2. **Non-exhaustive** ({Effects::Summary#exhaustive?} false) — the summary reads "these effects, and
@@ -108,30 +112,68 @@ module Rigor
       # is on, and `nil` otherwise — which is what makes effects-off output byte-identical to a run before
       # this feature existed.
       class Annotator
+        NO_ENTRIES = [].freeze
+        private_constant :NO_ENTRIES
+
         # @param envelope_index — the run's {Effects::EnvelopeIndex}, so
-        #   gate 0 can see a bound the author already wrote. `nil` skips that gate.
-        def initialize(table:, envelopes: false, envelope_index: nil)
+        #   gate 0 can see a bound the author already wrote. `nil` skips that half of the gate.
+        # @param config_envelopes — the project's
+        #   `effects.envelopes:` entries. Passed SEPARATELY from the index because the index drops every
+        #   entry without a `namespace:` (it serves call-site import, and a `match:` glob is a fact about
+        #   where a class is defined that a per-file collection window cannot see). Emission can see it:
+        #   a sig-gen candidate carries the defining file it came from, which is exactly what
+        #   {Effects::ConfigEnvelopes.selects?} matches a `match:` entry against.
+        def initialize(table:, envelopes: false, envelope_index: nil, config_envelopes: NO_ENTRIES)
           @table = table
           @envelopes = envelopes
           @envelope_index = envelope_index
+          @config_envelopes = config_envelopes
           freeze
         end
 
+        # @param path — the `.rb` file the def came from, for a `match:`-selected
+        #   `effects.envelopes:` entry.
         # @return `[Array<String>, Symbol|nil]` — see {EffectAnnotation.decide}.
-        def annotate(class_name:, method_name:, kind:)
+        def annotate(class_name:, method_name:, kind:, path: nil)
           key = EffectAnnotation.key_for(class_name, method_name, kind)
           return [[], nil] if key.nil?
 
-          EffectAnnotation.decide(@table[key], envelopes: @envelopes,
-                                               declared: declared?(class_name, method_name, kind))
+          EffectAnnotation.decide(
+            @table[key], envelopes: @envelopes,
+                         declared: declared?(class_name, method_name, kind, path)
+          )
         end
 
         private
 
-        def declared?(class_name, method_name, kind)
+        def declared?(class_name, method_name, kind, path)
+          annotated?(class_name, method_name, kind) || config_selected?(class_name, path)
+        end
+
+        def annotated?(class_name, method_name, kind)
           return false if @envelope_index.nil?
 
-          !@envelope_index[class_name, kind == :singleton, method_name.to_s].nil?
+          @envelope_index.annotated?(class_name, kind == :singleton, method_name.to_s)
+        end
+
+        # `namespace:` entries are answered by the index too; asking here as well costs one scan over a
+        # handful of entries and keeps the `match:` half from being a second, differently-shaped answer.
+        def config_selected?(class_name, path)
+          return false if @config_envelopes.empty? || class_name.nil?
+
+          paths = [path, relative_path(path)].compact.uniq
+          @config_envelopes.any? { |entry| Effects::ConfigEnvelopes.selects?(entry, class_name, paths) }
+        end
+
+        # A `match:` glob is project-relative, and a candidate's path is whatever the invocation named —
+        # relative when `paths:` supplied it, absolute when the user typed one. Both spellings are tried
+        # rather than one normalised: `Dir.pwd` is not guaranteed to be the project root either.
+        def relative_path(path)
+          return nil if path.nil?
+
+          expanded = File.expand_path(path.to_s)
+          root = "#{File.expand_path(Dir.pwd)}#{File::SEPARATOR}"
+          expanded.start_with?(root) ? expanded.delete_prefix(root) : nil
         end
       end
     end

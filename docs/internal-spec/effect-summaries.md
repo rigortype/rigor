@@ -231,6 +231,8 @@ The subclass index resolves each as-written superclass to a single parent — th
 
 An edge that reaches no project definition is **dropped**, not tainted: most such calls are ordinary inherited ones the catalogue has no row for, and tainting them would make the bit carry no information.
 
+`EnvelopeIndex` serves the call-site import question and so drops entries without a `namespace:` and refuses a ⊤ bound; an emitter asking "did the author write about this method" needs neither restriction, and asks `EnvelopeIndex#annotated?` plus `ConfigEnvelopes.selects?` against the candidate's own defining file. It must also be resolvable on a run that analysed no file: a warm whole-run cache hit serves the propagated table directly, so the index is built on demand from the run's resolved environment rather than left empty.
+
 It is this step that settles the **unclaimed** bit (#391). An unclaimed non-`super` edge whose *step 1* resolution — the receiver's own ancestry — answers nothing marks its caller unclaimed. The question is deliberately step 1 alone and not "did the edge resolve to anything": step 2's closed-world override join makes an edge resolve whenever any project subclass overrides the selector, while the receiver's own dispatch target is still a body nobody described. `B.run` on a `B` typed as a project subclass of a gem class runs the gem's implementation whatever a sibling subclass overrides. `Propagator::Index#owner_resolved?` exposes step 1's answer, memoised on the same tuple as the targets.
 
 A **`super` edge** is resolved by the same walk with two differences, and each is load-bearing:

@@ -127,7 +127,8 @@ module Rigor
           next candidate unless Classification::EMITTABLE.include?(candidate.classification)
 
           annotations, reason = @effect_annotator.annotate(
-            class_name: candidate.class_name, method_name: candidate.method_name, kind: candidate.kind
+            class_name: candidate.class_name, method_name: candidate.method_name, kind: candidate.kind,
+            path: candidate.path
           )
           reason.nil? && annotations.empty? ? candidate : candidate.with_effect_annotation(annotations, reason)
         end

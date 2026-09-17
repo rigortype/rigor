@@ -3,6 +3,8 @@
 require "optionparser"
 
 require_relative "../configuration"
+require_relative "../effects/config_envelopes"
+require_relative "../effects/registry"
 require_relative "options"
 require_relative "../sig_gen"
 require_relative "command"
@@ -26,7 +28,7 @@ module Rigor
     # `spec/` directory exists), unions per-position arg types, and the generator emits the union per ADR-5 clause 2.
     # `--params=observed-strict` stays reserved-but-inert until the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
-    class SigGenCommand < Command
+    class SigGenCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
       VALID_MODES = %w[print diff write].freeze
@@ -100,9 +102,22 @@ module Rigor
           buffer: nil, cache_root: configuration.cache_path
         )
         runner.run((configuration.paths + paths).uniq)
-        SigGen::EffectAnnotation::Annotator.new(table: runner.effect_table,
-                                                envelopes: options.fetch(:effect_envelopes),
-                                                envelope_index: runner.effect_envelopes)
+        SigGen::EffectAnnotation::Annotator.new(
+          table: runner.effect_table, envelopes: options.fetch(:effect_envelopes),
+          envelope_index: runner.effect_envelopes, config_envelopes: config_envelopes(configuration)
+        )
+      end
+
+      # The project's `effects.envelopes:` entries, for gate 0's `match:` half. Built with a plain
+      # registry rather than the run's: gate 0 asks only WHETHER an entry selects this class, never what
+      # it bounds, so the vocabulary a plugin would add cannot change the answer.
+      def config_envelopes(configuration)
+        Effects::ConfigEnvelopes.build(
+          entries: configuration.effects_envelopes,
+          registry: Effects::Registry.for_configuration(configuration)
+        )
+      rescue StandardError
+        []
       end
 
       # The withheld half of the emission, counted the way {#report_skipped} counts a skip: a method that

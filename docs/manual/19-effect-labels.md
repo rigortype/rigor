@@ -214,6 +214,16 @@ rigor effects --pure
 436 methods on Redmine, and they are your `%a{pure}` candidates — the on-ramp to
 the last section of this chapter.
 
+You do not have to write them all out by hand. With the `effects:` block in
+place, `rigor sig-gen` annotates the methods in this set whose signature it is
+proposing anyway: `%a{pure}` above every method that is exhaustive, undischarged,
+free of surviving `≤` labels, not already carrying a bound you wrote, and calling
+nothing the analyzer had no description for; and, under `--effect-envelopes`, the labelled spelling for the methods that
+do have a footprint. A method that is clean only because `effects.tolerated:`
+says so is deliberately left bare — the annotation would travel to readers who
+do not share your tolerated list. See
+[handbook chapter 11](../handbook/11-sig-gen.md#emitting-effect-annotations).
+
 ### Asking it a question
 
 **By label.** The question this chapter opens with, in one command:

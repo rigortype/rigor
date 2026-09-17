@@ -720,3 +720,10 @@ override anywhere — has no wider declaration to find.
   reading from `void` / the RBS-literal case: `untyped` says nothing, so it is
   treated like no declaration at all and the inferred return is proposed. See
   the third dated paragraph in § "The inference-vs-RBS contradiction rule".
+- 2026-09-17 — #391 filled the annotation-emission slot this ADR reserved.
+  With the `effects:` opt-in on, sig-gen writes `%a{pure}` — and, under
+  `--effect-envelopes`, `%a{rigor:v1:effect …}` — from effect summaries that
+  are exhaustive and undischarged, and from no others; the `sig.effect.*`
+  telemetry names the withheld cases. The rules are normative in
+  [`effect-labels.md`](../type-specification/effect-labels.md) § Emission;
+  [ADR-103](103-effect-labels.md) WD9 is the working decision.

@@ -29,11 +29,19 @@ module Rigor
       # The lanes are kept **raw** here — a declared label a proven one already subsumes is dropped where
       # output is rendered ({LabelSet#excluding_subsumed_by}), never in the table, because a further join
       # has to see what was actually declared.
+      # `unclaimed` is the transitive reading of {Summary#unclaimed?}: true when this method, or anything
+      # it reaches, called something nothing described (#391). It is not a label, not a taint, and is read
+      # by `rigor sig-gen`'s annotation emission alone — not by the report, the snapshot, or any
+      # diagnostic.
       class Entry < Data.define(:key, :direct, :proven, :undischarged, :declared, :exhaustive, :causes,
-                                :edges)
-        def initialize(undischarged: nil, declared: nil, **rest)
+                                :edges, :unclaimed)
+        def initialize(undischarged: nil, declared: nil, unclaimed: false, **rest)
           super(undischarged: undischarged || rest.fetch(:proven), declared: declared || LabelSet::EMPTY,
-                **rest)
+                unclaimed: unclaimed ? true : false, **rest)
+        end
+
+        def unclaimed?
+          unclaimed
         end
 
         # The declared labels worth printing beside `proven` — the rendering rule, in one place so the

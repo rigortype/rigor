@@ -113,6 +113,13 @@ module Rigor
         )
       end
 
+      # Whether one entry selects a class — by its fully-qualified name for a `namespace:` entry, by any
+      # file that defines it for a `match:` one.
+      #
+      # Public since #391: `rigor sig-gen`'s emission asks the same question this module's own
+      # {.for_classes} asks, and asks it with a defining file it already has. It was private while
+      # {.for_classes} was the only caller; a second caller with the same inputs is not a reason to
+      # reimplement the predicate.
       def selects?(entry, class_name, paths)
         return namespace_match?(entry.namespace, class_name) if entry.namespace
 
@@ -177,7 +184,7 @@ module Rigor
         absolute.start_with?(root) ? absolute[root.length..] : path.to_s
       end
 
-      private_class_method :selects?, :match_segments?, :match_deep?, :files_by_class, :relativize
+      private_class_method :match_segments?, :match_deep?, :files_by_class, :relativize
     end
   end
 end

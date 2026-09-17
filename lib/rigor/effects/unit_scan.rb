@@ -133,6 +133,8 @@ module Rigor
         @edges = []
         @nested = []
         @delegates_upward = false
+        # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
+        @unclaimed = false
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
@@ -155,7 +157,7 @@ module Rigor
         walk(body)
         summary = Summary.new(
           bundles: @bundles, declared_bundles: @declared_bundles,
-          exhaustive: @causes.empty?, causes: @causes
+          exhaustive: @causes.empty?, causes: @causes, unclaimed: @unclaimed
         )
         [summary, @edges]
       end
@@ -545,7 +547,10 @@ module Rigor
         selector = literal_selector(node.arguments&.arguments&.first)
         return taint("dynamic-send") unless selector
 
-        push_edge(record, selector, node.receiver.nil?)
+        # A literal `send` is an ordinary call and nothing bounded it, so it is unclaimed on the same
+        # terms as {#record_edge}'s.
+        push_edge(record, selector, node.receiver.nil?, unclaimed: true)
+        @unclaimed = true if !node.receiver.nil? && !edge_recordable?(record)
       end
 
       def literal_selector(node)
@@ -571,7 +576,13 @@ module Rigor
       # such calls are ordinary inherited ones the catalogue simply has no row for.
       def record_edge(node, record, bound = nil)
         self_call = node.receiver.nil?
-        push_edge(record, node.name.to_s, self_call)
+        # #391 — an uncatalogued, unbounded site is a site whose callee nobody described. Whether that
+        # matters is the propagator's to decide: if the edge lands on a project definition the closure
+        # reads that definition's own summary and the site is fully accounted for. So the bit travels ON
+        # the edge, and the unit is marked directly only where there is no edge to carry it.
+        unclaimed = bound.nil?
+        push_edge(record, node.name.to_s, self_call, unclaimed: unclaimed)
+        @unclaimed = true if unclaimed && !self_call && !edge_recordable?(record)
         return unless self_call && (record.nil? || !record.resolved)
         # An envelope on this unit's own class for the very selector the dispatcher declined is the
         # project declaring the method and stating its bound; a discharging plugin row on the framework
@@ -583,12 +594,20 @@ module Rigor
         taint("unresolved-self-call", node.name.to_s)
       end
 
-      def push_edge(record, selector, self_call)
-        return if record.nil? || record.receiver_class.nil?
+      def push_edge(record, selector, self_call, unclaimed: false)
+        return unless edge_recordable?(record)
 
         @edges << FileCollection::Edge.new(
-          receiver_class: record.receiver_class, kind: record.kind, selector: selector, self_call: self_call
+          receiver_class: record.receiver_class, kind: record.kind, selector: selector,
+          self_call: self_call, unclaimed: unclaimed
         )
+      end
+
+      # Whether {#push_edge} has a receiver to key an edge on. A call whose receiver the typer never
+      # named carries nothing the propagator can resolve, so an unclaimed site of that shape marks the
+      # unit directly instead of handing the bit to an edge that will not exist (#391).
+      def edge_recordable?(record)
+        !record.nil? && !record.receiver_class.nil?
       end
 
       def visit_block_argument(node)

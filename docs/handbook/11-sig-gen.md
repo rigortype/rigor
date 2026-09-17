@@ -119,6 +119,115 @@ The `sig.skipped.*` reasons are:
   the skipped method is reported on stderr, and it is worth
   reporting to us.
 
+## Emitting effect annotations
+
+If your `.rigor.yml` carries an `effects:` block, `sig-gen`
+writes one more thing: `%a{pure}`, the purity annotation rbs
+and Steep already understand, above the methods whose whole
+footprint Rigor read and found to be nothing.
+
+```ruby
+class Label
+  def render
+    parts = []
+    parts << "a"
+    parts.join
+  end
+end
+```
+
+```
+$ rigor sig-gen
+# lib/label.rb
+class Label
+  # [new]
+  %a{pure}
+  def render: () -> String
+end
+```
+
+Five conditions have to hold before an annotation is written,
+and every one of them exists to keep a wrong one off the
+page. An emitted annotation is not a hint — the effects opt-in reads
+it back as an **envelope** and enforces it on the method and
+on everything the method reaches, so a `%a{pure}` `sig-gen`
+invented would put `effect.envelope-exceeded` on code that
+is correct.
+
+- The summary must be **exhaustive**: every call the method
+  reaches was resolved. A summary that is not reads "these
+  effects, and possibly more", which is exactly the claim an
+  envelope must not make.
+- The summary must be **undischarged**: nothing in the
+  method's footprint may be invisible only because
+  `effects.tolerated:` says to ignore it. A method whose
+  whole footprint is a tolerated `telemetry` call looks
+  clean to *your* project and to nobody else — not to a
+  consumer reading your shipped `sig/`, and not to your own
+  `--no-tolerated-effects` audit.
+- Every callee must be **described by something**: a
+  catalogue row, a plugin, an envelope, or a definition in
+  your own project. "Every call resolved" and "every callee's
+  footprint is known" are different questions. A method whose
+  body is one call into a gem nobody has written a row or an
+  envelope for is exhaustive and tells you nothing, so it is
+  left bare rather than called pure.
+- The method must not **already carry a bound of its own**.
+  An annotation on the method or on its class — in `sig/` or
+  as an rbs-inline `# @rbs %a{…}` — or an `effects.envelopes:`
+  stanza selecting it by `namespace:` or by `match:`, is a
+  contract you wrote about this body; sig-gen will not replace
+  it with an inference about the same body. A bound whose
+  label is misspelled counts too: it bounds nothing, but
+  overwriting it would delete the annotation the
+  `effect.unknown-label` report points at.
+- The `≤` lane must be **empty**. A callee that states its
+  own bound puts that claim in your method's declared lane
+  without proving anything, so `rigor effects` shows
+  `[] ≤ [io.net.http]` where the proven lane is empty. Rigor
+  will not write `%a{pure}` over a claim it never proved
+  away.
+
+`--effect-envelopes` adds the labelled spelling,
+`%a{rigor:v1:effect io.db, nondet.time}`, for methods that
+do have a footprint. It is a separate flag because `%a{pure}`
+is the ecosystem's annotation and this one is Rigor's: a
+labelled envelope in your `sig/` is a Rigor-specific contract,
+and you should ask for it by name.
+
+Under `--write`, an annotation goes on the line above the
+declaration it binds. A declaration that **already** carries
+annotations is left byte-untouched and reported as
+`sig.effect.left-unreadable`: the writer cannot tell an
+annotation it wrote from one you wrote, and it has no grammar
+for merging two, so it will not rewrite that region. Decide
+what it should say and write it yourself.
+
+The `sig.effect.*` reasons are:
+
+- `sig.effect.emitted` — an annotation was rendered.
+- `sig.effect.withheld-tolerated` — the footprint is only
+  clean under `effects.tolerated:`.
+- `sig.effect.withheld-non-exhaustive` — some call the
+  method reaches could not be resolved.
+- `sig.effect.withheld-unclaimed-callee` — some call it
+  reaches resolved, and nothing anywhere says what that
+  callee does.
+- `sig.effect.withheld-declared` — the method already carries
+  an authored bound, or a label survives in the `≤` lane.
+- `sig.effect.left-unreadable` — the target declaration
+  already carries annotations, so nothing was written there.
+
+One limit worth knowing: annotations ride on the signature
+lines `sig-gen` proposes, so a method whose declaration is
+already exactly right gets none. An up-to-date `sig/` is
+therefore not annotated in place; the reader for those is
+`rigor effects --pure`, and writing them is still a hand
+edit.
+
+With no `effects:` block in `.rigor.yml`, none of this runs
+and the output is byte-for-byte what it was before.
+
 The three `sig.generated.*` identifiers
 (`sig.generated.new-file` / `new-method` / `tighter-return`)
 are emitted as JSON fields under `--format=json` so CI

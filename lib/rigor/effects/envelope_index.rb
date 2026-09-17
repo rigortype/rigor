@@ -135,6 +135,21 @@ module Rigor
         envelope
       end
 
+      # Whether ANY stratum carries an annotation for this key — ⊤ envelopes included.
+      #
+      # {#[]} is the import question and rightly refuses a ⊤ envelope: a bound that bounds nothing is not
+      # a bound. `rigor sig-gen`'s emission asks the other one (#391): an author who wrote
+      # `%a{rigor:v1:effect bogus.nonsense}` has still written about this method, and replacing their
+      # typo with an inferred `%a{pure}` would delete the only evidence that they meant to bound it — the
+      # `effect.unknown-label` report points at the annotation, and there would no longer be one.
+      def annotated?(owner, singleton, selector)
+        return false if owner.nil? || empty?
+
+        key = "#{owner}#{singleton ? '.' : '#'}#{selector}"
+        !(@method_envelopes[key] || @class_envelopes[owner] || config_envelope(owner) ||
+          @accepted[key]).nil?
+      end
+
       private
 
       # The first `namespace:` entry selecting `owner`, memoised per class name — one call site's owner

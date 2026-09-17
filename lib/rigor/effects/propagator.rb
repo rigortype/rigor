@@ -68,6 +68,7 @@ module Rigor
           targets = list.flat_map do |edge|
             resolved = index.targets_for(edge)
             taint_unresolved_super(state, caller_key, edge) if edge.super_call && resolved.empty?
+            mark_unclaimed(state, caller_key) if edge.unclaimed && !edge.super_call && !index.owner_resolved?(edge)
             resolved
           end.uniq.sort
           out[caller_key] = targets.freeze unless targets.empty?
@@ -95,6 +96,27 @@ module Rigor
         entry[:causes] << ["unresolved-super", edge.selector].freeze
       end
 
+      # #391 — an edge nothing bounded whose receiver's OWN ancestry holds no project definition: the
+      # callee's footprint was described by nobody, so the closure is "what the analyzer read", not
+      # "what the method does".
+      #
+      # The question is deliberately {Index#owner_resolved?} and NOT "did this edge resolve to nothing".
+      # An ordinary edge also joins every project subclass override of the selector (the closed-world
+      # join of ADR-103 WD4), so a receiver typed as a gem class a project subclass happens to override
+      # resolves non-empty while the receiver's own dispatch target is still undescribed — `B.run` on a
+      # `Base2 < Vendor::Client` reaches `Vendor::Client#run` at run time whatever `Sub2#run` does.
+      #
+      # Decided HERE for the same reason the `super` taint is: only the merged ancestry can say whether
+      # the edge resolves. Unlike that taint it is not a cause and does not touch exhaustiveness — every
+      # existing consumer reads exactly what it read before. Its one reader is sig-gen's emission, which
+      # must not write `%a{pure}` about a callee nobody described.
+      def mark_unclaimed(state, caller_key)
+        entry = state[caller_key]
+        return if entry.nil?
+
+        entry[:unclaimed] = true
+      end
+
       # Causes are carried as a Set through the fixpoint and flattened back to a sorted Array in
       # {build_entries}. A Set is what {absorb} needs: unioning one along an edge must cost the source's
       # size and allocate NOTHING when it adds nothing, and the array-concat-and-uniq it replaces
@@ -105,7 +127,8 @@ module Rigor
             proven: summary.proven,
             undischarged: discharge.inert? ? summary.proven : discharge.undischarged(summary.bundles),
             declared: summary.declared,
-            exhaustive: summary.exhaustive?, causes: Set.new(summary.causes)
+            exhaustive: summary.exhaustive?, causes: Set.new(summary.causes),
+            unclaimed: summary.unclaimed?
           }
         end
       end
@@ -164,6 +187,10 @@ module Rigor
           target[:exhaustive] = false
           changed = true
         end
+        if !target[:unclaimed] && source[:unclaimed]
+          target[:unclaimed] = true
+          changed = true
+        end
         causes = target[:causes]
         source[:causes].each { |cause| changed = true if causes.add?(cause) }
         changed
@@ -190,13 +217,14 @@ module Rigor
             declared: closed[:declared],
             exhaustive: closed[:exhaustive],
             causes: closed[:causes].sort_by { |cause, detail| [cause, detail.to_s] }.freeze,
-            edges: edges.fetch(key, NO_EDGES)
+            edges: edges.fetch(key, NO_EDGES),
+            unclaimed: closed[:unclaimed]
           )
         end
       end
 
-      private_class_method :resolve_edges, :taint_unresolved_super, :seed, :iterate, :reverse_edges,
-                           :absorb, :join_lane, :build_entries
+      private_class_method :resolve_edges, :taint_unresolved_super, :mark_unclaimed, :seed, :iterate,
+                           :reverse_edges, :absorb, :join_lane, :build_entries
 
       # The class graph a run's collections describe, and the edge resolution over it. Built once per
       # propagation; every lookup is a Hash read.
@@ -209,6 +237,9 @@ module Rigor
           @descendants = build_descendants(collection.superclasses)
           @descendant_closures = {}
           @targets = {}
+          # #391 — `{memo key => whether the receiver's own ancestry answered}`, filled by
+          # {#call_targets} so {#owner_resolved?} costs a Hash read rather than a second ancestor walk.
+          @owner_resolved = {}
         end
 
         # Every project method key `edge` may reach: the definition its ancestry resolves to, plus every
@@ -218,17 +249,36 @@ module Rigor
         # one such tuple is asked for once per call site in the project. `ApplicationRecord#save` alone is
         # thousands of sites on a Rails app, each of which used to re-walk the whole subclass forest.
         def targets_for(edge)
-          @targets[[edge.receiver_class, edge.kind, edge.selector, edge.super_call]] ||= begin
+          @targets[memo_key(edge)] ||= begin
             separator = edge.kind == :singleton ? "." : "#"
-            edge.super_call ? super_targets(edge, separator) : call_targets(edge, separator)
+            edge.super_call ? super_targets(edge, separator) : call_targets(edge, memo_key(edge), separator)
           end
+        end
+
+        # Whether the receiver's OWN ancestry holds a project definition of the selector — the half of
+        # {#targets_for} the closed-world subclass join hides (#391).
+        #
+        # `targets_for` answers "which project bodies may this edge reach", and for an effect closure the
+        # join is right: Ruby has no `final`, so a subclass override really can run. It is the wrong
+        # question for "is this callee described at all". A receiver typed as a class the project only
+        # subclasses dispatches into that class's own implementation, which lives in a gem or in core;
+        # that a project subclass overrides the same selector says nothing about it. Only emission asks
+        # this, and only to decline.
+        def owner_resolved?(edge)
+          targets_for(edge)
+          @owner_resolved.fetch(memo_key(edge), false)
         end
 
         private
 
-        def call_targets(edge, separator)
+        def memo_key(edge)
+          [edge.receiver_class, edge.kind, edge.selector, edge.super_call]
+        end
+
+        def call_targets(edge, memo_key, separator)
           targets = []
           owner = resolve_owner(edge.receiver_class, separator, edge.selector)
+          @owner_resolved[memo_key] = !owner.nil?
           targets << owner if owner
           descendant_closure(edge.receiver_class).each do |subclass|
             key = "#{subclass}#{separator}#{edge.selector}"

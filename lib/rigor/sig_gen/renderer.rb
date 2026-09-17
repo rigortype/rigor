@@ -76,7 +76,9 @@ module Rigor
                     "[tighter, was: #{candidate.declared_return_rbs}]"
                   end
             @out.puts("  # #{tag}")
-            @out.puts("  #{candidate.rbs}")
+            # Annotations first: an RBS annotation binds the declaration BELOW it, so `%a{pure}` printed
+            # after the `def` line would bind the next member — or nothing at all at the end of a class.
+            candidate.rbs_lines.each { |line| @out.puts("  #{line}") }
           end
           @out.puts("end")
         end
@@ -103,7 +105,7 @@ module Rigor
           @out.puts("--- #{candidate.path}: #{candidate.class_name}##{candidate.method_name}")
           declared = candidate.declared_return_rbs
           @out.puts("- def #{candidate.method_name}: () -> #{declared}") if declared
-          @out.puts("+ #{candidate.rbs}")
+          candidate.rbs_lines.each { |line| @out.puts("+ #{line}") }
           @out.puts
         end
       end
@@ -151,6 +153,21 @@ module Rigor
       def render_write_updated(result)
         @out.puts("updated #{result.target_path} (+#{result.applied.size}, " \
                   "skipped #{result.skipped.size} user-authored)")
+        render_left_unreadable(result)
+      end
+
+      # ADR-103 WD9 — the declarations whose annotation region the writer refused to rewrite. Named per
+      # method rather than counted: the fix is a human reading one existing annotation and deciding what
+      # it should say, and there is no count of those a reader could act on.
+      def render_left_unreadable(result)
+        return if result.left_unreadable.empty?
+
+        @out.puts("  left #{result.left_unreadable.size} existing annotation(s) byte-untouched " \
+                  "(sig.effect.left-unreadable):")
+        result.left_unreadable.each do |candidate|
+          @out.puts("    #{candidate.class_name}##{candidate.method_name} — " \
+                    "would have emitted #{candidate.annotations.join(' ')}")
+        end
       end
 
       def render_write_skipped(result)

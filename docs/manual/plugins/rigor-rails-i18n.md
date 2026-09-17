@@ -94,6 +94,10 @@ view templates containing lazy `t('.key')` calls.
   Default `rigor check` (sequential) is unaffected. The plugin's
   `load-error` rows no longer share this limitation: they are
   run-scoped disclosures, reported once per run on `.rigor.yml`.
+  They are `:warning`, so if you baselined one at its old position
+  that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 - **Pluralization is recognised but not validated** — `count:` is
   treated as a reserved option; whether the locale defines
   `:zero` / `:one` / `:other` is not checked.

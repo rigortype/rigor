@@ -638,7 +638,7 @@ module Rigor
         # model-file additions — so no priming walk is needed (it used to run the discover twice).
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
-        @load_errors << { key: :model_index_failed,
+        @load_errors << { key: "2-model-index-failed",
                           message: "model index build failed: #{e.class}: #{e.message}",
                           severity: :warning }
         nil
@@ -659,7 +659,7 @@ module Rigor
         # here.
         @schema_table = cache_for(:schema_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
-        @load_errors << { key: :schema_read_refused,
+        @load_errors << { key: "1-schema-read-refused",
                           message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
         nil
@@ -669,7 +669,7 @@ module Rigor
         # associations and table names off the discovered models, so this is a disclosure of REDUCED
         # capability rather than a failure — `:info`, the grade the plugins use for "here is what I
         # recognised", not `:warning`, the grade they use for "I could not run".
-        @load_errors << { key: :schema_file_missing,
+        @load_errors << { key: "1-schema-file-missing",
                           message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
                                    "`#{@structure_sql_file}`) not found#{REDUCED_MODE_SUFFIX}",
                           severity: :info }
@@ -677,7 +677,7 @@ module Rigor
       rescue StandardError => e
         # A schema that EXISTS but does not parse is a real, actionable problem — the user meant it to be
         # read. Reduced mode still applies, but the disclosure stays a warning.
-        @load_errors << { key: :schema_parse_failed,
+        @load_errors << { key: "1-schema-parse-failed",
                           message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
                                    "#{e.class}: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
@@ -701,6 +701,10 @@ module Rigor
       # The flag fixed the count per instance, but a fork-pool worker gets its OWN instance, so `--workers
       # N` re-multiplied it by N and each copy landed on that worker's first file — after #393 possibly an
       # `.erb` template unit, where a schema notice reads as a claim about a view.
+      # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
+      # (#1051), and the three schema outcomes — mutually exclusive, since `@schema_load_attempted` memoises
+      # the attempt — must still precede a model-index failure the way `@load_errors` records them. Keys are
+      # identities, never shown to the user, so the prefix costs nothing but the ordering.
       def disclose_load_errors
         @load_errors.each do |error|
           disclose_once(

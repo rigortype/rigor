@@ -636,6 +636,16 @@ module Rigor
         # definition-build failures the re-analysis demanded (#696) and the HKT-scan outcome, demanded
         # once more by the run itself (#784 — a rescued scan failure otherwise vanished with the worker).
         # The fork backend needs none of this: it re-analyses on the parent {WorkerSession} and drains it.
+        #
+        # Issue #1051, known exception: run-scoped disclosures a plugin registered from `#prepare` are NOT
+        # recovered here. There is no session to drain — this backend builds none on the coordinator — and
+        # `#prepare` deliberately does not run on the coordinator-side registry under pool mode, so a
+        # prepare-time disclosure lives only inside the Ractor that died with it. A disclosure registered
+        # from `#diagnostics_for_file` IS recovered, because the re-analysis below runs the coordinator-side
+        # plugin instances that {DiagnosticAggregator#plugin_run_disclosure_diagnostics} reads directly.
+        # Left as is: recovering the rest means running `#prepare` on the coordinator registry, which would
+        # re-publish every cross-plugin fact for a degrade, and this backend is off by default and today
+        # cannot complete a run at all (see the `TemplateUnits.empty` isolation bug filed alongside #1051).
         def reanalyze_degraded_in_process(degraded, results_by_path, source_files:)
           return if degraded.empty?
 

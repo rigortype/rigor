@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
+require "tempfile"
 require "tmpdir"
 
+require "rigor/analysis/baseline"
 require "rigor/analysis/runner"
 require "rigor/configuration"
 require "rigor/plugin"
@@ -145,6 +147,52 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
         pooled = run_with(dir, paths, plugin_class, "rigor-late-disclosing-plugin", workers: 2)
 
         expect(diag_keys(pooled)).to eq(diag_keys(sequential))
+      end
+    end
+  end
+
+  # Issue #1051 review — the position move is a BASELINE-VISIBLE change. `Analysis::Baseline` buckets by
+  # `(file, qualified_rule[, message])`, so an entry a project recorded while the disclosure still landed on
+  # a controller stops matching once the row moves to `.rigor.yml` and the row surfaces as new (and the
+  # rails-i18n / rails-routes ones are `:warning`, so it fails `--fail-on=warning`). The qualified rule is
+  # unchanged, so re-keying the entry to `.rigor.yml` is all a regenerated baseline does; this pins both
+  # halves so the upgrade note in the changelog and the plugin manuals stays true.
+  describe "a committed baseline against the new position" do
+    def disclosure_row
+      Rigor::Analysis::Diagnostic.new(
+        path: ".rigor.yml", line: 1, column: 1,
+        message: "rigor-activerecord: schema file `db/schema.rb` not found",
+        severity: :info, rule: "load-error", source_family: "plugin.activerecord"
+      )
+    end
+
+    def baseline_for(file)
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write(<<~YAML)
+          version: 1
+          ignored:
+            - file: #{file}
+              rule: plugin.activerecord.load-error
+              count: 1
+        YAML
+        f.flush
+        yield Rigor::Analysis::Baseline.load(f.path)
+      end
+    end
+
+    it "silences the row when the entry is keyed to .rigor.yml" do
+      baseline_for(".rigor.yml") do |baseline|
+        surfaced, silenced = baseline.filter([disclosure_row])
+        expect(silenced).to eq(1)
+        expect(surfaced).to be_empty
+      end
+    end
+
+    it "does not silence it when the entry is still keyed to the old file position" do
+      baseline_for("app/controllers/account_controller.rb") do |baseline|
+        surfaced, silenced = baseline.filter([disclosure_row])
+        expect(silenced).to eq(0)
+        expect(surfaced.map(&:path)).to eq([".rigor.yml"])
       end
     end
   end

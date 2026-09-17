@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "sig_gen/alias_index"
 require_relative "sig_gen/classification"
 require_relative "sig_gen/method_candidate"
 require_relative "sig_gen/observed_call"

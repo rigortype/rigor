@@ -265,6 +265,20 @@ idiomatic corpus → it is a strengthening, not a new discipline.
 - **Metrics:** wall time, total allocations (`ObjectSpace`), peak RSS, and
   diagnostic count (a *count* change flags an unintended behaviour shift —
   the byte-identical-diagnostics check ADR-44/45/46 already use).
+- **Sampling (added for #987):** the noisy metrics are sampled more than
+  once and reduced to the **lower** of the reps — `wall_s` and
+  `peak_rss_kb`, whose measured host spread (±7 %) is nearly as wide as
+  their band, so a single sample can flip the verdict either way. Runner
+  interference is one-sided (it only ever adds time and resident pages),
+  which is what makes `min` the right reducer rather than a median.
+  `allocations` and diagnostic count stay single-sample: they are
+  deterministic, and reducing them would hide a real nondeterminism.
+  **Each rep is a fresh process** — peak RSS is a per-process high-water
+  mark, so a second in-process run can only report the same or more, and a
+  warm rep's wall time is not comparable with the cold committed baseline.
+  `make bench-perf` stays one command (`tool/bench.rb --reps N`, default
+  2, spawns its own reps); the rule is recorded in `bench/baseline.json`'s
+  note so a recalibration measures the same way.
 - **Baseline + thresholds are committed, tunable artifacts.** A committed
   `bench/baseline.json` (per corpus, per metric) and a committed tolerance
   band (`bench/thresholds.yml` or co-located) — **both deliberately

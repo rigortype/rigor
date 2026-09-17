@@ -228,8 +228,17 @@ coverage:
 # Named `bench-perf` (not `bench`) so the target does not collide with the
 # `bench/` data directory — keeping the file's no-`.PHONY` convention and
 # its `check-*` / `test-*` hyphenated-target family.
+#
+# Still ONE command, but no longer one analysis: since #987 the script reps
+# each target `--reps` times (default 2), every rep in a fresh child process,
+# and gates on the LOWER of the reps for the noisy `wall_s` / `peak_rss_kb`
+# axes. Budget roughly N× the old runtime. `BENCH_ARGS` appends to the
+# invocation, so `make bench-perf BENCH_ARGS="--reps 1"` restores the old
+# cost for a quick local look (and the old single-sample noise with it).
+# The release gate runs the target bare, i.e. at the committed default.
+BENCH_ARGS ?=
 bench-perf:
-	bundle exec ruby tool/bench.rb --target lib
+	bundle exec ruby tool/bench.rb --target lib $(BENCH_ARGS)
 
 # ADR-103 WD13 / #409 effect-collection cost budget. Interleaved A/B of
 # `rigor check` with and without `effects:` over an external corpus target,

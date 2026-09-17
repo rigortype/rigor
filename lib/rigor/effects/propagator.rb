@@ -277,7 +277,7 @@ module Rigor
         private
 
         def memo_key(edge)
-          [edge.receiver_class, edge.kind, edge.selector, edge.super_call]
+          [edge.receiver_class, edge.kind, edge.selector, edge.super_call, edge.constant_receiver]
         end
 
         NEW_SELECTOR = "new"
@@ -316,11 +316,17 @@ module Rigor
         #   {RESERVED_CONSTRUCTOR_OWNERS}. `Class.new { … }` is not a constructor call on a project class
         #   and must never reach a project `#initialize`; a gem class the project only calls `new` on is
         #   undescribed exactly as it was, and stays unclaimed.
-        # - **no closed-world override join.** This is the `super` argument (see {#super_targets}), not the
-        #   ordinary-call one: `Const.new` names the class object it constructs, and `Sub#initialize` runs
-        #   only for `Sub.new`, which records its own edge. Joining it would put a proven label on the
-        #   caller that no execution of that call site can produce — the direction this project weighs
-        #   heaviest, since an emitted annotation is enforced.
+        # - the closed-world subclass join is **dropped for a written constant receiver, and only for one**.
+        #   `Base.new` names the class object it constructs, so `Sub#initialize` cannot run and joining it
+        #   would put a proven label on the caller that no execution of that site can produce — the `super`
+        #   argument (see {#super_targets}) rather than the ordinary-call one. But the edge is keyed on the
+        #   receiver's TYPE, and `self.class.new`, a `Singleton[Base]` local's `.new` and a receiver-less
+        #   `new` in a singleton body produce the identical tuple while genuinely constructing a subclass.
+        #   {FileCollection::Edge#constant_receiver} is what tells them apart, and every shape that is not
+        #   a written constant keeps the join — over `Sub#initialize` and over a subclass `Sub.new` alike.
+        # - an ancestry the scanner could not read ({FileCollection::OPAQUE_ANCESTOR} — a non-constant
+        #   superclass expression, an aliased `initialize`) declines, leaving the caller as unclaimed as it
+        #   was before this rule existed.
         #
         # @return the targets, or `nil` when the rewrite does not apply and ordinary resolution should run
         def constructor_targets(edge, memo_key)
@@ -328,15 +334,43 @@ module Rigor
           return nil if RESERVED_CONSTRUCTOR_OWNERS.include?(edge.receiver_class)
           return nil unless project_class?(edge.receiver_class)
           return nil if resolve_owner(edge.receiver_class, ".", NEW_SELECTOR)
+          return nil if opaque_ancestry?(edge.receiver_class)
 
           owner = resolve_owner(edge.receiver_class, "#", INITIALIZE_SELECTOR)
-          if owner
-            @owner_resolved[memo_key] = true
-            [owner].freeze
-          elsif empty_constructor?(edge.receiver_class)
-            @owner_resolved[memo_key] = true
-            NO_TARGETS
+          return nil unless owner || empty_constructor?(edge.receiver_class)
+
+          @owner_resolved[memo_key] = true
+          targets = owner ? [owner] : []
+          targets.concat(subclass_constructors(edge.receiver_class)) unless edge.constant_receiver
+          targets.uniq.freeze
+        end
+
+        # Every constructor a subclass of `class_name` supplies — its own `#initialize`, and its own
+        # `.new` where it overrides one. The closed-world join of step 2, spelled for the two keys a
+        # constructor can live under.
+        def subclass_constructors(class_name)
+          descendant_closure(class_name).each_with_object([]) do |subclass, keys|
+            keys << "#{subclass}##{INITIALIZE_SELECTOR}" if @summaries.key?("#{subclass}##{INITIALIZE_SELECTOR}")
+            keys << "#{subclass}.#{NEW_SELECTOR}" if @summaries.key?("#{subclass}.#{NEW_SELECTOR}")
           end
+        end
+
+        # Whether anything in `class_name`'s ancestry told the scanner its constructor is not readable from
+        # the source (#1039): a superclass expression that is not a constant path, or an `alias` that makes
+        # `initialize` another method. The sentinel rides the ancestry tables, so one walk finds it wherever
+        # in the chain it was recorded.
+        def opaque_ancestry?(class_name)
+          queue = [class_name]
+          seen = Set.new
+          until queue.empty?
+            current = queue.shift
+            next unless seen.add?(current)
+            return true if current == FileCollection::OPAQUE_ANCESTOR
+
+            queue.concat(@includes.fetch(current, []))
+            queue.concat(@superclasses.fetch(current, []))
+          end
+          false
         end
 
         # Whether `class_name`'s constructor is *known* to be `BasicObject#initialize`, whose footprint is

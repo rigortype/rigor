@@ -69,3 +69,58 @@ module ConstructorEdge
     end
   end
 end
+
+# The edge is keyed on the receiver's TYPE, so these three carry the identical tuple as a literal
+# `Spread.new` — and unlike it, they really do construct a subclass.
+module ConstructorEdge
+  class Spread
+    def clone_like
+      self.class.new
+    end
+
+    def via_local
+      klass = self.class
+      klass.new
+    end
+
+    def self.build
+      new
+    end
+  end
+
+  class SpreadSub < Spread
+    def initialize
+      File.write("/tmp/spread", "x")
+    end
+  end
+
+  # An ancestry the scanner cannot read: the superclass is an expression, not a constant path.
+  class Generated < Struct.new(:a)
+    def run
+      "generated"
+    end
+  end
+
+  # The constructor is another method's body, and the scanner models no aliases.
+  class Aliased
+    def setup
+      File.write("/tmp/aliased", "x")
+    end
+    alias initialize setup
+  end
+
+  class Spreader
+    # A written constant cannot reach `SpreadSub#initialize`.
+    def literal
+      Spread.new
+    end
+
+    def generated
+      Generated.new(1)
+    end
+
+    def aliased
+      Aliased.new
+    end
+  end
+end

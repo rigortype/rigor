@@ -207,10 +207,17 @@ RSpec.describe Rigor::Effects::Propagator do
   # #1039 — `new` is the one selector whose dispatch target is spelled under a different key. The end-to-end
   # shapes are `spec/rigor/effects/constructor_edge_spec.rb`.
   describe "a singleton `new` edge" do
-    def new_edge(receiver)
+    # A literal `Const.new`. The type-keyed tuple is the same one `self.class.new` records, which is what
+    # `constant_receiver` exists to separate.
+    def new_edge(receiver, constant: true)
       Rigor::Effects::FileCollection::Edge.new(
-        receiver_class: receiver, kind: :singleton, selector: "new", self_call: false, unclaimed: true
+        receiver_class: receiver, kind: :singleton, selector: "new", self_call: false, unclaimed: true,
+        constant_receiver: constant
       )
+    end
+
+    def opaque
+      Rigor::Effects::FileCollection::OPAQUE_ANCESTOR
     end
 
     it "resolves to the receiver's own #initialize" do
@@ -302,6 +309,65 @@ RSpec.describe Rigor::Effects::Propagator do
       )
 
       expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # The `self.class.new` / `klass.new` / receiver-less-`new`-in-a-singleton-body shapes. They carry the
+    # identical tuple as a written constant and really do construct a subclass, so the closed-world join
+    # is theirs.
+    it "joins subclass constructors when the receiver is not a written constant" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#initialize" => summary("io.fs.write"),
+                       "Other.new" => summary("exit") },
+          edges: { "A#run" => [new_edge("Base", constant: false)] },
+          superclasses: { "Sub" => ["Base"], "Other" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["exit", "io.fs.write"])
+      expect(table["A#run"].edges).to eq(["Other.new", "Sub#initialize"])
+    end
+
+    # The must-not-add-label arm of the same table: a written constant names the class it constructs.
+    it "keeps a written constant receiver clear of a subclass constructor" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Base")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    # `class K < Struct.new(:a)` records the opaque sentinel rather than nothing, so "no `<` at all" and
+    # "a superclass the scan could not read" stop being the same table entry.
+    it "declines when a superclass expression was not readable" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "K#label" => summary },
+          edges: { "A#run" => [new_edge("K")] }, superclasses: { "K" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # The sentinel declines even where the ancestry DOES answer: an aliased `initialize` is not the
+    # `#initialize` the walk would find.
+    it "declines when the ancestry is opaque although an #initialize resolves" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "K#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("K")] }, includes: { "K" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
       expect(table["A#run"]).to be_unclaimed
     end
 

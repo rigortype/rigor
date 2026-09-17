@@ -83,6 +83,43 @@ RSpec.describe "a Const.new call in an effect summary" do
     expect(entry.edges).to be_empty
   end
 
+  # The edge is keyed on the receiver's TYPE, so `self.class.new` inside `Spread` carries the identical
+  # tuple as a literal `Spread.new` — and it really can construct a subclass. Dropping the closed-world
+  # join for every shape would read `Spread#clone_like` as effect-free while `SpreadSub.new.clone_like`
+  # writes a file.
+  it "joins subclass constructors for a receiver that is not a written constant" do
+    expect(table["ConstructorEdge::Spread#clone_like"].proven.to_a).to include("io.fs.write")
+    expect(table["ConstructorEdge::Spread#via_local"].proven.to_a).to include("io.fs.write")
+    expect(table["ConstructorEdge::Spread.build"].proven.to_a).to include("io.fs.write")
+  end
+
+  # ... and the other half of the same rule: a written constant names the class it constructs, so the join
+  # must not put a subclass's label on it.
+  it "does not join a subclass constructor onto a written constant receiver" do
+    entry = table["ConstructorEdge::Spreader#literal"]
+
+    expect(entry.proven).to be_empty
+    expect(entry.edges).to be_empty
+    expect(entry).not_to be_unclaimed
+  end
+
+  # A superclass expression the scanner cannot read as a constant path is not "no superclass at all": the
+  # constructor is built at load time, which is the opposite of an absent one.
+  it "declines on a class whose superclass is an expression" do
+    entry = table["ConstructorEdge::Spreader#generated"]
+
+    expect(entry.edges).to be_empty
+    expect(entry).to be_unclaimed
+  end
+
+  # The scanner models no aliases, so an aliased `initialize` must not read as an absent one.
+  it "declines on a class that aliases initialize" do
+    entry = table["ConstructorEdge::Spreader#aliased"]
+
+    expect(entry.edges).to be_empty
+    expect(entry).to be_unclaimed
+  end
+
   # The constructor lives in another file for the inherited case, so this is also the marshal round trip.
   it "answers identically when the collections come back from a pool worker" do
     pooled = analyze(configuration(workers: 2))

@@ -549,7 +549,8 @@ module Rigor
 
         # A literal `send` is an ordinary call and nothing bounded it, so it is unclaimed on the same
         # terms as {#record_edge}'s.
-        push_edge(record, selector, node.receiver.nil?, unclaimed: true)
+        push_edge(record, selector, node.receiver.nil?,
+                  unclaimed: true, constant_receiver: constant_receiver?(node.receiver))
         @unclaimed = true if !node.receiver.nil? && !edge_recordable?(record)
       end
 
@@ -581,7 +582,8 @@ module Rigor
         # reads that definition's own summary and the site is fully accounted for. So the bit travels ON
         # the edge, and the unit is marked directly only where there is no edge to carry it.
         unclaimed = bound.nil?
-        push_edge(record, node.name.to_s, self_call, unclaimed: unclaimed)
+        push_edge(record, node.name.to_s, self_call,
+                  unclaimed: unclaimed, constant_receiver: constant_receiver?(node.receiver))
         @unclaimed = true if unclaimed && !self_call && !edge_recordable?(record)
         return unless self_call && (record.nil? || !record.resolved)
         # An envelope on this unit's own class for the very selector the dispatcher declined is the
@@ -594,13 +596,21 @@ module Rigor
         taint("unresolved-self-call", node.name.to_s)
       end
 
-      def push_edge(record, selector, self_call, unclaimed: false)
+      def push_edge(record, selector, self_call, unclaimed: false, constant_receiver: false)
         return unless edge_recordable?(record)
 
         @edges << FileCollection::Edge.new(
           receiver_class: record.receiver_class, kind: record.kind, selector: selector,
-          self_call: self_call, unclaimed: unclaimed
+          self_call: self_call, unclaimed: unclaimed, constant_receiver: constant_receiver
         )
+      end
+
+      # Whether the AUTHOR wrote this receiver as a constant path (#1039). The edge is otherwise keyed on
+      # the receiver's type, which cannot tell `Base.new` from `self.class.new` — the same `Singleton[Base]`
+      # in both — and the two reach different constructors. Everything else, a bare `self` included, is a
+      # receiver whose run-time class may be a subclass.
+      def constant_receiver?(receiver)
+        receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
       end
 
       # Whether {#push_edge} has a receiver to key an edge on. A call whose receiver the typer never

@@ -98,8 +98,11 @@ module Rigor
           return walk(node.body, prefix, true) if node.body
         when Prism::DefNode
           return enter_def(node, prefix, singleton)
+        when Prism::AliasMethodNode
+          return record_initialize_alias(class_name_for(prefix)) if alias_target_name(node) == "initialize"
         when Prism::CallNode
           harvest_class_body_macro(node, prefix)
+          return record_initialize_alias(class_name_for(prefix)) if alias_macro_to_initialize?(node)
           return record_declaration(node, prefix) if declaration?(node)
         end
 
@@ -209,6 +212,10 @@ module Rigor
       # A receiver-less call in a class / module body that declares units or ancestry. Class bodies are
       # not themselves effect units in v1 (their statements run at load time), so nothing else in one
       # contributes labels — but `include` and the accessor macros decide what the *methods* are.
+      def alias_macro_to_initialize?(node)
+        node.receiver.nil? && node.name == :alias_method && alias_target_name(node) == "initialize"
+      end
+
       def declaration?(node)
         node.receiver.nil? && DECLARATION_MACROS.include?(node.name)
       end
@@ -244,9 +251,32 @@ module Rigor
         (@includes[class_name] ||= []).concat(names) unless names.empty?
       end
 
+      # A superclass expression that is not a constant path — `class K < Struct.new(:a)`, `< Data.define(:a)`,
+      # `< DelegateClass(X)`, `< Sequel::Model(:t)` — records the opaque sentinel rather than nothing
+      # (#1039), because "no `<` at all" is the one reading the constructor rule turns into an answer and
+      # such a class inherits a constructor built at load time.
       def record_superclass(full_name, node, prefix)
-        superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
-        @superclasses[full_name] = lexical_candidates(superclass, prefix) if superclass
+        return if node.superclass.nil?
+
+        superclass = Source::ConstantPath.qualified_name(node.superclass)
+        @superclasses[full_name] =
+          superclass ? lexical_candidates(superclass, prefix) : [FileCollection::OPAQUE_ANCESTOR]
+      end
+
+      # `alias initialize setup` / `alias_method :initialize, :setup` makes the constructor another method's
+      # body, and the scanner models no aliases at all (#1039). The opaque sentinel is the minimal honest
+      # answer: the ancestry stops being readable, the constructor rule declines, and this class's callers
+      # stay exactly as unclaimed as they were before that rule existed.
+      def record_initialize_alias(class_name)
+        (@includes[class_name] ||= []) << FileCollection::OPAQUE_ANCESTOR
+      end
+
+      # The new name an alias gives, as a String, or nil.
+      def alias_target_name(node)
+        return symbol_arguments(node).first if node.is_a?(Prism::CallNode)
+
+        name = node.new_name
+        name.unescaped if name.is_a?(Prism::SymbolNode)
       end
 
       # An ancestry name is recorded AS WRITTEN — `class Loud < Base` inside `module Tracer` names

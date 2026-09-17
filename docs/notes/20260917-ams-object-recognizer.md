@@ -77,7 +77,8 @@ The cause is one thing wearing three hats: `delegate`, concern-declared associat
 macros are all model surface that `rigor-activerecord`'s discoverer does not fold. #534 item 5 landed
 the same fold for concern-declared SCOPES and nothing covers these three, so the follow-up is filed
 as [#1049](https://github.com/rigortype/rigor/issues/1049), with the full per-serializer table and an
-acceptance gate that re-runs the reach probe below. It belongs in that plugin rather than this one:
+acceptance gate that re-runs the reach probe below. That fold has since landed — see the dated
+section at the end of this note for the re-measurement, which recovers seven of the fifteen. It belongs in that plugin rather than this one:
 the other consumers of `:model_index` fail OPEN on an unseen name and are merely quieter for it,
 while this one fails closed and is the reason the gap is now visible.
 
@@ -120,3 +121,93 @@ derivation, for a `rigor-simple-form` that does not exist yet.
 
 `rigor-pundit` (`authorize`, 317 sites) and `rigor-devise` (`current_user`, 196) remain
 silent-but-loaded on Mastodon exactly as the sweep measured them. Nothing here touches either.
+
+---
+
+## 2026-09-17 — after the `:model_index` macro fold (#1049)
+
+`rigor-activerecord` 0.10.0 folds three macro families into the model entry and the published fact:
+`delegate` (model body, a concern's `included do`, and a concern module's own top level), the
+associations a concern declares in its `included do`, and the Paperclip / Active Storage attachment
+macros — plus an `enum`'s per-value predicates, which the table above counts under the concern
+family. This is the re-measurement the acceptance gate asked for.
+
+### Method
+
+Same as above, with one change: the two arms are the SAME plugin set on the SAME private copy, and
+what differs between them is `plugins/` at `origin/master` versus at this branch's HEAD. The plugin
+is on in both arms, because what is being measured is the fold, not the recognizer.
+
+The reach probe is a `def __rigor_probe__ = Rigor.dump_type(object)` inserted into every class under
+`app/serializers` on a second private copy, so the count covers every serializer rather than the ones
+that happen to read `object` already. That method costs two numbers of comparability with the table
+above: it probes 256 classes rather than the 173 the discoverer indexes (it probes nested and
+non-serializer classes too), and its pre-change derive count is 36 rather than 34 (this is a later
+checkout of the survey copy than the one measured above).
+
+### Corpus adjudication
+
+| | `plugins/` at origin/master | `plugins/` at this branch |
+| --- | --- | --- |
+| Mastodon diagnostics | 2536 | 2536 |
+| Redmine diagnostics | 1702 | 1702 |
+
+Sorted `path:line:column:rule:message` sets **byte-identical on both projects**. That is the result
+the issue predicted and the one the fold has to produce: every consumer of `:model_index` WIDENS a
+known-name set with what is folded here, so a new firing would mean a fold that invented a name.
+
+The concern fold does one thing that is not purely a widening, and it is worth naming: a concern's
+`has_one :account_stat` now narrows `account.account_stat` to `AccountStat | nil` where it used to
+be `Dynamic`, and a narrowed receiver is a receiver whose calls get checked. The byte-identical
+Mastodon set is the evidence that this did not turn into a new `call.undefined-method`.
+
+### Reach
+
+| | before | after |
+| --- | --- | --- |
+| serializer classes probed | 256 | 256 |
+| `object` derives a model | 36 | 43 |
+
+Seven of the issue's fifteen declines are recovered, including both of the project's largest
+serializers:
+
+| serializer | `object` now types as | family |
+| --- | --- | --- |
+| `REST::AccountSerializer` | `Account` | 1 + 2 + 3 |
+| `REST::Admin::AccountSerializer` | `Account` | 1 + 2 |
+| `REST::StatusSerializer` | `Status` | enum predicates from a concern |
+| `REST::MediaAttachmentSerializer` | `MediaAttachment` | 3 |
+| `ActivityPub::NoteSerializer::MediaAttachmentSerializer` | `MediaAttachment` | 3 |
+| `REST::CollectionItemSerializer` | `CollectionItem` | 2 |
+| `REST::AccountRelationshipSeveranceEventSerializer` | `AccountRelationshipSeveranceEvent` | 2 |
+
+Nothing that derived before stopped deriving, and the three genuine misses
+(`REST::ConversationSerializer`, `REST::InstanceSerializer`, `REST::V1::InstanceSerializer`) still
+resolve to `Dynamic[top]` — the surface check is what keeps them there, and folding more surface
+into the model does not weaken it.
+
+### The eight still declined, and what they are actually blocked on
+
+They are NOT blocked on the three families. Reading the unanswered names off each:
+
+| serializer | unanswered after the fold | what defines it |
+| --- | --- | --- |
+| `REST::PreviewCardSerializer`, `ActivityPub::NoteSerializer::PreviewCardSerializer` | `original_url` | `attr_accessor :original_url` on `PreviewCard` |
+| `REST::NotificationPolicySerializer`, `REST::V1::NotificationPolicySerializer` | `pending_requests_count`, `pending_notifications_count` | `attr_reader` on `NotificationPolicy` |
+| `REST::ReportSerializer` | `collection_ids` | Rails' `<singular>_ids` reader, generated by `has_many :collections` |
+| `REST::CustomEmojiSerializer` | `association(:category)` | `ActiveRecord::Base#association`, the framework's own instance API |
+| `REST::TranslationSerializer::PollSerializer` | `poll_options` | not an Active Record model at all — `TranslationService::Translation::Poll` |
+
+Three separate follow-ups, none of them a macro family this change covers: a plain `attr_*` on a
+model that the engine's `user_def_through_ancestors` walk does not answer for; the `<singular>_ids` /
+`<singular>_ids=` readers a collection association generates, which would be a one-line extension of
+family 2 and recovers `REST::ReportSerializer`; and the un-modelled part of Active Record's own
+instance surface. The last row is a `model_overrides` case, not a fold.
+
+### Deliberately not folded
+
+A concern's `included do` `enums:`, `validations:` and `callbacks:` stay where they were. The
+name-only sets folded here can only make a consumer quieter; `enums:` drives
+`Analyzer#validate_enum_value`, which FIRES, so folding a concern's enum COLUMN would put new
+`unknown-enum-value` diagnostics on a corpus whose acceptance gate is "no new diagnostic". The enum's
+value PREDICATES carry no such risk and are folded, which is what recovers `REST::StatusSerializer`.

@@ -36,6 +36,13 @@ module Rigor
       # class with no closed-world override join — a different question from every other edge, which is why
       # it is a field rather than a convention over the other three.
       #
+      # `constant_receiver` marks a call whose receiver the author wrote as a **constant path** (#1039).
+      # The collector keys an edge on the receiver's TYPE, so `self.class.new` inside `Base`, `klass.new`
+      # on a `Singleton[Base]` local and a receiver-less `new` in a singleton body all produce the very
+      # same tuple as a literal `Base.new` — and the first three really do construct a subclass. Only the
+      # constructor rule reads it, and only to DROP the closed-world subclass join a written constant
+      # cannot reach.
+      #
       # `unclaimed` marks a site NOTHING bounded: no catalogue row, no plugin row, no imported envelope
       # (#391). It is not a taint and never becomes one — an unresolved edge here is overwhelmingly an
       # inherited or gem call the catalogue simply has no row for, which is why the model drops it — but
@@ -43,13 +50,26 @@ module Rigor
       # it had something to read". Only sig-gen's annotation emission consults it, through
       # {EffectTable::Entry#unclaimed?}: writing `%a{pure}` is a claim about a callee nobody described,
       # and the emitter must decline rather than invent one.
-      Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call, :unclaimed) do
+      Edge = Data.define(:receiver_class, :kind, :selector, :self_call, :super_call, :unclaimed,
+                         :constant_receiver) do
         # Defaulted because every producer but the `super` one records an ordinary call, and an ordinary
-        # call is not a `super`. `unclaimed` defaults false so a Marshal-restored edge from a cache
-        # written before the field existed reads as claimed — the cache identity carries a schema
-        # component ({Identity}) so such an entry is never served in the first place.
-        def initialize(super_call: false, unclaimed: false, **) = super
+        # call is not a `super`, and because a producer that says nothing about `unclaimed` /
+        # `constant_receiver` means the safe value of each.
+        #
+        # The defaults do NOT rescue a cache written before a member existed: `Marshal.load` of a `Data`
+        # whose member list has grown raises `TypeError: struct size differs`, which the store reads as a
+        # miss. That is the right outcome and not the one relied on — the cache identity carries a schema
+        # component ({Identity}, `schema:3`), so such an entry is never offered in the first place.
+        def initialize(super_call: false, unclaimed: false, constant_receiver: false, **) = super
       end
+
+      # An ancestry entry that names nothing and can never resolve. The scanner records it where a class
+      # body says its ancestry or its constructor is not readable from the source — a superclass
+      # expression that is not a constant path (`class K < Struct.new(:a)`), or an `alias` / `alias_method`
+      # that makes `initialize` some other method (#1039). It matches no summary key, so every existing
+      # walk steps over it; the constructor rule asks for it by name, because "unreadable" is exactly what
+      # that rule must not read as "empty".
+      OPAQUE_ANCESTOR = "<opaque>"
 
       NO_TABLE = {}.freeze
       private_constant :NO_TABLE
@@ -117,7 +137,12 @@ module Rigor
 
           fold_summaries(summaries, collection.summaries)
           fold_lists(edges, collection.edges)
-          superclasses.update(collection.superclasses)
+          # The opaque sentinel is sticky across files as well as within one: a class whose constructor one
+          # file says is unreadable does not become readable because another file spells its `<`, and the
+          # fold must not depend on which file the run reads first.
+          superclasses.update(collection.superclasses) do |_key, mine, theirs|
+            mine.include?(OPAQUE_ANCESTOR) ? mine : theirs
+          end
           fold_lists(includes, collection.includes)
         end
 
@@ -177,7 +202,8 @@ module Rigor
       end
 
       def edge_order(edge)
-        [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0, edge.super_call ? 1 : 0]
+        [edge.receiver_class.to_s, edge.kind.to_s, edge.selector, edge.self_call ? 1 : 0,
+         edge.super_call ? 1 : 0, edge.constant_receiver ? 1 : 0]
       end
     end
   end

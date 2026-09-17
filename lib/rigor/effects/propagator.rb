@@ -251,7 +251,12 @@ module Rigor
         def targets_for(edge)
           @targets[memo_key(edge)] ||= begin
             separator = edge.kind == :singleton ? "." : "#"
-            edge.super_call ? super_targets(edge, separator) : call_targets(edge, memo_key(edge), separator)
+            key = memo_key(edge)
+            if edge.super_call
+              super_targets(edge, separator)
+            else
+              constructor_targets(edge, key) || call_targets(edge, key, separator)
+            end
           end
         end
 
@@ -272,7 +277,170 @@ module Rigor
         private
 
         def memo_key(edge)
-          [edge.receiver_class, edge.kind, edge.selector, edge.super_call]
+          [edge.receiver_class, edge.kind, edge.selector, edge.super_call, edge.constant_receiver]
+        end
+
+        NEW_SELECTOR = "new"
+        INITIALIZE_SELECTOR = "initialize"
+        private_constant :NEW_SELECTOR, :INITIALIZE_SELECTOR
+
+        # Class objects whose `new` is Ruby's own reflective constructor rather than a project class's
+        # (#1039). `Class.new` allocates an anonymous class and runs `Class#initialize`, NOT the
+        # `#initialize` of whatever the project happens to have named `Class`; the same holds for
+        # `Module.new`, and for `Struct.new` / `Data.define`, which build a class rather than an instance.
+        # Listed by name rather than left to the project-known guard below, because a project that reopens
+        # `Class` at all would otherwise turn every `Class.new` in it into a call on that reopening.
+        RESERVED_CONSTRUCTOR_OWNERS = %w[Class Module Struct Data].freeze
+        private_constant :RESERVED_CONSTRUCTOR_OWNERS
+
+        # Superclass spellings whose `#initialize` is Ruby's own and empty. A project chain that ends here
+        # — or ends implicitly, with no `<` at all — has no constructor body anywhere, which is what
+        # {#empty_constructor?} has to establish before it may say ∅ rather than "undescribed".
+        EMPTY_CONSTRUCTOR_ROOTS = %w[Object BasicObject].freeze
+        private_constant :EMPTY_CONSTRUCTOR_ROOTS
+
+        # #1039 — `Const.new` on a class the project defines, resolved to that class's `#initialize`.
+        #
+        # The collector records the call as `(Const, :singleton, "new")`, because that is what the typer
+        # saw; nothing in the project defines `Const.new`, so the edge resolved to nothing and every
+        # constructor body stayed out of its caller's closure. `new` is the one selector in Ruby whose
+        # dispatch target is spelled under a different key, and this is the rewrite: the same ancestor walk
+        # {#resolve_owner} performs, on the instance side, for `initialize`.
+        #
+        # Three boundaries, and each of them can only narrow:
+        #
+        # - a project `def self.new` **wins**. It is the definition `Const.new` actually reaches, and a
+        #   constructor that overrides `new` is the case where `#initialize` is not the answer. Resolved
+        #   through the singleton ancestry, so an inherited `self.new` wins too.
+        # - the receiver must be a class the project defines, and must not be one of
+        #   {RESERVED_CONSTRUCTOR_OWNERS}. `Class.new { … }` is not a constructor call on a project class
+        #   and must never reach a project `#initialize`; a gem class the project only calls `new` on is
+        #   undescribed exactly as it was, and stays unclaimed.
+        # - the closed-world subclass join is **dropped for a written constant receiver, and only for one**.
+        #   `Base.new` names the class object it constructs, so `Sub#initialize` cannot run and joining it
+        #   would put a proven label on the caller that no execution of that site can produce — the `super`
+        #   argument (see {#super_targets}) rather than the ordinary-call one. But the edge is keyed on the
+        #   receiver's TYPE, and `self.class.new`, a `Singleton[Base]` local's `.new` and a receiver-less
+        #   `new` in a singleton body produce the identical tuple while genuinely constructing a subclass.
+        #   {FileCollection::Edge#constant_receiver} is what tells them apart, and every shape that is not
+        #   a written constant keeps the join — over `Sub#initialize` and over a subclass `Sub.new` alike.
+        # - an ancestry the scanner could not read ({FileCollection::OPAQUE_ANCESTOR} — a non-constant
+        #   superclass expression, an aliased `initialize`) declines, leaving the caller as unclaimed as it
+        #   was before this rule existed.
+        #
+        # @return the targets, or `nil` when the rewrite does not apply and ordinary resolution should run
+        def constructor_targets(edge, memo_key)
+          return nil unless constructor_edge?(edge)
+
+          owner = resolve_owner(edge.receiver_class, "#", INITIALIZE_SELECTOR)
+          return nil unless owner || empty_constructor?(edge.receiver_class)
+
+          @owner_resolved[memo_key] = true
+          targets = owner ? [owner] : []
+          targets.concat(subclass_constructors(edge.receiver_class)) unless edge.constant_receiver
+          targets.uniq.freeze
+        end
+
+        # Whether the `new` rewrite applies to this edge at all — the guards of {#constructor_targets},
+        # each of which can only decline: a singleton `new` on a project class that is not one of Ruby's
+        # own class builders, whose singleton ancestry defines no `new` of its own, and whose constructor
+        # the scan could read both above it and (where the join applies) below it.
+        def constructor_edge?(edge)
+          edge.kind == :singleton && edge.selector == NEW_SELECTOR &&
+            !RESERVED_CONSTRUCTOR_OWNERS.include?(edge.receiver_class) &&
+            project_class?(edge.receiver_class) &&
+            resolve_owner(edge.receiver_class, ".", NEW_SELECTOR).nil? &&
+            !opaque_ancestry?(edge.receiver_class) &&
+            (edge.constant_receiver || !opaque_descendant?(edge.receiver_class))
+        end
+
+        # Every constructor a subclass of `class_name` supplies — its own `#initialize`, and its own
+        # `.new` where it overrides one. The closed-world join of step 2, spelled for the two keys a
+        # constructor can live under.
+        def subclass_constructors(class_name)
+          descendant_closure(class_name).each_with_object([]) do |subclass, keys|
+            keys << "#{subclass}##{INITIALIZE_SELECTOR}" if @summaries.key?("#{subclass}##{INITIALIZE_SELECTOR}")
+            keys << "#{subclass}.#{NEW_SELECTOR}" if @summaries.key?("#{subclass}.#{NEW_SELECTOR}")
+          end
+        end
+
+        # The same question DOWNWARD, and only where the closed-world join applies. A subclass whose own
+        # constructor is unreadable — `class AliasedChild < Parent; alias initialize setup` — is reached by
+        # `self.class.new` in `Parent`, and {#subclass_constructors} would find no `AliasedChild#initialize`
+        # key and say nothing. The join is the whole reason this edge may construct a subclass at all, so an
+        # unreadable one in the closure declines the edge instead.
+        def opaque_descendant?(class_name)
+          descendant_closure(class_name).any? do |subclass|
+            @includes.fetch(subclass, []).include?(FileCollection::OPAQUE_ANCESTOR) ||
+              @superclasses.fetch(subclass, []).include?(FileCollection::OPAQUE_ANCESTOR)
+          end
+        end
+
+        # Whether anything in `class_name`'s ancestry told the scanner its constructor is not readable from
+        # the source (#1039): a superclass expression that is not a constant path, or an `alias` that makes
+        # `initialize` another method. The sentinel rides the ancestry tables, so one walk finds it wherever
+        # in the chain it was recorded.
+        def opaque_ancestry?(class_name)
+          queue = [class_name]
+          seen = Set.new
+          until queue.empty?
+            current = queue.shift
+            next unless seen.add?(current)
+            return true if current == FileCollection::OPAQUE_ANCESTOR
+
+            queue.concat(@includes.fetch(current, []))
+            queue.concat(@superclasses.fetch(current, []))
+          end
+          false
+        end
+
+        # Whether `class_name`'s constructor is *known* to be `BasicObject#initialize`, whose footprint is
+        # ∅ (#1039).
+        #
+        # This is the design choice in the rewrite. "No `#initialize` in the ancestry" has two readings —
+        # the project defines none and none exists (a plain `class Bare; end`, constructed by Ruby's own
+        # empty constructor), or the project defines none and a gem's base class does. The first resolves
+        # to a known-empty definition: the edge contributes nothing AND leaves its caller claimed, because
+        # the callee was read — there is simply nothing in it. The second is undescribed and must keep
+        # marking its caller unclaimed. Only an ancestry that closes inside the project can tell them
+        # apart, so that is what this walks, and it answers `false` the moment the walk leaves.
+        #
+        # No summary row is invented for `BasicObject#initialize`. A row would be a *method of the
+        # project* in every table that lists them — the snapshot, `rigor effects`, the pure report — for a
+        # definition the project does not contain; the answer belongs to the edge, and the edge is already
+        # the thing {#owner_resolved?} is asked about.
+        #
+        # An `include` anywhere in the chain ends the walk conservatively. The collection's include table
+        # is a flat list of as-written *candidate spellings* (`include Foo` inside `module A` records both
+        # `A::Foo` and `Foo`), so it cannot say whether a class includes one project module or one gem
+        # module the project cannot see — and a module is free to define `initialize`. Such a class keeps
+        # exactly today's behaviour: its `new` edge resolves to nothing and its callers stay unclaimed.
+        def empty_constructor?(class_name)
+          queue = [class_name]
+          seen = Set.new
+          until queue.empty?
+            current = queue.shift
+            next unless seen.add?(current)
+            return false unless project_class?(current)
+            return false unless @includes.fetch(current, []).empty?
+
+            parents = @superclasses.fetch(current, [])
+            next if parents.empty?
+
+            known = parents.find { |candidate| project_class?(candidate) }
+            return false if known.nil? && parents.none? { |candidate| EMPTY_CONSTRUCTOR_ROOTS.include?(candidate) }
+
+            queue << known if known
+          end
+          true
+        end
+
+        # Whether the project defines this class at all: it defines a method on it, declares its
+        # superclass, or declares what it includes. Any one of the three is a `class` body the scanner
+        # read, which is what licenses reading its silence about `initialize` as an answer.
+        def project_class?(class_name)
+          !class_name.nil? &&
+            (@classes.include?(class_name) || @superclasses.key?(class_name) || @includes.key?(class_name))
         end
 
         def call_targets(edge, memo_key, separator)
@@ -309,7 +477,7 @@ module Rigor
 
         # Ancestry order mirrors the engine's: the class itself, the modules it includes, then its
         # superclass, recursively. Cycle-guarded, because a project may declare one. Ancestry names
-        # arrive as as-written candidate lists (see `Scanner#lexical_candidates`); every candidate is
+        # arrive as as-written candidate lists (see `AncestryRecorder#lexical_candidates`); every candidate is
         # enqueued and the most-qualified one comes first, so the right constant wins the race and a
         # spelling that names nothing simply matches no key.
         def resolve_owner(class_name, separator, selector)

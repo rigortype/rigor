@@ -54,7 +54,12 @@ module Rigor
             # #391 — the summary schema itself. A cached collection written before {Summary#unclaimed?}
             # existed restores with the bit false, which is the direction sig-gen's emission must never
             # guess, so such an entry must not be served rather than merely read carefully.
-            "schema:2",
+            #
+            # schema:3 — #1039 moved edge RESOLUTION: a singleton `new` edge on a project class now
+            # reaches that class's `#initialize`. The warm lanes serve a propagated `EffectTable` (and its
+            # `unclaimed` bits) rather than re-resolving, so an entry written under the old rule would
+            # answer the old closure for source nothing changed.
+            "schema:3",
             "vocabulary:#{registry.vocabulary_version}",
             "catalog:#{catalog.identity}",
             "effects:#{config_digest(configuration)}",

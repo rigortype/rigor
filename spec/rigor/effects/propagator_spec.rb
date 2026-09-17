@@ -204,6 +204,238 @@ RSpec.describe Rigor::Effects::Propagator do
     end
   end
 
+  # #1039 — `new` is the one selector whose dispatch target is spelled under a different key. The end-to-end
+  # shapes are `spec/rigor/effects/constructor_edge_spec.rb`.
+  describe "a singleton `new` edge" do
+    # A literal `Const.new`. The type-keyed tuple is the same one `self.class.new` records, which is what
+    # `constant_receiver` exists to separate.
+    def new_edge(receiver, constant: true)
+      Rigor::Effects::FileCollection::Edge.new(
+        receiver_class: receiver, kind: :singleton, selector: "new", self_call: false, unclaimed: true,
+        constant_receiver: constant
+      )
+    end
+
+    def opaque
+      Rigor::Effects::FileCollection::OPAQUE_ANCESTOR
+    end
+
+    it "resolves to the receiver's own #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Const#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Const")] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["io.fs.write"])
+      expect(table["A#run"].edges).to eq(["Const#initialize"])
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    it "resolves through the superclass chain to an inherited #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to eq(["Base#initialize"])
+    end
+
+    # The design choice: an ancestry that closes inside the project with no `#initialize` anywhere is
+    # constructed by `BasicObject#initialize`, whose footprint is ∅. Resolved to nothing, and claimed —
+    # without a summary row being invented for a definition the project does not contain.
+    it "resolves to nothing and claims the caller when the project ancestry defines no #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Bare#label" => summary },
+          edges: { "A#run" => [new_edge("Bare")] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    # ... which the walk may only say when it never left the project. A class whose superclass is a gem's
+    # inherits that gem's constructor, and nobody described it.
+    it "leaves the caller unclaimed when the ancestry leaves the project" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Sub#label" => summary },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["ActiveRecord::Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # An `include` is the same question, and the collection's flat candidate list cannot answer it: a
+    # module is free to define `initialize`, and the table cannot say whether the module is the project's.
+    it "leaves the caller unclaimed when the class includes anything" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Bare#label" => summary },
+          edges: { "A#run" => [new_edge("Bare")] }, includes: { "Bare" => ["Comparable"] }
+        )
+      )
+
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    it "prefers a project `def self.new` over #initialize, including an inherited one" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base.new" => summary("exit"), "Sub#initialize" => summary("io") },
+          edges: { "A#run" => [new_edge("Sub")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].edges).to eq(["Base.new"])
+      expect(table["A#run"].proven.to_a).to eq(["exit"])
+    end
+
+    # `Class.new` builds an anonymous class. Even a project that reopens `Class` must not turn it into a
+    # call on that reopening.
+    it "never resolves Class.new, Module.new, Struct.new or Data.new to a project #initialize" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Class#initialize" => summary("io"), "Struct#initialize" => summary("io") },
+          edges: { "A#run" => [new_edge("Class"), new_edge("Struct")] }
+        )
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # The `self.class.new` / `klass.new` / receiver-less-`new`-in-a-singleton-body shapes. They carry the
+    # identical tuple as a written constant and really do construct a subclass, so the closed-world join
+    # is theirs.
+    it "joins subclass constructors when the receiver is not a written constant" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#initialize" => summary("io.fs.write"),
+                       "Other.new" => summary("exit") },
+          edges: { "A#run" => [new_edge("Base", constant: false)] },
+          superclasses: { "Sub" => ["Base"], "Other" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["exit", "io.fs.write"])
+      expect(table["A#run"].edges).to eq(["Other.new", "Sub#initialize"])
+    end
+
+    # The must-not-add-label arm of the same table: a written constant names the class it constructs.
+    it "keeps a written constant receiver clear of a subclass constructor" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Base")] }, superclasses: { "Sub" => ["Base"] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    # `class K < Struct.new(:a)` records the opaque sentinel rather than nothing, so "no `<` at all" and
+    # "a superclass the scan could not read" stop being the same table entry.
+    it "declines when a superclass expression was not readable" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "K#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("K")] }, superclasses: { "K" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # The sentinel is looked for DOWNWARD as well, and only where the join applies: the join is the whole
+    # reason a non-constant receiver may construct a subclass, and an unreadable subclass constructor is a
+    # key {Index#subclass_constructors} cannot find.
+    it "declines when a subclass reachable through the join is opaque" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#label" => summary, "Sub#setup" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("Base", constant: false)] },
+          superclasses: { "Sub" => ["Base"] }, includes: { "Sub" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # ... and a written constant, which cannot reach that subclass, is unaffected by it.
+    it "keeps resolving a written constant although a subclass is opaque" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "Base#initialize" => summary("io.fs.read"), "Sub#setup" => summary },
+          edges: { "A#run" => [new_edge("Base")] },
+          superclasses: { "Sub" => ["Base"] }, includes: { "Sub" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven.to_a).to eq(["io.fs.read"])
+      expect(table["A#run"]).not_to be_unclaimed
+    end
+
+    # The sentinel declines even where the ancestry DOES answer: an aliased `initialize` is not the
+    # `#initialize` the walk would find.
+    it "declines when the ancestry is opaque although an #initialize resolves" do
+      table = described_class.propagate(
+        collection(
+          summaries: { "A#run" => summary, "K#initialize" => summary("io.fs.write") },
+          edges: { "A#run" => [new_edge("K")] }, includes: { "K" => [opaque] }
+        )
+      )
+
+      expect(table["A#run"].proven).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+
+    # A class the project never defines is a gem's, and its constructor is as undescribed as before.
+    it "leaves a receiver the project does not define unclaimed" do
+      table = described_class.propagate(
+        collection(summaries: { "A#run" => summary }, edges: { "A#run" => [new_edge("Net::HTTP")] })
+      )
+
+      expect(table["A#run"].edges).to be_empty
+      expect(table["A#run"]).to be_unclaimed
+    end
+  end
+
+  # The sentinel has to survive a fold in either direction, or the answer depends on which file a pooled
+  # run finished first. `FileCollection.merge_all` is where that is decided.
+  describe "folding an opaque ancestry across files" do
+    def opaque
+      Rigor::Effects::FileCollection::OPAQUE_ANCESTOR
+    end
+
+    def built
+      collection(summaries: { "Anon#more" => summary }, superclasses: { "Anon" => [opaque, "Base"] })
+    end
+
+    def reopened
+      collection(summaries: { "Anon#more" => summary }, superclasses: { "Anon" => ["Base"] })
+    end
+
+    it "keeps the sentinel whichever file is folded first" do
+      expect(Rigor::Effects::FileCollection.merge_all([built, reopened]).superclasses["Anon"])
+        .to eq([opaque, "Base"])
+      expect(Rigor::Effects::FileCollection.merge_all([reopened, built]).superclasses["Anon"])
+        .to eq([opaque, "Base"])
+    end
+  end
+
   it "drops an edge that reaches no project definition rather than tainting" do
     table = described_class.propagate(
       collection(summaries: { "A#run" => summary }, edges: { "A#run" => [edge("String", "upcase")] })

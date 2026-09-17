@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "ancestry_recorder"
 require_relative "attribution"
 require_relative "envelope_index"
 require_relative "file_collection"
@@ -82,8 +83,7 @@ module Rigor
         @plugin_facts = plugin_facts
         @summaries = {}
         @edges = {}
-        @superclasses = {}
-        @includes = {}
+        @ancestry = AncestryRecorder.new
         # ADR-103 WD10 / #387 — the class-body facts the framework-edge strategies read, harvested only
         # when a loaded plugin declared one. A run with no `effect_edges:` never allocates them.
         @harvest = plugin_facts.edges? ? {} : nil
@@ -96,7 +96,7 @@ module Rigor
         synthesize_framework_units
         FileCollection.new(
           path: @path, summaries: @summaries, edges: @edges,
-          superclasses: @superclasses, includes: @includes
+          superclasses: @ancestry.superclasses, includes: @ancestry.includes
         )
       end
 
@@ -129,8 +129,13 @@ module Rigor
           return walk(node.body, prefix, true) if node.body
         when Prism::DefNode
           return enter_def(node, prefix, singleton)
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+          @ancestry.record_constant_class(node, prefix)
+        when Prism::AliasMethodNode
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
         when Prism::CallNode
           harvest_class_body_macro(node, prefix)
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
           return record_declaration(node, prefix) if declaration?(node)
         end
 
@@ -141,7 +146,7 @@ module Rigor
         nested = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
         return node.rigor_each_child { |child| walk(child, prefix, false) } if nested.nil?
 
-        record_superclass(nested.join("::"), node, prefix) if node.is_a?(Prism::ClassNode)
+        @ancestry.record_superclass(nested.join("::"), node, prefix) if node.is_a?(Prism::ClassNode)
         walk(node.body, nested, false) if node.body
       end
 
@@ -247,7 +252,7 @@ module Rigor
       def record_declaration(node, prefix)
         class_name = class_name_for(prefix)
         case node.name
-        when :include, :prepend then record_includes(class_name, node, prefix)
+        when :include, :prepend then @ancestry.record_includes(class_name, constant_arguments(node), prefix)
         when :define_method then declare_define_method(class_name, node)
         else synthesize_accessors(class_name, node)
         end
@@ -270,25 +275,9 @@ module Rigor
         end
       end
 
-      def record_includes(class_name, node, prefix)
-        names = constant_arguments(node).flat_map { |name| lexical_candidates(name, prefix) }
-        (@includes[class_name] ||= []).concat(names) unless names.empty?
-      end
-
-      def record_superclass(full_name, node, prefix)
-        superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
-        @superclasses[full_name] = lexical_candidates(superclass, prefix) if superclass
-      end
-
-      # An ancestry name is recorded AS WRITTEN — `class Loud < Base` inside `module Tracer` names
-      # `Base`, not `Tracer::Base` — and a single file cannot say which constant that resolves to. So the
-      # scanner records the candidates Ruby's own lexical lookup would try, most-qualified first, and the
-      # propagator picks the one the merged project actually defines. Same shape as `ScopeIndexer`'s
-      # as-written superclass table, resolved at the same point: when the whole project is in view.
-      def lexical_candidates(name, prefix)
-        return [name] if prefix.empty? || name.start_with?("#{prefix.join('::')}::")
-
-        prefix.length.downto(1).map { |depth| "#{prefix.first(depth).join('::')}::#{name}" } + [name]
+      # The opaque-ancestry recordings the walk routes here; {AncestryRecorder} owns what they mean.
+      def record_initialize_alias(prefix)
+        @ancestry.record_initialize_alias(class_name_for(prefix))
       end
 
       def merge_unit(key, summary, edges)

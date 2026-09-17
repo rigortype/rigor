@@ -171,42 +171,62 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
 
     # ADR-87's racy guard is what makes a carried pack trustworthy, and it only exists inside a
     # `Cache::FileDigest.with_run` scope. `ProjectContext#project_scan` is NOT inside one, so without the
-    # wrap in `ProjectPrePasses#build_template_units` the recording instant is taken AFTER the pack's own
-    # `File.stat` and can never be racy — a write landing between the collector's read and that stat is
-    # recorded as the OLD digest beside the NEW stat tuple, and every later publish validates it on the
-    # tuple fast path and serves a unit compiled from bytes that are no longer on disk. The stub below is
-    # that window, made deterministic.
-    it "does not carry a unit whose template was rewritten while the scan was reading it" do
+    # wrap in `TemplateUnitCollector.collect_for_scan` the recording instant is taken AFTER the pack's own
+    # `File.stat` and can never be racy — a write landing between the collector's read and that stat would
+    # be recorded as the OLD digest beside the NEW stat tuple, and every later publish would validate it on
+    # the tuple fast path and serve a unit compiled from bytes no longer on disk.
+    #
+    # The property is asserted on the PACK, against the moment the bytes were read, rather than by staging
+    # a real write race: whether the guard can fire for a given write depends on the filesystem's timestamp
+    # granularity (ADR-87's own trade, and a coarse-granularity mount is exactly what `RIGOR_STRICT_VALIDATION`
+    # exists for), so a race-shaped example measures the runner's filesystem instead of this code. The
+    # instant preceding the read is what the wrap is FOR, and it is platform-independent.
+    it "stamps a scan-built pack with an instant taken before the template was read" do
       Dir.mktmpdir("rigor-lsp-template-racy-") do |tmpdir|
-        template = write_template_unit_project(tmpdir)
-        path = File.join(tmpdir, "lib", "app.rb")
-        uri = "file://#{path}"
-        buffer_table.open(uri: uri, bytes: File.read(path), version: 1)
+        write_template_unit_project(tmpdir)
         context = template_unit_context(tmpdir)
-        rewrite_after_read(template)
+        read_at = capture_read_instant(File.join(tmpdir, "app", "views", "users", "show.rbx"))
 
-        Dir.chdir(tmpdir) do
-          context.project_scan
-          compiled = RigorViewDemoPlugin.transform_calls
-          publisher_for(context).publish_for(uri)
+        index = Dir.chdir(tmpdir) { context.project_scan.template_units }
 
-          expect(RigorViewDemoPlugin.transform_calls - compiled).to eq(1)
-        end
+        expect(read_at.value).not_to be_nil # the stub matched the collector's spelling of the path
+        expect(recording_instant(index, "app/views/users/show.rbx")).to be <= read_at.value
       end
     ensure
       Rigor::Plugin.unregister!("view-demo")
     end
 
-    # Rewrites `target` the instant its bytes are read — the read-then-stat window a concurrent editor or
-    # `git checkout` occupies for real, which is otherwise not reproducible from a spec.
-    def rewrite_after_read(target)
+    # Notes when `target`'s bytes were read, and holds the read open long enough that an instant taken
+    # after it is unmistakably later — the window a concurrent editor or `git checkout` writes into.
+    def capture_read_instant(target)
+      seen = Struct.new(:value).new(nil)
       allow(File).to receive(:binread).and_wrap_original do |original, *args|
         bytes = original.call(*args)
-        # Compared by identity, not by string: the collector reads through `Dir.pwd`, which macOS
-        # resolves (`/private/var/…` for the tmpdir's `/var/…`).
-        File.write(target, "render_header(@title.rewritten)\n") if File.identical?(args.first.to_s, target)
+        if same_file?(args.first, target)
+          seen.value = Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond)
+          sleep 0.01
+        end
         bytes
       end
+      seen
+    end
+
+    # The collector reads through `Dir.pwd`, which is always resolved — on macOS a tmpdir's `/var/…` and
+    # pwd's `/private/var/…` are one file — and a relative spelling is a third. Both comparisons, so the
+    # stub matches the path whichever way the runner spells it.
+    def same_file?(candidate, target)
+      candidate = candidate.to_s
+      return true if File.expand_path(candidate) == File.expand_path(target)
+
+      File.exist?(candidate) && File.identical?(candidate, target)
+    end
+
+    # The `recording_instant_ns` field of the ADR-87 pack the scan recorded for `path` (see
+    # `Cache::FileDigest.pack_stat`). Read off the index's private table: it is deliberately not part of
+    # the index's public surface — a stat is not an answer, only the question of whether a carried answer
+    # still holds.
+    def recording_instant(index, path)
+      Integer(index.instance_variable_get(:@stats).fetch(path).split.fetch(5), 10)
     end
 
     def publisher_for(context)

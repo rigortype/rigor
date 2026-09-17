@@ -1063,7 +1063,68 @@ module Rigor
 
       recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
       entries = recorded ? recorded_header_nesting(recorded, raw) : peeled_header_nesting(subclass_qualified)
+      if !entries.empty? && DiscoveryIndex.ambiguous_header_nesting?(entries)
+        return ambiguous_ancestor_candidates(entries, raw_ancestor)
+      end
+
       entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
+    end
+
+    # Issue #986 — the candidate list for a raw name two declaration sites of ONE class wrote in different
+    # crefs (the compact-header rename pass landed both on this key). Each alternative chain gets its own
+    # candidate list, in the order this walk would have used for that site alone.
+    #
+    # When two of them resolve to two DIFFERENT project classes there is no candidate list to return: at
+    # runtime both `include`s run, and which of the two same-named modules ends up nearer in the MRO is the
+    # load order of the two files, which this walk cannot know. Answering with either is a WRONG ANCESTOR,
+    # and a wrong ancestor is a false-positive source rather than a missed one — two same-named modules can
+    # declare the same method at different arities, and `call.wrong-arity` then fires on a correct program.
+    # The empty list declines instead: the name resolves to no project class, the receiver's methods stay
+    # `Dynamic`, and every rule reading this walk goes quiet.
+    #
+    # Where the alternatives AGREE, or only one of them resolves at all, there is nothing to adjudicate: the
+    # answer is the union of their chains, most-qualified first — the same list a class whose sites needed
+    # no rename gets — so an unambiguous collision is unchanged, and an EXTERNAL ancestor keeps the full
+    # candidate list `#external_ancestor_name_candidates` hands the gem / RBS probe.
+    def ambiguous_ancestor_candidates(alternatives, raw_ancestor)
+      return [] if ambiguous_ancestor_resolutions_of(alternatives, raw_ancestor).size > 1
+
+      entries = alternatives.reduce([], :|).sort_by { |entry| [-entry.split("::").size, entry] }
+      entries.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s
+    end
+
+    def ambiguous_ancestor_resolutions_of(alternatives, raw_ancestor)
+      alternatives.filter_map do |chain|
+        (chain.map { |entry| "#{entry}::#{raw_ancestor}" } << raw_ancestor.to_s)
+          .find { |candidate| known_user_class?(candidate) }
+      end.uniq
+    end
+    private :ambiguous_ancestor_candidates, :ambiguous_ancestor_resolutions_of
+
+    # Issue #986 — the several project classes an ancestor name resolves to when the compact-header rename
+    # collision left it ambiguous, and `EMPTY_HEADER_NESTING` for every other name. {#ancestor_name_candidates}
+    # declines such a name because no ONE class is its answer; a caller that also knows which METHOD it is
+    # looking up can do better than that decline, and a rule that reports on a method must, because the
+    # decline otherwise silences it for the whole receiver — its own `def`s and its unambiguous ancestors
+    # included.
+    #
+    # Both of these classes are ancestors at runtime: both `include`s run, and only their MRO ORDER is the
+    # load order this walk cannot see. So a method only one of them declares is answered by that one
+    # whatever the order, and only a method they BOTH declare is unanswerable.
+    # `Analysis::CheckRules::SourceArity` reads this for exactly that: it takes both as mixin levels and
+    # declines on the disagreement its own envelope join already knows how to spot.
+    def ambiguous_ancestor_resolutions(subclass_qualified, raw_ancestor)
+      raw = raw_ancestor.to_s
+      return EMPTY_HEADER_NESTING if raw.start_with?("::")
+
+      recorded = @discovery.discovered_header_nestings[subclass_qualified.to_s]
+      return EMPTY_HEADER_NESTING if recorded.nil?
+
+      entries = recorded_header_nesting(recorded, raw)
+      return EMPTY_HEADER_NESTING if entries.empty? || !DiscoveryIndex.ambiguous_header_nesting?(entries)
+
+      resolved = ambiguous_ancestor_resolutions_of(entries, raw_ancestor)
+      resolved.size > 1 ? resolved : EMPTY_HEADER_NESTING
     end
 
     # Issue #728 — the chain of the declaration site that WROTE `raw`, which is the cref Ruby resolves that

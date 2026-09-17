@@ -27,6 +27,7 @@ require File.expand_path("../../plugins/rigor-ffi/lib/rigor-ffi", __dir__)
 module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   SCOPE_INSTANCE = %w[
     ==(req:other)
+    ambiguous_ancestor_resolutions(req:subclass_qualified,req:raw_ancestor)
     ancestor_name_candidates(req:subclass_qualified,req:raw_ancestor)
     bindable_top_level_def_for(req:method_name)
     class_cvars()

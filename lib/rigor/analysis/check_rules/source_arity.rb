@@ -183,15 +183,25 @@ module Rigor
           @kind == :singleton ? (@scope.discovered_extends[class_name] || []) : @scope.includes_of(class_name)
         end
 
+        # Issue #986 — a name the compact-header rename collision left ambiguous resolves to no ONE class,
+        # but BOTH classes it names are ancestors at runtime; only their MRO order is unknowable. Taking
+        # both as levels is what keeps this rule alive for the rest of the receiver: a method only one of
+        # them declares still has one envelope and still fires, a method they disagree about lands two on
+        # `#envelope_for`'s join and declines there, and the class's own `def`s, its superclass's and its
+        # unambiguous mixins are untouched. Letting the decline arrive as an unknown EXTERNAL mixin instead
+        # suppressed the rule for every level of the receiver.
         def collect_mixins(owner, raw_names, modules, externals, seen)
           raw_names.each do |raw|
             resolved = resolve(owner, raw)
-            if resolved.nil?
-              externals << @scope.ancestor_name_candidates(owner, raw)
-            elsif !seen[resolved]
-              seen[resolved] = true
-              modules << resolved
-              collect_mixins(resolved, @scope.includes_of(resolved), modules, externals, seen)
+            names = resolved ? [resolved] : @scope.ambiguous_ancestor_resolutions(owner, raw)
+            next externals << @scope.ancestor_name_candidates(owner, raw) if names.empty?
+
+            names.each do |name|
+              next if seen[name]
+
+              seen[name] = true
+              modules << name
+              collect_mixins(name, @scope.includes_of(name), modules, externals, seen)
             end
           end
         end

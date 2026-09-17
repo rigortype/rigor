@@ -2941,7 +2941,21 @@ module Rigor
         bucket.each_value(&:freeze).freeze
       end
 
+      # Most-qualified first, so a deeper cref is searched before a shallower one. Two entries of EQUAL depth
+      # are ordered alphabetically, which is a stable tie-break and nothing more: `Other::Mixin` precedes
+      # `Wrap::Mixin` for no reason Ruby would recognise. Pre-existing and left alone — the rename collision
+      # that made the pick load-order-dependent is adjudicated in `Scope`, which declines rather than sorts
+      # (#986).
       def union_header_nesting(existing, entries)
+        # Issue #986 — the alternatives shape reaches this fold too, not just the rename pass that creates
+        # it: the per-file instance path (`merge_ancestry_tables`) merges a file's plain String chains over
+        # the cross-file SEED, whose bucket may already hold alternatives. A third site using the nested
+        # spelling (`module Outer; class Leaf`, the Zeitwerk default) is exactly that, and unioning its
+        # chain into the list split an Array. A third cref is a third alternative, so it joins them.
+        if ambiguous_header_nesting?(existing) || ambiguous_header_nesting?(entries)
+          return collide_header_nesting(existing, entries)
+        end
+
         return existing if entries.all? { |entry| existing.include?(entry) }
 
         (existing | entries).sort_by { |entry| [-entry.split("::").size, entry] }.freeze
@@ -4788,10 +4802,109 @@ module Rigor
         end
       end
 
+      # Issue #986 — `header_nestings` is re-keyed here rather than through {#rekey_class_table} for two
+      # reasons, and both have to happen in this one pass.
+      #
+      # Its value is a BUCKET (`raw ancestor name → chain`, plus the unkeyed union), not a chain: mapping
+      # the bucket itself turned every entry into a `[raw, chain]` pair rendered as a string, and the next
+      # per-file merge ({#merge_header_nesting_bucket}) and every `Scope#recorded_header_nesting` lookup
+      # then raised on an Array where a Hash was expected — an internal analyzer error on every file of a
+      # project with one compact header (#984).
+      #
+      # And when a rename lands two buckets on ONE key — `class Outer::Leaf` written at the top level and
+      # again as a compact header inside `module Wrap`, which is one class with both bodies — the colliding
+      # chains MUST go through the table's own fold. {#combine_rekeyed_entries}' Hash arm replaced the
+      # sitting chain for a raw name BOTH sites wrote (each site's `include Mixin` records under the raw key
+      # `"Mixin"`), so which cref the ancestor name was resolved in depended on which file folded first:
+      # top-then-compact answered `Wrap::Mixin`, compact-then-top answered `::Mixin`. Unioning is the answer
+      # `merge_header_nestings` already gives two same-name sites of a class that needed no rename, and the
+      # one the internal spec states.
+      #
+      # Entries are renamed BEFORE the merge so the union's most-qualified-first sort ranks settled names.
+      def rekey_header_nestings(table, renames)
+        table.each_with_object({}) do |(name, bucket), out|
+          renamed = bucket.transform_values do |chain|
+            chain.map { |entry| rename_compact_name(renames, entry) }
+          end
+          merge_renamed_header_bucket(out, rename_compact_name(renames, name), renamed)
+        end
+      end
+
+      # {#merge_header_nesting_bucket} for the rename collision. The UNKEYED entry is the per-class union by
+      # definition — the pre-#728 answer for a name no site recorded — so it keeps unioning. A KEYED entry is
+      # the cref of the site that wrote that exact name, and the two sides are two different sites, so
+      # unioning their chains would hand each site's ancestor the other's namespace: `Wrap::Mixin` sorts
+      # ahead of `::Mixin`, and `Scope#compute_ancestor_class_name` takes the first known class as the sole
+      # resolution, so the top-level site's `include Mixin` silently became the `Wrap` one. That is not just
+      # a wrong class, it is a FALSE POSITIVE source — the two modules' same-named methods can differ in
+      # arity, and `call.wrong-arity` then fires on a correct program.
+      #
+      # So the two chains are kept side by side as ALTERNATIVES and the choice is deferred to `Scope`, which
+      # knows which names the project declares: it resolves each alternative and declines only when they
+      # name two DIFFERENT project classes. A collision whose alternatives agree, or where only one of them
+      # resolves at all, is unchanged.
+      def merge_renamed_header_bucket(table, name, incoming)
+        existing = table[name]
+        return table[name] = frozen_bucket(incoming) if existing.nil?
+
+        merged = existing.dup
+        incoming.each do |raw, entries|
+          previous = merged[raw]
+          merged[raw] =
+            if previous.nil? then entries.freeze
+            elsif raw == Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING then union_header_nesting(previous, entries)
+            else collide_header_nesting(previous, entries)
+            end
+        end
+        table[name] = merged.freeze
+      end
+
+      # One keyed entry's side-by-side combine. Two sites that recorded the SAME chain collapse back to that
+      # chain, so the alternatives shape appears only where the crefs really disagree.
+      def collide_header_nesting(previous, entries)
+        alternatives = header_nesting_alternatives(previous) | header_nesting_alternatives(entries)
+        return alternatives.first.freeze if alternatives.one?
+
+        alternatives.each(&:freeze).freeze
+      end
+
+      # Issue #986 — the re-anchored bucket, also filed under the name the declaration was written with.
+      #
+      # A body written INSIDE the compact header does not see the rename: its `self_type` is the per-node
+      # `Singleton[Wrap::Outer::Leaf]` (§531 keeps `declaration_prefix` per-node on purpose), and the
+      # per-file ancestry tables `merge_ancestry_tables` lays over the seed are keyed the same way, with
+      # this site's chain alone. So `include Mixin` resolved to `Wrap::Mixin` outright for every call in
+      # that body — the collision's false positive, inside the declaration that causes it.
+      #
+      # The alias hands the un-renamed key the SAME bucket the re-anchored one got, which is the honest
+      # answer: they are one class, and the file's own chain then merges into the alternatives rather than
+      # standing alone. It is added only for a name the rename pass moved, and only to this table, so no
+      # name gains a declaration it did not have.
+      def alias_renamed_header_nestings(table, renames)
+        renames.each do |recorded, reanchored|
+          bucket = table[reanchored]
+          table[recorded] = bucket if bucket && !table.key?(recorded)
+        end
+        table
+      end
+
+      def header_nesting_alternatives(entries)
+        ambiguous_header_nesting?(entries) ? entries : [entries]
+      end
+
+      def ambiguous_header_nesting?(entries)
+        Scope::DiscoveryIndex.ambiguous_header_nesting?(entries)
+      end
+
       # The per-shape combine {#rekey_class_table} applies. Every class-keyed table's value is a Hash of
-      # per-member entries, a Set or Array of names, or a single scalar fact (a superclass name, a member
-      # layout); the first two union, and a scalar keeps the entry already sitting, matching the first-wins
-      # fold `class_sources` and the `"path:line"` source tables use.
+      # per-member entries keyed by `"path:line"` or by member name, a Set or Array of names, or a single
+      # scalar fact (a superclass name, a member layout). The Set / Array arm unions; the Hash arm is
+      # later-wins per key, which is what the two contributions of one class want when their keys are
+      # distinct sites and is harmless when a key repeats with an equal value; a scalar keeps the entry
+      # already sitting, matching the first-wins fold `class_sources` uses.
+      #
+      # A value whose per-key entries must FOLD rather than be replaced does not belong here: see
+      # {#rekey_parameter_envelopes} (#992) and {#rekey_header_nestings} (#986).
       def combine_rekeyed_entries(sitting, arriving)
         case sitting
         when Hash then sitting.merge(arriving)
@@ -4804,7 +4917,7 @@ module Rigor
       # the nesting chains whose entries are class names. Runs before {#finalize_def_index}'s own whole-project
       # passes so those see the settled keys.
       def apply_compact_header_renames!(acc, renames)
-        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses header_nestings
+        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses
            includes extends method_visibilities methods class_sources data_member_layouts
            struct_member_layouts constant_writes].each do |key|
           acc[key] = rekey_class_table(acc[key], renames)
@@ -4813,14 +4926,8 @@ module Rigor
         # bodies of one class landing on the same key are exactly the reopening whose disagreement must
         # make a name opaque.
         acc[:parameter_envelopes] = rekey_parameter_envelopes(acc[:parameter_envelopes], renames)
-        # A `header_nestings` value is a BUCKET (`raw header → chain`, plus the unkeyed union), not a
-        # chain: mapping the bucket itself turned every entry into a `[raw, chain]` pair rendered as a
-        # string, and the next per-file merge (`merge_header_nesting_bucket`) and every
-        # `Scope#recorded_header_nesting` lookup then raised on an Array where a Hash was expected — an
-        # internal analyzer error on every file of a project with one compact header (#984).
-        acc[:header_nestings] = acc[:header_nestings].transform_values do |bucket|
-          bucket.transform_values { |chain| chain.map { |entry| rename_compact_name(renames, entry) } }
-        end
+        renamed_nestings = rekey_header_nestings(acc[:header_nestings], renames)
+        acc[:header_nestings] = alias_renamed_header_nestings(renamed_nestings, renames)
         acc[:def_nestings].transform_values! do |chain|
           chain&.map { |entry| rename_compact_name(renames, entry) }
         end

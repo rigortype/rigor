@@ -61,6 +61,18 @@ module Rigor
       # as written, and no ancestor name can be nil.
       UNKEYED_HEADER_NESTING = nil
 
+      # Issue #986 — a bucket entry is normally ONE chain (`["Wrap"]`, innermost first). When the
+      # compact-header rename pass lands two declarations of one class on a single key and both wrote the
+      # same raw ancestor name in DIFFERENT crefs, the entry is instead the LIST of those chains —
+      # `[["Wrap"], []]` — because no union of them is Ruby's answer for either site. `Scope` resolves each
+      # alternative and declines outright when they name two different project classes: which one wins
+      # depends on the runtime load order of the two `include`s, which static analysis cannot know, so
+      # picking either is unsound. A chain's entries are Strings and an alternatives list's are Arrays, so
+      # the two shapes cannot be confused.
+      def self.ambiguous_header_nesting?(entries)
+        entries.first.is_a?(Array)
+      end
+
       # Issue #992 — the two class-wide keys a `discovered_parameter_envelopes` bucket can carry beside its
       # `[kind, method_name]` entries. Their PRESENCE is the fact; the value is always
       # `Source::ParameterEnvelope::OPAQUE`, so a bucket folds under the one join every other entry does.

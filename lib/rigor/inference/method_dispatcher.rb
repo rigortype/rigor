@@ -451,6 +451,52 @@ module Rigor
         FlowContribution::Merger.merge(contributions).return_type
       end
 
+      # Issue #963 item 2 — the MEMBERSHIP half of the two plugin tiers, for #618's own-method veto.
+      #
+      # `ExpressionTyper#try_local_def_dispatch` has to decide whether the call's own `self` answers the
+      # name before a same-named top-level `def` may bind, and a plugin-supplied member is an answer Ruby
+      # really dispatches to: a model's column reader, an association, a scope, a macro-synthesised
+      # reader. The veto asked neither tier, so a top-level `def name` bound ahead of the member and
+      # typed the read as the def's `nil` — #618's false positive at a source the veto could not see.
+      #
+      # The question is asked HERE, of the same two tiers `resolve` consults and in the same order, rather
+      # than reconstructed in the veto: a name this reports as answered is a name the dispatch really would
+      # resolve, and no plugin knowledge moves into the engine's veto. The tiers are the gated
+      # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C `heredoc_templates` emissions
+      # today; the Tier B `Plugin::Macro::TraitRegistry` explosions share that table but cannot populate it
+      # until #476 threads a real environment into the pre-pass that builds it, so no trait member reaches
+      # this predicate in production yet — it will when #476 lands, with no change here).
+      #
+      # It is a predicate, not a type: the veto's job is to stop the top-level bind, after which the call
+      # falls through to the ordinary dispatch chain and the tier that answered here answers there too. The
+      # walk is not on the hot path — it runs only once `Scope#bindable_top_level_def_for` has already
+      # produced a candidate, which needs a project top-level `def` of the same name.
+      def plugin_member_answers?(call_node:, scope:, receiver_type:, method_name:)
+        return false if receiver_type.nil?
+        return true unless try_plugin_contribution(call_node, scope, receiver_type).nil?
+
+        synthetic_method_member?(receiver_type, method_name, scope&.environment)
+      end
+
+      # The synthetic-method half of {#plugin_member_answers?} — the same `(class_name, method_name, kind)`
+      # probe {#try_synthetic_method} makes, without the return-type promotion the veto has no use for.
+      def synthetic_method_member?(receiver_type, method_name, environment)
+        index = environment&.synthetic_method_index
+        return false if index.nil? || index.empty?
+
+        class_name = synthetic_method_class_name(receiver_type)
+        return false if class_name.nil?
+
+        matches = if receiver_type.is_a?(Type::Singleton)
+                    index.lookup_singleton(class_name, method_name)
+                  else
+                    index.lookup_instance(class_name, method_name)
+                  end
+        !matches.empty?
+      rescue StandardError
+        false
+      end
+
       # ADR-16 synthetic-method tier. Slice 2b shipped the floor — a match short-circuits at the
       # right precedence (above dep-source / discovered / user-class-fallback; below RBS) and
       # returns `Dynamic[T]`. Slice 6 (precision promotion):

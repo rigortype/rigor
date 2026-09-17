@@ -54,6 +54,11 @@ jobs:
       # Hard gate when bench/baseline.json is calibrated (exits 1 on
       # regression). An uncalibrated baseline always exits 0 and emits a
       # suggestion — future resets or first-time forks stay green.
+      #
+      # One command, two reps per target since #987: `tool/bench.rb` spawns a
+      # fresh process per rep itself and gates on the LOWER wall_s /
+      # peak_rss_kb, so this step costs ~2× what it did and the sampling rule
+      # lives in the script rather than in this YAML.
       - name: Run make bench-perf
         run: make bench-perf
 

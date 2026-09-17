@@ -228,6 +228,12 @@ coverage:
 # Named `bench-perf` (not `bench`) so the target does not collide with the
 # `bench/` data directory — keeping the file's no-`.PHONY` convention and
 # its `check-*` / `test-*` hyphenated-target family.
+#
+# Still ONE command, but no longer one analysis: since #987 the script reps
+# each target `--reps` times (default 2), every rep in a fresh child process,
+# and gates on the LOWER of the reps for the noisy `wall_s` / `peak_rss_kb`
+# axes. Budget roughly N× the old runtime; `--reps 1` restores the old cost
+# for a quick local look (and the old single-sample noise with it).
 bench-perf:
 	bundle exec ruby tool/bench.rb --target lib
 

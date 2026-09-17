@@ -135,6 +135,7 @@ comparison) appears nowhere else in this index.
 | 2026-07-25 | [`rigor check lib` allocation attribution — 55% is a one-time RBS env build, the #101 rules are 0.24%](20260725-check-allocation-attribution.md) |
 | 2026-07-30 | [Referenced-type stub pass 1 — static detection agrees with the builder (−32.8% of a cold run), and two live stub-synthesis defects](20260730-stub-pass1-static-detection-evaluation.md) |
 | 2026-09-09 | [CI wall time 371s → 220s — the shard spread was never the partition; work pinned to one matrix arm, one file over the per-worker budget, and three traps a spec split springs](20260909-ci-wall-time-shard-rebalance.md) |
+| 2026-09-12 | [v0.3.9 release-gate `lib peak_rss_kb` attribution — +10.5% is transient peak, not retention, and diffuse across ~95 merges](20260912-v039-rss-attribution.md) |
 
 ## Process & meta
 

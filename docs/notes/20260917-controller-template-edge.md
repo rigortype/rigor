@@ -68,27 +68,49 @@ corpus is silent about the lane by construction.
 
 `rigor effects --format json --full`, same two arms.
 
-| Project | `.erb` | Haml | `view:` units | `template-not-analysed` causes, before → after | **discharged** |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| redmine | 506 | 0 | 502 | 253 → 146 | **107** |
-| mastodon | 46 | 310 | 44 | 329 → 329 | **0** |
+| Project | `.erb` | Haml | `view:` units | `template-not-analysed` causes, before → after |
+| --- | ---: | ---: | ---: | ---: |
+| redmine | 506 | 0 | 502 | 253 → 148 |
+| mastodon | 46 | 310 | 44 | 329 → 329 |
 
-**291 of redmine's controller actions gained at least one effect label**, and 335 units in total did.
+The net hides the thing worth reporting, so the causes are split by the row that produced them:
+
+| Project | `ActionController::Base#render` | `ActionView::Base#render` |
+| --- | ---: | ---: |
+| redmine | 251 → **76** | 0 → **72** |
+| mastodon | 328 → 328 | 0 → 0 |
+
+**175 of redmine's controller render taints are discharged** — that is the feature. The 72 that appear
+on the template side are not a regression and not a loss: before this change a `render` *inside* a
+template contributed nothing at all, and a partial-rendering view read exhaustive while saying nothing
+about what it rendered. They are the plugin saying, for the first time, "this template renders
+something I did not analyse", and almost all of them are the layout gap
+([#1047](https://github.com/rigortype/rigor/issues/1047)). They propagate into their controllers like
+any other cause, which is the whole of the difference between 175 and the net 105.
+
+**298 of redmine's controller actions gained at least one effect label**, and 342 units in total did.
 Every label is one a template it really renders carries: redmine's view units carrying an `io.db.*`
 row went from 35 (the #393 count) to **60**, which is the template → partial edge and nothing else —
 the lane move does not move that number.
 
-Three of the rules narrow the count, and each was a false positive found in review rather than in the
-corpus:
+Four of the rules move the count, and every one of them came out of review rather than out of the
+corpus — which is worth saying plainly: **the corpus could not have found any of them**, because each
+is a shape whose cost is a missing or a spurious label and neither is a diagnostic.
 
-- a `responds:` call is only recorded at the unit's **top level**. `redirect_to "/" if @user.nil?`
-  answers on one path and leaves the other taking Rails' implicit render, so standing the unit rule
-  down there would drop the template edge *and* leave the action reading exhaustive. This is what took
-  the controller-action count from 270 to 291;
+- a `responds:` call is only recorded at the unit's **top level**, and a **block is branching**.
+  `redirect_to "/" if @user.nil?` answers on one path and leaves the other taking the implicit render;
+  so does `User.transaction { redirect_to "/" }`, and so does the HTML arm of
+  `respond_to { |f| f.html; f.json { render json: @user } }` — the single most common Rails idiom,
+  where the JSON arm's answer was standing the HTML arm's template down. Recording a response there
+  drops the template edge *and* leaves the action reading exhaustive. Took the controller-action count
+  from 270 to 298;
+- the exception is `respond_to`'s **own** block, which is a format dispatcher rather than a branch. Its
+  arms are ordinary blocks, so `format.html { render :show }` keeps the conventional edge beside the
+  one the `render` names — an accepted over-approximation, since an edge is labels and never a taint;
 - a **`private` / `protected`** member never takes the implicit render, because Rails'
   `action_methods` is public only — a `private def card` beside an `app/views/users/card.html.erb`
-  would otherwise be handed that template's effects. This is what took the discharge count from 109
-  to 107;
+  would otherwise be handed that template's effects. `public :foo` subtracts and a `def self.x` inside
+  a region marks nothing, or the same rule would mark public actions private from the other side;
 - a written handler or format is split off the name, so `render template: "users/show.html.erb"` reaches
   `view:users/show.html` rather than the key `view:users/show.html.erb.html`, which nothing could ever
   answer.
@@ -99,12 +121,12 @@ the render sites resolve to keys no unit answers, the edge is dropped, and the r
 back by the propagator. It is the negative control this feature most needed: a render whose template
 was never analysed must not read as exhaustive, and 329 of them still do not.
 
-The two numbers to keep are **107 taints discharged and 0 new diagnostics**.
+The two numbers to keep are **175 controller render taints discharged and 0 new diagnostics**.
 
 ### Pooled versus sequential
 
 The **effect table is byte-identical** between `RIGOR_RACTOR_WORKERS=2` and sequential on redmine —
-3 627 649 bytes of `effects --format json --full`, the same 502 `view:` rows, the same 146 residual
+3 653 853 bytes of `effects --format json --full`, the same 502 `view:` rows, the same 148 residual
 taints. The edges the new rules record are ordinary `FileCollection::Edge` values sorted by
 `freeze_edges`, and `taint_if_unresolved` is in that sort key, which is what a Data member added to an
 edge has to be for a marshalled worker collection and a sequential one to stay `==`.
@@ -140,8 +162,8 @@ three were *already* in the declared lane and hidden, because the proven lane ca
 `io.db.read` is under it. Moving them to proven only made them visible.
 
 So a third arm — the edge kept, the lane move reverted — was run on both projects, and the deltas
-attribute cleanly (taken before the three narrowing rules above, so the edge column reads 314 / 270 /
-109 rather than the shipped 335 / 291 / 107):
+attribute cleanly (taken before the four rules above, so the edge column reads 314 / 270 / 109
+rather than the shipped 342 / 298 / 175-minus-72):
 
 | Project | sub-change | units gaining a label | of them controller actions | taints discharged |
 | --- | --- | ---: | ---: | ---: |
@@ -163,7 +185,8 @@ argument about presentation rather than about what `proven` means.
   the decision in #1059 cannot be settled by a corpus sweep.
 - **Layouts.** Every layout is still a declined unit ([#1047](https://github.com/rigortype/rigor/issues/1047)),
   so a `render layout:` inside a template keeps its taint. That is deliberate and pinned by spec; it is
-  also a floor on the 146 residual taints on redmine rather than a measurement of them.
+  also most of the 148 residual taints on redmine — 72 of them are the template-side `render` rows that
+  this change made visible for the first time — rather than a measurement of them.
 - **Haml / Slim / Jbuilder.** Same seam, different compiler, still unclaimed — and mastodon is now the
   evidence for how much that costs.
 - **`render partial:, collection:` counted rather than reached.** `collection:` changes how many times a

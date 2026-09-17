@@ -19,9 +19,11 @@ module Rigor
     # include. Declining to decline leaves today's behaviour intact, which is the right direction for a
     # bit whose only power is to remove an edge.
     module Visibility
-      # The markers that take arguments. `public` is not among them: `public :foo` re-opens a member
-      # this module has no reason to track, since a name is only ever *added* to the answer.
-      MARKERS = %i[private protected].freeze
+      # The markers whose ARGUMENT form names members. `public` is one of them and **subtracts**:
+      # `private; def reopened; end; public :reopened` is a public action, and an answer that only ever
+      # grew would mark it private and silently drop its implicit-render edge.
+      HIDING = %i[private protected].freeze
+      SHOWING = :public
 
       NONE = [].freeze
       private_constant :NONE
@@ -35,10 +37,13 @@ module Rigor
         region = false
         statements.each do |statement|
           case statement
-          when Prism::DefNode then names << statement.name.to_s if region
+          # A `def self.x` is not the instance method a later `def x` defines, and the two share a name.
+          # Recording the singleton would mark the instance method private, which is the same false
+          # negative from the other side.
+          when Prism::DefNode then names << statement.name.to_s if region && statement.receiver.nil?
           when Prism::CallNode
             region = region_after(statement, region)
-            names.merge(targets(statement))
+            apply_targets(names, statement)
           end
         end
         names
@@ -57,11 +62,20 @@ module Rigor
         end
       end
 
-      # `private def foo` and `private :foo, :bar` — the argument forms.
-      def targets(node)
-        return NONE unless node.receiver.nil? && MARKERS.include?(node.name)
+      # `private def foo` / `private :foo, :bar`, and their inverse `public def foo` / `public :foo`.
+      def apply_targets(names, node)
+        return unless node.receiver.nil?
+        return names.merge(argument_names(node)) if HIDING.include?(node.name)
+        return unless node.name == SHOWING
 
-        Array(node.arguments&.arguments).filter_map do |argument|
+        argument_names(node).each { |name| names.delete(name) }
+      end
+
+      def argument_names(node)
+        arguments = node.arguments&.arguments
+        return NONE if arguments.nil? || arguments.empty?
+
+        arguments.filter_map do |argument|
           case argument
           when Prism::DefNode then argument.name.to_s
           when Prism::SymbolNode, Prism::StringNode then argument.unescaped
@@ -73,7 +87,7 @@ module Rigor
         node.receiver.nil? && node.arguments.nil? && node.block.nil?
       end
 
-      private_class_method :region_after, :targets, :bare?
+      private_class_method :region_after, :apply_targets, :argument_names, :bare?
     end
   end
 end

@@ -91,6 +91,23 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
       render template: "users/show.html.erb"
     end
 
+    def bare_html_arm
+      respond_to do |format|
+        format.html
+        format.json { render json: @user }
+      end
+    end
+
+    def in_transaction
+      User.transaction { redirect_to "/" }
+    end
+
+    def dispatched
+      respond_to do |format|
+        format.html { render :show }
+      end
+    end
+
     def json_suffix
       render "show.json"
     end
@@ -100,6 +117,23 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
     def card
       @user = User.find(1)
     end
+
+    def reopened
+      @user.touch
+    end
+    public :reopened
+
+    def self.klass_helper
+      1
+    end
+
+    public
+
+    def klass_helper
+      @user.touch
+    end
+
+    private
 
     def set_user
       @user = User.find(1)
@@ -141,23 +175,31 @@ TEMPLATE_EDGE_JSON_ERB = <<~ERB
   <%= @user.name %>
 ERB
 
+# `{relative path => source}`. Every action that must KEEP an implicit-render edge gets a template
+# doing `@user.touch`, so the assertion is a label arriving rather than a key existing.
+TEMPLATE_EDGE_FILES = {
+  "app/models/user.rb" => TEMPLATE_EDGE_MODELS,
+  "app/controllers/users_controller.rb" => TEMPLATE_EDGE_CONTROLLER,
+  "app/views/users/show.html.erb" => TEMPLATE_EDGE_SHOW_ERB,
+  "app/views/users/_card.html.erb" => TEMPLATE_EDGE_CARD_ERB,
+  "app/views/users/_row.html.erb" => TEMPLATE_EDGE_ROW_ERB,
+  "app/views/users/card.html.erb" => TEMPLATE_EDGE_PRIVATE_ERB,
+  "app/views/users/show.json.erb" => TEMPLATE_EDGE_JSON_ERB
+}.merge(
+  %w[maybe rescued bare_html_arm in_transaction reopened dispatched klass_helper]
+    .to_h { |action| ["app/views/users/#{action}.html.erb", TEMPLATE_EDGE_MAYBE_ERB] }
+).freeze
+
 RSpec.describe "plugins/rigor-actionpack — the controller → template effect edge (#1048)" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
   def build_project(dir, envelopes: nil, workers: 0)
-    FileUtils.mkdir_p(File.join(dir, "app", "models"))
-    FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
-    FileUtils.mkdir_p(File.join(dir, "app", "views", "users"))
-    File.write(File.join(dir, "app", "models", "user.rb"), TEMPLATE_EDGE_MODELS)
-    File.write(File.join(dir, "app", "controllers", "users_controller.rb"), TEMPLATE_EDGE_CONTROLLER)
-    File.write(File.join(dir, "app", "views", "users", "show.html.erb"), TEMPLATE_EDGE_SHOW_ERB)
-    File.write(File.join(dir, "app", "views", "users", "_card.html.erb"), TEMPLATE_EDGE_CARD_ERB)
-    File.write(File.join(dir, "app", "views", "users", "_row.html.erb"), TEMPLATE_EDGE_ROW_ERB)
-    File.write(File.join(dir, "app", "views", "users", "maybe.html.erb"), TEMPLATE_EDGE_MAYBE_ERB)
-    File.write(File.join(dir, "app", "views", "users", "rescued.html.erb"), TEMPLATE_EDGE_MAYBE_ERB)
-    File.write(File.join(dir, "app", "views", "users", "card.html.erb"), TEMPLATE_EDGE_PRIVATE_ERB)
-    File.write(File.join(dir, "app", "views", "users", "show.json.erb"), TEMPLATE_EDGE_JSON_ERB)
+    TEMPLATE_EDGE_FILES.each do |relative, source|
+      path = File.join(dir, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, source)
+    end
     effects = {}
     effects["envelopes"] = envelopes if envelopes
     Rigor::Configuration.new(
@@ -249,6 +291,35 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
       end
     end
 
+    it "keeps the implicit render when the response is inside a block that may not run" do
+      in_project do |runner, _result|
+        # `respond_to { |f| f.html; f.json { render json: @user } }` is the shape that matters most:
+        # the `render json:` is the JSON arm's answer and says nothing about the HTML arm, which takes
+        # the implicit render. `User.transaction { redirect_to "/" }` is the same question with a
+        # different block — a call the body may not make, recorded as if it always did.
+        %w[bare_html_arm in_transaction].each do |action|
+          entry = unit(runner, "UsersController##{action}")
+
+          expect(entry.edges).to include("view:users/#{action}.html"), "expected ##{action} to keep the edge"
+          expect(entry.declared.to_a).to include("io.db.write")
+        end
+      end
+    end
+
+    it "over-approximates a response inside a format arm, which costs labels and never a taint" do
+      in_project do |runner, _result|
+        # `format.html { render :show }` really does answer, but an arm is a block the body may not run,
+        # so the conventional `users/dispatched` edge is emitted beside the one the `render` names. That
+        # is the accepted direction: an edge contributes labels and never a taint, while the other way
+        # round loses the template of an action that DID take the implicit render — and leaves it
+        # reading exhaustive.
+        entry = unit(runner, "UsersController#dispatched")
+
+        expect(entry.edges).to include("view:users/show.html")
+        expect(entry.edges).to include("view:users/dispatched.html")
+      end
+    end
+
     it "never renders a PRIVATE helper, however much a template shares its name" do
       in_project do |runner, _result|
         # Rails' `action_methods` is a controller's public instance methods. `app/views/users/card.html.erb`
@@ -258,6 +329,23 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
         expect(entry.edges).not_to include("view:users/card.html")
         expect(entry.declared.to_a).not_to include("io.db.destroy")
         expect(entry.proven.to_a).not_to include("io.db.write")
+      end
+    end
+
+    it "lets `public :name` re-open a member the private region closed" do
+      in_project do |runner, _result|
+        # `private; def reopened; end; public :reopened` is a public action. An answer that only ever
+        # grew would read it as private and drop its edge.
+        expect(unit(runner, "UsersController#reopened").edges).to include("view:users/reopened.html")
+      end
+    end
+
+    it "does not let a `def self.x` inside a private region mark the instance method of that name" do
+      in_project do |runner, _result|
+        # `private; def self.klass_helper; end; public; def klass_helper; end` — a `private` region hides
+        # no singleton method, and the two are different methods that share a name. An answer keyed on
+        # the name alone would mark the public action private and drop its edge.
+        expect(unit(runner, "UsersController#klass_helper").edges).to include("view:users/klass_helper.html")
       end
     end
 

@@ -46,15 +46,26 @@ module Rigor
       # only to refuse to record a response the body might not perform: `render :edit if x` leaves the
       # other path taking Rails' implicit render.
       #
-      # A **block** is deliberately absent. `respond_to do |format| format.html { render :show } end` is
-      # how a Rails action answers, the block always runs, and counting it would add the conventional
-      # template's edge beside the one the `render` already names. The modifier forms need no entry of
-      # their own: Prism spells `render :x if y` as an ordinary `IfNode`.
+      # The modifier forms need no entry of their own — Prism spells `render :x if y` as an ordinary
+      # `IfNode` — and `RescueNode` is the rescue CLAUSE rather than the body it guards, so a `render` in
+      # the `begin` half of `begin … rescue … end` is at depth zero, which is right: that half runs.
+      #
+      # A **block** is branching too, and is handled separately because only its CALL can say so
+      # ({#transparent_block?}). `User.transaction { redirect_to "/" }`, `[1].each { redirect_to "/" }`
+      # and `x.presence&.then { … }` all contain a call the body may not make, and recording a response
+      # from one would drop the implicit-render edge AND leave the unit reading exhaustive — the
+      # combination this bit exists to prevent.
       BRANCHING = [
         Prism::IfNode, Prism::UnlessNode, Prism::CaseNode, Prism::CaseMatchNode,
         Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
         Prism::RescueNode, Prism::RescueModifierNode, Prism::AndNode, Prism::OrNode
       ].to_set.freeze
+
+      # The one block a response may be recorded through: `respond_to`'s own. It is the format dispatcher
+      # rather than a conditional, and it always runs — but its ARMS do not, so `f.html { … }` is an
+      # ordinary branching block and a `render json:` in the `f.json` arm no longer stands the `f.html`
+      # arm's implicit render down.
+      DISPATCH_SELECTORS = %i[respond_to respond_with].to_set.freeze
 
       # Selectors a per-class POSTURE default must never answer for, because a more specific reading of
       # the same site exists and would be swallowed: `send` and friends are the `dynamic-send` taint, and
@@ -167,6 +178,7 @@ module Rigor
         # inside; only a depth of zero answers.
         @responded = false
         @conditional = 0
+        @transparent_blocks = Set.new.compare_by_identity
         # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
         @unclaimed = false
       end
@@ -220,11 +232,20 @@ module Rigor
         return if unit_boundary?(node)
 
         visit(node)
-        return node.rigor_each_child { |child| walk(child) } unless BRANCHING.include?(node.class)
+        return node.rigor_each_child { |child| walk(child) } unless branching?(node)
 
         @conditional += 1
         node.rigor_each_child { |child| walk(child) }
         @conditional -= 1
+      end
+
+      # Whether the walk is entering a construct whose body may not run. A `BlockNode` answers from the
+      # call that owns it, which {#visit_call} has already marked — `walk` visits a node before its
+      # children, so the mark is always in place by the time the block is reached.
+      def branching?(node)
+        return !@transparent_blocks.include?(node) if node.is_a?(Prism::BlockNode)
+
+        BRANCHING.include?(node.class)
       end
 
       # A nested unit is recorded and NOT descended into: its body belongs to its own summary, and the
@@ -297,6 +318,7 @@ module Rigor
       end
 
       def visit_call(node)
+        mark_transparent_block(node)
         record = @calls[node]
         attribute(node, record)
         plugin = attribute_plugin(node, record)
@@ -309,6 +331,16 @@ module Rigor
         bound = envelope || (plugin&.discharge? ? plugin : nil)
         visit_uncatalogued(node, record, bound) unless claimed_by_catalogue?(node, record)
         visit_block_argument(node)
+      end
+
+      # `respond_to do |format| … end` — the block that is a dispatcher rather than a branch. Marked by
+      # identity, because a `BlockNode` cannot name the call it belongs to and two structurally equal
+      # blocks in one body are two blocks.
+      def mark_transparent_block(node)
+        return unless node.receiver.nil? && DISPATCH_SELECTORS.include?(node.name)
+
+        block = node.block
+        @transparent_blocks << block if block.is_a?(Prism::BlockNode)
       end
 
       # The **plugin stratum** (#387; ADR-103 WD6 / WD10): what the plugin that models a framework says

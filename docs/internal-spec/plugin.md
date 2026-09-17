@@ -799,14 +799,23 @@ would otherwise produce:
 - a `responds:` call counts only at the unit's **top level**. `redirect_to root_path if @user.nil?`
   leaves the other path taking the implicit render, and standing down there would drop the template
   edge *and* leave the unit reading exhaustive. Branching ancestors are `If` / `Unless` / `Case` /
-  loops / `Rescue` / `And` / `Or`, modifier forms included; a block is not one, because
-  `respond_to { |f| f.html { render :show } }` is how an action answers and always runs;
+  loops / `And` / `Or` (modifier forms included), `Rescue` — the rescue **clause**, not the body it
+  guards, so a `render` in the `begin` half of `begin … rescue … end` is at depth zero and stands the
+  rule down, correctly, because that half runs — and a **block**, whose body a call may never make
+  (`User.transaction { redirect_to "/" }`, `[1].each { … }`). The exception is `respond_to` /
+  `respond_with`'s own block, a format dispatcher rather than a branch; its arms are ordinary blocks,
+  so `format.json { render json: @user }` no longer stands the HTML arm's implicit render down. Three
+  over-approximations remain — an `if`/`else` whose every branch responds, a response inside a format
+  arm, and `redirect_to … and return` — and each keeps an edge that is not needed rather than
+  dropping one that is;
 - a **`private` or `protected`** member is skipped. Rails' `action_methods` is a controller's public
   instance methods, so a `private def card` is never rendered as `users/card` — while a project that
   happens to ship `app/views/users/card.html.erb` would otherwise hand that template's effects to the
-  helper. The three spellings (`private` as a region, `private def foo`, `private :foo`) are read off
-  the class body's own top level in source order; anything nested deeper reads as public, which leaves
-  today's behaviour intact rather than guessing;
+  helper. `Effects::Visibility` reads `private` / `protected` as a region and in their argument forms
+  (`private def foo`, `private :foo`), and `public` **subtracts** in both; a `def self.x` inside a
+  region marks nothing, since a region hides no singleton method. It reads the class body's own top
+  level in source order, and anything deeper — `send(:private, :card)`, a `class_eval`, a concern that
+  privatises on include — reads as public, which leaves today's behaviour intact rather than guessing;
 - a **nested `def`** and a **singleton method** are skipped outright. Neither is ever an action.
 
 ##### Discharge and first-party standing

@@ -64,6 +64,14 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.10.0, 2026-09-17 (#1049) — three macro families join the model entry and the published
+        # `:model_index` fact: `delegate`, associations declared in an included concern's `included do`, and
+        # the Paperclip / Active Storage attachment macros. `ModelIndex::Entry` gains a `macro_methods`
+        # member, so a cached 0.9.0 payload is not Marshal-compatible; and the concern fold WIDENS the
+        # association list of models the 0.9.0 payload recorded without it. Both make the bump — part of the
+        # producer cache KEY — what stops a warm run serving the pre-change surface to a consumer that fails
+        # closed on a name it cannot see.
+        #
         # 0.9.0, 2026-09-10 (#534 item 7) — the bundled signatures gained `sig/active_record/framework.rbs`:
         # the Active Record exception hierarchy, the `ActiveModel` namespace and `Arel`. No producer payload
         # changed shape, but the version is the cache key a project sees, and the RBS half of a plugin's
@@ -93,7 +101,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.9.0",
+        version: "0.10.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -614,7 +622,8 @@ module Rigor
             scopes: entry.scopes,
             validations: entry.validated_attributes,
             callbacks: entry.callbacks,
-            aliases: entry.aliases
+            aliases: entry.aliases,
+            macro_methods: entry.macro_methods
           }.freeze
         end.freeze
       end

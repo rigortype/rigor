@@ -216,13 +216,20 @@ module Rigor
 
       # Every name the model answers that its `:model_index` row states. The `?` forms are Active
       # Record's own per-column predicates, which a serializer reads as readily as the column.
+      #
+      # `macro_methods` (#1049) is the row's name-only set: `delegate`'s methods, the Paperclip / Active
+      # Storage attachment readers, and an `enum`'s per-value predicates, from the model body and from every
+      # concern the model includes. It is what lets `REST::AccountSerializer`'s `followers_count` / `user` /
+      # `avatar` reads resolve; an older producer that does not publish the key reads as the empty set here,
+      # which declines exactly as before rather than erroring.
       def model_members(row)
         columns = Array(row[:columns]).map(&:to_s)
         associations = Array(row[:associations]).map { |a| a[:name].to_s }
         enums = row[:enums].is_a?(Hash) ? row[:enums].keys.map(&:to_s) : []
         aliases = row[:aliases].is_a?(Hash) ? row[:aliases].keys.map(&:to_s) : []
         scopes = Array(row[:scopes]).map(&:to_s)
-        (columns + columns.map { |c| "#{c}?" } + associations + enums + aliases + scopes).to_set
+        macros = Array(row[:macro_methods]).map(&:to_s)
+        (columns + columns.map { |c| "#{c}?" } + associations + enums + aliases + scopes + macros).to_set
       end
 
       # A method the project writes in Ruby on `class_name` or an ancestor of it. On the model side that

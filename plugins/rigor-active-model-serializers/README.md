@@ -104,7 +104,9 @@ will read off its resource: the `attributes` / `attribute` / `has_many` /
 `object.<name>` in its body, minus the methods every `Object` has (which
 say nothing about which class the resource is). The model must answer all
 of them, from its `:model_index` row or from a project `def` the ancestor
-walk finds. Requiring all rather than most is deliberate: a decorator
+walk finds — the row's `macro_methods` (#1049) is what carries the
+`delegate` / attachment / enum-predicate names. Requiring all rather than
+most is deliberate: a decorator
 around a model shares most of the model's surface, and the one or two
 extra names are exactly what say so.
 
@@ -134,13 +136,13 @@ serializers with `["app/serializers"]` alone, 173 with `app/lib` added.
 - **`serializer:` / `each_serializer:` options.** They say which
   serializer renders an association, never which model a serializer
   serializes.
-- **Model surface the index cannot see.** `delegate`, an association
-  declared in a concern's `included do`, and attachment macros are all
-  things the model answers and the `:model_index` fact does not carry, so
-  a serializer reading one is declined. That fold belongs in
-  `rigor-activerecord` and is filed as
-  [#1049](https://github.com/rigortype/rigor/issues/1049); the note
-  records which Mastodon serializers it would recover.
+- **Model surface the index cannot see.** A name the model answers through
+  `method_missing`, through an unrecognised gem macro, or through a module
+  included at runtime is not in the `:model_index` row, so a serializer
+  reading one is declined. `delegate`, concern-declared associations, the
+  Paperclip / Active Storage attachment macros and `enum` value predicates
+  were the measured share of this on Mastodon and are folded as of
+  [#1049](https://github.com/rigortype/rigor/issues/1049).
 - **A few reader spellings.** `object[:key]`, `object.title =`,
   `object.try(:name)`, `object.present?` and the `attribute(:x) { ... }`
   block form are not collected as evidence, so a serializer using one may

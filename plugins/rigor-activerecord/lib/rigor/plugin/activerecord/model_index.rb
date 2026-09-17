@@ -15,7 +15,7 @@ module Rigor
       # Phase 2's schema is OPTIONAL. A project that ships raw migrations only — the DB-agnostic Rails
       # pattern, where `db/schema.rb` is gitignored (Redmine) — has no schema to combine, and `schema_table:
       # nil` then yields the REDUCED index: every {Entry} carries its resolved table name, associations,
-      # enums, scopes, validations, callbacks and aliases, and an EMPTY column set. Only the column-keyed
+      # enums, scopes, validations, callbacks, aliases and macro methods, and an EMPTY column set. Only the column-keyed
       # surface stands down; the schema was never an input to any of the rest. {#columns_known?} tells the
       # two modes apart — an empty column set means "the schema is unknown", not "this model has no
       # columns", and consumers that would fire on an unrecognised column must not read the two the same
@@ -27,7 +27,7 @@ module Rigor
       #
       # Single-table-inheritance subclasses (`class Admin < User`) carry an `sti_parent:` pointer; their
       # {Entry} resolves its table from the root model and inherits the chain's declared associations /
-      # enums / aliases / scopes / validations / callbacks.
+      # enums / aliases / scopes / validations / callbacks / macro methods.
       class ModelIndex
         # `associations` is a frozen `Array<Hash>` where each row carries `{ name:, kind:, target:,
         # nullable: }`:
@@ -47,7 +47,7 @@ module Rigor
         # exact. Only a true reading licenses pinning the name to a value; see
         # `Activerecord#table_name_return_type` for why the schema is not admitted as corroboration.
         Entry = Struct.new(:class_name, :table_name, :table_name_exact, :columns, :associations,
-                           :enums, :scopes, :validations, :callbacks, :aliases,
+                           :enums, :scopes, :validations, :callbacks, :aliases, :macro_methods,
                            keyword_init: true) do
           def table_name_exact? = table_name_exact == true
 
@@ -90,6 +90,13 @@ module Rigor
           # declarations.
           def alias?(name) = aliases.key?(name.to_s)
           def resolve_alias(name) = aliases[name.to_s]
+
+          # `macro_methods` is `Array<method_name>` — the instance methods a declaration macro installs that
+          # none of the sets above already carries (#1049): `delegate`'s names, the Paperclip / Active
+          # Storage attachment readers, and an `enum`'s per-value predicates. Names only, with no type: a
+          # consumer asks "does this model answer `followers_count`?", which is what a fail-closed check
+          # needs and all the declaration states.
+          def macro_method?(name) = macro_methods.include?(name.to_s)
         end
 
         attr_reader :entries
@@ -149,8 +156,8 @@ module Rigor
               end
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
-            # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
-            # child would surface as a false `unknown-column`.
+            # validations / callbacks / macro methods. Without the merge a `where(<parent-association>: ...)`
+            # on the child would surface as a false `unknown-column`.
             acc[class_name] = Entry.new(
               class_name: class_name,
               table_name: table_name,
@@ -161,7 +168,8 @@ module Rigor
               scopes: chain.flat_map { |r| Array(r[:scopes]) }.uniq.freeze,
               validations: chain.flat_map { |r| Array(r[:validations]) }.uniq.freeze,
               callbacks: chain.flat_map { |r| Array(r[:callbacks]) }.map(&:freeze).freeze,
-              aliases: merge_aliases(chain)
+              aliases: merge_aliases(chain),
+              macro_methods: chain.flat_map { |r| Array(r[:macro_methods]) }.uniq.freeze
             ).freeze
           end
           new(entries.freeze, columns_known: !schema_table.nil?)

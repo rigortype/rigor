@@ -92,6 +92,55 @@ hand-written `def self.included(base)` with `base.class_eval`, or
 directly in the body of your base class rather than in a concern —
 is not folded, and the call stays as untyped as it was.
 
+`belongs_to` / `has_one` / `has_many` /
+`has_and_belongs_to_many` declared in that same `included do ...
+end` block count as the including model's own too, with the same
+`include`-edge attribution: `account.user` narrows to
+`User | nil` when `Account` includes the concern that declares
+`has_one :user`, and `where(user: ...)` stops reporting a false
+`unknown-column`. A model that declares the association itself
+keeps its own version.
+
+### The names a macro defines
+
+Three macro families define ordinary instance methods that are
+neither columns nor associations, and the model's recorded
+surface now carries their names:
+
+- `delegate :followers_count, to: :account_stat` — every
+  delegated name, including the `prefix:` spellings
+  (`delegate :can?, to: :user, prefix: true` defines
+  `user_can?`). `delegate` is read from the model body, from a
+  concern's `included do ... end`, and from a concern's own
+  top level, where it defines an instance method the including
+  model inherits.
+- Attachment macros — Paperclip's `has_attached_file :avatar`
+  (`avatar`, `avatar=`, `avatar?`) and Active Storage's
+  `has_one_attached` / `has_many_attached` (`banner`,
+  `banner_attachment`, `banner_blob`; `docs`,
+  `docs_attachments`, `docs_blobs`). Paperclip's
+  `avatar_file_name` / `avatar_content_type` / `avatar_file_size`
+  / `avatar_updated_at` are real columns, so they come from your
+  schema rather than from the macro.
+- `enum` value predicates — `enum :visibility, { limited: 4 },
+  suffix: :visibility` defines `limited_visibility?`, and
+  `prefix:` / `_prefix:` / `_suffix:` are read the same way. An
+  `enum` declared `instance_methods: false` defines none of
+  them, and none are recorded.
+
+These are recorded as NAMES. Nothing here says what a delegated
+method returns, and the plugin contributes no type for one — the
+value is that a consumer asking "does this model answer
+`followers_count`?" gets the right answer. The consumer this was
+built for is
+[`rigor-active-model-serializers`](rigor-active-model-serializers.md),
+which types a serializer's `object` only when the candidate model
+answers every name the serializer reads.
+
+A declaration this plugin cannot read off the source contributes
+nothing rather than a guess: a `prefix: true` whose `to:` is a
+method call, a non-literal `prefix:`, a computed enum value list.
+
 If the project also installs `activerecord` through
 `rbs collection install`, the collection declares
 `ActiveRecord::Relation` without a type parameter while the

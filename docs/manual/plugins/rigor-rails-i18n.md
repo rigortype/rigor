@@ -91,7 +91,11 @@ view templates containing lazy `t('.key')` calls.
 - **View diagnostics duplicate under `--workers`** — the view
   scan is a project-wide pass surfaced through the per-file
   diagnostic hook, so each fork-pool worker re-emits the full set.
-  Default `rigor check` (sequential) is unaffected. The plugin's
+  Default `rigor check` (sequential) is unaffected. These rows name
+  a real view file and line, so they cannot move to `.rigor.yml` the
+  way the `load-error` rows did; emitting them once per run needs an
+  engine channel that keeps a batch's own positions
+  ([#1060](https://github.com/rigortype/rigor/issues/1060)). The plugin's
   `load-error` rows no longer share this limitation: they are
   run-scoped disclosures, reported once per run on `.rigor.yml`.
   They are `:warning`, so if you baselined one at its old position

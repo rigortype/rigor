@@ -368,4 +368,69 @@ RSpec.describe "plugins/rigor-activestorage" do
       end
     end
   end
+
+  # Issue #1056 — the "attachment index did not load" notice is a RUN-scoped disclosure, not a per-file
+  # diagnostic. It used to be returned from `#diagnostics_for_file` with no once-guard at all, so the row
+  # repeated on every analysed file (and `--workers N` re-multiplied that by each worker's own plugin
+  # instance). `spec/rigor/analysis/run_scoped_disclosure_spec.rb` pins the pooled half of the contract.
+  describe "the attachment index load error is disclosed once per run (#1056)" do
+    def refusal
+      Rigor::Plugin::AccessDeniedError.new("read refused: app/models/user.rb", reason: :outside_root)
+    end
+
+    def load_error_rows(&stub)
+      stub.call
+      result = run_plugin(
+        source: "user.avatar\n",
+        files: { "extra1.rb" => "a = 1\n", "extra2.rb" => "b = 2\n" },
+        paths: %w[demo.rb extra1.rb extra2.rb]
+      )
+      plugin_diagnostics(result).select { |d| d.rule == "load-error" }
+    end
+
+    it "emits one row at .rigor.yml:1:1, not one per analysed file" do
+      rows = load_error_rows do
+        allow(Rigor::Plugin::Activestorage::AttachmentDiscoverer).to receive(:new).and_raise(RuntimeError, "boom")
+      end
+
+      expect(rows.size).to eq(1)
+      expect([rows.first.path, rows.first.line, rows.first.column]).to eq([".rigor.yml", 1, 1])
+      expect(rows.first.severity).to eq(:warning)
+      expect(rows.first.message).to include("discovery failed")
+    end
+
+    # The refusal arm keeps the boundary's own wording — it is already a sentence about a denied read, so
+    # the plugin prefixes its name and nothing else. The `discovery failed:` prefix belongs to the other
+    # arm; asserting its ABSENCE is what pins the two messages apart.
+    it "keeps the refusal message unprefixed by `discovery failed:`" do
+      rows = load_error_rows do
+        allow(Rigor::Plugin::Activestorage::AttachmentDiscoverer).to receive(:new).and_raise(refusal)
+      end
+
+      expect(rows.size).to eq(1)
+      expect(rows.first.message).to eq("rigor-activestorage: read refused: app/models/user.rb")
+      expect(rows.first.path).to eq(".rigor.yml")
+    end
+
+    # Both outcomes are reachable in ONE run: `#attachment_index` re-attempts the load per call site, so a
+    # refusal on the first attempt and a different failure on a later one both land in the table. The
+    # engine emits a plugin's disclosures in KEY order, which is why the keys carry an ordinal prefix —
+    # the refusal must still precede the discovery failure the way `@load_errors` recorded them.
+    it "emits both keys once each, refusal first, when both outcomes occur" do
+      attempt = 0
+      rows = load_error_rows do
+        allow(Rigor::Plugin::Activestorage::AttachmentDiscoverer).to receive(:new) do
+          attempt += 1
+          raise(attempt == 1 ? refusal : RuntimeError.new("boom"))
+        end
+      end
+
+      expect(rows.size).to eq(2)
+      expect(rows.map(&:message)).to eq(
+        ["rigor-activestorage: read refused: app/models/user.rb",
+         "rigor-activestorage: discovery failed: RuntimeError: boom"]
+      )
+      expect(rows.map(&:path).uniq).to eq([".rigor.yml"])
+    end
+  end
 end

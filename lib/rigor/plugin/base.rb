@@ -710,8 +710,8 @@ module Rigor
       end
 
       # ADR-60 WD4 — the `StandardError` a prior {#producer_value} call rescued for `id`, or nil when it
-      # succeeded or was never called. Plugins surface it as a load-error diagnostic from
-      # `#diagnostics_for_file`.
+      # succeeded or was never called. Plugins surface it as a run-scoped `load-error` disclosure through
+      # {#disclose_once} (#1056) — a failed index is a fact about the run's inputs, not about a file.
       def producer_error(id)
         @producer_errors[id.to_sym]
       end

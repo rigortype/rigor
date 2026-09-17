@@ -40,11 +40,18 @@ arguments decline — those are covered by ActiveStorage's own RBS.
 | Rule | Severity | When |
 | --- | --- | --- |
 | `plugin.activestorage.attachment-call` | info | a recognised `model.attachment_name` call surfaces; confirms the model → attachment mapping |
-| `plugin.activestorage.load-error` | warning | discovery failed (e.g. the model directory is inaccessible under the IoBoundary trust policy) |
+| `plugin.activestorage.load-error` | warning | discovery failed (e.g. the model directory is inaccessible under the IoBoundary trust policy) — once per run, on `.rigor.yml` |
 
 No `:error` diagnostics in this slice — the value is the
 return-type contribution; an "unknown attachment name" rule is a
 future slice.
+
+The `load-error` warning is run-scoped: it is a fact about your
+configuration, not about any one source file, so it is reported once
+per run on `.rigor.yml` rather than repeated on every analysed file.
+It is `:warning`, so if you baselined it at its old position that
+entry no longer matches and the row fails a `--fail-on=warning` run —
+regenerate with `rigor baseline regenerate`.
 
 ## Configuration
 

@@ -151,6 +151,55 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
     end
   end
 
+  # Issue #1056 — the shape the six bundled discovery plugins (rigor-actioncable, -activejob,
+  # -activestorage, -actionmailer, -pundit, -sidekiq) carried: a `load_error_diagnostic(path)` returned
+  # from `#diagnostics_for_file` with NO once-guard at all, so the row repeated on every analysed FILE and
+  # `--workers N` re-multiplied that by each worker's own instance. A stub plugin suffices here because
+  # the pooled path is plugin-agnostic — it de-duplicates by `(plugin id, key)` and never reads a message;
+  # each bundled plugin's own integration spec pins its wording and severity sequentially.
+  describe "a discovery plugin whose index producer fails (#1056)" do
+    let(:plugin_class) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "failing-index-plugin", version: "0.1.0")
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          disclose_once(
+            :index_load_failed,
+            message: "failing-index-plugin: failed to discover things: RuntimeError: boom",
+            severity: :warning,
+            rule: "load-error"
+          )
+          []
+        end
+      end
+    end
+
+    before { stub_const("RunDisclosureFailingIndexStubPlugin", plugin_class) }
+
+    it "emits one row at .rigor.yml:1:1 sequentially, not one per analysed file" do
+      Dir.mktmpdir do |dir|
+        paths = write_fixture(dir)
+        rows = run_with(dir, paths, plugin_class, "rigor-failing-index-plugin")
+               .select { |d| d.rule == "load-error" && d.source_family == "plugin.failing-index-plugin" }
+
+        expect(rows.size).to eq(1)
+        expect([rows.first.path, rows.first.line, rows.first.column]).to eq([".rigor.yml", 1, 1])
+        expect(rows.first.severity).to eq(:warning)
+      end
+    end
+
+    it "emits the same single row under workers: 2" do
+      Dir.mktmpdir do |dir|
+        paths = write_fixture(dir)
+        sequential = run_with(dir, paths, plugin_class, "rigor-failing-index-plugin")
+        pooled = run_with(dir, paths, plugin_class, "rigor-failing-index-plugin", workers: 2)
+
+        expect(pooled.count { |d| d.rule == "load-error" }).to eq(1)
+        expect(diag_keys(pooled)).to eq(diag_keys(sequential))
+      end
+    end
+  end
+
   # Issue #1051 review — the position move is a BASELINE-VISIBLE change. `Analysis::Baseline` buckets by
   # `(file, qualified_rule[, message])`, so an entry a project recorded while the disclosure still landed on
   # a controller stops matching once the row moves to `.rigor.yml` and the row surfaces as new (and the

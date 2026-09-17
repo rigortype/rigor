@@ -170,6 +170,15 @@ still carry it are not silently fixed: the flag is theirs, and the
 engine cannot tell a run-level row from a file-level one that happens
 to repeat. Adopting `#disclose_once` is the migration.
 
+The question that chooses the channel is whether the row has a
+position it could be **right** about. "The index did not load" does
+not — it goes here. A project-wide scan whose rows each name a real
+file and line does, and must keep it; surfacing such a batch through
+`#diagnostics_for_file` behind an `@emitted` flag still duplicates it
+per worker, and there is no run-scoped channel for a *positioned*
+batch yet ([#1060](https://github.com/rigortype/rigor/issues/1060)).
+`rigor-rails-i18n`'s view scan is the one bundled instance.
+
 #### Template units — `template_globs:` / `#template_units_for_file` ([#392](https://github.com/rigortype/rigor/issues/392))
 
 `#template_units_for_file(path:, source:)` is the **source transform** half of the revived ADR-16 Tier-D

@@ -69,6 +69,13 @@ plugins:
   which the report already records. Rooting every class under
   `app/mailers` instead would mark a mailer nothing sends reachable
   forever on no evidence.
+- **The "failed to discover mailers" warning is run-scoped.** It is
+  a fact about your configuration, not about any one source file, so
+  it is reported once per run on `.rigor.yml` rather than repeated on
+  every analysed file. It is `:warning`, so if you baselined it at its
+  old position that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 
 ## Plugin internals
 

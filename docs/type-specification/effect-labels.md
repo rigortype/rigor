@@ -292,6 +292,20 @@ Four invariants govern the policy, and each is a separate commitment:
 
 For the envelope check the discharge applies transitively: what a bound is compared against is the proven closure minus every discharged origin bundle, computed at the origin's own method and propagated along call edges like the proven lane itself. For a snapshot difference, an **added** label is tolerated exactly when every origin introducing it is discharged; a **removal** is judged by label, because the origin that produced it no longer exists to consult.
 
+## Emission
+
+> **Implemented as of this writing** ([#391](https://github.com/rigortype/rigor/issues/391)): `rigor sig-gen` writes `%a{pure}` from the proven lane, and `%a{rigor:v1:effect …}` under `--effect-envelopes`.
+
+Emission is the inverse of the envelope check, and it is bound by the same asymmetry: a check that is too strict costs a finding, and an emission that is too generous writes a contract nothing re-derives. A method is annotated only when **every** condition below holds, and a generator MUST NOT widen the set:
+
+- Its summary is **exhaustive**. A non-exhaustive summary reads "these effects, and possibly more" (§ Effect summaries), which is precisely the claim an upper bound must not make.
+- Its summary is **undischarged**: the transitive proven lane and the judgment lane agree. This is invariant 4 above, and it is what keeps a policy-tolerated `telemetry` footprint from earning a written `%a{pure}` — such a method reads clean to the project that tolerated it and to nobody else, including that project's own `--no-tolerated-effects` audit.
+- The bound written is the **proven** set, never the discharged one.
+
+`%a{pure}` is written when the proven set is subsumed by `{mutate.local}`. `%a{rigor:v1:effect …}` names the proven labels exactly, and is gated behind an explicit request because it is Rigor's own spelling where `%a{pure}` is the ecosystem's ([ADR-10](../adr/10-dependency-source-inference.md) WD7 — a shape nothing committed to never round-trips out as authored RBS).
+
+A generator MUST NOT rewrite an annotation region it did not write. A declaration that already carries annotations is left byte-for-byte as it is, and the withheld emission is reported instead: there is no merge rule for two bounds on one declaration, and the reading of `%a{pure}` beside `%a{rigor:v1:effect …}` (§ Effect envelopes) is a contradiction to report rather than a state to produce.
+
 ## Unknown labels
 
 > **Implemented as of this writing** ([#384](https://github.com/rigortype/rigor/issues/384), [#385](https://github.com/rigortype/rigor/issues/385)): the ⊤ degradation, the intent-gated `effect.unknown-label` at the declaration (RBS and rbs-inline) and at every `.rigor.yml` label surface — `effects.tolerated:`, `effects.envelopes[].effect`, `effects.attribution:` values and `effects.labels:` — and the `effect.annotations-unchecked` residual.

@@ -119,6 +119,81 @@ The `sig.skipped.*` reasons are:
   the skipped method is reported on stderr, and it is worth
   reporting to us.
 
+## Emitting effect annotations
+
+If your `.rigor.yml` carries an `effects:` block, `sig-gen`
+writes one more thing: `%a{pure}`, the purity annotation rbs
+and Steep already understand, above the methods Rigor proved
+do nothing.
+
+```ruby
+class Label
+  def render
+    parts = []
+    parts << "a"
+    parts.join
+  end
+end
+```
+
+```
+$ rigor sig-gen
+# lib/label.rb
+class Label
+  # [new]
+  %a{pure}
+  def render: () -> String
+end
+```
+
+Two conditions have to hold before an annotation is written,
+and both exist to keep a wrong one off the page. An emitted
+annotation is not a hint — the effects opt-in reads it back
+as an **envelope** and enforces it on the method and on
+everything the method reaches, so a `%a{pure}` `sig-gen`
+invented would put `effect.envelope-exceeded` on code that
+is correct.
+
+- The summary must be **exhaustive**: every call the method
+  reaches was resolved. A summary that is not reads "these
+  effects, and possibly more", which is exactly the claim an
+  envelope must not make.
+- The summary must be **undischarged**: nothing in the
+  method's footprint may be invisible only because
+  `effects.tolerated:` says to ignore it. A method whose
+  whole footprint is a tolerated `telemetry` call looks
+  clean to *your* project and to nobody else — not to a
+  consumer reading your shipped `sig/`, and not to your own
+  `--no-tolerated-effects` audit.
+
+`--effect-envelopes` adds the labelled spelling,
+`%a{rigor:v1:effect io.db, nondet.time}`, for methods that
+do have a footprint. It is a separate flag because `%a{pure}`
+is the ecosystem's annotation and this one is Rigor's: a
+labelled envelope in your `sig/` is a Rigor-specific contract,
+and you should ask for it by name.
+
+Under `--write`, an annotation goes on the line above the
+declaration it binds. A declaration that **already** carries
+annotations is left byte-untouched and reported as
+`sig.effect.left-unreadable`: the writer cannot tell an
+annotation it wrote from one you wrote, and it has no grammar
+for merging two, so it will not rewrite that region. Decide
+what it should say and write it yourself.
+
+The `sig.effect.*` reasons are:
+
+- `sig.effect.emitted` — an annotation was rendered.
+- `sig.effect.withheld-tolerated` — the footprint is only
+  clean under `effects.tolerated:`.
+- `sig.effect.withheld-non-exhaustive` — some call the
+  method reaches could not be resolved.
+- `sig.effect.left-unreadable` — the target declaration
+  already carries annotations, so nothing was written there.
+
+With no `effects:` block in `.rigor.yml`, none of this runs
+and the output is byte-for-byte what it was before.
+
 The three `sig.generated.*` identifiers
 (`sig.generated.new-file` / `new-method` / `tighter-return`)
 are emitted as JSON fields under `--format=json` so CI

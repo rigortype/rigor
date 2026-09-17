@@ -2,6 +2,7 @@
 
 require "optionparser"
 
+require_relative "../cache/store"
 require_relative "../configuration"
 require_relative "options"
 require_relative "../sig_gen"
@@ -50,7 +51,8 @@ module Rigor
         observations = collect_observations(configuration, options)
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
                                           observations: observations,
-                                          include_private: options.fetch(:include_private))
+                                          include_private: options.fetch(:include_private),
+                                          effect_annotator: effect_annotator(configuration, paths, options))
         candidates = generator.run
         mode = options.fetch(:mode).to_sym
 
@@ -61,12 +63,61 @@ module Rigor
                    0
                  end
         report_skipped(candidates, options)
+        report_withheld_annotations(candidates, options)
         report_unrenderable(generator.unrenderable)
         report_unresolvable_superclasses(generator.unresolvable_superclasses)
         status
       end
 
       private
+
+      # ADR-103 WD9 — the effect table sig-gen writes annotations from, or `nil`.
+      #
+      # The gate is the project's own `effects:` opt-in and nothing else. An annotation is read back as an
+      # enforced envelope, so turning emission on from a sig-gen flag alone would let one command commit a
+      # project to a contract `rigor check` was never asked to keep; and a project that has not opted in
+      # pays neither the analysis this needs nor a single changed byte of output.
+      #
+      # `--effect-envelopes` is the second, narrower switch: `%a{pure}` is the ecosystem's existing purity
+      # spelling and round-trips through Steep as well as Rigor, while `%a{rigor:v1:effect …}` is Rigor's
+      # own and belongs in a project's `sig/` only when the author asked for it by name.
+      def effect_annotator(configuration, paths, options)
+        unless configuration.effects_enabled?
+          if options.fetch(:effect_envelopes)
+            @err.puts("rigor sig-gen: --effect-envelopes needs the `effects:` opt-in in .rigor.yml; " \
+                      "no effect annotation was emitted.")
+          end
+          return nil
+        end
+
+        require_relative "../analysis/runner"
+        runner = Analysis::Runner.new(configuration: configuration,
+                                      cache_store: Cache::Store.new(root: configuration.cache_path),
+                                      collect_stats: false, workers: 0)
+        runner.run((configuration.paths + paths).uniq)
+        SigGen::EffectAnnotation::Annotator.new(table: runner.effect_table,
+                                                envelopes: options.fetch(:effect_envelopes))
+      end
+
+      # The withheld half of the emission, counted the way {#report_skipped} counts a skip: a method that
+      # did NOT get `%a{pure}` is the interesting case for a reader who expected one, and silence would
+      # read as "sig-gen does not do this" rather than "this method did not earn it".
+      def report_withheld_annotations(candidates, options)
+        return unless options.fetch(:format) == "text"
+
+        counts = candidates.each_with_object(Hash.new(0)) do |candidate, acc|
+          reason = candidate.effect_reason
+          acc[reason] += 1 if reason && reason != :emitted
+        end
+        return if counts.empty?
+
+        breakdown = counts.map { |reason, n| "#{SigGen::EffectAnnotation::DIAGNOSTIC_IDS.fetch(reason)}: #{n}" }
+        @err.puts(
+          "rigor sig-gen: withheld an effect annotation from #{counts.values.sum} method(s) " \
+          "(#{breakdown.join(', ')}). An annotation is enforced once written, so it is emitted only " \
+          "from an exhaustive, undischarged summary."
+        )
+      end
 
       # Issue #778 — one stderr line per run saying how many methods the generator declined and why, so a
       # method missing from the output is never a silent absence. Text mode only: under `--format=json` every
@@ -170,6 +221,7 @@ module Rigor
           overwrite: false,
           observe: [],
           include_private: false,
+          effect_envelopes: false,
           config: nil
         }
         build_option_parser(options).parse!(@argv)
@@ -181,7 +233,7 @@ module Rigor
         nil
       end
 
-      def build_option_parser(options) # rubocop:disable Metrics/AbcSize
+      def build_option_parser(options) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = USAGE
           opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }
@@ -192,6 +244,10 @@ module Rigor
           end
           opts.on("--include-private", "Emit private / protected instance methods (default: public only)") do
             options[:include_private] = true
+          end
+          opts.on("--effect-envelopes", "Also emit %a{rigor:v1:effect ...} for effectful methods " \
+                                        "(requires the effects: opt-in)") do
+            options[:effect_envelopes] = true
           end
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|

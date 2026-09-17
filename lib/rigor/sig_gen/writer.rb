@@ -31,7 +31,7 @@ module Rigor
 
       # Per-`update_existing` accumulator. The merge_class helper mutates `source` / `decls` / `applied` /
       # `skipped` in place as each class is processed so the next class sees the latest byte positions.
-      MergeState = Struct.new(:source, :decls, :applied, :skipped, keyword_init: true)
+      MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, keyword_init: true)
       private_constant :MergeState
 
       def initialize(path_mapper:, overwrite: false)
@@ -245,7 +245,7 @@ module Rigor
 
       def render_tree_node_body(node, kinds, supers, depth, prefix)
         inner_indent = INDENT * (depth + 1)
-        method_lines = node[:methods].map { |c| "#{inner_indent}#{c.rbs}\n" }.join
+        method_lines = node[:methods].flat_map { |c| c.rbs_lines.map { |line| "#{inner_indent}#{line}\n" } }.join
         child_blocks = node[:children].values.map do |child|
           render_tree_node(child, kinds, supers, depth + 1, prefix + [node[:name]])
         end.join
@@ -291,13 +291,14 @@ module Rigor
         decls = parse_signature(source)
         return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
 
-        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [])
+        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [])
         merge_candidates(state, candidates)
 
         action = state.applied.empty? ? :noop : :updated
         unless action == :updated
           return WriteResult.new(source_path: source_path, target_path: target, action: action,
-                                 applied: state.applied, skipped: state.skipped)
+                                 applied: state.applied, skipped: state.skipped,
+                                 left_unreadable: state.left_unreadable)
         end
 
         # The merge splices text into an existing file by byte offset, so a bug here can produce a file neither
@@ -312,7 +313,8 @@ module Rigor
 
         target.write(state.source)
         WriteResult.new(source_path: source_path, target_path: target,
-                        action: action, applied: state.applied, skipped: state.skipped)
+                        action: action, applied: state.applied, skipped: state.skipped,
+                        left_unreadable: state.left_unreadable)
       end
 
       # Applies every class group, then every requested shell, then normalises the layout the three steps
@@ -544,7 +546,7 @@ module Rigor
           state.applied.concat(methods)
           insert_namespace_chain(state, class_name, kinds, supers, methods)
         else
-          state.source = merge_into_existing_class(state.source, decl, methods, state.applied, state.skipped)
+          state.source = merge_into_existing_class(state.source, decl, methods, state)
           state.decls = parse_signature(state.source) || state.decls
         end
       end
@@ -575,19 +577,19 @@ module Rigor
         source.end_with?("\n")
       end
 
-      def merge_into_existing_class(source, decl, methods, applied, skipped)
+      def merge_into_existing_class(source, decl, methods, state)
         existing_pairs = collect_member_pairs(decl)
         new_methods, conflicting = partition_against_existing(methods, existing_pairs)
 
         source = insert_into_class(source, decl, new_methods)
-        applied.concat(new_methods)
+        state.applied.concat(new_methods)
 
         if @overwrite
-          source, replaced = replace_eligible_conflicts(source, decl, conflicting)
-          applied.concat(replaced)
-          skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
+          source, replaced = replace_eligible_conflicts(source, decl, conflicting, state)
+          state.applied.concat(replaced)
+          state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
         else
-          skipped.concat(conflicting.map { |c| [c, :user_authored] })
+          state.skipped.concat(conflicting.map { |c| [c, :user_authored] })
         end
 
         source
@@ -628,7 +630,8 @@ module Rigor
         return source if new_methods.empty?
 
         indent = INDENT * member_indent_depth(decl)
-        insert_before_end(source, decl, new_methods.map { |c| "#{indent}#{c.rbs}\n" }.join)
+        lines = new_methods.flat_map { |c| c.rbs_lines.map { |line| "#{indent}#{line}\n" } }.join
+        insert_before_end(source, decl, lines)
       end
 
       # Walks the class's existing method declarations; for each replaceable candidate that matches a member
@@ -643,7 +646,7 @@ module Rigor
       #    canonical case is `initialize_stub_candidate`, which bypasses the existing-RBS comparison and always
       #    classifies as `NEW_METHOD` — when sig-gen's `--params=observed` upgrades a `(path: untyped) -> void`
       #    declaration to `(path: String) -> void` we want `--overwrite` to apply it.
-      def replace_eligible_conflicts(source, decl, candidates)
+      def replace_eligible_conflicts(source, decl, candidates, state)
         eligible = candidates.select { |c| eligible_for_replacement?(c, decl, source) }
         return [source, []] if eligible.empty?
 
@@ -652,7 +655,7 @@ module Rigor
         # source grows or shrinks.
         sorted = eligible.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
         sorted.each do |candidate|
-          source = apply_replacement(source, decl, candidate) and replaced << candidate
+          source = apply_replacement(source, decl, candidate, state) and replaced << candidate
         end
         [source, replaced]
       end
@@ -714,12 +717,41 @@ module Rigor
       # Splices the new RBS one-liner over the existing declaration's byte range. `RBS::Parser`'s location
       # starts at the `def` keyword, NOT at the column zero of the line, so the leading whitespace stays inside
       # `source[0...start_pos]` and we do not re-emit it.
-      def apply_replacement(source, decl, candidate)
+      def apply_replacement(source, decl, candidate, state)
         member = find_method_member(decl, candidate.method_name, candidate.kind)
         return nil if member.nil?
 
         loc = member.location
-        source[0...loc.start_pos] + candidate.rbs + source[loc.end_pos..]
+        replaced = source[0...loc.start_pos] + candidate.rbs + source[loc.end_pos..]
+        splice_annotations(replaced, member, candidate, state)
+      end
+
+      # ADR-103 WD9 — the annotation half of a replacement, and the one place this slice is allowed to
+      # write bytes ABOVE an existing declaration.
+      #
+      # `RBS::Parser` puts a member's annotations OUTSIDE its `location`, so {#apply_replacement} above
+      # already leaves every annotation on the declaration byte-untouched — the `%a{deprecated}` and the
+      # `%a{implicitly-returns-nil}` a user wrote survive an `--overwrite` unchanged. What is left is the
+      # question of adding ours, and the answer is: only onto a declaration that carries none.
+      #
+      # A declaration that already carries an annotation is left exactly as it is, and the candidate is
+      # reported as `sig.effect.left-unreadable`. The writer cannot tell an annotation it authored from
+      # one the user wrote, and it has no grammar for merging two — so rewriting the region could silently
+      # replace an author's own `%a{pure}` with a labelled envelope, or strip a directive Rigor does not
+      # read at all. Leaving it and saying so is the only move that cannot destroy an authored fact.
+      def splice_annotations(source, member, candidate, state)
+        return source if candidate.annotations.empty?
+
+        unless member.annotations.empty?
+          state.left_unreadable << candidate
+          return source
+        end
+
+        line_start = line_start_index(source, member.location.start_pos)
+        indent = source[line_start...member.location.start_pos].to_s
+        return source unless indent.match?(/\A[ \t]*\z/)
+
+        source[0...line_start] + candidate.annotations.map { |line| "#{indent}#{line}\n" }.join + source[line_start..]
       end
     end
   end

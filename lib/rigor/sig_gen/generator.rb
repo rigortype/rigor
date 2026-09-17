@@ -17,6 +17,9 @@ require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
 require_relative "meta_class_shape"
 require_relative "rbs_validity"
+require_relative "classification"
+require_relative "effect_annotation"
+require_relative "method_candidate"
 
 module Rigor
   module SigGen
@@ -68,11 +71,14 @@ module Rigor
       #   produced by {ObservationCollector}. An empty Hash (the default)
       #   means "no observations available; emit `untyped` for every
       #   parameter position" per ADR-5 clause 2.
-      def initialize(configuration:, paths:, observations: {}, include_private: false)
+      def initialize(configuration:, paths:, observations: {}, include_private: false, effect_annotator: nil)
         @configuration = configuration
         @paths = paths
         @observations = normalize_observations(observations)
         @include_private = include_private
+        # ADR-103 WD9 — `nil` when the project's `effects:` opt-in is off, which is what keeps an
+        # effects-off run byte-identical to one from before the annotation slot was filled.
+        @effect_annotator = effect_annotator
         # Per-file scratch state. `analyse_file` resets each one to a fresh container for every file walked so
         # candidates from one file don't leak into another; initialising empty here gives downstream consumers
         # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
@@ -102,12 +108,30 @@ module Rigor
         resolved = resolve_paths(@paths)
         @environment = build_environment(resolved)
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
-        demote_overridden_base_methods(
-          demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
+        annotate_effects(
+          demote_overridden_base_methods(
+            demote_unresolvable_superclasses(resolve_superclass_spellings(candidates))
+          )
         )
       end
 
       private
+
+      # ADR-103 WD9 — the annotation-emission slot ADR-14 reserved, run LAST so a candidate a later
+      # demotion turns into a skip never carries an annotation it will not print. Only emittable rows are
+      # asked: an annotation is a claim attached to a line, and a row that produces no line makes none.
+      def annotate_effects(candidates)
+        return candidates if @effect_annotator.nil?
+
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+
+          annotations, reason = @effect_annotator.annotate(
+            class_name: candidate.class_name, method_name: candidate.method_name, kind: candidate.kind
+          )
+          reason.nil? && annotations.empty? ? candidate : candidate.with_effect_annotation(annotations, reason)
+        end
+      end
 
       # Issue #744 — a base class's method is NOT emitted when a project subclass overrides it and the
       # override is not emitted itself.

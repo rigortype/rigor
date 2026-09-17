@@ -6,6 +6,9 @@ require_relative "actionpack/analyzer"
 require_relative "actionpack/effects"
 require_relative "actionpack/controller_discoverer"
 require_relative "actionpack/controller_index"
+require_relative "actionpack/erb_compiler"
+require_relative "actionpack/view_assigns"
+require_relative "actionpack/view_units"
 
 module Rigor
   module Plugin
@@ -69,23 +72,39 @@ module Rigor
         # Bumped 2026-09-02 (#621) — a reopened controller's `def`s are UNIONed rather than clobbered by
         # the later file in the glob, so a cached 1.0.0 index can be missing the filter targets the merge
         # restores.
+        # Bumped 2026-09-17 (#393) — the plugin gained `template_globs:` and compiles `app/views/**/*.erb`
+        # into template units, so the answer for a project with views is a different answer entirely and
+        # a cached 1.2.0 run has no view rows in it.
         # Bumped 2026-09-10 (#534 item 7) — the plugin gained a bundled `sig/` (ADR-25) naming the
         # `ActionController` namespace and the errors controllers rescue, so the constants stop resolving
         # to `untyped`. `ActionController::Parameters` and the `ActionDispatch` readers stay undeclared;
         # `sig/action_controller.rbs` documents why that absence is load-bearing.
-        version: "1.2.0",
+        version: "1.3.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
-          "view_search_paths" => { kind: :array, default: ["app/views"] }
+          "view_search_paths" => { kind: :array, default: ["app/views"] },
+          # #393 — whether the ordinary `call.*` type checks are reported INSIDE a compiled template.
+          # Off by default: the synthesised `self` is an open receiver and the seeds are deliberately
+          # narrow, so the typing half of a view unit is not yet precise enough to be worth a diagnostic
+          # per template line, while the EFFECTS half needs no receiver precision at all and is what the
+          # view layer is analysed for first. A project that wants `@user.nmae` in `show.html.erb` can
+          # turn it on; see `docs/manual/plugins/rigor-actionpack.md`.
+          "view_type_checks" => { kind: :boolean, default: false }
         },
         consumes: [
           { plugin_id: "rails-routes", name: :helper_table, optional: true },
           { plugin_id: "activerecord", name: :model_index, optional: true }
         ],
         # ADR-25 (#534 item 7) — the framework-namespace signatures. See `sig/action_controller.rbs` for
-        # the admission rule and, more importantly, for what it refuses to declare.
+        # the admission rule and, more importantly, for what it refuses to declare, and
+        # `sig/action_view.rbs` for the one class a template unit's `self` is typed as.
         signature_paths: ["sig"],
+        # #393 — the ERB templates this plugin compiles into {Plugin::TemplateUnit}s. A manifest row is
+        # read without running plugin code, so it cannot consult `view_search_paths:`; a project that
+        # moves its views away from `app/views` gets no units, which is the quiet answer rather than a
+        # wrong one. Both `show.html.erb` and the bare `show.erb` shape are claimed.
+        template_globs: ["app/views/**/*.erb"],
         # ADR-26 — every class the bundled signature names is declared so the CONSTANT resolves; none of
         # them enumerates a method surface, so `ParameterMissing#param` and its siblings must stay
         # lenient rather than becoming `call.undefined-method` on a rescue body.
@@ -101,7 +120,10 @@ module Rigor
           "ActionController::InvalidCrossOriginRequest",
           "ActionController::MissingExactTemplate",
           "ActionController::ParameterMissing",
-          "ActionController::UnpermittedParameters"
+          "ActionController::UnpermittedParameters",
+          # #393 — the view context every template unit's `self` is typed as. Declared in
+          # `sig/action_view.rbs` so the name resolves, open so the helper surface stays lenient.
+          "ActionView::Base"
         ],
         # ADR-103 WD10 / WD14 (#387) — see {Effects} for what each row is and why.
         effect_root: "rails",
@@ -123,10 +145,82 @@ module Rigor
         ).discover
       end
 
+      # #393 — the diagnostic families a compiled template does not report while `view_type_checks:` is
+      # off (its default). Both are measured rather than assumed, on the private corpus copies recorded in
+      # `docs/notes/20260917-erb-template-units.md`:
+      #
+      # - `call.` — the receiver-precision family. `self` is an open `ActionView::Base` and the seeds are
+      #   deliberately narrow, so what this family would report about a view is mostly a statement about
+      #   what the synthesis does not know yet.
+      # - `flow.` — because the render-site `locals:` are not traced yet. Redmine writes the standard
+      #   optional-local preamble (`<% path = nil unless defined? path %>`, `app/views/common/_other.html.erb`),
+      #   and the compiled Ruby really does assign nil there — so the flow rules fold three live branches
+      #   to `always-falsey` on a partial Rails renders correctly. Three false positives, on one of the two
+      #   corpora, from the one binding this slice does not synthesise.
+      SUPPRESSED_VIEW_RULES = ["call.", "flow."].freeze
+
       def init(_services)
         @controller_search_paths = Array(config.fetch("controller_search_paths")).map(&:to_s)
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
+        @view_type_checks = config.fetch("view_type_checks") ? true : false
       end
+
+      # #393 — one ERB template compiled into one {Plugin::TemplateUnit}. Called once per matched file, on
+      # the parent, before any analysis (ADR-16 Tier D as revived by #392).
+      #
+      # The three synthesised bindings and where each comes from:
+      #
+      # - `self_type:` — {ViewUnits::SELF_TYPE}, a declared-but-open `ActionView::Base`, so every helper
+      #   call resolves lenient rather than drawing a finding per line.
+      # - `locals:` — the Rails 7.1 strict-locals comment. Names only; Rails' syntax carries no types, and
+      #   the seed is what makes Prism read `user` as a local rather than as a method call.
+      # - `ivar_seeds:` — the assigns of the controller actions that render this template, through
+      #   {ViewAssigns}. A partial has none: its bindings belong to the render site.
+      #
+      # A compiler whose line numbering could not be measured declines the file rather than reporting at
+      # lines it cannot vouch for — {ErbCompiler::Unmappable} propagates, and the seam turns it into one
+      # `:plugin_loader` `runtime-error` row naming the template.
+      #
+      # ## Compiled Ruby that does not parse declines the file, silently
+      #
+      # A template is not Ruby, and the compiled form of one is not always Ruby either: a layout's
+      # `<%= yield %>` is invalid outside a method, and a `case` split across tags with markup between the
+      # `case` and its first `when` is invalid anywhere. Handing such a body to the engine would put TWO
+      # parse diagnostics on a template Rails renders perfectly — a false positive per file, which is the
+      # one outcome this feature may not have (AGENTS.md). So the compiled Ruby is parsed here first and a
+      # body that does not parse declines the file through the seam's own `[]` door: no unit, no
+      # diagnostic, no effects. Measured on redmine (506 templates) the residue is 5 — four layouts and
+      # one `case` — and on mastodon 0.
+      #
+      # The cost is one Prism parse per template on the parent. It is paid once per run, on files that
+      # are small, and it buys the FP guarantee outright.
+      def template_units_for_file(path:, source:)
+        name = ViewUnits.logical_name(path, @view_search_paths)
+        text = source.dup.force_encoding(Encoding::UTF_8)
+        compiled, line_map, transform = ErbCompiler.compile(text)
+        return [] unless Prism.parse(compiled).errors.empty?
+
+        [
+          Rigor::Plugin::TemplateUnit.new(
+            logical_name: name, path: path, ruby_source: compiled, line_map: line_map,
+            self_type: ViewUnits::SELF_TYPE, locals: ViewUnits.strict_locals(text),
+            ivar_seeds: view_assigns.seeds_for(name), transform_id: transform,
+            suppressed_rules: @view_type_checks ? [] : SUPPRESSED_VIEW_RULES
+          )
+        ]
+      end
+
+      # The controller-assigns index, built once per run on the parent. Deliberately NOT a `producer` —
+      # a producer's value is cached against the run key, and this is consulted from the template-unit
+      # hook, which runs before the analysis a producer belongs to.
+      def view_assigns
+        @view_assigns ||= ViewAssigns::Builder.new(
+          io_boundary: io_boundary, search_paths: @controller_search_paths
+        ).build
+      rescue StandardError
+        ViewAssigns.empty
+      end
+      private :view_assigns
 
       # ADR-37 — the four Action Pack phases run per-call over the engine-owned walk. Each rule gates on
       # `controller_file?(path)` (the plugin only validates files under `controller_search_paths`,

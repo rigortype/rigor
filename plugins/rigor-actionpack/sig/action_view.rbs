@@ -1,0 +1,28 @@
+# Action View's namespace — issue #393.
+#
+# `ActionView::Base` is the `self_type:` of every ERB template unit the plugin compiles. It is declared
+# here for one reason: so that the NAME resolves. `Analysis::TemplateUnits#seed` binds an unresolvable
+# `self_type:` to `Dynamic[top]`, which is silent but also tells the engine nothing, and a declared
+# receiver is what lets a later slice put a real helper surface behind it.
+#
+# ## Why it enumerates nothing
+#
+# The same argument `action_controller.rbs` makes about `ActionController::Parameters`, one step stronger.
+# A template's implicit-self calls are `link_to`, `form_with`, `t`, `l`, `cache`, `content_for`,
+# `image_tag`, `turbo_frame_tag`, every `*_path` / `*_url` route helper, every method in the project's own
+# `ApplicationHelper` and `<Controller>Helper`, every `helper_method` a controller exported, and whatever
+# the project's gems mixed in. No signature completes that surface, and a declared class DROPS every
+# member its signature omits — so enumerating the ten helpers the design note names would turn the other
+# thousand into `call.undefined-method` on working templates.
+#
+# So the class is named and left empty, and `open_receivers:` in the manifest (ADR-26) keeps its whole
+# method surface lenient. That is the "lenient / open receivers, never closed" posture stated as code.
+#
+# `ActionView::UnknownLocal` is deliberately ABSENT — see `ViewUnits::UNKNOWN_LOCAL`. It is the name a
+# strict-locals parameter is seeded with precisely because nothing resolves it, so the engine binds
+# `Dynamic[top]` while the local's NAME still reaches the parse.
+
+module ActionView
+  class Base
+  end
+end

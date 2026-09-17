@@ -249,6 +249,7 @@ line_map: {}, self_type: nil, locals: {}, ivar_seeds: {}, transform_id: nil)`.
 | `locals` | `Hash<String, String>` | `{ name => type name }` — the render site's parameters. |
 | `ivar_seeds` | `Hash<String, String>` | `{ "@name" => type name }` — the assigns the rendering action set. |
 | `transform_id` | `String?` | The compiler's identity (`"erubi-1.13"`). Defaults to the declaring plugin's `id@version`. |
+| `suppressed_rules` | `Array<String>` | #393 — rule-id PREFIXES the engine drops for this unit's diagnostics. See _Rule posture_ below. |
 
 It satisfies the same common contract as the four tiers: frozen at
 construction, validated at construction (a malformed declaration raises
@@ -293,6 +294,23 @@ only when the line actually moves: a compiler that happens to leave a line
 where it was still rewrote that line's text, and ERB is exactly that case — its
 map is near-identity and its columns are meaningless either way. A unit with an
 empty map claims no mapping at all, and its diagnostics pass through untouched.
+
+### Rule posture (#393)
+
+`suppressed_rules:` is the **per-unit** answer to "which families of finding are meaningful in this
+compiler's output". A prefix is a dotted family (`call.`) or a whole rule id; the match is
+`String#start_with?`, and `Analysis::TemplateUnits#remap` drops a matching diagnostic before the run's
+stream leaves the parent. An empty list — the default — reports everything.
+
+It is deliberately not a `disable:` entry: `disable:` silences a rule in the project's `.rb` files too,
+which is the opposite of what a template-unit plugin wants. It is deliberately not engine policy
+either: only the plugin knows what its own transform emits, and the honest default for one compiler is
+not the honest default for another. It rides the unit digest, so turning a family back on re-analyses.
+
+rigor-actionpack declares `["call.", "flow."]` while `view_type_checks:` is off (its default), and
+`docs/notes/20260917-erb-template-units.md` records the corpus measurement each of the two prefixes
+rests on — three `flow.always-truthy-condition` false positives on redmine, from the optional-local
+preamble a partial writes when its render-site `locals:` are not traced.
 
 ### Effects, cache and the pool
 
@@ -375,8 +393,23 @@ empty map claims no mapping at all, and its diagnostics pass through untouched.
   alone, because a template's bytes are not Ruby an RBS synthesiser can read.
   `RunStats#target_files` counts units, because they are files the run parsed.
 
-Worked consumer: `spec/fixtures/template_units/view_demo_plugin.rb`, with the
-identity transform this slice ships. ERB itself (Erubi when it resolves,
-stdlib `ERB` as the fallback — the [ADR-93](../adr/93-default-rbs-inline-ingestion.md)
-never-bundled posture) is [#393](https://github.com/rigortype/rigor/issues/393),
-and changes only `#template_units_for_file`.
+Worked consumers: `spec/fixtures/template_units/view_demo_plugin.rb` (the identity transform #392
+shipped) and **rigor-actionpack**, which as of
+[#393](https://github.com/rigortype/rigor/issues/393) claims `app/views/**/*.erb` and compiles each
+through Erubi when it resolves in the analysed project's bundle
+([ADR-90](../adr/90-target-library-resolution-from-project-bundle.md)) and stdlib `ERB` otherwise.
+
+Two things #392 expected that consumer to need, and it did not:
+
+- It does **not** only change `#template_units_for_file`. It needed the per-unit rule posture above,
+  because a compiled template's typing is not yet worth a diagnostic per line, and it needed a
+  `view:` unit key to be an `effects.envelopes:` subject (`Effects::MethodKey.envelope_owner` — a view
+  has no owner class, and `MethodKey.split` would have grouped `view:users/show.html` under the
+  class name `view:users/show`, which no run ever produced).
+- A template whose compiled Ruby does not **parse** is declined by the plugin rather than handed over:
+  a layout's `<%= yield %>` is legal ERB and illegal Ruby outside a method, so the alternative was two
+  parse diagnostics per layout on templates Rails renders. The seam's `[]` door is what that decline
+  goes through. Layouts therefore have no unit yet
+  ([#1047](https://github.com/rigortype/rigor/issues/1047)), and nothing edges a controller action to
+  its template yet ([#1048](https://github.com/rigortype/rigor/issues/1048)) — the `render` taint
+  still stands.

@@ -486,8 +486,11 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
-        # #392 — re-synthesise the template units each run: their source files can change between two runs
-        # of one long-lived Runner (the LSP's), and a unit is never served from a cache of its own.
+        # #392 — re-derive the template units each run: their source files can change between two runs of
+        # one long-lived Runner (the LSP's), and a unit is never served from a cache of its own. Since
+        # #1038 "re-derive" is not "recompile": a `prebuilt:` runner carries the snapshot's warm index into
+        # {#template_units}, which still re-expands every claim and revalidates every template against the
+        # filesystem, and only compiles what actually moved.
         @template_units = nil
         # Per-run reset of the environment the cacheable path resolves, reused by the envelope pass so a
         # run never builds two.
@@ -1133,6 +1136,11 @@ module Rigor
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
         diagnostics += @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+        # Issue #1051 — read after `analyze_targets` for the same reason the refusal stream below is: a
+        # plugin may register a disclosure from `#prepare` (the usual case) or while analysing a file, and
+        # both have to be in before the table is harvested. Ordered before the refusals so the run-level
+        # plugin rows read plugin-authored notice first, engine-authored envelope second.
+        diagnostics += @diagnostic_aggregator.plugin_run_disclosure_diagnostics
         # Issue #959 — read LAST (after `analyze_targets`, which already ran before this method is called),
         # so every per-file plugin call has had its chance to record a refusal on its (per-plugin-instance
         # memoised) `IoBoundary`, alongside the prepare-time refusals the same boundary instance may
@@ -1585,11 +1593,19 @@ module Rigor
       # #392 — the run's template units. Built once per run, on the parent, AFTER the plugin pre-pass has
       # loaded the registry; a run whose plugins declare no `template_globs:` never globs and never calls a
       # plugin.
+      #
+      # #1038 — a runner built with `prebuilt:` hands the snapshot's warm index to `collect(previous:)`, so
+      # a per-buffer publish against a long-lived {LanguageServer::ProjectContext} re-runs the transform
+      # only for a template that actually moved on disk (and for the buffer's own, always). The globs are
+      # still re-expanded and every surviving template is still revalidated, so an added, deleted or edited
+      # template is seen on the next publish without the owner invalidating anything. A runner with no
+      # `prebuilt:` — every CLI run — passes no `previous:` and builds the index exactly as before.
       def template_units
         @template_units ||= if @plugin_registry.nil?
                               TemplateUnits.empty
                             else
-                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer)
+                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer,
+                                                    previous: @prebuilt&.template_units)
                             end
       end
 
@@ -1694,7 +1710,8 @@ module Rigor
           env_build_failure_snapshot: -> { @snapshots.env_build_failure },
           definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
-          conformance_results_snapshot: -> { @snapshots.conformance_results }
+          conformance_results_snapshot: -> { @snapshots.conformance_results },
+          pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures }
         )
       end
 

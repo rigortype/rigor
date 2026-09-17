@@ -98,6 +98,87 @@ under another plugin's id. Plugin exceptions inside the hook isolate
 as a `:plugin_loader` `runtime-error` diagnostic rather than crashing
 `rigor check`.
 
+#### Project-global disclosures — `#disclose_once` ([#1051](https://github.com/rigortype/rigor/issues/1051))
+
+`#disclose_once(key, message:, severity: :info, rule: "load-error")`
+is the **run-scoped** emission channel: a notice about the run's
+*inputs* rather than about a line of a file. The canonical case is a
+degrade disclosure — "`db/schema.rb` is not there, so column checks
+are off".
+
+The method registers; it does not return a row. Plugin authors MAY
+call it from any hook (`#prepare` is the usual place, because a
+disclosure is normally a fact about the project known before a file is
+read; `#diagnostics_for_file` and a `node_rule` block are also
+allowed), and it returns `nil` in every case. The engine harvests the
+registrations after analysis, **de-duplicates them by `(plugin id,
+key)`**, and emits one row per surviving pair. `key` is any object with
+a stable `#to_s`; it is never shown to the user, so it MUST NOT
+interpolate anything that varies between plugin instances. The row is
+stamped `source_family: "plugin.<manifest.id>"` like every other
+plugin-emitted row.
+
+**Two properties are binding.**
+
+*Exactly once per run.* De-duplication happens on the parent, over the
+union of the coordinator-side registry and every pool worker's table:
+the pre-fork `WorkerSession`'s registrations (so anything registered
+during `#prepare`), each fork child's `disclosures:` payload slot, and
+each Ractor worker's `:done` message. A run therefore emits the same
+multiset of disclosures under `--workers 0` and `--workers N`.
+
+One exception, on the Ractor backend only (off by default, and
+currently unable to complete a run at all — see
+[#1055](https://github.com/rigortype/rigor/issues/1055)): when a
+worker dies, `PoolCoordinator#reanalyze_degraded_in_process` re-runs
+its slice on a bare environment with no `WorkerSession`, and `#prepare`
+does not run on the coordinator-side registry under pool mode, so a
+disclosure that worker registered from `#prepare` is lost with it. One
+registered from `#diagnostics_for_file` survives, because the
+re-analysis runs the coordinator-side plugin instances the harvest
+reads. The fork backend has no such gap: its degrade re-analyses on
+the parent session and drains it.
+
+*Positioned at `.rigor.yml:1:1`.* Not at the first analysed file. A
+disclosure has no source position it could be right about, and the
+config file is where the user declared the input the notice is about —
+the same position plugin load errors, `#prepare` raises and
+`plugin_trust.read-refused` already use. Pinning it there also settles
+the question #1051 raised: a project-global disclosure can never land
+on a synthesised template unit's path (an `.erb`, [#393](https://github.com/rigortype/rigor/issues/393)),
+where it would read as a claim about that view.
+
+Moving an existing disclosure to this channel is therefore a
+**baseline-visible** change: `Analysis::Baseline` buckets by `(file,
+qualified_rule[, message])`, so an entry recorded at the row's old file
+position stops matching and the row surfaces as new. The qualified rule
+does not change, so `rigor baseline regenerate` is the whole migration
+— but a plugin making this move owes its users a changelog and manual
+note saying so, because a `:warning`-grade disclosure otherwise breaks
+a `--fail-on=warning` CI on upgrade.
+
+Emission order is `(registry position, key)` — the plugin load order
+(topological by `consumes:`) and then the key string — **not**
+registration order, which is a function of how the pool sliced the
+file list.
+
+The superseded idiom is a per-instance `@emitted` flag consulted from
+`#diagnostics_for_file`. It is per plugin INSTANCE, and a fork-pool
+worker has its own, so `--workers N` emitted up to N copies, each on
+whichever file that worker happened to analyse first. Plugins that
+still carry it are not silently fixed: the flag is theirs, and the
+engine cannot tell a run-level row from a file-level one that happens
+to repeat. Adopting `#disclose_once` is the migration.
+
+The question that chooses the channel is whether the row has a
+position it could be **right** about. "The index did not load" does
+not — it goes here. A project-wide scan whose rows each name a real
+file and line does, and must keep it; surfacing such a batch through
+`#diagnostics_for_file` behind an `@emitted` flag still duplicates it
+per worker, and there is no run-scoped channel for a *positioned*
+batch yet ([#1060](https://github.com/rigortype/rigor/issues/1060)).
+`rigor-rails-i18n`'s view scan is the one bundled instance.
+
 #### Template units — `template_globs:` / `#template_units_for_file` ([#392](https://github.com/rigortype/rigor/issues/392))
 
 `#template_units_for_file(path:, source:)` is the **source transform** half of the revived ADR-16 Tier-D

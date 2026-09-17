@@ -493,6 +493,10 @@ module Rigor
         @fact_cache = {}
         @producer_value_cache = {}
         @producer_errors = {}
+        # Issue #1051 — the run-scoped disclosure table ({#disclose_once}). Allocated here for the same
+        # reason as the three memos above: a registration is a Hash-content mutation, so it stays sound on
+        # a plugin that freezes itself in `initialize`.
+        @run_disclosures = {}
       end
 
       # Override in subclasses to wire any state the plugin needs from the injected service container.
@@ -706,10 +710,54 @@ module Rigor
       end
 
       # ADR-60 WD4 — the `StandardError` a prior {#producer_value} call rescued for `id`, or nil when it
-      # succeeded or was never called. Plugins surface it as a load-error diagnostic from
-      # `#diagnostics_for_file`.
+      # succeeded or was never called. Plugins surface it as a run-scoped `load-error` disclosure through
+      # {#disclose_once} (#1056) — a failed index is a fact about the run's inputs, not about a file.
       def producer_error(id)
         @producer_errors[id.to_sym]
+      end
+
+      # Issue #1051 — records a PROJECT-GLOBAL disclosure: a notice about the run's inputs ("the schema file
+      # is not there, so column checks are off") rather than about a line of a file. Registering the same
+      # `key` again — on this instance or on any other instance of this plugin in the same run — is a no-op,
+      # so the run emits the row exactly once however many workers, files or call sites reached it.
+      #
+      #     disclose_once(:missing_schema,
+      #                   message: "rigor-activerecord: schema file `db/schema.rb` not found; …",
+      #                   severity: :info, rule: "load-error")
+      #
+      # Callable from any hook — `#prepare` (the usual place: the disclosure is a fact about the project,
+      # known before a single file is read), `#diagnostics_for_file`, or a `node_rule` block. It returns
+      # `nil` and emits NOTHING itself: the engine harvests the table after analysis, de-duplicates it by
+      # `(plugin id, key)` across the coordinator and every pool worker, and emits one row per surviving
+      # pair at `.rigor.yml:1:1` — the position every other run-level plugin row already uses (plugin load
+      # errors, `#prepare` raises, `plugin_trust.read-refused`).
+      #
+      # That position is the point of the facility. The pre-#1051 idiom was an `@emitted` flag consulted from
+      # `#diagnostics_for_file`, which positions the row at whichever file the plugin instance happened to
+      # see first — per WORKER under `--workers N`, so the row was duplicated, and after #393 the file it
+      # landed on could be a template unit's `.erb` path, reading as a claim about a view. A disclosure has
+      # no source position to be right about; `.rigor.yml` is where the user configured the input it is
+      # about.
+      #
+      # `severity:` defaults to `:info`, the grade plugins use for "here is what I recognised"; pass
+      # `:warning` for "I could not run". `key` is any object with a stable `#to_s` (a Symbol reads best) and
+      # is never shown to the user — it is the de-duplication identity, so it must not interpolate anything
+      # that differs between workers.
+      def disclose_once(key, message:, severity: :info, rule: "load-error")
+        id = key.to_s
+        return nil if @run_disclosures.key?(id)
+
+        @run_disclosures[id] = {
+          key: id, message: message.to_s, severity: severity.to_sym, rule: rule.to_s
+        }.freeze
+        nil
+      end
+
+      # Engine-facing reader for {#disclose_once}: this instance's registered disclosures in registration
+      # order. Plugin authors never call it — {Rigor::Analysis::Runner} and {Rigor::Analysis::WorkerSession}
+      # drain it, and the de-duplication across instances happens there.
+      def run_disclosure_records
+        @run_disclosures.values
       end
 
       # Boilerplate-reduction helper (review §1.3): the "did you mean …?" suggestion every

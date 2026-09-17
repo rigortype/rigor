@@ -40,7 +40,7 @@ arguments.
 | `plugin.sidekiq.worker-call` | info | a `Worker.perform_*` call matched a discovered worker's `#perform` arity |
 | `plugin.sidekiq.wrong-arity` | error | the forwarded argument count falls outside `#perform`'s arity envelope (message names the schedule carve-out for `perform_in` / `perform_at`) |
 | `plugin.sidekiq.missing-schedule` | error | `perform_in()` / `perform_at()` called with zero arguments (the schedule is required even when `#perform` takes none) |
-| `plugin.sidekiq.load-error` | warning | worker discovery failed (parse/read error) — once per file |
+| `plugin.sidekiq.load-error` | warning | worker discovery failed (parse/read error) — once per run, on `.rigor.yml` |
 
 ## What it types
 
@@ -144,6 +144,13 @@ added it is 100.
   alternative `klass:` spelling, and a schedule built in Ruby with
   `Sidekiq::Cron::Job.load_from_hash!`, supply no roots — the worker
   stays a `rigor unused` candidate rather than being guessed at.
+- **The "failed to discover workers" warning is run-scoped.** It is
+  a fact about your configuration, not about any one source file, so
+  it is reported once per run on `.rigor.yml` rather than repeated on
+  every analysed file. It is `:warning`, so if you baselined it at its
+  old position that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 
 ## Plugin internals
 

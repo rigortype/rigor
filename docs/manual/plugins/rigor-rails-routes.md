@@ -129,6 +129,13 @@ routed. Helper-name recognition for all three is unaffected.
   doesn't model) may not register, which can surface a false
   `unknown-helper`. Record those in a baseline, or
   `# rigor:disable` the line.
+- **The "routes file did not load" warning is run-scoped.** It is a
+  fact about your configuration, not about any one source file, so
+  it is reported once per run on `.rigor.yml` rather than on the
+  first analysed file. It is `:warning`, so if you baselined it at
+  its old position that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 - **Project-custom inflections** declared in
   `config/initializers/inflections.rb` are not yet fully ingested
   (ADR-39 slice 3); the standard ActiveSupport inflections are

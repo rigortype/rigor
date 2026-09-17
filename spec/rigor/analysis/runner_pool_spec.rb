@@ -175,6 +175,32 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
       original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
     end
 
+    # Issue #1055 — a Ractor worker must survive its own CONSTRUCTOR. A class-level `@memo ||= …` is a
+    # class-ivar WRITE, which a non-main Ractor may not perform; three of them
+    # (`TemplateUnits.empty`, `Effects::Attribution.empty`, `FactStore::Target.local`) sat on the path
+    # every worker takes for every project, so every worker died before analysing anything, the
+    # coordinator degraded the whole file set to in-process re-analysis, and the backend was unusable
+    # independently of Ruby Bug #22075. This builds ONE session in ONE Ractor — the failure was in
+    # construction, not in concurrency, so the pin needs neither a pool nor a file loop, and carries none
+    # of the concurrent-Ractor UAF exposure a real pooled run does. It lives in this file, rather than in
+    # the main suite, because it spawns a Ractor at all.
+    it "builds a WorkerSession inside a non-main Ractor without tripping Ractor::IsolationError (#1055)" do
+      require "rigor/analysis/worker_session"
+      Rigor::Environment::ClassRegistry.default
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+
+      outcome = Ractor.new(configuration) do |shareable_configuration|
+        Rigor::Analysis::WorkerSession.new(configuration: shareable_configuration, cache_store: nil)
+        :built
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        # Returned rather than raised so a failure reads as the class and message, not as a
+        # `Ractor::RemoteError` wrapper.
+        "#{e.class}: #{e.message}".freeze
+      end.value
+
+      expect(outcome).to eq(:built)
+    end
+
     it "preserves original path order even when workers complete out of order" do
       Dir.mktmpdir do |dir|
         # Each file emits a parse-error diagnostic so the per-file output is deterministic; the resulting diagnostic

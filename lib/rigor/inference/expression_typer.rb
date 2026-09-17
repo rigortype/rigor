@@ -1192,10 +1192,16 @@ module Rigor
       # and fired `undefined method 'upcase' for nil` on correct code. The candidate is still looked up
       # first — that lookup is a hash probe and owns the ADR-46 cross-file dependency edge — and
       # {#self_type_answers?} then vetoes the bind for a name the enclosing class answers itself.
+      #
+      # Issue #963 item 2 — {#plugin_member_answers?} is the second veto, for the members no source the
+      # engine walks can enumerate: a plugin's `dynamic_return` answer and the ADR-16 synthetic-method
+      # index. They are members of `self` exactly as an `attr_reader` is, so a top-level `def` must not
+      # bind ahead of them either.
       def try_local_def_dispatch(node, receiver, arg_types, block_type = nil)
         local_def = node.receiver.nil? ? scope.bindable_top_level_def_for(node.name) : nil
         return nil unless local_def
         return nil if self_type_answers?(node.name)
+        return nil if plugin_member_answers?(node, receiver)
 
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types, block_type)
         return local_inference if local_inference
@@ -1274,6 +1280,24 @@ module Rigor
           self_type.members.key?(method_name.to_sym) || instance_self_answers?(self_type.class_name, method_name)
         else false
         end
+      end
+
+      # Issue #963 item 2 — the plugin arm of the veto: whether a plugin answers `node.name` on the call's
+      # own `self`. Asked of `MethodDispatcher.plugin_member_answers?`, which puts the question to the same
+      # two tiers dispatch would consult (the gated `dynamic_return` walk and the ADR-16 synthetic-method
+      # index), so the veto carries no plugin knowledge of its own.
+      #
+      # The confidence gate is #618's, unchanged and re-stated here rather than inherited: only a `self`
+      # whose class is KNOWN participates. At genuine top level, and inside a block whose `self` is
+      # unmodelled, `scope.self_type` is nil, `receiver` is the synthetic `Object` / `Dynamic[Top]` stand-in
+      # that {#call_receiver_type_for} substitutes, and asking a plugin about THAT receiver would be asking
+      # about a `self` the engine has not modelled — #316's / #319's territory, which this stays out of.
+      def plugin_member_answers?(node, receiver)
+        return false if scope.self_type.nil?
+
+        MethodDispatcher.plugin_member_answers?(
+          call_node: node, scope: scope, receiver_type: receiver, method_name: node.name
+        )
       end
 
       # The instance side of {#self_type_answers?}: the discovered methods (`def`, `attr_*`,

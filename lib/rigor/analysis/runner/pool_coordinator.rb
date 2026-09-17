@@ -10,6 +10,7 @@ require_relative "../run_stats"
 require_relative "../../effects/signature_sources"
 require_relative "../../rbs_extended/conformance_checker"
 require_relative "../../runtime/jit"
+require_relative "../../cache/engine_source"
 
 module Rigor
   module Analysis
@@ -59,6 +60,11 @@ module Rigor
           # `#collected_effects`, so a pooled run's effect graph is the sequential run's graph.
           @record_effects = configuration.effects_enabled?
           @collected_effects = {}
+          # Issue #1051 — run-scoped plugin disclosures ({Plugin::Base#disclose_once}), keyed
+          # `[plugin id, key]` so the FIRST worker to register a pair wins and every later copy is dropped.
+          # The de-duplication has to happen here, on the parent, because each fork worker owns its own
+          # plugin instances and therefore its own `@run_disclosures` table.
+          @collected_run_disclosures = {}
           @collect_stats = collect_stats
           @buffer = buffer
           @environment_override = environment_override
@@ -91,6 +97,25 @@ module Rigor
         # unless the configuration carries an `effects:` block and a pool run occurred). The runner merges
         # these with its own sequential records before the post-pool fixpoint.
         attr_reader :collected_effects
+
+        # Issue #1051 — the run-scoped disclosures a pool run collected, de-duplicated by `[plugin id, key]`
+        # and in first-registration order. Empty on a sequential run: there the runner's own plugin
+        # registry is the one that registered them, and {Runner} reads it directly.
+        def collected_run_disclosures
+          @collected_run_disclosures.values
+        end
+
+        # Issue #1051 — folds one session's / one worker payload's disclosures in, keeping the first
+        # registration of each `[plugin id, key]` pair. Nothing here inspects the message: two workers that
+        # disclose the same key with differently interpolated text still collapse to one row, which is the
+        # point — the key is the identity a plugin author controls, and an author who interpolates
+        # worker-varying text into a message has authored one disclosure, not N.
+        def merge_run_disclosures(records)
+          Array(records).each do |record|
+            identity = [record[:plugin_id], record[:key]].freeze
+            @collected_run_disclosures[identity] ||= record
+          end
+        end
 
         # ADR-15 Phase 4b — pool mode is enabled when `@workers > 0`. Editor mode (`buffer:` non-nil)
         # silently overrides pool mode to sequential: per design § "Ractor pool mode", the pool's warm-up
@@ -478,6 +503,20 @@ module Rigor
           # (shareable) registry into the class-ivar cache before any worker reads.
           Environment::ClassRegistry.default
 
+          # #1055 — the same treatment for the engine-source digest. Every worker's `Environment.for_project`
+          # reaches `Cache::EngineSource.key_config_entries` whenever a source-RBS synthesizer is wired (the
+          # ADR-93 `rigor-rbs-inline` auto-wire, on by default and off throughout the spec suite), and the
+          # memo behind it is a 90 ms tree walk that cannot be eager-loaded at require time. Warming it here
+          # is what makes the worker's access a READ of a frozen String rather than a forbidden class-ivar
+          # write. `Unavailable` is left to the worker: it raises rather than assigning, so it costs the pool
+          # no more than it costs a sequential run, and swallowing it here would hide a tree the engine
+          # cannot identify.
+          begin
+            Cache::EngineSource.process_identity
+          rescue Cache::EngineSource::Unavailable
+            nil
+          end
+
           # ADR-15 Phase 4b.x — pre-warm the RBS cache so workers serve every reflection query from the
           # Marshal blob on disk. Without this, the first cache MISS inside a worker falls through to
           # `RBS::EnvironmentLoader.new`, which reads a chain of non-`Ractor.shareable?` RubyGems / RBS
@@ -546,7 +585,10 @@ module Rigor
                 main.send([:file, msg, session.analyze(msg)])
               end
 
-              main.send([:done, session.drain_reporters])
+              # Issue #1051 — sent with `:done`, not with `:prepare`: this backend builds no parent session,
+              # so the worker's own table is the only place a disclosure exists, and it is complete only
+              # once the worker has finished its files.
+              main.send([:done, session.drain_reporters, session.drain_run_disclosures])
             end
           end
 
@@ -580,7 +622,8 @@ module Rigor
             when :file
               results_by_path[message[1]] = message[2]
             when :done
-              merge_worker_reporters(message.last)
+              merge_worker_reporters(message[1])
+              merge_run_disclosures(message[2])
             end
           end
 
@@ -608,6 +651,17 @@ module Rigor
         # definition-build failures the re-analysis demanded (#696) and the HKT-scan outcome, demanded
         # once more by the run itself (#784 — a rescued scan failure otherwise vanished with the worker).
         # The fork backend needs none of this: it re-analyses on the parent {WorkerSession} and drains it.
+        #
+        # Issue #1051, known exception: run-scoped disclosures a plugin registered from `#prepare` are NOT
+        # recovered here. There is no session to drain — this backend builds none on the coordinator — and
+        # `#prepare` deliberately does not run on the coordinator-side registry under pool mode, so a
+        # prepare-time disclosure lives only inside the Ractor that died with it. A disclosure registered
+        # from `#diagnostics_for_file` IS recovered, because the re-analysis below runs the coordinator-side
+        # plugin instances that {DiagnosticAggregator#plugin_run_disclosure_diagnostics} reads directly.
+        # Left as is: recovering the rest means running `#prepare` on the coordinator registry, which would
+        # re-publish every cross-plugin fact for a degrade, and this backend is off by default. Since #1055
+        # the path is also rare rather than universal — it used to be taken on every run, because every
+        # worker died in its constructor on a class-ivar memo.
         def reanalyze_degraded_in_process(degraded, results_by_path, source_files:)
           return if degraded.empty?
 
@@ -667,6 +721,14 @@ module Rigor
           # same project).
           snapshot_project_signature_state(session.environment)
           snapshot_effect_annotation_carrier(session.environment.rbs_loader)
+          # Issue #1051 — taken BEFORE the fork, for the same reason and with the same effect as the two
+          # snapshots above: `#prepare` ran on the parent when the session was built, so every disclosure a
+          # plugin registers there (the normal case — a disclosure is a fact about the project's inputs,
+          # known before a file is read) is already in this table, in the same order the sequential path
+          # would produce. Each child inherits the identical table and re-offers it in its payload, where
+          # `merge_run_disclosures` drops it as a duplicate; only a disclosure a worker registers while
+          # analysing its own slice adds anything.
+          merge_run_disclosures(session.drain_run_disclosures)
           snapshot_fork_pool_stats(session) if @collect_stats
 
           worker_count = [@workers, files.size].min
@@ -685,6 +747,8 @@ module Rigor
           unless degraded.empty?
             degraded.each { |path| results_by_path[path] = session.analyze(path) }
             merge_worker_reporters(session.drain_reporters)
+            # The degraded slice ran on the parent session, so a disclosure it registered lives there.
+            merge_run_disclosures(session.drain_run_disclosures)
             # The degraded slice was re-analysed on the parent session, so its dependency records live there,
             # not in a child payload — fold them in alongside the successful children's.
             @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
@@ -709,7 +773,8 @@ module Rigor
           Runtime::Jit.rearm_after_fork
           results = slice.to_h { |path| [path, session.analyze(path)] }
           payload = { results: results, reporters: session.drain_reporters,
-                      dependencies: session.drain_dependencies }
+                      dependencies: session.drain_dependencies,
+                      disclosures: session.drain_run_disclosures }
           # ADR-103 WD13 — the effects slot exists only on a collecting run, so a normal `--workers N` run
           # marshals exactly the payload it marshalled before the feature existed.
           payload[:effects] = session.drain_effects if @record_effects
@@ -741,6 +806,7 @@ module Rigor
             if payload
               results_by_path.merge!(payload.fetch(:results))
               merge_worker_reporters(payload.fetch(:reporters))
+              merge_run_disclosures(payload.fetch(:disclosures, []))
               @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
               @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else

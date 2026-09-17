@@ -64,6 +64,20 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.11.0, 2026-09-17 (#963 item 2) — an implicit-self read of a column / association / `column?`
+        # predicate inside the model's own `def` is answered `untyped` instead of reaching no path, so the
+        # engine's own-method veto sees the member and a same-named top-level `def` stops binding ahead of
+        # it. No producer payload changed shape, but the version is the cache key a project sees and this
+        # changes which calls the plugin claims — a warm run must not serve the pre-change stream.
+        #
+        # 0.10.0, 2026-09-17 (#1049) — three macro families join the model entry and the published
+        # `:model_index` fact: `delegate`, associations declared in an included concern's `included do`, and
+        # the Paperclip / Active Storage attachment macros. `ModelIndex::Entry` gains a `macro_methods`
+        # member, so a cached 0.9.0 payload is not Marshal-compatible; and the concern fold WIDENS the
+        # association list of models the 0.9.0 payload recorded without it. Both make the bump — part of the
+        # producer cache KEY — what stops a warm run serving the pre-change surface to a consumer that fails
+        # closed on a name it cannot see.
+        #
         # 0.9.0, 2026-09-10 (#534 item 7) — the bundled signatures gained `sig/active_record/framework.rbs`:
         # the Active Record exception hierarchy, the `ActiveModel` namespace and `Arel`. No producer payload
         # changed shape, but the version is the cache key a project sees, and the RBS half of a plugin's
@@ -93,7 +107,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.9.0",
+        version: "0.11.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -211,6 +225,10 @@ module Rigor
       # no-op).
       def prepare(services)
         index = model_index
+        # Issue #1051 — registered HERE, on the run's parent, because `#prepare` is where the schema read is
+        # forced and therefore where every load error already exists. The pool's one pre-fork session runs
+        # this, so the disclosure is in the coordinator's table before a single worker is forked.
+        disclose_load_errors
         return if index.nil? || index.empty?
         # Reduced mode stays UNPUBLISHED. Every consumer reads `columns:` as authoritative and fires on a
         # key missing from it — rigor-actionpack's `permit(:title)` check and rigor-shoulda-matchers'
@@ -231,11 +249,13 @@ module Rigor
         index = model_index
         # The schema-load disclosure is independent of whether an index was built: reduced mode still
         # produces one (and still analyzes), while a genuine index failure produces one and nothing else.
-        diagnostics = consume_load_error_diagnostics(path)
-        return diagnostics if index.nil? || index.empty?
-        return diagnostics if migration_path?(path)
+        # It leaves through the run-scoped channel rather than this method's return, so re-registering here
+        # is free — it only matters for a load error appended after `#prepare` already ran.
+        disclose_load_errors
+        return [] if index.nil? || index.empty?
+        return [] if migration_path?(path)
 
-        diagnostics.concat(Analyzer.new(path: path, model_index: index).analyze(root).diagnostics)
+        Analyzer.new(path: path, model_index: index).analyze(root).diagnostics
       end
 
       # Rails migration files (`db/migrate/<timestamp>_*.rb`) and post-migration files
@@ -318,7 +338,8 @@ module Rigor
             relation_call_return_type(call_node, scope, index) ||
             instance_call_return_type(call_node, scope, index)
         else
-          implicit_self_class_call_return_type(call_node, scope, index)
+          implicit_self_class_call_return_type(call_node, scope, index) ||
+            implicit_self_instance_member_type(call_node, scope, index)
         end
       end
 
@@ -358,6 +379,88 @@ module Rigor
 
         finder_return_type(call_node, entry) ||
           class_scope_return_type(call_node, entry)
+      end
+
+      # Implicit-self INSTANCE member read — `name` / `account` written without a receiver inside the
+      # model's own `def`, where `self` is `Nominal[Model]`. Both existing instance paths key on a WRITTEN
+      # receiver, so this spelling reached no path at all; issue #963 item 2 is what that costs beyond
+      # precision. The engine's own-method veto (#618) asks the dispatcher whether a plugin answers the
+      # name before letting a same-named top-level `def` bind, and a member no tier answers is a member the
+      # top-level `def` binds ahead of — typing `name.upcase` inside `def shout` as the def's `nil` and
+      # firing `undefined method 'upcase' for nil` on working Rails code.
+      #
+      # **`untyped`, not the column's type**, and the difference is measured rather than assumed. The
+      # precise variant (the same `association_return_type` / `column_return_type` pair the written-receiver
+      # path uses) was run over the corpus and added 57 diagnostics on mastodon and 5 on redmine, all new:
+      # `flow.always-truthy-condition` where a predicate reader now folds a guard to a constant, and
+      # `call.possible-nil-receiver` where a singular association's `nil` arm survives a `.compact` the
+      # engine does not fold. Those are precision questions about the reader's TYPE, and each is a false
+      # positive on correct code. What #963 needs is only that the member EXISTS, so the contribution is the
+      # ADR-82 WD4 answer `#ruby_type_to_type`'s decline already documents next door: the plugin knows the
+      # reader is there and declines to say more here. The site keeps the `Dynamic` it already had, gains
+      # the `framework_dsl_boundary` attribution, and the veto gets its answer.
+      #
+      # The project's OWN definition wins, and is not merely a precision preference: `def name` on the
+      # model — or on an ancestor it declares — is an override Ruby dispatches to, and the plugin tier sits
+      # ABOVE the engine's body-inference tiers, so answering here would displace the override's real return
+      # type with `Dynamic`. `discovered_method_through_ancestors?` is the same table the veto's own
+      # discovery arm reads, and it fails toward declining (a budget-exhausted walk answers true).
+      def implicit_self_instance_member_type(call_node, scope, index)
+        return nil if scope.nil?
+        return nil unless call_node.arguments.nil?
+        return nil unless call_node.block.nil?
+
+        self_type = scope.self_type
+        return nil unless self_type.is_a?(Rigor::Type::Nominal)
+
+        entry = index.find(self_type.class_name)
+        return nil if entry.nil?
+        return nil unless instance_member_name?(entry, call_node.name)
+        return nil if scope.discovered_method_through_ancestors?(self_type.class_name, call_node.name, :instance)
+        return nil if rbs_answers_before_object?(self_type.class_name, call_node.name, scope)
+
+        Rigor::Type::Combinator.untyped
+      end
+
+      # A signature the project wrote about the model — or about anything in the model's MRO — is
+      # authorship, and this tier sits above `RbsDispatch`, so answering `untyped` for a name RBS declares
+      # would displace the declared type at the implicit-self spelling ONLY, leaving `name` and `self.name`
+      # typed differently in one method body. Declining restores both: RBS answers the call, and the
+      # engine's own veto still sees the member through its pre-`::Object` RBS arm, so a top-level `def` of
+      # the name does not bind either.
+      #
+      # The cut-off is `ExpressionTyper#rbs_declared_before_object?`'s and NOT its own-class sibling's, and
+      # the difference is the whole point: RBS's definition builder resolves through ancestors, so a reader
+      # declared on a `sig/application_record.rbs` superclass or on an `include`d module comes back with
+      # THAT owner, and an own-class test would call it undeclared and displace it one ancestor up. What the
+      # cut-off keeps out is an owner at or after a top-level `def`'s own rung — `Object`, `Kernel`,
+      # `BasicObject` — whose names say nothing about whether the model answers. Instance-side only, so a
+      # sidecar declaring `def self.name` is correctly not counted. Fail-soft: an unreadable environment
+      # declines to claim a declaration exists, which leaves the member visible to the veto.
+      TOP_LEVEL_DEF_OWNERS = %w[Object Kernel BasicObject].freeze
+      private_constant :TOP_LEVEL_DEF_OWNERS
+
+      def rbs_answers_before_object?(class_name, method_name, scope)
+        definition = services.reflection.instance_method_definition(class_name, method_name, scope: scope)
+        return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+        defined_in = definition.defined_in
+        return false if defined_in.nil?
+
+        !TOP_LEVEL_DEF_OWNERS.include?(defined_in.to_s.delete_prefix("::"))
+      rescue StandardError
+        false
+      end
+
+      # Whether the model entry declares `method_name` as an instance-side member: an association accessor,
+      # a column reader, or the ActiveRecord-generated `column?` predicate. The same three families
+      # `#recognised_method_names` puts in the dispatch gate, asked of ONE entry.
+      def instance_member_name?(entry, method_name)
+        name = method_name.to_s
+        return true unless entry.association(method_name).nil?
+
+        column_name = name.end_with?("?") ? name[0..-2] : name
+        !entry.column(column_name).nil?
       end
 
       # Class-side finders + the class-side relation entry points. `find` / `find_by!` return the model;
@@ -614,7 +717,8 @@ module Rigor
             scopes: entry.scopes,
             validations: entry.validated_attributes,
             callbacks: entry.callbacks,
-            aliases: entry.aliases
+            aliases: entry.aliases,
+            macro_methods: entry.macro_methods
           }.freeze
         end.freeze
       end
@@ -632,7 +736,9 @@ module Rigor
         # model-file additions — so no priming walk is needed (it used to run the discover twice).
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
-        @load_errors << { message: "model index build failed: #{e.class}: #{e.message}", severity: :warning }
+        @load_errors << { key: "2-model-index-failed",
+                          message: "model index build failed: #{e.class}: #{e.message}",
+                          severity: :warning }
         nil
       end
 
@@ -651,7 +757,8 @@ module Rigor
         # here.
         @schema_table = cache_for(:schema_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
-        @load_errors << { message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
+        @load_errors << { key: "1-schema-read-refused",
+                          message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
         nil
       rescue Errno::ENOENT
@@ -660,14 +767,16 @@ module Rigor
         # associations and table names off the discovered models, so this is a disclosure of REDUCED
         # capability rather than a failure — `:info`, the grade the plugins use for "here is what I
         # recognised", not `:warning`, the grade they use for "I could not run".
-        @load_errors << { message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
+        @load_errors << { key: "1-schema-file-missing",
+                          message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
                                    "`#{@structure_sql_file}`) not found#{REDUCED_MODE_SUFFIX}",
                           severity: :info }
         nil
       rescue StandardError => e
         # A schema that EXISTS but does not parse is a real, actionable problem — the user meant it to be
         # read. Reduced mode still applies, but the disclosure stays a warning.
-        @load_errors << { message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
+        @load_errors << { key: "1-schema-parse-failed",
+                          message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
                                    "#{e.class}: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
         nil
@@ -679,23 +788,31 @@ module Rigor
                             "(`where(col:)`, column readers) are skipped"
       private_constant :REDUCED_MODE_SUFFIX
 
-      # Project-global disclosures, emitted once per run on the first analyzed file rather than once per
-      # file. On a Redmine-shape project (migrations only, no `schema.rb`) the per-file form produced 346
-      # identical rows; on a Solidus monorepo, 999.
-      def consume_load_error_diagnostics(path)
-        return [] if @load_errors_emitted
-
-        @load_errors_emitted = true
-        @load_errors.uniq.map do |error|
-          Rigor::Analysis::Diagnostic.new(
-            path: path,
-            line: 1,
-            column: 1,
+      # Project-global disclosures, handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
+      # issue #1051). They are facts about the project's INPUTS — "there is no `db/schema.rb`, so column
+      # checks are off" — so the engine positions them at `.rigor.yml:1:1` and emits each `key` once per
+      # run.
+      #
+      # This used to be an `@load_errors_emitted` flag consulted from `#diagnostics_for_file`, which put the
+      # row on whichever file this instance saw first. On a Redmine-shape project (migrations only, no
+      # `schema.rb`) the per-FILE form before that produced 346 identical rows; on a Solidus monorepo, 999.
+      # The flag fixed the count per instance, but a fork-pool worker gets its OWN instance, so `--workers
+      # N` re-multiplied it by N and each copy landed on that worker's first file — after #393 possibly an
+      # `.erb` template unit, where a schema notice reads as a claim about a view.
+      # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
+      # (#1051), and the three schema outcomes — mutually exclusive, since `@schema_load_attempted` memoises
+      # the attempt — must still precede a model-index failure the way `@load_errors` records them. Keys are
+      # identities, never shown to the user, so the prefix costs nothing but the ordering.
+      def disclose_load_errors
+        @load_errors.each do |error|
+          disclose_once(
+            error.fetch(:key),
             message: error.fetch(:message),
             severity: error.fetch(:severity),
             rule: "load-error"
           )
         end
+        nil
       end
     end
 

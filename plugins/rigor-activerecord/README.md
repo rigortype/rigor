@@ -41,7 +41,7 @@ rigor-activerecord/
 │           ├── schema_table.rb            ← parsed schema + Column value object
 │           ├── schema_parser.rb           ← Prism interpreter for create_table DSL
 │           ├── model_discoverer.rb        ← walks model_search_paths via IoBoundary
-│           ├── model_index.rb             ← model name → table + columns
+│           ├── model_index.rb             ← model name → table + columns + DSL surface
 │           └── analyzer.rb                ← per-file walker, validates AR queries
 └── demo/
     ├── .rigor.yml
@@ -112,6 +112,7 @@ digest and the cache would never invalidate.
 | Auto-built `Cache::Descriptor` chains digests | both producers feed off the same `IoBoundary` instance, so the model_index cache key naturally includes both schema digest and every model file digest |
 | Prism DSL interpretation | `SchemaParser` recursive descent on `create_table` blocks |
 | Two-pass cross-file analysis | discoverer walks the project, analyzer walks per file |
+| Deferred cross-file attribution | `ModelDiscoverer#fold_concern_declarations` — a concern's `included do` scopes / associations / macro methods reach a model along the `include` edges recorded in the first pass, resolved only once every file is read |
 | `did_you_mean`-style UX | `Analyzer#closest_column` (Levenshtein ≤ 3) |
 
 The end-user view of what these surfaces produce — diagnostics,

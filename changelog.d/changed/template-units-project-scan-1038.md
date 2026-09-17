@@ -1,0 +1,1 @@
+- **[editor]** A long-lived language-server session now carries its compiled template units on the warm project scan, so a per-buffer publish re-runs a plugin's template transform only for a template that changed on disk — on Redmine with `rigor-actionpack`, 506 ERB compiles per publish become 4. ([#1053](https://github.com/rigortype/rigor/pull/1053))

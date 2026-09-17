@@ -12,12 +12,14 @@ module Rigor
     # Per-session cache of the project-wide analyzer state the LSP reads on every request — chiefly the
     # `Environment` (with its ~100-300ms RBS env build), a read-only `Cache::Store` that lets the runner hit
     # the on-disk RBS cache without writing back, and (since the pre-pass cache slice) a frozen
-    # {Rigor::Analysis::ProjectScan} snapshot covering the plugin registry, dependency-source index, and
-    # pre-pass scanner outputs.
+    # {Rigor::Analysis::ProjectScan} snapshot covering the plugin registry, dependency-source index,
+    # pre-pass scanner outputs and (since #1038) the compiled template-unit index.
     #
     # The pre-pass scan lets `DiagnosticPublisher#run_analysis` build a `Runner` with `prebuilt:` so per-buffer
     # publishes skip plugin `#prepare`, the synthetic-method scanner, the project-patched scanner, and the
-    # dependency-source walker. For projects with substrate plugins / opt-in dependency source / sizeable
+    # dependency-source walker — and, since #1038, the template-unit transform: a publish recompiles only a
+    # template that moved on disk since the scan was built (plus the buffer's own, always), rather than every
+    # view in the project. For projects with substrate plugins / opt-in dependency source / sizeable
     # `pre_eval:` configuration this cuts publish wall time substantially — for the trivial case the savings
     # are small (the per-publish path is already ≈2ms once Environment is warm).
     #

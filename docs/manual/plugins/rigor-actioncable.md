@@ -36,7 +36,7 @@ ActionCable.server.broadcast("chat_room_42", body: "hi")    # warning: no such s
 | `plugin.actioncable.broadcast-stream` | info | `ActionCable.server.broadcast("...", ...)` matched a registered `stream_from` literal |
 | `plugin.actioncable.unknown-channel` | error | the receiver ends in `Channel` but is not in the index (with a did-you-mean) |
 | `plugin.actioncable.unknown-stream` | warning | the literal stream name matched no `stream_from` registration (with a did-you-mean) |
-| `plugin.actioncable.load-error` | warning | channel discovery failed (parse/read error) — once per file |
+| `plugin.actioncable.load-error` | warning | channel discovery failed (parse/read error) — once per run, on `.rigor.yml` |
 
 The `unknown-stream` check is **suppressed** when any discovered
 channel registers a dynamic stream (`stream_from interpolated_string`
@@ -100,6 +100,13 @@ default.
 - **The `#receive` contract is path-scoped, not class-scoped** (ADR-28):
   any `def receive(data)` defined anywhere under `channel_search_paths`
   is typed, even on a class that isn't an ActionCable channel.
+- **The "failed to discover channels" warning is run-scoped.** It is
+  a fact about your configuration, not about any one source file, so
+  it is reported once per run on `.rigor.yml` rather than repeated on
+  every analysed file. It is `:warning`, so if you baselined it at its
+  old position that entry no longer matches and the row fails a
+  `--fail-on=warning` run — regenerate with `rigor baseline
+  regenerate`.
 
 ## Plugin internals
 

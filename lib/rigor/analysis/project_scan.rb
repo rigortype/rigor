@@ -16,13 +16,23 @@ module Rigor
     # are NOT visible until the owner invalidates the scan — typically via `workspace/didChangeWatchedFiles`.
     # This is the same trade-off the LSP made when slice 7 cached only the `Environment`; extending the cache
     # to the pre-pass outputs preserves the contract.
+    #
+    # `template_units` (#1038) is the one slot a consumer does not adopt verbatim. The rest of the snapshot
+    # is reused as it stands until the owner invalidates it; the template index is handed to
+    # `TemplateUnits.collect(previous:)`, which re-expands the claimed globs and revalidates each template
+    # against the filesystem, so a template edited, added or deleted on disk is seen on the next publish
+    # even though the snapshot itself did not move. What the carry saves is the plugin transform — for ERB
+    # (#393) an Erubi compile of every view in the project, otherwise paid per keystroke. The index is
+    # always built WITHOUT a buffer binding, so the shared snapshot never holds a unit compiled from an
+    # editor's in-flight bytes.
     ProjectScan = Data.define(
       :plugin_registry,
       :dependency_source_index,
       :synthetic_method_index,
       :project_patched_methods,
       :plugin_prepare_diagnostics,
-      :pre_eval_diagnostics
+      :pre_eval_diagnostics,
+      :template_units
     )
   end
 end

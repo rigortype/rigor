@@ -89,6 +89,26 @@ RSpec.describe Rigor::Analysis::TemplateUnitPositions do
     expect(map.node_at(line: 2, column: 1)).to eq(:ambiguous)
   end
 
+  # One text gap is ONE literal and the compiler pads the swallowed lines with blanks, so the literal
+  # carrying the probed line's leading text sits on the last compiled line that emitted anything — the
+  # line above only when that line carried a tag itself. Reading "the compiled lines of L-1" left the
+  # commonest view shape (a markup line, or a blank one, above the probed line) typing text as code.
+  it "declines leading text when the hoisted literal sits above a markup-only line" do
+    map = positions("<%= v %>\n<div>\nname <%= name %>\n",
+                    "_e.<<(( v ).to_s); _e.<< \"\\n<div>\\nname \".freeze\n\n; _e.<<(( name ).to_s)\n",
+                    { 1 => 1, 2 => 2, 3 => 3 })
+
+    expect(map.node_at(line: 3, column: 1)).to eq(:ambiguous)
+  end
+
+  it "walks back over blank compiled lines to find the hoisted literal" do
+    map = positions("<%= v %>\n\nname <%= name %>\n",
+                    "_e.<<(( v ).to_s); _e.<< \"\\n\\nname \".freeze\n\n; _e.<<(( name ).to_s)\n",
+                    { 1 => 1, 2 => 2, 3 => 3 })
+
+    expect(map.node_at(line: 3, column: 1)).to eq(:ambiguous)
+  end
+
   it "still answers a tag on the line after another tag with the same name" do
     map = positions("<%= v %>\n<%= v %>\n", "_e.<<(( v ).to_s)\n_e.<<(( v ).to_s)\n", { 1 => 1, 2 => 2 })
 

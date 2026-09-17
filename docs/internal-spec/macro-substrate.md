@@ -461,18 +461,22 @@ preamble a partial writes when its render-site `locals:` are not traced.
     that copy seen from the other end: without that exemption
     `<%= @author.nil? ? l(:a) : l(:b, f(@author)) %>` declined, and the busy
     lines of a real view lost a third of their answers. What still declines is
-    the CROSS-TAG repeat (`<%= v %> <%= v.to_s %>`, `<%= v %><%= "v" %>`),
-    the price of not knowing where the tags are; a tag span exported by the
+    the CROSS-TAG repeat — `<%= v %> <%= v.to_s %>`, or `<%= v %><%= "v" %>`
+    probed at the string's `v` — the price of not knowing where the tags are; a tag span exported by the
     plugin would answer those, and is the follow-up this rule is conservative
     ahead of.
-  - **Hoisted text.** The previous template line's compiled lines join the
-    search as SPILL targets, and only a string literal found there counts.
-    stdlib ERB emits a line's leading text on the line above
-    (`_erbout.<< "\nname ".freeze`), so for a probe in that text the literal it
-    has to tie with is not on this template line's compiled lines at all:
-    without the spill, `name <%= name %>` probed at the HTML word typed as the
-    tag's code. A CODE node on the line above must not count, or every
-    `<%= v %>` repeated on consecutive template lines would decline.
+  - **Hoisted text.** The nearest NON-BLANK compiled line above this template
+    line's own joins the search as a SPILL target, and only a string literal
+    found there counts. stdlib ERB emits a line's leading text on the line
+    above (`_erbout.<< "\nname ".freeze`), so for a probe in that text the
+    literal it has to tie with is not on this template line's compiled lines at
+    all: without the spill, `name <%= name %>` probed at the HTML word typed as
+    the tag's code. It is the nearest non-blank line rather than "the compiled
+    lines of template line L-1" because ONE text gap is ONE literal and the
+    compiler pads the lines it swallowed with blanks, so the literal sits on
+    the last line that emitted anything — L-1 only when L-1 carried a tag
+    itself. A CODE node up there must not count, or every `<%= v %>` repeated
+    on consecutive template lines would decline.
     Tie-breaking by "the placement whose node looks like code" was rejected for
     the same family of reason: preferring the code would type a word of text.
   A bare `FILE:LINE` lists only the expressions on those compiled lines whose

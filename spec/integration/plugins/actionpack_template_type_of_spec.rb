@@ -28,6 +28,8 @@ TEMPLATE_TYPE_OF_SHOW_ERB = <<~ERB
   <%= v %><% if "a" <= v %><% end %>
   name <%= @user.name %>
   <%= @user.name.empty? ? @user.name : "x" %>
+  <div>
+  name <%= @user.name %>
 ERB
 
 TEMPLATE_TYPE_OF_LAYOUT_ERB = <<~ERB
@@ -172,6 +174,16 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       expect(out).to eq("")
       expect(status).to eq(1)
       expect(err).to include("no expression found at app/views/users/show.html.erb:7:1")
+    end
+
+    # One text gap is ONE literal, and the compiler pads the lines it swallowed with blanks, so the
+    # literal carrying line 10's leading text sits on the compiled line of line 8's tag — not on line 9's.
+    it "declines a word of HTML text below a text-only line, where the hoisted literal is further up" do
+      status, out, err = run_cli("type-of", "app/views/users/show.html.erb:10:1")
+
+      expect(out).to eq("")
+      expect(status).to eq(1)
+      expect(err).to include("no expression found at app/views/users/show.html.erb:10:1")
     end
 
     # A name repeated INSIDE one tag is one copy read from both ends, not a second reading: the rival's

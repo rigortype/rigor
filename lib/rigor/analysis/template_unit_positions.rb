@@ -75,10 +75,23 @@ module Rigor
         candidates = compiled_lines_for(line)
         return :no_compiled_line if candidates.empty?
 
-        # The PREVIOUS template line's compiled lines join as spill targets: stdlib ERB hoists a line's
-        # leading text onto the line before it (`_erbout.<< "\nname ".freeze`), so the literal a probe in
-        # that text has to tie with is not on this template line's compiled lines at all.
-        resolve(text, offset, targets_for(candidates), targets_for(compiled_lines_for(line - 1)))
+        # The compiled line ABOVE joins as a spill target: stdlib ERB hoists a line's leading text onto it
+        # (`_erbout.<< "\nname ".freeze`), so the literal a probe in that text has to tie with is not on
+        # this template line's compiled lines at all.
+        resolve(text, offset, targets_for(candidates), spill_targets(candidates))
+      end
+
+      # The nearest NON-BLANK compiled line above this template line's own, or none.
+      #
+      # Not "the compiled lines of template line L-1": one text gap is ONE literal, and the compiler pads
+      # the lines it swallowed with blanks, so the literal carrying line L's leading text sits on the last
+      # line that emitted anything — which is L-1 only when L-1 itself carried a tag. With the L-1 reading,
+      # `<h1>T</h1>` / `<div>` / `name <%= name %>` answered about the tag's code at `3:1`, and so did any
+      # view with a blank line or a text-only line above the probed one: the common shape.
+      def spill_targets(candidates)
+        number = candidates.min - 1
+        number -= 1 while number.positive? && @compiled_lines[number - 1].strip.empty?
+        number.positive? ? targets_for([number]) : []
       end
 
       def targets_for(numbers)
@@ -159,8 +172,9 @@ module Rigor
       # A repeat INSIDE the winning run is not a rival: `<%= @author.nil? ? l(:a) : l(:b, f(@author)) %>`
       # copies one tag body once, and the second `@author` is the same copy seen from the other end, not a
       # second reading. Only a node OUTSIDE the winning run's own compiled span counts, which is what keeps
-      # the busy lines of a real view answerable while the cross-tag repeat (`<%= v %> <%= v.to_s %>`,
-      # `<%= v %><%= "v" %>`) still declines — the family a plugin-exported tag span would answer instead
+      # the busy lines of a real view answerable while the cross-tag repeat (`<%= v %> <%= v.to_s %>`, or
+      # `<%= v %><%= "v" %>` probed at the STRING's `v`) still declines — the family a plugin-exported tag
+      # span would answer instead
       # (see the PR), and the follow-up this rule is deliberately conservative ahead of.
       #
       # `spill` is the previous template line's compiled lines, where a hoisted leading-text literal lives.

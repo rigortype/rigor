@@ -646,9 +646,12 @@ module Rigor
       # The default reads the {.dynamic_return} rules that gate on BOTH a receiver kind and a method
       # name set: such a rule is a declaration that the receiver class answers those names. A
       # receiver-less rule speaks about a name on any receiver and a name-less rule about any name on a
-      # receiver; neither is a claim about one class owning one method, so neither counts. A plugin
-      # whose knowledge is not expressed as rule gates (rigor-activerecord's per-model index) overrides.
-      # Failures isolate to false.
+      # receiver; neither is a claim about one class owning one method, so neither counts. A receiver
+      # that is `Object`, `Kernel` or `BasicObject` does not count either: a subclass match on it would
+      # claim the name for every class, and those owners sit at or after the top-level `def`'s own rung, so
+      # the veto's `::Object` cut-off (inference-engine.md) forbids them from retracting the binding. A
+      # plugin whose knowledge is not expressed as rule gates (rigor-activerecord's per-model index)
+      # overrides. Failures isolate to false.
       def supplies_method?(class_name:, method_name:, singleton:, environment:)
         return false if class_name.nil? || method_name.nil?
 
@@ -658,12 +661,18 @@ module Rigor
           next false unless resolved_dynamic_return_methods(rule).include?(name)
 
           resolved_dynamic_return_receiver_entries(rule).any? do |receiver, singleton_entry|
-            singleton_entry == singleton && class_matches_receiver?(class_name, receiver, environment)
+            next false if singleton_entry != singleton || OWNERSHIP_CUTOFF_RECEIVERS.include?(receiver)
+
+            class_matches_receiver?(class_name, receiver, environment)
           end
         end
       rescue StandardError
         false
       end
+
+      # The receivers at or after a top-level `def`'s rung in every MRO; see {#supplies_method?}.
+      OWNERSHIP_CUTOFF_RECEIVERS = %w[Object Kernel BasicObject ::Object ::Kernel ::BasicObject].freeze
+      private_constant :OWNERSHIP_CUTOFF_RECEIVERS
 
       # ADR-37 slice 2 — the post-return narrowing facts contributed by this plugin's {.narrowing_facts}
       # rules for a call. The engine calls this from `StatementEvaluator`; a rule fires only when

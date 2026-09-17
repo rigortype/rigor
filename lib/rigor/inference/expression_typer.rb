@@ -1330,8 +1330,9 @@ module Rigor
       end
 
       # The plugin-supplied arm shared by both sides of {#self_type_answers?}: `Plugin::Registry#supplies_method?`
-      # (each plugin's own claim about the class, kind included) and the synthetic-method index. Both are
-      # exact `(class, name)` probes, so a name the plugin knows only on some OTHER class does not veto here.
+      # (each plugin's own claim about the class, kind included) and the synthetic-method index. The index
+      # is an exact `(class, name)` probe; a plugin answers for the class or a subclass of a receiver it
+      # declares. Either way a name the plugin knows only on some unrelated class does not veto here.
       def plugin_supplied_self_answers?(class_name, method_name, singleton:)
         environment = scope.environment
         return false if environment.nil?

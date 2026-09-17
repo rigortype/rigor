@@ -554,6 +554,32 @@ RSpec.describe Rigor::Plugin::Base do
         it "does not read a name-less rule as a claim about a name" do
           expect(supplies?(plugin, "Foo", :bar)).to be(false)
         end
+
+        # An `Object` / `Kernel` receiver would match every class through the subclass ordering, and those
+        # owners sit at or after the top-level `def`'s rung — the veto's `::Object` cut-off.
+        it "does not read an Object / Kernel / BasicObject receiver as ownership on every class" do
+          global = Class.new(described_class) do
+            manifest(id: "dr-global", version: "0.1.0")
+            dynamic_return receivers: %w[Object], methods: %i[format] do |_call_node, _scope|
+              Rigor::Type::Combinator.nominal_of("String")
+            end
+            dynamic_return receivers: %w[Kernel], methods: %i[puts] do |_call_node, _scope|
+              Rigor::Type::Combinator.nominal_of("NilClass")
+            end
+            dynamic_return receivers: %w[BasicObject], methods: %i[instance_eval] do |_call_node, _scope|
+              Rigor::Type::Combinator.nominal_of("String")
+            end
+          end.new(services: services)
+          env = Rigor::Environment.default
+          %w[String Array StandardError Object Kernel].each do |class_name|
+            expect(global.supplies_method?(class_name: class_name, method_name: :format, singleton: false,
+                                           environment: env)).to be(false)
+            expect(global.supplies_method?(class_name: class_name, method_name: :puts, singleton: false,
+                                           environment: env)).to be(false)
+            expect(global.supplies_method?(class_name: class_name, method_name: :instance_eval, singleton: false,
+                                           environment: env)).to be(false)
+          end
+        end
       end
 
       it "accepts String method names and normalises them to symbols" do

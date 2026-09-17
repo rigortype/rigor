@@ -361,10 +361,14 @@ module Rigor
       # Issue #963 — the own-method veto's question, answered per model rather than from the name gate
       # above (which is the union over every model, so it would veto `text` inside any class once one
       # model has a `text` column). An instance of a discovered model answers its column readers and
-      # `column?` predicates, `alias_attribute` names, and association accessors; the class object answers
-      # the finder / relation entry points and its declared scopes. Only the exact model's entry is
-      # consulted — an STI subclass inherits its root's columns / associations / scopes through the
-      # discoverer, so the entry already reflects the chain.
+      # `column?` predicates, `alias_attribute` names, association accessors, and the names a declaration
+      # macro installs (`delegate`, attachment readers, enum predicates — `Entry#macro_method?`); the class
+      # object answers the finder / relation entry points and its declared `scope`s. Only the exact model's
+      # entry is consulted — an STI subclass inherits its root's columns / associations / scopes through the
+      # discoverer, so the entry already reflects the chain. Not claimed: the scopes an `enum` generates
+      # (their spelling depends on `prefix:` / `suffix:` / `scopes: false`, which the index does not keep)
+      # and the `ActiveRecord::Base` surface itself (`errors`, `count`, …) that `framework.rbs` leaves
+      # undeclared.
       def supplies_method?(class_name:, method_name:, singleton:, environment:) # rubocop:disable Lint/UnusedMethodArgument
         entry = model_index&.find(class_name)
         return false if entry.nil?
@@ -374,7 +378,7 @@ module Rigor
           FINDER_METHOD_NAMES.include?(name.to_sym) || entry.scope?(name)
         else
           entry.column?(name) || (name.end_with?("?") && entry.column?(name.delete_suffix("?"))) ||
-            entry.association?(name) || entry.alias?(name)
+            entry.association?(name) || entry.alias?(name) || entry.macro_method?(name)
         end
       rescue StandardError
         false

@@ -77,8 +77,10 @@ done
 
 The 36 rows that flip are **6 distinct sites**, all the same collision: `Status`'s `belongs_to
 :reblog` association versus `def reblog(status, at_time)` — a helper defined directly inside an
-`RSpec.describe` block in `spec/models/trends/statuses_spec.rb`, which is a top-level `def` to Ruby
-and to the scope index alike.
+`RSpec.describe` block in `spec/models/trends/statuses_spec.rb`, which the scope index records as a
+bindable top-level `def`. (To Ruby it is not one: rspec-core runs the block with `module_exec` on the
+example-group class, so the helper is an instance method of that class, not a private method on
+`Object`. The bind was wrong either way — `Status#reblog` is the association.)
 
 | site | self | rows |
 | --- | --- | --- |
@@ -94,17 +96,21 @@ declines the bind and dispatch reaches the association through `rigor-activereco
 
 ## Controls
 
-- **Positive (the fix does something):** the 36 flipped rows above, and the two regression examples in
+- **Positive (the fix does something):** the 36 flipped rows above, and the regression examples in
   `spec/integration/plugins/activerecord_plugin_spec.rb` (`#963`) — a top-level `def title` / `def user`
-  / `def recent` against a model's column, association and scope. Without the engine change the
-  must-not-bind example fails with `call.undefined-method` on `post.rb`.
+  / `def recent` / `def headline` / `def email` against a model's column, association, scope,
+  `alias_attribute` and `delegate`. Without the engine change the must-not-bind example fails with
+  `call.undefined-method` on `post.rb`; deleting either the instance-side or the singleton-side
+  `plugin_supplied_self_answers?` line makes it fail too.
 - **Negative (nothing else moves):** the `call.*` diagnostic set is identical before and after (4040 =
   4040, symmetric difference empty), and every row that was vetoed before is still vetoed after (the
   480 is a strict superset of the 444).
 - **Must-still-fire:** 979 sites keep binding the top-level `def` after the fix — 4966 rows on a
   `nil` self (genuine top level and spec blocks), 165 rows on a `Nominal` self where no plugin
-  supplies the name. The `Widget` arm of the regression spec pins the diagnostic that must keep
-  firing.
+  supplies the name. Two arms of the regression spec pin the diagnostic that must keep firing: a
+  `Widget` no plugin models, and a `User` model whose table lacks the `title` column another model
+  has — the second is why `rigor-activerecord` answers per model rather than from its plugin-wide
+  name union.
 
 ## Limitations
 
@@ -121,5 +127,19 @@ declines the bind and dispatch reaches the association through `rigor-activereco
 - **No `errors` / synthesized-member collision observed.** The `SyntheticMethodIndex` arm and the
   base `Plugin::Base#supplies_method?` (receiver+name `dynamic_return` gates) are exercised by unit
   specs only; mastodon produced no row where they decided the outcome.
+- **The `ActiveRecord::Base` surface itself is still unclaimed.** #963 names `errors` explicitly, and
+  it — like an inherited class method such as `count` — still binds a same-named top-level `def`:
+  `framework.rbs` deliberately leaves `ActiveRecord::Base` undeclared, so the RBS arm cannot answer,
+  and the `rigor-activerecord` override claims only what the model index records for the class
+  (columns, predicates, associations, aliases, macro-installed members, finders, declared `scope`s).
+  Reproduced in the #1058 review on the fixed engine with `class ApplicationRecord <
+  ActiveRecord::Base` plus a top-level `def errors = nil` / `def count = nil`: `errors.full_messages`
+  and `count.succ` both still report `undefined method … for nil`. Mastodon has no such collision;
+  closing this needs either a declared `ActiveRecord::Base` surface or a base-class claim in the
+  plugin, and is left open here.
+- **Enum-generated scopes are unclaimed.** `enum :status, { draft: 0, published: 1 }` installs a
+  `published` class-side scope whose spelling depends on `prefix:` / `suffix:` and which `scopes:
+  false` removes; the model index keeps the per-value `?` predicates (instance side) but not the
+  scope names, so `def self.pub = published.first` still binds a top-level `def published`.
 - **Single corpus, single revision, workers default.** Wall time ~40 s either way; the extra
   registry/index lookups on the veto path did not register.

@@ -4124,26 +4124,22 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
-  # Issue #963 — a column reader, an association accessor, or a scope is a method of the model at runtime, so
-  # an implicit-self call to it inside the model reaches the plugin-modelled member and never the same-named
-  # top-level `def` (a private method on `Object`, the last MRO link). The veto in
-  # `ExpressionTyper#self_type_answers?` asks `Activerecord#supplies_method?` before binding the top-level
-  # body. The must-still-fire arm pins the boundary: in a class no plugin models, the top-level `def` still
-  # binds and its `nil` still fires.
+  # Issue #963 — a column reader, an association accessor, a scope, or a macro-installed member is a method
+  # of the model at runtime, so an implicit-self call to it inside the model reaches the plugin-modelled
+  # member and never the same-named top-level `def` (a private method on `Object`, the last MRO link). The
+  # veto in `ExpressionTyper#self_type_answers?` asks `Activerecord#supplies_method?` before binding the
+  # top-level body. Two must-still-fire arms pin the boundary: a class no plugin models, and — the reason
+  # the override answers per model rather than from the plugin-wide name union — a model that lacks the
+  # column another model has.
   describe "own-method veto — plugin-supplied members beat a same-named top-level def (#963)" do
     let(:shadow_source) do
       <<~RUBY
-        def title
-          nil
-        end
-
-        def user
-          nil
-        end
-
-        def recent
-          nil
-        end
+        def title = nil
+        def user = nil
+        def recent = nil
+        def admin? = nil
+        def headline = nil
+        def email = nil
       RUBY
     end
 
@@ -4153,45 +4149,73 @@ RSpec.describe "plugins/rigor-activerecord" do
           class Post < ApplicationRecord
             belongs_to :user
             scope :recent, -> { order(created_at: :desc) }
+            alias_attribute :headline, :title
+            delegate :email, to: :user
 
-            def shout
-              title.upcase
-            end
-
-            def author_email
-              user.email
-            end
-
-            def self.latest
-              recent.first
-            end
+            def shout = title.upcase
+            def author = user.email
+            def banner = headline.upcase
+            def contact = email.upcase
+            def self.latest = recent.first
+          end
+        RUBY
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            def role = admin? ? "admin" : "member"
+            def shout = title.upcase
           end
         RUBY
         "app/models/widget.rb" => <<~RUBY
           class Widget
-            def shout
-              title.upcase
-            end
+            def shout = title.upcase
           end
         RUBY
       )
     end
 
+    # `[basename, line]` pairs of every `call.undefined-method`, so a failure names the arm that regressed.
     # The models are analysed too (`paths:`), since the calls under test sit inside their bodies.
-    def undefined_method_messages
+    def undefined_method_sites
       files = models.merge("db/schema.rb" => DEFAULT_SCHEMA)
       result = run_plugin(source: shadow_source, files: files, paths: ["demo.rb", "app"])
       result.diagnostics
             .select { |d| d.rule == "call.undefined-method" }
-            .to_h { |d| [File.basename(d.path.to_s), d.message] }
+            .map { |d| [File.basename(d.path.to_s), d.line] }
     end
 
-    it "does not bind the top-level def for a column reader, an association, or a scope inside the model" do
-      expect(undefined_method_messages.keys).not_to include("post.rb")
+    it "does not bind the top-level def for a column, an association, an alias, a delegate, or a scope" do
+      expect(undefined_method_sites.select { |site| site.first == "post.rb" }).to eq([])
+    end
+
+    # The `?` predicate types as `bool`, and `nil` answers every method a `bool` does, so no diagnostic
+    # can separate the two bindings; the veto's question is asked of the plugin directly instead.
+    it "claims a column `?` predicate on the model that has the column, and only there" do
+      files = models.merge("db/schema.rb" => DEFAULT_SCHEMA, "demo.rb" => shadow_source)
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, files)
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]),
+            cache_store: nil, collect_stats: false, plugin_requirer: build_plugin_requirer
+          )
+          guarded_run(runner)
+          plugin = runner.plugin_registry.find("activerecord")
+          asks = lambda do |klass, name|
+            plugin.supplies_method?(class_name: klass, method_name: name, singleton: false, environment: nil)
+          end
+          expect(asks.call("User", :admin?)).to be(true)
+          expect(asks.call("Post", :admin?)).to be(false)
+          expect(asks.call("User", :title)).to be(false)
+        end
+      end
     end
 
     it "still binds the top-level def, and fires, inside a class no plugin models" do
-      expect(undefined_method_messages["widget.rb"]).to include("upcase")
+      expect(undefined_method_sites).to include(["widget.rb", 2])
+    end
+
+    it "still binds the top-level def, and fires, inside a model whose table lacks the column" do
+      expect(undefined_method_sites).to include(["user.rb", 3])
     end
   end
 end

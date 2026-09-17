@@ -730,9 +730,15 @@ and `methods:`, where the name is in the (possibly callable) `methods:` list and
 some receiver entry matches the class with the same kind. A receiver-less rule
 (`methods:` only), a name-less rule (`receivers:` only), and `file_methods:` are
 NOT read as ownership claims — they gate dispatch, and a name-only gate read as
-ownership would veto a same-named top-level `def` inside every class. A plugin
-whose knowledge is per-class overrides the hook (`rigor-activerecord` answers
-from the model-index entry of exactly `class_name`). `false` means "not known to
+ownership would veto a same-named top-level `def` inside every class. A receiver
+entry naming `Object`, `Kernel` or `BasicObject` is NOT an ownership claim either:
+those owners sit at or after the top-level `def`'s rung in every MRO, and a
+subclass match on them would reach every class the environment knows, which the
+veto's `::Object` cut-off forbids. A plugin whose knowledge is per-class overrides
+the hook (`rigor-activerecord` answers from the model-index entry of exactly
+`class_name`: columns, `?` predicates, associations, `alias_attribute`s and
+macro-installed members on the instance side; finders and declared `scope`s on
+the class side). `false` means "not known to
 supply", never "known absent"; the hook MUST NOT raise (the registry treats a
 raise as `false`) and MUST NOT depend on `environment` being non-`nil`.
 

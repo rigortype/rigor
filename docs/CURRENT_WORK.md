@@ -62,9 +62,10 @@ issue tracks the untyped-return gap; if #1011 rules otherwise, each is a one-lin
   `sig-gen gap:` markers wrong, or is the gate's wording? [#1007](https://github.com/rigortype/rigor/issues/1007)
   and [#1008](https://github.com/rigortype/rigor/issues/1008) are engine gaps sitting behind two
   marked `sig/` rows.
-- A separate session is checking why `rigor check` stays silent on `call.wrong-arity` shapes the
-  `Analysis::Runner` harness reports (found while fixing #986); its outcome lands as an issue or a
-  `docs/agents/measurement.md` entry.
+- The "`rigor check` misses `call.wrong-arity`" report from the #986 lane was an oracle mistake,
+  not an engine gap: the CLI answers for the tree its `exe/rigor` was loaded from, so a CLI resolved
+  from the main clone analyses a different engine than a worktree's harness. Recorded in
+  `docs/agents/measurement.md` by [#1033](https://github.com/rigortype/rigor/pull/1033).
 
 ## Where the worktrees are
 

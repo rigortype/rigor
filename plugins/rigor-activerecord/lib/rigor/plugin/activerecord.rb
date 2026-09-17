@@ -219,6 +219,10 @@ module Rigor
       # no-op).
       def prepare(services)
         index = model_index
+        # Issue #1051 — registered HERE, on the run's parent, because `#prepare` is where the schema read is
+        # forced and therefore where every load error already exists. The pool's one pre-fork session runs
+        # this, so the disclosure is in the coordinator's table before a single worker is forked.
+        disclose_load_errors
         return if index.nil? || index.empty?
         # Reduced mode stays UNPUBLISHED. Every consumer reads `columns:` as authoritative and fires on a
         # key missing from it — rigor-actionpack's `permit(:title)` check and rigor-shoulda-matchers'
@@ -239,11 +243,13 @@ module Rigor
         index = model_index
         # The schema-load disclosure is independent of whether an index was built: reduced mode still
         # produces one (and still analyzes), while a genuine index failure produces one and nothing else.
-        diagnostics = consume_load_error_diagnostics(path)
-        return diagnostics if index.nil? || index.empty?
-        return diagnostics if migration_path?(path)
+        # It leaves through the run-scoped channel rather than this method's return, so re-registering here
+        # is free — it only matters for a load error appended after `#prepare` already ran.
+        disclose_load_errors
+        return [] if index.nil? || index.empty?
+        return [] if migration_path?(path)
 
-        diagnostics.concat(Analyzer.new(path: path, model_index: index).analyze(root).diagnostics)
+        Analyzer.new(path: path, model_index: index).analyze(root).diagnostics
       end
 
       # Rails migration files (`db/migrate/<timestamp>_*.rb`) and post-migration files
@@ -641,7 +647,9 @@ module Rigor
         # model-file additions — so no priming walk is needed (it used to run the discover twice).
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
-        @load_errors << { message: "model index build failed: #{e.class}: #{e.message}", severity: :warning }
+        @load_errors << { key: "2-model-index-failed",
+                          message: "model index build failed: #{e.class}: #{e.message}",
+                          severity: :warning }
         nil
       end
 
@@ -660,7 +668,8 @@ module Rigor
         # here.
         @schema_table = cache_for(:schema_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
-        @load_errors << { message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
+        @load_errors << { key: "1-schema-read-refused",
+                          message: "rigor-activerecord: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
         nil
       rescue Errno::ENOENT
@@ -669,14 +678,16 @@ module Rigor
         # associations and table names off the discovered models, so this is a disclosure of REDUCED
         # capability rather than a failure — `:info`, the grade the plugins use for "here is what I
         # recognised", not `:warning`, the grade they use for "I could not run".
-        @load_errors << { message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
+        @load_errors << { key: "1-schema-file-missing",
+                          message: "rigor-activerecord: schema file `#{@schema_file}` (or " \
                                    "`#{@structure_sql_file}`) not found#{REDUCED_MODE_SUFFIX}",
                           severity: :info }
         nil
       rescue StandardError => e
         # A schema that EXISTS but does not parse is a real, actionable problem — the user meant it to be
         # read. Reduced mode still applies, but the disclosure stays a warning.
-        @load_errors << { message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
+        @load_errors << { key: "1-schema-parse-failed",
+                          message: "rigor-activerecord: failed to parse `#{@schema_file}`: " \
                                    "#{e.class}: #{e.message}#{REDUCED_MODE_SUFFIX}",
                           severity: :warning }
         nil
@@ -688,23 +699,31 @@ module Rigor
                             "(`where(col:)`, column readers) are skipped"
       private_constant :REDUCED_MODE_SUFFIX
 
-      # Project-global disclosures, emitted once per run on the first analyzed file rather than once per
-      # file. On a Redmine-shape project (migrations only, no `schema.rb`) the per-file form produced 346
-      # identical rows; on a Solidus monorepo, 999.
-      def consume_load_error_diagnostics(path)
-        return [] if @load_errors_emitted
-
-        @load_errors_emitted = true
-        @load_errors.uniq.map do |error|
-          Rigor::Analysis::Diagnostic.new(
-            path: path,
-            line: 1,
-            column: 1,
+      # Project-global disclosures, handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
+      # issue #1051). They are facts about the project's INPUTS — "there is no `db/schema.rb`, so column
+      # checks are off" — so the engine positions them at `.rigor.yml:1:1` and emits each `key` once per
+      # run.
+      #
+      # This used to be an `@load_errors_emitted` flag consulted from `#diagnostics_for_file`, which put the
+      # row on whichever file this instance saw first. On a Redmine-shape project (migrations only, no
+      # `schema.rb`) the per-FILE form before that produced 346 identical rows; on a Solidus monorepo, 999.
+      # The flag fixed the count per instance, but a fork-pool worker gets its OWN instance, so `--workers
+      # N` re-multiplied it by N and each copy landed on that worker's first file — after #393 possibly an
+      # `.erb` template unit, where a schema notice reads as a claim about a view.
+      # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
+      # (#1051), and the three schema outcomes — mutually exclusive, since `@schema_load_attempted` memoises
+      # the attempt — must still precede a model-index failure the way `@load_errors` records them. Keys are
+      # identities, never shown to the user, so the prefix costs nothing but the ordering.
+      def disclose_load_errors
+        @load_errors.each do |error|
+          disclose_once(
+            error.fetch(:key),
             message: error.fetch(:message),
             severity: error.fetch(:severity),
             rule: "load-error"
           )
         end
+        nil
       end
     end
 

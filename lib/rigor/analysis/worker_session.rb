@@ -305,6 +305,24 @@ module Rigor
         @file_effects
       end
 
+      # Issue #1051 — the run-scoped disclosures ({Plugin::Base#disclose_once}) this session's plugin
+      # instances registered, each tagged with the plugin id the coordinator de-duplicates by. Marshal-clean
+      # (frozen Hashes of Strings and Symbols) so the fork pool ships them back like the three drains above;
+      # a registration made on the PARENT during `#prepare` is already visible to the coordinator through
+      # the pre-fork session, and one a worker makes while analysing its slice arrives through the payload.
+      # Entries are not cleared — a drain is a read, and the parent session is drained again on the degrade
+      # path.
+      def drain_run_disclosures
+        return [] if @plugin_registry.empty?
+
+        @plugin_registry.plugins.flat_map do |plugin|
+          plugin_id = safe_plugin_id(plugin)
+          Array(plugin.run_disclosure_records).map { |record| record.merge(plugin_id: plugin_id) }
+        rescue StandardError
+          []
+        end
+      end
+
       private
 
       # Mirrors {Runner#seed_project_scope}: applies the cross-file pre-pass discovery tables the

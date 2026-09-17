@@ -68,7 +68,6 @@ module Rigor
 
       def init(_services)
         @routes_file = config["routes_file"]
-        @load_error_emitted = false
       end
 
       # ADR-37 — per-call helper validation over the engine-owned walk. The engine hands us every `CallNode`;
@@ -86,9 +85,12 @@ module Rigor
         diagnostics_for_call(path, node, base, kind, table)
       end
 
-      # File-level only: the once-per-run load-error emission. Per-call validation runs over the engine-owned walk via
+      # File-level only: the run-scoped load-error disclosure. Per-call validation runs over the engine-owned walk via
       # the node rule above, so this hook is reserved for the one diagnostic a per-node walk cannot express — the
-      # project-global "routes file did not load" warning, emitted once rather than on every analysed file.
+      # project-global "routes file did not load" warning. It is handed to `#disclose_once` (issue #1051) rather than
+      # returned: a `@load_error_emitted` flag is per plugin INSTANCE, and a fork-pool worker has its own, so
+      # `--workers N` used to emit N copies, each positioned at whichever file that worker analysed first. The engine
+      # emits a disclosure once per `(plugin, key)` per RUN, at `.rigor.yml:1:1`.
       #
       # `#producer_value` runs the `:route_table` producer through `#cache_for`; a `StandardError` the producer raises
       # (missing / malformed / access-denied `routes.yml`) is rescued into `#producer_error`. ADR-60 WD3
@@ -97,10 +99,14 @@ module Rigor
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         table = producer_value(:route_table)
         return [] unless table.nil?
-        return [] if @load_error_emitted
 
-        @load_error_emitted = true
-        [load_error_diagnostic(path)]
+        disclose_once(
+          :route_table_load_failed,
+          message: load_error_message,
+          severity: :warning,
+          rule: "load-error"
+        )
+        []
       end
 
       private
@@ -157,20 +163,9 @@ module Rigor
         )
       end
 
-      # File-level (line 1) load-error warning. There is no call node to position at, so this is one of the few places a
-      # plugin constructs a `Diagnostic` directly rather than through `#diagnostic`. The message is tailored to the
-      # `StandardError` class `#producer_value` rescued into `#producer_error(:route_table)`.
-      def load_error_diagnostic(path)
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: 1,
-          column: 1,
-          message: load_error_message,
-          severity: :warning,
-          rule: "load-error"
-        )
-      end
-
+      # The run-scoped disclosure's message, tailored to the `StandardError` class `#producer_value` rescued into
+      # `#producer_error(:route_table)`. There is no call node to position at — which is the point of a disclosure: the
+      # engine owns the position (`.rigor.yml:1:1`), so this plugin builds no `Diagnostic` at all for it.
       def load_error_message
         case (error = producer_error(:route_table))
         when Plugin::AccessDeniedError

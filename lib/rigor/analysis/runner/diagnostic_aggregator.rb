@@ -53,7 +53,8 @@ module Rigor
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
                        quarantined_signatures_snapshot:, env_build_failure_snapshot:,
                        definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
-                       conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] })
+                       conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] },
+                       pooled_run_disclosures: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -70,6 +71,9 @@ module Rigor
           @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
           @hkt_scan_failure_snapshot_reader = hkt_scan_failure_snapshot
           @conformance_results_snapshot_reader = conformance_results_snapshot
+          # Issue #1051 — reader for the pool coordinator's de-duplicated run-scoped disclosure table.
+          # Empty on a sequential run, where `plugin_registry`'s own instances are the ones that registered.
+          @pooled_run_disclosures_reader = pooled_run_disclosures
         end
 
         # Pre-file diagnostic streams that fire once per run rather than per analyzed file: plugin load /
@@ -968,6 +972,69 @@ module Rigor
           plugin_registry.plugins.filter_map { |plugin| plugin_trust_refusal_diagnostic(plugin) }
         end
 
+        # Issue #1051 — the run-scoped plugin disclosures ({Plugin::Base#disclose_once}), the run's
+        # project-global notices about its own inputs. Two sources feed one table:
+        #
+        # - the coordinator-side registry, which is where a SEQUENTIAL run's `#prepare` and per-file hooks
+        #   ran; and
+        # - `pooled_run_disclosures`, the pool coordinator's already-de-duplicated collection from the
+        #   pre-fork parent session and every worker payload.
+        #
+        # Both are keyed `[plugin id, key]` and the first registration of a pair wins, so a run emits one
+        # row per pair no matter how many plugin instances (workers) reached it — the #1051 bug, where a
+        # per-instance `@emitted` flag produced one row per WORKER.
+        #
+        # The emitted order is `(registry position, key)`, NOT registration order: a worker's slice
+        # determines which instance registers a key first, so registration order is a function of
+        # `--workers N` and would make a pooled run's stream differ from a sequential one's even with the
+        # duplicates gone. Registry position is the plugin load order (topological by `consumes:`), which
+        # both modes share.
+        #
+        # Position is `.rigor.yml:1:1` for every row; see {Plugin::Base#disclose_once} for why that and not
+        # the first analysed file.
+        def plugin_run_disclosure_diagnostics
+          registry = plugin_registry
+          return [] if registry.empty?
+
+          positions = {}
+          registry.plugins.each_with_index { |plugin, index| positions[disclosure_plugin_id(plugin)] ||= index }
+          collect_run_disclosure_records(registry)
+            .sort_by { |record| [positions.fetch(record[:plugin_id], positions.size), record[:key].to_s] }
+            .map { |record| run_disclosure_diagnostic(record) }
+        end
+
+        def collect_run_disclosure_records(registry)
+          records = {}
+          Array(pooled_run_disclosures).each do |record|
+            records[[record[:plugin_id], record[:key]]] ||= record
+          end
+          registry.plugins.each do |plugin|
+            plugin_id = disclosure_plugin_id(plugin)
+            Array(plugin.run_disclosure_records).each do |record|
+              records[[plugin_id, record[:key]]] ||= record.merge(plugin_id: plugin_id)
+            end
+          rescue StandardError
+            next
+          end
+          records.values
+        end
+
+        def run_disclosure_diagnostic(record)
+          Diagnostic.new(
+            path: ".rigor.yml", line: 1, column: 1,
+            message: record.fetch(:message),
+            severity: record.fetch(:severity),
+            rule: record.fetch(:rule),
+            source_family: "plugin.#{record[:plugin_id]}"
+          )
+        end
+
+        def disclosure_plugin_id(plugin)
+          plugin.manifest.id
+        rescue StandardError
+          plugin.class.to_s
+        end
+
         def plugin_trust_refusal_diagnostic(plugin)
           summary = plugin.io_boundary.refusal_summary
           return nil if summary.nil?
@@ -1052,6 +1119,10 @@ module Rigor
 
         def cached_plugin_prepare_diagnostics
           @cached_plugin_prepare_diagnostics_reader.call
+        end
+
+        def pooled_run_disclosures
+          @pooled_run_disclosures_reader.call
         end
 
         def pre_eval_diagnostics_from_scanner

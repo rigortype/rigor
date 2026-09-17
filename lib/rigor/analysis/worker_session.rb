@@ -321,7 +321,10 @@ module Rigor
       # diagnostics carry the logical path.
       def parse_source(path)
         entry = @template_units[path]
-        return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby) if entry
+        if entry
+          return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby,
+                                           scopes: @template_units.parse_scopes(path))
+        end
 
         physical = @buffer ? @buffer.resolve(path) : path
         return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path

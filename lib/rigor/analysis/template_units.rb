@@ -36,6 +36,11 @@ module Rigor
     # units first-class dependents is a later slice's work, and needs a decision the design note does not
     # settle.
     class TemplateUnits
+      # What a declared type name binds to when nothing resolves it. `Dynamic[top]` — the analyzer's own
+      # "a value is here and I cannot see its class".
+      DYNAMIC = Type::Combinator.dynamic(Type::Combinator.top)
+      private_constant :DYNAMIC
+
       # One synthesised unit, flattened off the plugin's {Plugin::TemplateUnit} with its identity resolved.
       #
       # `path` is both the file the user wrote AND the logical path the engine analyses under: a diagnostic
@@ -68,6 +73,7 @@ module Rigor
       # and the later claim is dropped; the loser is not a diagnostic (the project chose both plugins).
       def self.collect(registry:, root: Dir.pwd)
         entries = {}
+        failures = []
         registry.plugins.each do |plugin|
           # A plugin whose manifest cannot be read claims nothing. `Plugin::Base#manifest` raises for a
           # class that declared none, and a registry is not guaranteed to hold only well-formed plugins
@@ -80,28 +86,38 @@ module Rigor
           end
           next if globs.empty?
 
-          collect_plugin(plugin, globs, root, entries)
+          collect_plugin(plugin, globs, root, entries, failures)
         end
-        entries.empty? ? empty : new(entries)
+        new(entries, failures)
       end
 
-      def self.collect_plugin(plugin, globs, root, entries)
-        fallback = "#{plugin.manifest.id}@#{plugin.manifest.version}"
+      def self.collect_plugin(plugin, globs, root, entries, failures)
+        id = plugin.manifest.id
+        fallback = "#{id}@#{plugin.manifest.version}"
         expand(globs, root).each do |path|
-          source = begin
-            File.binread(File.join(root, path))
-          rescue StandardError
-            next
-          end
+          source = read_source(File.join(root, path), path, id, failures)
+          next if source.nil?
+
           units = begin
             Array(plugin.template_units_for_file(path: path, source: source))
-          rescue StandardError
-            []
+          rescue StandardError => e
+            failures << Failure.new(plugin_id: id, path: path,
+                                    message: "#{e.class}: #{e.message}")
+            next
           end
-          units.each { |unit| record(entries, unit, fallback, plugin.manifest.id) }
+          units.each { |unit| record(entries, unit, path, fallback, id, failures) }
         end
       end
       private_class_method :collect_plugin
+
+      def self.read_source(physical, path, plugin_id, failures)
+        File.binread(physical)
+      rescue StandardError => e
+        failures << Failure.new(plugin_id: plugin_id, path: path,
+                                message: "could not be read (#{e.class}: #{e.message})")
+        nil
+      end
+      private_class_method :read_source
 
       # Sorted so the run's analysed-path order — and therefore the run cache key's `paths` slot — is
       # independent of the filesystem's directory order.
@@ -112,8 +128,23 @@ module Rigor
       end
       private_class_method :expand
 
-      def self.record(entries, unit, fallback, plugin_id)
+      # A unit MUST name the file it was compiled from. Without the check a `path:` naming another project
+      # file silently REPLACED that file's source (the engine serves a unit's bytes for its own path), and a
+      # `path:` naming something outside the project root was analysed with no dependency-descriptor row —
+      # both from a plugin that only had to get one string wrong. A mismatch is reported, not dropped in
+      # silence, because a plugin author whose unit vanished has nothing to read.
+      def self.record(entries, unit, claimed_path, fallback, plugin_id, failures)
         return unless unit.is_a?(Plugin::TemplateUnit)
+
+        unless unit.path == claimed_path
+          failures << Failure.new(plugin_id: plugin_id, path: claimed_path,
+                                  message: "returned a unit for #{unit.path.inspect}, which is not the " \
+                                           "file it was offered; a unit may only name its own source")
+          return
+        end
+        # First claim wins — see {.collect}. A duplicate `logical_name` across two DIFFERENT paths is NOT
+        # refused: the two units are analysed separately and their summaries union under one `view:` key,
+        # which is the same reading a method reopened in two files gets.
         return if entries.key?(unit.path)
 
         entries[unit.path] = Entry.new(
@@ -125,10 +156,19 @@ module Rigor
       end
       private_class_method :record
 
-      def initialize(entries)
+      # One template file a plugin claimed and did not deliver a usable unit for — a transform that raised,
+      # a file that could not be read, or a unit naming the wrong path. Reported as a `plugin_loader`
+      # `runtime-error` row by {Runner#template_unit_failure_diagnostics}, which is the isolation envelope
+      # every other plugin hook reports through (ADR-2 § "Plugin Trust and I/O Policy").
+      Failure = Data.define(:plugin_id, :path, :message)
+
+      def initialize(entries, failures = [])
         @entries = entries.freeze
+        @failures = failures.freeze
         freeze
       end
+
+      attr_reader :failures
 
       def empty?
         @entries.empty?
@@ -162,27 +202,45 @@ module Rigor
         Digest::SHA256.hexdigest(@entries.keys.sort.map { |path| "#{path}\x00#{@entries[path].digest}" }.join("\n"))
       end
 
+      # The Prism `scopes:` argument for a unit's parse, or nil for a path that is not one.
+      #
+      # Without it the seeded locals are inert: Prism parses a bare identifier with no assignment in sight
+      # as a **method call**, so `size` in a template was a `CallNode` and `Scope#local(:size)` was never
+      # consulted. Declaring the render site's locals as an enclosing scope is exactly what Rails does when
+      # it compiles a partial's locals into the method's parameters, and it is what makes `locals:` mean
+      # anything.
+      def parse_scopes(path)
+        entry = @entries[path]
+        return nil if entry.nil? || entry.locals.empty?
+
+        [entry.locals.keys.map(&:to_sym)]
+      end
+
       # The `view:<logical_name>` effect-unit key for a path, or nil.
       def unit_key_for(path)
         @entries[path]&.unit_key
       end
 
       # Binds the declared `self`, locals and ivar seeds onto the per-file scope, so the unit's body types
-      # as the render site would run it. A type name that resolves to nothing is SKIPPED rather than
-      # guessed: the binding then stays `Dynamic`, which taints honestly (ADR-5) instead of asserting a
-      # class the plugin could not justify.
+      # as the render site would run it.
+      #
+      # A type name that resolves to nothing is bound `Dynamic` rather than guessed OR left unbound, and
+      # the difference matters most for `self_type:`. Leaving it unbound is not "no claim": it is the claim
+      # that the body runs at top level, so every helper call in the template reports
+      # `call.unresolved-toplevel` — a finding per line, caused by the plugin naming a class whose RBS the
+      # project does not ship (`ActionView::Base`, on the very first Rails app to try this). `Dynamic` is
+      # the honest reading of "a receiver is declared and the analyzer cannot see it" (ADR-5), and it is
+      # silent.
       def seed(scope, path)
         entry = @entries[path]
         return scope if entry.nil?
 
         scope = bind_self(scope, entry)
         entry.locals.each do |name, type_name|
-          type = resolve(scope, type_name)
-          scope = scope.with_local(name.to_sym, type) if type
+          scope = scope.with_local(name.to_sym, resolve(scope, type_name))
         end
         entry.ivar_seeds.each do |name, type_name|
-          type = resolve(scope, type_name)
-          scope = scope.with_ivar(name.to_sym, type) if type
+          scope = scope.with_ivar(name.to_sym, resolve(scope, type_name))
         end
         scope
       end
@@ -196,15 +254,20 @@ module Rigor
           entry = @entries[diagnostic.path]
           next diagnostic if entry.nil?
 
-          line = entry.template_line(diagnostic.line)
-          line == diagnostic.line ? diagnostic : relocate(diagnostic, line)
+          next diagnostic if entry.line_map.empty?
+
+          relocate(diagnostic, entry.template_line(diagnostic.line))
         end
       end
 
       # The template's lines and the compiled Ruby's columns do not correspond — a compiler preserves lines
       # and rewrites the text of each (Erubi's documented property, and the reason a Rails backtrace can
-      # name `show.html.erb:12`). So a remapped diagnostic keeps its line and drops to column 1 rather than
-      # pointing at a column of a file whose bytes are not what was analysed.
+      # name `show.html.erb:12`). So a diagnostic from a unit keeps its line and drops to column 1 rather
+      # than pointing at a column of a file whose bytes are not what was analysed.
+      #
+      # Applied whenever the unit carries a map, NOT only when the line moves: a compiler that happens to
+      # leave a line where it was still rewrote that line's text, and ERB is exactly that case — the map is
+      # near-identity and the columns are meaningless anyway.
       def relocate(diagnostic, line)
         Diagnostic.new(
           path: diagnostic.path, line: line, column: 1, message: diagnostic.message,
@@ -219,15 +282,14 @@ module Rigor
       def bind_self(scope, entry)
         return scope if entry.self_type.nil?
 
-        type = resolve(scope, entry.self_type)
-        type ? scope.with_self_type(type) : scope
+        scope.with_self_type(resolve(scope, entry.self_type))
       end
 
       def resolve(scope, type_name)
         environment = scope.environment
         resolved = environment&.nominal_for_name(type_name)
         return resolved if resolved
-        return nil unless scope.discovered_classes.key?(type_name)
+        return DYNAMIC unless scope.discovered_classes.key?(type_name)
 
         Type::Combinator.nominal_of(type_name)
       end

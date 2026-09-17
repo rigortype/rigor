@@ -47,13 +47,17 @@ RSpec.describe "template units (#392)" do
     RUBY
   end
 
-  def build_project(dir, template: true)
+  def build_project(dir, template: true, body: nil)
     FileUtils.mkdir_p(File.join(dir, "lib"))
     File.write(File.join(dir, "lib", "app.rb"), project_source)
     return unless template
 
     FileUtils.mkdir_p(File.join(dir, "app", "views", "users"))
-    File.write(File.join(dir, "app", "views", "users", "show.rbx"), template_source)
+    File.write(File.join(dir, "app", "views", "users", "show.rbx"), body || template_source)
+  end
+
+  def template_findings(diagnostics)
+    diagnostics.select { |d| d.path.end_with?("show.rbx") }.map { |d| [d.rule, d.line] }
   end
 
   # `Configuration#to_h` deliberately omits the `effects:` block (it must not perturb the diagnostics
@@ -69,19 +73,23 @@ RSpec.describe "template units (#392)" do
   end
 
   # Runs one whole-project analysis inside a throwaway project root and yields the finished Runner.
-  def in_project(template: true, effects: true, workers: 0, plugins: true)
+  def in_project(template: true, effects: true, workers: 0, plugins: true, template_body: nil,
+                 allow_plugin_crash: false, **overrides)
+    RigorViewDemoPlugin.spec_overrides = overrides
     Dir.mktmpdir("rigor-392-") do |dir|
-      build_project(dir, template: template)
+      build_project(dir, template: template, body: template_body)
       config = configuration(effects: effects, workers: workers, plugins: plugins)
       Dir.chdir(dir) do
         runner = Rigor::Analysis::Runner.new(
           configuration: config, cache_store: nil,
           plugin_requirer: plugins ? ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) } : ->(_name) {}
         )
-        result = guarded_run(runner, ["lib"])
+        result = guarded_run(runner, ["lib"], allow_plugin_crash: allow_plugin_crash)
         yield runner, result
       end
     end
+  ensure
+    RigorViewDemoPlugin.spec_overrides = {}
   end
 
   describe "the unit reaches the effect table" do
@@ -162,6 +170,110 @@ RSpec.describe "template units (#392)" do
 
     def summary_text(runner)
       runner.effect_table.map { |row| "#{row.key}: #{row.proven.to_a.sort.join(',')}" }.sort
+    end
+  end
+
+  # #392 review B1 — a narrowed run must still analyse every unit. `target_files` narrows the `.rb`
+  # expansion FIRST and appends the units second; before that fix the `@analyze_only` select ate them, and
+  # `IncrementalSession` neither replayed them from its cache (they are not in `current_files`) nor kept
+  # them in `@analyzed`, so the finding vanished from the second run onwards.
+  describe "an `--incremental` recheck" do
+    it "reports the template diagnostic on the recheck as well as on the baseline" do
+      Dir.mktmpdir("rigor-392-inc-") do |dir|
+        build_project(dir)
+        config = configuration(effects: false, workers: 0, plugins: true)
+        Dir.chdir(dir) do
+          session = Rigor::Analysis::IncrementalSession.new(
+            configuration: config, paths: ["lib"],
+            plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+          )
+          baseline = guarded_baseline(session)
+          recheck = guarded_recheck(session)
+
+          expect(template_findings(baseline)).to eq([["call.undefined-method", 4]])
+          expect(template_findings(recheck.diagnostics)).to eq([["call.undefined-method", 4]])
+        end
+      end
+    end
+
+    # The units must also stay out of the session's analysed set, or the FIRST recheck reads them as files
+    # that vanished from the project and evicts them.
+    it "never counts a unit as a project file that was added or removed" do
+      Dir.mktmpdir("rigor-392-inc2-") do |dir|
+        build_project(dir)
+        config = configuration(effects: false, workers: 0, plugins: true)
+        Dir.chdir(dir) do
+          session = Rigor::Analysis::IncrementalSession.new(
+            configuration: config, paths: ["lib"],
+            plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+          )
+          guarded_baseline(session)
+          recheck = guarded_recheck(session)
+
+          expect(recheck.removed.to_a).to eq([])
+          expect(recheck.added.to_a).to eq([])
+        end
+      end
+    end
+  end
+
+  # #392 review S1 — Prism parses a bare identifier with no assignment in sight as a method call, so a
+  # seeded local was never consulted until the parse declared the render site's locals as an enclosing
+  # scope. `size` is a `String` here, and calling something String does not have must say so.
+  describe "the render site's locals" do
+    it "types a bare local as the declared type rather than as a method call" do
+      in_project(effects: false, template_body: "size.nope
+") do |_runner, result|
+        found = result.diagnostics.select { |d| d.path.end_with?("show.rbx") }
+
+        expect(found.map { |d| [d.rule, d.receiver_type] }).to eq([["call.undefined-method", "String"]])
+      end
+    end
+  end
+
+  # #392 review S2 — a declared-but-unresolvable `self_type:` used to leave the body typing at top level,
+  # so every helper call reported `call.unresolved-toplevel`. That is a finding per line caused by the
+  # plugin naming a class whose RBS the project does not ship — `ActionView::Base` on the first real Rails
+  # app — which is exactly the false-positive direction the engine must not take (ADR-5).
+  describe "a declared type the environment cannot resolve" do
+    # The body carries two helper calls AND one genuine finding, so the example says both halves at once:
+    # the helper calls are silent (Dynamic, not top-level), and the file was really analysed rather than
+    # skipped — the `String` row is still reported at its template line.
+    it "binds Dynamic and stays silent rather than typing the body at top level" do
+      body = "render_header(1)\nrender_footer(2)\n@title.upcasee\n"
+      in_project(effects: false, self_type: "Nope::Missing", template_body: body) do |_runner, result|
+        found = result.diagnostics.select { |d| d.path.end_with?("show.rbx") }
+
+        expect(found.map { |d| [d.rule, d.line] }).to eq([["call.undefined-method", 3]])
+      end
+    end
+  end
+
+  # #392 review S3 — a unit may only name the file it was compiled from. Without the check a `path:`
+  # naming another project file silently replaced that file's source, and one naming a path outside the
+  # root was analysed with no dependency-descriptor row.
+  describe "a unit that names a file it was not offered" do
+    it "is refused, and the project file it aimed at is analysed from its own bytes" do
+      in_project(effects: false, unit_path: "lib/app.rb", allow_plugin_crash: true) do |_runner, result|
+        rows = result.diagnostics.select { |d| d.rule == "runtime-error" }
+
+        expect(rows.map(&:path)).to eq(["app/views/users/show.rbx"])
+        expect(rows.first.message).to include("may only name its own source")
+        expect(result.diagnostics.select { |d| d.path.end_with?(".rbx") && d.rule != "runtime-error" }).to eq([])
+      end
+    end
+  end
+
+  # #392 review S4 — a raising transform is reported through the same `:plugin_loader` `runtime-error`
+  # envelope a raise from `#diagnostics_for_file` uses, not dropped in silence.
+  describe "a transform that raises" do
+    it "reports one plugin-isolation row for the file and leaves the run standing" do
+      in_project(effects: false, raise_on_transform: true, allow_plugin_crash: true) do |_runner, result|
+        rows = result.diagnostics.select { |d| d.source_family == :plugin_loader }
+
+        expect(rows.map { |d| [d.path, d.rule] }).to eq([["app/views/users/show.rbx", "runtime-error"]])
+        expect(rows.first.message).to include("produced no template unit")
+      end
     end
   end
 

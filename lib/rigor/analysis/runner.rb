@@ -756,7 +756,10 @@ module Rigor
         @run_served_from_cache = false
         return assemble_run_diagnostics(expansion) unless run_result_cacheable?
 
-        environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        # #392 — `source_files:` is what a plugin's `source_rbs_synthesizer` is offered at env-build time,
+        # and a template unit is not Ruby the synthesiser can read (rbs-inline would be handed `.rbx`
+        # bytes). The `.rb` expansion is the right set here; the units join the ANALYSED set only.
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
         # Lazy-files descriptor: the cache KEY reads only `gems` + `configs`; the RBS signature-tree `files`
         # are digested solely by `run_dependency_descriptor` on a MISS, so a warm HIT never walks the tree.
         rbs_descriptor = if environment&.rbs_loader
@@ -1039,6 +1042,11 @@ module Rigor
         # untouched so its lazy build timing is unchanged.
         environment = seed_pre_eval_constants(expansion, environment)
         diagnostics = @diagnostic_aggregator.pre_file_diagnostics(expansion)
+        # #392 — a template transform that raised, a template that could not be read, or a unit naming a
+        # file it was not offered. Reported through the same `:plugin_loader` `runtime-error` envelope a
+        # raise from `#diagnostics_for_file` uses (ADR-2 § "Plugin Trust and I/O Policy"), rather than
+        # dropped in silence: a plugin author whose view stopped being analysed has nothing else to read.
+        diagnostics += template_unit_failure_diagnostics
         # ADR-46 — record which project files this run actually analyzed (the `analyze_only` subset, or
         # all of them). The incremental orchestrator serves every analyzed-but-not-affected file from the
         # per-file cache, so it needs the full analyzed set to subtract the affected closure from.
@@ -1062,6 +1070,18 @@ module Rigor
         close_effect_graph
         diagnostics + post_analysis_diagnostic_streams
       end
+
+      def template_unit_failure_diagnostics
+        template_units.failures.map do |failure|
+          Diagnostic.new(
+            path: failure.path, line: 1, column: 1,
+            message: "plugin #{failure.plugin_id.inspect} produced no template unit for " \
+                     "#{failure.path}: #{failure.message}",
+            severity: :error, rule: "runtime-error", source_family: :plugin_loader
+          )
+        end
+      end
+      private :template_unit_failure_diagnostics
 
       # The rbs-coverage build-failure ladder plus every remaining post-analysis stream
       # `#assemble_run_diagnostics` appends, in their fixed contract order (see the comments at each call
@@ -1539,7 +1559,7 @@ module Rigor
       end
 
       def target_files(expansion)
-        files = template_unit_targets(expansion.fetch(:files))
+        files = expansion.fetch(:files)
         # ADR-46 slice 2 — restrict the analyzed set to the affected closure while the pre-pass (run
         # separately over `expansion`'s full file list) keeps the cross-file index complete.
         if @analyze_only
@@ -1548,25 +1568,40 @@ module Rigor
           # the same allowance option A makes below.
           files = files.select { |path| @analyze_only.include?(path) }
           files |= [@buffer.logical_path] if @buffer && @analyze_only.include?(@buffer.logical_path)
-          return files
+          return template_unit_targets(files)
         end
-        return files if @buffer.nil?
+        return template_unit_targets(files) if @buffer.nil?
 
-        # Editor mode option A — no closure, so the buffer's single logical path IS the analyzed set.
+        # Editor mode option A — no closure, so the buffer's single logical path IS the analyzed set. The
+        # template units deliberately do NOT join it: a per-buffer publish answers about the buffer the
+        # editor is showing, and appending every view would publish diagnostics for files the editor did
+        # not ask about (and re-parse them on every keystroke).
         [@buffer.logical_path]
       end
 
-      # #392 — the template units join the analysed set unconditionally, even on an `--incremental`
-      # narrowed run. Nothing in the ADR-46 dependency graph names a synthesised file, so there is no edge
-      # that could put one in a closure; re-analysing every unit every run is the conservative reading and
-      # costs one parse per template. Appended rather than merged in sorted order so the `.rb` expansion's
-      # own order — and every output that follows it — is byte-identical for a project with no units.
+      # #392 — the template units join the analysed set AFTER any narrowing, so an `--incremental` recheck
+      # re-analyses every unit even when its closure is one `.rb` file. Nothing in the ADR-46 dependency
+      # graph names a synthesised file, so there is no edge that could put a unit in a closure — narrowing
+      # first and appending second is what makes "always re-analysed" true rather than a comment. The cost
+      # is one parse per template on the warm path; the alternative silently drops every template
+      # diagnostic from the second run onwards.
+      #
+      # Appended rather than merged in sorted order so the `.rb` expansion's own order — and every output
+      # that follows it — is byte-identical for a project with no units.
       def template_unit_targets(files)
         return files if template_units.empty?
 
         files + (template_units.paths - files)
       end
       private :template_unit_targets
+
+      # #392 — the unit paths this run synthesised. Read by {IncrementalSession}, which keeps them OUT of
+      # its analysed-file set: a unit is never served from the per-file cache and never counts as a file
+      # that was removed from the project, because `#target_files` re-analyses it every run.
+      def template_unit_paths
+        template_units.paths
+      end
+      public :template_unit_paths
 
       # Editor mode (`buffer:` non-nil) auto-flips the cache store to `read_only: true` so multiple
       # debounced editor invocations against the same project don't churn the on-disk cache or race on
@@ -1651,7 +1686,9 @@ module Rigor
         RunStats.new(
           wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
           peak_rss_bytes: RunStats.peak_rss_bytes,
-          target_files: expansion.fetch(:files).size,
+          # #392 — the template units count too: they are files this run parsed and typed, and a stats line
+          # that omitted them would under-report exactly the work a views-heavy project added.
+          target_files: expansion.fetch(:files).size + template_units.paths.size,
           rbs_classes_total: snapshot.size,
           rbs_classes_project_sig: project_sig,
           rbs_classes_bundled: bundled,
@@ -1809,7 +1846,10 @@ module Rigor
       # `Prism.parse_file` codepath unchanged.
       def parse_source(path)
         entry = template_units[path]
-        return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby) if entry
+        if entry
+          return Prism.parse(entry.source, filepath: path, version: @configuration.target_ruby,
+                                           scopes: template_units.parse_scopes(path))
+        end
 
         if @in_memory_sources&.key?(path)
           return Prism.parse(@in_memory_sources[path], filepath: path, version: @configuration.target_ruby)

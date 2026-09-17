@@ -25,20 +25,31 @@ class RigorViewDemoPlugin < Rigor::Plugin::Base
     "#{path.sub(%r{\Aapp/views/}, '').sub(/\.rbx\z/, '')}.html"
   end
 
+  # Spec knobs, so one fixture plugin can stand in for the handful of malformed-declaration cases the
+  # seam has to behave under (an unresolvable `self_type:`, a unit naming the wrong path, a raising
+  # transform) without a second plugin class per case. Production plugins carry nothing like this.
+  class << self
+    attr_accessor :spec_overrides
+  end
+  self.spec_overrides = {}
+
   def template_units_for_file(path:, source:)
+    overrides = self.class.spec_overrides || {}
+    raise "the demo transform was told to fail" if overrides[:raise_on_transform]
+
     text = source.dup.force_encoding(Encoding::UTF_8)
     name = logical_name_for(path)
     [
       Rigor::Plugin::TemplateUnit.new(
         logical_name: name,
-        path: path,
+        path: overrides[:unit_path] || path,
         # The transform is the identity on the body, plus a one-line banner — so the compiled Ruby's lines
         # are the template's lines OFF BY ONE, and a run that lost the line map would report every finding
         # one line late. A real compiler's map is far less regular; this is the smallest map that is not
         # the identity.
         ruby_source: "# rigor template unit: #{name}\n#{text}",
         line_map: (1..text.lines.length).to_h { |line| [line + 1, line] },
-        self_type: "ViewContext",
+        self_type: overrides[:self_type] || "ViewContext",
         locals: { "size" => "String" },
         ivar_seeds: { "@user" => "User", "@title" => "String" },
         transform_id: "identity-1"

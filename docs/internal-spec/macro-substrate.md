@@ -216,7 +216,23 @@ one manifest row, because a template is compiled rather than pattern-matched:
 | Surface | Shape | Role |
 | --- | --- | --- |
 | `Manifest#template_globs` | `Array<String>` | Project-relative globs the plugin claims. Absolute globs and `..` segments are refused at manifest-build time. A plugin declaring none is never asked, and a run whose plugins declare none globs nothing. |
-| `Base#template_units_for_file(path:, source:)` | `-> Array<TemplateUnit>` | The transform. Called ONCE per matched file, on the parent, before any analysis. `[]` declines the file. A raise isolates: that file contributes no unit and the run continues. |
+| `Base#template_units_for_file(path:, source:)` | `-> Array<TemplateUnit>` | The transform. Called ONCE per matched file, on the parent, before any analysis. `[]` declines the file. |
+
+A returned unit MUST name the file it was offered (`unit.path == path`); a unit naming anything
+else is refused. Without that check a `path:` naming another project file silently **replaced** that
+file's source — the engine serves a unit's bytes for its own path — and a `path:` naming something
+outside the project root was analysed with no dependency-descriptor row, both from one wrong string.
+
+Three failure modes are reported rather than dropped, each as one `:plugin_loader` `runtime-error`
+diagnostic positioned at the template file: a transform that **raised**, a template that could not be
+**read**, and a unit naming the **wrong path**. That is the isolation envelope every other plugin
+hook reports through ([ADR-2](../adr/2-extension-api.md) § "Plugin Trust and I/O Policy"): the file
+contributes no unit, the run continues, and the plugin author has something to read.
+
+Two units may share a `logical_name` across different paths. That is not refused: the two are
+analysed separately and their summaries union under one `view:` key, the same reading a method
+reopened in two files gets. Two units for the same **path** cannot occur — the first claim wins, so a
+second plugin claiming a file another already compiled is dropped in registration order.
 
 ### `TemplateUnit`
 
@@ -240,10 +256,13 @@ construction, validated at construction (a malformed declaration raises
 `#to_h` that round-trips. It is additionally **`Marshal`-clean**, which the
 fork pool depends on.
 
-A `self_type`, `locals` or `ivar_seeds` type name the environment cannot
-resolve is **skipped**, not guessed: the binding stays `Dynamic`, which
-taints honestly ([ADR-5](../adr/5-robustness-principle.md)) rather than
-asserting a class the plugin could not justify.
+A `self_type`, `locals` or `ivar_seeds` type name the environment cannot resolve is bound
+`Dynamic[top]` — not guessed, and **not left unbound**. The difference matters most for `self_type:`:
+leaving it unbound is not "no claim", it is the claim that the body runs at top level, so every
+helper call in the template reports `call.unresolved-toplevel` — a finding per line, caused by the
+plugin naming a class whose RBS the project does not ship (`ActionView::Base`, on the first real
+Rails app to try this). `Dynamic` is the honest reading of "a receiver is declared and the analyzer
+cannot see it" ([ADR-5](../adr/5-robustness-principle.md)), and it is silent.
 
 ### Positions
 
@@ -254,6 +273,13 @@ applied at the file boundary. Wrapping the body in a synthesised `class … def`
 would shift every line and force the engine to compose an offset of its own
 with the plugin's map; as it is, the only mapping in play is the plugin's.
 
+The `locals:` names are additionally passed to Prism as the parse's enclosing
+`scopes:`. Without that the seeding is inert: Prism parses a bare identifier
+with no assignment in sight as a **method call**, so `size` in a template was a
+`CallNode` and `Scope#local(:size)` was never consulted. Declaring them is what
+Rails itself does when it compiles a partial's locals into the compiled
+method's parameters.
+
 A diagnostic produced inside a unit is re-pointed through `line_map` before it
 leaves the run (`Analysis::TemplateUnits#remap`): the **path is already the
 template's** (the parse is stamped with it), so only the line moves, and the
@@ -261,6 +287,12 @@ column drops to 1 — a compiler preserves lines and rewrites the text of each,
 so a column of the compiled Ruby names nothing in the template. An unmapped
 line anchors at the nearest mapped line before it, and at line 1 when there
 is none, so a finding always lands inside the file.
+
+The column rule applies whenever the unit carries a non-empty `line_map`, not
+only when the line actually moves: a compiler that happens to leave a line
+where it was still rewrote that line's text, and ERB is exactly that case — its
+map is near-identity and its columns are meaningless either way. A unit with an
+empty map claims no mapping at all, and its diagnostics pass through untouched.
 
 ### Effects, cache and the pool
 
@@ -284,7 +316,23 @@ is none, so a finding always lands inside the file.
   no edge that could put one in a closure. The conservative reading is taken —
   **a run always re-analyses every template unit** — which costs one parse per
   template on the warm incremental path and can never serve a stale answer.
-  Making units first-class dependents is a later slice.
+  Making units first-class dependents is a later slice. Two mechanics carry it:
+  `Runner#target_files` narrows the `.rb` expansion FIRST and appends the units
+  second (appending first let the `analyze_only` select eat them), and
+  `IncrementalSession` keeps unit paths OUT of `@analyzed`, so a unit is never
+  served from the per-file cache and never reads as a project file that vanished.
+- **Editor mode.** A single-buffer publish (`buffer:` with no closure) answers
+  about the buffer the editor is showing, so the units do NOT join its analysed
+  set — appending every view would publish diagnostics for files the editor did
+  not ask about. A `--incremental --tmp-file` recheck, which has a closure, does
+  analyse them. The index is still rebuilt per run, so a long-lived LSP session
+  re-runs the plugin transform per publish;
+  [#1038](https://github.com/rigortype/rigor/issues/1038) carries it onto
+  `ProjectScan`.
+- **Other file sets.** A unit is an ANALYSED file, never a `source_files:` one:
+  the env-build-time `source_rbs_synthesizer` is offered the `.rb` expansion
+  alone, because a template's bytes are not Ruby an RBS synthesiser can read.
+  `RunStats#target_files` counts units, because they are files the run parsed.
 
 Worked consumer: `spec/fixtures/template_units/view_demo_plugin.rb`, with the
 identity transform this slice ships. ERB itself (Erubi when it resolves,

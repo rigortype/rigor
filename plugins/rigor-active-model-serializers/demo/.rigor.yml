@@ -1,0 +1,9 @@
+paths:
+  - app
+
+plugins:
+  - rigor-activerecord
+  - rigor-active-model-serializers
+
+cache:
+  path: tmp/.rigor/cache

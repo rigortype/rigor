@@ -69,6 +69,7 @@ Larger surfaces — typically need a Rails app shape to make sense.
 | [`rigor-actioncable`](rigor-actioncable/) | 3F | ActionCable channel discovery + `<Channel>.broadcast_to` / `ActionCable.server.broadcast(stream)` validation, with dynamic-stream suppression | Ruby | ✅ |
 | [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby | ✅ |
 | [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model; the returned jid types as `String` | Ruby | ✅ |
+| [`rigor-active-model-serializers`](rigor-active-model-serializers/) | 3G | Types the implicit-self `object` reader inside an `ActiveModel::Serializer` subclass as the serializer's model — derived from the `<Model>Serializer` convention against the `:model_index` fact and then CHECKED, by requiring the model to answer every name the serializer reads off its resource; declines otherwise. Declares the AMS framework constants. No diagnostics. | Ruby (`app/serializers/`, `app/lib/`) | ✅ |
 
 ### Rails ecosystem (framework core)
 

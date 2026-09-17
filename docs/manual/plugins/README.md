@@ -54,6 +54,9 @@ The full catalogue, with a one-line scope for every plugin, is
   `Result` / `Option` unwrap types and synthesises `Enum` variants.
 - [rigor-pundit](rigor-pundit.md) — policy-class existence and
   `authorize(record, :action)` predicate validation.
+- [rigor-active-model-serializers](rigor-active-model-serializers.md) —
+  types the `object` reader inside a serializer as the serializer's
+  model (no diagnostics).
 - [rigor-sidekiq](rigor-sidekiq.md) — Sidekiq `Worker.perform_*`
   argument arity against the discovered `#perform`.
 - [rigor-actioncable](rigor-actioncable.md) — `broadcast_to` channel

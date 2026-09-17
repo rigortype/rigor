@@ -258,9 +258,16 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
   end
 
   describe "`views: strict` against `views: lenient`" do
-    LENIENT = [{ "match" => "app/views/**/*",
-                 "effect" => ["mutate.local", "mutate.self", "io.db.read"] }].freeze
-    STRICT = [{ "match" => "app/views/**/*", "effect" => ["mutate.local", "mutate.self"] }].freeze
+    # The two presets of the manual, trimmed to the labels this fixture's plugins register: `lenient`
+    # admits `io.db.read` in a view and `strict` does not, which is the whole difference under test.
+    let(:lenient) do
+      [{ "match" => "app/views/**/*",
+         "effect" => ["mutate.local", "mutate.self", "io.db.read"] }]
+    end
+
+    let(:strict) do
+      [{ "match" => "app/views/**/*", "effect" => ["mutate.local", "mutate.self"] }]
+    end
 
     # The `_row` partial is the one whose only effect is the lazy `@user.posts.count`. `_card` writes,
     # and a write is a finding under BOTH presets, which is what the manual already says.
@@ -271,10 +278,10 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
     end
 
     it "reports a lazy relation read in a view under `strict` and not under `lenient`" do
-      in_project(envelopes: STRICT) do |_runner, result|
+      in_project(envelopes: strict) do |_runner, result|
         expect(row_findings(result).map(&:message).join("\n")).to include("io.db.read")
       end
-      in_project(envelopes: LENIENT) do |_runner, result|
+      in_project(envelopes: lenient) do |_runner, result|
         expect(row_findings(result)).to be_empty
       end
     end

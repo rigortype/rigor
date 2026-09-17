@@ -17,6 +17,11 @@ module Rigor
     #
     # The gates, in order:
     #
+    # 0. **Already declared** — the method's own signature (or its class's, or `effects.envelopes:`, or
+    #    an rbs-inline `# @rbs %a{…}`) states a bound. The author has spoken and sig-gen has nothing to
+    #    add; writing its own answer over that would silently replace a contract with an inference.
+    #    `withheld-declared`. This is a DIFFERENT lane from gate 5: an envelope on the method itself goes
+    #    to {Effects::EnvelopeCheck} and never enters the summary's `≤` lane, so the table cannot see it.
     # 1. **No summary** — the method is not an effect unit this run collected. Nothing is emitted and nothing
     #    is reported: the absence is about the run, not about the method.
     # 2. **Non-exhaustive** ({Effects::Summary#exhaustive?} false) — the summary reads "these effects, and
@@ -71,9 +76,12 @@ module Rigor
 
       # Turns one {Effects::EffectTable::Entry} into the annotation lines to render and the reason to report.
       #
+      # @param declared — whether the method already carries an authored bound of its own
+      #   ({Effects::EnvelopeIndex}); see gate 0.
       # @return `[Array<String> annotations, Symbol|nil reason]`. An empty
       #   array with a `nil` reason is "nothing to say about this method".
-      def decide(entry, envelopes: false)
+      def decide(entry, envelopes: false, declared: false)
+        return [[], :withheld_declared] if declared
         return [[], nil] if entry.nil?
         return [[], :withheld_non_exhaustive] unless entry.exhaustive?
         return [[], :withheld_tolerated] unless entry.proven == entry.undischarged
@@ -100,9 +108,12 @@ module Rigor
       # is on, and `nil` otherwise — which is what makes effects-off output byte-identical to a run before
       # this feature existed.
       class Annotator
-        def initialize(table:, envelopes: false)
+        # @param envelope_index — the run's {Effects::EnvelopeIndex}, so
+        #   gate 0 can see a bound the author already wrote. `nil` skips that gate.
+        def initialize(table:, envelopes: false, envelope_index: nil)
           @table = table
           @envelopes = envelopes
+          @envelope_index = envelope_index
           freeze
         end
 
@@ -111,7 +122,16 @@ module Rigor
           key = EffectAnnotation.key_for(class_name, method_name, kind)
           return [[], nil] if key.nil?
 
-          EffectAnnotation.decide(@table[key], envelopes: @envelopes)
+          EffectAnnotation.decide(@table[key], envelopes: @envelopes,
+                                               declared: declared?(class_name, method_name, kind))
+        end
+
+        private
+
+        def declared?(class_name, method_name, kind)
+          return false if @envelope_index.nil?
+
+          !@envelope_index[class_name, kind == :singleton, method_name.to_s].nil?
         end
       end
     end

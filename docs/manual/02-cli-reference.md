@@ -491,8 +491,8 @@ When `.rigor.yml` carries an `effects:` block, sig-gen also writes
 (every call it reaches was resolved), **undischarged** (nothing in
 its footprint is only invisible because `effects.tolerated:` says
 so), **claimed** (every callee is described by a catalogue row, a
-plugin, an envelope or a project definition) and free of surviving
-labels in the `≤` lane. Nothing else is annotated, and
+plugin, an envelope or a project definition), carries no authored
+bound of its own, and is free of surviving labels in the `≤` lane. Nothing else is annotated, and
 `--effect-envelopes` adds Rigor's own labelled spelling for methods
 that do have a footprint. With no `effects:` block the output is
 byte-for-byte what it was before. See

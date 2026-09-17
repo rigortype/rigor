@@ -69,3 +69,27 @@ module Annotated
     end
   end
 end
+
+# The override-join shape. `Base2` inherits `run` from `Supplier::Client`, which this project declares
+# and never defines; `Sub2` overrides it with a body sig-gen CAN read. An edge resolution that asks
+# only "did this reach any project method" answers yes, from `Sub2#run` — and `B.run` still dispatches
+# `Supplier::Client#run` at run time.
+module Annotated
+  class Base2 < Supplier::Client
+  end
+
+  class Sub2 < Base2
+    def run
+      1
+    end
+  end
+
+  class Use3
+    B = Base2.new
+
+    def u
+      B.run
+      1
+    end
+  end
+end

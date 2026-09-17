@@ -1,0 +1,8 @@
+# An authored bound on the method ITSELF. It goes to the envelope check, never into a caller's `<=`
+# lane, so the effect table cannot see it and the emitter has to ask the envelope index.
+module Annotated
+  class Declared
+    %a{rigor:v1:effect io.db}
+    def store: () -> untyped
+  end
+end

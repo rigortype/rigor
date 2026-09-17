@@ -12,3 +12,11 @@ end
 class Vendor
   def self.get: (String) -> String
 end
+
+# The owner the closed-world override join hides: `Supplier::Client#run` is described by nobody, and a
+# project subclass overriding `run` does not change what `Base2.new.run` dispatches to.
+module Supplier
+  class Client
+    def run: () -> Integer
+  end
+end

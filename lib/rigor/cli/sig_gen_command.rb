@@ -101,7 +101,8 @@ module Rigor
         )
         runner.run((configuration.paths + paths).uniq)
         SigGen::EffectAnnotation::Annotator.new(table: runner.effect_table,
-                                                envelopes: options.fetch(:effect_envelopes))
+                                                envelopes: options.fetch(:effect_envelopes),
+                                                envelope_index: runner.effect_envelopes)
       end
 
       # The withheld half of the emission, counted the way {#report_skipped} counts a skip: a method that

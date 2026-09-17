@@ -107,6 +107,15 @@ module Rigor
         @effect_table || Effects::EffectTable.empty
       end
 
+      # ADR-103 WD9 (#391) — the envelope index this run built, for `rigor sig-gen`'s annotation emission
+      # to consult. Public for the same reason {#effect_table} is: a consumer outside the diagnostic
+      # stream needs what the run already computed, and rebuilding it would read a different set of
+      # strata (the accepted signatures and the rbs-inline virtual RBS both come from the built
+      # environment). Empty until a collecting run has resolved one.
+      def effect_envelopes
+        @effect_envelope_index || Effects::EnvelopeIndex.empty
+      end
+
       # ADR-103 WD2 / WD6 / WD10 / #387 — the loaded plugins' effect contributions, compiled once per
       # process. Memoised on first use rather than built in the constructor for two reasons: the plugin
       # registry is adopted after construction (`apply_prebuilt` / the plugin-load pre-pass), and the

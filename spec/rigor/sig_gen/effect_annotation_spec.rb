@@ -21,28 +21,35 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
   # `tolerated: [telemetry]` is what makes `Annotated::Chatty#note` the fourth-invariant case: its whole
   # proven footprint (`io`, `telemetry`) arrives through one `Logger#info` origin the policy discharges,
   # so the JUDGMENT reads as clean as `Annotated::Pure#label` does and the RECORD does not.
-  def configuration(effects: { "tolerated" => ["telemetry"] })
+  def configuration(effects: { "tolerated" => ["telemetry"] }, inline: false)
     data = { "paths" => ["lib"], "signature_paths" => ["sig"] }
     data["effects"] = effects unless effects == :absent
+    # `Configuration.new` never auto-wires `rigor-rbs-inline` (only `Configuration.load` does), so the
+    # spec that exercises the inline `# @rbs %a{…}` spelling lists it the way autowiring would.
+    if inline
+      data["plugins"] = [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+                           "config" => { "require_magic_comment" => false } }]
+    end
     Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(data))
   end
 
-  def effect_table(root, configuration)
+  def analysis(root, configuration)
     Dir.chdir(root) do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil,
                                            collect_stats: false, workers: 0)
       guarded_run(runner, ["lib"])
-      runner.effect_table
+      [runner.effect_table, runner.effect_envelopes]
     end
   end
 
-  def candidates(root, envelopes: false, effects: { "tolerated" => ["telemetry"] })
-    config = configuration(effects: effects)
+  def candidates(root, envelopes: false, effects: { "tolerated" => ["telemetry"] }, inline: false)
+    config = configuration(effects: effects, inline: inline)
     annotator =
       if effects == :absent
         nil
       else
-        described_class::Annotator.new(table: effect_table(root, config), envelopes: envelopes)
+        table, index = analysis(root, config)
+        described_class::Annotator.new(table: table, envelopes: envelopes, envelope_index: index)
       end
     Dir.chdir(root) do
       Rigor::SigGen::Generator.new(configuration: config, paths: ["lib"], effect_annotator: annotator).run
@@ -107,6 +114,34 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
       expect(row.effect_reason).to eq(:withheld_unclaimed_callee)
     end
 
+    # The closed-world override join (ADR-103 WD4) makes an edge resolve NON-empty whenever any project
+    # subclass overrides the selector — `Sub2#run` here — while `B.run` still dispatches
+    # `Supplier::Client#run`, which nothing describes. So the emitter asks whether the RECEIVER'S OWN
+    # ancestry answered, not whether the edge reached anything.
+    it "withholds when only a subclass override made the edge resolve" do
+      row = rows.fetch("Annotated::Use3#u")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_unclaimed_callee)
+    end
+
+    # A bound on the method ITSELF goes to the envelope check and never enters any summary's `≤` lane,
+    # so the table cannot see it; the emitter asks the run's envelope index. Writing `%a{pure}` here
+    # would replace the author's contract with an inference over the body they wrote it about.
+    it "withholds from a method whose own sig/ declaration already states a bound" do
+      row = rows.fetch("Annotated::Declared#store")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_declared)
+    end
+
+    it "withholds from the rbs-inline spelling of the same bound" do
+      row = by_key(candidates(fixture, inline: true)).fetch("Annotated::Declared#persist")
+
+      expect(row.annotations).to be_empty
+      expect(row.effect_reason).to eq(:withheld_declared)
+    end
+
     # The labelled spelling is Rigor's own, so an effectful method stays bare until the flag asks for it.
     it "says nothing about an effectful method without --effect-envelopes" do
       row = rows.fetch("Annotated::Loud#shout")
@@ -129,7 +164,8 @@ RSpec.describe Rigor::SigGen::EffectAnnotation do
 
       expect(rows.values_at("Annotated::Chatty#note", "Annotated::Opaque#dispatch",
                             "Annotated::Zoo#via_envelope", "Annotated::Zoo#via_gem",
-                            "Annotated::Caller#go").map(&:annotations)).to all(be_empty)
+                            "Annotated::Caller#go", "Annotated::Use3#u",
+                            "Annotated::Declared#store").map(&:annotations)).to all(be_empty)
     end
   end
 

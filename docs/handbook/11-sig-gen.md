@@ -146,9 +146,9 @@ class Label
 end
 ```
 
-Four conditions have to hold before an annotation is written,
-and all four exist to keep a wrong one off the page. An
-emitted annotation is not a hint — the effects opt-in reads
+Five conditions have to hold before an annotation is written,
+and every one of them exists to keep a wrong one off the
+page. An emitted annotation is not a hint — the effects opt-in reads
 it back as an **envelope** and enforces it on the method and
 on everything the method reaches, so a `%a{pure}` `sig-gen`
 invented would put `effect.envelope-exceeded` on code that
@@ -172,6 +172,11 @@ is correct.
   body is one call into a gem nobody has written a row or an
   envelope for is exhaustive and tells you nothing, so it is
   left bare rather than called pure.
+- The method must not **already carry a bound of its own**.
+  If your `sig/` (or an rbs-inline `# @rbs %a{…}`) declares
+  what this method may do, that is a contract you wrote about
+  this body; sig-gen will not replace it with an inference
+  about the same body.
 - The `≤` lane must be **empty**. A callee that states its
   own bound puts that claim in your method's declared lane
   without proving anything, so `rigor effects` shows
@@ -204,8 +209,8 @@ The `sig.effect.*` reasons are:
 - `sig.effect.withheld-unclaimed-callee` — some call it
   reaches resolved, and nothing anywhere says what that
   callee does.
-- `sig.effect.withheld-declared` — a label survives in the
-  `≤` lane.
+- `sig.effect.withheld-declared` — the method already carries
+  an authored bound, or a label survives in the `≤` lane.
 - `sig.effect.left-unreadable` — the target declaration
   already carries annotations, so nothing was written there.
 

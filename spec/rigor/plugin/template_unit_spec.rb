@@ -90,4 +90,28 @@ RSpec.describe Rigor::Plugin::TemplateUnit do
       expect(index.paths).to eq([])
     end
   end
+
+  describe "suppressed_rules (#393)" do
+    def unit(**overrides)
+      described_class.new(logical_name: "users/show.html", path: "app/views/users/show.html.erb",
+                          ruby_source: "1\n", **overrides)
+    end
+
+    it "defaults to reporting everything" do
+      expect(unit.suppressed_rules).to eq([])
+    end
+
+    it "matches a family by prefix and a rule by its whole id" do
+      expect(unit(suppressed_rules: ["call."]).suppressed_rules).to eq(["call."])
+      expect(unit(suppressed_rules: ["call.undefined-method"]).suppressed_rules).to eq(["call.undefined-method"])
+    end
+
+    it "refuses an empty prefix, which would suppress the unit entirely" do
+      expect { unit(suppressed_rules: [""]) }.to raise_error(ArgumentError, /suppressed_rules/)
+    end
+
+    it "rides the digest, so turning a family back on re-analyses" do
+      expect(unit(suppressed_rules: ["call."]).digest).not_to eq(unit.digest)
+    end
+  end
 end

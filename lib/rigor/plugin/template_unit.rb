@@ -35,13 +35,21 @@ module Rigor
     # - `transform_id` — the compiler's identity (`"erubi-1.13"`). Joins the unit digest, so re-compiling
     #   with a different compiler re-analyses. Defaults to the declaring plugin's `id@version`.
     #
+    # - `suppressed_rules` — rule-id PREFIXES the engine drops for this unit's diagnostics (#393). The
+    #   per-unit rule posture: a compiled template is not code the user wrote, and a plugin that knows its
+    #   compiler's idioms is the only party that can say which families of finding are meaningful there.
+    #   `["call."]` is what an ERB plugin declares while the synthesised receivers are still coarse — the
+    #   unit still contributes its EFFECTS, which is what the view layer is analysed for first, without
+    #   the typing half costing the project a diagnostic per line. Empty means "report everything", which
+    #   is what a plugin whose synthesis it trusts should declare.
+    #
     # A type name that resolves to nothing is not an error here: the engine falls back to `Dynamic`, which
     # taints honestly rather than fabricating a type the plugin could not justify (ADR-5).
     class TemplateUnit
       # Bumped whenever the engine changes what it synthesises from a unit — the seeding rules, the
       # scope binding, the effect-unit key spelling. It rides the unit digest, so a change here
       # invalidates every cached run that analysed a unit, exactly as a changed transform does.
-      SYNTHESIS_VERSION = 1
+      SYNTHESIS_VERSION = 2
 
       # The prefix an effect-unit key carries for a template unit. Deliberately not a {Effects::MethodKey}
       # shape: a view has no owner class and no selector, and spelling one would put a method in the
@@ -54,13 +62,19 @@ module Rigor
       LOCAL_NAME = /\A[a-z_][A-Za-z0-9_]*\z/
       private_constant :LOCAL_NAME
 
+      # A rule prefix is a dotted family (`call.`) or a whole rule id (`call.undefined-method`); the match
+      # is `String#start_with?`, so the former covers the latter. A bare `""` would suppress the unit
+      # entirely and is refused.
+      RULE_PREFIX = /\A[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*\.?\z/
+      private_constant :RULE_PREFIX
+
       attr_reader :logical_name, :path, :ruby_source, :line_map, :self_type, :locals, :ivar_seeds,
-                  :transform_id
+                  :transform_id, :suppressed_rules
 
       # Every field is one declared property of the unit; grouping them behind a context object would only
       # move the same list into a second value class.
       def initialize(logical_name:, path:, ruby_source:, line_map: {}, self_type: nil, locals: {}, # rubocop:disable Metrics/ParameterLists
-                     ivar_seeds: {}, transform_id: nil)
+                     ivar_seeds: {}, transform_id: nil, suppressed_rules: [])
         @logical_name = validate_string!("logical_name", logical_name)
         @path = validate_string!("path", path)
         @ruby_source = validate_source!(ruby_source)
@@ -69,6 +83,7 @@ module Rigor
         @locals = validate_bindings!("locals", locals, LOCAL_NAME)
         @ivar_seeds = validate_bindings!("ivar_seeds", ivar_seeds, IVAR_NAME)
         @transform_id = transform_id.nil? ? nil : validate_string!("transform_id", transform_id)
+        @suppressed_rules = validate_rule_prefixes!(suppressed_rules)
         freeze
       end
 
@@ -89,6 +104,7 @@ module Rigor
           [
             "source:#{@ruby_source}",
             "transform:#{@transform_id || fallback_transform_id || 'unknown'}",
+            "suppressed:#{@suppressed_rules.join(',')}",
             "synthesis:#{SYNTHESIS_VERSION}"
           ].join("\x00")
         )
@@ -109,7 +125,8 @@ module Rigor
         {
           "logical_name" => @logical_name, "path" => @path, "ruby_source" => @ruby_source,
           "line_map" => @line_map, "self_type" => @self_type, "locals" => @locals,
-          "ivar_seeds" => @ivar_seeds, "transform_id" => @transform_id
+          "ivar_seeds" => @ivar_seeds, "transform_id" => @transform_id,
+          "suppressed_rules" => @suppressed_rules
         }
       end
 
@@ -149,6 +166,19 @@ module Rigor
 
           [from, to]
         end.freeze
+      end
+
+      def validate_rule_prefixes!(value)
+        raise ArgumentError, "TemplateUnit suppressed_rules must be an Array" unless value.is_a?(Array)
+
+        value.map do |prefix|
+          text = prefix.to_s
+          unless text.match?(RULE_PREFIX)
+            raise ArgumentError, "TemplateUnit suppressed_rules entry #{text.inspect} is malformed"
+          end
+
+          text.dup.freeze
+        end.uniq.freeze
       end
 
       def validate_bindings!(field, value, pattern)

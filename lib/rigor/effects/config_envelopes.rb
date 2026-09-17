@@ -171,7 +171,7 @@ module Rigor
       def files_by_class(sources, project_root)
         root = "#{File.absolute_path(project_root.to_s).chomp('/')}/"
         sources.each_with_object({}) do |(key, paths), out|
-          owner = MethodKey.owner(key)
+          owner = MethodKey.envelope_owner(key)
           next if owner.nil?
 
           bucket = (out[owner] ||= [])

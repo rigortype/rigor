@@ -264,6 +264,22 @@ Where a nested partial exists in both formats, the `.js` template gets the `.htm
 count on redmine is **0** — its only dual-format partials, `imports/_{issues,users,time_entries}_mapping`,
 are rendered only through a computed name.
 
+Two shapes the fallback must NOT resolve past, found in review and fixed before landing: a template
+whose file exists and whose plugin produced no unit — an ERB whose compiled Ruby does not parse, and a
+handler the plugin does not compile at all. Action View runs those files, so the other format's effects
+are not what the render produces. `TemplateUnits#declined_unit_keys` carries them (derived from the
+paths the plugin read and the root prefix its own logical names imply) and the propagator stops there.
+rigor-actionpack now claims `app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}` and declines every
+one of them, which is how the engine learns those templates exist: **313 declined keys on mastodon**
+(its Haml views) and **2 on redmine** (`common/feed.atom.builder`, `journals/index.builder`). Neither
+project has a case where the block changes an edge — redmine's 33 resolutions are unchanged and
+mastodon's effect table is byte-identical — so the block is protection rather than a measured recovery.
+An unclaimed handler stays invisible and its fallback fires as if no template were there.
+
+The zero in the controller-actions row is [#1071](https://github.com/rigortype/rigor/issues/1071):
+a `respond_to { |format| format.js }` arm is how redmine reaches a `.js.erb`, and the implicit-render
+unit rule edges only to `<action>.html`.
+
 ### Pooled versus sequential
 
 redmine's `effects --format json --full` is **byte-identical** between `RIGOR_RACTOR_WORKERS=2` and `0`

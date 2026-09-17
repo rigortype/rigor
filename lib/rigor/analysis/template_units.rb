@@ -141,6 +141,7 @@ module Rigor
         # carried answer still holds.
         @stats = stats.freeze
         @plugin_signature = plugin_signature.freeze
+        @declined_unit_keys = build_declined_unit_keys
         freeze
       end
 
@@ -168,6 +169,20 @@ module Rigor
       def empty?
         @entries.empty?
       end
+
+      # #1065 — the `view:` keys of the templates this run READ and produced no unit for: an ERB whose
+      # compiled Ruby does not parse, and a handler the claiming plugin declines outright (a `.haml` view
+      # under a decline-only claim). They are what stops the effect edge's format fallback from resolving
+      # PAST a template that exists: Action View runs `_watchers.js.haml`, so joining `_watchers.html`'s
+      # effects there would be a label no execution produces. An unclaimed handler is invisible here and
+      # the fallback still fires for it, which is why a plugin claims the handlers it declines.
+      #
+      # The key is derived from the paths the plugin ITSELF keyed: a produced unit gives the root prefix
+      # its logical name was taken relative to (`app/views/` for `app/views/users/_card.html.erb` →
+      # `users/_card.html`), and a declined path under that prefix is keyed the same way, minus its
+      # handler. A run whose claim produced no unit at all learns no prefix and blocks nothing, which
+      # leaves the fallback exactly as it was rather than guessing at a layout the engine does not own.
+      attr_reader :declined_unit_keys
 
       # The logical paths the run analyses on top of its `.rb` expansion, sorted.
       def paths
@@ -198,6 +213,42 @@ module Rigor
       # the ADR-87 boot-slim probe (which loads no plugin, so its slot is always absent) served the stale
       # rows. The slot now exists whenever any plugin claimed a glob, which is exactly the condition under
       # which the probe's key is knowingly unreconstructable.
+      def build_declined_unit_keys
+        declined = @stats.keys - @entries.keys
+        return NO_DECLINED_KEYS if declined.empty?
+
+        prefixes = @entries.filter_map { |path, entry| root_prefix(path, entry.logical_name) }.uniq
+        return NO_DECLINED_KEYS if prefixes.empty?
+
+        declined.filter_map { |path| declined_unit_key(path, prefixes) }.uniq.sort.freeze
+      end
+      private :build_declined_unit_keys
+
+      NO_DECLINED_KEYS = [].freeze
+      private_constant :NO_DECLINED_KEYS
+
+      # The directory a plugin took a logical name relative to, or nil when the path and the name do not
+      # agree — a plugin free to key a unit any way it likes is one this derivation must decline for.
+      def root_prefix(path, logical_name)
+        stem = strip_handler(path)
+        stem.end_with?(logical_name) ? stem.delete_suffix(logical_name) : nil
+      end
+      private :root_prefix
+
+      def declined_unit_key(path, prefixes)
+        stem = strip_handler(path)
+        prefix = prefixes.find { |candidate| stem.start_with?(candidate) && stem.length > candidate.length }
+        prefix.nil? ? nil : "#{Plugin::TemplateUnit::KEY_PREFIX}#{stem.delete_prefix(prefix)}"
+      end
+      private :declined_unit_key
+
+      # `app/views/users/_card.html.erb` → `app/views/users/_card.html`. A template's logical name never
+      # carries its handler, which is the one naming rule the seam itself states.
+      def strip_handler(path)
+        path.sub(%r{\.[^./]+\z}, "")
+      end
+      private :strip_handler
+
       def digest
         return nil if @claimed_globs.empty?
 

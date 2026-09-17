@@ -239,6 +239,21 @@ back to depends on the request's `Accept` header, which the source
 does not say — and neither does a render site that names its format
 (`formats: [:js]`, `render "list.js"`) or a controller-side `render`.
 
+The fallback stops at a template that **exists and produced no
+unit**: a `_list.js.haml`, or a `_list.js.erb` whose compiled Ruby
+does not parse. Rails runs that file, so the `.html` one's effects
+are not what the render produces, and the taint stays. That is why
+this plugin claims `app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}`
+and compiles none of them: the claim is how the engine learns a
+template is there. A handler outside that list is invisible, and a
+render of one still falls back.
+
+One approximation rides along. A partial reached *through* the
+fallback renders its own partials in `html`, while Action View's
+context is still `[:js, :html]`. Where a nested partial exists in
+both formats, the `.js` template gets the `.html` one's labels —
+labels, never a taint, and zero occurrences on the measured corpus.
+
 The `template-not-analysed` taint on a `render` is discharged
 exactly when the edge lands on a real unit. It **stays** when it
 does not, and both cases are common enough to name:

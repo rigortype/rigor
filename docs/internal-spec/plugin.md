@@ -951,6 +951,21 @@ resolves is the edge's only target; the row's `taint:` is seeded only when all o
 list rather than one edge per candidate, because two edges would join **both** units where both exist,
 and only one of them runs.
 
+A fallback is **not** tried past a requested key the run declined — a template the plugin claimed and
+produced no unit for, carried as `Analysis::TemplateUnits#declined_unit_keys` and handed to
+`Propagator.propagate` ([#1065](https://github.com/rigortype/rigor/issues/1065)). "No unit answers" and
+"no such template" are different facts, and only the second licenses the framework's next candidate: a
+`_row.js.haml` beside a `_row.html.erb` is run as Haml, so joining the ERB unit would be a label no
+execution produces. A plugin that wants that protection for a handler it does not compile must CLAIM the
+handler in `template_globs:` and decline it in `template_units_for_file`, which is what rigor-actionpack
+does for `{haml,slim,jbuilder,builder,rabl,ruby}`; an unclaimed handler is invisible to the engine and
+its fallback fires as if no template were there.
+
+One over-approximation remains and is accepted: a partial reached *through* a fallback renders its own
+partials in the format its own unit key carries, while the framework's lookup context is still the
+original list. Where a nested partial exists in both formats, the first template joins the wrong one's
+labels — labels, never a taint, and zero occurrences on the measured corpus.
+
 A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.
 Rails' implicit render is a fact about a method that made *no call*, so there is no site to colour and
 no class body that can see which of its methods responded — only a finished unit scan can. Such a row

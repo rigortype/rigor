@@ -78,7 +78,16 @@ FORMAT_FALLBACK_FILES = {
   "app/views/watchers/_row.html.erb" => FORMAT_FALLBACK_DESTROY,
   "app/views/watchers/show.json.erb" => %(<%= render "row" %>\n),
   "app/views/watchers/index.json.erb" => %(<%= render "list" %>\n),
-  "app/views/watchers/page.html.erb" => FORMAT_FALLBACK_WRITE
+  "app/views/watchers/page.html.erb" => FORMAT_FALLBACK_WRITE,
+  # A `.js` template whose compiled Ruby does not parse: the plugin declines it (no unit, no
+  # diagnostic), and the `.html` file beside it is NOT what Rails runs.
+  "app/views/watchers/_broken.js.erb" => %(<% case x %>\ntext\n<% when 1 %>\n<% end %>\n),
+  "app/views/watchers/_broken.html.erb" => FORMAT_FALLBACK_DESTROY,
+  "app/views/watchers/broken.js.erb" => %(<%= render "broken" %>\n),
+  # A handler this plugin does not compile at all, claimed so the engine knows the template exists.
+  "app/views/watchers/_haml.js.haml" => %(%li= User.count\n),
+  "app/views/watchers/_haml.html.erb" => FORMAT_FALLBACK_DESTROY,
+  "app/views/watchers/haml.js.erb" => %(<%= render "haml" %>\n)
 }.freeze
 
 FORMAT_FALLBACK_VIEW_TAINT = ["template-not-analysed", "ActionView::Base#render"].freeze
@@ -144,7 +153,7 @@ RSpec.describe "plugins/rigor-actionpack — the `.js` → `.html` format fallba
 
       aggregate_failures do
         expect(entry.edges).to eq(["view:watchers/_shared.js"])
-        expect(entry.declared.to_a).not_to include("io.db.destroy")
+        expect(entry.declared.to_a).to eq(unit(runner, "view:watchers/_shared.js").declared.to_a)
       end
     end
   end
@@ -155,7 +164,7 @@ RSpec.describe "plugins/rigor-actionpack — the `.js` → `.html` format fallba
 
       aggregate_failures do
         expect(entry.edges).to eq(["view:watchers/_row.json"])
-        expect(entry.declared.to_a).not_to include("io.db.destroy")
+        expect(entry.declared.to_a).to eq(unit(runner, "view:watchers/_row.json").declared.to_a)
         expect(entry.causes).not_to include(FORMAT_FALLBACK_VIEW_TAINT)
       end
     end
@@ -212,6 +221,27 @@ RSpec.describe "plugins/rigor-actionpack — the `.js` → `.html` format fallba
         expect(entry.edges).to be_empty
         expect(entry.causes).to include(FORMAT_FALLBACK_CONTROLLER_TAINT)
         expect(entry.declared.to_a).not_to include("io.db.write")
+      end
+    end
+  end
+
+  # B1 — "no unit answers" is not "no such template". Both of these files exist and are what Action
+  # View runs; joining the `.html` unit beside them would be a label no execution produces.
+  {
+    "broken" => "an ERB whose compiled Ruby does not parse",
+    "haml" => "a handler this plugin claims and declines"
+  }.each do |name, shape|
+    it "does not fall back past #{shape}" do
+      in_project do |runner, result|
+        entry = unit(runner, "view:watchers/#{name}.js")
+
+        aggregate_failures do
+          expect(entry.edges).to be_empty
+          expect(entry.causes).to include(FORMAT_FALLBACK_VIEW_TAINT)
+          expect(entry.declared.to_a).not_to include("io.db.write")
+          # A declined template costs its file no diagnostic, claimed or not.
+          expect(result.diagnostics.map(&:path)).not_to include(a_string_including("_#{name}."))
+        end
       end
     end
   end

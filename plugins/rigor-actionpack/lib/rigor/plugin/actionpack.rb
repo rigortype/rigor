@@ -84,7 +84,10 @@ module Rigor
         # Bumped 2026-09-17 (#1047) — the plugin now traces render-site `locals:` into a partial's unit and
         # compiles LAYOUTS (a `yield` rewrite), so a cached 1.3.0 run is missing both the layout units and
         # every seeded local.
-        version: "1.4.0",
+        # Bumped 2026-09-18 (#1065) — the claim grew the non-ERB handlers, which the plugin declines and
+        # the engine reads as "a template exists here and has no unit". A cached 1.4.0 index knows nothing
+        # about them, so a render's format fallback would resolve past one.
+        version: "1.5.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
@@ -111,7 +114,14 @@ module Rigor
         # read without running plugin code, so it cannot consult `view_search_paths:`; a project that
         # moves its views away from `app/views` gets no units, which is the quiet answer rather than a
         # wrong one. Both `show.html.erb` and the bare `show.erb` shape are claimed.
-        template_globs: ["app/views/**/*.erb"],
+        # #1065 — the non-ERB handlers are claimed and DECLINED. Nothing here is compiled, and
+        # {#template_units_for_file} returns `[]` for every one of them; what the claim buys is the
+        # engine knowing a template exists at that logical name, which is what stops a `.js` render's
+        # format fallback from resolving past `_row.js.haml` onto `_row.html.erb`. Action View runs the
+        # Haml file. The list is Action View's own first-party handler set minus ERB; a handler nobody
+        # claims is invisible, and its fallback behaves as it did before this claim existed.
+        template_globs: ["app/views/**/*.erb",
+                         "app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}"],
         # ADR-26 — every class the bundled signature names is declared so the CONSTANT resolves; none of
         # them enumerates a method surface, so `ParameterMissing#param` and its siblings must stay
         # lenient rather than becoming `call.undefined-method` on a rescue body.
@@ -217,6 +227,10 @@ module Rigor
       # The cost is one Prism parse per template on the parent, and since #1047 both that parse and the
       # compile are the ones {RenderLocals} already performed while building its index.
       def template_units_for_file(path:, source:)
+        # #1065 — a claimed non-ERB handler is read for its NAME and nothing else: this plugin compiles
+        # ERB, and a `.haml` body handed to an ERB compiler would be garbage rather than a decline.
+        return [] unless path.end_with?(ERB_SUFFIX)
+
         name = ViewUnits.logical_name(path, @view_search_paths)
         # Scrubbed ONCE, here, and handed to both readers. Scrubbing inside the compiler alone left
         # `ViewUnits.strict_locals` matching a Regexp against the raw bytes, and a single invalid byte
@@ -241,6 +255,9 @@ module Rigor
 
       # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
       # the index never globbed. Same four values the cache carries.
+      # The one handler this plugin compiles; every other claimed template is declined for its name.
+      ERB_SUFFIX = ".erb"
+
       def compile_now(text)
         compiled, line_map, transform = ErbCompiler.compile(text)
         [compiled, line_map, transform, Prism.parse(compiled).errors.empty?]

@@ -1604,20 +1604,33 @@ module Rigor
         # is absent or false, `:unfoldable` when it is present in a shape this walker cannot read.
         def delegate_prefix(args)
           value = keyword_option(args, "prefix")
-          return "" if value.nil? || value.is_a?(Prism::FalseNode)
+          # `prefix: nil` is what ActiveSupport's own default is, and it reads as "no prefix" there, not as
+          # an option the call spelled unreadably.
+          return "" if value.nil? || value.is_a?(Prism::FalseNode) || value.is_a?(Prism::NilNode)
 
-          if value.is_a?(Prism::TrueNode)
-            target = keyword_option(args, "to")
-            name = Rigor::Source::Literals.symbol_name(target)
-            return :unfoldable if name.nil? || name.empty?
+          return delegate_target_prefix(args) if value.is_a?(Prism::TrueNode)
 
-            return "#{name}_"
-          end
-
-          literal = Rigor::Source::Literals.symbol_name(value) || (value.is_a?(Prism::StringNode) ? value.unescaped : nil)
+          literal = name_literal(value)
           return :unfoldable if literal.nil? || literal.empty?
 
           "#{literal}_"
+        end
+
+        # `prefix: true` names the prefix after the `to:` target, so the target has to render as a name.
+        # An instance-variable target (`to: :@user`, the spelling ActiveSupport accepts for delegating to an
+        # ivar) does NOT: Rails strips the `@` when it builds the method name, and reading it as written
+        # would invent `@user_email`.
+        def delegate_target_prefix(args)
+          name = name_literal(keyword_option(args, "to"))
+          return :unfoldable if name.nil? || name.empty? || name.start_with?("@")
+
+          "#{name}_"
+        end
+
+        # A Symbol or String literal rendered as a plain name, or nil for anything else. Rails accepts both
+        # spellings wherever it takes a method or prefix name.
+        def name_literal(node)
+          Rigor::Source::Literals.symbol_name(node) || (node.is_a?(Prism::StringNode) ? node.unescaped : nil)
         end
 
         # `has_attached_file :file` / `has_one_attached :avatar` / `has_many_attached :images` → the reader
@@ -1642,11 +1655,19 @@ module Rigor
         # The enum's COLUMN and value list are deliberately not folded into the row's `enums:` from here —
         # see {#concern_declarations}. This method contributes names, which every consumer of the fact
         # WIDENS a known-name set with; `enums:` drives `Analyzer#validate_enum_value`, which FIRES.
+        #
+        # `instance_methods: false` (Rails 7.1+) declines the whole call: that option is how a model asks
+        # Rails NOT to define the per-value predicates, so folding them would claim methods the application
+        # does not have — the one way this family could answer a fail-closed consumer wrongly rather than
+        # just incompletely. A non-literal value for the option declines for the same reason.
         def enum_predicate_names(node)
           row = parse_enum_call(node)
           return [] if row.nil? || row[:values].empty?
 
           args = node.arguments&.arguments || []
+          instance_methods = keyword_option(args, "instance_methods")
+          return [] unless instance_methods.nil? || instance_methods.is_a?(Prism::TrueNode)
+
           prefix = enum_affix(args, %w[prefix _prefix], row[:column]) { |literal| "#{literal}_" }
           suffix = enum_affix(args, %w[suffix _suffix], row[:column]) { |literal| "_#{literal}" }
           return [] if prefix == :unfoldable || suffix == :unfoldable
@@ -1661,7 +1682,7 @@ module Rigor
           return "" if value.nil? || value.is_a?(Prism::FalseNode)
           return yield(column_name) if value.is_a?(Prism::TrueNode)
 
-          literal = Rigor::Source::Literals.symbol_name(value) || (value.is_a?(Prism::StringNode) ? value.unescaped : nil)
+          literal = name_literal(value)
           return :unfoldable if literal.nil? || literal.empty?
 
           yield(literal)

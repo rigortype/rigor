@@ -1755,6 +1755,79 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(published.fetch("Status")).to be_empty
     end
 
+    it "records no predicate for an enum declared `instance_methods: false`" do
+      # Rails 7.1+ defines NO `<value>?` / `<value>!` for such an enum, so folding one would claim a method
+      # the application does not have — the one way this family could answer a fail-closed consumer wrongly
+      # rather than merely incompletely.
+      models = macro_models.merge(
+        "app/models/account.rb" => <<~RUBY
+          class Account < ApplicationRecord
+            enum :visibility, { public: 0, limited: 4 }, suffix: :visibility, instance_methods: false
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: macro_schema)
+
+      expect(index.find("Account").macro_methods).to be_empty
+    end
+
+    it "records an enum's predicates from a concern's `included do` without folding its column" do
+      # The stated split: a NAME can only make a consumer of the fact quieter, while `enums:` drives
+      # `Analyzer#validate_enum_value`, which fires.
+      models = macro_models.merge(
+        "app/models/account.rb" => <<~RUBY,
+          class Account < ApplicationRecord
+            include Account::Visibility
+          end
+        RUBY
+        "app/models/concerns/account/visibility.rb" => <<~RUBY
+          module Account::Visibility
+            extend ActiveSupport::Concern
+
+            included do
+              enum :visibility, { public: 0, limited: 4 }, suffix: :visibility
+            end
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: macro_schema)
+      entry = index.find("Account")
+
+      expect(entry.macro_methods).to contain_exactly("public_visibility?", "limited_visibility?")
+      expect(entry.enums).to be_empty
+      expect(entry.enum?("visibility")).to be(false)
+    end
+
+    it "reads `prefix: nil` and a String `to:` the way ActiveSupport does" do
+      models = macro_models.merge(
+        "app/models/account.rb" => <<~RUBY
+          class Account < ApplicationRecord
+            delegate :chosen_languages, to: :user, prefix: nil
+            delegate :email, to: 'user', prefix: true
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: macro_schema)
+
+      # `prefix: nil` is ActiveSupport's own default and means no prefix, not an unreadable option.
+      expect(index.find("Account").macro_methods).to contain_exactly("chosen_languages", "user_email")
+    end
+
+    it "declines a `prefix: true` whose target is an instance variable" do
+      # Rails strips the `@` when it builds the name, so reading the target as written would invent
+      # `@user_email`.
+      models = macro_models.merge(
+        "app/models/account.rb" => <<~RUBY
+          class Account < ApplicationRecord
+            delegate :email, to: :@user, prefix: true
+          end
+        RUBY
+      )
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: macro_schema)
+
+      expect(index.find("Account").macro_methods).to be_empty
+    end
+
     it "declines a delegate whose prefix cannot be read off the source" do
       models = macro_models.merge(
         "app/models/account.rb" => <<~RUBY

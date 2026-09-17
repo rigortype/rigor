@@ -124,7 +124,9 @@ surface now carries their names:
   schema rather than from the macro.
 - `enum` value predicates — `enum :visibility, { limited: 4 },
   suffix: :visibility` defines `limited_visibility?`, and
-  `prefix:` / `_prefix:` / `_suffix:` are read the same way.
+  `prefix:` / `_prefix:` / `_suffix:` are read the same way. An
+  `enum` declared `instance_methods: false` defines none of
+  them, and none are recorded.
 
 These are recorded as NAMES. Nothing here says what a delegated
 method returns, and the plugin contributes no type for one — the

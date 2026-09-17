@@ -689,6 +689,20 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       expect(types).to eq(["dump_type: Account"])
     end
 
+    it "reads a producer row that predates the key as carrying no macro methods" do
+      # `rigor-activerecord` 0.9.0 published no `macro_methods:`. A cached payload of that shape can still
+      # reach this consumer, and it must read as the empty set — declining exactly as it did before the
+      # fold — rather than raising on the missing key.
+      old_shape = {
+        table: "accounts", columns: %w[id username], associations: [],
+        enums: {}, scopes: [], validations: [], callbacks: [], aliases: {}
+      }
+      members = plugin_class.allocate.send(:model_members, old_shape)
+
+      expect(members).to contain_exactly("id", "id?", "username", "username?")
+      expect(members).not_to include("followers_count")
+    end
+
     it "still declines when the concern carrying the name is not included" do
       types = dumped_types(files: {
                              "app/models/account.rb" => "class Account < ApplicationRecord\nend\n",

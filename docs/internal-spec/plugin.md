@@ -212,7 +212,19 @@ A unit may also declare `suppressed_rules:` — rule-id prefixes the engine drop
 ([#393](https://github.com/rigortype/rigor/issues/393)). It is the per-unit rule posture: only the plugin
 knows which families of finding its own compiler's output can support, and the alternative — a project-wide
 `disable:` entry — would silence the rule in the project's `.rb` files too. rigor-actionpack declares
-`["call.", "flow."]` for an ERB unit while its `view_type_checks:` is off.
+`["call."]` for an ERB unit while its `view_type_checks:` is off (`flow.` left the set in
+[#1047](https://github.com/rigortype/rigor/issues/1047), once render-site locals were traced).
+
+`#template_units_pass_started` ([#1047](https://github.com/rigortype/rigor/issues/1047)) is called once at
+the start of every collection pass over the plugin's claim — before its first `#template_units_for_file`,
+and even when the pass compiles nothing because every unit was carried. It exists for a transform that reads
+state gathered across its claimed files and memoises it on the plugin instance: a long-lived owner
+(`LanguageServer::ProjectContext`) keeps that instance across passes, and a warm pass offers only the
+editor's buffer, so no order of `#template_units_for_file` calls can tell one pass from the next. The
+default does nothing, and a raise is swallowed — the pass proceeds, only the plugin's own revalidation is
+skipped. The same cross-file dependency is why the collector carries a plugin's claim as a whole: if any
+of its templates was edited, added or deleted since the carried index was built, none of its units is
+reused (a deleted template that had produced no unit is the one change that rule does not see).
 
 The value-object fields, the position mapping, the `view:<logical_name>` effect key, the rule posture, the
 cache identity and the `--incremental` bound are normative in

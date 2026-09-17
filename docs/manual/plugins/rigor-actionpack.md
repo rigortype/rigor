@@ -208,6 +208,16 @@ settle from the call itself (`User.find(1)`, or an ivar the rendering
 action's own seeds typed); anything else is `Dynamic`. A
 strict-locals comment still wins where a template carries one.
 
+A partial's **own** optional-local test counts too:
+`<% size = nil unless defined?(size) %>`, `local_assigns[:size]` and
+`local_assigns.key?(:size)` bind `size` even when no render site the
+plugin can read passes it — a `locals: opts` hash, a `render` from a
+helper, or a local with a default nobody passes. A name a helper under
+`app/helpers` defines is left alone, so
+`<% if defined?(current_user) %>` stays a helper call. A helper that a
+gem or a concern defines is not seen by that scan, and its name is
+bound as a `Dynamic` local instead.
+
 ### The controller → template edge
 
 A controller action's summary **includes what its template does**.
@@ -311,9 +321,12 @@ deliberately loud rather than a silent no-op.
 - **Unsaved render sites are not read in the editor.** The
   render-site index reads templates and controllers from disk, so a
   `locals:` you have typed but not saved does not reach the partial
-  until the save. Saving a view recompiles every view in the
-  language server (a partial's locals can come from any of them);
-  a keystroke recompiles only the buffer. A full `rigor check` does
+  until the save. A keystroke recompiles only the buffer, and a save
+  rebuilds the project's analysis as it always has. A view changed on
+  disk *without* a save the editor sees (a `git checkout`, a
+  formatter run elsewhere) recompiles every view on the next
+  publish, because a partial's locals can come from any of them. A
+  full `rigor check` does
   the same compile work it did before — the index hands its compiled
   sources to the unit transform rather than compiling twice.
 - **ERB only, under `app/views`.** `template_globs:` is a manifest

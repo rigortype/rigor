@@ -178,7 +178,8 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     # a TYPED seed: `show` passes `s: String.new`, so `s.nope_from_seed` in the partial is an undefined
     # method on String; once `show` passes a computed value instead, `s` is `Dynamic` and the row must go.
     # Before the fix the memo was never revalidated and the carry reused the partial's unit, so the row
-    # survived both the publish and an `invalidate!`.
+    # survived every publish until something invalidated the context. The `invalidate!` steps pin that a
+    # cold rebuild agrees with the warm answer in both directions.
     it "re-reads a render site edited on disk into the partial it renders" do
       Dir.mktmpdir("rigor-lsp-render-locals-") do |tmpdir|
         show = write_render_locals_project(tmpdir, "String.new")
@@ -204,6 +205,50 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       end
     ensure
       Rigor::Plugin.unregister!("actionpack")
+    end
+
+    # #1047 review — a warm publish offers the collector only the buffer's path, so no order of paths can
+    # tell one pass from the next. Switching buffers after a render site changed on disk must still read the
+    # new site, whichever way the two buffers sort; `template_units_pass_started` is what makes it so.
+    it "re-reads an edited render site after switching to a buffer, in either sort direction" do
+      Dir.mktmpdir("rigor-lsp-render-locals-switch-") do |tmpdir|
+        uris, write_show = write_switch_project(tmpdir)
+        publisher = publisher_for(render_locals_context(tmpdir))
+
+        Dir.chdir(tmpdir) do
+          # mid (cold), edit, then card — which sorts BEFORE mid.
+          expect(published_messages(publisher, uris["m/_mid"])).to include(a_string_including("nope_from_seed"))
+          write_show.call("params[:s]")
+          expect(published_messages(publisher, uris["a/_card"])).not_to include(a_string_including("nope_from_seed"))
+
+          # restore, then mid — which sorts AFTER card.
+          write_show.call("String.new(\"back\")")
+          expect(published_messages(publisher, uris["m/_mid"])).to include(a_string_including("nope_from_seed"))
+        end
+      end
+    ensure
+      Rigor::Plugin.unregister!("actionpack")
+    end
+
+    # Two partials that sort on either side of nothing in particular (`a/_card`, `m/_mid`), both open as
+    # buffers, both rendered with a typed local from `z/show`. Returns their URIs and a writer for `show`.
+    def write_switch_project(tmpdir)
+      views = File.join(tmpdir, "app", "views")
+      uris = %w[a/_card m/_mid].to_h do |name|
+        path = File.join(views, "#{name}.html.erb")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "<p><%= s.nope_from_seed %></p>\n")
+        buffer_table.open(uri: "file://#{path}", bytes: File.read(path), version: 1)
+        [name, "file://#{path}"]
+      end
+      show = File.join(views, "z", "show.html.erb")
+      FileUtils.mkdir_p(File.dirname(show))
+      write_show = lambda do |value|
+        File.write(show, %(<%= render partial: "a/card", locals: { s: #{value} } %>\n) +
+                         %(<%= render partial: "m/mid", locals: { s: #{value} } %>\n))
+      end
+      write_show.call("String.new")
+      [uris, write_show]
     end
 
     def published_messages(publisher, uri)

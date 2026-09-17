@@ -569,6 +569,19 @@ module Rigor
         []
       end
 
+      # #1047 — called once at the start of every template-unit COLLECTION PASS over this plugin's claim,
+      # before any `#template_units_for_file` of that pass and whether or not the pass ends up calling it
+      # (a warm pass may carry every unit and compile none). A plugin whose transform reads state gathered
+      # ACROSS its claimed files — rigor-actionpack seeds a partial's locals from the render sites in every
+      # view — memoises that state on its instance, and a long-lived owner keeps the instance across
+      # passes; this is where such a plugin learns that the memo may now be stale. The collector's
+      # per-call order is not a substitute: a warm pass offers only the editor's buffer, so no sequence of
+      # paths can tell one pass from the next.
+      #
+      # The default does nothing. A raise is swallowed: the pass continues, and the plugin's own
+      # revalidation simply does not run for it.
+      def template_units_pass_started; end
+
       # ADR-37 slice 1 — runs the plugin's declared {.node_rule}s over one file and returns their
       # diagnostics. The engine owns the single AST walk here so plugin authors never hand-roll a traversal:
       # every node reachable from `root` is offered to each rule whose `node_type` it satisfies

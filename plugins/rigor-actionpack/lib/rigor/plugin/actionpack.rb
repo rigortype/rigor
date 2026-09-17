@@ -171,6 +171,12 @@ module Rigor
       # arrives rather than staying as a habit.
       SUPPRESSED_VIEW_RULES = ["call."].freeze
 
+      # #1047 — where the project's view helpers live, read only for the names they `def`: a template's
+      # `defined?(current_user)` tests a HELPER, not an optional local, and must not seed one
+      # ({ViewUnits.self_declared_locals}). Rails' own convention and not a config knob, for the reason
+      # `template_globs:` is not one either.
+      HELPER_SEARCH_PATHS = ["app/helpers"].freeze
+
       def init(_services)
         @controller_search_paths = Array(config.fetch("controller_search_paths")).map(&:to_s)
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
@@ -218,7 +224,7 @@ module Rigor
         # correctly turns into an `error`-severity `:plugin_loader` row, so one mis-encoded view failed
         # the whole run.
         text = ErbCompiler.scrub(source)
-        revalidate_indexes(path)
+        revalidate_indexes
         compiled, line_map, transform, parsed = render_locals.compiled_for(path, text) || compile_now(text)
         return [] unless parsed
 
@@ -247,7 +253,7 @@ module Rigor
       # the render-site index alone misses a `locals: opts` site, a helper-side `render` and a local no
       # site passes at all), the render sites {RenderLocals} could read, and the strict-locals comment.
       def template_locals(name, text)
-        ViewUnits.self_declared_locals(text)
+        ViewUnits.self_declared_locals(text, helpers: render_locals.helper_methods)
                  .merge(render_locals.seeds_for(name))
                  .merge(ViewUnits.strict_locals(text))
       end
@@ -258,20 +264,27 @@ module Rigor
       # revalidated keeps a render site's locals after the site changed on disk, which is a `flow.` row
       # on a correct partial until the process restarts.
       #
-      # So the indexes are revalidated once per COLLECTION PASS, at its first hook call, against a
-      # fingerprint of every controller and template they read ({RenderLocals::Builder.fingerprint}: one
-      # glob and one `stat` per file). A pass boundary is recognised by a path arriving a second time —
-      # the collector hands each claimed path over at most once per pass. Revalidating at the FIRST call
-      # rather than when an edited template's own bytes arrive is load-bearing: `_card.html.erb` globs
-      # before `show.html.erb`, so a reset triggered by `show` would come after `_card`'s unit had already
-      # been built from the stale index. The collector's whole-claim carry decision
-      # ({Analysis::TemplateUnitCollector}) is the other half: it is what re-offers `_card` at all.
-      def revalidate_indexes(path)
-        if @index_pass.nil? || @index_pass.key?(path)
-          @index_pass = {}
-          drop_indexes unless indexes_fresh?
-        end
-        @index_pass[path] = true
+      # So the indexes are revalidated once per COLLECTION PASS, against a fingerprint of every controller,
+      # helper and template they read ({RenderLocals::Builder.fingerprint}: one glob and one `stat` per
+      # file). The collector announces a pass through {#template_units_pass_started}; the check itself is
+      # deferred to the pass's first `#template_units_for_file`, so a warm pass that carries every unit and
+      # compiles nothing pays nothing. Inferring the pass from the order of paths was tried and is not
+      # enough: a warm pass offers only the editor's buffer, so switching buffers after a render site
+      # changed on disk was served from the stale index whichever way the two paths sorted.
+      #
+      # Revalidating at the FIRST call of the pass rather than when an edited template's own bytes arrive is
+      # load-bearing too: `_card.html.erb` globs before `show.html.erb`, so a reset triggered by `show` would
+      # come after `_card`'s unit had already been built from the stale index. The collector's whole-claim
+      # carry decision ({Analysis::TemplateUnitCollector}) is the other half: it is what re-offers `_card`.
+      def template_units_pass_started
+        @index_pass_pending = true
+      end
+
+      def revalidate_indexes
+        return unless @index_pass_pending
+
+        @index_pass_pending = false
+        drop_indexes unless indexes_fresh?
       end
       private :revalidate_indexes
 
@@ -291,7 +304,7 @@ module Rigor
       def index_fingerprint
         RenderLocals::Builder.fingerprint(
           io_boundary: io_boundary, controller_search_paths: @controller_search_paths,
-          view_search_paths: @view_search_paths
+          view_search_paths: @view_search_paths, helper_search_paths: HELPER_SEARCH_PATHS
         )
       rescue StandardError
         nil
@@ -320,7 +333,8 @@ module Rigor
         @render_locals ||= begin
           RenderLocals::Builder.new(
             io_boundary: io_boundary, controller_search_paths: @controller_search_paths,
-            view_search_paths: @view_search_paths, view_assigns: view_assigns
+            view_search_paths: @view_search_paths, helper_search_paths: HELPER_SEARCH_PATHS,
+            view_assigns: view_assigns
           ).build
         rescue StandardError
           RenderLocals.empty

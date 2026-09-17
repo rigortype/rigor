@@ -102,9 +102,13 @@ module Rigor
       # `users/show`. A per-path carry reused `_card`'s unit after `show` dropped the local it passed,
       # and the stale seed survived every later publish. So if any of a plugin's claimed templates was
       # edited, added or deleted since the carried index was built, none of its units is carried and the
-      # whole claim is recompiled. What stays exempt is the editor's buffer — a keystroke is not a save,
+      # whole claim is recompiled. One change is not seen: a template that produced NO unit (declined, or
+      # raised) being deleted, because the carried rows record no owning plugin for it. A declined template
+      # contributed nothing a sibling could have read from its unit, which is why that is left as stated
+      # rather than tracked. What stays exempt is the editor's buffer — a keystroke is not a save,
       # so #1038's per-keystroke property holds — and a path an earlier plugin already claimed.
       def self.collect_plugin(plugin, globs, collection, state)
+        start_pass(plugin)
         plan = expand(globs, collection.root, collection.buffer).map do |path|
           physical = physical_path(path, collection.root, collection.buffer)
           [path, physical, carried_entry(path, physical, collection, state)]
@@ -119,6 +123,15 @@ module Rigor
         end
       end
       private_class_method :collect_plugin
+
+      # {Plugin::Base#template_units_pass_started}, isolated: a plugin that raises there loses its own
+      # revalidation for this pass and nothing else.
+      def self.start_pass(plugin)
+        plugin.template_units_pass_started
+      rescue StandardError
+        nil
+      end
+      private_class_method :start_pass
 
       # True when nothing in this plugin's claim moved: every planned path is carried (or is exempt, see
       # {.collect_plugin}), and no path the carried index held for this plugin has since vanished.

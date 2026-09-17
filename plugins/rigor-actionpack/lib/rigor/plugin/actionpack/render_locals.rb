@@ -81,10 +81,14 @@ module Rigor
         # recorded as already seen. nil for {.empty}, which therefore never matches a real fingerprint.
         attr_reader :fingerprint
 
-        def initialize(by_template, compiled = {}, fingerprint: nil)
+        # Every method name a project helper `def`s — see {ViewUnits.self_declared_locals}.
+        attr_reader :helper_methods
+
+        def initialize(by_template, compiled = {}, fingerprint: nil, helper_methods: {})
           @by_template = by_template.freeze
           @compiled = compiled.freeze
           @fingerprint = fingerprint
+          @helper_methods = helper_methods.freeze
           freeze
         end
 
@@ -110,10 +114,12 @@ module Rigor
 
         # Builds the index from the controller sources and the templates the plugin claims.
         class Builder
-          def initialize(io_boundary:, controller_search_paths:, view_search_paths:, view_assigns:)
+          def initialize(io_boundary:, controller_search_paths:, view_search_paths:, view_assigns:,
+                         helper_search_paths: [])
             @io_boundary = io_boundary
             @controller_search_paths = controller_search_paths
             @view_search_paths = view_search_paths
+            @helper_search_paths = helper_search_paths
             @view_assigns = view_assigns
             # `{ target => [ { name => type_name_or_nil }, … ] }` — one hash per render site, merged only
             # once every site has been seen, because "bound at some sites" is a property of the whole set.
@@ -123,18 +129,25 @@ module Rigor
           def build
             fingerprint = self.class.fingerprint(
               io_boundary: @io_boundary, controller_search_paths: @controller_search_paths,
-              view_search_paths: @view_search_paths
+              view_search_paths: @view_search_paths, helper_search_paths: @helper_search_paths
             )
             harvest_controllers
             compiled = harvest_templates
-            RenderLocals.new(@sites.transform_values { |sites| merge(sites) }, compiled, fingerprint: fingerprint)
+            RenderLocals.new(@sites.transform_values { |sites| merge(sites) }, compiled,
+                             fingerprint: fingerprint, helper_methods: harvest_helper_methods)
           end
 
-          # What the index was built from, as one String: every controller and template path with its size
-          # and mtime. A glob catches a file appearing or vanishing and a stat catches an edit; neither
-          # reads a byte, so revalidating costs one `stat` per file, once per collection pass.
-          def self.fingerprint(io_boundary:, controller_search_paths:, view_search_paths:)
+          # What the index was built from, as one String: every controller, helper and template path with
+          # its size and mtime. A glob catches a file appearing or vanishing and a stat catches an edit;
+          # neither reads a byte, so revalidating costs one `stat` per file, once per collection pass.
+          #
+          # There is deliberately no content-digest fallback, unlike the collector's ADR-87 pack: a
+          # byte-identical `touch` moves the fingerprint and rebuilds this index while the collector still
+          # carries the units. That costs one rebuild and never a wrong answer — the rebuilt index is the
+          # index the carried units were seeded from — so a digest per file per pass is not worth buying.
+          def self.fingerprint(io_boundary:, controller_search_paths:, view_search_paths:, helper_search_paths: [])
             files = source_files(io_boundary, controller_search_paths, "*.rb") +
+                    source_files(io_boundary, helper_search_paths, "*.rb") +
                     source_files(io_boundary, view_search_paths, "*.erb")
             files.map do |path|
               stat = File.stat(path)
@@ -165,6 +178,19 @@ module Rigor
             names.to_h do |name|
               types = sites.map { |site| site.key?(name) ? site[name] : :absent }.uniq
               [name, types.length == 1 && types.first.is_a?(String) ? types.first : UNKNOWN]
+            end
+          end
+
+          HELPER_DEF = /^[ \t]*def[ \t]+(?:self\.)?([a-z_][A-Za-z0-9_]*[?!]?)/
+          private_constant :HELPER_DEF
+
+          # `{ "current_user" => true }` for every `def` in a project helper. A line scan rather than a
+          # parse: the answer only has to be a superset of the names a helper can answer, and a name read
+          # out of a comment or a heredoc merely leaves one template's `defined?` test unseeded — which is
+          # what #393 shipped for every name.
+          def harvest_helper_methods
+            source_files(@helper_search_paths, "*.rb").each_with_object({}) do |path, names|
+              read(path)&.scan(HELPER_DEF)&.each { |(name)| names[name] = true }
             end
           end
 

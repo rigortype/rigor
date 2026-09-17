@@ -301,10 +301,37 @@ RSpec.describe "plugins/rigor-actionpack — render-site locals and layouts (#10
         <% a = nil unless defined?(a) %><% b = nil unless defined? b %>
         <% c = local_assigns[:c] %><% d = local_assigns.fetch(:d, 1) %><% if local_assigns.key?(:e) %><% end %>
         <% if defined?(super) || defined?(@ivar) || defined?(Foo) || defined?(obj.meth) %><% end %>
+        <% if defined?(link_to "x", y) || defined?(helper_call(1)) %><% end %>
+        <%# if defined?(old_local) %>
+        <%% if defined?(escaped_text) %>
         <p>defined?(html_text)</p>
       ERB
 
       expect(locals).to eq(%w[a b c d e].to_h { |name| [name, dynamic] })
+    end
+
+    # #1047 review — `defined?(current_user)` in a shared partial tests a HELPER. Seeding it as a local would
+    # turn every later `current_user` from a call into a `Dynamic` read. The view context does not resolve
+    # project helpers yet (`ViewUnits::SELF_TYPE`), so the observable is the seed itself: the helper's name
+    # is not bound, and a plain optional local beside it still is.
+    it "does not seed a name a project helper defines, and still seeds a plain optional local" do
+      Dir.mktmpdir("rigor-1047-helper-names-") do |dir|
+        write_files(dir, {
+                      "app/helpers/application_helper.rb" =>
+                        "module ApplicationHelper\n  def current_user\n    nil\n  end\nend\n",
+                      "app/views/shared/_nav.html.erb" => <<~ERB
+                        <% size = nil unless defined?(size) %>
+                        <% if defined?(current_user) && current_user %><%= current_user %><% end %>
+                      ERB
+                    })
+        Dir.chdir(dir) do
+          unit = real_plugin(dir).template_units_for_file(
+            path: "app/views/shared/_nav.html.erb", source: File.read("app/views/shared/_nav.html.erb")
+          ).first
+
+          expect(unit.locals).to eq("size" => dynamic)
+        end
+      end
     end
 
     it "no longer suppresses the family at all" do

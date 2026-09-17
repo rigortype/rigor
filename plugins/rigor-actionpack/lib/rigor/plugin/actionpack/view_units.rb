@@ -39,8 +39,13 @@ module Rigor
         # #1047 — the ways a template tests for its OWN optional local, each capturing the name:
         # `defined?(size)` / `defined? size`, `local_assigns[:size]`, and `local_assigns.key?(:size)` with
         # its `has_key?` / `include?` / `fetch` spellings.
+        #
+        # The `defined?` forms take the name only when it is the WHOLE operand — `defined?(size)` closed by
+        # its parenthesis, or `defined? size` followed by the end of the expression — so
+        # `defined?(link_to "x", y)` and `defined?(obj.meth)` name nothing.
         SELF_DECLARED = [
-          /\bdefined\?\s*\(?\s*([a-z_][A-Za-z0-9_]*)\b(?![.(\[?!:])/,
+          /\bdefined\?\s*\(\s*([a-z_][A-Za-z0-9_]*)\s*\)/,
+          /\bdefined\?[ \t]+([a-z_][A-Za-z0-9_]*)(?=\s*(?:%>|\)|&&|\|\||;|\n|\z|\b(?:and|or|then|if|unless)\b))/,
           /\blocal_assigns\s*\[\s*:([a-z_][A-Za-z0-9_]*)\s*\]/,
           /\blocal_assigns\s*\.\s*(?:key\?|has_key\?|include\?|fetch)\s*\(?\s*:([a-z_][A-Za-z0-9_]*)/
         ].freeze
@@ -54,8 +59,9 @@ module Rigor
         ].freeze
         private_constant :NOT_LOCALS
 
-        # Every ERB tag — the only place a template's Ruby lives. `<%%` is literal text, not a tag.
-        RUBY_TAG = /<%(?!%).*?%>/m
+        # Every ERB tag that holds Ruby — the only place a template's own tests live. `<%%` is literal text
+        # and `<%#` is a comment, so `<%# if defined?(old_local) %>` declares nothing.
+        RUBY_TAG = /<%(?![%#]).*?%>/m
         private_constant :RUBY_TAG
 
         module_function
@@ -94,11 +100,20 @@ module Rigor
         # A name the template ALSO assigns without such a test (`<% total = 0 %>`) is untouched: it is only
         # seeded when it is tested, and a test on a name the body always assigns first is dead code the
         # binding cannot make worse.
-        def self_declared_locals(source)
+        #
+        # A name a project HELPER defines is not seeded (`helpers:`, the `def` names under `app/helpers`):
+        # `<% if defined?(current_user) && current_user %>` in a shared partial tests a helper, and binding
+        # it as a local would turn every later `current_user` from a call into a `Dynamic` read. The trade
+        # left is stated in the manual: a helper that a gem or a concern defines is not seen by that scan,
+        # so the name is still seeded — which reads `Dynamic` where it would otherwise have been an
+        # open-receiver call, and no finding either way.
+        def self_declared_locals(source, helpers: {})
           source.scan(RUBY_TAG).each_with_object({}) do |tag, locals|
             SELF_DECLARED.each do |pattern|
               tag.scan(pattern).flatten.each do |name|
-                locals[name] = UNKNOWN_LOCAL unless NOT_LOCALS.include?(name)
+                next if NOT_LOCALS.include?(name) || helpers.key?(name)
+
+                locals[name] = UNKNOWN_LOCAL
               end
             end
           end

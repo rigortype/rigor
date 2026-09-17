@@ -199,20 +199,39 @@ holds byte for byte (3 533 152 bytes).
 ### A memo that outlived the render site
 
 `@render_locals ||=` lives on the plugin instance, and a `LanguageServer::ProjectContext` keeps that instance
-across publishes and across `invalidate!`. Meanwhile #1038's carry revalidated each template against its
-*own* bytes. Drop a local in `show.html.erb` on disk and `_card`'s unit kept the seed through every publish,
-through an `invalidate!`, and past the local being restored — a `flow.` row with no cause on disk.
+across publishes (an `invalidate!` builds a fresh one, so a save — which fires `didChangeWatchedFiles` —
+always did recover). Meanwhile #1038's carry revalidated each template against its *own* bytes. Drop a local
+in `show.html.erb` on disk without the editor seeing a save — a `git checkout`, a formatter, another tool —
+and `_card`'s unit kept the seed through every publish until something invalidated: a `flow.` row with no
+cause on disk.
 
 Two halves, both needed, both pinned (each spec fails with its half reverted):
 
 - **The collector decides a plugin's carry for its whole claim.** If any of its templates was edited, added
   or deleted, none of its units is carried — because a transform may read its plugin's other templates, a
-  template's own freshness cannot vouch for its unit. The editor's buffer is exempt, so this costs a
-  recompile of the claim per *save*, never per keystroke; and a template read with no unit (declined) is
-  carried as a bare stat pack, so one layout the plugin cannot compile does not read as an edit on every run.
-- **The plugin revalidates its indexes once per collection pass**, at the pass's *first* hook call, against a
-  fingerprint of every controller and template they read (a glob and a `stat` per file). Revalidating when
-  the edited template's own bytes arrive would be too late: `_card.html.erb` globs before `show.html.erb`.
+  template's own freshness cannot vouch for its unit. The editor's buffer is exempt, so this never costs a
+  keystroke, and it only bites on an on-disk edit the owner has not invalidated for (a save invalidates and
+  rebuilds cold anyway); measured on redmine, the recompile is 0.1–0.3 s. A template read with no unit
+  (declined) is carried as a bare stat pack, so one layout the plugin cannot compile does not read as an edit
+  on every run. The one change the rule does not see is the *deletion* of such a declined template, which
+  had contributed nothing a sibling could read.
+- **The plugin revalidates its indexes once per collection pass** against a fingerprint of every controller,
+  helper and template they read (a glob and a `stat` per file; a byte-identical `touch` rebuilds the index,
+  which costs a rebuild and never a wrong answer). The pass is announced by a new engine hook,
+  `Plugin::Base#template_units_pass_started`, and the check runs at that pass's first
+  `#template_units_for_file`. A second review round showed that inferring the pass from the order of paths is
+  not enough — a warm pass offers only the editor's buffer, so switching buffers after an on-disk edit was
+  served stale whichever way the two paths sorted — and revalidating when the edited template's own bytes
+  arrive would be too late: `_card.html.erb` globs before `show.html.erb`.
+
+### A helper tested with `defined?`
+
+`<% if defined?(current_user) && current_user %>` in a shared partial tests a *helper*, not an optional
+local, and seeding it would turn every later `current_user` from a call into a `Dynamic` read. Names a
+project helper `def`s under `app/helpers` are therefore not seeded; a helper a gem or a concern defines is not
+seen by that scan and still is — `Dynamic` either way today, since the view context does not resolve project
+helpers yet. `defined?` also only names a local when the name is its whole operand (`defined?(link_to "x",
+y)` names nothing), and `<%#` comment tags are not read.
 
 What remains is stated in the manual: an unsaved `locals:` does not reach its partial until the save,
 because the index reads from disk.

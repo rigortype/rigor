@@ -53,11 +53,14 @@ module Rigor
     # set of claimed globs, and a different set of glob-claiming plugins.
     #
     # A fourth rebuilds one PLUGIN'S claim outright (#1047): any of that plugin's templates edited, added or
-    # deleted. A transform may read the plugin's other templates — rigor-actionpack seeds a partial's locals
-    # from the views that render it — so the freshness of `_card` alone cannot vouch for `_card`'s unit. The
-    # editor's buffer does not count as an edit (a keystroke is not a save), so this costs a recompile per
-    # SAVE, never per keystroke. A template read with no unit (declined, or raised) is carried as a bare
-    # stat pack for exactly this decision, so an unchanged declined file is not mistaken for an edit.
+    # deleted (except the deletion of a template that had produced no unit, which the carried rows cannot
+    # attribute to a plugin and which contributed nothing a sibling could read). A transform may read the
+    # plugin's other templates — rigor-actionpack seeds a partial's locals from the views that render it —
+    # so the freshness of `_card` alone cannot vouch for `_card`'s unit. The editor's buffer does not count
+    # as an edit, so this never costs a keystroke, and it bites only on an on-disk edit the owner has not
+    # invalidated for — a save already rebuilds cold. A template read with no unit (declined, or raised) is
+    # carried as a bare stat pack for exactly this decision, so an unchanged declined file is not mistaken
+    # for an edit.
     #
     # Separately, and whatever the rest of the index does, the editor's own buffer is never carried: a
     # path the buffer is bound to is recompiled from the buffer's bytes on every publish, and the compiled

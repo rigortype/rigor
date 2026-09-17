@@ -22,7 +22,21 @@
 # strict-locals parameter is seeded with precisely because nothing resolves it, so the engine binds
 # `Dynamic[top]` while the local's NAME still reaches the parse.
 
+# ## The one declared member, and why it is not a helper
+#
+# `__rigor_yield` is issue #1047's reading of a LAYOUT's `yield`. `<%= yield %>` is legal ERB and illegal
+# Ruby outside a method body, so `ErbCompiler` rewrites the keyword into a call on this receiver before
+# either compiler runs — the template-unit seam does not wrap a unit's body in a synthesised method, so the
+# body has to parse as written. The name is not Rails', is not reachable from any template a user writes,
+# and exists only so the rewritten body resolves.
+#
+# It returns `String` and nothing narrower. Rails' `yield` hands back whatever the inner template's output
+# buffer holds and `yield :sidebar` hands back a `content_for` buffer or nil; a lenient `String` is the
+# widest honest reading of that, and it is what keeps a layout from seeding a type the analyzer could not
+# justify. `*untyped` covers `yield`, `yield :sidebar` and `yield(:sidebar)` alike.
+
 module ActionView
   class Base
+    def __rigor_yield: (*untyped) -> String
   end
 end

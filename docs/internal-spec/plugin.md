@@ -857,8 +857,9 @@ exactly as it was, `taint:` included. A rule that answers a key the run's table 
 an edge that resolves to nothing, and the row's `taint:` is seeded **by the propagator** from
 `FileCollection::Edge#taint_if_unresolved` — added on failure rather than subtracted on success, so
 every step of the fixpoint stays monotone. Between them those two rules are why `render foo`,
-`render json:`, and a `render` of a template the plugin declined (a layout,
-[#1047](https://github.com/rigortype/rigor/issues/1047)) all keep the `template-not-analysed` taint,
+`render json:`, and a `render` of a template the plugin never compiled (a Haml view, or a
+format the lookup falls back on — [#1065](https://github.com/rigortype/rigor/issues/1065)) all keep the
+`template-not-analysed` taint,
 while only a render that reached a real unit clears it.
 
 A **unit rule** is the one shape neither `effect_attributions:` nor `effect_edges:` could carry before.

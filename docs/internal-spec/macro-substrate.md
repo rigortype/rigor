@@ -436,14 +436,21 @@ Two things #392 expected that consumer to need, and it did not:
   `view:` unit key to be an `effects.envelopes:` subject (`Effects::MethodKey.envelope_owner` — a view
   has no owner class, and `MethodKey.split` would have grouped `view:users/show.html` under the
   class name `view:users/show`, which no run ever produced).
-- A template whose compiled Ruby does not **parse** is declined by the plugin rather than handed over:
-  a layout's `<%= yield %>` is legal ERB and illegal Ruby outside a method, so the alternative was two
-  parse diagnostics per layout on templates Rails renders. The seam's `[]` door is what that decline
-  goes through. Layouts therefore have no unit yet
-  ([#1047](https://github.com/rigortype/rigor/issues/1047)).
+- A template whose compiled Ruby does not **parse** is declined by the plugin rather than handed over,
+  through the seam's `[]` door. A layout was the measured case: `<%= yield %>` is legal ERB and illegal
+  Ruby outside a method, so the alternative was two parse diagnostics per layout on templates Rails
+  renders. [#1047](https://github.com/rigortype/rigor/issues/1047) resolved it **in the transform, not
+  in the seam** — the plugin rewrites the `yield` keyword into a call on its synthesised view context
+  before either compiler runs, which is the shape this section's Positions rule forces: wrapping the
+  body in a synthesised method would shift every line and compose a second map onto the plugin's, so a
+  body that must parse as written has to be rewritten as written. The rewrite is not width-preserving
+  and does not need to be — a unit with a non-empty `line_map` reports at column 1 by construction.
 - A controller action **is** edged to the template it renders
   ([#1048](https://github.com/rigortype/rigor/issues/1048)), through an attribution row's `callee:`
   rule rather than through anything in this seam: the unit key a template unit already carries is the
   callee key the edge names, so the two halves meet in the summaries table with no new resolution.
-  The `render` taint survives exactly where the edge does not resolve — a computed target, and a
-  layout, which is why #1047 is still what unblocks the `template -> layout` half.
+  The `render` taint survives exactly where the edge does not resolve — a computed target, or a name no
+  unit answers. Since #1047 a layout **is** a unit, so a view-side `render layout:` discharges like any
+  other partial render; what remains unedged is the layout Rails wraps an *action's* template in, whose
+  name is a class-body declaration plus a convention lookup and therefore outside what a callee rule may
+  read.

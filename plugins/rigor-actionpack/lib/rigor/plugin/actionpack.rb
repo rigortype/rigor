@@ -6,7 +6,9 @@ require_relative "actionpack/analyzer"
 require_relative "actionpack/effects"
 require_relative "actionpack/controller_discoverer"
 require_relative "actionpack/controller_index"
+require_relative "actionpack/controller_scan"
 require_relative "actionpack/erb_compiler"
+require_relative "actionpack/render_locals"
 require_relative "actionpack/view_assigns"
 require_relative "actionpack/view_units"
 
@@ -79,12 +81,17 @@ module Rigor
         # `ActionController` namespace and the errors controllers rescue, so the constants stop resolving
         # to `untyped`. `ActionController::Parameters` and the `ActionDispatch` readers stay undeclared;
         # `sig/action_controller.rbs` documents why that absence is load-bearing.
-        version: "1.3.0",
+        # Bumped 2026-09-17 (#1047) — the plugin now traces render-site `locals:` into a partial's unit and
+        # compiles LAYOUTS (a `yield` rewrite), so a cached 1.3.0 run is missing both the layout units and
+        # every seeded local.
+        version: "1.4.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
           "view_search_paths" => { kind: :array, default: ["app/views"] },
-          # #393 — whether the ordinary `call.*` type checks are reported INSIDE a compiled template.
+          # #393 — whether the ordinary `call.*` type checks are reported INSIDE a compiled template. The
+          # `flow.*` family is no longer gated on this knob: #1047 removed the binding gap that made it
+          # unsound in a view, and it reports by default like every other family.
           # Off by default: the synthesised `self` is an open receiver and the seeds are deliberately
           # narrow, so the typing half of a view unit is not yet precise enough to be worth a diagnostic
           # per template line, while the EFFECTS half needs no receiver precision at all and is what the
@@ -145,19 +152,24 @@ module Rigor
         ).discover
       end
 
-      # #393 — the diagnostic families a compiled template does not report while `view_type_checks:` is
-      # off (its default). Both are measured rather than assumed, on the private corpus copies recorded in
-      # `docs/notes/20260917-erb-template-units.md`:
+      # #393 / #1047 — the diagnostic family a compiled template does not report while `view_type_checks:`
+      # is off (its default). Measured rather than assumed, on the private corpus copies recorded in
+      # `docs/notes/20260917-erb-template-units.md` and `docs/notes/20260917-render-locals-and-layouts.md`.
       #
-      # - `call.` — the receiver-precision family. `self` is an open `ActionView::Base` and the seeds are
-      #   deliberately narrow, so what this family would report about a view is mostly a statement about
-      #   what the synthesis does not know yet.
-      # - `flow.` — because the render-site `locals:` are not traced yet. Redmine writes the standard
-      #   optional-local preamble (`<% path = nil unless defined? path %>`, `app/views/common/_other.html.erb`),
-      #   and the compiled Ruby really does assign nil there — so the flow rules fold three live branches
-      #   to `always-falsey` on a partial Rails renders correctly. Three false positives, on one of the two
-      #   corpora, from the one binding this slice does not synthesise.
-      SUPPRESSED_VIEW_RULES = ["call.", "flow."].freeze
+      # `call.` is the receiver-precision family. `self` is an open `ActionView::Base` and the seeds are
+      # deliberately narrow, so what this family would report about a view is mostly a statement about what
+      # the synthesis does not know yet.
+      #
+      # **`flow.` was here and is not any more (#1047).** It was suppressed for one measured reason: with
+      # no render-site `locals:`, redmine's standard optional-local preamble
+      # (`<% path = nil unless defined? path %>` in `app/views/common/_other.html.erb`) really did assign
+      # nil in the compiled Ruby, and the flow rules folded three live branches on a partial Rails renders
+      # correctly. {RenderLocals} binds those names from the three sites that render that partial, the
+      # preamble stops being a fresh assignment, and the corpus re-measured with `flow.` UNSUPPRESSED is
+      # byte-identical to the corpus with it suppressed — on redmine (506 templates, layouts included) and
+      # on mastodon (46). The suppression was a stand-in for a missing binding, so it goes when the binding
+      # arrives rather than staying as a habit.
+      SUPPRESSED_VIEW_RULES = ["call."].freeze
 
       def init(_services)
         @controller_search_paths = Array(config.fetch("controller_search_paths")).map(&:to_s)
@@ -172,8 +184,9 @@ module Rigor
       #
       # - `self_type:` — {ViewUnits::SELF_TYPE}, a declared-but-open `ActionView::Base`, so every helper
       #   call resolves lenient rather than drawing a finding per line.
-      # - `locals:` — the Rails 7.1 strict-locals comment. Names only; Rails' syntax carries no types, and
-      #   the seed is what makes Prism read `user` as a local rather than as a method call.
+      # - `locals:` — the names every RENDER SITE passes ({RenderLocals}, #1047), overlaid with the Rails
+      #   7.1 strict-locals comment where a template carries one. The seed is what makes Prism read `user`
+      #   as a local rather than as a method call, which is what a `defined? user` preamble needs.
       # - `ivar_seeds:` — the assigns of the controller actions that render this template, through
       #   {ViewAssigns}. A partial has none: its bindings belong to the render site.
       #
@@ -183,17 +196,20 @@ module Rigor
       #
       # ## Compiled Ruby that does not parse declines the file, silently
       #
-      # A template is not Ruby, and the compiled form of one is not always Ruby either: a layout's
-      # `<%= yield %>` is invalid outside a method, and a `case` split across tags with markup between the
-      # `case` and its first `when` is invalid anywhere. Handing such a body to the engine would put TWO
-      # parse diagnostics on a template Rails renders perfectly — a false positive per file, which is the
-      # one outcome this feature may not have (AGENTS.md). So the compiled Ruby is parsed here first and a
-      # body that does not parse declines the file through the seam's own `[]` door: no unit, no
-      # diagnostic, no effects. Measured on redmine (506 templates) the residue is 5 — four layouts and
-      # one `case` — and on mastodon 0.
+      # A template is not Ruby, and the compiled form of one is not always Ruby either: a `case` split
+      # across tags with markup between the `case` and its first `when` is invalid anywhere. Handing such a
+      # body to the engine would put TWO parse diagnostics on a template Rails renders perfectly — a false
+      # positive per file, which is the one outcome this feature may not have (AGENTS.md). So the compiled
+      # Ruby is parsed and a body that does not parse declines the file through the seam's own `[]` door:
+      # no unit, no diagnostic, no effects.
       #
-      # The cost is one Prism parse per template on the parent. It is paid once per run, on files that
-      # are small, and it buys the FP guarantee outright.
+      # A LAYOUT used to be the bulk of that residue — `<%= yield %>` is legal ERB and illegal Ruby outside
+      # a method — and since #1047 it is not: {ErbCompiler::YIELD_METHOD} rewrites the keyword into a call
+      # on the view context, so all four of redmine's layouts and both of mastodon's compile. The residue
+      # is one `case` under stdlib ERB and none under Erubi.
+      #
+      # The cost is one Prism parse per template on the parent, and since #1047 both that parse and the
+      # compile are the ones {RenderLocals} already performed while building its index.
       def template_units_for_file(path:, source:)
         name = ViewUnits.logical_name(path, @view_search_paths)
         # Scrubbed ONCE, here, and handed to both readers. Scrubbing inside the compiler alone left
@@ -202,18 +218,27 @@ module Rigor
         # correctly turns into an `error`-severity `:plugin_loader` row, so one mis-encoded view failed
         # the whole run.
         text = ErbCompiler.scrub(source)
-        compiled, line_map, transform = ErbCompiler.compile(text)
-        return [] unless Prism.parse(compiled).errors.empty?
+        compiled, line_map, transform, parsed = render_locals.compiled_for(path, text) || compile_now(text)
+        return [] unless parsed
 
         [
           Rigor::Plugin::TemplateUnit.new(
             logical_name: name, path: path, ruby_source: compiled, line_map: line_map,
-            self_type: ViewUnits::SELF_TYPE, locals: ViewUnits.strict_locals(text),
+            self_type: ViewUnits::SELF_TYPE,
+            locals: render_locals.seeds_for(name).merge(ViewUnits.strict_locals(text)),
             ivar_seeds: view_assigns.seeds_for(name), transform_id: transform,
             suppressed_rules: @view_type_checks ? [] : SUPPRESSED_VIEW_RULES
           )
         ]
       end
+
+      # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
+      # the index never globbed. Same four values the cache carries.
+      def compile_now(text)
+        compiled, line_map, transform = ErbCompiler.compile(text)
+        [compiled, line_map, transform, Prism.parse(compiled).errors.empty?]
+      end
+      private :compile_now
 
       # The controller-assigns index, built once per run on the parent. Deliberately NOT a `producer` —
       # a producer's value is cached against the run key, and this is consulted from the template-unit
@@ -226,6 +251,20 @@ module Rigor
         ViewAssigns.empty
       end
       private :view_assigns
+
+      # #1047 — the render-site `locals:` index, and the compiled source every template was read through
+      # while it was built. Lazy and parent-only for the same reason {#view_assigns} is: it answers a
+      # question the analysis has not begun to ask yet. See {RenderLocals} for what a site contributes and
+      # for the LSP cost the cache does not remove.
+      def render_locals
+        @render_locals ||= RenderLocals::Builder.new(
+          io_boundary: io_boundary, controller_search_paths: @controller_search_paths,
+          view_search_paths: @view_search_paths, view_assigns: view_assigns
+        ).build
+      rescue StandardError
+        RenderLocals.empty
+      end
+      private :render_locals
 
       # ADR-37 — the four Action Pack phases run per-call over the engine-owned walk. Each rule gates on
       # `controller_file?(path)` (the plugin only validates files under `controller_search_paths`,

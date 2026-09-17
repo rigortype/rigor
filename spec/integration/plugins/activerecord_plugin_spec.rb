@@ -1522,13 +1522,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "types the concern scope as the including model's relation" do
-      result = run_ar("Rigor.dump_type(Account.without_suspended)\n",
-                      models: concern_models, schema: concern_schema)
-      dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }
-                     .map { |d| d.message.sub("dump_type: ", "") }
-
-      expect(dumped.first).to include("Account")
-      expect(dumped.first).not_to include("untyped")
+      expect(concern_dumped_types("Rigor.dump_type(Account.without_suspended)\n"))
+        .to eq(["ActiveRecord::Relation[Account]"])
       expect(concern_undefined_methods("Account.without_suspended\n")).to be_empty
     end
 
@@ -1570,6 +1565,36 @@ RSpec.describe "plugins/rigor-activerecord" do
 
       expect(index.find("Account").scopes).to contain_exactly("without_suspended", "without_deleted")
       expect(index.find("Status").scopes).to be_empty
+    end
+
+    it "reaches every model through a concern included once in the base class" do
+      # The idiom that carries a concern to the whole app. The base class is NOT a discovered model, so it
+      # has no `sti_parent` and `ModelIndex.sti_chain` stops before it — the discoverer walks the superclass
+      # chain itself for this.
+      models = concern_models.merge(
+        "app/models/application_record.rb" => <<~RUBY,
+          class ApplicationRecord
+            include BaseConcern
+          end
+        RUBY
+        "app/models/concerns/base_concern.rb" => <<~RUBY
+          module BaseConcern
+            extend ActiveSupport::Concern
+
+            included do
+              scope :base_scoped, -> { where(id: nil) }
+            end
+          end
+        RUBY
+      )
+      result, index = run_ar_with_index("Rigor.dump_type(Account.base_scoped)\n",
+                                        models: models, schema: concern_schema)
+      dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }
+                     .map { |d| d.message.sub("dump_type: ", "") }
+
+      expect(index.find("Account").scopes).to contain_exactly("without_suspended", "base_scoped")
+      expect(index.find("Status").scopes).to contain_exactly("base_scoped")
+      expect(dumped).to eq(["ActiveRecord::Relation[Account]"])
     end
   end
 

@@ -138,8 +138,8 @@ module Rigor
           # Every file is walked (and every module's `table_name_prefix` / `table_name_suffix` recorded)
           # before any row is resolved — a model's file may sort, and so be visited, before the file that
           # declares its enclosing module's decorator.
-          attach_table_name_decorators(fold_concern_scopes(resolve_models(candidates)),
-                                       superclass_map: superclass_map)
+          rows = fold_concern_scopes(resolve_models(candidates), superclass_map: superclass_map)
+          attach_table_name_decorators(rows, superclass_map: superclass_map)
         end
 
         private
@@ -596,15 +596,37 @@ module Rigor
         # `include` edge: a concern nobody includes contributes nothing, and a same-named `scope` in an
         # unrelated concern does not leak onto this model. A concern that includes another concern is followed
         # transitively (Ruby's own semantics — the inner module ends up in the model's ancestry either way).
-        def fold_concern_scopes(rows)
+        #
+        # The model's SUPERCLASS chain is walked too, because a concern is routinely included once in
+        # `ApplicationRecord` for every model to get. The chain is walked here rather than left to
+        # {ModelIndex.sti_chain}, which only links a model to another MODEL: a configured base class is not a
+        # discovered model, so `class Account < ApplicationRecord` has no `sti_parent` and the index's chain
+        # stops at `Account`. (A `scope` written directly in the base class's own body is still not
+        # propagated — that pre-existing gap is a different mechanism and is documented, not widened here.)
+        def fold_concern_scopes(rows, superclass_map: {})
           return rows if @concern_scopes.empty?
 
           rows.map do |row|
-            inherited = concern_scopes_for(row.fetch(:class_name))
+            inherited = ancestry_concern_scopes(row.fetch(:class_name), superclass_map)
             next row if inherited.empty?
 
             row.merge(scopes: (Array(row[:scopes]) + inherited).uniq.freeze)
           end
+        end
+
+        # The concern scopes reaching `class_name` through its own includes and those of every superclass up
+        # the chain (`visited` stops a cycle a malformed source could spell).
+        def ancestry_concern_scopes(class_name, superclass_map)
+          scopes = []
+          curr = class_name
+          visited = Set.new
+
+          while curr && visited.add?(curr)
+            scopes.concat(concern_scopes_for(curr))
+            curr = superclass_map[curr]
+          end
+
+          scopes.uniq
         end
 
         # Breadth-first over the `include` edges reachable from `class_name`, unioning each visited concern's
@@ -633,6 +655,18 @@ module Rigor
         # enclosing namespaces first (`include Suspensions` inside `class Account` → `Account::Suspensions`,
         # which is what Ruby resolves), and otherwise it is taken as written. A name no walked module answers
         # to simply contributes nothing.
+        #
+        # Two known imprecisions, both cheap only to state:
+        #
+        # - The enclosing-namespace attempts are made for a COMPACT declaration too (`module A::B`'s own
+        #   `include C` tries `A::B::C` then `A::C`), where Ruby's cref would only see `A::B` and the top
+        #   level. Harmless: the extra candidates must match a module that was actually walked, and a
+        #   project with both `A::B::C` and a top-level `C` concern would have to want the latter.
+        # - The final bare-name fall-back attributes BY SPELLING. A nearer constant declared outside
+        #   `model_search_paths` — `Account::Suspensions` in `lib/`, say, while the concern roots hold a
+        #   top-level `Suspensions` — is invisible to this walker, so the wrong one can win. Reading
+        #   further than the model roots needs its own cache descriptor (see {#discover}'s `watch:` note),
+        #   so the spelling is trusted instead.
         def resolve_concern_name(raw, from_name)
           name = strip_root(raw)
           return name if raw.start_with?("::")

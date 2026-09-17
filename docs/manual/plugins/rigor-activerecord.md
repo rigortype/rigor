@@ -80,9 +80,17 @@ A `scope` declared inside a concern's `included do ... end` block
 counts as the including model's own. `Account.without_suspended`
 types as `ActiveRecord::Relation[Account]` when `Account` includes
 the concern that declares the scope — directly, or through another
-concern that concern includes. Attribution follows the `include`
-you wrote, not the name: a model that includes nothing gets
-nothing, whatever some other concern in the project declares.
+concern that concern includes. A concern included once in your
+base class (`ApplicationRecord`) reaches every model under it.
+Attribution follows the `include` you wrote, not the name: a
+model that includes nothing gets nothing, whatever some other
+concern in the project declares.
+
+The gate is the `included do ... end` block itself. A scope
+declared some other way — in a `class_methods do` block, a
+hand-written `def self.included(base)` with `base.class_eval`, or
+directly in the body of your base class rather than in a concern —
+is not folded, and the call stays as untyped as it was.
 
 If the project also installs `activerecord` through
 `rbs collection install`, the collection declares

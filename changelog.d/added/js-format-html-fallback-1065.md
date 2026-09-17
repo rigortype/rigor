@@ -1,0 +1,1 @@
+- **[plugins]** rigor-actionpack now follows Action View's `.js` → `.html` partial lookup, so a `.js.erb` template that renders an HTML-only partial reaches that partial's effects instead of keeping a `template-not-analysed` taint. ([#1070](https://github.com/rigortype/rigor/pull/1070))

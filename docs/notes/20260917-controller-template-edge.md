@@ -258,6 +258,12 @@ Less than the taint count suggests, and worth saying so:
   there until an action's `format.js` arm is edged to its `.js` unit — a separate change to the unit
   rule, not to the fallback.
 
+One over-approximation the fallback makes newly reachable: a partial reached through it renders its
+own partials in `html`, while Action View's context is still `[:js, :html]` and would try `.js` first.
+Where a nested partial exists in both formats, the `.js` template gets the `.html` one's labels. The
+count on redmine is **0** — its only dual-format partials, `imports/_{issues,users,time_entries}_mapping`,
+are rendered only through a computed name.
+
 ### Pooled versus sequential
 
 redmine's `effects --format json --full` is **byte-identical** between `RIGOR_RACTOR_WORKERS=2` and `0`

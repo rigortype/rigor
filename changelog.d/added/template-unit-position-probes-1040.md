@@ -1,0 +1,1 @@
+- **[cli]** `rigor type-of` on a template a plugin compiles into Ruby (an ERB view under rigor-actionpack) now types the compiled code under the view's declared `self`, locals and instance variables at the template's own line and column, and declines positions in markup or rewritten code instead of failing with a parse error. [#1069](https://github.com/rigortype/rigor/pull/1069)

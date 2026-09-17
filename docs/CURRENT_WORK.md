@@ -36,48 +36,50 @@ own-line form the manual documents as a user-visible error, while the same-line 
 three readers. Grounded in [`docs/notes/20260912-inline-refinement-carrier-probe.md`](notes/20260912-inline-refinement-carrier-probe.md).
 Nothing is implemented; the maintainer decides.
 
-## What landed on 2026-09-17
+## What landed on 2026-09-17 and 2026-09-18
 
-Four batches, each PR implemented by an Opus lane in its own worktree and taken through one to four
-rounds of adversarial review before landing. master is green through c03fd94d; the #1057 merge run
-(63bbfa33) was in progress when this was written.
+Six batches, each PR implemented by an Opus lane in its own worktree and taken through one to four
+rounds of adversarial review before landing. master is green through c22278b7.
 
 - Batch 1: #1029 (#986), #1030 (#963 item 1), #1031 (#1014), #1032 (#1002).
 - Batch 2: #1034 (#534 item 5), #1035 (#963 item 3), #1036 (#391), #1037 (#392), #1041 (#987),
-  #1042 (#1039), #1044 (#534 item 6, closes #534), #1050 (#393 slice; #393 stays open as umbrella).
-- Batch 3: #1052 (#1049), #1053 (#1038), #1054 (#1051), #1057 (#1048 edge; `Refs`, see below).
-- Batch 4: #1061 (#1055), #1062 (#1056; category 2 → #1060), #1063 (#963 item 2).
+  #1042 (#1039), #1044 (#534 item 6, closes #534), #1050 (#393 slice).
+- Batch 3: #1052 (#1049), #1053 (#1038), #1054 (#1051), #1057 (#1048 edge only; `Refs`).
+- Batch 4: #1061 (#1055), #1062 (#1056), #1063 (#963 item 2).
+- Batch 5: #1066 (#1047), #1067 (#1060), #1068 (#1064 items 1 and 4; `Refs`).
+- Batch 6: #1069 (#1040), #1070 (#1065).
 
-Two `Scope` rows in `sig/rigor/scope.rbs` carry `# sig-gen gap: #1011` markers because no engine
-issue tracks the untyped-return gap; if #1011 rules otherwise, each is a one-line repoint.
+The review rounds are where the value was: #1057, #1063, #1069 and #1070 each shipped a first draft
+that answered CONFIDENTLY AND WRONGLY — a lane-move against an owner ruling, an RBS type displaced by
+a plugin, a column rule that typed a different identifier, a format fallback that labelled an
+execution Rails does not run. CI was green on every one of those drafts.
 
 ## Waiting on the maintainer
 
-- [#1059](https://github.com/rigortype/rigor/issues/1059) — whether first-party `discharge: true`
-  plugin rows may prove. #1057's first draft moved them to the proven lane; that contradicts ADR-103
-  WD17 (owner ruling 2026-08-24) and was reverted. Until ruled, `views: strict` and `views: lenient`
-  do not differ, and #1048 / #393 stay open on that acceptance line.
+- [#1059](https://github.com/rigortype/rigor/issues/1059) — whether a first-party `discharge: true`
+  plugin row may prove. ADR-103 WD17 (owner ruling, 2026-08-24) says no; #1048's strict/lenient
+  acceptance line needs it. Until ruled, `views: strict` and `views: lenient` do not differ, and
+  #1048 and #393 stay open on that line.
 - [#1011](https://github.com/rigortype/rigor/issues/1011) — the `sig-gen gap:` marker convention.
+  Two `Scope` rows in `sig/rigor/scope.rbs` cite it; each is a one-line repoint if it rules otherwise.
 
 ## What is worth picking up next
 
-- [#1047](https://github.com/rigortype/rigor/issues/1047) — render-site `locals:` and layouts; a lane
-  was started on it from 63bbfa33 (branch `render-locals-and-layouts-1047`). If no PR exists, the
-  worktree under `rigor-wt/` is its state.
-- [#1043](https://github.com/rigortype/rigor/issues/1043) — allocations +15.6% over the v0.3.9
-  baseline; a separate session was bisecting it. Recalibration is release prep.
-- [#1065](https://github.com/rigortype/rigor/issues/1065) — `.js.erb` rendering an HTML partial
-  (34 of redmine's 72 remaining template-side taints): format fallback in the callee rule.
-- [#1064](https://github.com/rigortype/rigor/issues/1064) — the Ractor backend's remaining tail
-  (shallow-frozen constants, RBS-gem memo, Ruby Bug #22075, lockfile discovery); #1061 fixed the
-  constructor-time memos only.
-- [#1060](https://github.com/rigortype/rigor/issues/1060) — a positioned once-per-run channel for
-  rigor-rails-i18n's view batch.
-- [#1040](https://github.com/rigortype/rigor/issues/1040), [#394](https://github.com/rigortype/rigor/issues/394),
+- [#1046](https://github.com/rigortype/rigor/issues/1046) and [#1043](https://github.com/rigortype/rigor/issues/1043)
+  — the release-gate allocations band. Measurement work; run it with no other lane active, and read
+  `docs/agents/measurement.md` first.
+- [#1064](https://github.com/rigortype/rigor/issues/1064) — the Ractor tail. Items 1 and 4 landed in
+  #1068; item 6 (a worker misses the prewarmed RBS env cache) is Rigor-side and open, items 2 and 3
+  are upstream.
+- [#1071](https://github.com/rigortype/rigor/issues/1071) — a `respond_to { format.js }` arm should
+  edge to the action's `.js` template; it is why #1070 gained no controller-action labels.
+- [#1072](https://github.com/rigortype/rigor/issues/1072) — `rigor type-of` answers Dynamic for a
+  constant `rigor check` resolves, on redmine.
+- [#394](https://github.com/rigortype/rigor/issues/394) (views V2/V3, now unblocked),
   [#963](https://github.com/rigortype/rigor/issues/963)'s non-meta constant-write asymmetry.
 
 ## Where the worktrees are
 
-Two: `rigor-wt/render-locals-and-layouts-1047` (the #1047 lane) and `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
+One remains: `rigor-wt/perfbench-harness-775`, deliberately kept — it is the instrument behind the
 #775 allocation work, not leftover scratch. The fifteen worktrees the previous handoff listed are
 gone, and every PR they carried is merged.

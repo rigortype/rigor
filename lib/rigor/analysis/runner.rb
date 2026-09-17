@@ -1253,7 +1253,7 @@ module Rigor
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
-        globs = rbs_descriptor.globs.dup
+        globs = rbs_descriptor.globs + template_unit_glob_entries
         @plugin_registry.plugins.each do |plugin|
           # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
           # are frozen after the run, and a plugin that never built a boundary read no files through it,
@@ -1306,13 +1306,22 @@ module Rigor
       # entries are the validation half, so a template edited between two runs re-globs and re-digests here
       # exactly as an analysed `.rb` file does. Both are needed: a transform that compiles two different
       # templates to the same Ruby must still not resurrect the wrong PATH in a diagnostic.
+      # #392 — one `:names` row per claimed `template_globs:` pattern, whether or not it matched. The file
+      # rows below cover edits to templates that EXIST; only a glob row notices one appearing or vanishing,
+      # which is what let a project's first template stay invisible to every warm run.
+      def template_unit_glob_entries
+        template_units.glob_entries
+      end
+
+      # Every template the run READ, successes and failures alike: a `plugin_loader` row produced by a
+      # template that would not compile must not outlive the edit that fixes it, and a buffer-bound path is
+      # digested at the bytes the run actually read.
       def template_unit_file_entries
-        return [] if template_units.empty?
+        template_units.source_paths.filter_map do |path|
+          physical = @buffer ? @buffer.resolve(path) : path
+          next unless File.file?(physical)
 
-        template_units.paths.filter_map do |path|
-          next unless File.file?(path)
-
-          Cache::Descriptor::FileEntry.stat(path: path, digest: Cache::FileDigest.hexdigest(path))
+          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
         end
       end
 
@@ -1554,7 +1563,7 @@ module Rigor
         @template_units ||= if @plugin_registry.nil?
                               TemplateUnits.empty
                             else
-                              TemplateUnits.collect(registry: @plugin_registry)
+                              TemplateUnits.collect(registry: @plugin_registry, buffer: @buffer)
                             end
       end
 

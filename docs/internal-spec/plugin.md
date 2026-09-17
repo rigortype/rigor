@@ -106,13 +106,23 @@ seam: a plugin that declared `template_globs:` is offered each matched file's by
 site's locals and the rendering action's ivar seeds. The default returns `[]`, so a plugin that declares no
 globs is never asked and one that does may still decline a file it cannot read.
 
+A returned unit MUST name the file it was offered (`unit.path == path`). A unit naming anything else is
+refused: without the check a `path:` naming another project file silently **replaced** that file's source
+(the engine serves a unit's bytes for its own path), and a `path:` naming something outside the project
+root was analysed with no dependency-descriptor row — both from one wrong string.
+
+A transform that **raises**, a template that cannot be **read**, and a unit naming the **wrong path** are
+each reported as one `:plugin_loader` `runtime-error` diagnostic positioned at the template file — the
+same isolation envelope a raise from `#diagnostics_for_file` produces (ADR-2 § "Plugin Trust and I/O
+Policy"). The file contributes no unit, the run continues, and the plugin author has something to read.
+
 Three properties make it safe to add to the contract at this point in the freeze:
 
 - **It runs once, on the parent, before analysis.** Everything downstream is the frozen, `Marshal`-clean
   value object, so no plugin code runs inside the fork-pool worker, inside the effect scan (ADR-103 WD13
   forbids it there), or on any per-file hot path.
-- **It isolates like `#diagnostics_for_file`.** A raise costs that file its unit; the run continues. A
-  template compiler meeting a file it cannot read must never cost the run.
+- **It isolates like `#diagnostics_for_file`.** A raise costs that file its unit and surfaces as the row
+  above; the run continues. A template compiler meeting a file it cannot read must never cost the run.
 - **It costs nothing when unused.** A run whose loaded plugins declare no `template_globs:` performs no
   glob, calls no plugin, adds no cache-key slot and analyses exactly the files it analysed before. `rigor
   check` on such a project is byte-identical.

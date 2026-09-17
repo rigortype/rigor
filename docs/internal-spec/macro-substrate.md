@@ -303,10 +303,24 @@ empty map claims no mapping at all, and its diagnostics pass through untouched.
   `Runner#effect_sources` traces the key back to `path`.
 - **Cache identity.** Each unit's digest is **`ruby_source` bytes + transform
   id + synthesis version** (`TemplateUnit::SYNTHESIS_VERSION`, bumped whenever
-  the engine changes what it synthesises). The run's units hash into one
-  `template-units` slot of the ADR-45 run-result key descriptor; the template
-  FILES join the recorded dependency descriptor. A project with no units adds
-  no slot, so no existing key moves.
+  the engine changes what it synthesises). Three rows carry it:
+  - the ADR-45 run-result **key** gains a `template-units` `configs:` slot
+    hashing every unit digest AND every failure, keyed by path. The failures
+    are in it because a run that produced only failures still produced an
+    answer; without them such a run's key equalled the no-templates key, which
+    the ADR-87 boot-slim probe reconstructs exactly (it loads no plugin), so it
+    served those rows after the template was fixed or deleted. The slot exists
+    whenever any plugin claimed a glob — the condition under which the probe's
+    key is knowingly unreconstructable, so the probe misses rather than hits.
+  - every template the run READ, successes and failures alike, joins the
+    recorded dependency descriptor as a `:stat` file row.
+  - every claimed `template_globs:` pattern joins it as a `:names` glob row,
+    whether or not it matched — the #979 mechanism. Only a glob row notices a
+    template APPEARING, which is what otherwise let a project's first template
+    stay invisible to every warm run until some `.rb` file changed.
+
+  A project whose plugins claim no globs adds none of the three, so no existing
+  key or descriptor moves.
 - **Fork pool.** The index is built on the parent and inherited by the one
   pre-fork `WorkerSession`, so a worker analyses a unit from exactly the bytes
   the parent compiled. Pooled output equals sequential output for both the
@@ -322,13 +336,26 @@ empty map claims no mapping at all, and its diagnostics pass through untouched.
   `IncrementalSession` keeps unit paths OUT of `@analyzed`, so a unit is never
   served from the per-file cache and never reads as a project file that vanished.
 - **Editor mode.** A single-buffer publish (`buffer:` with no closure) answers
-  about the buffer the editor is showing, so the units do NOT join its analysed
-  set — appending every view would publish diagnostics for files the editor did
-  not ask about. A `--incremental --tmp-file` recheck, which has a closure, does
-  analyse them. The index is still rebuilt per run, so a long-lived LSP session
-  re-runs the plugin transform per publish;
+  about the buffer the editor is showing, so the OTHER units do not join its
+  analysed set — appending every view would publish diagnostics for files the
+  editor did not ask about. When the buffer IS a template, that one unit is the
+  analysed set exactly as a `.rb` buffer would be, and the transform is run over
+  the **buffer's** bytes rather than the saved file's (`TemplateUnits.collect`
+  takes the `BufferBinding`), so `--tmp-file` / `--instead-of` naming a template
+  reports what the editor is showing. A `--incremental --tmp-file` recheck,
+  which has a closure, analyses every unit. The index is still rebuilt per run,
+  so a long-lived LSP session re-runs the plugin transform per publish;
   [#1038](https://github.com/rigortype/rigor/issues/1038) carries it onto
   `ProjectScan`.
+- **Position probes.** `rigor type-of` and the `dump_type` helper read the file
+  from disk and parse those bytes directly — they do not consult the index, so
+  a probe against a template answers about the TEMPLATE's own text (and, for a
+  template whose raw bytes are not valid Ruby, declines with a parse error).
+  Routing them through the unit needs the INVERSE of everything the seam ships
+  — the user names a template position and the command has to find the compiled
+  node, through a map that is not injective — so it is
+  [#1040](https://github.com/rigortype/rigor/issues/1040) rather than part of
+  this slice. `rigor check` and `rigor effects` are unaffected.
 - **Other file sets.** A unit is an ANALYSED file, never a `source_files:` one:
   the env-build-time `source_rbs_synthesizer` is offered the `.rb` expansion
   alone, because a template's bytes are not Ruby an RBS synthesiser can read.

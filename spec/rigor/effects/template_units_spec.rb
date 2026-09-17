@@ -5,6 +5,7 @@ require "tmpdir"
 
 require "rigor"
 require "rigor/analysis/runner"
+require "rigor/analysis/run_cache_probe"
 require "rigor/cli/effects_report"
 require "rigor/cli/effects_renderer"
 require_relative "../../fixtures/template_units/view_demo_plugin"
@@ -273,6 +274,91 @@ RSpec.describe "template units (#392)" do
 
         expect(rows.map { |d| [d.path, d.rule] }).to eq([["app/views/users/show.rbx", "runtime-error"]])
         expect(rows.first.message).to include("produced no template unit")
+      end
+    end
+  end
+
+  # #392 review round 2 B1 — the ADR-45 run-result cache must never answer for a world that has a
+  # different set of templates in it. Both examples run the SAME project root twice with one cache store,
+  # which is what `rigor check` does; the second run's answer has to match a `--no-cache` oracle.
+  describe "the run-result cache across a template's life" do
+    # One `rigor check` in this project root, engine path then probe path, the way the CLI runs it: the
+    # ADR-87 boot-slim probe is asked FIRST and the engine runs only when it declines. The probe is the
+    # half that matters here — it loads no plugin, so it reconstructs a key with no `template-units` slot,
+    # and every stale answer this block pins was a probe hit on a key the engine had written.
+    def cached_run(dir, root)
+      config = configuration(effects: false, workers: 0, plugins: true)
+      Dir.chdir(dir) do
+        served = Rigor::Analysis::RunCacheProbe.new(
+          configuration: config, cache_root: root, explain: false
+        ).serve(["lib"])
+        next served.diagnostics if served
+
+        store = Rigor::Cache::Store.new(root: root)
+        runner = Rigor::Analysis::Runner.new(
+          configuration: config, cache_store: store,
+          plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+        )
+        guarded_run(runner, ["lib"], allow_plugin_crash: true).diagnostics
+      end
+    end
+
+    # A project whose FIRST template appears between two runs. Before the `:names` glob row the descriptor
+    # listed only the templates that already existed, so nothing noticed the new file and the warm run
+    # replayed the answer computed before it was written.
+    it "sees a template that appeared since the run it cached" do
+      Dir.mktmpdir("rigor-392-c1-") do |dir|
+        build_project(dir, template: false)
+        root = File.join(dir, ".rigor", "cache")
+        expect(cached_run(dir, root)).to eq([])
+
+        build_project(dir)
+
+        expect(template_findings(cached_run(dir, root))).to eq([["call.undefined-method", 4]])
+      end
+    end
+
+    # A run whose transform failed produced an answer — one `plugin_loader` row — under a key that, before
+    # the failures joined the digest, was the no-templates key. The boot-slim probe reconstructs exactly
+    # that key, so the row outlived the edit that fixed the template.
+    it "sees a template that stopped failing since the run it cached" do
+      Dir.mktmpdir("rigor-392-c2-") do |dir|
+        build_project(dir)
+        root = File.join(dir, ".rigor", "cache")
+        RigorViewDemoPlugin.spec_overrides = { raise_on_transform: true }
+        expect(cached_run(dir, root).map(&:rule)).to eq(["runtime-error"])
+
+        RigorViewDemoPlugin.spec_overrides = {}
+
+        expect(template_findings(cached_run(dir, root))).to eq([["call.undefined-method", 4]])
+      end
+    ensure
+      RigorViewDemoPlugin.spec_overrides = {}
+    end
+  end
+
+  # #392 review round 2 S1 — editor mode. `TemplateUnits.collect` reads through the `BufferBinding`, so a
+  # `--tmp-file` / `--instead-of` pair naming a TEMPLATE compiles the editor's bytes; before the fix the
+  # transform read the saved file and the editor was published diagnostics it had already fixed.
+  describe "an editor buffer bound to a template" do
+    it "compiles the buffer's bytes rather than the file on disk" do
+      Dir.mktmpdir("rigor-392-buf-") do |dir|
+        build_project(dir, body: "render_header(@title.upcase)\n")
+        buffer_path = File.join(dir, "buffer.rbx")
+        File.write(buffer_path, "render_header(@title.nope_from_buffer)\n")
+        logical = "app/views/users/show.rbx"
+        binding = Rigor::Analysis::BufferBinding.new(logical_path: logical, physical_path: buffer_path)
+        config = configuration(effects: false, workers: 0, plugins: true)
+
+        found = Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: config, cache_store: nil, buffer: binding,
+            plugin_requirer: ->(_name) { Rigor::Plugin.register(RigorViewDemoPlugin) }
+          )
+          guarded_run(runner, [logical]).diagnostics
+        end
+
+        expect(found.map { |d| [d.path, d.method_name] }).to eq([[logical, "nope_from_buffer"]])
       end
     end
   end

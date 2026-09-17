@@ -2,6 +2,7 @@
 
 require "digest"
 
+require_relative "../cache/descriptor"
 require_relative "../plugin/template_unit"
 require_relative "../type/combinator"
 require_relative "diagnostic"
@@ -71,9 +72,10 @@ module Rigor
       #
       # Two plugins claiming one path is a conflict with no principled winner, so registration order decides
       # and the later claim is dropped; the loser is not a diagnostic (the project chose both plugins).
-      def self.collect(registry:, root: Dir.pwd)
+      def self.collect(registry:, root: Dir.pwd, buffer: nil)
         entries = {}
         failures = []
+        claimed = []
         registry.plugins.each do |plugin|
           # A plugin whose manifest cannot be read claims nothing. `Plugin::Base#manifest` raises for a
           # class that declared none, and a registry is not guaranteed to hold only well-formed plugins
@@ -86,16 +88,22 @@ module Rigor
           end
           next if globs.empty?
 
-          collect_plugin(plugin, globs, root, entries, failures)
+          claimed.concat(globs)
+          collect_plugin(plugin, globs, root, entries, failures, buffer)
         end
-        new(entries, failures)
+        new(entries, failures, claimed.uniq, root)
       end
 
-      def self.collect_plugin(plugin, globs, root, entries, failures)
+      def self.collect_plugin(plugin, globs, root, entries, failures, buffer)
         id = plugin.manifest.id
         fallback = "#{id}@#{plugin.manifest.version}"
         expand(globs, root).each do |path|
-          source = read_source(File.join(root, path), path, id, failures)
+          # Editor mode (#146) — the in-flight buffer's bytes stand in for the file on disk, exactly as
+          # `Runner#parse_source` reads them for a `.rb` file. Without this a `--tmp-file` / `--instead-of`
+          # pair naming a TEMPLATE compiled the saved file and the editor got diagnostics for bytes it had
+          # already replaced.
+          physical = buffer ? buffer.resolve(path) : path
+          source = read_source(physical == path ? File.join(root, path) : physical, path, id, failures)
           next if source.nil?
 
           units = begin
@@ -162,9 +170,13 @@ module Rigor
       # every other plugin hook reports through (ADR-2 § "Plugin Trust and I/O Policy").
       Failure = Data.define(:plugin_id, :path, :message)
 
-      def initialize(entries, failures = [])
+      def initialize(entries, failures = [], claimed_globs = [], root = Dir.pwd)
         @entries = entries.freeze
         @failures = failures.freeze
+        # The globs the loaded plugins claimed, whether or not anything matched. They are the CACHE's
+        # business, not the analysis's: see {#glob_entries}.
+        @claimed_globs = claimed_globs.freeze
+        @root = root
         freeze
       end
 
@@ -193,13 +205,44 @@ module Rigor
         @entries.transform_values(&:source)
       end
 
-      # The index's cache identity: every unit's digest (source bytes + transform id + synthesis version),
-      # keyed by path, hashed once. nil when there are no units, so a project with no template-unit plugin
-      # perturbs no cache key at all.
+      # The index's cache identity: every unit's digest (source bytes + transform id + synthesis version)
+      # keyed by path, plus every FAILURE keyed by path, hashed once. nil only when the run's plugins
+      # claimed no globs at all, so a project with no template-unit plugin perturbs no cache key.
+      #
+      # The failures are in it because a run that produced only failures still produced an ANSWER — one
+      # `plugin_loader` row per file — and without them that run's key equalled the no-templates key. A
+      # later run whose template now compiles, or whose template is gone, reconstructed the same key, and
+      # the ADR-87 boot-slim probe (which loads no plugin, so its slot is always absent) served the stale
+      # rows. The slot now exists whenever any plugin claimed a glob, which is exactly the condition under
+      # which the probe's key is knowingly unreconstructable.
       def digest
-        return nil if @entries.empty?
+        return nil if @claimed_globs.empty?
 
-        Digest::SHA256.hexdigest(@entries.keys.sort.map { |path| "#{path}\x00#{@entries[path].digest}" }.join("\n"))
+        rows = @entries.keys.sort.map { |path| "unit\x00#{path}\x00#{@entries[path].digest}" } +
+               @failures.map { |failure| "fail\x00#{failure.path}\x00#{failure.message}" }.sort
+        Digest::SHA256.hexdigest((["globs\x00#{@claimed_globs.sort.join("\x00")}"] + rows).join("\n"))
+      end
+
+      # The ADR-60 WD3 / #979 `:names` glob rows the run's dependency descriptor records: one per claimed
+      # pattern, whether or not it matched.
+      #
+      # Without them a template APPEARING under a claimed glob moved nothing a warm run could see — the
+      # descriptor listed only the files that already existed — so a project whose first template was added
+      # between two runs kept replaying the answer computed before it existed. `:names` rather than `:stat`
+      # for the same reason the signature roots use it (`cache.md` § the run-descriptor row inventory): the
+      # question a glob row adds is which files MATCH, and edits to those files are carried by their own
+      # file rows.
+      def glob_entries
+        @claimed_globs.map do |pattern|
+          Cache::Descriptor::GlobEntry.compute(root: @root.to_s, pattern: pattern, mode: :names)
+        end
+      end
+
+      # Every template file this run read — the ones that produced a unit AND the ones that failed. A
+      # failure's file is as much an input to the run's answer as a success's: the `plugin_loader` row it
+      # produced must not outlive the edit that fixes the template.
+      def source_paths
+        (@entries.keys + @failures.map(&:path)).uniq.sort
       end
 
       # The Prism `scopes:` argument for a unit's parse, or nil for a path that is not one.

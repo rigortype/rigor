@@ -24,7 +24,11 @@ module Rigor
     # - `path` — the template file as the user wrote it. Every diagnostic and every source trace names it.
     # - `ruby_source` — the compiled Ruby the engine parses.
     # - `line_map` — `{ ruby_source line => template line }`, 1-based. A line the map does not mention
-    #   anchors at the nearest mapped line before it, and at line 1 when there is none.
+    #   anchors at the nearest mapped line before it, and at line 1 when there is none. **An EMPTY map is
+    #   the identity, not "no positions"**: every compiled line reports at its own number and the columns
+    #   pass through untouched. That is correct only for a transform that emits nothing the template did
+    #   not contain — a transform that prepends so much as one preamble line and omits the map reports
+    #   every finding off by that many lines. Omit it only for a byte-preserving transform.
     # - `self_type` — the fully-qualified class the body's `self` is typed as, or nil for a bare body.
     # - `locals` — `{ name => type name }`, the parameters the render site passes.
     # - `ivar_seeds` — `{ "@name" => type name }`, the assigns the rendering action set.

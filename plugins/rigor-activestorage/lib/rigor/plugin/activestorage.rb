@@ -138,12 +138,10 @@ module Rigor
       end
 
       # Issue #1056 — "the attachment index did not load" is a fact about the run's INPUTS, not about the
-      # file being analysed, so both outcomes go to the engine's run-scoped channel
-      # ({Plugin::Base#disclose_once}, issue #1051) rather than being returned from the per-file hook.
-      # Returned, they carried no once-guard at all: the `.uniq` collapsed repeats within one instance's
-      # list, but the whole list was re-emitted on EVERY analysed file, and `--workers N` re-multiplied
-      # that by the worker's own plugin instance. The engine de-duplicates by `(plugin id, key)` across
-      # the coordinator and every worker and emits one row per run at `.rigor.yml:1:1`.
+      # file being analysed, so both outcomes are registered rather than returned: see
+      # {Plugin::Base#disclose_once} for the channel and the position. Returned from the per-file hook they
+      # carried no once-guard at all — the `.uniq` collapsed repeats within one instance's list, but the
+      # whole list was re-emitted on every analysed file.
       #
       # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
       # (#1051), and a refused read must still precede a discovery failure the way `@load_errors` records

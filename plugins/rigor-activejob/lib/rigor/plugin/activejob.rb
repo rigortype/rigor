@@ -148,13 +148,10 @@ module Rigor
 
       private
 
-      # Issue #1056 — "the job index did not load" is a fact about the run's INPUTS, not about the file
-      # being analysed, so it is handed to the engine's run-scoped channel ({Plugin::Base#disclose_once},
-      # issue #1051) rather than returned from the per-file hook. Returned, it carried no once-guard at
-      # all: the row repeated on EVERY analysed file, and `--workers N` re-multiplied that by the worker's
-      # own plugin instance. The engine de-duplicates by `(plugin id, key)` across the coordinator and
-      # every worker and emits one row per run at `.rigor.yml:1:1` — a disclosure has no source position it
-      # could be right about, and after #393 the file it happened to land on could be a view's `.erb` path.
+      # Issue #1056 — "the job index did not load" is a fact about the run's INPUTS, not about the file being
+      # analysed, so it is registered rather than returned: see {Plugin::Base#disclose_once} for the
+      # channel, the `(plugin id, key)` de-duplication and why the engine positions it at `.rigor.yml:1:1`.
+      # Returned from the per-file hook it carried no once-guard at all and repeated on every file.
       def disclose_load_error
         error = producer_error(:job_index)
         disclose_once(

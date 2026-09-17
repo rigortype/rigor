@@ -154,9 +154,9 @@ RSpec.describe "run-scoped plugin disclosures (#1051)" do
   # Issue #1056 — the shape the six bundled discovery plugins (rigor-actioncable, -activejob,
   # -activestorage, -actionmailer, -pundit, -sidekiq) carried: a `load_error_diagnostic(path)` returned
   # from `#diagnostics_for_file` with NO once-guard at all, so the row repeated on every analysed FILE and
-  # `--workers N` re-multiplied that by each worker's own instance. Modelled here on a plugin whose index
-  # producer raises, because the bundled ones are not loadable from this spec; each plugin's own
-  # integration spec pins its message and severity sequentially, and this arm pins the pooled half.
+  # `--workers N` re-multiplied that by each worker's own instance. A stub plugin suffices here because
+  # the pooled path is plugin-agnostic — it de-duplicates by `(plugin id, key)` and never reads a message;
+  # each bundled plugin's own integration spec pins its wording and severity sequentially.
   describe "a discovery plugin whose index producer fails (#1056)" do
     let(:plugin_class) do
       Class.new(Rigor::Plugin::Base) do

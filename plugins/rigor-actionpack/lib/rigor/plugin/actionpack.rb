@@ -85,8 +85,9 @@ module Rigor
         # compiles LAYOUTS (a `yield` rewrite), so a cached 1.3.0 run is missing both the layout units and
         # every seeded local.
         # Bumped 2026-09-18 (#1065) — the claim grew the non-ERB handlers, which the plugin declines and
-        # the engine reads as "a template exists here and has no unit". A cached 1.4.0 index knows nothing
-        # about them, so a render's format fallback would resolve past one.
+        # the engine reads as "a template exists here and has no unit". The bump is belt-and-braces: what
+        # actually invalidates is the claim itself, through the glob row in `TemplateUnits#digest` and the
+        # `claimed_globs` equality the carry checks. A manifest version is in no cache key of its own.
         version: "1.5.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
@@ -118,8 +119,11 @@ module Rigor
         # {#template_units_for_file} returns `[]` for every one of them; what the claim buys is the
         # engine knowing a template exists at that logical name, which is what stops a `.js` render's
         # format fallback from resolving past `_row.js.haml` onto `_row.html.erb`. Action View runs the
-        # Haml file. The list is Action View's own first-party handler set minus ERB; a handler nobody
-        # claims is invisible, and its fallback behaves as it did before this claim existed.
+        # Haml file. The list is the handlers a Rails app actually keeps under `app/views` — the common
+        # third-party template gems, plus Action View's own `builder` and `ruby`. It is NOT exhaustive:
+        # `raw` and `html` are Action View handlers too and are deliberately left out, because a claim on
+        # `*.html` would key a file whose name carries no format at all. A handler nobody claims is
+        # invisible, and its fallback behaves as it did before this claim existed.
         template_globs: ["app/views/**/*.erb",
                          "app/views/**/*.{haml,slim,jbuilder,builder,rabl,ruby}"],
         # ADR-26 — every class the bundled signature names is declared so the CONSTANT resolves; none of

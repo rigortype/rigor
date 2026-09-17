@@ -59,7 +59,7 @@ module Bench
   DEFAULT_REPS = 2
 
   # The noisy axes — reduced by `min` across the reps. See the header for why "lower" is the right reducer here
-  # rather than a median (interference is one-sided) .
+  # rather than a median (interference is one-sided).
   LOWER_OF_REPS = %w[wall_s peak_rss_kb].freeze
 
   # The deterministic axes — taken from the first rep, unreduced.
@@ -140,13 +140,22 @@ module Bench
     reduced
   end
 
+  # The child's output and exit status. Its own method so the failure paths below are reachable from a spec without
+  # spawning anything.
+  def popen_rep(cmd)
+    raw = IO.popen(cmd, &:read)
+    [raw, $?]
+  end
+
   # One rep = one fresh child of this script. Anything short of a clean, parseable rep aborts: a gate that silently
   # falls back to fewer samples than it claims is worse than one that stops.
+  #
+  # `status.inspect` rather than `exitstatus`, because a child killed by a signal (the OOM killer is the realistic
+  # case for a benchmark) has a nil exit status and would otherwise print "exited nil".
   def measure_in_fresh_process(target)
     cmd = [RbConfig.ruby, File.expand_path(__FILE__), "--measure", target]
-    raw = IO.popen(cmd, &:read)
-    status = $?
-    abort("bench rep for #{target} exited #{status.exitstatus.inspect} — no sample to reduce") unless status.success?
+    raw, status = popen_rep(cmd)
+    abort("bench rep for #{target} failed (#{status.inspect}) — no sample to reduce") unless status&.success?
 
     begin
       JSON.parse(raw)
@@ -214,12 +223,17 @@ module Bench
       o.on("--measure PATH") { |v| options[:measure] = v }
     end.parse!(argv)
     options[:targets] = ["lib"] if options[:targets].empty?
-    abort("--reps must be >= 1") if options[:reps] < 1
+    raise ArgumentError, "--reps must be >= 1" if options[:reps] < 1
     options
   end
 
   def main(argv)
-    options = parse_options(argv)
+    options =
+      begin
+        parse_options(argv)
+      rescue ArgumentError => e
+        abort(e.message)
+      end
 
     # Child mode: one rep, one JSON object on stdout, no gating. Nothing else may be printed to stdout here.
     if options[:measure]

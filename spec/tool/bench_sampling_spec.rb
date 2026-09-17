@@ -10,6 +10,7 @@
 #
 # Unit test only. Requiring the script defines {Bench} without benchmarking anything (the `$PROGRAM_NAME` guard at
 # the bottom of the script), so no examples here run the analyzer.
+require "json"
 require "spec_helper"
 
 require_relative "../../tool/bench"
@@ -80,6 +81,44 @@ RSpec.describe "tool/bench.rb sampling (ADR-50 WD4, #987)" do
     end
   end
 
+  # The gate must stop rather than quietly reduce fewer reps than it claims. Both failure paths abort, and both are
+  # unreachable from a real run without breaking a child on purpose — so they are stubbed at {Bench.popen_rep},
+  # which exists to make exactly this testable.
+  describe ".measure_in_fresh_process failure paths" do
+    def status_double(success)
+      instance_double(Process::Status, success?: success)
+    end
+
+    it "aborts when a rep's child exits non-zero" do
+      allow(Bench).to receive(:popen_rep).and_return(["", status_double(false)])
+
+      expect { Bench.measure_in_fresh_process("lib") }.to raise_error(SystemExit)
+        .and output(/no sample to reduce/).to_stderr
+    end
+
+    # A child killed by a signal has a nil exit status, which is why the message reports the whole status object.
+    it "aborts when a rep's child was killed rather than exited" do
+      allow(Bench).to receive(:popen_rep).and_return(["", status_double(nil)])
+
+      expect { Bench.measure_in_fresh_process("lib") }.to raise_error(SystemExit)
+        .and output(/failed/).to_stderr
+    end
+
+    it "aborts when a rep's output is not JSON" do
+      allow(Bench).to receive(:popen_rep).and_return(["Segmentation fault\n", status_double(true)])
+
+      expect { Bench.measure_in_fresh_process("lib") }.to raise_error(SystemExit)
+        .and output(/unparseable output/).to_stderr
+    end
+
+    it "returns the parsed metrics of a clean rep" do
+      allow(Bench).to receive(:popen_rep)
+        .and_return([JSON.generate(sample(wall: 1.0, allocations: 2, rss: nil)), status_double(true)])
+
+      expect(Bench.measure_in_fresh_process("lib")).to include("wall_s" => 1.0, "allocations" => 2)
+    end
+  end
+
   describe "defaults" do
     it "reps twice by default" do
       expect(Bench::DEFAULT_REPS).to eq(2)
@@ -91,6 +130,11 @@ RSpec.describe "tool/bench.rb sampling (ADR-50 WD4, #987)" do
 
     it "defaults --reps to DEFAULT_REPS" do
       expect(Bench.parse_options([])[:reps]).to eq(Bench::DEFAULT_REPS)
+    end
+
+    # Zero reps would reduce an empty list; the option parser refuses it, and `main` turns that into an abort.
+    it "rejects --reps below 1" do
+      expect { Bench.parse_options(["--reps", "0"]) }.to raise_error(ArgumentError, /--reps/)
     end
   end
 end

@@ -100,6 +100,9 @@ module Rigor
         # and the pinned-source `!` suffix are already stripped for us. The upstream bundler RBS shim does
         # not declare it.
         parser.dependencies.keys.to_set { |name| -name.to_s }.freeze # rigor:disable undefined-method
+      rescue ::Ractor::IsolationError => e
+        warn_isolated(path, e)
+        EMPTY_NAMES
       rescue StandardError => e
         warn "rigor: ignoring malformed #{path} (#{e.class}: #{e.message})"
         EMPTY_NAMES
@@ -156,11 +159,25 @@ module Rigor
           )
         end
         locked.freeze
+      rescue ::Ractor::IsolationError => e
+        warn_isolated(path, e)
+        EMPTY
       rescue StandardError => e
         warn "rigor: ignoring malformed #{path} (#{e.class}: #{e.message})"
         EMPTY
       end
       private_class_method :do_parse
+
+      # #1064 — Bundler's lockfile parser reads RubyGems module state a non-main Ractor may not touch, so the
+      # parse raises `Ractor::IsolationError` there whatever the lockfile says. That is an engine constraint, not
+      # a malformed lockfile, and the warning must not send the user to fix a file that is fine. The Ractor pool
+      # does not reach this: its coordinator resolves the lockfile on the main Ractor and hands every worker the
+      # result (`WorkerSession.new(locked_gems:)`). The rescue stays for any future caller that forgets to.
+      def self.warn_isolated(path, error)
+        warn "rigor: cannot read #{path} inside a Ractor worker, so gem dependency discovery is off for it " \
+             "(#{error.class}: #{error.message})"
+      end
+      private_class_method :warn_isolated
     end
   end
 end

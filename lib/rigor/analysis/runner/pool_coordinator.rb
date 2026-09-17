@@ -550,7 +550,18 @@ module Rigor
           # matching explicit call for the HKT-scan outcome: every worker already demands it from its OWN
           # environment in `#drain_reporters`, and the scan has one outcome whoever demands it, so a
           # worker's report already says what the coordinator's own demand would.
-          warm_env = prewarm_rbs_cache_for_pool(source_files: source_files)
+          # #1064 — the lockfile is resolved HERE, once, and travels to every worker as frozen data the way
+          # `source_files` does: Bundler's parser reads RubyGems module state a non-main Ractor may not touch,
+          # so a worker resolving its own raised `Ractor::IsolationError`, printed a "malformed Gemfile.lock"
+          # warning per worker, and analysed with the project's gem signatures silently missing.
+          locked_gems = Ractor.make_shareable(
+            Environment::LockfileResolver.locked_gems(
+              lockfile_path: @configuration.bundler_lockfile,
+              project_root: Dir.pwd,
+              auto_detect: @configuration.bundler_auto_detect
+            )
+          )
+          warm_env = prewarm_rbs_cache_for_pool(source_files: source_files, locked_gems: locked_gems)
           snapshot_project_signature_state(warm_env)
           snapshot_effect_annotation_carrier(warm_env&.rbs_loader)
           record_definition_build_failures(warm_env&.rbs_loader&.definition_build_failures)
@@ -566,14 +577,15 @@ module Rigor
           shareable_source_files = source_files.map { |path| path.to_s.dup.freeze }.freeze
 
           pool = Array.new(@workers) do
-            Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files) do |configuration, cache_root, blueprints, explain, shareable_source_files| # rubocop:disable Layout/LineLength
+            Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems) do |configuration, cache_root, blueprints, explain, shareable_source_files, locked_gems| # rubocop:disable Layout/LineLength
               cache_store = cache_root ? Rigor::Cache::Store.new(root: cache_root) : nil
               session = Rigor::Analysis::WorkerSession.new(
                 configuration: configuration,
                 cache_store: cache_store,
                 plugin_blueprints: blueprints,
                 explain: explain,
-                source_files: shareable_source_files
+                source_files: shareable_source_files,
+                locked_gems: locked_gems
               )
               main = Ractor.main
               main.send([:prepare, session.prepare_diagnostics])
@@ -869,13 +881,14 @@ module Rigor
         # index, the synthetic-method / project-patched indexes) is withheld for the same reason: nothing
         # here dispatches.
         # @param source_files — the WHOLE project's file list, never the analyzed subset.
-        def prewarm_rbs_cache_for_pool(source_files:)
+        def prewarm_rbs_cache_for_pool(source_files:, locked_gems: nil)
           warm_env = Environment.for_project(
             libraries: @configuration.libraries,
             signature_paths: @configuration.signature_paths,
             cache_store: @cache_store,
             plugin_registry: plugin_registry,
             source_files: source_files,
+            locked_gems: locked_gems,
             **ProjectEnvironment.dependency_discovery_options(@configuration)
           )
           warm_env.rbs_loader&.prewarm

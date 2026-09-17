@@ -1,0 +1,1 @@
+- **[perf]** The six scope-index walks that recognise `Const = Struct.new(:a) do … end` and its `||=` / `.freeze` spellings no longer copy the spelling list on every AST node: `rigor check lib` allocates about 2.1M fewer objects (−7.7%) than at #1035's merge. ([#1045](https://github.com/rigortype/rigor/pull/1045))

@@ -456,7 +456,7 @@ module Rigor
 
         # Ancestry order mirrors the engine's: the class itself, the modules it includes, then its
         # superclass, recursively. Cycle-guarded, because a project may declare one. Ancestry names
-        # arrive as as-written candidate lists (see `Scanner#lexical_candidates`); every candidate is
+        # arrive as as-written candidate lists (see `AncestryRecorder#lexical_candidates`); every candidate is
         # enqueued and the most-qualified one comes first, so the right constant wins the race and a
         # spelling that names nothing simply matches no key.
         def resolve_owner(class_name, separator, selector)

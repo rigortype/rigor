@@ -301,9 +301,10 @@ module Rigor
             seeds
           end
 
-          # The nodes a method body reaches on EVERY path: its own statement list, and the statement list
-          # of a `begin`. Everything else — `if` / `unless` / `case` / `while` / `until` / `rescue` /
-          # `for`, and any block — is a branch, so the walk stops there rather than descending.
+          # The nodes a method body reaches on EVERY path: its own statement list, a parenthesised
+          # expression, and a `begin` that cannot be cut short. Everything else — `if` / `unless` /
+          # `case` / `while` / `until` / `rescue` / `for`, and any block — is a branch, so the walk stops
+          # there rather than descending.
           def walk_assignments(node, &)
             return unless node.is_a?(Prism::Node)
 
@@ -317,8 +318,16 @@ module Rigor
             node.rigor_each_child { |child| walk_assignments(child, &) }
           end
 
+          # A `BeginNode` carrying a `rescue_clause` is NOT every-path, and that covers `def show; … rescue
+          # …; end` as well as an explicit `begin`: an exception raised by the first statement leaves the
+          # rest unassigned, and if the rescue renders anything the template reads a nil ivar. An
+          # `ensure`-only `begin` has no such exit and stays. The modifier form
+          # (`@u = User.find(1) rescue render :missing`) never seeds either — its value node is a
+          # `RescueModifierNode`, which {#produced_type} does not recognise.
           def definite?(node)
-            node.is_a?(Prism::StatementsNode) || node.is_a?(Prism::BeginNode)
+            return node.rescue_clause.nil? if node.is_a?(Prism::BeginNode)
+
+            node.is_a?(Prism::StatementsNode) || node.is_a?(Prism::ParenthesesNode)
           end
 
           # The narrow inference. `Model.find(…)` / `Model.new` → `"Model"`, and nothing else.

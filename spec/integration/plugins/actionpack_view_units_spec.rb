@@ -135,8 +135,8 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
   end
 
   # Runs the assigns builder over one controller source in a throwaway tree, and answers what it seeded
-  # for `widgets/show`.
-  def build_assigns(controller_source)
+  # for `widgets/<template>`.
+  def build_assigns(controller_source, template: "show")
     Dir.mktmpdir("rigor-393-assigns-") do |dir|
       FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
       File.write(File.join(dir, "app", "controllers", "widgets_controller.rb"), controller_source)
@@ -144,7 +144,7 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
         index = Rigor::Plugin::Actionpack::ViewAssigns::Builder.new(
           io_boundary: VIEW_ASSIGNS_BOUNDARY.new(dir), search_paths: ["app/controllers"]
         ).build
-        index.seeds_for("widgets/show.html")
+        index.seeds_for("widgets/#{template}.html")
       end
     end
   end
@@ -188,6 +188,29 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
       expect(units.length).to eq(1)
       expect(units.first.locals.keys).to eq(["user"])
       expect(units.first.ruby_source).to be_valid_encoding
+    end
+
+    it "measures the prologue rather than assuming it, for a compiler CI cannot install" do
+      # Erubi resolves only out of an analysed project's bundle (ADR-90), so the Erubi leg never runs
+      # here — and its prologue is a DIFFERENT height from stdlib ERB's (0 against 1), which is the whole
+      # reason the offset is probed. Standing in an Erubi-shaped output pins the measurement itself.
+      markers = (1..3).map { |n| " RIGOR_ERB_PROBE_#{n} ;" }
+      erubi_shaped = "_buf = ::String.new;#{markers.join("\n")}\n_buf.to_s\n"
+      allow(compiler).to receive(:compile_source).and_return(erubi_shaped)
+      compiler.reset!
+
+      expect(compiler.line_offset).to eq(0)
+    ensure
+      compiler.reset!
+    end
+
+    it "declines a compiler whose output does not step line for line" do
+      allow(compiler).to receive(:compile_source).and_return("RIGOR_ERB_PROBE_1 RIGOR_ERB_PROBE_2\n")
+      compiler.reset!
+
+      expect(compiler.line_offset).to be_nil
+    ensure
+      compiler.reset!
     end
 
     it "never claims the empty (identity) map, so the compiled columns cannot leak" do
@@ -263,10 +286,14 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
 
           def show
             @definite = Widget.find(1)
+            (@parenthesised = Widget.find(5))
             @branchy = Widget.find(2) if params[:pick]
             Widget.all.each { |w| @in_block = Widget.find(w.id) }
-          rescue StandardError
-            @rescued = Widget.find(3)
+            begin
+              @guarded = Widget.find(6)
+            rescue StandardError
+              nil
+            end
           end
 
           def maybe_set
@@ -275,7 +302,37 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
         end
       RUBY
 
-      expect(seeds.keys).to eq(["@definite"])
+      expect(seeds.keys).to eq(["@definite", "@parenthesised"])
+    end
+
+    it "refuses everything in an action a `rescue` can cut short" do
+      # The assignment really is the first statement, and it really does run first — but if it RAISES
+      # the rescue may render, and the template then reads an ivar that was never set. Both spellings
+      # of the rescue are the same node.
+      seeds = build_assigns(<<~RUBY)
+        class WidgetsController < ApplicationController
+          def show
+            @rescued = Widget.find(1)
+          rescue StandardError
+            flash[:error] = 1
+          end
+        end
+      RUBY
+
+      expect(seeds).to be_empty
+    end
+
+    it "refuses the modifier-rescue form, including the template its fallback renders" do
+      source = <<~RUBY
+        class WidgetsController < ApplicationController
+          def show
+            @modifier = Widget.find(1) rescue render :missing
+          end
+        end
+      RUBY
+
+      expect(build_assigns(source)).to be_empty
+      expect(build_assigns(source, template: "missing")).to be_empty
     end
   end
 

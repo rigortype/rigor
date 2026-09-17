@@ -89,9 +89,11 @@ line map over to the compiler's trim rules, so the markers are blanked in the sa
 All six are layouts, and all six are `<%= yield %>` — legal ERB that Rails renders, and not legal
 Ruby outside a method body.
 
-(Under stdlib `ERB` redmine has a fifth, `app/views/issues/new.js.erb`, whose `case` is separated from
-its first `when` by markup. Erubi compiles that one and stdlib ERB does not, which is the only
-behavioural difference the two compilers showed across 552 templates — see § 5.)
+(Under stdlib `ERB` redmine has a fifth, `app/views/issues/new.js.erb`, whose `case` tag is separated
+from its first `when` tag by nothing but the newline between them — which Erubi swallows and stdlib
+ERB emits as a buffer append, making the `case` illegal. Erubi compiles that one and stdlib ERB does
+not, and it is the only behavioural difference the two compilers showed across 552 templates — see
+§ 5.)
 
 Reporting them would have been two parse diagnostics per file on correct templates. So the plugin
 parses the compiled Ruby itself and a body that does not parse **declines the file** through the
@@ -138,6 +140,17 @@ appends the bundle's require paths and Erubi loads; mastodon has no installed bu
 A hardcoded offset would have been right for exactly one of the two, and wrong by one line on every
 finding in every template of the other — silently. Both maps are exact for the multi-line-tag case
 (`<%= b(\n 1) %>`), which is the shape that would expose a compiler that re-flows lines.
+
+### Two known under-reads, recorded rather than fixed
+
+Neither costs a false positive — both leave an ivar unseeded, which reads as `Dynamic` and is silent —
+and both are the every-path rule being conservative in a place it did not have to be:
+
+- `return unless @u = User.find(1)`-shaped guards, and any assignment after an early `return`, are
+  taken as every-path on the fall-through, which is right for the fall-through and is the one case
+  where the rule is *less* conservative than it looks. Rare in a controller action.
+- assigns made inside `respond_to do |format| … end` are dropped, because a block may not run. In
+  Rails it always does, so this loses real seeds on format-dispatching actions.
 
 ## Not measured, deliberately
 

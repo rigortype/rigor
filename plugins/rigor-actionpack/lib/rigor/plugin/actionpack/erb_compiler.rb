@@ -17,7 +17,7 @@ module Rigor
       # what Rails itself compiles with, so it is used when it resolves in the ANALYSED project's bundle,
       # through the same `Isolation.require_with_target_bundle` path `Inflector` takes. Stdlib `ERB` is the
       # fallback, and it is always there. Whichever ran is reported as the unit's `transform_id`
-      # (`erubi-1.13.1` / `erb-5.0.2`), which rides the unit digest — so a project that installs Erubi
+      # (`erubi-1.13.1` / `erb-6.0.1.1`), which rides the unit digest — so a project that installs Erubi
       # between two runs re-analyses rather than replaying the stdlib answer.
       #
       # ## The line map is measured, never assumed
@@ -169,7 +169,7 @@ module Rigor
           first
         end
 
-        # `erubi-1.13.1` / `erb-5.0.2` — the compiler's identity, which rides the unit digest.
+        # `erubi-1.13.1` / `erb-6.0.1.1` — the compiler's identity, which rides the unit digest.
         def transform_id
           @transform_id ||= if erubi?
                               "erubi-#{::Erubi::VERSION}"

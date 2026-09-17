@@ -152,11 +152,16 @@ finding per line.
 **What is in scope.** `@ivars` are seeded from the controller
 actions that render the template — the implicit render
 (`UsersController#show` → `users/show`) and explicit
-`render :edit` / `render "admin/form"` — reading only assignments
-whose right-hand side cannot be `nil` (`User.find`, `Model.new`;
-never `find_by`). A partial inherits the assigns of its own
-directory, because an ivar is not a local. Locals come from the
-Rails 7.1 strict-locals comment:
+`render :edit` / `render "admin/form"`. Two restrictions keep a seed
+from claiming a type the template will not find: only assignments
+whose right-hand side cannot be `nil` contribute (`User.find`,
+`Model.new`; never `find_by`), and only assignments the action
+reaches on **every** path — not one inside an `if`, a `case`, a
+`rescue`, a loop or a block, and nothing from a `before_action`
+carrying `if:` / `unless:`. Anything else leaves the ivar unseeded,
+which reads as `Dynamic` and is silent. A partial inherits the
+assigns of its own directory, because an ivar is not a local. Locals
+come from the Rails 7.1 strict-locals comment:
 
 ```erb
 <%# locals: (user:, admin: false) %>

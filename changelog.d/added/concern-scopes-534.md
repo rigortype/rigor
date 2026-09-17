@@ -1,0 +1,1 @@
+- **[plugins]** rigor-activerecord now folds a `scope` declared inside an ActiveSupport::Concern's `included do ... end` block into every model that includes that concern, so `Account.without_suspended` types as `ActiveRecord::Relation[Account]` while a model that does not include the concern is unaffected. [#1034](https://github.com/rigortype/rigor/pull/1034)

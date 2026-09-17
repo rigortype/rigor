@@ -69,6 +69,7 @@ module Rigor
         # happened to be (`prepend_formats` puts the template's format in front of them) — an `Accept`
         # header the source never states, Turbo's included — so those keep their taint rather than guess.
         FORMAT_FALLBACKS = { "js" => ["html"] }.freeze
+        Ractor.make_shareable(FORMAT_FALLBACKS)
 
         # The cookie jars a Rails app writes through.
         COOKIE_JARS = ["self.cookies", "self.cookies.signed", "self.cookies.encrypted",

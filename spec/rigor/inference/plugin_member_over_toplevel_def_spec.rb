@@ -255,11 +255,16 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
     RUBY
   end
 
-  # A signature the project wrote ABOUT THIS MODEL is authorship, and this tier sits ABOVE `RbsDispatch` —
-  # so a blanket `untyped` here would displace the declared type at the implicit-self spelling only, leaving
-  # `name` and `self.name` typed differently in one body. The plugin declines instead: all three reads keep
-  # their declared types and all three true positives still fire. There is no top-level `def` in play for
-  # `posts`, and `name`'s is shadowed by the declaration through the veto's own pre-`::Object` RBS arm.
+  # A signature the project wrote about the model — or about anything in its MRO — is authorship, and this
+  # tier sits ABOVE `RbsDispatch`, so a blanket `untyped` here would displace the declared type at the
+  # implicit-self spelling only, leaving `name` and `self.name` typed differently in one body. The plugin
+  # declines instead: the reads keep their declared types and the true positives still fire. There is no
+  # top-level `def` in play for `posts`, and `name`'s is shadowed by the declaration through the veto's own
+  # pre-`::Object` RBS arm.
+  #
+  # The three arms differ only in WHERE the declaration sits. RBS's definition builder resolves through
+  # ancestors, so a superclass sidecar and an included module's come back owned by the ancestor — which is
+  # why the decline mirrors `ExpressionTyper#rbs_declared_before_object?` rather than its own-class sibling.
   it "keeps a project-declared RBS type at the implicit-self spelling" do
     messages = ar_messages(<<~RUBY, signatures: { "user.rbs" => user_rbs })
       has_many :posts
@@ -279,6 +284,45 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
     expect(messages.grep(/upcase_zzz/).size).to eq(3)
     expect(messages).to include(/undefined method .upcase_zzz. for String/)
     expect(messages).to include(/undefined method .upcase_zzz. for Array\[String\]/)
+  end
+
+  it "keeps a type declared on a project ANCESTOR class at the implicit-self spelling" do
+    signatures = {
+      "application_record.rbs" => "class ApplicationRecord\n  def name: () -> Integer\nend\n",
+      "user.rbs" => "class User < ApplicationRecord\nend\n"
+    }
+    messages = ar_messages(<<~RUBY, signatures: signatures)
+      def shout
+        name.upcase_zzz
+      end
+    RUBY
+    expect(messages).to include(/undefined method .upcase_zzz. for Integer/)
+  end
+
+  it "keeps a type declared on an INCLUDED module at the implicit-self spelling" do
+    signatures = {
+      "nameable.rbs" => "module Nameable\n  def name: () -> Integer\nend\n",
+      "user.rbs" => "class User\n  include Nameable\nend\n"
+    }
+    messages = ar_messages(<<~RUBY, signatures: signatures)
+      def shout
+        name.upcase_zzz
+      end
+    RUBY
+    expect(messages).to include(/undefined method .upcase_zzz. for Integer/)
+  end
+
+  # The cut-off's other side, and the reason it is not "any RBS answer at all": a sidecar that declares only
+  # the SINGLETON twin says nothing about what an instance answers, so the member stays visible to the veto
+  # and the implicit-self read is silent rather than binding the top-level `def name`.
+  it "does not count a singleton-only declaration as the instance reader" do
+    signatures = { "user.rbs" => "class User\n  def self.name: () -> Integer\nend\n" }
+    messages = ar_messages(<<~RUBY, signatures: signatures)
+      def shout
+        name.upcase
+      end
+    RUBY
+    expect(messages).to be_empty
   end
 
   # --- a fixture plugin's `dynamic_return` member -----------------------------------------------------

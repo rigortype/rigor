@@ -146,9 +146,22 @@ plugin rather than pretending the AR case works.
 **A project-declared signature keeps answering.** The plugin tier sits above `RbsDispatch`, so an
 unconditional `untyped` at the implicit-self spelling would displace a `sig/user.rbs` that declares
 `User#name` — and only at that spelling, leaving `name` and `self.name` typed differently in one
-method body. The implicit-self path therefore declines whenever the RBS environment declares the name
-on the model itself, mirroring `ExpressionTyper#rbs_declared_on_class?`. The veto still sees the
-member through its own pre-`::Object` RBS arm, so a top-level `def` does not bind either.
+method body. The implicit-self path therefore declines whenever RBS answers the name with an owner
+that is not `Object` / `Kernel` / `BasicObject`, mirroring
+`ExpressionTyper#rbs_declared_before_object?`. The cut-off is the MRO one and not its own-class
+sibling on purpose: RBS's definition builder resolves through ancestors, so a reader declared on a
+`sig/application_record.rbs` superclass or on an `include`d module comes back owned by THAT ancestor,
+and an own-class test would call it undeclared and displace it one ancestor up — the same defect,
+one link along. The veto still sees the member through its own pre-`::Object` RBS arm, so a top-level
+`def` does not bind either. Instance-side only, so a sidecar declaring `def self.name` correctly does
+not count.
+
+**The WRITTEN-receiver spelling already outranks a project sidecar, and this change does not touch
+it.** With `sig/user.rbs` declaring `User#name: () -> Integer` against a `string` column,
+`self.name.upcase_zzz` reports `for String` — the plugin's column type, not the declared one — on
+master and here alike, because the plugin tier has always sat above `RbsDispatch` for a written
+receiver. Whether an authored signature should outrank the schema there is a real question and a
+pre-existing one; it is out of scope for #963 item 2, which is about which member the veto can see.
 
 **A project class whose ancestry leaves the project is the general form of the same gap.** `User <
 ApplicationRecord < ActiveRecord::Base` truncates at a class with no signature, so Rigor cannot assert

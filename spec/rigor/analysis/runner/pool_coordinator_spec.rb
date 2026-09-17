@@ -1035,7 +1035,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = described_class.allocate
       session = instance_double(
         Rigor::Analysis::WorkerSession, analyze: [], drain_reporters: {}, drain_dependencies: {},
-        drain_run_disclosures: []
+                                        drain_run_disclosures: []
       )
       allow(Rigor::Runtime::Jit).to receive(:rearm_after_fork)
       allow(coordinator).to receive(:exit!)

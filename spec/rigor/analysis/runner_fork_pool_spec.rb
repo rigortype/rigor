@@ -315,7 +315,7 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     let(:session) do
       instance_double(
         Rigor::Analysis::WorkerSession, analyze: [], drain_reporters: {}, drain_dependencies: {},
-        drain_run_disclosures: []
+                                        drain_run_disclosures: []
       )
     end
 

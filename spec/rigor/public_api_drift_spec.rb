@@ -261,6 +261,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     run_disclosure_records()
     services()
     signature_paths()
+    supplies_method?(keyreq:class_name,keyreq:method_name,keyreq:singleton,keyreq:environment)
     template_units_for_file(keyreq:path,keyreq:source)
     template_units_pass_started()
   ].freeze
@@ -360,6 +361,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     resolved_gem_paths()
     signature_paths()
     source_rbs_synthesizers()
+    supplies_method?(keyreq:class_name,keyreq:method_name,keyreq:singleton,keyreq:environment)
     type_node_resolvers()
   ].freeze
 

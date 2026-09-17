@@ -719,6 +719,23 @@ enum-predicate names) straight off the prepared `ModelIndex`.
 the plugin cannot derive are NOT listed — matching `check`, which
 answers nothing for them either.
 
+**Ownership query — `#supplies_method?(class_name:, method_name:, singleton:, environment:)` (#963).**
+The own-method veto in `ExpressionTyper#self_type_answers?` (see
+[inference-engine.md](inference-engine.md)) asks each loaded plugin, through
+`Registry#supplies_method?`, whether `class_name` carries `method_name` on the
+instance side (`singleton: false`) or the class-object side (`singleton: true`).
+The `Base` default is derived from the declared gates and MUST stay conservative:
+it answers `true` only for a `dynamic_return` rule that carries BOTH `receivers:`
+and `methods:`, where the name is in the (possibly callable) `methods:` list and
+some receiver entry matches the class with the same kind. A receiver-less rule
+(`methods:` only), a name-less rule (`receivers:` only), and `file_methods:` are
+NOT read as ownership claims — they gate dispatch, and a name-only gate read as
+ownership would veto a same-named top-level `def` inside every class. A plugin
+whose knowledge is per-class overrides the hook (`rigor-activerecord` answers
+from the model-index entry of exactly `class_name`). `false` means "not known to
+supply", never "known absent"; the hook MUST NOT raise (the registry treats a
+raise as `false`) and MUST NOT depend on `environment` being non-`nil`.
+
 #### Machine-readable capability catalogue — `rigor plugins --capabilities` (ADR-37 Slice 3)
 
 `rigor plugins --capabilities` emits the per-plugin extension-protocol

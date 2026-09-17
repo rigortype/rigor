@@ -636,6 +636,35 @@ module Rigor
         nil
       end
 
+      # Issue #963 — does this plugin supply `method_name` on `class_name` (its instances, or the class
+      # object when `singleton:` is true)? The own-method veto asks this before binding an implicit-self
+      # call to a same-named top-level `def`: a column reader, an association accessor, or any other
+      # member a plugin models is a method of the class at runtime, so the top-level `def` (a private
+      # method on `Object`, the last MRO link) is never reached for it. A false answer means "not that I
+      # know of", never "definitely absent" — the other veto sources are still consulted.
+      #
+      # The default reads the {.dynamic_return} rules that gate on BOTH a receiver kind and a method
+      # name set: such a rule is a declaration that the receiver class answers those names. A
+      # receiver-less rule speaks about a name on any receiver and a name-less rule about any name on a
+      # receiver; neither is a claim about one class owning one method, so neither counts. A plugin
+      # whose knowledge is not expressed as rule gates (rigor-activerecord's per-model index) overrides.
+      # Failures isolate to false.
+      def supplies_method?(class_name:, method_name:, singleton:, environment:)
+        return false if class_name.nil? || method_name.nil?
+
+        name = method_name.to_sym
+        self.class.dynamic_returns.any? do |rule|
+          next false if rule[:methods].nil? || rule[:receivers].nil?
+          next false unless resolved_dynamic_return_methods(rule).include?(name)
+
+          resolved_dynamic_return_receiver_entries(rule).any? do |receiver, singleton_entry|
+            singleton_entry == singleton && class_matches_receiver?(class_name, receiver, environment)
+          end
+        end
+      rescue StandardError
+        false
+      end
+
       # ADR-37 slice 2 — the post-return narrowing facts contributed by this plugin's {.narrowing_facts}
       # rules for a call. The engine calls this from `StatementEvaluator`; a rule fires only when
       # `call_node.name` is one of its declared `methods:`. Failures isolate to [].

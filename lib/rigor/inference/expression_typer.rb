@@ -1315,13 +1315,45 @@ module Rigor
       # `Comparable#clamp`. What the cut-off keeps out is the tier v0.0.3 A exists for and #316 / #319
       # refined: a name owned by `Object` or `Kernel` themselves (`inspect`, `format`) is at or after the
       # top-level `def`'s own rung, so the historical binding still stands there.
+      #
+      # Issue #963 — a member no source `def` spells out is still a method of the class: a plugin-modelled
+      # column reader or association accessor, and an ADR-16 synthetic method the macro expander recorded.
+      # Neither sits in the discovery tables or the RBS environment, so they are asked on their own terms.
       def instance_self_answers?(class_name, method_name)
         return false if class_name.nil?
         return true if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
         return true if meta_member?(class_name, method_name)
         return true if resolve_user_def_through_ancestors(class_name, method_name)
+        return true if plugin_supplied_self_answers?(class_name, method_name, singleton: false)
 
         rbs_ancestor_answers?(class_name, method_name)
+      end
+
+      # The plugin-supplied arm shared by both sides of {#self_type_answers?}: `Plugin::Registry#supplies_method?`
+      # (each plugin's own claim about the class, kind included) and the synthetic-method index. Both are
+      # exact `(class, name)` probes, so a name the plugin knows only on some OTHER class does not veto here.
+      def plugin_supplied_self_answers?(class_name, method_name, singleton:)
+        environment = scope.environment
+        return false if environment.nil?
+
+        registry = environment.plugin_registry
+        if registry && !registry.empty? &&
+           registry.supplies_method?(class_name: class_name, method_name: method_name,
+                                     singleton: singleton, environment: environment)
+          return true
+        end
+
+        index = environment.synthetic_method_index
+        return false if index.nil? || index.empty?
+
+        matches = if singleton
+                    index.lookup_singleton(class_name, method_name)
+                  else
+                    index.lookup_instance(class_name, method_name)
+                  end
+        !matches.empty?
+      rescue StandardError
+        false
       end
 
       # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS
@@ -1359,6 +1391,7 @@ module Rigor
         return false if class_name.nil?
         return true if scope.discovered_method_through_ancestors?(class_name, method_name, :singleton)
         return true unless scope.singleton_def_through_ancestors(class_name, method_name).first.nil?
+        return true if plugin_supplied_self_answers?(class_name, method_name, singleton: true)
 
         rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :singleton), class_name)
       end

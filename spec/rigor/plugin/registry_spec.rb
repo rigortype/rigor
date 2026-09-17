@@ -204,6 +204,45 @@ RSpec.describe Rigor::Plugin::Registry do
     end
   end
 
+  describe "#supplies_method? (#963 — own-method veto source)" do
+    let(:owner) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "owner", version: "0.1.0")
+        dynamic_return receivers: %w[Widget], methods: %i[title] do |_call_node, _scope|
+          Rigor::Type::Combinator.nominal_of("String")
+        end
+      end.new(services: services)
+    end
+    let(:raiser) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "raiser", version: "0.1.0")
+        def supplies_method?(**) = raise("boom")
+      end.new(services: services)
+    end
+
+    def supplies?(registry, class_name, name, singleton: false)
+      registry.supplies_method?(class_name: class_name, method_name: name, singleton: singleton, environment: nil)
+    end
+
+    it "is false on the empty registry and for a nil class" do
+      expect(supplies?(described_class::EMPTY, "Widget", :title)).to be(false)
+      expect(supplies?(described_class.new(plugins: [owner]), nil, :title)).to be(false)
+    end
+
+    it "is true when any loaded plugin supplies the name on that class and kind" do
+      registry = described_class.new(plugins: [plugin_class.new(services: services), owner])
+      expect(supplies?(registry, "Widget", :title)).to be(true)
+      expect(supplies?(registry, "Widget", :title, singleton: true)).to be(false)
+      expect(supplies?(registry, "Gadget", :title)).to be(false)
+    end
+
+    it "treats a raising plugin as not supplying, without hiding the others" do
+      registry = described_class.new(plugins: [raiser, owner])
+      expect(supplies?(registry, "Widget", :title)).to be(true)
+      expect(supplies?(registry, "Widget", :other)).to be(false)
+    end
+  end
+
   describe "#open_receivers / #open_receiver? (ADR-26)" do
     it "is empty when no plugin declares open_receivers" do
       expect(described_class::EMPTY.open_receivers).to eq([])

@@ -4123,4 +4123,75 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(enum[:type]).to be_nil
     end
   end
+
+  # Issue #963 — a column reader, an association accessor, or a scope is a method of the model at runtime, so
+  # an implicit-self call to it inside the model reaches the plugin-modelled member and never the same-named
+  # top-level `def` (a private method on `Object`, the last MRO link). The veto in
+  # `ExpressionTyper#self_type_answers?` asks `Activerecord#supplies_method?` before binding the top-level
+  # body. The must-still-fire arm pins the boundary: in a class no plugin models, the top-level `def` still
+  # binds and its `nil` still fires.
+  describe "own-method veto — plugin-supplied members beat a same-named top-level def (#963)" do
+    let(:shadow_source) do
+      <<~RUBY
+        def title
+          nil
+        end
+
+        def user
+          nil
+        end
+
+        def recent
+          nil
+        end
+      RUBY
+    end
+
+    let(:models) do
+      DEFAULT_MODELS.merge(
+        "app/models/post.rb" => <<~RUBY,
+          class Post < ApplicationRecord
+            belongs_to :user
+            scope :recent, -> { order(created_at: :desc) }
+
+            def shout
+              title.upcase
+            end
+
+            def author_email
+              user.email
+            end
+
+            def self.latest
+              recent.first
+            end
+          end
+        RUBY
+        "app/models/widget.rb" => <<~RUBY
+          class Widget
+            def shout
+              title.upcase
+            end
+          end
+        RUBY
+      )
+    end
+
+    # The models are analysed too (`paths:`), since the calls under test sit inside their bodies.
+    def undefined_method_messages
+      files = models.merge("db/schema.rb" => DEFAULT_SCHEMA)
+      result = run_plugin(source: shadow_source, files: files, paths: ["demo.rb", "app"])
+      result.diagnostics
+            .select { |d| d.rule == "call.undefined-method" }
+            .to_h { |d| [File.basename(d.path.to_s), d.message] }
+    end
+
+    it "does not bind the top-level def for a column reader, an association, or a scope inside the model" do
+      expect(undefined_method_messages.keys).not_to include("post.rb")
+    end
+
+    it "still binds the top-level def, and fires, inside a class no plugin models" do
+      expect(undefined_method_messages["widget.rb"]).to include("upcase")
+    end
+  end
 end

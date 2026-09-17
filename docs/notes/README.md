@@ -89,6 +89,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-17 | [The controller → template effect edge — corpus measurement](20260917-controller-template-edge.md) |
 | 2026-09-17 | [Plugin-supplied members as an own-method veto source — sizing the corpus first (issue #963)](20260917-plugin-member-veto.md) |
 | 2026-09-17 | [Render-site locals and layouts — corpus measurement](20260917-render-locals-and-layouts.md) |
+| 2026-09-17 | [Plugin-supplied members vs. a same-named top-level `def` — the #963 item-2 measurement](20260917-plugin-supplied-own-method-veto-963.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

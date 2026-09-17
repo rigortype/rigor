@@ -60,6 +60,7 @@ class Rigor::Plugin::Base
   # join, so it proposes the literal fallback `nil` instead of the honest contract.
   def dynamic_return_type: (call_node: untyped, scope: untyped, receiver_type: untyped) -> untyped
   def narrowing_facts_for: (call_node: untyped, scope: untyped) -> Array[untyped]
+  def supplies_method?: (class_name: untyped, method_name: untyped, singleton: bool, environment: untyped) -> bool
 
   # Authoring helpers.
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> Rigor::Analysis::Diagnostic

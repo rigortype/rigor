@@ -794,4 +794,63 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
       end
     RUBY
   end
+
+  # Issue #963 item 2 — a method a PLUGIN supplies is an own method too: a `dynamic_return` gated on this
+  # class and name (ADR-52), or an ADR-16 synthesized member on the exact class and kind. Both are read
+  # through `Environment`, so the arm is pinned here at the `self_type_answers?` level with a `Nominal` /
+  # `Singleton` self; the end-to-end column/association/scope shape lives in the rigor-activerecord
+  # integration spec. A name neither source knows keeps the top-level `def` bindable.
+  describe "plugin-supplied and synthesized members (#963)" do
+    let(:services) do
+      Rigor::Plugin::Services.new(reflection: Rigor::Reflection, type: Rigor::Type::Combinator,
+                                  configuration: Rigor::Configuration.new)
+    end
+    let(:plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "veto-963", version: "0.1.0")
+        dynamic_return receivers: %w[Widget singleton(Widget)], methods: %i[text] do |_call_node, _scope|
+          Rigor::Type::Combinator.nominal_of("String")
+        end
+      end.new(services: services)
+    end
+    let(:synthetic_index) do
+      entries = [
+        Rigor::Inference::SyntheticMethod.new(class_name: "Gadget", method_name: :label, return_type: "String"),
+        Rigor::Inference::SyntheticMethod.new(class_name: "Gadget", method_name: :build, return_type: "Gadget",
+                                              kind: Rigor::Inference::SyntheticMethod::SINGLETON)
+      ]
+      Rigor::Inference::SyntheticMethodIndex.new(entries: entries)
+    end
+    let(:environment) do
+      Rigor::Environment.new(plugin_registry: Rigor::Plugin::Registry.new(plugins: [plugin]),
+                             synthetic_method_index: synthetic_index)
+    end
+
+    def answers?(self_type, name, env: environment)
+      scope = Rigor::Scope.empty(environment: env).with_self_type(self_type)
+      Rigor::Inference::ExpressionTyper.new(scope: scope).send(:self_type_answers?, name)
+    end
+
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+    def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
+
+    it "answers a dynamic_return name on the gated class, on the declared side only" do
+      expect(answers?(nominal("Widget"), :text)).to be(true)
+      expect(answers?(singleton("Widget"), :text)).to be(true)
+      expect(answers?(nominal("Other"), :text)).to be(false)
+    end
+
+    it "answers a synthesized member on its exact class and kind" do
+      expect(answers?(nominal("Gadget"), :label)).to be(true)
+      expect(answers?(nominal("Gadget"), :build)).to be(false)
+      expect(answers?(singleton("Gadget"), :build)).to be(true)
+      expect(answers?(singleton("Gadget"), :label)).to be(false)
+    end
+
+    it "keeps a name no source supplies bindable, and an environment without plugins unchanged" do
+      expect(answers?(nominal("Widget"), :other)).to be(false)
+      expect(answers?(nominal("Gadget"), :other)).to be(false)
+      expect(answers?(nominal("Widget"), :text, env: Rigor::Environment.new)).to be(false)
+    end
+  end
 end

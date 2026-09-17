@@ -12,5 +12,8 @@ class Rigor::Plugin::Registry
   def ids: () -> Array[String]
   def empty?: () -> bool
   def any_load_errors?: () -> bool
+  # sig-gen gap: #963 — `plugins` is an untyped attr, so the `any?` over it (with its per-plugin
+  # `rescue`) reaches sig-gen as an untyped return; the `bool` contract is hand-written.
+  def supplies_method?: (class_name: untyped, method_name: untyped, singleton: bool, environment: untyped) -> bool
   def type_node_resolvers: () -> Array[untyped]
 end

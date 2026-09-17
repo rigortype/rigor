@@ -358,6 +358,28 @@ module Rigor
         contribution_return_type(call_node, scope)
       end
 
+      # Issue #963 — the own-method veto's question, answered per model rather than from the name gate
+      # above (which is the union over every model, so it would veto `text` inside any class once one
+      # model has a `text` column). An instance of a discovered model answers its column readers and
+      # `column?` predicates, `alias_attribute` names, and association accessors; the class object answers
+      # the finder / relation entry points and its declared scopes. Only the exact model's entry is
+      # consulted — an STI subclass inherits its root's columns / associations / scopes through the
+      # discoverer, so the entry already reflects the chain.
+      def supplies_method?(class_name:, method_name:, singleton:, environment:) # rubocop:disable Lint/UnusedMethodArgument
+        entry = model_index&.find(class_name)
+        return false if entry.nil?
+
+        name = method_name.to_s
+        if singleton
+          FINDER_METHOD_NAMES.include?(name.to_sym) || entry.scope?(name)
+        else
+          entry.column?(name) || (name.end_with?("?") && entry.column?(name.delete_suffix("?"))) ||
+            entry.association?(name) || entry.alias?(name)
+        end
+      rescue StandardError
+        false
+      end
+
       private
 
       # The run-time name gate: finders ∪ scopes ∪ associations ∪ column readers (+ `?` predicates).

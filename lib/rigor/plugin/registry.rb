@@ -308,6 +308,21 @@ module Rigor
         !load_errors.empty?
       end
 
+      # Issue #963 — true when any loaded plugin supplies `method_name` on `class_name` (see
+      # `Base#supplies_method?`). Consulted by the own-method veto, which runs only once a same-named
+      # top-level `def` candidate exists, so the plain walk is not on the hot dispatch path. A raising
+      # plugin declines rather than aborting the veto.
+      def supplies_method?(class_name:, method_name:, singleton:, environment:)
+        return false if plugins.empty? || class_name.nil?
+
+        plugins.any? do |plugin|
+          plugin.supplies_method?(class_name: class_name, method_name: method_name,
+                                  singleton: singleton, environment: environment)
+        rescue StandardError
+          false
+        end
+      end
+
       # ADR-13 — flat ordered list of every loaded plugin's manifest-declared {TypeNodeResolver} instances,
       # in plugin registration order. `Environment#build_name_scope` builds a `TypeNode::ResolverChain` from
       # this list (environment.rb). The first non-nil `#resolve(node, scope)` return wins per ADR-13 WD3 /

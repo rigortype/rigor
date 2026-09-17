@@ -523,6 +523,39 @@ RSpec.describe Rigor::Plugin::Base do
         expect(type).to be_nil
       end
 
+      # Issue #963 — the own-method veto's question, answered from the rule gates by default.
+      describe "#supplies_method?" do
+        def supplies?(plugin, class_name, name, singleton: false)
+          plugin.supplies_method?(class_name: class_name, method_name: name, singleton: singleton, environment: nil)
+        end
+
+        it "claims a declared name on a declared receiver, kind included" do
+          expect(supplies?(plugin_with_methods, "Foo", :unwrap)).to be(true)
+          expect(supplies?(plugin_with_methods, "Foo", "unwrap!")).to be(true)
+          expect(supplies?(plugin_with_methods, "Foo", :unwrap, singleton: true)).to be(false)
+        end
+
+        it "declines an undeclared name, another class, and a nil class" do
+          expect(supplies?(plugin_with_methods, "Foo", :other)).to be(false)
+          expect(supplies?(plugin_with_methods, "Other", :unwrap)).to be(false)
+          expect(supplies?(plugin_with_methods, nil, :unwrap)).to be(false)
+        end
+
+        it "does not read a receiver-less rule as a claim about a class" do
+          name_only = Class.new(described_class) do
+            manifest(id: "dr-name-only", version: "0.1.0")
+            dynamic_return methods: %i[unwrap] do |_call_node, _scope|
+              Rigor::Type::Combinator.nominal_of("Bar")
+            end
+          end.new(services: services)
+          expect(supplies?(name_only, "Foo", :unwrap)).to be(false)
+        end
+
+        it "does not read a name-less rule as a claim about a name" do
+          expect(supplies?(plugin, "Foo", :bar)).to be(false)
+        end
+      end
+
       it "accepts String method names and normalises them to symbols" do
         plugin = Class.new(described_class) do
           manifest(id: "dr-str", version: "0.1.0")

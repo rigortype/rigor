@@ -2174,7 +2174,8 @@ module Rigor
               return
             end
           end
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
             record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc)
@@ -2357,6 +2358,11 @@ module Rigor
       # define-once idiom: where the constant is unset — the case the program is written for — Ruby evaluates the
       # rvalue and names the class `Const`, exactly as the plain write does. `&&=` and the operator writes are NOT
       # here: neither names a freshly created class.
+      #
+      # The six whole-tree walks that recognise the idiom spell these four classes out in their `when` arms rather
+      # than splatting this list: `when *ARRAY` copies the array on EVERY evaluation, and the arms are evaluated once
+      # per AST node per walk, which cost `rigor check lib` about 2.3M allocations (+10%) when they were splatted.
+      # This list is for the `is_a?` scans; keep the arms and the list in step.
       META_CONSTANT_WRITE_NODES = [
         Prism::ConstantWriteNode,
         Prism::ConstantPathWriteNode,
@@ -2658,7 +2664,8 @@ module Rigor
               return
             end
           end
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
             walk_singleton_body(meta_new_block_body(node), child_prefix, false, accumulator)
@@ -3088,7 +3095,8 @@ module Rigor
             walk_data_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_child_prefix(node, qualified_prefix)
           record_data_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
         end
@@ -3139,7 +3147,8 @@ module Rigor
             walk_struct_member_layouts(node.body, child_prefix, accumulator) if node.body
             return
           end
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_child_prefix(node, qualified_prefix)
           record_struct_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
         end
@@ -3390,7 +3399,8 @@ module Rigor
               return current_visibility
             end
           end
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
             walk_method_visibilities(meta_new_block_body(node), child_prefix, false, :public, accumulator)
@@ -5140,7 +5150,8 @@ module Rigor
         case node
         when Prism::ModuleNode, Prism::ClassNode
           return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames)
-        when *META_CONSTANT_WRITE_NODES
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
           return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 

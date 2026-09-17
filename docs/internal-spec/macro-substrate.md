@@ -425,15 +425,42 @@ preamble a partial writes when its render-site `locals:` are not traced.
   still absolute after that reduction is **outside the project**, and an
   unanchored claim (`**/*.rbx`) does not reach it: a plugin's glob is a claim
   over the project, and `Dir.glob` could never have returned that path.
-- **Position probes.** `rigor type-of` and the `dump_type` helper read the file
-  from disk and parse those bytes directly — they do not consult the index, so
-  a probe against a template answers about the TEMPLATE's own text (and, for a
-  template whose raw bytes are not valid Ruby, declines with a parse error).
-  Routing them through the unit needs the INVERSE of everything the seam ships
-  — the user names a template position and the command has to find the compiled
-  node, through a map that is not injective — so it is
-  [#1040](https://github.com/rigortype/rigor/issues/1040) rather than part of
-  this slice. `rigor check` and `rigor effects` are unaffected.
+- **Position probes.** `rigor type-of` on a path a loaded plugin's
+  `template_globs:` claims builds the run's index, parses the unit's COMPILED
+  source with `parse_scopes`, seeds the file scope through `seed`, and resolves
+  the requested TEMPLATE position through the inverse map
+  (`Analysis::TemplateUnitPositions`,
+  [#1040](https://github.com/rigortype/rigor/issues/1040)). A path no plugin
+  claims builds no index and probes exactly as before; a claimed template whose
+  transform raised reports the failure and exits 1; one the plugin declined is
+  probed as the command always probed a file. The inverse is chosen, not
+  derived, because nothing the seam ships runs that way:
+  - **Lines.** A template line names the SET of compiled lines whose
+    `template_line` is that line — the same set a diagnostic from it reports
+    from — since `line_map` is not injective.
+  - **Columns.** They do not correspond, so a column is resolved through the
+    **longest verbatim run**: the template byte at the column is placed against
+    every matching byte on those compiled lines, each placement is extended
+    while the bytes agree, and the longest wins. The answer is the deepest
+    compiled node at the mapped offset, and it is accepted only when that
+    longest run is UNIQUE (a tie is two readings — declined as ambiguous) and
+    the node lies wholly inside the run on one line. The second condition is
+    what rejects markup: a compiler copies template text into a string
+    literal, and the literal's quotes are never template bytes. It equally
+    rejects code a compiler REWROTE rather than copied (rigor-actionpack's
+    `yield` → `__rigor_yield`). Tie-breaking by "the placement whose node looks
+    like code" was rejected: the HTML word `name` beside `<%= name %>` ties with
+    the tag, and preferring the code would type a word of text.
+  A bare `FILE:LINE` lists only the expressions on those compiled lines whose
+  span maps back to a template column through the same run (confirmed from both
+  sides), so every column in the table is the template's. A `--trace` fallback
+  is reported at the template line, and at a template column only when its
+  location lies in a verbatim run. The rule knows nothing about ERB: an identity
+  transform is one run per line and an ERB compiler one per tag body. The
+  `dump_type` helper has no probe path of its own — it is a `rigor check`
+  diagnostic, so it already types the compiled unit under the seeded scope and
+  reports at the template line. The language server's hover does not route
+  through the unit yet.
 - **Other file sets.** A unit is an ANALYSED file, never a `source_files:` one:
   the env-build-time `source_rbs_synthesizer` is offered the `.rb` expansion
   alone, because a template's bytes are not Ruby an RBS synthesiser can read.

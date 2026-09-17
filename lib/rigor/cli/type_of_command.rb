@@ -13,6 +13,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/precision_scanner"
 require_relative "../source/node_children"
 require_relative "type_of_renderer"
+require_relative "type_of_template_probe"
 require_relative "command"
 require_relative "options"
 require_relative "../project_environment"
@@ -28,10 +29,15 @@ module Rigor
     # type-of UX (extra flags, watch mode, streaming output) without bloating the CLI shell. Output formatting is
     # delegated to {TypeOfRenderer}.
     class TypeOfCommand < Command
+      include TypeOfTemplateProbe
+
       USAGE = "Usage: rigor type-of [options] FILE:LINE[:COL] [FILE:LINE[:COL] ...]"
 
-      Result = Data.define(:file, :line, :column, :node, :type, :tracer, :enumeration) do
-        def initialize(enumeration: nil, **rest)
+      # `location_mapper` is set for a template unit's result (#1040): the `--trace` fallback locations are
+      # positions in the COMPILED Ruby, and the mapper turns one into the `[template_line, column_or_nil]`
+      # the user can find in the file they named.
+      Result = Data.define(:file, :line, :column, :node, :type, :tracer, :enumeration, :location_mapper) do
+        def initialize(enumeration: nil, location_mapper: nil, **rest)
           super
         end
       end
@@ -105,6 +111,14 @@ module Rigor
         # is only that the BUFFER is readable, which `resolve_buffer_binding` has already enforced.
         physical = buffer ? buffer.resolve(file) : file
         return 1 unless file_exists?(buffer ? physical : file)
+
+        unit_probe = template_unit_probe(file, base_scope.environment, buffer)
+        return unit_probe if unit_probe.is_a?(Integer)
+
+        if unit_probe
+          context = { configuration: configuration, base_scope: base_scope, options: options }
+          return resolve_template(file, physical, unit_probe, indexed_targets, context)
+        end
 
         source = File.read(physical)
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
@@ -191,11 +205,11 @@ module Rigor
         end
       end
 
-      def type_result(file, line, column, node, scope_index, options, enumeration: nil)
+      # `presentation` is the Result's optional `enumeration:` / `location_mapper:`.
+      def type_result(file, line, column, node, scope_index, options, **presentation)
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
         type = scope_index[node].type_of(node, tracer: tracer)
-        Result.new(file: file, line: line, column: column, node: node, type: type, tracer: tracer,
-                   enumeration: enumeration)
+        Result.new(file: file, line: line, column: column, node: node, type: type, tracer: tracer, **presentation)
       end
 
       # Builds the plugin-aware environment relative to the probed file, so the reported type matches what `rigor

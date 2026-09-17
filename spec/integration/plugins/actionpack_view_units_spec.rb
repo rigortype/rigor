@@ -68,6 +68,13 @@ VIEW_UNITS_CARD_ERB = <<~ERB
   </div>
 ERB
 
+# The two calls {ViewAssigns::Builder} makes on the plugin IO boundary. A real boundary needs the
+# service container; this needs a directory and a file.
+VIEW_ASSIGNS_BOUNDARY = Struct.new(:root) do
+  def directory?(path) = File.directory?(path)
+  def read_file(path) = File.read(path)
+end
+
 RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -119,6 +126,29 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
     end
   end
 
+  # A bare, initialised plugin instance for the unit-level hooks. `Plugin::Base#initialize` takes the
+  # service container, and nothing exercised here reaches it.
+  def view_plugin
+    plugin = Rigor::Plugin::Actionpack.new(services: nil, config: {})
+    plugin.init(nil)
+    plugin
+  end
+
+  # Runs the assigns builder over one controller source in a throwaway tree, and answers what it seeded
+  # for `widgets/show`.
+  def build_assigns(controller_source)
+    Dir.mktmpdir("rigor-393-assigns-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
+      File.write(File.join(dir, "app", "controllers", "widgets_controller.rb"), controller_source)
+      Dir.chdir(dir) do
+        index = Rigor::Plugin::Actionpack::ViewAssigns::Builder.new(
+          io_boundary: VIEW_ASSIGNS_BOUNDARY.new(dir), search_paths: ["app/controllers"]
+        ).build
+        index.seeds_for("widgets/show.html")
+      end
+    end
+  end
+
   def unit(runner, key)
     runner.effect_table.find { |row| row.key == key }
   end
@@ -144,6 +174,20 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
       # two compiled lines of its own.
       compiled_line = compiled.lines.index { |line| line.include?(" c ") } + 1
       expect(map[compiled_line]).to eq(4)
+    end
+
+    it "scrubs invalid bytes once, for every reader of the template" do
+      # A single invalid byte used to raise out of `ViewUnits.strict_locals`' Regexp — the compiler
+      # scrubbed and the locals reader did not — which the seam turns into an `error`-severity
+      # `:plugin_loader` row, so one mis-encoded view failed the whole run.
+      raw = +"<%# locals: (user:) %>\n<p>caf\xE9 <%= user %></p>\n"
+      raw.force_encoding(Encoding::UTF_8)
+
+      units = view_plugin.template_units_for_file(path: "app/views/users/_card.html.erb", source: raw)
+
+      expect(units.length).to eq(1)
+      expect(units.first.locals.keys).to eq(["user"])
+      expect(units.first.ruby_source).to be_valid_encoding
     end
 
     it "never claims the empty (identity) map, so the compiled columns cannot leak" do
@@ -209,9 +253,29 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
     end
 
     it "refuses a nil-able producer, so no fold is licensed on a value that is nil at runtime" do
-      builder = Rigor::Plugin::Actionpack::ViewAssigns::Builder
       expect(Rigor::Plugin::Actionpack::ViewAssigns::NON_NIL_PRODUCERS).not_to include(:find_by)
-      expect(builder).to be_a(Class)
+    end
+
+    it "refuses a conditional assignment and a conditional filter, for the same reason" do
+      seeds = build_assigns(<<~RUBY)
+        class WidgetsController < ApplicationController
+          before_action :maybe_set, if: :signed_in?
+
+          def show
+            @definite = Widget.find(1)
+            @branchy = Widget.find(2) if params[:pick]
+            Widget.all.each { |w| @in_block = Widget.find(w.id) }
+          rescue StandardError
+            @rescued = Widget.find(3)
+          end
+
+          def maybe_set
+            @filtered = Widget.find(4)
+          end
+        end
+      RUBY
+
+      expect(seeds.keys).to eq(["@definite"])
     end
   end
 

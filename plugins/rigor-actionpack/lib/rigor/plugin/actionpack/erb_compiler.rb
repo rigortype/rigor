@@ -88,21 +88,31 @@ module Rigor
 
         module_function
 
-        # `[ruby_source, line_map, transform_id]` for one template's bytes.
+        # `[ruby_source, line_map, transform_id]` for one template's bytes. `text` must already be valid
+        # UTF-8 — {.scrub} is the caller's, because more than one thing reads the template and every one
+        # of them has to read the SAME bytes.
         #
         # `line_map` is `{ compiled line => template line }` for every template line, explicitly — NOT the
         # empty "identity" map, even when the offset is zero. An empty map tells the engine the transform
         # was byte-preserving and lets the compiled Ruby's COLUMNS through, and an ERB column names
         # nothing in the template (`macro-substrate.md` § Positions).
-        def compile(source)
-          text = source.dup.force_encoding(Encoding::UTF_8)
-          text = text.encode(Encoding::UTF_8, invalid: :replace, undef: :replace) unless text.valid_encoding?
+        def compile(text)
           offset = line_offset
           raise Unmappable, "#{transform_id} does not emit template lines one per compiled line" if offset.nil?
 
           compiled = compile_source(normalize(text))
           map = (1..template_line_count(text)).to_h { |line| [line + offset, line] }
           [compiled, map, transform_id]
+        end
+
+        # A template's bytes as valid UTF-8. A `.erb` file is whatever the project committed, and an
+        # invalid byte is not a reason to refuse it: `ERB`, `Regexp#match?` and Prism all raise on one,
+        # so every reader has to be handed the same scrubbed String or they disagree about the file.
+        def scrub(source)
+          text = source.to_s.dup.force_encoding(Encoding::UTF_8)
+          return text if text.valid_encoding?
+
+          text.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
         end
 
         # The compiled Ruby for one template, through whichever compiler resolved.

@@ -196,7 +196,12 @@ module Rigor
       # are small, and it buys the FP guarantee outright.
       def template_units_for_file(path:, source:)
         name = ViewUnits.logical_name(path, @view_search_paths)
-        text = source.dup.force_encoding(Encoding::UTF_8)
+        # Scrubbed ONCE, here, and handed to both readers. Scrubbing inside the compiler alone left
+        # `ViewUnits.strict_locals` matching a Regexp against the raw bytes, and a single invalid byte
+        # anywhere in a template carrying a strict-locals comment raised out of the hook — which the seam
+        # correctly turns into an `error`-severity `:plugin_loader` row, so one mis-encoded view failed
+        # the whole run.
+        text = ErbCompiler.scrub(source)
         compiled, line_map, transform = ErbCompiler.compile(text)
         return [] unless Prism.parse(compiled).errors.empty?
 

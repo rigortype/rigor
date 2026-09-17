@@ -226,19 +226,28 @@ module Rigor
             names = arguments.filter_map { |argument| argument.is_a?(Prism::SymbolNode) ? argument.unescaped.to_sym : nil }
             only = symbol_list(options, :only)
             except = symbol_list(options, :except)
-            names.map { |name| [name, only, except] }
+            conditional = %i[if unless].any? { |key| option?(options, key) }
+            names.map { |name| [name, only, except, conditional] }
+          end
+
+          def option?(options, key)
+            !pair_for(options, key).nil?
           end
 
           def symbol_list(options, key)
-            return nil if options.nil?
-
-            pair = options.elements.find do |element|
-              element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
-                element.key.unescaped.to_sym == key
-            end
+            pair = pair_for(options, key)
             return nil if pair.nil?
 
             symbols_in(pair.value)
+          end
+
+          def pair_for(options, key)
+            return nil if options.nil?
+
+            options.elements.find do |element|
+              element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+                element.key.unescaped.to_sym == key
+            end
           end
 
           def symbols_in(node)
@@ -249,11 +258,16 @@ module Rigor
             end
           end
 
-          # The assigns every `before_action` that runs for `action` made, in chain order, so a later
-          # filter's assignment of the same ivar wins — and the action's own assignment wins over all of
-          # them, which is why the caller merges this UNDER the action's.
+          # The assigns every `before_action` that UNCONDITIONALLY runs for `action` made, in chain order,
+          # so a later filter's assignment of the same ivar wins — and the action's own assignment wins
+          # over all of them, which is why the caller merges this UNDER the action's.
+          #
+          # `only:` / `except:` are decided here, per action, because they are static. `if:` / `unless:`
+          # cannot be: the filter may not run, so nothing it assigns is definite, and seeding from it
+          # would claim a non-nil type for an ivar that is nil at render time — see {#definite?}.
           def filter_assigns(filters, action, methods)
-            filters.each_with_object({}) do |(name, only, except), seeds|
+            filters.each_with_object({}) do |(name, only, except, conditional), seeds|
+              next if conditional
               next if only && !only.include?(action)
               next if except&.include?(action)
 
@@ -264,9 +278,17 @@ module Rigor
             end
           end
 
-          # `@user = User.find(params[:id])` → `{ "@user" => "User" }`. Walks the whole body, including
-          # inside conditionals and blocks: an assign made on one branch is still an assign the template
-          # may read, and the type is the same either way. Two disagreeing types drop the ivar.
+          # `@user = User.find(params[:id])` → `{ "@user" => "User" }`.
+          #
+          # **Definite assignments only.** An assignment the method may not reach — inside an `if`, a
+          # `case`, a `rescue`, a loop, or a block that may not run — does not contribute, because a seed
+          # is a claim about what the template will FIND, and `@user = User.find(1) if params[:pick]`
+          # leaves `@user` nil on the other path. A non-nil nominal standing in for a runtime nil is the
+          # `Parameters#[]` trap (`Actionpack::STRONG_PARAMS_CHAIN_METHODS`): the flow rules act on it and
+          # report live branches, which is exactly what a reader of a template would see with
+          # `view_type_checks:` on. The unseeded ivar reads `Dynamic` instead and taints honestly (ADR-5).
+          #
+          # Two disagreeing types drop the ivar for the same reason.
           def ivar_assigns(body)
             seeds = {}
             conflicts = []
@@ -279,14 +301,24 @@ module Rigor
             seeds
           end
 
+          # The nodes a method body reaches on EVERY path: its own statement list, and the statement list
+          # of a `begin`. Everything else — `if` / `unless` / `case` / `while` / `until` / `rescue` /
+          # `for`, and any block — is a branch, so the walk stops there rather than descending.
           def walk_assignments(node, &)
             return unless node.is_a?(Prism::Node)
 
             if node.is_a?(Prism::InstanceVariableWriteNode)
               type_name = produced_type(node.value)
               yield node.name.to_s, type_name if type_name
+              return
             end
+            return unless definite?(node)
+
             node.rigor_each_child { |child| walk_assignments(child, &) }
+          end
+
+          def definite?(node)
+            node.is_a?(Prism::StatementsNode) || node.is_a?(Prism::BeginNode)
           end
 
           # The narrow inference. `Model.find(…)` / `Model.new` → `"Model"`, and nothing else.

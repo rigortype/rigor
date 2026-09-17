@@ -684,6 +684,104 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # --- the write spellings the meta-constant handler used to miss (issue #963 item 3) ---------------
+  #
+  # The veto is unchanged here; what changed is that these bodies are now ENTERED as the constant's class
+  # body at all. Left in the enclosing (top-level) scope the call had no `self_type`, so the confidence gate
+  # alone decided and the top-level `def text`'s `nil` bound ahead of the member.
+
+  it "reads a struct member inside a `Const = Struct.new(...) do ... end.freeze` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+    RUBY
+  end
+
+  it "reads a struct member inside a `Const ||= Struct.new(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line ||= Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `Const = Const || Struct.new(...) do ... end` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Line = Line || Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "reads a struct member inside a `Class.new(Struct.new(...)) do ... end.freeze` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Anon = Class.new(Struct.new(:text)) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+    RUBY
+  end
+
+  it "reads a member inside a `Const = Data.define(...) do ... end.freeze` body" do
+    expect(upcase_errors(<<~RUBY)).to be_empty
+      Point = Data.define(:text) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `.freeze`-tailed body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line = Struct.new(:other) do
+        def shout
+          text.upcase
+        end
+      end.freeze
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `||=` body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line ||= Struct.new(:other) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  it "still binds a top-level def inside a `Const = Const || ...` body answering nothing" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line = Line || Struct.new(:other) do
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
+  # The control: the plain spelling the three above are variations of is unchanged, and so is a trailing call
+  # that is NOT value-preserving — `.members` answers an Array, so the constant names no class the body owns.
+  it "still binds a top-level def inside a body whose write ends in a non-`freeze` call" do
+    expect(upcase_errors(<<~RUBY)).not_to be_empty
+      Line = Struct.new(:text) do
+        def shout
+          text.upcase
+        end
+      end.members
+    RUBY
+  end
+
   # The control: a block whose `self` Rigor still does not model is untouched by the narrowing.
   it "leaves a plain block inside an instance method alone" do
     expect(upcase_errors(<<~RUBY)).to be_empty

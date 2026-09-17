@@ -81,7 +81,8 @@ pins instance and singleton method sets for:
   (`ffi_binding_recognizer`, `ffi_binding_recognizers`) DSLs;
   instance-level `services` / `config` / `manifest`, the override
   hooks `#init` / `#prepare` / `#diagnostics_for_file` /
-  `#template_units_for_file`, the engine-owned-walk dispatcher
+  `#template_units_for_file` / `#template_units_pass_started` (#1047),
+  the engine-owned-walk dispatcher
   `#node_rule_diagnostics`, the `#diagnostic(node, …)` builder, and
   the run-scoped disclosure channel `#disclose_once(key, message:,
   severity:, rule:)` / `#run_disclosure_records` (#1051), and its

@@ -420,7 +420,7 @@ Applied in `UnitScan#callee_edge_taken?`, beside the label contribution. Three o
 
 - the rule answers a callee — an edge is recorded, carrying the row's `taint:` in `FileCollection::Edge#taint_if_unresolved` rather than at the site;
 - the rule answers **nil** — no edge, and `UnitScan` taints the site exactly as it did before the field existed. `render foo`, `render json: @user` and `render formats: computed` all land here;
-- the edge resolves to nothing at propagation — `Propagator.taint_unresolved_callee` seeds the carried cause into the caller's state, the same way `taint_unresolved_super` does and for the same reason: only the merged table can answer. A layout, which is a declined unit today ([#1047](https://github.com/rigortype/rigor/issues/1047)), is the measured case.
+- the edge resolves to nothing at propagation — `Propagator.taint_unresolved_callee` seeds the carried cause into the caller's state, the same way `taint_unresolved_super` does and for the same reason: only the merged table can answer. A `render partial: @thing` whose name is computed, and a `.js.erb` rendering an HTML-only partial ([#1065](https://github.com/rigortype/rigor/issues/1065)), are the measured cases; a layout was one until [#1047](https://github.com/rigortype/rigor/issues/1047) gave it a unit.
 
 The taint is therefore **added where the edge failed, never subtracted where it succeeded**, so every step of the fixpoint stays monotone and no consumer has to reason about a cause that might be removed later in the pass.
 

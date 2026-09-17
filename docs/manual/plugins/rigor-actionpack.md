@@ -167,17 +167,56 @@ come from the Rails 7.1 strict-locals comment:
 <%# locals: (user:, admin: false) %>
 ```
 
-**Type checks are off inside templates by default.** `call.*` **and
-`flow.*`** findings are suppressed there while the synthesised
-bindings are still coarse — measured on redmine and mastodon, the
-feature adds **zero** new findings to either
+**`call.*` findings are off inside templates by default**, while the
+synthesised receivers are still coarse — measured on redmine and
+mastodon, the feature adds **zero** new findings to either
 ([the measurement note](../../notes/20260917-erb-template-units.md)).
 Set `view_type_checks: true` to opt in and have `@user.nmae` in
-`show.html.erb` reported like any other call. It turns **both**
-families back on, flow folding included — which is the half with the
-known gap, since a partial's optional-local preamble reads as a
-definite `nil` until its render site's `locals:` are traced
-([#1047](https://github.com/rigortype/rigor/issues/1047)).
+`show.html.erb` reported like any other call.
+
+`flow.*` **reports in a template like anywhere else.** It was
+suppressed alongside `call.*` for one measured reason — a partial's
+optional-local preamble (`<% path = nil unless defined? path %>`)
+really did assign nil, because nothing told the unit its render site
+had bound `path`. Render-site `locals:` are traced now, and the same
+two projects re-measured with the family reporting are byte-identical
+to the runs with it suppressed ([the #1047 note](../../notes/20260917-render-locals-and-layouts.md)).
+
+### Locals come from the render site
+
+A partial's parameters are bound by whoever renders it, and every
+spelling of that is read — on both sides of the render:
+
+```erb
+<%= render partial: "card", locals: { user: @user } %>
+<%= render "card", user: @user %>          <%# a view's trailing hash IS locals %>
+<%= render partial: "card", collection: @users, as: :row %>
+<%= render partial: "card", object: @user %>
+```
+
+`collection:` binds `row`, `row_counter` and `row_iteration`;
+`object:` and `as:` bind one local named after the partial or after
+`as:`. A controller's `render partial: …, locals: …` is read the same
+way — but a controller's *trailing hash* is options, so
+`render :show, status: :ok` binds nothing.
+
+A partial rendered from several sites gets the **union** of the
+names. A name only some of them pass is still bound, typed
+`Dynamic` — absence is what produced the false positives above.
+A **type** is claimed only where every site agrees on one it could
+settle from the call itself (`User.find(1)`, or an ivar the rendering
+action's own seeds typed); anything else is `Dynamic`. A
+strict-locals comment still wins where a template carries one.
+
+A partial's **own** optional-local test counts too:
+`<% size = nil unless defined?(size) %>`, `local_assigns[:size]` and
+`local_assigns.key?(:size)` bind `size` even when no render site the
+plugin can read passes it — a `locals: opts` hash, a `render` from a
+helper, or a local with a default nobody passes. A name a helper under
+`app/helpers` defines is left alone, so
+`<% if defined?(current_user) %>` stays a helper call. A helper that a
+gem or a concern defines is not seen by that scan, and its name is
+bound as a `Dynamic` local instead.
 
 ### The controller → template edge
 
@@ -198,8 +237,9 @@ does not, and both cases are common enough to name:
   `render formats: some_format`. The render site is read from
   literals only, so anything computed keeps the honest "and possibly
   more";
-- the target is a **layout**, which has no unit today
-  ([#1047](https://github.com/rigortype/rigor/issues/1047));
+- the target names no template this plugin compiled — a `render
+  partial: @thing`, or a `.js.erb` rendering an HTML-only partial
+  ([#1065](https://github.com/rigortype/rigor/issues/1065));
 - the template is outside `app/views/**/*.erb` — a Haml, Slim or
   Jbuilder view, which this plugin does not claim.
 
@@ -265,18 +305,30 @@ deliberately loud rather than a silent no-op.
 
 ## Limitations
 
-- **Layouts get no unit.** A layout's `<%= yield %>` is not valid
-  Ruby outside a method body, so its compiled form does not parse
-  and the file is declined — silently, because two parse errors on
-  a template Rails renders perfectly would be worse than no unit.
-  Any template whose compiled Ruby does not parse is declined the
-  same way. See
-  [#1047](https://github.com/rigortype/rigor/issues/1047).
-- **Render-site `locals:` are not traced.** A partial's parameters
-  are known only from a strict-locals comment; without one they
-  read as helper calls on the view context. That is why `flow.*` is
-  suppressed in templates by default — see the measurement note and
-  [#1047](https://github.com/rigortype/rigor/issues/1047).
+- **A controller's own layout is not edged.** A layout is a unit
+  now, and a `render layout:` *inside a view* reaches it — but the
+  layout Rails wraps an action's template in (`layouts/application`,
+  or whatever `layout "base"` named) is not attributed to that
+  action. A callee rule may read the call's literals, the unit's
+  owner and the unit's key, and a layout's name is none of those:
+  it is a class-body declaration plus a convention lookup against
+  the view tree. So the layout's own effects reach a view that
+  renders it explicitly and no further.
+- **`yield` in a layout is a `String` and nothing more.** The
+  keyword is rewritten into a declared call on the view context so
+  the body parses; what the inner template produced is never
+  modelled.
+- **Unsaved render sites are not read in the editor.** The
+  render-site index reads templates and controllers from disk, so a
+  `locals:` you have typed but not saved does not reach the partial
+  until the save. A keystroke recompiles only the buffer, and a save
+  rebuilds the project's analysis as it always has. A view changed on
+  disk *without* a save the editor sees (a `git checkout`, a
+  formatter run elsewhere) recompiles every view on the next
+  publish, because a partial's locals can come from any of them. A
+  full `rigor check` does
+  the same compile work it did before — the index hands its compiled
+  sources to the unit transform rather than compiling twice.
 - **ERB only, under `app/views`.** `template_globs:` is a manifest
   row, read without running plugin code, so it cannot consult
   `view_search_paths:`. Haml, Slim and Jbuilder are the same seam

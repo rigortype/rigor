@@ -44,6 +44,10 @@ class Rigor::Plugin::Base
   def init: (untyped services) -> nil
   def prepare: (untyped services) -> nil
   def diagnostics_for_file: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+  # sig-gen gap: #392 — the hook's contract is `Array[Rigor::Plugin::TemplateUnit]`, but the default body
+  # is a bare `[]` and every real return comes from a plugin gem sig-gen never sees, so inference proposes
+  # the empty literal rather than the declared element type.
+  def template_units_for_file: (path: untyped, source: untyped) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.
   def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]

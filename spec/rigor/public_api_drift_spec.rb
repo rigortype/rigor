@@ -257,6 +257,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     read_fact(keyreq:plugin_id,keyreq:name)
     services()
     signature_paths()
+    template_units_for_file(keyreq:path,keyreq:source)
   ].freeze
 
   # ADR-30 / issue #727: `ffi_binding_recognizer` and `ffi_binding_recognizers` are defined on
@@ -310,6 +311,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     signature_paths()
     source_rbs_synthesizer()
     target_gems()
+    template_globs()
     to_h()
     trait_registries()
     type_node_resolvers()
@@ -411,6 +413,26 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     receiver_constraint()
     symbol_arg_position()
     to_h()
+  ].freeze
+
+  # #392 — the template-unit seam's one new public value object. Pinned like every other shipped manifest
+  # / hook carrier: a plugin gem is authored against these names.
+  PLUGIN_TEMPLATE_UNIT_INSTANCE = %w[
+    ==(req:other)
+    digest(opt:fallback_transform_id)
+    eql?(req:other)
+    hash()
+    ivar_seeds()
+    line_map()
+    locals()
+    logical_name()
+    path()
+    ruby_source()
+    self_type()
+    template_line(req:ruby_line)
+    to_h()
+    transform_id()
+    unit_key()
   ].freeze
 
   PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE = %w[
@@ -967,6 +989,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-36 slice-A value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::NestedClassTemplate)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::TemplateUnit" do
+    it "exposes the expected #392 template-unit value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::TemplateUnit)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_TEMPLATE_UNIT_INSTANCE
       )
     end
   end

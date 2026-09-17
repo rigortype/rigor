@@ -546,6 +546,25 @@ module Rigor
         []
       end
 
+      # #392 — the **template-unit** transform: compile one non-Ruby project file into the Ruby the engine
+      # analyses (ADR-16 Tier D, revived; design note § 11.3). The engine globs the manifest's
+      # `template_globs:`, reads each match's bytes, and calls this once per match on the PARENT, before any
+      # analysis — so the transform runs exactly once per file per run and its result marshals into every
+      # fork-pool worker.
+      #
+      # Returns an `Array<Rigor::Plugin::TemplateUnit>`; an empty array declines the file, which is the
+      # right answer for a match the plugin's glob caught but its compiler cannot read. The default returns
+      # `[]`, so a plugin that declares no `template_globs:` is never asked and one that does may still
+      # decline per file.
+      #
+      # A raise isolates exactly like `#diagnostics_for_file`: the file contributes no unit and the run
+      # continues. The hook is the one place a template-unit plugin runs code — everything downstream is
+      # the frozen value object — which is what keeps the engine's analysis of a unit identical to its
+      # analysis of a `.rb` file.
+      def template_units_for_file(path:, source:) # rubocop:disable Lint/UnusedMethodArgument
+        []
+      end
+
       # ADR-37 slice 1 — runs the plugin's declared {.node_rule}s over one file and returns their
       # diagnostics. The engine owns the single AST walk here so plugin authors never hand-roll a traversal:
       # every node reachable from `root` is offered to each rule whose `node_type` it satisfies

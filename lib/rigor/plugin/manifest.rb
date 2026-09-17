@@ -56,6 +56,12 @@ module Rigor
                   :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points,
                   :effect_ancestry
 
+      # #392 — the project-relative globs whose files this plugin compiles into {TemplateUnit}s. Purely a
+      # CLAIM: the engine globs these, reads each match's bytes and offers them to
+      # {Base#template_units_for_file}, which is where the transform itself lives. A plugin declaring none
+      # is never asked, and a run whose plugins declare none does no extra globbing at all.
+      attr_reader :template_globs
+
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, config_schema: {}, target_gems: [],
@@ -65,7 +71,7 @@ module Rigor
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil, additional_initializers: [],
         effect_root: nil, effect_labels: [], effect_attributions: [], effect_edges: [],
-        effect_entry_points: [], effect_ancestry: []
+        effect_entry_points: [], effect_ancestry: [], template_globs: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -96,7 +102,7 @@ module Rigor
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
-                             effect_entry_points, effect_ancestry)
+                             effect_entry_points, effect_ancestry, template_globs)
         freeze
       end
 
@@ -162,15 +168,27 @@ module Rigor
       private :validate_effect_fields!
 
       def assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
-                               effect_entry_points, effect_ancestry)
+                               effect_entry_points, effect_ancestry, template_globs)
         @effect_root = effect_root.nil? ? nil : effect_root.to_s.dup.freeze
         @effect_labels = effect_labels.map { |label| label.to_s.dup.freeze }.uniq.sort.freeze
         @effect_attributions = effect_attributions.dup.freeze
         @effect_edges = effect_edges.dup.freeze
         @effect_entry_points = effect_entry_points.dup.freeze
         @effect_ancestry = effect_ancestry.dup.freeze
+        assign_template_globs(template_globs)
       end
       private :assign_effect_fields
+
+      # #392 — a glob is a String, and an absolute one is refused: a template unit is a project file, and
+      # a plugin reaching outside the project root is the trust boundary ADR-2 § "Plugin Trust and I/O
+      # Policy" draws. Validated and assigned in one call, because `#initialize` is at its line budget.
+      def assign_template_globs(globs)
+        validate_array_of!("template_globs", globs, "non-empty relative glob Strings") do |glob|
+          glob.is_a?(String) && !glob.empty? && !glob.start_with?("/") && !glob.include?("..")
+        end
+        @template_globs = globs.map { |glob| glob.to_s.dup.freeze }.uniq.freeze
+      end
+      private :assign_template_globs
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -224,7 +242,8 @@ module Rigor
           "effect_attributions" => effect_attributions.map(&:to_h),
           "effect_edges" => effect_edges.map(&:to_h),
           "effect_entry_points" => effect_entry_points.map(&:to_h),
-          "effect_ancestry" => effect_ancestry.map(&:to_h)
+          "effect_ancestry" => effect_ancestry.map(&:to_h),
+          "template_globs" => template_globs
         }
       end
 

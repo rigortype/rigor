@@ -22,7 +22,7 @@ We will build a new static analysis tool named **Rigor** ("Rigorous Inference fo
 * **Powerful Inference First:** The core engine relies on deep Control Flow Analysis (CFA) and Data Flow Analysis to deduce types.
 * **Advanced Types:** Rigor will support Union Types, Literal Types (e.g., `1`, `"str"`), and Virtual/Refined Types (e.g., `non-empty-string`, `positive-int`).
 * **External Dependencies via RBS:** Standard gem types will be resolved using the existing RBS ecosystem.
-* **`RBS::Extended`:** To express advanced types not yet supported by standard RBS, Rigor-specific metadata should attach to RBS declarations through RBS annotations or external/generated signatures rather than through a new Ruby comment DSL.
+* **`RBS::Extended`:** To express advanced types not yet supported by standard RBS, Rigor-specific metadata should attach to RBS declarations through RBS annotations or external/generated signatures rather than through a new Ruby comment DSL. Rigor still does not ask anyone to scatter types through Ruby code. The one Rigor-read comment channel, `# @extrbs`, is opt-in, carries only what RBS cannot spell, and is written into generated signatures as RBS annotations ([ADR-112](112-extrbs-comment-channel.md)).
 
 ### 3. PHPStan-like Plugin Architecture
 

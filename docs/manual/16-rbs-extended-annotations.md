@@ -54,18 +54,24 @@ The other inline-RBS readers do not accept all three:
 | own line | syntax error (`expected a token pARROW`), annotation lost | annotation kept |
 | same line | annotation and method type kept | annotation kept, method type **dropped** |
 
-Rigor keeps both halves of every row. Which spelling to recommend
-for a `.rb` file is still open in
-[ADR-111](../adr/111-inline-refinement-carrier.md), which carries
-the measurement. If the method type after a same-line annotation
+Rigor keeps both halves of every row. If you also run Steep in
+inline mode, use the same-line spelling. The measurement is in
+[ADR-111](../adr/111-inline-refinement-carrier.md). If the method type after a same-line annotation
 does not parse, the method is left untyped and Rigor reports it as
 [`plugin.rbs-inline.source-rbs-annotation-not-honoured`](plugins/rigor-rbs-inline.md#same-line-annotations).
 
 This needs the `rbs-inline` library installed; Rigor ingests
 inline annotations by default when it is
-([ADR-93](../adr/93-default-rbs-inline-ingestion.md)). There is
-no Rigor-only comment dialect: `# rigor:` comments remain
-suppression-only.
+([ADR-93](../adr/93-default-rbs-inline-ingestion.md)). `# rigor:`
+comments remain suppression-only.
+
+A dedicated `# @extrbs` comment for what RBS cannot spell is
+accepted in [ADR-112](../adr/112-extrbs-comment-channel.md) but
+not implemented yet ([#1073](https://github.com/rigortype/rigor/issues/1073)).
+Until it ships, the `%a{}` forms above are the inline route. A type
+plain RBS can spell, such as `:asc | :desc`, belongs in `# @rbs` or
+`#:` either way.
+
 This page is the *operational* reference — the directives you can
 write and their syntax. For the normative rules (conflict
 handling, merging, provenance) see

@@ -42,6 +42,8 @@ The right-hand side of `return:`, `param:`, `assert*`, and `predicate-if-*` acce
 - Exported plain RBS MUST drop or erase Rigor-only annotations unless the user asks to preserve them.
 - The annotation grammar is versioned and SHOULD remain small until implementation experience proves it out. Incompatible grammar changes require a new version prefix rather than changing `rigor:v1:` semantics.
 
+> **Accepted, not yet implemented — [ADR-112](../adr/112-extrbs-comment-channel.md).** The payload grammar above becomes a superset of the RBS type grammar, with a `\u{…}` escape for `%a` closers ([#1074](https://github.com/rigortype/rigor/issues/1074)). A `# @extrbs` comment in a `.rb` file carries the same grammar ([#1073](https://github.com/rigortype/rigor/issues/1073)). The "exported plain RBS" rule narrows to plain-RBS export: `rigor sig-gen` keeps declared refinements as annotations ([#1076](https://github.com/rigortype/rigor/issues/1076)). Each change updates this document when it lands.
+
 ## Type predicates and assertions
 
 Rigor models Python `TypeGuard`/`TypeIs`-style predicates, TypeScript-style type guards, and PHPStan-style assertions as **flow effects** attached to RBS method signatures.

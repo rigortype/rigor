@@ -555,6 +555,10 @@ silent because they are outside the same-line split:
 
 ### WD13 — A `sig/` declaration wins over an inline one, per member
 
+> **Partially superseded by [ADR-112](112-extrbs-comment-channel.md) (WD5).** The same-member
+> case no longer lets `sig/` win silently. Consistent declarations merge to the more precise side,
+> and a contradiction is an error. The Steep analysis below still holds.
+
 *2026-09-08, closing [#824](https://github.com/rigortype/rigor/issues/824).*
 
 A method declared **both** in `sig/` and by an inline annotation in its

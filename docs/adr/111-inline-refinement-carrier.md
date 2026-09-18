@@ -1,6 +1,11 @@
 # ADR-111 — Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect
 
-Status: **Proposed, 2026-09-12; revised the same day with the Steep measurement.** Rules on
+Status: **Superseded by [ADR-112](112-extrbs-comment-channel.md), 2026-09-19.** The maintainer ruled
+#996 the other way: Rigor reads a `# @extrbs` channel, and Rigor itself writes the `%a{}` into the
+generated signature. The measurements below are that ADR's grounding and stay valid. The
+recommendation and WD1–WD4 do not stand. The text below is the Proposed draft as it was.
+
+Original status: **Proposed, 2026-09-12; revised the same day with the Steep measurement.** Rules on
 [#996](https://github.com/rigortype/rigor/issues/996). Recommends **reaffirming** that Rigor has no
 comment dialect of its own: a refinement in a `.rb` file rides the `%a{rigor:v1:…}` annotation the RBS
 grammar already defines, beside a plain type position that states its erasure, and never inside one.

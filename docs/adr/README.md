@@ -127,6 +127,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-110 | [An inherited declaration does not outrank the receiver's own `def`](110-inherited-declaration-precedence.md) | Accepted (WD1 + WD3 implemented in #856; measured zero new diagnostics across 25 corpus targets) |
 | ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Superseded (by ADR-112; the probe measurements stand) |
 | ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
+| ADR-113 | [`rigor lens`: a declaration map with type provenance, for agents and tools](113-rigor-lens.md) | Accepted (nothing implemented yet) |
 
 ## Adding a New ADR
 

@@ -124,7 +124,7 @@ What that buys is the answer to *"what does this request actually
 do"* past the `render` line. A partial that calls `@user.update`
 reports `io.db.write` at `app/views/users/_card.html.erb`, a
 `Time.now` in a layout fragment reports `nondet.time`, a leftover
-`binding.pry` reports `io.input` — all of it in `rigor effects` and
+`puts` reports `io.output.stdout` — all of it in `rigor effects` and
 in the snapshot, so a template that starts writing shows up in a
 diff.
 
@@ -285,52 +285,41 @@ it never runs.
 ### Holding views to an effect budget
 
 A view unit is an `effects.envelopes:` subject like any class, and a
-finding is positioned in the template. The two presets the design
-note describes are written like this — pick one, or neither:
+finding is positioned in the template:
 
 ```yaml
-# views: lenient — reads are fine (lazy loading is the Rails default)
 effects:
   envelopes:
     - match: "app/views/**/*"
-      effect: [mutate.local, io.db.read, cache.read, cache.write,
-               rails.config.read, rails.i18n.translate,
-               rails.session.read, telemetry]
+      effect: [mutate.local]
 ```
 
-```yaml
-# views: strict — the static twin of `strict_loading`: every datum is
-# loaded in the controller
-effects:
-  envelopes:
-    - match: "app/views/**/*"
-      effect: [mutate.local, cache.read, cache.write,
-               rails.config.read, rails.i18n.translate,
-               rails.session.read, telemetry]
+A bound judges only what Rigor proved by reading code, so what this
+catches in a view is what Rigor's own catalogue proves: a `puts`
+(`io.output.stdout`) or a `Time.now` (`nondet.time`).
+
+**Plugin-sourced labels are never judged by an envelope.** A plugin's
+statement about a framework method — `User.find` is `io.db.read`,
+`@user.update` is `io.db.write`, `perform_later` is `job.enqueue` —
+rides the declared (`≤`) lane, and the envelope check reads the proven
+one. Listing `io.db.read` in a view's envelope, or leaving it out,
+changes nothing: the lazy `<%= user.posts.count %>` is not a finding
+either way. That is a property of the whole Rails effect layer rather
+than of views ([ADR-103](../../adr/103-effect-labels.md) WD17, ruled
+in [#1059](https://github.com/rigortype/rigor/issues/1059)).
+
+What notices a view that starts reading the database is the effect
+snapshot. With `.rigor-effects.yml` committed, `rigor effects check`
+fails by default on drift in either lane, and a template that gains a
+query shows up in the diff as a declared-lane addition:
+
+```
+view:users/show.html  ≤+ io.db.read
 ```
 
-Under either, an `io.db.write`, a `job.enqueue`, an `io.output.stdout`
-(`puts`), an `io.input` (`binding.pry`) or a `nondet.time` in a view
-is a finding.
-
-**The two presets do not yet differ in behaviour.** A plugin's statement
-about a framework method — `User.find` is `io.db.read` — rides the
-declared (`≤`) lane, and the envelope check reads the proven one, so
-neither preset can report the lazy `<%= user.posts.count %>` that
-separates them on paper. That is a property of the whole Rails effect
-layer rather than of views ([ADR-103](../../adr/103-effect-labels.md)
-WD17 ruled on the lane and named `rigor effects check` as the
-enforcement surface for a plugin-sourced label); the open question is
-[#1059](https://github.com/rigortype/rigor/issues/1059).
-
-Only the labels the plugins in your `plugins:` list register are
-known, and both stanzas above name two that rigor-actionpack does not
-own: `rails.config.read` comes from
-`rigor-railties` and `rails.i18n.translate` from
-[`rigor-rails-i18n`](rigor-rails-i18n.md). Activate those alongside
-rigor-actionpack, or drop the labels — without them each is reported
-as `effect.unknown-label` and the entry bounds nothing, which is
-deliberately loud rather than a silent no-op.
+That is a ratchet on the whole project's recorded effects, reviewed as a
+diff — not a policy scoped to `app/views/**/*`. See
+[Effect labels](../19-effect-labels.md#what-a-bound-can-and-cannot-see).
 
 ## Limitations
 

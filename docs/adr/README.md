@@ -8,7 +8,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 - **ADR-1** through **ADR-3** define the type model, extension API, and type representation — the analyzer's conceptual core.
 - Higher-numbered ADRs build on the foundation and can be read as needed.
 - Each ADR has a **Status** field: `Accepted`, `Proposed`, or `Superseded`. Accepted ADRs whose implementation is still in flight carry a parenthetical note (e.g. *partially implemented*, *slice N deferred*).
-- No ADR here carries the whole-document `Superseded` status — every supersession in the corpus is **partial**: one working decision, slice, or rejected-alternative row overtaken while the rest of the ADR stands. That does not change the status word. It is marked in place, on both sides, as `> **Partially superseded by [ADR-N](N-slug.md) (§ X / WDn).** <what changed>` — see [ADR-49](49-adr-authoring-guidelines.md)'s axis-6 note.
+- Only ADR-111 carries the whole-document `Superseded` status: it was a Proposed recommendation, and ADR-112 ruled the other way. Every other supersession in the corpus is **partial**: one working decision, slice, or rejected-alternative row overtaken while the rest of the ADR stands. A partial supersession does not change the status word. It is marked in place, on both sides, as `> **Partially superseded by [ADR-N](N-slug.md) (§ X / WDn).** <what changed>` — see [ADR-49](49-adr-authoring-guidelines.md)'s axis-6 note.
 
 ## Index
 
@@ -125,7 +125,8 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-108 | [Type provenance for agents: the `rigor-type-oracle` skill and the adopting project's contract](108-type-provenance-for-agents.md) | Accepted (skill, `rigor-project-init` contract paragraph, and catalogue wiring landed in #826; ADR-107 is the repo-side twin) |
 | ADR-109 | [Ruby range literals as the notation and the semantics of numeric range refinements](109-ruby-native-range-notation.md) | Accepted (implemented: `Integer[1..10]` in #830, `Float[R]` in #844, Float narrowing in #846, the `int<a, b>` deprecation row in #854, the Float folds) |
 | ADR-110 | [An inherited declaration does not outrank the receiver's own `def`](110-inherited-declaration-precedence.md) | Accepted (WD1 + WD3 implemented in #856; measured zero new diagnostics across 25 corpus targets) |
-| ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Proposed (recommends the same-line `%a{}` carrier for #996; Steep measured — the own-line form is an error in its inline mode — so #998 is the prerequisite; nothing implemented) |
+| ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Superseded (by ADR-112; the probe measurements stand) |
+| ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
 
 ## Adding a New ADR
 

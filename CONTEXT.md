@@ -40,6 +40,14 @@ define *behaviour*.
   `spec/docs/type_shaped_comments_spec.rb`). An inline `#:` / `# @rbs` annotation is not one: it is a
   type *source* the product ingests and checks ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md)),
   here as in an adopting project, written where it says what the name and the code do not.
+- **`@extrbs`** — the opt-in typed comment channel Rigor reads in a `.rb` file: the `@rbs` tag forms
+  with Rigor's type language allowed in type positions ([ADR-111](docs/adr/111-inline-refinement-carrier.md)).
+  Rigor-only; other tools see its contract through the generated signature. Not `@rbs-ext`, which
+  rbs-inline parses as a malformed `@rbs` tag.
+- **generated signature** — the `.rbs` Rigor writes into `sig/` from type comments and inference
+  (RBS types plus `rigor:v1:` annotations): the contract other tools and downstream users read. It is
+  an input like any `sig/` file; a stale one surfaces as a contradiction with its source. A member
+  may mix generated and **hand-written** parts (ADR-107).
 - **erasure** — the conservative mapping of a carrier to spellable RBS
   (`docs/type-specification/rbs-erasure.md`).
 - **dispatch tier** — one stage of method-call resolution; the dispatcher's tier ordering is

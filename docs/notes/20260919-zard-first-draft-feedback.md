@@ -73,3 +73,33 @@ and not a replacement for a contract. The ruling does not rank it. Two questions
 - Should ZARD discourage a claim when a contract already states that type? A claim that repeats the
   contract is exactly the YARD duplication ZARD exists to avoid. One option is to let `zard-doc lint`
   flag a claim that only repeats the contract.
+
+## Addendum: the Rigor lens ([ADR-113](../adr/113-rigor-lens.md))
+
+ZARD's `CONTEXT.md` names the **Rigor lens**, and ZARD ADR-0003 names a "versioned structured Rigor
+lens result". Rigor has now decided on that surface as the `rigor lens` command. What ZARD should
+take from it:
+
+- **The schema is `lens/v0` and unfrozen until ZARD reads it.** The first ZARD slice that consumes it
+  is what promotes it to `lens/v1` on Rigor's v1.0 freeze list. Build that slice against `v0`, and
+  report what is missing before the freeze rather than after.
+- **Type strings and diagnostic sets are not part of the contract.** They improve with the engine
+  (ADR-50 § Decision 3). The contract covers structure: declarations, spans, provenance, and anchors.
+- **Types are spelled as `sig-gen` writes `.rbs`**: the erasure, plus `%a{rigor:v1:…}` where refined.
+  A ZARD renderer that wants `non-empty-string` in prose reads it from the annotation. It must not
+  expect a refinement in the type position.
+- **Type provenance vocabulary:** `sig`, `inline`, `extrbs`, `inferred`, `plugin:<name>`, and
+  `library`. A `Dynamic` slot carries its origin instead. ZARD's own "Provenance" term, which covers
+  source, location, syntax and origin, is broader. Map Rigor's value into ZARD's model; do not rename it.
+- **Anchors cover the leading annotation comment block plus the declaration**, as xxh3-64 truncated to
+  4 hex (`line:hash`, with an ordinal when rows share a span). A ZARD attachment keyed on an anchor
+  therefore changes when the type annotation changes. That is intended. lisplens excludes comments;
+  Rigor does not, because a Ruby type annotation lives in the comment.
+- **API documentation stays ZARD's.** The lens carries no doc prose, and ZARD overlays it. ZARD needs
+  each declaration's span and the span of its comment block. Check that `lens/v0` gives both before
+  building on it; if it does not, that is a `v0` gap to report
+  ([#1083](https://github.com/rigortype/rigor/issues/1083)).
+- **Reopenings:** members are tagged with their defining file. An **extension** (a new member) is
+  distinguished from a **redefinition** (`redefines <origin>`), and `refine` members form their own
+  group. ZARD's documentation model should keep the same distinction, rather than attaching docs for
+  a redefinition to the original method.

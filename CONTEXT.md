@@ -41,13 +41,26 @@ define *behaviour*.
   type *source* the product ingests and checks ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md)),
   here as in an adopting project, written where it says what the name and the code do not.
 - **`@extrbs`** — the opt-in typed comment channel Rigor reads in a `.rb` file: the `@rbs` tag forms
-  with Rigor's type language allowed in type positions ([ADR-111](docs/adr/111-inline-refinement-carrier.md)).
+  with Rigor's type language allowed in type positions ([ADR-112](docs/adr/112-extrbs-comment-channel.md)).
   Rigor-only; other tools see its contract through the generated signature. Not `@rbs-ext`, which
   rbs-inline parses as a malformed `@rbs` tag.
 - **generated signature** — the `.rbs` Rigor writes into `sig/` from type comments and inference
   (RBS types plus `rigor:v1:` annotations): the contract other tools and downstream users read. It is
   an input like any `sig/` file; a stale one surfaces as a contradiction with its source. A member
   may mix generated and **hand-written** parts (ADR-107).
+- **Rigor lens** — a structured map of the declarations in a file or symbol: each type slot's
+  effective type with its type provenance, plus the facts Rigor already holds about the member. One
+  model, rendered as compact text for agents and as a versioned structure for tools such as ZARD. Not
+  a second analyzer, and not the source text.
+- **type provenance** — where a slot's effective type comes from: `sig` (a `.rbs` file), `inline`
+  (`@rbs` / `#:`), `extrbs`, `inferred`, `plugin:<name>`, or `library` (gem or stdlib RBS). A
+  `Dynamic` slot carries its dynamic origin instead. Distinct from ADR-108's provenance *criterion*,
+  which asks which command produced a type an agent writes.
+- **reopening** — a project `class` / `module` body, `include`, or `prepend` that adds to a class whose
+  primary definition lives elsewhere (core, a gem, another file). Two kinds, never merged: an
+  **extension** adds a member the class did not have (ActiveSupport's `core_ext`); a **redefinition**
+  replaces one it did. _Avoid_: "monkey patch", which names both. Not ADR-26's open receiver, which is
+  about a partial RBS declaration.
 - **erasure** — the conservative mapping of a carrier to spellable RBS
   (`docs/type-specification/rbs-erasure.md`).
 - **dispatch tier** — one stage of method-call resolution; the dispatcher's tier ordering is

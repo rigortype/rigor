@@ -28,8 +28,12 @@ then went through an adversarial review, which overturned two first drafts: one 
   (consistency rule), #1076 (sig-gen; blocked by #1073 and #1074).
 - **#1059**: ADR-103 WD17 kept. The manual's `views: strict` / `lenient` pair is merged into one
   example. #1048 and #393 are closed, and #394 is unblocked.
-- **#1011, #1071, #512**: rulings posted on each; all three are now `ready-for-agent`. #1072 is closed
-  as a duplicate of #512.
+- **#1011, #1071**: rulings posted; both are `ready-for-agent`. #1072 is closed as a duplicate of #512.
+- **`rigor lens` → [ADR-113](adr/113-rigor-lens.md)** (Accepted; also reviewed adversarially). It is a
+  declaration map with type provenance and lisplens-compatible anchors, computed as a one-file
+  `check`. `type-of` adopts the same computation, which supersedes #512's "unseeded" ruling; #512
+  closes with #1083. Issues: #1080 (`def_sites`), #1081 (xxh3), #1082 (`declared_members`), #1083
+  (phase 1), #1084 (MCP / skills), #1085 (phase 2 `--annotate`, `ready-for-human`).
 - **#1046**: the 2026-09-17 ruling stands (accept, recalibrate at release prep). #1043 is closed.
   Non-gating follow-ups: #1077 (trim #1010's arity waste) and #1078 (run `release-gate.yml` on a
   schedule).
@@ -43,12 +47,13 @@ Nothing from this list. The only open ruling-type issues left are the long-stand
 
 ## What is worth picking up next
 
-Delegable, independent: #1071, #1011, #1077, #1078, #512, and #394's V3 slices (Jbuilder,
-ViewComponent, Haml/Slim). Core: #1073 → #1074 → #1075 / #1076 (in that order, one lane), #394 V2,
+Delegable, independent: #1071, #1011, #1077, #1078, #1081, #1082, and #394's V3 slices (Jbuilder,
+ViewComponent, Haml/Slim). Core: #1073 → #1074 → #1075 / #1076 (in that order, one lane); #1080 →
+#1083 → #1084 (the lens lane); #394 V2,
 #963's non-meta constant-write residue, and #1064 item 6 (low value while ADR-15 is open). Measure
 #1077 with no other measuring lane active; read `docs/agents/measurement.md` first.
 
 ## Where the worktrees are
 
 `rigor-wt/perfbench-harness-775` is kept deliberately: it is the instrument behind the #775 allocation
-work. `rigor-wt/extrbs-channel-decisions` carries this session's docs PR until it lands.
+work.

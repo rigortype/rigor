@@ -3451,10 +3451,8 @@ module Rigor
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
       def block_entry_scope(block_node, expected, narrowed_self_type: nil)
-        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
-        block_scope = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
-          acc.with_local(name, type)
-        end
+        block_scope = BlockParameterBinder.new(expected_param_types: expected)
+                                          .bind_onto(block_node, scope.entering_opaque_block)
         return block_scope unless narrowed_self_type
 
         block_scope.with_self_type(narrowed_self_type)
@@ -4021,9 +4019,8 @@ module Rigor
       # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
       # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
       def captured_exit_bindings(block, param_types, bindings, names)
-        params = BlockParameterBinder.new(expected_param_types: param_types).bind(block)
         entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
-        entry = params.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
         _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
         names.to_h { |name| [name, exit_scope.local(name)] }
       end
@@ -4437,9 +4434,9 @@ module Rigor
       # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local the body rebinds
       # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
       def type_block_body_with_param(block_node, expected_param_types, captured: nil)
-        bindings = BlockParameterBinder.new(expected_param_types: expected_param_types).bind(block_node)
         block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
-        block_scope = bindings.reduce(block_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
+                                          .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope)
       rescue StandardError
         nil

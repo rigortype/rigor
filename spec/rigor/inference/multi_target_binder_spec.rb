@@ -117,4 +117,80 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result).to eq(b: constant(2))
     end
   end
+
+  # Issue #1093. Every decline below is paired with a neighbour that still decomposes, so a construction
+  # error that widens everything to `Dynamic[top]` cannot pass the declines on its own.
+  describe ".bind_marked over an Array[T] right-hand side" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:dyn) { Rigor::Type::Combinator.untyped }
+
+    def array_of(element)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+    end
+
+    it "binds each fixed slot to T and a named rest to Array[T], marking only the fixed slots" do
+      result = described_class.bind_marked(parse_multi_write("x, *y, z = ints"), array_of(integer))
+      expect(result.types).to eq(x: integer, y: array_of(integer), z: integer)
+      expect(result.optimistic).to contain_exactly(:x, :z)
+    end
+
+    it "binds the rest-free and leading-rest forms consistently" do
+      pair = described_class.bind_marked(parse_multi_write("a, b = ints"), array_of(integer))
+      expect(pair.types).to eq(a: integer, b: integer)
+      expect(pair.optimistic).to contain_exactly(:a, :b)
+
+      leading = described_class.bind_marked(parse_multi_write("*a, b = ints"), array_of(integer))
+      expect(leading.types).to eq(a: array_of(integer), b: integer)
+      expect(leading.optimistic).to contain_exactly(:b)
+    end
+
+    it "decomposes through a Difference base (non-empty-array[T] after an empty? guard)" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(integer)
+      expect(non_empty).to be_a(Rigor::Type::Difference)
+      result = described_class.bind_marked(parse_multi_write("first, *rest = ints"), non_empty)
+      expect(result.types).to eq(first: integer, rest: array_of(integer))
+    end
+
+    it "recurses into nested targets with T as the new right-hand side, inheriting the mark" do
+      element = tuple(integer, string)
+      result = described_class.bind_marked(parse_multi_write("(p, q), r = pairs"), array_of(element))
+      expect(result.types).to eq(p: integer, q: string, r: element)
+      expect(result.optimistic).to contain_exactly(:p, :q, :r)
+    end
+
+    it "marks the names under an optimistic parent slot even when the slot itself is a Tuple" do
+      node = Prism.parse("foo { |(g, h)| g }").value.statements.body.first.block.parameters.parameters.requireds.first
+      result = described_class.bind_marked(node, tuple(integer, string), optimistic: true)
+      expect(result.types).to eq(g: integer, h: string)
+      expect(result.optimistic).to contain_exactly(:g, :h)
+    end
+
+    it "keeps Dynamic[top] per slot for raw Array, Array[untyped] and Dynamic[Array[T]]" do
+      node = parse_multi_write("a, *r = xs")
+      [
+        Rigor::Type::Combinator.nominal_of("Array"),
+        array_of(dyn),
+        Rigor::Type::Combinator.dynamic(array_of(integer))
+      ].each do |carrier|
+        result = described_class.bind_marked(node, carrier)
+        expect(result.types).to eq(a: dyn, r: dyn), "for #{carrier.describe}"
+        expect(result.optimistic).to be_empty
+      end
+    end
+
+    it "leaves Tuple decomposition unmarked" do
+      result = described_class.bind_marked(parse_multi_write("a, b = [1, 2]"), tuple(constant(1), constant(2)))
+      expect(result.types).to eq(a: constant(1), b: constant(2))
+      expect(result.optimistic).to be_empty
+    end
+
+    it "records the mark on the scope through Result#apply_to" do
+      result = described_class.bind_marked(parse_multi_write("a, *r = ints"), array_of(integer))
+      scope = result.apply_to(Rigor::Scope.empty)
+      expect(scope.local(:a)).to eq(integer)
+      expect(scope.optimistic_local(:a)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+      expect(scope.optimistic_local(:r)).to be_nil
+    end
+  end
 end

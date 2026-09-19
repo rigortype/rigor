@@ -111,22 +111,28 @@ module GraphQL
     def self.query: (?Class? new_query_object) ?{ () -> untyped } -> Class?
     def self.mutation: (?Class? new_mutation_object) ?{ () -> untyped } -> Class?
     def self.subscription: (?Class? new_subscription_object) ?{ () -> untyped } -> Class?
-    def self.directive: (untyped new_directive) -> Class
+    # Runtime returns the stored Class under a visibility profile, otherwise the
+    # `add_type_and_traverse` result — the union is untyped (schema.rb `directive`).
+    def self.directive: (untyped new_directive) -> untyped
     def self.directives: (*untyped) -> ::Hash[untyped, untyped]
     def self.orphan_types: (*untyped new_orphan_types) -> ::Array[untyped]
-    def self.trace_with: (untyped trace_mod, **untyped options) -> ::Array[untyped]
-    def self.instrument: (untyped instrument_step, untyped instrumenter, **untyped options) -> ::Array[untyped]
-    def self.rescue_from: (*untyped err_classes) ?{ (untyped err) -> void } -> ::Hash[untyped, untyped]
-    def self.error_handler: (?untyped new_error_handler) -> untyped
+    # `mode:` as an Array re-enters once per element and returns that Array; the
+    # default path ends in `add_trace_options_for`, which returns nil.
+    def self.trace_with: (untyped trace_mod, **untyped options) -> ::Array[untyped]?
+    def self.instrument: (untyped instrument_step, untyped instrumenter, ?untyped options) -> ::Array[untyped]
+    # Returns `err_classes.each`'s receiver — the exception-class Array, not the
+    # handlers Hash (schema.rb `rescue_from`).
+    def self.rescue_from: (*untyped err_classes) ?{ (untyped err) -> void } -> ::Array[untyped]
+    def self.error_handlers: () -> ::Hash[untyped, untyped]
     def self.max_depth: (?Integer? new_max_depth, ?count_introspection_fields: bool) -> Integer?
     def self.max_complexity: (?untyped new_max_complexity, ?count_introspection_fields: bool) -> untyped
     def self.max_query_string_tokens: (?Integer? new_max_tokens) -> Integer?
     def self.validate_max_errors: (?Integer? new_validate_max_errors) -> Integer?
-    def self.max_validation_errors: (?Integer? new_max_validation_errors) -> Integer?
+
     def self.error_bubbling: (?bool? new_error_bubbling) -> bool
     def self.default_max_page_size: (?Integer? new_default_max_page_size) -> Integer?
     def self.default_page_size: (?Integer? new_default_page_size) -> Integer?
-    def self.default_filter: (?untyped new_default_filter) -> untyped
+
     def self.cursor_encoder: (?Class? new_encoder) -> Class?
     def self.context_class: (?Class? new_context_class) -> Class?
     def self.connections: (?untyped new_connections) -> untyped
@@ -155,7 +161,6 @@ module GraphQL
         def visible?: (untyped context) -> bool
         def authorized?: (untyped object, untyped context) -> bool
         def mutation: (?Class? mutation_class) -> Class?
-        def metadata: () -> ::Hash[untyped, untyped]
         def to_graphql: () -> untyped
         def kind: () -> untyped
         def path: () -> String
@@ -182,12 +187,13 @@ module GraphQL
                    , ?untyped desc_positional
                    , **untyped kwargs
                    ) ?{ (GraphQL::Schema::Field) -> void } -> GraphQL::Schema::Field
-        def add_field: (GraphQL::Schema::Field field_defn, **untyped kwargs) -> GraphQL::Schema::Field
+        # Runtime ends in a bare `nil` after mutating `own_fields` (has_fields.rb).
+        def add_field: (GraphQL::Schema::Field field_defn, **untyped kwargs) -> nil
         def field_class: (?Class? new_field_class) -> Class
-        def global_id_field: (untyped field_name, **untyped kwargs) -> GraphQL::Schema::Field
+        # Ends in `define_singleton_method(field_name)`, which returns the Symbol.
+        def global_id_field: (untyped field_name, **untyped kwargs) -> ::Symbol
         def fields: (?untyped context) -> ::Hash[untyped, untyped]
         def get_field: (untyped field_name, ?untyped context) -> GraphQL::Schema::Field?
-        def has_field?: (untyped field_name, ?untyped context) -> bool
       end
 
       module HasInterfaces
@@ -247,7 +253,6 @@ module GraphQL
       def self.field_arguments: (?untyped context) -> ::Hash[untyped, untyped]
       def self.extension: (untyped extension, **untyped options) -> untyped
       def self.extensions: () -> ::Array[untyped]
-      def self.rescue_from: (*untyped err_classes) ?{ (untyped err) -> void } -> ::Hash[untyped, untyped]
       def self.authorizes?: (untyped context) -> bool
 
       attr_reader object: untyped
@@ -328,7 +333,9 @@ module GraphQL
       def self.locations: (*untyped new_locations) -> ::Array[untyped]
       def self.repeatable: (?bool? new_repeatable) -> bool
       def self.on: (*untyped new_locations) -> ::Array[untyped]
-      def self.include?: (untyped directive_name) -> bool
+      # Runtime takes the runtime object, argument values, and query context
+      # (directive.rb `include?` delegates to `static_include?`).
+      def self.include?: (untyped object, untyped arguments, untyped context) -> bool
     end
 
     # `Field`/`Argument` are definition objects, not schema members —

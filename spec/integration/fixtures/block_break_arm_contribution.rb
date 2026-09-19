@@ -48,7 +48,7 @@ def each_with_break(xs, flag)
   end
 end
 
-assert_type("7 | Array", each_with_break([1, 2], some_bool))
+assert_type("7 | Array[Integer]", each_with_break([1, 2], some_bool))
 
 # A bare `break` carries nil, so the call becomes optional.
 def each_with_bare_break(xs, flag)
@@ -57,7 +57,7 @@ def each_with_bare_break(xs, flag)
   end
 end
 
-assert_type("Array?", each_with_bare_break([1, 2], some_bool))
+assert_type("Array[Integer]?", each_with_bare_break([1, 2], some_bool))
 
 # `find` answers an element or nil; the arm joins that. The Tuple
 # receiver folds the element side to `1` — the first position, which is
@@ -144,7 +144,7 @@ def multi_value_arm(xs, flag)
   end
 end
 
-assert_type('Array | [1, "x"]', multi_value_arm([1, 2], some_bool))
+assert_type('Array[Integer] | [1, "x"]', multi_value_arm([1, 2], some_bool))
 
 # Flow sensitivity comes free from the evaluator's dead-arm skip: `x` is
 # pinned per position, so `x.nil?` folds to false and the arm is never

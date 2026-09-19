@@ -7,6 +7,7 @@ require_relative "../range_constant"
 require_relative "../rbs_type_translator"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
+require_relative "../mutation_widening"
 require_relative "overload_selector"
 
 module Rigor
@@ -209,7 +210,7 @@ module Rigor
               type_vars: type_vars,
               block_type: block_type,
               environment: environment,
-              self_type_override: self_type_override,
+              self_type_override: self_type_override || receiver_self_type(receiver, receiver_args, method_name),
               scope: scope,
               call_node: call_node
             )
@@ -304,6 +305,40 @@ module Rigor
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end
+          end
+
+          # Issue #1092 — the substitute for `Bases::Self` on an instance receiver whose projection carries
+          # type arguments, so `Array[Integer]#tap {}` answers `Array[Integer]` rather than the raw `Array`
+          # the class name alone builds. Nil keeps that raw nominal.
+          #
+          # A shape carrier substitutes its projected nominal, never itself: the pure self-returners
+          # already keep the shape through ShapeDispatch (ADR-76 WD3), and a block can mutate the receiver
+          # through its yielded alias, which MutationWidening does not follow. For the same reason every
+          # value-pinned argument widens to its nominal base: `[:a].tap { |l| l << :b }` answering
+          # `Array[:a]` would fold `.last == :b` to false on correct code. A shape mutator keeps the raw
+          # nominal, as the call's value is the post-mutation carrier. A `Dynamic` receiver keeps its
+          # wrapping.
+          def receiver_self_type(receiver, receiver_args, method_name)
+            return nil if receiver_args.empty?
+
+            case receiver
+            when Type::Nominal
+              self_nominal(receiver.class_name, receiver_args)
+            when Type::Tuple
+              self_nominal("Array", receiver_args) unless MutationWidening::ARRAY_MUTATORS.include?(method_name)
+            when Type::HashShape
+              self_nominal("Hash", receiver_args) unless MutationWidening::HASH_MUTATORS.include?(method_name)
+            when Type::Refined, Type::Difference
+              receiver_self_type(receiver.base, receiver_args, method_name)
+            when Type::Dynamic
+              inner = receiver_self_type(receiver.static_facet, receiver_args, method_name)
+              inner && Type::Combinator.dynamic(inner)
+            end
+          end
+
+          def self_nominal(class_name, receiver_args)
+            type_args = receiver_args.map { |arg| Type::Combinator.widen_value_pinned(arg) }
+            Type::Combinator.nominal_of(class_name, type_args: type_args)
           end
 
           # ADR-48 — project a `Data`/`Struct` member carrier to its tagging class (or the `Data`/`Struct`
@@ -428,13 +463,16 @@ module Rigor
               end
             # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
             # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
-            # fallback returns the caller's type, not Object.
+            # fallback returns the caller's type, not Object. `dispatch_one` also routes the receiver's
+            # type-argument-bearing projection through it ({receiver_self_type}, #1092).
             self_type = self_type_override || resolved_self_type
 
             candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
-              self_type: self_type,
+              # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
+              # read the static facet, as they did before the substitute carried the wrapping.
+              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: !block_type.nil?,

@@ -110,7 +110,7 @@ RSpec.describe "block `break` arm union", type: :runner do
     end
 
     it "unions a `break` arm with the receiver `each` returns" do
-      expect(dumped_type(<<~RUBY)).to eq("7 | Array")
+      expect(dumped_type(<<~RUBY)).to eq("7 | Array[Integer]")
         flag = [true, false].sample
         dump_type([1, 2, 3].each { |_x| break 7 if flag })
       RUBY

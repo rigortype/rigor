@@ -174,6 +174,94 @@ RSpec.describe Rigor::Inference::BlockCallTiming do
       end
     end
 
+    # Re-review of #1095: the block-return pass types a self-call to a project-overridden `raise` / `exit` as
+    # Kernel's `bot` too, so only the syntactic walk can see the override — and any project definition of the
+    # name declines it.
+    describe "project overrides of the non-returning names" do
+      let(:cli) do
+        <<~RUBY
+          module SoftExit
+            def exit(*) = nil
+          end
+
+          class Cli
+            include SoftExit
+
+            def raise(*) = :swallowed
+            def abort(*) = nil
+            def self.exit(*) = nil
+            def flag = [true, false].sample
+
+            def self.go = dump_type([1, 2].tap { exit })
+
+            def via_raise
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { raise "x" })
+            end
+
+            def via_exit
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { exit })
+            end
+
+            def via_abort
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { abort })
+            end
+
+            def via_self_raise
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { self.raise "x" })
+            end
+
+            def via_fail
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { fail "x" })
+            end
+
+            def symptom
+              ints = [2, 3].map { |x| x + 1 }
+              s = flag ? ints.tap { raise "boom" } : "str"
+              s.push(1) if s.respond_to?(:push)
+            end
+          end
+
+          class Sub < Cli
+            def go2
+              ints = [2, 3].map { |x| x + 1 }
+              dump_type(ints.tap { raise "x" })
+            end
+          end
+        RUBY
+      end
+
+      let(:result) { analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{cli})) }
+
+      # The dumps in source order: `self.go`, `via_raise`, `via_exit`, `via_abort`, `via_self_raise`,
+      # `via_fail`, `Sub#go2`.
+      def dumps
+        result.diagnostics.select { |d| d.message.start_with?("dump_type") }.sort_by(&:line)
+              .map { |d| d.message.delete_prefix("dump_type: ") }
+      end
+
+      it "keeps the receiver for an overridden raise, exit, abort and self.raise" do
+        expect(dumps[1..4]).to eq(["Array[Integer]"] * 4)
+      end
+
+      it "keeps the receiver on the singleton side and in an inheriting subclass" do
+        expect(dumps.first).not_to eq("bot")
+        expect(dumps.last).to eq("Array[Integer]")
+      end
+
+      it "still types the un-overridden fail as bot" do
+        expect(dumps[5]).to eq("bot")
+      end
+
+      it "fires no undefined method on the ternary's other arm" do
+        expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
+      end
+    end
+
     describe "the review's `loop` repros produce no diagnostic" do
       def diagnostics_for(source)
         analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics

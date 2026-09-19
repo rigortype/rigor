@@ -120,7 +120,19 @@ module Rigor
           return true if node.arguments&.arguments&.any? { |argument| never_completes_normally?(argument, scope) }
           return false unless NON_RETURNING_CALLS.include?(node.name)
 
-          kernel_spelled_receiver?(node.receiver) && scope.top_level_def_for(node.name).nil?
+          kernel_spelled_receiver?(node.receiver) && !project_defines_anywhere?(node.name, scope)
+        end
+
+        # Deliberately coarse: ANY project definition of the name — top-level, on any class or module, either
+        # side, or a `pre_eval:` patch — declines. Resolving the call-site `self`'s ancestry precisely buys
+        # nothing for names this rare, and the block-return pass is no independent check here: it types a
+        # self-call to an overridden `raise` as Kernel's `bot` too, so a missed override is a wrong `bot`.
+        def project_defines_anywhere?(method_name, scope)
+          return true if scope.top_level_def_for(method_name)
+          return true if scope.discovered_methods.any? { |_class_name, table| table.key?(method_name) }
+
+          patched = scope.environment&.project_patched_methods
+          !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }
         end
 
         # Implicit self, `self.`, or the `Kernel` module itself — the spellings that reach Kernel's function.

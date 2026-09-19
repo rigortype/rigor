@@ -1400,12 +1400,13 @@ module Rigor
       # method definition, or selected overload does not provide statically declared block
       # parameter types. Callers MUST treat the empty array as "no information"; the binder
       # falls back to `Dynamic[Top]` for every parameter slot in that case.
-      def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil)
+      def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil,
+                                     scope: nil)
         return [] if receiver_type.nil?
 
         context = CallContext.build(
           receiver: receiver_type, method_name: method_name,
-          args: arg_types, environment: environment
+          args: arg_types, environment: environment, scope: scope
         )
         iterator_result = IteratorDispatch.block_param_types(context)
         return iterator_result if iterator_result

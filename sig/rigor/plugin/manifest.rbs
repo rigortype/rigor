@@ -3,7 +3,7 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped, ?effect_root: untyped, ?effect_labels: untyped, ?effect_attributions: untyped, ?effect_edges: untyped, ?effect_entry_points: untyped, ?effect_ancestry: untyped, ?template_globs: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?rbs_complete_ancestors: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped, ?effect_root: untyped, ?effect_labels: untyped, ?effect_attributions: untyped, ?effect_edges: untyped, ?effect_entry_points: untyped, ?effect_ancestry: untyped, ?template_globs: untyped) -> void
 
   # Public attribute readers (the full `attr_reader` surface). Plugins
   # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
@@ -25,6 +25,7 @@ class Rigor::Plugin::Manifest
   def consumes: () -> untyped
   def owns_receivers: () -> untyped
   def open_receivers: () -> untyped
+  def rbs_complete_ancestors: () -> untyped
   def type_node_resolvers: () -> untyped
   def block_as_methods: () -> untyped
   def heredoc_templates: () -> untyped

@@ -49,7 +49,8 @@ module Rigor
       attr_reader :target_gems
 
       attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
-                  :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
+                  :owns_receivers, :open_receivers, :rbs_complete_ancestors, :type_node_resolvers,
+                  :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
                   :source_rbs_synthesizer, :additional_initializers,
@@ -62,10 +63,11 @@ module Rigor
       # is never asked, and a run whose plugins declare none does no extra globbing at all.
       attr_reader :template_globs
 
-      def initialize( # rubocop:disable Metrics/ParameterLists
+      def initialize( # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
         id:, version:,
         description: nil, config_schema: {}, target_gems: [],
-        produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
+        produces: [], consumes: [], owns_receivers: [], open_receivers: [], rbs_complete_ancestors: [],
+        type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
@@ -80,6 +82,7 @@ module Rigor
         validate_target_gems!(target_gems)
         validate_owns_receivers!(owns_receivers)
         validate_open_receivers!(open_receivers)
+        validate_rbs_complete_ancestors!(rbs_complete_ancestors)
         validate_type_node_resolvers!(type_node_resolvers)
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
@@ -99,6 +102,7 @@ module Rigor
                       hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
         assign_target_gems(target_gems)
+        assign_rbs_complete_ancestors(rbs_complete_ancestors)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
@@ -138,6 +142,12 @@ module Rigor
         @target_gems = target_gems.map { |g| g.to_s.dup.freeze }.uniq.freeze
       end
       private :assign_target_gems
+
+      # ADR-43 WD4 — assigned outside assign_fields (which already carries the maximum positional arity).
+      def assign_rbs_complete_ancestors(rbs_complete_ancestors)
+        @rbs_complete_ancestors = rbs_complete_ancestors.map { |c| c.to_s.dup.freeze }.freeze
+      end
+      private :assign_rbs_complete_ancestors
 
       # Assigned outside assign_fields (which already carries the maximum positional arity) — set in
       # `initialize` before the final freeze. ADR-36 nested-class emission tier.
@@ -214,7 +224,7 @@ module Rigor
         errors
       end
 
-      def to_h # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def to_h # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
         {
           "id" => id,
           "version" => version,
@@ -226,6 +236,7 @@ module Rigor
           "consumes" => consumes.map { |c| consumption_hash(c) },
           "owns_receivers" => owns_receivers,
           "open_receivers" => open_receivers,
+          "rbs_complete_ancestors" => rbs_complete_ancestors,
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
@@ -405,6 +416,20 @@ module Rigor
       # routes dispatch); this one only suppresses the diagnostic.
       def validate_open_receivers!(open_receivers)
         validate_array_of!("open_receivers", open_receivers, "non-empty String") { |c| c.is_a?(String) && !c.empty? }
+      end
+
+      # ADR-43 WD4 — `rbs_complete_ancestors:` declares the class names this plugin's bundled RBS covers
+      # COMPLETELY: a method call the signature does not declare is genuinely absent at runtime. A
+      # Ruby-source subclass of a listed class may then bridge inherited calls to the ancestor's RBS
+      # (the ADR-43 allow-list's manifest-declared half). The dual of `open_receivers:` — that field
+      # marks a class open to suppress diagnostics on an unbounded surface; this one marks a class
+      # closed to ENABLE them on subclasses. Listing a class whose signature is partial would turn
+      # every omitted inherited method into a `call.undefined-method` false positive on subclass
+      # receivers, so only classes the plugin's `signature_paths:` declares exhaustively belong here.
+      def validate_rbs_complete_ancestors!(rbs_complete_ancestors)
+        validate_array_of!("rbs_complete_ancestors", rbs_complete_ancestors, "non-empty String") do |c|
+          c.is_a?(String) && !c.empty?
+        end
       end
 
       # ADR-13 slice 2 — `type_node_resolvers:` declares the plugin-supplied `TypeNodeResolver` instances the

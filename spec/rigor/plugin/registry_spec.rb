@@ -23,6 +23,13 @@ class RigorPluginRegistrySpecOpenPlugin < Rigor::Plugin::Base
            open_receivers: ["ActiveRecord::Relation"])
 end
 
+# ADR-43 WD4 — a named plugin class declaring `rbs_complete_ancestors:`, for the
+# `Registry#rbs_complete_ancestors` / `#rbs_complete_ancestor?` tests.
+class RigorPluginRegistrySpecRbsAncestorPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-rbs-ancestor-plugin", version: "0.0.1",
+           rbs_complete_ancestors: ["GraphQL::Schema::Object"])
+end
+
 # ADR-28 — a named plugin class declaring `protocol_contracts:`, for the `Registry#protocol_contracts` /
 # `#contracts_for_path` tests.
 class RigorPluginRegistrySpecContractPlugin < Rigor::Plugin::Base
@@ -220,6 +227,25 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.open_receiver?("ActiveRecord::Relation")).to be(true)
       expect(registry.open_receiver?("String")).to be(false)
       expect(registry.open_receiver?(nil)).to be(false)
+    end
+  end
+
+  describe "#rbs_complete_ancestors / #rbs_complete_ancestor? (ADR-43 WD4)" do
+    it "is empty when no plugin declares rbs_complete_ancestors" do
+      expect(described_class::EMPTY.rbs_complete_ancestors).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.rbs_complete_ancestors).to eq([])
+      expect(registry.rbs_complete_ancestor?("GraphQL::Schema::Object")).to be(false)
+    end
+
+    it "aggregates declared rbs_complete_ancestors and answers the membership predicate" do
+      ancestor_plugin = RigorPluginRegistrySpecRbsAncestorPlugin.new(services: services)
+      registry = described_class.new(plugins: [ancestor_plugin])
+
+      expect(registry.rbs_complete_ancestors).to eq(%w[GraphQL::Schema::Object])
+      expect(registry.rbs_complete_ancestor?("GraphQL::Schema::Object")).to be(true)
+      expect(registry.rbs_complete_ancestor?("String")).to be(false)
+      expect(registry.rbs_complete_ancestor?(nil)).to be(false)
     end
   end
 

@@ -290,6 +290,33 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["open_receivers"]).to eq(%w[ActiveRecord::Relation])
     end
 
+    it "accepts rbs_complete_ancestors as an Array of class-name Strings (ADR-43 WD4)" do
+      m = described_class.new(
+        id: "graphql", version: "0.1.0",
+        rbs_complete_ancestors: ["GraphQL::Schema::Object"]
+      )
+      expect(m.rbs_complete_ancestors).to eq(%w[GraphQL::Schema::Object])
+      expect(m.rbs_complete_ancestors).to be_frozen
+    end
+
+    it "defaults rbs_complete_ancestors to an empty array" do
+      m = described_class.new(id: "graphql", version: "0.1.0")
+      expect(m.rbs_complete_ancestors).to eq([])
+    end
+
+    it "rejects non-String / empty-String rbs_complete_ancestors entries" do
+      expect do
+        described_class.new(id: "graphql", version: "0.1.0", rbs_complete_ancestors: [:Foo])
+      end.to raise_error(ArgumentError, /rbs_complete_ancestors/)
+    end
+
+    it "round-trips rbs_complete_ancestors through to_h" do
+      m = described_class.new(
+        id: "graphql", version: "0.1.0", rbs_complete_ancestors: ["GraphQL::Schema::Object"]
+      )
+      expect(m.to_h["rbs_complete_ancestors"]).to eq(%w[GraphQL::Schema::Object])
+    end
+
     it "accepts signature_paths as an Array of relative-path Strings (ADR-25)" do
       m = described_class.new(
         id: "as", version: "0.1.0", signature_paths: ["sig", "sig/overlay"]
@@ -742,6 +769,7 @@ RSpec.describe Rigor::Plugin::Manifest do
       [:produces, [123], "Symbol/String"],
       [:owns_receivers, [""], "non-empty String"],
       [:open_receivers, [""], "non-empty String"],
+      [:rbs_complete_ancestors, [""], "non-empty String"],
       [:type_node_resolvers, [:x], "Rigor::Plugin::TypeNodeResolver instances"],
       [:block_as_methods, [:x], "Rigor::Plugin::Macro::BlockAsMethod instances"],
       [:heredoc_templates, [:x], "Rigor::Plugin::Macro::HeredocTemplate instances"],

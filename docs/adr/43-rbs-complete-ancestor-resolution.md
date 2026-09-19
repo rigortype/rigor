@@ -148,13 +148,19 @@ RBS omits.
   contract; revisit if a use case appears). The walk reuses ADR-24's existing
   `discovered_superclasses` map — no new bookkeeping.
 
-- **WD4 — Allow-list sourcing: constant now, plugin-manifest later.** v1 hard-
-  codes the constant. A future iteration MAY let a plugin declare "my contract
-  base is RBS-complete" through the manifest (the ADR-37 / ADR-40 declarative
-  route), so an out-of-tree plugin gem can opt its own `Base`-like class in
-  without editing the engine. Deferred because the seed needs no it and the
-  manifest surface is real design cost; recorded so the constant is understood
-  as a placeholder, not the endpoint.
+- **WD4 — Allow-list sourcing: constant seed + plugin-manifest declarations
+  (manifest half DONE, #1100).** v1 hard-coded the constant. The manifest
+  route has since landed: a plugin declares `rbs_complete_ancestors:` naming
+  the classes its bundled `signature_paths:` covers completely, and
+  `RbsDispatch` consults the aggregate set (`Plugin::Registry#rbs_complete_ancestor?`)
+  alongside the constant. rigor-graphql is the first consumer — graphql-ruby
+  ships no RBS, so the plugin's bundled sig IS the authority for
+  `GraphQL::Schema::Object` and friends, and a source `class PostType <
+  GraphQL::Schema::Object` resolves inherited `field`/`argument`/… calls
+  through the bridge. The constant remains the seed for the engine's own
+  `Plugin::Base` contract. Listing a class is a claim of completeness:
+  pairing it with `open_receivers:` (as rigor-graphql does) keeps genuinely
+  absent methods diagnostic-free while declared signatures still type-check.
 
 - **WD5 — Measurement gate before flag-on.** Because precision and
   `undefined-method`-firing are coupled (Context), the change ships behind a
@@ -206,7 +212,8 @@ RBS omits.
   yet target the plugin tree, and the allow-list reaches the goal now with less
   surface. Revisit if sig-gen coverage lands.
 
-- **(deferred) Plugin-manifest-declared allow-list** — folded into WD4.
+- **(DONE, #1100) Plugin-manifest-declared allow-list** — landed as the
+  `rbs_complete_ancestors:` manifest field; see WD4.
 
 ## Relationship to other ADRs
 

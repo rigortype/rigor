@@ -149,7 +149,8 @@ module Rigor
             receiver: context.receiver,
             method_name: context.method_name,
             args: context.args,
-            environment: environment
+            environment: environment,
+            scope: context.scope
           )
         end
 
@@ -376,15 +377,23 @@ module Rigor
           # `class_name` is itself RBS-known (the direct lookup already had authority), or when the
           # discovered chain reaches no allow-listed class. The walk carries a visited set so a malformed
           # cyclic `A < B < A` source cannot loop.
+          #
+          # ADR-43 WD4 — the allow-list's manifest-declared half: a loaded plugin may name its own
+          # contract classes in `rbs_complete_ancestors:` (e.g. rigor-graphql's `GraphQL::Schema::Object`),
+          # extending the engine's hard-coded seed without editing this constant.
           def allowed_rbs_complete_ancestor(environment, class_name, scope)
             return nil if scope.nil?
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
+            registry = environment&.plugin_registry
             supers = scope.discovered_superclasses
             seen = {}
             current = supers[class_name.to_s]
             until current.nil? || seen[current]
-              return current if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(current)
+              if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(current) ||
+                 registry&.rbs_complete_ancestor?(current)
+                return current
+              end
 
               seen[current] = true
               current = supers[current]
@@ -764,11 +773,11 @@ module Rigor
 
           # ----- block parameter probe (Phase C sub-phase 1) -----
 
-          def probe_block_param_types(receiver:, method_name:, args:, environment:)
+          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil)
             args ||= []
             case receiver
-            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment)
-            else                  probe_block_param_types_one(receiver, method_name, args, environment)
+            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment, scope)
+            else                  probe_block_param_types_one(receiver, method_name, args, environment, scope)
             end
           end
 
@@ -776,9 +785,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment)
+              probe_block_param_types_one(member, method_name, args, environment, scope)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -786,12 +795,12 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope)
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
             return [] unless method_definition
 
             type_vars = build_type_vars(environment, class_name, receiver_args)

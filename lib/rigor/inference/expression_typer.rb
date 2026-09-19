@@ -3356,7 +3356,8 @@ module Rigor
           receiver_type: receiver_type,
           method_name: call_node.name,
           arg_types: arg_types,
-          environment: scope.environment
+          environment: scope.environment,
+          scope: scope
         )
         block_return_for(block_arg, expected, narrowed_self_type: block_body_self_narrowing(call_node, receiver_type))
       rescue StandardError
@@ -3432,7 +3433,8 @@ module Rigor
           receiver_type: receiver,
           method_name: call_node.name,
           arg_types: call_arg_types(call_node),
-          environment: scope.environment
+          environment: scope.environment,
+          scope: scope
         )
       end
 

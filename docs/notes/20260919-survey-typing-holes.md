@@ -226,9 +226,13 @@ Filed 2026-09-19 (all independent):
   generic application (~130 mangrove sites).
 - **#1099 (area:plugins)** — rigor-grape: new plugin for the Grape endpoint DSL; ~10k
   gitlab implicit-self sites (`expose`/`requires`/`optional`/`route_setting`/`desc`/`params`).
+  Done — merged as #1111.
 - **#1100 (area:plugins)** — rigor-graphql: type `field`/`argument` DSL call sites (~5k
   gitlab sites); the plugin publishes fact tables but no expression typing, and gitlab's
   config did not enable it. Adjacent to #136 (resolver checks).
+  Done — merged as #1106.
+- **#1117 (area:plugins)** — rigor-grape `desc … do` bodies bind `self` to
+  `Grape::DSL::Desc::ConfigContext`. Done — merged as #1118.
 - **#1101 (area:engine)** — `Parameters?` (Difference-receiver) dispatch: `present?`/`==`/
   `blank?`/`to_s` on `Parameters − nil` read opaque on mastodon/redmine/gitlab; the next
   layer under the fixed `Parameters#[]`.
@@ -271,6 +275,36 @@ ancestor walks (the ADR-43 bridge and the new macro narrowing) now resolve as-wr
 superclass names through `ancestor_name_candidates` — the raw table lookup died on
 `class AccessRequests < ::API::Base`-style rooted spellings, which is the dominant
 gitlab shape.
+
+## Post-merge corpus sweep (2026-09-20): #1106 + #1111 + #1118 landed
+
+Both plugin PRs survived a GPT-5.6-Sol adversarial review (via Codex) before merge;
+the review's confirmed findings — runtime-mismatched return types, methods absent at
+the supported versions, and an RBS-bridge precedence bug where a bridged ancestor
+shadowed a nearer source-defined method — were fixed and re-verified upstream. A
+follow-up pass bound `desc … do` bodies to `Grape::DSL::Desc::ConfigContext` (#1117,
+merged as #1118), closing the largest deferred cluster the grape run left behind.
+
+The full 32-target corpus was re-run on a worktree at post-merge master (`faae6273`,
+artifacts `*.merged.*`), then gitlab was re-run again at `9ec52001` with the `desc`
+fix (`gitlab.descfix.*`):
+
+| scope | baseline | post-merge |
+| --- | --- | --- |
+| corpus precision | 63.67% (2,057,615 / 3,231,851) | **64.80%** (+1.13pp) |
+| corpus opaque sites | 1,170,398 | **1,133,693** (−36,705) |
+| gitlab precision | 59.68% | **62.08%** (+2.40pp) |
+| gitlab lib/api holes | 62,091 | **44,553** (−28.2%) |
+
+The `desc` binding alone moved lib/api holes 48,811 → 44,553; every recovered name
+is a ConfigContext setter (`is_array` −181, `success`/`failure`/`tags`/`hidden`
+families ~−1,900 combined), with zero new hole names and an identical diagnostic
+count (4,773 — no FPs, no lost warnings). Non-gitlab deltas in the sweep come from
+the other master commits that landed between the census and post-merge worktrees.
+
+Remaining levers, in measured order: #1097 (Sorbet `sig` DSL, ~58k corpus sites —
+largest single artifact), #1101 (Difference-receiver dispatch), #1102
+(BroadcastLogger / cache-store RBS gaps), #1098 (mangrove generics).
 
 ## What this note does not claim
 

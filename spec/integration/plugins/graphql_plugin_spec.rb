@@ -519,7 +519,7 @@ RSpec.describe "rigor-graphql integration" do
         end
       RUBY
       expect(dump_types(source)).to eq(
-        ["Array[Dynamic[top]]", "Class?", "Hash[Dynamic[top], Dynamic[top]]",
+        ["Array[Dynamic[top]]", "Class?", "Array[Dynamic[top]]",
          "Integer?", "Array[Dynamic[top]]"]
       )
     end
@@ -541,6 +541,50 @@ RSpec.describe "rigor-graphql integration" do
         end
         class PostType < BaseObject
           Rigor.dump_type(field :title, String, null: false)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])
+    end
+
+    it "lets a project-defined override on a nearer ancestor shadow the bridged declaration" do
+      source = <<~RUBY
+        class BaseObject < GraphQL::Schema::Object
+          def self.field(*)
+            "custom"
+          end
+        end
+        class PostType < BaseObject
+          Rigor.dump_type(field :title, String)
+        end
+      RUBY
+      # Runtime dispatch reaches `BaseObject.field` (a user `def`), not
+      # `GraphQL::Schema::Object.field` — the bridge must decline so the
+      # discovered/user-def tiers answer instead of the RBS ancestor; the
+      # body re-types to the literal "custom".
+      expect(dump_types(source)).to eq(['"custom"'])
+    end
+
+    it "bridges a rooted intermediate superclass name (`class T < ::Base`)" do
+      source = <<~RUBY
+        module Types
+          class BaseObject < GraphQL::Schema::Object
+          end
+        end
+        class PostType < ::Types::BaseObject
+          Rigor.dump_type(field :title, String)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])
+    end
+
+    it "bridges a lexically relative superclass name inside its module" do
+      source = <<~RUBY
+        module Types
+          class BaseObject < GraphQL::Schema::Object
+          end
+          class PostType < BaseObject
+            Rigor.dump_type(field :title, String)
+          end
         end
       RUBY
       expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])

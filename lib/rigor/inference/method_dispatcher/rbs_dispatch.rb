@@ -103,15 +103,33 @@ module Rigor
           rbs_ancestry_array_conversion_free?(name, scope.environment)
         end
 
+        # ADR-17's boundary for what the project's source can add to a class: a `def` in the analysed file
+        # (`Scope#discovered_method*`, walked through the source ancestry) or in a `pre_eval:` file
+        # (`Environment#project_patched_methods`). Both are asked about the class, its RBS ancestors and the
+        # default owners, because a hook added to any of them reaches the instance.
         def project_defines_array_conversion?(name, scope)
           return false if scope.nil?
 
+          owners = [name, *rbs_instance_ancestor_names(name, scope.environment),
+                    *ARRAY_CONVERSION_DEFAULT_OWNERS.map { |owner| owner.delete_prefix("::") }].uniq
+          patched = scope.environment&.project_patched_methods
+          patched = nil if patched && patched.empty?
           ARRAY_CONVERSION_HOOKS.any? do |hook|
             scope.discovered_method_through_ancestors?(name, hook, :instance) ||
-              ARRAY_CONVERSION_DEFAULT_OWNERS.any? do |owner|
-                scope.discovered_method?(owner.delete_prefix("::"), hook, :instance)
+              owners.any? do |owner|
+                scope.discovered_method?(owner, hook, :instance) ||
+                  !patched&.lookup(class_name: owner, method_name: hook, kind: :instance).nil?
               end
           end
+        end
+
+        def rbs_instance_ancestor_names(name, environment)
+          return [] if environment.nil? || !Rigor::Reflection.rbs_class_known?(name, environment: environment)
+
+          definition = Rigor::Reflection.instance_definition(name, environment: environment)
+          return [] if definition.nil?
+
+          definition.ancestors.ancestors.map { |ancestor| ancestor.name.to_s.delete_prefix("::") }
         end
 
         def rbs_ancestry_array_conversion_free?(name, environment)

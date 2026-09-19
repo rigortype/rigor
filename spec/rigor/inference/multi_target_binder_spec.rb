@@ -270,6 +270,38 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
         .to eq(a: time, b: constant(nil))
     end
 
+    # ADR-17 — a `pre_eval:` file's `def` reaches every analysed file through
+    # `Environment#project_patched_methods`, so a hook it adds to the class, an RBS ancestor of it
+    # (`Time` includes `Comparable`) or a default owner declines the wrap, core list included.
+    it "keeps Dynamic[top] when a pre_eval: file adds a conversion hook the RBS does not declare" do
+      entry = lambda do |class_name, method_name|
+        Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: class_name, method_name: method_name, kind: :instance,
+          source_path: "lib/ext.rb", source_line: 1
+        )
+      end
+      patched_scope = lambda do |*entries|
+        registry = Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+        environment = Rigor::Environment.new(rbs_loader: Rigor::Environment::RbsLoader.default,
+                                             project_patched_methods: registry)
+        Rigor::Scope.empty(environment: environment)
+      end
+      time = Rigor::Type::Combinator.nominal_of("Time")
+      node = parse_multi_write("a, b = t")
+
+      [
+        [time, entry.call("Time", :to_ary)],
+        [time, entry.call("Comparable", :method_missing)],
+        [constant(1), entry.call("Kernel", :respond_to_missing?)]
+      ].each do |value, patch|
+        expect(described_class.bind(node, value, scope: patched_scope.call(patch)))
+          .to eq({ a: dyn, b: dyn }), "for #{patch.class_name}##{patch.method_name}"
+      end
+
+      unrelated = patched_scope.call(entry.call("String", :to_url))
+      expect(described_class.bind(node, time, scope: unrelated)).to eq(a: time, b: constant(nil))
+    end
+
     it "wraps a nested slot whose value has no to_ary" do
       result = described_class.bind(parse_multi_write("(a, b), c = pair"), tuple(constant(1), constant("s")))
       expect(result).to eq(a: constant(1), b: constant(nil), c: constant("s"))

@@ -24,3 +24,19 @@ end
   assert_type("1 | 2", v)
   assert_type("Dynamic[top]", extra)
 end
+
+# Issue #1108 — numbered parameters splat as the explicit list of the
+# highest `_N` referenced: `_2` reads as `|a, b|`, `_1` alone as `|a|`,
+# and `it` never splats (CRuby: `{ a: 1 }.each { _1 }` sees `[:a, 1]`).
+{ a: 1, b: 2 }.each do
+  assert_type(":a | :b", _1)
+  assert_type("1 | 2", _2)
+end
+
+{ a: 1, b: 2 }.each do
+  assert_type("[:a | :b, 1 | 2]", _1)
+end
+
+{ a: 1, b: 2 }.each do
+  assert_type("[:a | :b, 1 | 2]", it)
+end

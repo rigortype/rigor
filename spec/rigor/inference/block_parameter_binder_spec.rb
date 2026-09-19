@@ -405,5 +405,81 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(bindings).to eq(a: yielded, b: untyped)
       end
     end
+
+    # Issue #1108 — a numbered-parameter block reads as the explicit list of `maximum` required positionals,
+    # so it auto-splats (and marks) exactly as that list does. Each case is checked against its explicit twin.
+    describe "numbered-parameter auto-splat" do
+      def array_of(element)
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+      end
+
+      def pair
+        Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+      end
+
+      def bind_both(expected, numbered_source, explicit_source)
+        [numbered_source, explicit_source].map do |source|
+          binder = described_class.new(expected_param_types: expected)
+          [binder.bind(parse_block(source)).values, binder.optimistic.size]
+        end
+      end
+
+      it "splats a Tuple across _1, _2 as |k, v| does (Hash#each shape)" do
+        numbered, explicit = bind_both([pair], "h.each { _1; _2 }", "h.each { |k, v| k }")
+        expect(numbered).to eq(explicit)
+        expect(numbered).to eq([[integer_nominal, string_nominal], 0])
+      end
+
+      it "splats an Array[T] across _1, _2 as |g, h| does, marking both optimistic" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("ints.each_slice(2) { _1 + _2 }")))
+          .to eq(_1: integer_nominal, _2: integer_nominal)
+        expect(binder.optimistic).to contain_exactly(:_1, :_2)
+
+        numbered, explicit = bind_both([array_of(integer_nominal)], "xs.each { _1 + _2 }", "xs.each { |g, h| g }")
+        expect(numbered).to eq(explicit)
+      end
+
+      it "splats when only _2 is referenced, _1 still bound" do
+        bindings = described_class.new(expected_param_types: [pair]).bind(parse_block("h.each { _2 }"))
+        expect(bindings).to eq(_1: integer_nominal, _2: string_nominal)
+      end
+
+      it "leaves a slot past the Tuple at Dynamic[Top], as |a, b, c| does" do
+        numbered, explicit = bind_both([pair], "h.each { _3 }", "h.each { |a, b, c| a }")
+        expect(numbered).to eq(explicit)
+        expect(numbered.first.last).to eq(untyped)
+      end
+
+      it "does not splat a block that references only _1, nor an `it` block, as |a| does not" do
+        [pair, array_of(integer_nominal)].each do |carrier|
+          ["h.each { _1 }", "h.each { it }", "h.each { |a| a }"].each do |source|
+            binder = described_class.new(expected_param_types: [carrier])
+            expect(binder.bind(parse_block(source)).values).to eq([carrier]), "#{source} over #{carrier.describe}"
+            expect(binder.optimistic).to be_empty
+          end
+        end
+      end
+
+      it "does not splat a two-value yield (each_with_index)" do
+        yielded = [pair, integer_nominal]
+        numbered, explicit = bind_both(yielded, "xs.each_with_index { _1; _2 }", "xs.each_with_index { |a, b| a }")
+        expect(numbered).to eq(explicit)
+        expect(numbered).to eq([[pair, integer_nominal], 0])
+      end
+
+      it "joins a union yield per position as |a, b| does" do
+        yielded = Rigor::Type::Combinator.union(pair, array_of(string_nominal))
+        numbered, explicit = bind_both([yielded], "xs.each { _1; _2 }", "xs.each { |a, b| a }")
+        expect(numbered).to eq(explicit)
+      end
+
+      it "records the marks on the scope through #bind_onto" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        scope = binder.bind_onto(parse_block("ints.each_slice(2) { _1 + _2 }"), Rigor::Scope.empty)
+        expect(scope.local(:_2)).to eq(integer_nominal)
+        expect(scope.optimistic_local(:_2)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+      end
+    end
   end
 end

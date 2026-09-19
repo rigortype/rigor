@@ -99,23 +99,19 @@ module Rigor
       end
 
       def receiver_class_inherits_from?(class_name, constraint, environment, scope = nil)
-        return true if class_name == constraint
-        return true if rbs_inherits?(class_name, constraint, environment)
+        name = class_name.to_s
+        return true if name == constraint
+        return true if rbs_inherits?(name, constraint, environment)
 
-        # Source-side ancestry — `class API < Grape::API` lives on the scope's discovered superclass
-        # table, not in the environment's RBS/registry ordering (the same reason ADR-43's bridge walks
-        # `discovered_superclasses`). Walk the chain until it reaches a name the environment can order
-        # against the constraint; a malformed cyclic `A < B < A` cannot loop thanks to `seen`.
-        supers = scope&.discovered_superclasses
-        seen = {}
-        current = supers&.[](class_name.to_s)
-        until current.nil? || seen[current]
-          return true if current == constraint || rbs_inherits?(current, constraint, environment)
-
-          seen[current] = true
-          current = supers[current]
-        end
-        false
+        # Source-side ancestry — `class API < Grape::API` lives on the scope's discovery tables, not in
+        # the environment's RBS/registry ordering (the same reason ADR-43's bridge walks them).
+        # `external_ancestor_name_candidates` resolves the as-written superclass spelling against the
+        # declaration's header nesting — `class AccessRequests < ::API::Base` and `class X < Base` alike —
+        # which a raw `discovered_superclasses` walk cannot.
+        groups = scope&.external_ancestor_name_candidates(name)
+        groups&.any? do |candidates|
+          candidates.any? { |c| c == constraint || rbs_inherits?(c, constraint, environment) }
+        end || false
       rescue StandardError
         false
       end

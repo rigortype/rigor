@@ -386,17 +386,12 @@ module Rigor
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
             registry = environment&.plugin_registry
-            supers = scope.discovered_superclasses
-            seen = {}
-            current = supers[class_name.to_s]
-            until current.nil? || seen[current]
-              if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(current) ||
-                 registry&.rbs_complete_ancestor?(current)
-                return current
+            scope.external_ancestor_name_candidates(class_name).each do |candidates|
+              hit = candidates.find do |candidate|
+                ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                  registry&.rbs_complete_ancestor?(candidate)
               end
-
-              seen[current] = true
-              current = supers[current]
+              return hit if hit
             end
             nil
           end

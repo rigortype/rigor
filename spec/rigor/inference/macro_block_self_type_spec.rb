@@ -180,17 +180,19 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         expect(result).to be_nil
       end
 
-      it "walks the scope's discovered superclass chain when the environment cannot order the receiver" do
+      it "walks the scope's external-ancestor candidates when the environment cannot order the receiver" do
         env = instance_double(Rigor::Environment, plugin_registry: grape_registry)
         allow(env).to receive(:nominal_for_name) { |name| Rigor::Type::Nominal.new(name) }
         allow(env).to receive(:singleton_for_name) { |name| Rigor::Type::Singleton.new(name) }
         allow(env).to receive(:class_ordering) do |lhs, rhs|
           lhs == rhs ? :equal : :unknown
         end
+        # `class API < ::Base` / `class Base < Grape::API` — the resolved candidate groups
+        # `external_ancestor_name_candidates` returns for a two-hop source-side ancestry.
         scope = instance_double(
           Rigor::Scope,
           environment: env,
-          discovered_superclasses: { "Base" => "Grape::API", "API" => "Base" }
+          external_ancestor_name_candidates: [["Base"], ["Grape::API"]]
         )
         call = Prism.parse("params do; end").value.statements.body.first
         result = described_class.narrow_self_type_for(

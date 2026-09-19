@@ -78,6 +78,30 @@ RSpec.describe "rigor-grape integration" do
     )
   end
 
+  it "bridges a root-prefixed intermediate base class and DSL calls inside iterator blocks" do
+    # The gitlab shape: `class AccessRequests < ::API::Base` where `API::Base < Grape::API`, with
+    # declaration calls nested in `%w[...].each do` bodies (self stays the class object).
+    source = <<~RUBY
+      module API
+        class Base < ::Grape::API
+        end
+
+        class AccessRequests < ::API::Base
+          %w[group project].each do |source_type|
+            Rigor.dump_type(desc "list \#{source_type}")
+            params do
+              Rigor.dump_type(requires :id, type: String)
+            end
+            namespace :things do
+              Rigor.dump_type(route_setting :swagger, tags: %w[things])
+            end
+          end
+        end
+      end
+    RUBY
+    expect(dump_types(source)).to eq(%w[Object? Object? Object?])
+  end
+
   it "binds `params` block self to ParamsScope so requires/optional/grouping macros resolve" do
     source = <<~RUBY
       class API < Grape::API

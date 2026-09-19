@@ -1,0 +1,1 @@
+- **[inference]** Blockless `each_slice(2)` now yields `Array[T]` slices instead of a fixed `[T, T]` pair, because the last slice can be shorter, and the block form returns its receiver instead of `void`: Rigor no longer loads the `rbs` gem's internal `Enumerable#each_slice` shim into analysed projects. [#1115](https://github.com/rigortype/rigor/pull/1115)

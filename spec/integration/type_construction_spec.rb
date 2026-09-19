@@ -1491,6 +1491,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/enumerable_slices_default_libraries/ — each_slice / each_cons without the rbs shim (#1109)" do
+    let(:harness) { harness_for("enumerable_slices_default_libraries") }
+
+    it "types blockless slices as Array[element], agreeing with the block form" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/include_aware_clamp.rb — Integer#clamp via Comparable's catalog" do
     let(:harness) { harness_for("include_aware_clamp") }
 

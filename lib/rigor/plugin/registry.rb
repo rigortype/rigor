@@ -373,6 +373,18 @@ module Rigor
         @open_receivers_set.include?(class_name.to_s)
       end
 
+      # ADR-43 WD4 — the aggregate set of "RBS-complete ancestor" class names declared across loaded
+      # plugins (manifest `rbs_complete_ancestors:`). `RbsDispatch`'s inherited-call bridge consults it
+      # alongside the engine's own allow-list: a Ruby-source subclass of a listed class resolves
+      # inherited calls against the ancestor's RBS, and the signature-reading rules apply to them.
+      attr_reader :rbs_complete_ancestors
+
+      def rbs_complete_ancestor?(class_name)
+        return false if class_name.nil?
+
+        @rbs_complete_ancestors_set.include?(class_name.to_s)
+      end
+
       # ADR-28 — flat, ordered list of every loaded plugin's path-scoped method-protocol contracts, in
       # plugin registration order. Read from each plugin's `#protocol_contracts` (which the manifest backs
       # by default but a plugin MAY override to fold in per-project config). Consumed by
@@ -435,12 +447,20 @@ module Rigor
       #   nil where {#guarded_manifest} caught a raising manifest read.
       def compile_aggregates(manifests)
         @additional_initializers = manifests.flat_map { |m| m&.additional_initializers || [] }.freeze
-        @open_receivers = manifests.flat_map { |m| (m&.open_receivers || []).map(&:to_s) }.uniq.freeze
+        @open_receivers = aggregate_class_names(manifests, :open_receivers)
         @open_receivers_set = @open_receivers.to_set.freeze
+        @rbs_complete_ancestors = aggregate_class_names(manifests, :rbs_complete_ancestors)
+        @rbs_complete_ancestors_set = @rbs_complete_ancestors.to_set.freeze
         @type_node_resolvers = manifests.flat_map { |m| m&.type_node_resolvers || [] }.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}
         @effect_memo = {}
+      end
+
+      # The shared shape of `open_receivers:` / `rbs_complete_ancestors:` — a flat uniq'd class-name list
+      # aggregated across manifests, each entry normalised to String.
+      def aggregate_class_names(manifests, field)
+        manifests.flat_map { |m| (m&.public_send(field) || []).map(&:to_s) }.uniq.freeze
       end
 
       # Fail-soft per plugin: a plugin whose `effect_attributions:` override raises (a missing

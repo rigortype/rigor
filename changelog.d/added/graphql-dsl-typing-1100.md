@@ -1,0 +1,2 @@
+- **[rigor-graphql]** The plugin now bundles the graphql-ruby class-level DSL signature (`field`, `argument`, `value`, `implements`, `description`, `graphql_name`, the `Schema` registration macros), so calls inside a `GraphQL::Schema::*` subclass type as their real carriers instead of `Dynamic[top]`. ([#1106](https://github.com/rigortype/rigor/pull/1106))
+  - The manifest gains `rbs_complete_ancestors:` (ADR-43 WD4): a plugin names the classes its bundled signature covers completely, letting a Ruby-source subclass bridge inherited calls to that ancestor's RBS.

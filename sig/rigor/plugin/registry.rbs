@@ -13,4 +13,6 @@ class Rigor::Plugin::Registry
   def empty?: () -> bool
   def any_load_errors?: () -> bool
   def type_node_resolvers: () -> Array[untyped]
+  def rbs_complete_ancestors: () -> Array[String]
+  def rbs_complete_ancestor?: (untyped class_name) -> bool
 end

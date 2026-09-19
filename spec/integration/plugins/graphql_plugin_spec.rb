@@ -19,19 +19,6 @@ require "rigor-graphql"
 RSpec.describe "rigor-graphql integration" do
   let(:plugin_class) { Rigor::Plugin::Graphql }
 
-  let(:graphql_rbs) do
-    <<~RBS
-      module GraphQL
-        module Schema
-          class Object
-            def self.field: (*untyped) { (?) -> void } -> void
-                          | (*untyped) -> void
-          end
-        end
-      end
-    RBS
-  end
-
   it "registers a manifest publishing all four facts" do
     manifest = plugin_class.manifest
     expect(manifest.id).to eq("graphql")
@@ -452,6 +439,170 @@ RSpec.describe "rigor-graphql integration" do
     expect(run_and_read_fact(demo: demo)).to be_nil
   end
 
+  # The manifest's `signature_paths:` contribution — every DSL call inside a recognised subclass should
+  # type as its real carrier (`field` → `GraphQL::Schema::Field`, `argument` →
+  # `GraphQL::Schema::Argument`, …) instead of `Dynamic[top]`. The `Rigor.dump_type` diagnostic is the
+  # only channel that distinguishes a contributed type from a bare Dynamic read.
+  describe "shipped DSL signature (#1100)" do
+    def dump_types(source)
+      result = run_plugin(source: source)
+      result.diagnostics
+            .select { |d| d.qualified_rule == "dump.type" }
+            .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    def run_plugin(source:)
+      Rigor::Plugin.unregister!
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "plugins" => ["rigor-graphql"],
+          "bundler" => { "auto_detect" => false },
+          "rbs_collection" => { "auto_detect" => false }
+        )
+      )
+      runner = Rigor::Analysis::Runner.new(
+        configuration: configuration, cache_store: nil,
+        plugin_requirer: lambda { |_name|
+          Rigor::Plugin.register(plugin_class)
+          true
+        }
+      )
+      guarded_run_source(runner, source: source)
+    end
+
+    it "types `field`/`description`/`graphql_name`/`implements` inside a Schema::Object subclass" do
+      source = <<~RUBY
+        class PostType < GraphQL::Schema::Object
+          Rigor.dump_type(field :title, String, null: false)
+          Rigor.dump_type(description "a post")
+          Rigor.dump_type(graphql_name "Post")
+          Rigor.dump_type(implements Types::Node)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(
+        ["GraphQL::Schema::Field", "String?", "String", "Array[Dynamic[top]]"]
+      )
+    end
+
+    it "types the Mutation/Resolver/Enum/InputObject DSL surfaces" do
+      source = <<~RUBY
+        class UpdateThing < GraphQL::Schema::RelayClassicMutation
+          Rigor.dump_type(argument :name, String, required: true)
+          Rigor.dump_type(field :thing, String, null: true)
+        end
+        class FindThing < GraphQL::Schema::Resolver
+          Rigor.dump_type(argument :id, ID, required: true)
+          Rigor.dump_type(type String, null: false)
+        end
+        class Status < GraphQL::Schema::Enum
+          Rigor.dump_type(value "ACTIVE")
+        end
+        class SearchInput < GraphQL::Schema::InputObject
+          Rigor.dump_type(argument :q, String, required: false)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(
+        ["GraphQL::Schema::Argument", "GraphQL::Schema::Field",
+         "GraphQL::Schema::Argument", "Dynamic[top]",
+         "GraphQL::Schema::EnumValue", "GraphQL::Schema::Argument"]
+      )
+    end
+
+    it "types the Schema-class registration DSL" do
+      source = <<~RUBY
+        class AppSchema < GraphQL::Schema
+          Rigor.dump_type(use GraphQL::Dataloader)
+          Rigor.dump_type(query Types::QueryType)
+          Rigor.dump_type(rescue_from(StandardError) { |e| e })
+          Rigor.dump_type(max_depth 15)
+          Rigor.dump_type(orphan_types Types::Node)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(
+        ["Array[Dynamic[top]]", "Class?", "Array[Dynamic[top]]",
+         "Integer?", "Array[Dynamic[top]]"]
+      )
+    end
+
+    it "types `argument` on a yielded Field in the one-parameter block form" do
+      source = <<~RUBY
+        class PostType < GraphQL::Schema::Object
+          field :comments do |f|
+            Rigor.dump_type(f.argument :since, String, required: false)
+          end
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Argument"])
+    end
+
+    it "bridges through an intermediate Ruby-source base class" do
+      source = <<~RUBY
+        class BaseObject < GraphQL::Schema::Object
+        end
+        class PostType < BaseObject
+          Rigor.dump_type(field :title, String, null: false)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])
+    end
+
+    it "lets a project-defined override on a nearer ancestor shadow the bridged declaration" do
+      source = <<~RUBY
+        class BaseObject < GraphQL::Schema::Object
+          def self.field(*)
+            "custom"
+          end
+        end
+        class PostType < BaseObject
+          Rigor.dump_type(field :title, String)
+        end
+      RUBY
+      # Runtime dispatch reaches `BaseObject.field` (a user `def`), not
+      # `GraphQL::Schema::Object.field` — the bridge must decline so the
+      # discovered/user-def tiers answer instead of the RBS ancestor; the
+      # body re-types to the literal "custom".
+      expect(dump_types(source)).to eq(['"custom"'])
+    end
+
+    it "bridges a rooted intermediate superclass name (`class T < ::Base`)" do
+      source = <<~RUBY
+        module Types
+          class BaseObject < GraphQL::Schema::Object
+          end
+        end
+        class PostType < ::Types::BaseObject
+          Rigor.dump_type(field :title, String)
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])
+    end
+
+    it "bridges a lexically relative superclass name inside its module" do
+      source = <<~RUBY
+        module Types
+          class BaseObject < GraphQL::Schema::Object
+          end
+          class PostType < BaseObject
+            Rigor.dump_type(field :title, String)
+          end
+        end
+      RUBY
+      expect(dump_types(source)).to eq(["GraphQL::Schema::Field"])
+    end
+
+    it "keeps a subclass of a NON-listed GraphQL class on the Dynamic fallback" do
+      source = <<~RUBY
+        class MyQuery < GraphQL::Query
+          Rigor.dump_type(context)
+        end
+      RUBY
+      # `GraphQL::Query` is declared in the sig but deliberately NOT in `rbs_complete_ancestors` —
+      # subclassing it is not a supported graphql-ruby extension point, so the bridge must stay off
+      # and the inherited call keeps the false-positive-safe Dynamic fallback.
+      expect(dump_types(source)).to eq(["Dynamic[top]"])
+    end
+  end
+
   def run_and_read_fact(demo:, fact_name: :graphql_type_table)
     Rigor::Plugin.unregister!
     captured_store = nil
@@ -468,8 +619,6 @@ RSpec.describe "rigor-graphql integration" do
     Dir.mktmpdir do |dir|
       dir = File.realpath(dir)
       File.write(File.join(dir, "types.rb"), demo)
-      FileUtils.mkdir_p(File.join(dir, "sig"))
-      File.write(File.join(dir, "sig", "graphql.rbs"), graphql_rbs)
 
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge(

@@ -45,11 +45,43 @@ Lisp-macro nor PHPStan-trait" because there's no Ruby method to expand.
 Rigor's value for graphql-ruby is therefore a STATIC TYPE TABLE
 downstream consumers can cross-reference — not method synthesis.
 
+## Shipped DSL signature (`sig/graphql.rbs`)
+
+graphql-ruby ships no RBS of its own, so the manifest's
+`signature_paths:` contributes the class-level DSL surface —
+`field`, `argument`, `value`, `implements`, `description`,
+`graphql_name`, the `Schema` registration macros, and friends —
+following graphql-ruby's real `Member`-rooted ancestry. Return types
+are the real carriers (`field` → `Schema::Field`, `argument` →
+`Schema::Argument`, `Enum.value` → `Schema::EnumValue`), not `void`,
+which the engine recovers as `top` in value position.
+
+Two manifest fields make the signature reach subclass bodies:
+
+- `rbs_complete_ancestors:` (ADR-43 WD4) lists the GraphQL base
+  classes the sig covers completely, so a Ruby-source
+  `class PostType < GraphQL::Schema::Object` resolves inherited DSL
+  calls against the bundled sig — including through intermediate
+  source base classes (`BaseObject < GraphQL::Schema::Object`).
+- `open_receivers:` keeps the same classes exempt from
+  `call.undefined-method` on members the sig does not declare, because
+  graphql-ruby's surface stays open to `use`-able plugins and user
+  base classes.
+
+Deferred, per the sig file's header: `include
+GraphQL::Schema::Interface`'s include-time `DefinitionMethods`
+extension, zero-arity `field ... do ... end` `instance_eval` self
+(the one-parameter `|f|` form types through the declared block
+parameter), and `Schema.execute` result typing (#136).
+
 ## Plugin authoring surface this exercises
 
 | Surface | Used for |
 | --- | --- |
 | `manifest(... produces:)` | Declares the four cross-plugin fact ids. |
+| `manifest(... signature_paths:)` | Bundles `sig/graphql.rbs` — the class-level DSL surface (ADR-25). |
+| `manifest(... rbs_complete_ancestors:)` | Lets source subclasses bridge inherited calls to the bundled sig (ADR-43 WD4). |
+| `manifest(... open_receivers:)` | Keeps the declared classes exempt from `call.undefined-method` on non-declared members (ADR-26). |
 | `prepare(services)` + `scannable_paths(services)` | Scans every `paths:` entry's `.rb` files for schema-class shapes. |
 | `services.fact_store.publish` (ADR-9) | Publishes each frozen table; empty tables are suppressed via `publish_if_present`. |
 | `Rigor::Source::Literals.symbol_name` | Symbol/string argument extraction in the `field` / `argument` / `value` parse. |

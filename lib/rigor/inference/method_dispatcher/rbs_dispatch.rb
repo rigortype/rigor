@@ -229,7 +229,8 @@ module Rigor
             receiver: context.receiver,
             method_name: context.method_name,
             args: context.args,
-            environment: environment
+            environment: environment,
+            scope: context.scope
           )
         end
 
@@ -436,7 +437,7 @@ module Rigor
             # inherited contract calls (`self.manifest` on a plugin) resolve and the normal call rules
             # apply. Bounded to the allow-list, so open hierarchies stay on the Dynamic fallback (no false
             # positive on `< ActionController::Base`).
-            ancestor = allowed_rbs_complete_ancestor(environment, class_name, scope)
+            ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
             return nil unless ancestor
 
             lookup_method_on(environment, ancestor, kind, method_name)
@@ -456,20 +457,52 @@ module Rigor
           # `class_name` is itself RBS-known (the direct lookup already had authority), or when the
           # discovered chain reaches no allow-listed class. The walk carries a visited set so a malformed
           # cyclic `A < B < A` source cannot loop.
-          def allowed_rbs_complete_ancestor(environment, class_name, scope)
+          #
+          # ADR-43 WD4 — the allow-list's manifest-declared half: a loaded plugin may name its own
+          # contract classes in `rbs_complete_ancestors:` (e.g. rigor-graphql's `GraphQL::Schema::Object`),
+          # extending the engine's hard-coded seed without editing this constant.
+          def allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
             return nil if scope.nil?
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
-            supers = scope.discovered_superclasses
-            seen = {}
-            current = supers[class_name.to_s]
-            until current.nil? || seen[current]
-              return current if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(current)
+            # A project `def` on the receiver class or on a nearer source ancestor shadows the
+            # bridged declaration. RBS dispatch runs before the discovered-method tier, so without
+            # this guard the bridge would resolve e.g. `field` on `GraphQL::Schema::Object` while
+            # the runtime actually calls a user `def self.field` on an intermediate `BaseObject` —
+            # a wrong return type and a false `undefined-method`/arity reading downstream.
+            return nil if scope.discovered_method?(class_name, method_name, kind)
 
-              seen[current] = true
-              current = supers[current]
+            registry = environment&.plugin_registry
+            each_source_ancestor_candidate(scope, class_name) do |candidate|
+              return nil if scope.discovered_method?(candidate, method_name, kind)
+              return candidate if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                                  registry&.rbs_complete_ancestor?(candidate)
             end
             nil
+          end
+
+          # BFS over the scope's as-written superclass table, yielding every resolved ancestor name.
+          # The table stores names AS WRITTEN — `"::API::Base"`, bare `"Base"` — so each hop resolves
+          # through the nesting-aware `ancestor_name_candidates` rather than a raw lookup. Deliberately
+          # NOT `external_ancestor_name_candidates`: that walk records `ancestry_sources` edges via
+          # `record_class_dependency`, which would mislabel a dispatch lookup as an ancestry edge.
+          def each_source_ancestor_candidate(scope, class_name)
+            supers = scope.discovered_superclasses
+            queue = [class_name.to_s]
+            seen = {}
+            until queue.empty?
+              current = queue.shift
+              next if current.nil? || seen[current]
+
+              seen[current] = true
+              raw = supers[current]
+              next if raw.nil?
+
+              scope.ancestor_name_candidates(current, raw).each do |candidate|
+                yield candidate
+                queue << candidate if supers.key?(candidate)
+              end
+            end
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the
@@ -844,11 +877,11 @@ module Rigor
 
           # ----- block parameter probe (Phase C sub-phase 1) -----
 
-          def probe_block_param_types(receiver:, method_name:, args:, environment:)
+          def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil)
             args ||= []
             case receiver
-            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment)
-            else                  probe_block_param_types_one(receiver, method_name, args, environment)
+            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment, scope)
+            else                  probe_block_param_types_one(receiver, method_name, args, environment, scope)
             end
           end
 
@@ -856,9 +889,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment)
+              probe_block_param_types_one(member, method_name, args, environment, scope)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -866,12 +899,12 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope)
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
             return [] unless method_definition
 
             type_vars = build_type_vars(environment, class_name, receiver_args)

@@ -1462,7 +1462,8 @@ module Rigor
           receiver_type: coll_type,
           method_name: :each,
           arg_types: [],
-          environment: scope.environment
+          environment: scope.environment,
+          scope: scope
         )
         return structural if block_params.nil? || block_params.empty?
 
@@ -2886,7 +2887,12 @@ module Rigor
       def expected_block_param_types_for(call_node)
         return [] if call_node.nil?
 
-        receiver_type = call_node.receiver ? scope.type_of(call_node.receiver, tracer: tracer) : nil
+        receiver_type =
+          if call_node.receiver
+            scope.type_of(call_node.receiver, tracer: tracer)
+          else
+            scope.self_type || scope.environment.nominal_for_name("Object")
+          end
         return [] if receiver_type.nil?
 
         arg_types = call_arg_types_for(call_node)
@@ -2894,7 +2900,8 @@ module Rigor
           receiver_type: receiver_type,
           method_name: call_node.name,
           arg_types: arg_types,
-          environment: scope.environment
+          environment: scope.environment,
+          scope: scope
         )
       rescue StandardError
         []

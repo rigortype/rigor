@@ -9,8 +9,9 @@
 # enabled, rigor's `prepare(services)` hook scans this file, sees the subclasses, and publishes the
 # `:graphql_type_table` fact mapping each type to its field-type map.
 #
-# At slice 1 the observable change is fact-publication only; the downstream uplift (resolver-method
-# type-check, etc.) lands in a later slice.
+# The plugin also bundles the graphql-ruby class-level DSL signature (`sig/` via the manifest's
+# `signature_paths:`), so each `field` call itself types as `GraphQL::Schema::Field` rather than
+# `Dynamic[top]` — try `Rigor.dump_type(field :name, String, null: false)` inside a subclass.
 
 module Types
   class User < GraphQL::Schema::Object

@@ -1,0 +1,485 @@
+# graphql-ruby class-level DSL surface — bundled by rigor-graphql via
+# the manifest's `signature_paths:` (ADR-25).
+#
+# graphql-ruby ships no RBS of its own, so without this file every
+# `field`/`argument`/`value`/`implements`/`description` call inside a
+# `GraphQL::Schema::*` subclass reads Dynamic[top] — ~5k implicit-self
+# sites on the GitLab checkout alone
+# (docs/notes/20260919-survey-typing-holes.md).
+#
+# Return types follow graphql-ruby's real implementations: `field`
+# returns the created `Schema::Field`, `argument` the created
+# `Schema::Argument`, `Enum.value` the `Schema::EnumValue`, the
+# registration macros on `Schema` return the collection or object they
+# registered, and the setter/getter pairs (`description`,
+# `graphql_name`, `type`, `null`, …) return their configured value.
+# `void` is deliberately avoided — these expressions are ordinary API
+# (a stored `field` result is a real `Field`), and the engine recovers
+# a `void` return as `top`, which would keep every DSL call in the
+# Dynamic census this signature exists to drain.
+#
+# The ancestry follows graphql-ruby's real hierarchy:
+# `Mutation`/`Subscription`/`RelayClassicMutation < Resolver`,
+# `Object`/`InputObject`/`Enum`/`Union`/`Scalar`/`EnumValue <
+# Member`, and `Field`/`Argument` standalone (each `include`s
+# `Member::HasArguments` for their own `argument` DSL). The shared
+# class-level DSL lives on the `Member::*` mixin modules exactly as
+# graphql-ruby arranges it, so user subclasses pick it up by RBS
+# ancestry rather than per-class duplication.
+#
+# Deferred, deliberately:
+#
+# - `include GraphQL::Schema::Interface` — graphql-ruby wires the DSL
+#   onto the includer through `Interface.included` →
+#   `base.extend(DefinitionMethods)`, an include-time effect RBS
+#   cannot express, so `field` inside interface modules stays opaque.
+#   `Interface::DefinitionMethods` is still declared so an `extend`
+#   of it resolves.
+# - `field ... do ... end` / `argument ... do ... end` block bodies —
+#   graphql-ruby `instance_eval`s a zero-arity definition block on the
+#   new Field/Argument, and no engine mechanism currently rebinds a
+#   block's `self` to a declared block `self:` type. The one-parameter
+#   form (`field(:x) { |f| f.argument }`) types through the declared
+#   block parameter.
+# - `Schema.execute` / `Schema.multiplex` result typing and
+#   resolver-method return checking — tracked by issue #136; they are
+#   declared `-> untyped` here so dispatch resolves, but the honestly
+#   opaque return is unchanged.
+
+module GraphQL
+  class Error < ::StandardError
+  end
+
+  class ExecutionError < GraphQL::Error
+    def initialize: (untyped message, **untyped opts) -> void
+    def extensions: () -> ::Hash[untyped, untyped]
+    def to_h: () -> ::Hash[untyped, untyped]
+  end
+
+  class AnalysisError < GraphQL::Error
+  end
+
+  class RequiredImplementationMissingError < GraphQL::Error
+  end
+
+  class UnauthorizedError < GraphQL::Error
+  end
+
+  class Dataloader
+    def with: (untyped source_class, *untyped batch_args) -> untyped
+    def load: (untyped source_class, untyped id) -> untyped
+    def load_all: (untyped source_class, untyped ids) -> ::Array[untyped]
+    def append: (untyped job) -> untyped
+    def run: () -> untyped
+    def run_all: () -> untyped
+    def merge!: (untyped) -> untyped
+
+    class Source
+      def load: (untyped input) -> untyped
+      def fetch: (untyped inputs) -> ::Array[untyped]
+      def result_key_for: (untyped input) -> untyped
+    end
+  end
+
+  class Query
+    def context: () -> GraphQL::Query::Context
+
+    class Context
+      def []: (untyped key) -> untyped
+      def []=: (untyped key, untyped value) -> untyped
+      def fetch: (untyped key, ?untyped default) -> untyped
+      def key?: (untyped key) -> bool
+      def dig: (untyped key, *untyped rest) -> untyped
+      def namespace: (untyped ns) -> untyped
+      def scoped_set!: (untyped key, untyped value) -> untyped
+      def to_h: () -> ::Hash[untyped, untyped]
+      def schema: () -> singleton(GraphQL::Schema)
+      def query: () -> GraphQL::Query
+      def object: () -> untyped
+      def dataloader: () -> GraphQL::Dataloader
+      def errors: () -> ::Array[untyped]
+      def add_error: (untyped error) -> untyped
+    end
+  end
+
+  class Schema
+    # Schema-class registration DSL (`class AppSchema < GraphQL::Schema`).
+    # Setter/getter pairs return the configured value; the `<<`-style
+    # registrars return the collection they pushed onto.
+    def self.use: (untyped plugin, **untyped kwargs) -> ::Array[untyped]
+    def self.plugins: () -> ::Array[untyped]
+    def self.query: (?Class? new_query_object) ?{ () -> untyped } -> Class?
+    def self.mutation: (?Class? new_mutation_object) ?{ () -> untyped } -> Class?
+    def self.subscription: (?Class? new_subscription_object) ?{ () -> untyped } -> Class?
+    # Runtime returns the stored Class under a visibility profile, otherwise the
+    # `add_type_and_traverse` result — the union is untyped (schema.rb `directive`).
+    def self.directive: (untyped new_directive) -> untyped
+    def self.directives: (*untyped) -> ::Hash[untyped, untyped]
+    def self.orphan_types: (*untyped new_orphan_types) -> ::Array[untyped]
+    # `mode:` as an Array re-enters once per element and returns that Array; the
+    # default path ends in `add_trace_options_for`, which returns nil.
+    def self.trace_with: (untyped trace_mod, **untyped options) -> ::Array[untyped]?
+    def self.instrument: (untyped instrument_step, untyped instrumenter, ?untyped options) -> ::Array[untyped]
+    # Returns `err_classes.each`'s receiver — the exception-class Array, not the
+    # handlers Hash (schema.rb `rescue_from`).
+    def self.rescue_from: (*untyped err_classes) ?{ (untyped err) -> void } -> ::Array[untyped]
+    def self.error_handlers: () -> ::Hash[untyped, untyped]
+    def self.max_depth: (?Integer? new_max_depth, ?count_introspection_fields: bool) -> Integer?
+    def self.max_complexity: (?untyped new_max_complexity, ?count_introspection_fields: bool) -> untyped
+    def self.max_query_string_tokens: (?Integer? new_max_tokens) -> Integer?
+    def self.validate_max_errors: (?Integer? new_validate_max_errors) -> Integer?
+
+    def self.error_bubbling: (?bool? new_error_bubbling) -> bool
+    def self.default_max_page_size: (?Integer? new_default_max_page_size) -> Integer?
+    def self.default_page_size: (?Integer? new_default_page_size) -> Integer?
+
+    def self.cursor_encoder: (?Class? new_encoder) -> Class?
+    def self.context_class: (?Class? new_context_class) -> Class?
+    def self.connections: (?untyped new_connections) -> untyped
+    def self.introspection: (?Module? new_introspection_namespace) -> Module?
+    def self.query_analyzer: (untyped new_analyzer) -> ::Array[untyped]
+    def self.multiplex_analyzer: (untyped new_analyzer) -> ::Array[untyped]
+    def self.query_analyzers: () -> ::Array[untyped]
+    def self.multiplex_analyzers: () -> ::Array[untyped]
+    def self.visible?: (untyped member, untyped ctx) -> bool
+    def self.id_from_object: (untyped application_object, untyped graphql_type, untyped context) -> String?
+    def self.object_from_id: (untyped object_id, untyped context) -> untyped
+    def self.resolve_type: (untyped abstract_type, untyped obj, untyped ctx) -> untyped
+    def self.type_error: (untyped type_error, untyped ctx) -> untyped
+    def self.types: (?untyped context) -> ::Hash[untyped, untyped]
+    def self.execute: (*untyped) -> untyped
+    def self.multiplex: (*untyped) -> untyped
+
+    # Shared class-level DSL inherited by every schema member class.
+    class Member
+      module BaseDSLMethods
+        def description: (?String? new_description) -> String?
+        def graphql_name: (?String? new_name) -> String
+        def comment: (?String? new_comment) -> String?
+        def introspection: (?untyped new_introspection) -> bool
+        def introspection?: () -> bool
+        def visible?: (untyped context) -> bool
+        def authorized?: (untyped object, untyped context) -> bool
+        def mutation: (?Class? mutation_class) -> Class?
+        def to_graphql: () -> untyped
+        def kind: () -> untyped
+        def path: () -> String
+      end
+      extend BaseDSLMethods
+
+      module HasArguments
+        def argument: ( ?untyped arg_name
+                      , ?untyped type_expr
+                      , ?untyped desc
+                      , **untyped kwargs
+                      ) ?{ (GraphQL::Schema::Argument) -> void } -> GraphQL::Schema::Argument
+        def add_argument: (GraphQL::Schema::Argument arg_defn) -> GraphQL::Schema::Argument
+        def arguments: (?untyped context) -> ::Hash[untyped, untyped]
+        def get_argument: (untyped argument_name, ?untyped context) -> GraphQL::Schema::Argument?
+        def any_arguments?: () -> bool
+        def all_argument_definitions: () -> ::Array[untyped]
+        def argument_class: (?Class? new_arg_class) -> Class
+      end
+
+      module HasFields
+        def field: ( ?untyped name_positional
+                   , ?untyped type_positional
+                   , ?untyped desc_positional
+                   , **untyped kwargs
+                   ) ?{ (GraphQL::Schema::Field) -> void } -> GraphQL::Schema::Field
+        # Runtime ends in a bare `nil` after mutating `own_fields` (has_fields.rb).
+        def add_field: (GraphQL::Schema::Field field_defn, **untyped kwargs) -> nil
+        def field_class: (?Class? new_field_class) -> Class
+        # Ends in `define_singleton_method(field_name)`, which returns the Symbol.
+        def global_id_field: (untyped field_name, **untyped kwargs) -> ::Symbol
+        def fields: (?untyped context) -> ::Hash[untyped, untyped]
+        def get_field: (untyped field_name, ?untyped context) -> GraphQL::Schema::Field?
+      end
+
+      module HasInterfaces
+        def implements: (*untyped new_interfaces, **untyped options) -> ::Array[untyped]
+        def interfaces: (?untyped context) -> ::Array[untyped]
+        def interface_type_memberships: () -> ::Array[untyped]
+      end
+
+      module RelayShortcuts
+        def connection_type: () -> Class
+        def edge_type: () -> Class
+        def connection_type_class: (?Class? new_connection_type_class) -> Class
+        def edge_type_class: (?Class? new_edge_type_class) -> Class
+        def node_field: (**untyped kwargs) -> GraphQL::Schema::Field
+        def nodes_field: (**untyped kwargs) -> GraphQL::Schema::Field
+      end
+      extend RelayShortcuts
+
+      module TypeSystemHelpers
+        def to_graphql: () -> untyped
+      end
+    end
+
+    class Object < Member
+      extend Member::HasFields
+      extend Member::HasInterfaces
+      attr_reader object: untyped
+      attr_reader context: GraphQL::Query::Context
+    end
+
+    class Resolver
+      module HasPayloadType
+        def payload_type: (?Class? new_payload_type) -> Class
+        def type: ( ?untyped new_type
+                  , ?null: bool? null
+                  ) -> untyped
+        def type_expr: () -> untyped
+        def null: (?bool? allow_null) -> bool
+        def field_class: (?Class? new_class) -> Class
+        def object_class: (?Class? new_class) -> Class
+      end
+      extend Member::BaseDSLMethods
+      extend Member::HasArguments
+      extend HasPayloadType
+
+      def self.resolve_method: (?Symbol? new_method) -> Symbol
+      def self.resolver_method: (?Symbol? new_method_name) -> Symbol
+      def self.extras: (?::Array[untyped]? new_extras) -> ::Array[untyped]
+      def self.complexity: (?untyped new_complexity) -> untyped
+      def self.broadcastable: (untyped new_broadcastable) -> untyped
+      def self.broadcastable?: () -> bool?
+      def self.max_page_size: (?Integer? new_max_page_size) -> Integer?
+      def self.default_page_size: (?Integer? new_default_page_size) -> Integer?
+      def self.has_max_page_size?: () -> bool
+      def self.has_default_page_size?: () -> bool
+      def self.has_scope: (?untyped new_has_scope) -> bool
+      def self.field_arguments: (?untyped context) -> ::Hash[untyped, untyped]
+      def self.extension: (untyped extension, **untyped options) -> untyped
+      def self.extensions: () -> ::Array[untyped]
+      def self.authorizes?: (untyped context) -> bool
+
+      attr_reader object: untyped
+      attr_reader context: GraphQL::Query::Context
+      attr_reader field: GraphQL::Schema::Field
+      def arguments: () -> ::Hash[untyped, untyped]
+      def dataloader: () -> GraphQL::Dataloader
+      def resolve: (**untyped args) -> untyped
+      def ready?: (**untyped args) -> bool
+      def authorized?: (**untyped inputs) -> bool
+      def load_application_object: (untyped type, untyped id) -> untyped
+      def load_application_object_failed!: (untyped err) -> void
+    end
+
+    class Mutation < Resolver
+      extend Member::HasFields
+      def self.ready?: (**untyped inputs) -> bool
+      def self.authorized?: (**untyped inputs) -> bool
+      def self.load_application_object: (untyped type, untyped id) -> untyped
+      def object: () -> untyped
+      def ready?: (**untyped inputs) -> bool
+      def authorized?: (**untyped inputs) -> bool
+    end
+
+    class RelayClassicMutation < Mutation
+      def self.input_object_class: (?Class? new_class) -> Class
+      def self.return_field: () -> untyped
+    end
+
+    class Subscription < Resolver
+      extend Member::HasFields
+      def self.topic: (?untyped new_topic) -> untyped
+      def self.subscription_scope: (?untyped new_scope) -> untyped
+      def subscribe: (**untyped args) -> untyped
+      def update: (**untyped args) -> untyped
+      def unsubscribe: (**untyped args) -> untyped
+    end
+
+    class InputObject < Member
+      extend Member::HasArguments
+      def self.prepare: (*untyped) -> untyped
+      def self.one_of: () -> bool
+      def prepare: () -> untyped
+      def arguments: () -> untyped
+    end
+
+    class Union < Member
+      def self.possible_types: (*untyped new_types, ?context: untyped, **untyped) -> ::Array[untyped]
+      def self.get_possible_type: (untyped type_expr, untyped obj, untyped ctx) -> untyped
+      def self.resolve_type: (untyped type_expr, untyped obj, untyped ctx) -> untyped
+      def self.type_error: (untyped type_error, untyped ctx) -> untyped
+      def self.orphan_types: (*untyped new_orphan_types) -> ::Array[untyped]
+    end
+
+    class Enum < Member
+      def self.value: (*untyped args, **untyped kwargs) ?{ (EnumValue) -> void } -> EnumValue
+      def self.values: (?untyped context) -> ::Hash[untyped, untyped]
+      def self.enum_values: (?untyped context) -> ::Array[untyped]
+      def self.enum_value_for: (untyped value_name, ?untyped context) -> EnumValue?
+      def self.value_from_ruby: (untyped val, ?untyped ctx) -> untyped
+    end
+
+    class EnumValue < Member
+      def value: (?untyped new_val) -> untyped
+      def deprecation_reason: (?String? new_reason) -> String?
+      attr_reader owner: untyped
+      attr_reader graphql_name: String
+      attr_reader description: String?
+    end
+
+    class Scalar < Member
+      def self.coerce_input: (untyped val, untyped ctx) -> untyped
+      def self.coerce_result: (untyped val, untyped ctx) -> untyped
+    end
+
+    class Directive < Member
+      extend Member::HasArguments
+      def self.locations: (*untyped new_locations) -> ::Array[untyped]
+      def self.repeatable: (?bool? new_repeatable) -> bool
+      def self.on: (*untyped new_locations) -> ::Array[untyped]
+      # Runtime takes the runtime object, argument values, and query context
+      # (directive.rb `include?` delegates to `static_include?`).
+      def self.include?: (untyped object, untyped arguments, untyped context) -> bool
+    end
+
+    # `Field`/`Argument` are definition objects, not schema members —
+    # they `include HasArguments` so `argument` inside a definition
+    # block's one-parameter form (`field(:x) { |f| f.argument }`)
+    # resolves on the yielded object.
+    class Field
+      include Member::HasArguments
+      def name: () -> String
+      def graphql_name: () -> String
+      def type: () -> untyped
+      def description: (?String? new_description) -> String?
+      def deprecation_reason: (?String? new_reason) -> String?
+      def extension: (untyped extension, **untyped options) -> untyped
+      def extensions: () -> untyped
+      def complexity: (?untyped new_complexity) -> untyped
+      def scope: (?untyped new_scope) -> untyped
+      def null: (?bool? new_null) -> bool
+      def null?: () -> bool
+      def method_sym: () -> Symbol
+      def method_str: () -> String
+      def resolver_method: () -> Symbol
+      def owner: () -> untyped
+      def connection?: () -> bool
+      def max_page_size: () -> Integer?
+      def default_page_size: () -> Integer?
+      def subscription_scope: (?untyped) -> untyped
+    end
+
+    class Argument
+      def keyword: () -> Symbol
+      def name: () -> String
+      def graphql_name: () -> String
+      def type: () -> untyped
+      def description: (?String? new_description) -> String?
+      def deprecation_reason: (?String? new_reason) -> String?
+      def default_value: (?untyped new_default_value) -> untyped
+      def default_value?: () -> bool
+      def required?: () -> bool
+      def loads: () -> untyped
+      def as: () -> Symbol
+      def prepare: () -> untyped
+      def owner: () -> untyped
+      def validates: () -> untyped
+      def replace_null_with_default?: () -> bool
+    end
+
+    class LateBoundType
+      def initialize: (untyped name, ?untyped type_defn) -> void
+      def graphql_name: () -> String
+    end
+
+    # The include-time `extend DefinitionMethods` is not modelled —
+    # see the file header. `DefinitionMethods` is declared so code that
+    # extends it directly resolves the same surface class bodies get.
+    module Interface
+      module DefinitionMethods
+        include Member::BaseDSLMethods
+        include Member::HasFields
+        include Member::HasInterfaces
+        include Member::RelayShortcuts
+        def orphan_types: (*untyped new_orphan_types) -> ::Array[untyped]
+        def resolve_type: (untyped type_expr, untyped obj, untyped ctx) -> untyped
+        def definition_methods: (?Module? other_module) -> untyped
+      end
+      extend DefinitionMethods
+    end
+  end
+
+  # graphql-ruby's own scalar / Relay wrapper types, referenced as
+  # `field`/`argument` arguments (`field :x, GraphQL::Types::ISO8601DateTime`).
+  module Types
+    class Boolean < Schema::Scalar
+    end
+
+    class ID < Schema::Scalar
+    end
+
+    class Int < Schema::Scalar
+    end
+
+    class Float < Schema::Scalar
+    end
+
+    class String < Schema::Scalar
+    end
+
+    class BigInt < Schema::Scalar
+    end
+
+    class Decimal < Schema::Scalar
+    end
+
+    class ISO8601Date < Schema::Scalar
+    end
+
+    class ISO8601DateTime < Schema::Scalar
+    end
+
+    class ISO8601DateTimePrecise < Schema::Scalar
+    end
+
+    class JSON < Schema::Scalar
+    end
+
+    class JSONString < Schema::Scalar
+    end
+
+    class Base64Binary < Schema::Scalar
+    end
+
+    module Relay
+      class BaseConnection < Schema::Object
+        def self.edge_type: (untyped edge_class, **untyped kwargs) -> Class?
+        def self.node_type: () -> Class?
+        def self.edges_field: (**untyped) -> GraphQL::Schema::Field
+        def self.nodes_field: (**untyped) -> GraphQL::Schema::Field
+      end
+
+      class BaseEdge < Schema::Object
+        def self.node_type: () -> Class?
+      end
+
+      class PageInfo < Schema::Object
+      end
+
+      class BaseField < Schema::Field
+        def self.connection_extension: () -> untyped
+      end
+
+      module Node
+        include GraphQL::Schema::Interface
+      end
+
+      module NodeBehaviors
+        def object_from_id: (untyped object_id, untyped ctx) -> untyped
+        def type_from_object: (untyped obj) -> untyped
+      end
+
+      module HasNodeField
+      end
+
+      module HasNodesField
+      end
+    end
+  end
+end

@@ -225,6 +225,40 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
+    # Issue #1094 — `v == nil` is `v.nil?` spelled as a comparison, on either side and through every equality
+    # operator. Paired with the proof-carrying control below and the non-nil comparison that must not derive.
+    it "declines through a comparison with the nil literal, either side and every equality spelling" do
+      ["v == nil", "nil == v", "v != nil", "nil != v", "v.eql?(nil)", "v.equal?(nil)", "nil === v"].each do |guard|
+        type, = evaluate(<<~RUBY)
+          h = { a: "x", b: "y" }
+          v = h[key]
+          if #{guard} then "none" else 1 end
+        RUBY
+
+        expect(arms_of(type)).to contain_exactly(1, "none"), "for #{guard}"
+      end
+    end
+
+    it "still elides a comparison with the nil literal over a proof-carrying carrier" do
+      type, = evaluate(<<~RUBY)
+        v = "abc".upcase
+        if v == nil then "none" else 1 end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "does not derive through a comparison with a non-nil value or with an argument list that is not one nil" do
+      node = Prism.parse("v == 1").value.statements.body.first
+      scope_with_mark = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                             .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+      expect(described_class.resolve(node, scope_with_mark)).to be_nil
+      both_nil = Prism.parse("nil == nil").value.statements.body.first
+      expect(described_class.resolve(both_nil, scope_with_mark)).to be_nil
+      guard = Prism.parse("v == nil", scopes: [[:v]]).value.statements.body.first
+      expect(described_class.resolve(guard, scope_with_mark)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
     it "does not derive through a value predicate, which is not a statement about nil-ness" do
       # `empty?` folds from the carrier's *value*, and the mark is about its nil-freeness only. Deriving
       # through it would widen this channel into a general taint and silence honest verdicts.
@@ -403,6 +437,17 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       RUBY
 
       expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines `== nil` / `!= nil` on a slot softened out of a union (the #1094 review repros)" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of("x"),
+                                               Rigor::Type::Combinator.constant_of("y"))
+      found = Rigor::Type::Combinator.union(tuple, Rigor::Type::Combinator.constant_of(nil))
+      { "if k == nil then \"none\" else 1 end" => [1, "none"],
+        "if k != nil then 1 else \"none\" end" => [1, "none"] }.each do |guard, arms|
+        type, = evaluate_with({ found: found }, "k, v = found\n#{guard}\n")
+        expect(arms_of(type)).to match_array(arms), "for #{guard}"
+      end
     end
 
     it "still elides on the nil slot of a wrapped scalar, which is exact rather than a bet" do

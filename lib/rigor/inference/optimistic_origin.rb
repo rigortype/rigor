@@ -43,6 +43,12 @@ module Rigor
       # them would widen this channel into a taint that silences genuine diagnostics.
       NIL_COLLAPSING_PREDICATES = %i[nil? !].freeze
 
+      # Issue #1094 — the binary comparisons that are the same statement as `nil?` when one operand is the `nil`
+      # literal: `x == nil`, `nil != x`, `x.equal?(nil)`, `nil === x`. Every one folds from the other operand's
+      # nil-freeness alone, so the derivation is exactly as sound as the unary one. A comparison against any
+      # other value folds from the carrier's value and stays out, for the reason the value predicates do.
+      NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
+
       module_function
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
@@ -72,11 +78,28 @@ module Rigor
       # is. A block or any argument means this is not the unary predicate it looks like (`x.!(y)` is a
       # user-defined operator), and the derivation declines.
       def resolve_through_predicate(node, scope)
-        return nil unless NIL_COLLAPSING_PREDICATES.include?(node.name)
         return nil unless node.block.nil?
+        return resolve_through_nil_comparison(node, scope) if NIL_COMPARISONS.include?(node.name)
+        return nil unless NIL_COLLAPSING_PREDICATES.include?(node.name)
         return nil unless node.arguments.nil? || node.arguments.arguments.empty?
 
         resolve(node.receiver, scope)
+      end
+
+      # `x == nil` / `nil == x` — resolves the non-`nil` operand. Declines unless there is exactly one
+      # positional argument and exactly one side is the `nil` literal (`nil == nil` states nothing about a
+      # carrier).
+      def resolve_through_nil_comparison(node, scope)
+        arguments = node.arguments&.arguments
+        return nil unless arguments&.size == 1
+
+        receiver = node.receiver
+        argument = arguments.first
+        if argument.is_a?(Prism::NilNode) && !receiver.nil? && !receiver.is_a?(Prism::NilNode)
+          resolve(receiver, scope)
+        elsif receiver.is_a?(Prism::NilNode) && !argument.is_a?(Prism::NilNode)
+          resolve(argument, scope)
+        end
       end
 
       # `(x.nil?)` — a single-statement parenthesised body is its own value, and authors do parenthesise a

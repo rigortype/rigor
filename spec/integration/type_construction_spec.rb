@@ -1957,6 +1957,13 @@ RSpec.describe "Rigor type construction (integration)" do
         nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
         expect(nil_receivers).to be_empty
       end
+
+      # `x == nil` / `x != nil` over a softened slot is the same statement as `x.nil?`, so it inherits the
+      # optimistic mark and the flow rule declines rather than calling a live guard constant.
+      it "reports no always-truthy condition on a nil comparison over a softened slot" do
+        always = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(always).to be_empty
+      end
     end
 
     describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do

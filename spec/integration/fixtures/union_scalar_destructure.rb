@@ -74,3 +74,31 @@ def proxied
   assert_type("Dynamic[top]", p1)
   assert_type("Dynamic[top]", p2)
 end
+
+# A softened slot is optimistic, so a `== nil` / `!= nil` guard over it is
+# not "always falsey / truthy" (no `flow.always-truthy-condition`).
+def nil_pair(cond)
+  x, _y = cond ? [1, 2] : [nil, nil]
+  x = 0 if x == nil
+  x
+end
+
+WEIGHTS = { a: 1, b: 2 }.freeze
+def first_positive
+  k, _v = WEIGHTS.find { |_k, vv| vv > 0 }
+  return "none" if k == nil
+
+  k
+end
+
+def checked_status(flag)
+  _status, value = flag ? [:ok, "v"] : [:err]
+  raise ArgumentError if value == nil
+
+  value
+end
+
+def optional_pair(cond)
+  x, _y = cond ? [1, 2] : nil
+  x.succ if x != nil
+end

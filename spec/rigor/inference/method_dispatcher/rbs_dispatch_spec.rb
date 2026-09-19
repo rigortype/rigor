@@ -40,6 +40,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       expect(type.class_name).to eq("Integer")
     end
 
+    # Issue #1092 — `Array#tap` is `-> self`; the substitute keeps the receiver's `Dynamic` wrapping and its
+    # type arguments rather than baking in the erased raw nominal.
+    it "keeps a Dynamic receiver's wrapping and type arguments on a `-> self` return" do
+      ints = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
+      type = dispatch(Rigor::Type::Combinator.dynamic(ints), :itself)
+      expect(type).to be_a(Rigor::Type::Dynamic)
+      expect(type.static_facet).to eq(ints)
+    end
+
+    it "answers the raw nominal on a `-> self` return when every type argument is untyped" do
+      untyped = Rigor::Type::Combinator.untyped
+      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [untyped, untyped])
+      expect(dispatch(hash, :itself)).to eq(Rigor::Type::Combinator.nominal_of("Hash"))
+    end
+
     it "unions return types when receiver is a Union of known classes" do
       union = Rigor::Type::Combinator.union(
         Rigor::Type::Combinator.nominal_of(Integer),

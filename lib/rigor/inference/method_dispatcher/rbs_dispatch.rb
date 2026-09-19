@@ -8,6 +8,7 @@ require_relative "../rbs_type_translator"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
 require_relative "overload_selector"
+require_relative "self_substitute"
 
 module Rigor
   module Inference
@@ -209,7 +210,8 @@ module Rigor
               type_vars: type_vars,
               block_type: block_type,
               environment: environment,
-              self_type_override: self_type_override,
+              self_type_override: self_type_override ||
+                                  SelfSubstitute.for(receiver, receiver_args, method_name, args, block_type),
               scope: scope,
               call_node: call_node
             )
@@ -428,13 +430,16 @@ module Rigor
               end
             # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
             # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
-            # fallback returns the caller's type, not Object.
+            # fallback returns the caller's type, not Object. `dispatch_one` also routes the receiver's
+            # type-argument-bearing projection through it ({SelfSubstitute}, #1092).
             self_type = self_type_override || resolved_self_type
 
             candidates = OverloadSelector.select_candidates(
               method_definition,
               arg_types: args,
-              self_type: self_type,
+              # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
+              # read the static facet, as they did before the substitute carried the wrapping.
+              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: !block_type.nil?,

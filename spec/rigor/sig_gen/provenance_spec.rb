@@ -119,7 +119,10 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 1,
   "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 1,
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,
-  "sig/rigor/analysis/fact_store.rbs" => 17,
+  # -2 (#1092): an RBS `-> self` return keeps the receiver's type arguments, so `FactStore#normalize`
+  # and `CheckRules.filter_suppressed` stop inferring the raw `Array`; both now classify as parameter
+  # intent (their declared `Array[Fact]` / `Array[Diagnostic]` follows from the declared parameters).
+  "sig/rigor/analysis/fact_store.rbs" => 15,
   "sig/rigor/ast.rbs" => 1,
   "sig/rigor/cache.rbs" => 2,
   "sig/rigor/cli/diff_command.rbs" => 1,

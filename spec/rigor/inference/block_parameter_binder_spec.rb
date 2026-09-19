@@ -107,15 +107,22 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings[:blk]).to eq(Rigor::Type::Combinator.nominal_of(Proc))
     end
 
-    it "binds MultiTargetNode block parameters with a non-Tuple slot to Dynamic[Top]" do
-      # When the slot expected type is not a Tuple, MultiTargetBinder falls back to Dynamic[Top] for every inner local.
-      # The outer `c` still binds to its slot type.
+    it "binds MultiTargetNode block parameters with a slot that may convert to Dynamic[Top]" do
+      # When the slot's value may answer `to_ary` (here `Object`, which an Array is), MultiTargetBinder falls back
+      # to Dynamic[Top] for every inner local. The outer `c` still binds to its slot type.
       block = parse_block("foo { |(a, b), c| c }")
       bindings = described_class.new(
-        expected_param_types: [integer_nominal, string_nominal]
+        expected_param_types: [Rigor::Type::Combinator.nominal_of("Object"), string_nominal]
       ).bind(block)
       dyn = Rigor::Type::Combinator.untyped
       expect(bindings).to eq(a: dyn, b: dyn, c: string_nominal)
+    end
+
+    it "wraps a MultiTargetNode slot whose value has no to_ary as [value] (issue #1094)" do
+      # `[[1, "s"]].each { |(a, b), c| }` hands `(a, b)` the Integer 1, which Ruby destructures as `[1]`.
+      block = parse_block("foo { |(a, b), c| c }")
+      bindings = described_class.new(expected_param_types: [integer_nominal, string_nominal]).bind(block)
+      expect(bindings).to eq(a: integer_nominal, b: Rigor::Type::Combinator.constant_of(nil), c: string_nominal)
     end
 
     it "binds trailing positionals" do
@@ -172,9 +179,9 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings).to eq(a: integer_nominal, b: string_nominal, c: integer_nominal)
     end
 
-    it "falls back to Dynamic[Top] for MultiTargetNode slots when the slot is not a Tuple" do
+    it "falls back to Dynamic[Top] for MultiTargetNode slots when the slot is not decomposable" do
       block = parse_block("foo { |(a, b)| a }")
-      bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+      bindings = described_class.new(expected_param_types: [untyped]).bind(block)
       dyn = Rigor::Type::Combinator.untyped
       expect(bindings).to eq(a: dyn, b: dyn)
     end
@@ -343,6 +350,59 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(scope.local(:g)).to eq(integer_nominal)
         expect(scope.optimistic_local(:g)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
         expect(scope.optimistic_local(:r)).to be_nil
+      end
+    end
+
+    # Issue #1094 — a union of splattable carriers splats member by member. Each join is paired with a decline
+    # that keeps the pre-#1094 answer, so a construction error that stops splatting cannot pass both.
+    describe "block auto-splat of a union yield" do
+      def array_of(element)
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+      end
+
+      def union(*members)
+        Rigor::Type::Combinator.union(*members)
+      end
+
+      def tuple(*elements)
+        Rigor::Type::Combinator.tuple_of(*elements)
+      end
+
+      it "joins each position across Tuple members, a slot past a short member staying Dynamic[Top]" do
+        yielded = union(tuple(string_nominal, integer_nominal), tuple(integer_nominal))
+        binder = described_class.new(expected_param_types: [yielded])
+        expect(binder.bind(parse_block("xs.each { |a, b| a }")))
+          .to eq(a: union(string_nominal, integer_nominal), b: untyped)
+        expect(binder.optimistic).to be_empty
+      end
+
+      it "marks a position any Array[T] member marked, and joins the rest only when every member supplies one" do
+        yielded = union(array_of(integer_nominal), tuple(string_nominal, string_nominal))
+        binder = described_class.new(expected_param_types: [yielded])
+        expect(binder.bind(parse_block("xs.each { |a, b| a }")))
+          .to eq(a: union(integer_nominal, string_nominal), b: union(integer_nominal, string_nominal))
+        expect(binder.optimistic).to contain_exactly(:a, :b)
+
+        with_rest = described_class.new(expected_param_types: [yielded]).bind(parse_block("xs.each { |a, *r| a }"))
+        expect(with_rest[:r]).to eq(array_of(untyped))
+
+        arrays = union(array_of(integer_nominal), array_of(string_nominal))
+        all_arrays = described_class.new(expected_param_types: [arrays]).bind(parse_block("xs.each { |a, *r| a }"))
+        expect(all_arrays[:r]).to eq(union(array_of(integer_nominal), array_of(string_nominal)))
+      end
+
+      it "softens a member's bare nil out of a position another member fills, marking the position" do
+        nil_type = Rigor::Type::Combinator.constant_of(nil)
+        yielded = union(tuple(integer_nominal, string_nominal), tuple(nil_type, nil_type))
+        binder = described_class.new(expected_param_types: [yielded])
+        expect(binder.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: integer_nominal, b: string_nominal)
+        expect(binder.optimistic).to contain_exactly(:a, :b)
+      end
+
+      it "does not splat a union with a member that is not a Tuple or Array[T], nor wrap a lone scalar" do
+        yielded = union(tuple(integer_nominal, string_nominal), Rigor::Type::Combinator.constant_of(nil))
+        bindings = described_class.new(expected_param_types: [yielded]).bind(parse_block("xs.each { |a, b| a }"))
+        expect(bindings).to eq(a: yielded, b: untyped)
       end
     end
   end

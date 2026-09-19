@@ -103,7 +103,7 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result[:b]).to eq(constant(nil))
     end
 
-    it "falls back to Dynamic[Top] for every slot when the rhs is not a Tuple" do
+    it "falls back to Dynamic[Top] for every slot when the rhs may convert through to_ary" do
       node = parse_multi_write("a, b = foo")
       dyn = Rigor::Type::Combinator.untyped
       nominal = Rigor::Type::Combinator.nominal_of("Object")
@@ -205,6 +205,155 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(scope.local(:a)).to eq(integer)
       expect(scope.optimistic_local(:a)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
       expect(scope.optimistic_local(:r)).to be_nil
+    end
+  end
+
+  # Issue #1094. As above, each decline is paired with a neighbour that still decomposes.
+  describe ".bind_marked over a value Ruby wraps as [rhs]" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:dyn) { Rigor::Type::Combinator.untyped }
+    let(:scope) { Rigor::Scope.empty }
+
+    it "binds the value to the first slot, nil to the other fixed slots, and [] to the rest, unmarked" do
+      result = described_class.bind_marked(parse_multi_write("a, *r, b = 1"), constant(1))
+      expect(result.types).to eq(a: constant(1), r: tuple, b: constant(nil))
+      expect(result.optimistic).to be_empty
+    end
+
+    it "wraps a Hash, a HashShape, nil and a Refined String without an environment" do
+      shape = Rigor::Type::Combinator.hash_shape_of(k: constant(1))
+      [
+        Rigor::Type::Combinator.nominal_of("Hash", type_args: [integer, integer]),
+        shape,
+        constant(nil),
+        Rigor::Type::Combinator.non_empty_string
+      ].each do |value|
+        result = described_class.bind(parse_multi_write("c, d = v"), value)
+        expect(result).to eq({ c: value, d: constant(nil) }), "for #{value.describe}"
+      end
+    end
+
+    it "wraps an RBS-known class whose ancestry has no to_ary and no method_missing override" do
+      time = Rigor::Type::Combinator.nominal_of("Time")
+      expect(described_class.bind(parse_multi_write("a, b = t"), time, scope: scope))
+        .to eq(a: time, b: constant(nil))
+      expect(described_class.bind(parse_multi_write("a, b = t"), time)).to eq(a: dyn, b: dyn)
+    end
+
+    it "keeps Dynamic[top] for a Delegator, a module, Object, an unknown class and Dynamic" do
+      [
+        Rigor::Type::Combinator.nominal_of("SimpleDelegator"),
+        Rigor::Type::Combinator.nominal_of("Delegator"),
+        Rigor::Type::Combinator.nominal_of("Comparable"),
+        Rigor::Type::Combinator.nominal_of("Object"),
+        Rigor::Type::Combinator.nominal_of("NoSuchClassAnywhere"),
+        Rigor::Type::Combinator.dynamic(integer),
+        dyn
+      ].each do |value|
+        result = described_class.bind_marked(parse_multi_write("a, b = v"), value, scope: scope)
+        expect(result.types).to eq({ a: dyn, b: dyn }), "for #{value.describe}"
+      end
+    end
+
+    # `rbs core` declares `method_missing` / `respond_to_missing?` on `Delegator`, and CRuby's conversion asks
+    # them, so `a, b = SimpleDelegator.new([1, 2])` binds `1, 2` at runtime. `Time`, loaded beside it, is the
+    # neighbour that proves the environment answers at all.
+    it "keeps Dynamic[top] for a class whose RBS ancestry overrides method_missing (SimpleDelegator)" do
+      environment = Rigor::Environment.for_project(libraries: ["delegate"], signature_paths: [])
+      delegate_scope = Rigor::Scope.empty(environment: environment)
+      expect(environment.class_known?("SimpleDelegator")).to be(true)
+      delegator = Rigor::Type::Combinator.nominal_of("SimpleDelegator")
+      expect(described_class.bind(parse_multi_write("a, b = d"), delegator, scope: delegate_scope))
+        .to eq(a: dyn, b: dyn)
+      time = Rigor::Type::Combinator.nominal_of("Time")
+      expect(described_class.bind(parse_multi_write("a, b = t"), time, scope: delegate_scope))
+        .to eq(a: time, b: constant(nil))
+    end
+
+    it "wraps a nested slot whose value has no to_ary" do
+      result = described_class.bind(parse_multi_write("(a, b), c = pair"), tuple(constant(1), constant("s")))
+      expect(result).to eq(a: constant(1), b: constant(nil), c: constant("s"))
+    end
+  end
+
+  describe ".bind_marked over a union right-hand side" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:dyn) { Rigor::Type::Combinator.untyped }
+
+    def union(*members)
+      Rigor::Type::Combinator.union(*members)
+    end
+
+    def array_of(element)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+    end
+
+    it "distributes over Tuple members, joining each name" do
+      rhs = union(tuple(constant(1), constant("s"), constant(:t)), tuple(constant(1.0)))
+      result = described_class.bind_marked(parse_multi_write("e, *f = un"), rhs)
+      expect(result.types).to eq(
+        e: union(constant(1), constant(1.0)),
+        f: union(tuple(constant("s"), constant(:t)), tuple)
+      )
+      expect(result.optimistic).to be_empty
+    end
+
+    it "uses the Array[T] rule for an Array member and marks what that member marked" do
+      rhs = union(tuple(constant(1), constant("s")), array_of(integer))
+      result = described_class.bind_marked(parse_multi_write("a, b, *r = mixed"), rhs)
+      expect(result.types).to eq(
+        a: union(constant(1), integer),
+        b: union(constant("s"), integer),
+        r: union(tuple, array_of(integer))
+      )
+      expect(result.optimistic).to contain_exactly(:a, :b)
+    end
+
+    it "binds T per slot for Array[T] | nil (`ints[1..]`), the wrapped nil member softened into the mark" do
+      rhs = union(array_of(integer), constant(nil))
+      result = described_class.bind_marked(parse_multi_write("a, b = slice"), rhs)
+      expect(result.types).to eq(a: integer, b: integer)
+      expect(result.optimistic).to contain_exactly(:a, :b)
+    end
+
+    # `k, v = hash.find { ... }; v.x if k` — which member arrived is correlated across the slots, so a
+    # per-slot `V | nil` would fire on the guarded read. The softened names carry the mark instead.
+    it "softens a member's bare nil out of a name another member binds, and marks the name" do
+      rhs = union(tuple(integer, string), constant(nil))
+      result = described_class.bind_marked(parse_multi_write("k, v = found"), rhs)
+      expect(result.types).to eq(k: integer, v: string)
+      expect(result.optimistic).to contain_exactly(:k, :v)
+
+      short = union(tuple(constant(:ok), string), tuple(constant(:err)))
+      status = described_class.bind_marked(parse_multi_write("s, v = result"), short)
+      expect(status.types).to eq(s: union(constant(:ok), constant(:err)), v: string)
+      expect(status.optimistic).to contain_exactly(:v)
+    end
+
+    it "keeps nil where every member binds nil, and keeps a member's own nil-bearing element" do
+      rhs = union(tuple(constant(1), constant(nil)), tuple(constant(2)))
+      result = described_class.bind_marked(parse_multi_write("a, b = x"), rhs)
+      expect(result.types).to eq(a: union(constant(1), constant(2)), b: constant(nil))
+      expect(result.optimistic).to be_empty
+
+      nilable = union(integer, constant(nil))
+      arrays = union(array_of(nilable), tuple(string, string))
+      kept = described_class.bind_marked(parse_multi_write("a, b = x"), arrays)
+      expect(kept.types).to eq(a: union(nilable, string), b: union(nilable, string))
+    end
+
+    it "keeps Dynamic[top] for every name when a member cannot be decomposed" do
+      rhs = union(tuple(constant(1), constant(2)), Rigor::Type::Combinator.nominal_of("Object"))
+      result = described_class.bind_marked(parse_multi_write("a, b = x"), rhs)
+      expect(result.types).to eq(a: dyn, b: dyn)
+    end
+
+    it "keeps Dynamic[top] only for the nested names a member cannot decompose" do
+      object = Rigor::Type::Combinator.nominal_of("Object")
+      rhs = union(tuple(tuple(constant(1), constant(2)), constant(3)), tuple(object, constant(4)))
+      result = described_class.bind(parse_multi_write("(p, q), r = x"), rhs)
+      expect(result).to eq(p: dyn, q: dyn, r: union(constant(3), constant(4)))
     end
   end
 end

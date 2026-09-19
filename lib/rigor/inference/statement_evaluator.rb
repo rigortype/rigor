@@ -704,12 +704,13 @@ module Rigor
       # `a, b = rhs` — Slice 5 phase 2 sub-phase 2 destructuring. Evaluates the right-hand side under the entry scope,
       # then decomposes its type against the multi-write target tree (Prism::MultiWriteNode#lefts/rest/rights, including
       # nested Prism::MultiTargetNode for the `(b, c)` form). Tuple-shaped right-hand sides produce per-slot types
-      # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), and
+      # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), a
+      # union distributes over its members and a value with no implicit `to_ary` binds as `[rhs]` (issue #1094), and
       # other carriers fall back to `Dynamic[Top]` per slot. The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        [rhs_type, MultiTargetBinder.bind_marked(node, rhs_type).apply_to(post_rhs)]
+        [rhs_type, MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs).apply_to(post_rhs)]
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1477,7 +1478,7 @@ module Rigor
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind_marked(index_node, element_type).apply_to(scope)
+          MultiTargetBinder.bind_marked(index_node, element_type, scope: scope).apply_to(scope)
         else
           scope
         end

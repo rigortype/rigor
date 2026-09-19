@@ -381,6 +381,39 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
+    # Issue #1094 — a union right-hand side marks a name when any member marked it, so the Array member's
+    # short-array bet survives a join with a Tuple member whose slot is present.
+    it "declines on a slot a union's Array[T] member marked, even joined with a present Tuple slot" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"),
+                                               Rigor::Type::Combinator.nominal_of("String"))
+      mixed = Rigor::Type::Combinator.union(tuple, array_of_string)
+      type, = evaluate_with({ xs: mixed }, <<~RUBY)
+        a, b = xs
+        if b.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a slot softened from `Array[T] | nil`, whose nil member wraps to [nil]" do
+      optional = Rigor::Type::Combinator.union(array_of_string, Rigor::Type::Combinator.constant_of(nil))
+      type, = evaluate_with({ xs: optional }, <<~RUBY)
+        a, b = xs
+        if a then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "still elides on the nil slot of a wrapped scalar, which is exact rather than a bet" do
+      type, = evaluate(<<~RUBY)
+        a, b = 1
+        if b then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("none"))
+    end
+
     it "still elides on a statement-level rest, which is an Array even when the source is short" do
       type, = evaluate_with({ xs: array_of_string }, <<~RUBY)
         a, *rest = xs

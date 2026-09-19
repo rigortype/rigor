@@ -1,0 +1,33 @@
+---
+locals:
+  a: '1'
+  b: nil
+  c: "{ k: 1 }"
+  d: nil
+  e: Dynamic[top]
+  f: Dynamic[top]
+  g: Dynamic[top]
+  h: Dynamic[top]
+  x: nil
+  "y": "[]"
+  z: nil
+assertions:
+  '1': 1 | 1.0
+  '2': '["s", :t] | []'
+  '3': non-negative-int
+  '4': non-negative-int
+  '5': Array[String]
+  '6': ":err | :ok"
+  '7': '1'
+  '8': nil
+  '9': "{ k: 1 }"
+  '10': nil
+  '11': nil
+  '12': "[]"
+  '13': nil
+  '14': Dynamic[top]
+  '15': Dynamic[top]
+  '16': 1..2
+  '17': nil
+  '18': Dynamic[top]
+  '19': Dynamic[top]

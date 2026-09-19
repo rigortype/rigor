@@ -20,7 +20,8 @@ module Rigor
     #    lists (`Prism::MultiTargetNode` under `BlockParametersNode#requireds`).
     # 3. `Rigor::Inference::StatementEvaluator#bind_for_index` for `for a, b in pairs`.
     # 4. `Rigor::Inference::ScopeIndexer`'s class-ivar pre-pass, for the ivar targets of `@a, @b = rhs`
-    #    (issue #1110), which records {Result#ivars} and drops the marks, as it does for `@x = xs.first`.
+    #    (issue #1110), which records {Result#ivars} and drops the marks, as it does for `@x = xs.first`,
+    #    with `soften_slots: false` (see {.bind_marked}).
     #
     # Both Prism nodes share the same `lefts` / `rest` (a `Prism::SplatNode`) / `rights` triple,
     # so the binder treats them uniformly. The binder is pure: it MUST NOT mutate its inputs and
@@ -124,10 +125,15 @@ module Rigor
       # @param optimistic — whether `rhs_type` itself is an optimistic slot of an enclosing
       #   decomposition (a block's `|(g, h)|` fed from an auto-splatted `Array[T]`), in which case
       #   every name bound under it inherits the mark.
-      def bind_marked(target_node, rhs_type, optimistic: false, scope: nil)
+      # @param soften_slots — false keeps a present `X | nil` tuple slot and a union member's bare
+      #   `nil` in the binding instead of applying the ADR-57 softening of {slot_type} /
+      #   {join_member_bindings}. That softening is only honest together with the optimistic mark
+      #   it records, so a consumer that drops the marks (the class-ivar seed, issue #1110) turns it
+      #   off; the `Array[T]` bet is unaffected, matching what `@x = xs.first` records.
+      def bind_marked(target_node, rhs_type, optimistic: false, scope: nil, soften_slots: true)
         bindings = {}
         marked = []
-        visit(target_node, rhs_type, optimistic, bindings, marked, scope)
+        visit(target_node, rhs_type, optimistic, bindings, marked, [scope, soften_slots])
         split_result(bindings, marked)
       end
 
@@ -177,34 +183,37 @@ module Rigor
 
         def ivar_name?(name) = name.start_with?("@")
 
-        def visit(node, rhs_type, optimistic, bindings, marked, scope)
-          return visit_union(node, rhs_type.members, optimistic, bindings, marked, scope) if rhs_type.is_a?(Type::Union)
+        # `context` is the `[scope, soften_slots]` pair every step of the walk shares.
+        def visit(node, rhs_type, optimistic, bindings, marked, context)
+          if rhs_type.is_a?(Type::Union)
+            return visit_union(node, rhs_type.members, optimistic, bindings, marked, context)
+          end
 
           lefts = node.lefts || []
           rest = node.rest
           rights = node.rights || []
 
           fronts, rest_type, backs, slots_optimistic =
-            decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?, scope: scope)
+            decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?, context: context)
           rest_type = arity_free_rest(rest_type) if optimistic
           slot_mark = optimistic || slots_optimistic
-          lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked, scope) }
+          lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked, context) }
           bind_rest_target(rest, rest_type, bindings, marked) if rest
-          rights.each_with_index { |t, i| bind_target(t, backs[i], slot_mark, bindings, marked, scope) }
+          rights.each_with_index { |t, i| bind_target(t, backs[i], slot_mark, bindings, marked, context) }
         end
 
         # Every member walks the same target tree, so each binds the same names; the first member's
         # key order is the declaration order.
-        def visit_union(node, members, optimistic, bindings, marked, scope)
+        def visit_union(node, members, optimistic, bindings, marked, context)
           walks = members.map do |member|
             member_bindings = {}
             member_marked = []
-            visit(node, member, optimistic, member_bindings, member_marked, scope)
+            visit(node, member, optimistic, member_bindings, member_marked, context)
             [member_bindings, member_marked]
           end
           walks.first.first.each_key do |name|
             types = walks.map { |member_bindings, _| member_bindings[name] }
-            joined, softened = join_member_bindings(types)
+            joined, softened = join_member_bindings(types, context.last)
             mark = softened || walks.any? { |_, member_marked| member_marked.include?(name) }
             bind_name(name, joined, mark, bindings, marked)
           end
@@ -218,12 +227,12 @@ module Rigor
         # {slot_type}'s ADR-57 softening across members: which member arrived is correlated with the
         # other slots (`k, v = hash.find { ... }; v.x if k`, `status, value = ok ? [:ok, v] : [:err]`),
         # and a per-slot `T | nil` fires `call.possible-nil-receiver` on the guarded read.
-        def join_member_bindings(types)
+        def join_member_bindings(types, soften_slots)
           untyped = Type::Combinator.untyped
           return [untyped, false] if types.any? { |type| type == untyped }
 
           firm = types.reject { |type| nil_literal?(type) }
-          return [Type::Combinator.union(*types), false] if firm.empty? || firm.size == types.size
+          return [Type::Combinator.union(*types), false] if !soften_slots || firm.empty? || firm.size == types.size
 
           [Type::Combinator.union(*firm), true]
         end
@@ -233,14 +242,15 @@ module Rigor
         # array of length `front_count`/`back_count`, `rest_type` either a `Rigor::Type` (when
         # `rest_present:` is true) or `nil`, and `optimistic` true when the fixed slots are the
         # short-array bet rather than known elements.
-        def decompose(rhs_type, front_count, back_count, rest_present:, scope:)
+        def decompose(rhs_type, front_count, back_count, rest_present:, context:)
+          scope, soften = context
           if rhs_type.is_a?(Type::Tuple)
-            [*decompose_tuple(rhs_type, front_count, back_count, rest_present: rest_present), false]
+            [*decompose_tuple(rhs_type, front_count, back_count, rest_present: rest_present, soften: soften), false]
           elsif (element = array_element_type(rhs_type))
             [*decompose_array(element, front_count, back_count, rest_present: rest_present), true]
           elsif wraps_as_single_element?(rhs_type, scope)
             wrapped = Type::Combinator.tuple_of(rhs_type)
-            [*decompose_tuple(wrapped, front_count, back_count, rest_present: rest_present), false]
+            [*decompose_tuple(wrapped, front_count, back_count, rest_present: rest_present, soften: soften), false]
           else
             [*decompose_default(front_count, back_count, rest_present: rest_present), false]
           end
@@ -271,17 +281,17 @@ module Rigor
           ]
         end
 
-        def decompose_tuple(tuple, front_count, back_count, rest_present:)
+        def decompose_tuple(tuple, front_count, back_count, rest_present:, soften:)
           elements = tuple.elements
-          fronts = Array.new(front_count) { |i| slot_type(elements, i) }
+          fronts = Array.new(front_count) { |i| slot_type(elements, i, soften) }
           if rest_present
             middle_end = [elements.size - back_count, front_count].max
             middle = elements[front_count...middle_end] || []
             rest_type = Type::Combinator.tuple_of(*middle)
-            backs = Array.new(back_count) { |i| slot_type(elements, middle_end + i) }
+            backs = Array.new(back_count) { |i| slot_type(elements, middle_end + i, soften) }
           else
             rest_type = nil
-            backs = Array.new(back_count) { |i| slot_type(elements, front_count + i) }
+            backs = Array.new(back_count) { |i| slot_type(elements, front_count + i, soften) }
           end
           [fronts, rest_type, backs]
         end
@@ -304,11 +314,11 @@ module Rigor
         # outranks the worst-case per-slot reading, so we drop the `nil` from a destructured slot
         # and keep the non-`nil` constituent (a bare `nil` slot stays `nil` — there is nothing to
         # soften). A pure non-optional element keeps its precise type unchanged.
-        def slot_type(elements, index)
+        def slot_type(elements, index, soften)
           element = elements[index]
           return Type::Combinator.constant_of(nil) if element.nil?
 
-          soften_optional_slot(element)
+          soften ? soften_optional_slot(element) : element
         end
 
         def soften_optional_slot(element)
@@ -333,12 +343,12 @@ module Rigor
           ]
         end
 
-        def bind_target(target, type, optimistic, bindings, marked, scope)
+        def bind_target(target, type, optimistic, bindings, marked, context)
           case target
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
             bind_name(target.name, type, optimistic, bindings, marked)
           when Prism::MultiTargetNode
-            visit(target, type, optimistic, bindings, marked, scope)
+            visit(target, type, optimistic, bindings, marked, context)
           end
         end
 

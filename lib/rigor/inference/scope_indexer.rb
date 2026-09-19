@@ -1349,11 +1349,16 @@ module Rigor
       # `@x = xs.first` write records: an `Array[T]` fixed slot seeds `T`, not `T | nil`. The table has no mark
       # channel, and a `T | nil` seed is not gated everywhere a declaration-sourced nil is — a sibling returning the
       # ivar against a declared `-> T` would fire `def.return-type-mismatch` on a correct program (ADR-5).
+      #
+      # The ADR-57 slot softening is the opposite case and is turned off (`soften_slots: false`): dropping the `nil`
+      # of a present `X | nil` tuple slot, or a union member's bare `nil`, is honest for a local only because the
+      # binder marks the name, and the seed drops the mark. Without it a sibling's `if @b` / `raise unless @b` would
+      # fold on a `nil` that is reachable, so the seed keeps the genuine `X | nil` the pre-#1110 indexer kept.
       def record_multi_write_ivars(node, scope, class_name, accumulator)
         return unless node.is_a?(Prism::MultiWriteNode)
 
         rhs_type = scope.type_of(node.value)
-        ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope).ivars
+        ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope, soften_slots: false).ivars
         ivars.each { |name, type| accumulate_ivar_type(accumulator, class_name, name, type) }
       end
 

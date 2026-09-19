@@ -3517,6 +3517,45 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # The seed drops the binder's marks, so it must also skip the ADR-57 softening those marks keep honest:
+      # CRuby reaches `nil` in each slot below, and a sibling guard on it must not fold.
+      describe "a sibling guard on a slot that can be nil" do
+        def truthy_diags(result)
+          result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        end
+
+        it "does not fold on a present optional tuple slot, a literal optional slot, or a union member's nil" do
+          result = analyze(<<~RUBY)
+            class TupleOptional
+              def initialize(cond) = (@a, @b = 1, (cond ? nil : 3))
+              def truthy_fold = (@b ? :v : :n)
+              def unless_guard = (raise "x" unless @b)
+            end
+
+            class OptionalSlot
+              def initialize(flag) = (@p, @q = [1, flag ? "s" : nil])
+              def truthy_fold = (@q ? :v : :n)
+            end
+
+            class ResultShape
+              def initialize(ok) = (@status, @value = ok ? [:ok, "v"] : [:err])
+              def has_value = (@value ? :v : :n)
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still folds on a tuple slot that is never nil" do
+          result = analyze(<<~RUBY)
+            class Present
+              def initialize = (@a, @b = 1, 3)
+              def truthy_fold = (@b ? :v : :n)
+            end
+          RUBY
+          expect(truthy_diags(result).size).to eq(1)
+        end
+      end
+
       it "still fires on a slot that is exactly nil" do
         result = analyze(<<~RUBY)
           class Padded

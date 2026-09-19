@@ -1935,7 +1935,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(ivars[:@rest]).to eq(Rigor::Type::Combinator.nominal_of("Array", type_args: [integer]))
       end
 
-      it "records a Tuple RHS rest as the middle elements and softens a present optional slot as locals do" do
+      it "records a Tuple RHS rest as the middle elements and keeps a present optional slot's nil" do
         program = parse(<<~RUBY)
           class L
             def initialize(flag)
@@ -1948,7 +1948,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         two, three = [2, 3].map { |v| Rigor::Type::Combinator.constant_of(v) }
         expect(ivars[:@mid]).to eq(Rigor::Type::Combinator.tuple_of(two, three))
         expect(ivars[:@z]).to eq(Rigor::Type::Combinator.constant_of(4))
-        expect(ivars[:@q]).to eq(Rigor::Type::Combinator.constant_of("s"))
+        # The seed carries no optimistic mark, so the ADR-57 softening would make a sibling's `if @q` fold.
+        expect(ivars[:@q]).to eq(Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of("s"),
+                                                               Rigor::Type::Combinator.constant_of(nil)))
       end
 
       it "wraps a value with no implicit to_ary as [rhs], padding the later slot with nil" do

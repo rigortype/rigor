@@ -430,4 +430,35 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result.optimistic_ivars).to be_empty
     end
   end
+
+  # Issue #1110. The class-ivar seed drops the marks, so it turns off the ADR-57 softening they keep honest.
+  describe ".bind_marked with soften_slots: false" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+
+    def union(*members)
+      Rigor::Type::Combinator.union(*members)
+    end
+
+    it "keeps a present optional tuple slot's nil, where the default softens it" do
+      rhs = tuple(constant(1), union(string, constant(nil)))
+      node = parse_multi_write("@a, @b = x")
+      expect(described_class.bind_marked(node, rhs, soften_slots: false).ivars[:@b]).to eq(union(string, constant(nil)))
+      expect(described_class.bind_marked(node, rhs).ivars[:@b]).to eq(string)
+    end
+
+    it "keeps a union member's bare nil in the join and marks nothing" do
+      rhs = union(tuple(constant(:ok), string), tuple(constant(:err)))
+      result = described_class.bind_marked(parse_multi_write("@s, @v = x"), rhs, soften_slots: false)
+      expect(result.ivars[:@v]).to eq(union(string, constant(nil)))
+      expect(result.optimistic_ivars).to be_empty
+    end
+
+    it "still takes the Array[T] bet, marked" do
+      ints = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer])
+      result = described_class.bind_marked(parse_multi_write("@a, *@r = ints"), ints, soften_slots: false)
+      expect(result.ivars[:@a]).to eq(integer)
+      expect(result.optimistic_ivars).to contain_exactly(:@a)
+    end
+  end
 end

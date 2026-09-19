@@ -386,6 +386,19 @@ module Rigor
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
             registry = environment&.plugin_registry
+            each_source_ancestor_candidate(scope, class_name) do |candidate|
+              return candidate if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                                  registry&.rbs_complete_ancestor?(candidate)
+            end
+            nil
+          end
+
+          # BFS over the scope's as-written superclass table, yielding every resolved ancestor name.
+          # The table stores names AS WRITTEN — `"::API::Base"`, bare `"Base"` — so each hop resolves
+          # through the nesting-aware `ancestor_name_candidates` rather than a raw lookup. Deliberately
+          # NOT `external_ancestor_name_candidates`: that walk records `ancestry_sources` edges via
+          # `record_class_dependency`, which would mislabel a dispatch lookup as an ancestry edge.
+          def each_source_ancestor_candidate(scope, class_name)
             supers = scope.discovered_superclasses
             queue = [class_name.to_s]
             seen = {}
@@ -397,20 +410,11 @@ module Rigor
               raw = supers[current]
               next if raw.nil?
 
-              # The table stores the superclass AS WRITTEN — `"::API::Base"`, bare `"Base"` — so resolve
-              # each hop through the nesting-aware candidate list rather than a raw lookup. Deliberately
-              # NOT `external_ancestor_name_candidates`: that walk records `ancestry_sources` edges via
-              # `record_class_dependency`, which would mislabel a dispatch lookup as an ancestry edge.
               scope.ancestor_name_candidates(current, raw).each do |candidate|
-                if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
-                   registry&.rbs_complete_ancestor?(candidate)
-                  return candidate
-                end
-
+                yield candidate
                 queue << candidate if supers.key?(candidate)
               end
             end
-            nil
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the

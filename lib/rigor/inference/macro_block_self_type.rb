@@ -104,12 +104,18 @@ module Rigor
         return true if rbs_inherits?(name, constraint, environment)
 
         # Source-side ancestry — `class API < Grape::API` lives on the scope's discovery tables, not in
-        # the environment's RBS/registry ordering (the same reason ADR-43's bridge walks them). The
-        # superclass table stores names AS WRITTEN (`"::API::Base"`, bare `"Base"`), so each hop resolves
-        # through `ancestor_name_candidates` (rooted names, header nesting) rather than a raw table
-        # lookup. Deliberately NOT `external_ancestor_name_candidates`: that walk records
-        # `ancestry_sources` edges through `record_class_dependency`, which would mislabel a DSL-call
-        # lookup as an ancestry dependency.
+        # the environment's RBS/registry ordering (the same reason ADR-43's bridge walks them).
+        source_ancestors_reach?(name, constraint, environment, scope)
+      rescue StandardError
+        false
+      end
+
+      # BFS over the source-side superclass table. The table stores names AS WRITTEN (`"::API::Base"`,
+      # bare `"Base"`), so each hop resolves through `ancestor_name_candidates` (rooted names, header
+      # nesting) rather than a raw lookup. Deliberately NOT `external_ancestor_name_candidates`: that
+      # walk records `ancestry_sources` edges through `record_class_dependency`, which would mislabel
+      # a DSL-call lookup as an ancestry dependency.
+      def source_ancestors_reach?(name, constraint, environment, scope)
         supers = scope&.discovered_superclasses
         queue = [name]
         seen = {}
@@ -127,8 +133,6 @@ module Rigor
             queue << candidate if supers.key?(candidate)
           end
         end
-        false
-      rescue StandardError
         false
       end
 

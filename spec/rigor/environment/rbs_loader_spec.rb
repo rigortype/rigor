@@ -100,7 +100,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
     it "drops the rbs gem's unsound Enumerable#each_slice shim overloads" do
       method = rbs_library_loader.instance_method(class_name: "Array", method_name: :each_slice)
       signatures = method.method_types.map(&:to_s)
-      expect(signatures).to include("(::Integer n) -> ::Enumerator[::Array[E], self]")
+      # The type-parameter name differs across rbs lines (`E` on 4.x, `Elem` on 3.x).
+      expect(signatures).to include(a_string_matching(/\A\(::Integer n\) -> ::Enumerator\[::Array\[\w+\], self\]\z/))
       expect(signatures.grep(/\A\(2\)/)).to be_empty
     end
 

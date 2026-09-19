@@ -164,23 +164,35 @@ module Rigor
         # `nil` guard on the second slot folded away) and the block form returned `void` instead of the
         # receiver. Unloading the file leaves core's `Enumerator[Array[Elem], self]`, which agrees with the
         # block form's `Array[Elem]`. The other shims (`bundler.rbs`, `rubygems.rbs`) only add missing
-        # declarations and stay. Fails soft to the env as built: an rbs whose `Environment` has no `#unload`, or a
-        # relocated shim keeps the pre-#1109 behaviour rather than failing the build.
+        # declarations and stay. Fails soft to the env as built: a relocated or absent shim, or an rbs API
+        # shape this code does not recognise, keeps the pre-#1109 behaviour rather than failing the build.
+        # Because errors are rescued, the guard spec in `rbs_loader_spec.rb` is what catches a broken unload,
+        # so it must stay green on both lines of the RBS compatibility matrix.
         RBS_LIBRARY = "rbs"
         private_constant :RBS_LIBRARY
         UNSOUND_CORE_SHIMS = %w[shims/enumerable.rbs].freeze
         private_constant :UNSOUND_CORE_SHIMS
 
         def unload_upstream_core_shims(env, rbs_loader)
-          return env unless env.respond_to?(:unload) && env.respond_to?(:each_rbs_source)
+          return env unless env.respond_to?(:unload)
 
           shim_names = upstream_core_shim_names(rbs_loader)
           return env if shim_names.empty?
 
-          buffers = env.each_rbs_source.map(&:buffer).select { |buffer| shim_names.include?(buffer.name.to_s) }
-          buffers.empty? ? env : env.unload(buffers)
+          buffers = loaded_signature_buffers(env)&.select { |buffer| shim_names.include?(buffer.name.to_s) }
+          buffers.nil? || buffers.empty? ? env : env.unload(buffers)
         rescue StandardError
           env
+        end
+
+        # rbs 4.x lists its sources through `each_rbs_source`; rbs 3.x keys `signatures` by `Buffer`, and its
+        # `unload` matches those very objects with `include?`, so the env's own keys are what it must receive.
+        def loaded_signature_buffers(env)
+          if env.respond_to?(:each_rbs_source)
+            env.each_rbs_source.map(&:buffer)
+          elsif env.respond_to?(:signatures)
+            env.signatures.keys
+          end
         end
 
         def upstream_core_shim_names(rbs_loader)

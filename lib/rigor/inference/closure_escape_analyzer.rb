@@ -37,7 +37,9 @@ module Rigor
     #   `collect_concat`, `filter`, `filter_map`).
     # - `Hash`-only iteration: `each_pair`, `each_key`, `each_value`, `transform_keys`, `transform_values`.
     # - `Integer#times`, `Integer#upto`, `Integer#downto`, `Range#each`, `Range#step`.
-    # - `Object#tap`, `Object#then`, `Object#yield_self`.
+    # - `Object#tap`, `Object#then`, `Object#yield_self`. The stronger "yields exactly once, before returning"
+    #   fact for these three lives in {BlockCallTiming}; that table is expected to move to the same
+    #   `RBS::Extended` call-timing effect as this one.
     # - Tuple/HashShape carriers map to Array/Hash for catalogue lookup so a literal `[1, 2, 3].each { ... }`
     #   is recognised.
     #

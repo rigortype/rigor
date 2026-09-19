@@ -148,6 +148,43 @@ RSpec.describe "rigor-grape integration" do
     expect(dump_types(source)).to eq(%w[Object? Object? Object? Object?])
   end
 
+  # `scope` routes through `within_namespace { nest(block) }` (dsl/routing.rb) — the block
+  # `instance_eval`s on the Instance class object like `namespace`, so it must be in
+  # NAMESPACE_METHODS (Codex adversarial review, grape 2.4.0).
+  it "binds `scope` block self to the Instance class object like `namespace`" do
+    source = <<~RUBY
+      class API < Grape::API
+        scope do
+          Rigor.dump_type(route_setting :swagger, hidden: true)
+          params do
+            Rigor.dump_type(optional :id)
+          end
+        end
+      end
+    RUBY
+    expect(dump_types(source)).to eq(%w[Object? Object?])
+  end
+
+  it "types `Endpoint#cookies` as Grape::Cookies, not Hash" do
+    source = <<~RUBY
+      class API < Grape::API
+        get "/things" do
+          Rigor.dump_type(cookies)
+        end
+      end
+    RUBY
+    expect(dump_types(source)).to eq(["Grape::Cookies"])
+  end
+
+  it "types `Entity.root_exposures` as NestedExposures, not Array" do
+    source = <<~RUBY
+      class ThingEntity < Grape::Entity
+        Rigor.dump_type(root_exposures)
+      end
+    RUBY
+    expect(dump_types(source)).to eq(["Grape::Entity::Exposure::NestingExposure::NestedExposures"])
+  end
+
   it "binds verb block self to Grape::Endpoint so inside-route calls resolve" do
     source = <<~RUBY
       class API < Grape::API
@@ -190,7 +227,7 @@ RSpec.describe "rigor-grape integration" do
       end
     RUBY
     expect(dump_types(source)).to eq(
-      ["Array[Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]", "Object", "Array[Dynamic[top]]"]
+      ["Array[Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]", "Proc", "Array[Dynamic[top]]"]
     )
   end
 

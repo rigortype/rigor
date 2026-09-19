@@ -58,11 +58,25 @@ name. `null:` extracts to `nullable:` (defaulting to `true`, mirroring
 graphql-ruby); `required:` defaults to `false`. The single-element
 `[String]` list form is recognised.
 
+## Typed DSL surface
+
+Beyond the fact tables, the plugin bundles the graphql-ruby class-level
+DSL signature, so calls inside a recognised subclass type as their real
+carriers instead of staying opaque: `field` returns
+`GraphQL::Schema::Field`, `argument` returns `GraphQL::Schema::Argument`,
+`Enum.value` returns `GraphQL::Schema::EnumValue`, `description` /
+`graphql_name` return their configured strings, and the `Schema`
+registration macros (`query`, `mutation`, `use`, `orphan_types`, …)
+return what they registered. A block parameter on `field`/`argument`
+(`field(:comments) { |f| … }`) types as `GraphQL::Schema::Field` /
+`GraphQL::Schema::Argument`.
+
 ## No diagnostics, no config
 
 The plugin emits no diagnostics and has no configuration knobs — it
-contributes the type tables above for other plugins to consume. It
-walks every `paths:` entry's `.rb` files for the schema-class shapes.
+contributes the type tables and signature above for the engine and
+other plugins to consume. It walks every `paths:` entry's `.rb` files
+for the schema-class shapes.
 
 ## Limitations
 
@@ -72,6 +86,13 @@ walks every `paths:` entry's `.rb` files for the schema-class shapes.
 - **No `Schema.execute(...)` result typing.** Typing
   `Schema.execute(query).to_h` against the queried fields is a future
   plugin.
+- **Interface DSL stays opaque.** `include GraphQL::Schema::Interface`
+  wires the DSL onto the includer through an include-time `extend`
+  hook RBS cannot express, so `field` inside an interface module is
+  not yet typed.
+- **Zero-arity definition blocks keep an opaque `self`.**
+  `field :x do ... end` `instance_eval`s on the new `Field` at
+  runtime; only the explicit-parameter form (`{ |f| … }`) is typed.
 - **Constant-form types only.** The string form (`field :foo, "User"`)
   and the `<Type>.array` / `<Type>!` sugar chains are not recognised
   (the `[String]` bracket form is). Multi-element and empty list

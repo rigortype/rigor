@@ -40,6 +40,21 @@ module Rigor
     #   required: ...` declarations.
     # - No user-facing diagnostics yet.
     #
+    # ## Shipped DSL signature (`sig/graphql.rbs`)
+    #
+    # Since graphql-ruby ships no RBS, the manifest's `signature_paths:` contributes the class-level
+    # DSL surface — `field`/`argument`/`value`/`implements`/`description`/`graphql_name` and friends —
+    # following graphql-ruby's real `Member`-rooted ancestry so subclass bodies stop reading every
+    # DSL call as `Dynamic[top]`. Return types are the real carriers (`field` → `Schema::Field`,
+    # `Enum.value` → `Schema::EnumValue`, setter/getter macros → their configured value) rather than
+    # `void`, which the engine recovers as `top`. Scope and deferrals are documented at the top of
+    # the sig file.
+    #
+    # The declared classes stay in `open_receivers:` because graphql-ruby's real surface is open:
+    # schema plugins (`use`-able extensions) and user base classes add class-level DSL methods this
+    # signature does not enumerate, so `call.undefined-method` must not read these classes as
+    # closed.
+    #
     # ## Deferred (demand-driven)
     #
     # - **`resolver:` / `mutation:` reroute** recognition.
@@ -51,11 +66,66 @@ module Rigor
       manifest(
         id: "graphql",
         target_gems: ["graphql"],
-        version: "0.1.0",
+        # 0.2.0, 2026-09-20 (#1100) — `signature_paths:` contributes the graphql-ruby class-level DSL
+        # surface (`field`/`argument`/`value`/…), typed with the real carriers (`Field`/`Argument`/
+        # `EnumValue`/…) so DSL calls stop reading `Dynamic[top]` inside recognised subclasses.
+        version: "0.2.0",
         description: "Recognises `class T < GraphQL::Schema::{Object,Enum,InputObject,Mutation}` " \
                      "subclasses; publishes the per-type field-type table, the per-enum value " \
                      "list, the per-input-object argument table, and the per-mutation arguments+fields " \
-                     "table.",
+                     "table; ships the graphql-ruby class-level DSL signature surface.",
+        signature_paths: ["sig"],
+        # ADR-43 WD4 — the classes the bundled sig covers completely enough that a Ruby-source subclass
+        # (`class PostType < GraphQL::Schema::Object`) may bridge inherited calls to the RBS ancestor.
+        # Listing one turns on `call.undefined-method`/arity checks for inherited DSL calls on every
+        # subclass — justified here because the sig IS the authority (graphql-ruby ships none).
+        rbs_complete_ancestors: %w[
+          GraphQL::Schema
+          GraphQL::Schema::Member
+          GraphQL::Schema::Object
+          GraphQL::Schema::Resolver
+          GraphQL::Schema::Mutation
+          GraphQL::Schema::RelayClassicMutation
+          GraphQL::Schema::Subscription
+          GraphQL::Schema::InputObject
+          GraphQL::Schema::Enum
+          GraphQL::Schema::EnumValue
+          GraphQL::Schema::Union
+          GraphQL::Schema::Scalar
+          GraphQL::Schema::Directive
+          GraphQL::Schema::Field
+          GraphQL::Schema::Argument
+          GraphQL::Dataloader::Source
+          GraphQL::Types::Relay::BaseConnection
+          GraphQL::Types::Relay::BaseEdge
+          GraphQL::Types::Relay::PageInfo
+          GraphQL::Types::Relay::BaseField
+        ],
+        open_receivers: %w[
+          GraphQL::Schema
+          GraphQL::Schema::Member
+          GraphQL::Schema::Object
+          GraphQL::Schema::Resolver
+          GraphQL::Schema::Mutation
+          GraphQL::Schema::RelayClassicMutation
+          GraphQL::Schema::Subscription
+          GraphQL::Schema::InputObject
+          GraphQL::Schema::Enum
+          GraphQL::Schema::EnumValue
+          GraphQL::Schema::Union
+          GraphQL::Schema::Scalar
+          GraphQL::Schema::Directive
+          GraphQL::Schema::Field
+          GraphQL::Schema::Argument
+          GraphQL::Schema::Interface
+          GraphQL::Query
+          GraphQL::Query::Context
+          GraphQL::Dataloader
+          GraphQL::Dataloader::Source
+          GraphQL::Types::Relay::BaseConnection
+          GraphQL::Types::Relay::BaseEdge
+          GraphQL::Types::Relay::BaseField
+        ],
         produces: %i[graphql_type_table graphql_enum_table graphql_input_object_table graphql_mutation_table]
       )
 

@@ -129,7 +129,10 @@ module Rigor
         # self-call to an overridden `raise` as Kernel's `bot` too, so a missed override is a wrong `bot`.
         def project_defines_anywhere?(method_name, scope)
           return true if scope.top_level_def_for(method_name)
-          return true if scope.discovered_methods.any? { |_class_name, table| table.key?(method_name) }
+          # `discovered_methods` withholds a plain cross-file `def` (the ADR-17 monkey-patch contract); the
+          # def-node tables still carry it, on both sides.
+          return true if [scope.discovered_methods, scope.discovered_def_nodes, scope.discovered_singleton_def_nodes]
+                         .any? { |tables| tables.any? { |_class_name, table| table.key?(method_name) } }
 
           patched = scope.environment&.project_patched_methods
           !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }

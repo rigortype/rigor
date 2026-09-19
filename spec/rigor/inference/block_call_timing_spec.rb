@@ -262,6 +262,64 @@ RSpec.describe Rigor::Inference::BlockCallTiming do
       end
     end
 
+    # Re-review of #1095: `Scope#discovered_methods` withholds a plain `def` from ANOTHER file, so an override
+    # of a non-returning name on a cross-file superclass slipped through. Two files are the whole point here.
+    describe "a cross-file override of a non-returning name" do
+      def cross_file_dumps(base)
+        caller_source = <<~RUBY
+          require "rigor/testing"
+          include Rigor::Testing
+
+          class B < A
+            def go
+              dump_type([1, 2].map { |x| x + 1 }.tap { abort })
+            end
+
+            def self.cgo
+              dump_type([1, 2].map { |x| x + 1 }.tap { exit! })
+            end
+
+            def positive
+              dump_type([1, 2].map { |x| x + 1 }.tap { fail "x" })
+            end
+
+            def symptom(flag)
+              s = flag ? [1, 2].tap { abort } : "str"
+              s.push(1) if s.respond_to?(:push)
+            end
+          end
+        RUBY
+        result = analyze(files: { "a.rb" => base, "b.rb" => caller_source })
+        dumps = result.diagnostics.select { |d| d.message.start_with?("dump_type") }.sort_by(&:line)
+        [dumps.map { |d| d.message.delete_prefix("dump_type: ") }, result.diagnostics.map(&:rule)]
+      end
+
+      let(:base_overrides) do
+        <<~RUBY
+          class A
+            def abort(*) = nil
+            def self.exit!(*) = nil
+          end
+        RUBY
+      end
+
+      it "keeps the receiver for an instance-side and a singleton-side override in another file" do
+        dumps, rules = cross_file_dumps(base_overrides)
+        expect(dumps[0..1]).to eq(["Array[Integer]"] * 2)
+        expect(rules).not_to include("call.undefined-method")
+      end
+
+      it "still types the un-overridden fail beside them as bot" do
+        dumps, = cross_file_dumps(base_overrides)
+        expect(dumps[2]).to eq("bot")
+      end
+
+      it "types abort and exit! as bot when the other file overrides nothing" do
+        dumps, = cross_file_dumps("class A\n  def unrelated = 1\nend\n")
+        expect(dumps[0..1]).to eq(%w[bot bot])
+      end
+    end
+
     describe "the review's `loop` repros produce no diagnostic" do
       def diagnostics_for(source)
         analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics

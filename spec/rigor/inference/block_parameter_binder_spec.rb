@@ -259,6 +259,29 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(reused.optimistic).to be_empty
       end
 
+      it "does not splat into |a = 1, *r|, which CRuby leaves unsplatted" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        array = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+        [tuple, array].each do |carrier|
+          binder = described_class.new(expected_param_types: [carrier])
+          bindings = binder.bind(parse_block("xs.each { |a = 1, *r| a }"))
+          expect(bindings[:a]).to eq(carrier), "for #{carrier.describe}"
+          expect(binder.optimistic).to be_empty
+        end
+      end
+
+      it "splats |a = 1, b = 2|, which has more than one optional" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a = 1, b = 2| a }"))
+        expect(bindings).to eq(a: integer_nominal, b: string_nominal)
+      end
+
+      it "does not splat into |a, &b|" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, &b| a }"))
+        expect(bindings[:a]).to eq(tuple)
+      end
+
       it "does not splat into a lone |*rest|" do
         tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
         bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |*r| r }"))

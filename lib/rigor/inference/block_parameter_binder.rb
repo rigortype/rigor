@@ -136,17 +136,15 @@ module Rigor
       # `k.<method-not-on-Tuple>` would false-fire.
       #
       # The rule fires only when (a) the receiver yields exactly one value (`expected_param_types.size ==
-      # 1`), (b) the block declares more than one positional slot, or one plus a rest (`|k, *r|`, and the
-      # trailing-comma `|k,|` Prism spells as an `ImplicitRestNode`) — Ruby splats both, while a lone `|*r|`
-      # does not — and (c) that single expected element is a Tuple or an `Array[T]` carrier
+      # 1`), (b) the parameter list is one CRuby splats (see {#splatting_parameter_list?}), and (c) that single
+      # expected element is a Tuple or an `Array[T]` carrier
       # ({MultiTargetBinder.array_element_type}). Multi-arg yields (e.g. `each_with_index`'s `(element,
       # index)` pair) are NOT auto-splatted — matching Ruby semantics where a multi-arg yield to a `|a, b, c|`
       # block fills the extra slot with nil rather than splatting any element.
       def apply_auto_splat(params_node)
         return unless @expected_param_types.size == 1
 
-        pos_count = params_node.requireds.size + params_node.optionals.size + params_node.posts.size
-        return unless pos_count > 1 || (pos_count == 1 && !params_node.rest.nil?)
+        return unless splatting_parameter_list?(params_node)
 
         first = @expected_param_types[0]
         if first.is_a?(Type::Tuple)
@@ -154,6 +152,19 @@ module Rigor
         elsif (element = MultiTargetBinder.array_element_type(first))
           apply_array_auto_splat(params_node, element)
         end
+      end
+
+      # CRuby's own condition (`vm_callee_setup_block_arg` / `setup_parameters_complex`): a block splats a lone
+      # array argument when it has a mandatory positional (`lead + post > 0`) or more than one optional, except a
+      # bare `|a|` (the iseq's `ambiguous_param0`). So `|k, *r|`, `|*r, v|`, `|a = 1, b = 2|` and the
+      # trailing-comma `|k,|` (Prism's `ImplicitRestNode`) splat, while `|*r|`, `|a = 1, *r|` and `|a, &b|` /
+      # `|a, k: 1|` do not.
+      def splatting_parameter_list?(params_node)
+        mandatory = params_node.requireds.size + params_node.posts.size
+        optional = params_node.optionals.size
+        return false unless mandatory.positive? || optional > 1
+
+        !(mandatory == 1 && optional.zero? && params_node.rest.nil?)
       end
 
       # The Tuple arm of {#apply_auto_splat}. Leading positionals (required, then optional) read from the head;

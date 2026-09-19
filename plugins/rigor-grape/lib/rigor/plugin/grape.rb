@@ -34,7 +34,11 @@ module Rigor
     class Grape < Rigor::Plugin::Base
       # `namespace`-family bodies evaluate as instance methods of the Instance *class object*
       # (`Instance.nest` / `evaluate_as_instance_with_configuration` do `instance_eval(&block)`).
-      NAMESPACE_METHODS = %i[namespace group resource resources segment route_param version given mounted].freeze
+      # `scope` belongs here too: `Grape::DSL::Routing#scope` is `within_namespace { nest(block) }`,
+      # so its body `instance_eval`s on the same Instance class object as `namespace`.
+      NAMESPACE_METHODS = %i[
+        namespace group resource resources segment scope route_param version given mounted
+      ].freeze
       # HTTP verb macros are generated over `Grape::HTTP_SUPPORTED_METHODS` and delegate to `route`;
       # their bodies run inside `Grape::Endpoint` instances.
       VERB_METHODS = %i[get put post delete head patch options route].freeze

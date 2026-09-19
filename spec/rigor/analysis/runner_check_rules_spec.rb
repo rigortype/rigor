@@ -3451,8 +3451,9 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     # Issue #1110 — an ivar destructured from `Array[T]` binds `T` (marked optimistic) in its own method and seeds
-    # `T | nil` for a sibling; neither reading may fire on a correct program. The neighbour proves the targets are
-    # still bound: a slot that is exactly `nil` fires as it would for a local.
+    # `T` for a sibling, as `@x = xs.first` does; neither reading may fire on a correct program. The neighbours prove
+    # the targets are still bound: a slot that is exactly `nil` fires as it would for a local, and a seed that
+    # really holds `nil` still fails a declared return.
     describe "destructuring into instance variables" do
       it "fires nothing on the idiomatic Array[T] destructure, in the method or a sibling" do
         result = analyze(<<~RUBY)
@@ -3474,6 +3475,46 @@ RSpec.describe Rigor::Analysis::Runner do
           end
         RUBY
         expect(result.diagnostics.map(&:rule)).to be_empty
+      end
+
+      describe "against a declared RBS return" do
+        let(:version_sig) do
+          { "version.rbs" => <<~RBS }
+            class Version
+              def major_i: () -> Integer
+            end
+          RBS
+        end
+
+        def return_mismatches(result)
+          result.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+        end
+
+        it "does not fire when a sibling returns an ivar destructured from Array[T]" do
+          result = analyze(<<~RUBY, sig: version_sig)
+            class Version
+              def initialize
+                @major, @minor, @patch = RUBY_VERSION.split(".").map(&:to_i)
+              end
+
+              def major_i = @major
+            end
+          RUBY
+          expect(return_mismatches(result)).to be_empty
+        end
+
+        it "still fires when the only seed is nil" do
+          result = analyze(<<~RUBY, sig: version_sig)
+            class Version
+              def initialize
+                @major = nil
+              end
+
+              def major_i = @major
+            end
+          RUBY
+          expect(return_mismatches(result)).not_to be_empty
+        end
       end
 
       it "still fires on a slot that is exactly nil" do

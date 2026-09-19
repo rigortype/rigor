@@ -1345,15 +1345,15 @@ module Rigor
       # what a single write to an unknown RHS records). Nested and splat targets (`(@a, @b), *@c = …`) follow the same
       # rules.
       #
-      # The seed is flow-insensitive and carries no ADR-101 optimistic mark to a sibling method's read, so the binder
-      # runs in its sound mode (`soften: false`): an `Array[T]` fixed slot records `T | nil`, and a genuinely optional
-      # tuple slot keeps its `nil`. The seeded read is declaration-sourced (ADR-58 WD1), so that `nil` does not fire
-      # `possible-nil-receiver` across methods, while `@first.nil?` in a sibling no longer folds to `false`.
+      # The seed records the binder's default reading and drops its ADR-101 marks, exactly what a single
+      # `@x = xs.first` write records: an `Array[T]` fixed slot seeds `T`, not `T | nil`. The table has no mark
+      # channel, and a `T | nil` seed is not gated everywhere a declaration-sourced nil is — a sibling returning the
+      # ivar against a declared `-> T` would fire `def.return-type-mismatch` on a correct program (ADR-5).
       def record_multi_write_ivars(node, scope, class_name, accumulator)
         return unless node.is_a?(Prism::MultiWriteNode)
 
         rhs_type = scope.type_of(node.value)
-        ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope, soften: false).ivars
+        ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope).ivars
         ivars.each { |name, type| accumulate_ivar_type(accumulator, class_name, name, type) }
       end
 

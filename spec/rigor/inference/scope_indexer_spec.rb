@@ -1919,9 +1919,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).not_to be_a(Rigor::Type::Union)
       end
 
-      # Issue #1110 — the seed decomposes by `MultiTargetBinder`'s rules, in its sound mode: the class-ivar
-      # table carries no optimistic mark to a sibling read, so an `Array[T]` fixed slot records `T | nil`.
-      it "records an Array[T] RHS as T | nil per fixed slot and Array[T] for the rest" do
+      # Issue #1110 — the seed decomposes by `MultiTargetBinder`'s rules and drops the marks, recording what
+      # `@first = xs.first` records: an `Array[T]` fixed slot seeds `T`, not `T | nil`.
+      it "records an Array[T] RHS as T per fixed slot and Array[T] for the rest" do
         program = parse(<<~RUBY)
           class K
             def initialize
@@ -1931,11 +1931,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         RUBY
         ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("K")
         integer = Rigor::Type::Combinator.nominal_of("Integer")
-        expect(ivars[:@first]).to eq(Rigor::Type::Combinator.union(integer, Rigor::Type::Combinator.constant_of(nil)))
+        expect(ivars[:@first]).to eq(integer)
         expect(ivars[:@rest]).to eq(Rigor::Type::Combinator.nominal_of("Array", type_args: [integer]))
       end
 
-      it "records a Tuple RHS rest as the middle elements and keeps a present optional slot's nil" do
+      it "records a Tuple RHS rest as the middle elements and softens a present optional slot as locals do" do
         program = parse(<<~RUBY)
           class L
             def initialize(flag)
@@ -1948,8 +1948,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         two, three = [2, 3].map { |v| Rigor::Type::Combinator.constant_of(v) }
         expect(ivars[:@mid]).to eq(Rigor::Type::Combinator.tuple_of(two, three))
         expect(ivars[:@z]).to eq(Rigor::Type::Combinator.constant_of(4))
-        expect(ivars[:@q]).to eq(Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of("s"),
-                                                               Rigor::Type::Combinator.constant_of(nil)))
+        expect(ivars[:@q]).to eq(Rigor::Type::Combinator.constant_of("s"))
       end
 
       it "wraps a value with no implicit to_ary as [rhs], padding the later slot with nil" do

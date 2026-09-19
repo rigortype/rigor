@@ -276,6 +276,53 @@ module Rigor
         MIGRATION_PATH_PATTERNS.any? { |pattern| path_s.match?(pattern) }
       end
 
+      # ADR-113 WD4 (#1082) — enumerates the members this plugin synthesizes on `class_name`, for the
+      # `rigor lens` declaration map. The rows come straight from the prepared {ModelIndex} — the same
+      # fact the `dynamic_return` gate and {#diagnostics_for_file} already read — so the hook adds no
+      # discovery of its own and stays off the `check` hot path (ADR-52): `check` never calls it. An
+      # unknown class, a failed index, and a non-model class all answer `[]`; a reduced-mode index (no
+      # schema) simply lists no columns.
+      #
+      # `type` carries the type the plugin already answers for the member, per the issue's rule:
+      #
+      # - `:scope` — `Relation[Model]`, the class-side answer `Post.published` gets.
+      # - `:association_reader` — the same object {#association_return_type} contributes at a call
+      #   site: `Relation[Target]` for a collection, `Nominal[Target]` (`| nil` for `has_one` /
+      #   `optional: true`) for a singular, and nil for a polymorphic target the plugin cannot type.
+      # - `:column_reader` / `:column_predicate` — `Dynamic[top]` ON PURPOSE (#963): a precise column
+      #   type at member level was measured at 57 false positives on mastodon, so the plugin claims
+      #   the reader (and its Rails-generated `column?` predicate) and declines to say more.
+      # - `:enum` — the enum's attribute reader (`status`), `Dynamic[top]` for the same reason. The
+      #   per-value predicates Rails generates ride in `:macro_method` with their affix-resolved names.
+      # - `:macro_method` — `delegate` names, attachment readers, enum predicates (#1049 records names
+      #   only): the plugin knows the member exists and answers no type for it, so `type` is nil.
+      def declared_members(class_name)
+        index = model_index
+        return [] if index.nil?
+
+        entry = index.find(class_name)
+        return [] if entry.nil?
+
+        untyped = Rigor::Type::Combinator.untyped
+        entry.column_names.flat_map do |name|
+          [{ name: name, kind: :column_reader, type: untyped },
+           { name: "#{name}?", kind: :column_predicate, type: untyped }]
+        end +
+          entry.associations.map do |association|
+            { name: association[:name], kind: :association_reader,
+              type: association_return_type(entry, association[:name]) }
+          end +
+          entry.scopes.map do |name|
+            { name: name, kind: :scope, type: relation_of(entry.class_name) }
+          end +
+          entry.enums.keys.map do |column|
+            { name: column, kind: :enum, type: untyped }
+          end +
+          entry.macro_methods.map do |name|
+            { name: name, kind: :macro_method, type: nil }
+          end
+      end
+
       # The class-side finder / relation entry-point names `finder_return_type` recognises. Static half of
       # the `dynamic_return` name gate; the run-time half comes from the model index (scopes,
       # associations, columns).

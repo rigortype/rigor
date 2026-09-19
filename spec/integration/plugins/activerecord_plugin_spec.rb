@@ -3988,4 +3988,133 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
     end
   end
+
+  describe "#declared_members (ADR-113 WD4, #1082)" do
+    # The lens declaration-map hook: `User` exposes its schema columns, association accessors, declared
+    # scopes and enum surface as `{name:, kind:, type:}` rows read off the prepared ModelIndex.
+    # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+    LENS_MODELS = {
+      "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+      "app/models/user.rb" => <<~RUBY,
+        class User < ApplicationRecord
+          has_many :posts
+          has_one :profile
+          belongs_to :attachable, polymorphic: true
+          scope :admins, -> { where(admin: true) }
+          enum status: { active: 0, archived: 1 }
+        end
+      RUBY
+      "app/models/post.rb" => <<~RUBY,
+        class Post < ApplicationRecord
+          belongs_to :user
+        end
+      RUBY
+      "app/models/profile.rb" => "class Profile < ApplicationRecord\nend\n"
+    }.freeze
+
+    LENS_SCHEMA = <<~SCHEMA
+      ActiveRecord::Schema[8.0].define do
+        create_table "users", force: :cascade do |t|
+          t.string "name"
+          t.string "email"
+          t.boolean "admin"
+          t.integer "status", default: 0
+        end
+
+        create_table "posts", force: :cascade do |t|
+          t.string "title"
+          t.references "user", foreign_key: true
+        end
+
+        create_table "profiles", force: :cascade do |t|
+          t.references "user", foreign_key: true
+        end
+      end
+    SCHEMA
+    # rubocop:enable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+
+    # Same shape as `run_ar_with_index`, but returns the plugin instance so the examples can call the
+    # hook directly — `declared_members` is a lens entry point, not something `check` invokes.
+    def plugin_after_run(models:, schema: LENS_SCHEMA)
+      files = { "demo.rb" => "x = 1\n" }.merge(models)
+      files["db/schema.rb"] = schema if schema
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, files)
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => ["demo.rb"],
+            "plugins" => ["rigor-activerecord"]
+          )
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            collect_stats: false,
+            plugin_requirer: build_plugin_requirer
+          )
+          guarded_run(runner)
+          runner.plugin_registry.find("activerecord")
+        end
+      end
+    end
+
+    def declared_by_kind(plugin, class_name)
+      plugin.declared_members(class_name).group_by { |member| member[:kind] }
+    end
+
+    it "lists the schema column readers and their `?` predicates, all Dynamic[top]" do
+      by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS), "User")
+
+      reader_names = by_kind.fetch(:column_reader).map { |m| m[:name] }
+      expect(reader_names).to include("name", "email", "admin", "status")
+      expect(by_kind.fetch(:column_reader).map { |m| m[:type] }.uniq)
+        .to eq([Rigor::Type::Combinator.untyped])
+
+      predicate_names = by_kind.fetch(:column_predicate).map { |m| m[:name] }
+      expect(predicate_names).to include("name?", "email?", "admin?", "status?")
+      expect(by_kind.fetch(:column_predicate).map { |m| m[:type] }.uniq)
+        .to eq([Rigor::Type::Combinator.untyped])
+    end
+
+    it "lists association readers with the type the call-site path answers" do
+      by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS), "User")
+      associations = by_kind.fetch(:association_reader).to_h { |m| [m[:name], m[:type]] }
+
+      expect(associations["posts"].describe).to eq("ActiveRecord::Relation[Post]")
+      expect(associations["profile"].describe).to eq("Profile?")
+      # A polymorphic accessor has no single static target — the plugin declines rather than invent one.
+      expect(associations["attachable"]).to be_nil
+    end
+
+    it "lists a declared scope as a Relation[Model] class-side member" do
+      by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS), "User")
+      scope = by_kind.fetch(:scope).find { |m| m[:name] == "admins" }
+
+      expect(scope[:type].describe).to eq("ActiveRecord::Relation[User]")
+    end
+
+    it "lists the enum attribute, and its generated predicates under :macro_method" do
+      by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS), "User")
+
+      enum = by_kind.fetch(:enum).find { |m| m[:name] == "status" }
+      expect(enum[:type]).to eq(Rigor::Type::Combinator.untyped)
+
+      macro_names = by_kind.fetch(:macro_method).map { |m| m[:name] }
+      expect(macro_names).to include("active?", "archived?")
+      expect(by_kind.fetch(:macro_method).map { |m| m[:type] }.uniq).to eq([nil])
+    end
+
+    it "returns [] for a class the index does not know" do
+      plugin = plugin_after_run(models: LENS_MODELS)
+
+      expect(plugin.declared_members("NotAModel")).to eq([])
+    end
+
+    it "still lists associations / scopes / enums in reduced mode (no schema)" do
+      by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS, schema: nil), "User")
+
+      expect(by_kind[:column_reader]).to be_nil
+      expect(by_kind.fetch(:association_reader).map { |m| m[:name] }).to include("posts", "profile")
+      expect(by_kind.fetch(:scope).map { |m| m[:name] }).to include("admins")
+      expect(by_kind.fetch(:enum).map { |m| m[:name] }).to include("status")
+    end
+  end
 end

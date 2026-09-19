@@ -235,6 +235,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   PLUGIN_BASE_INSTANCE = %w[
     cache_for(req:producer_id,key:params,key:descriptor)
     config()
+    declared_members(req:class_name)
     diagnostic(req:node,keyreq:path,keyreq:message,key:severity,key:rule,key:location)
     diagnostics_for(req:violations,keyreq:path,key:node)
     diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)

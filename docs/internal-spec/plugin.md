@@ -684,6 +684,36 @@ historical role it played — an ungated per-call fat hook returning a
 `FlowContribution` bundle — is now expressed through the narrow,
 compiled-dispatch DSL forms described above.
 
+#### Enumerating synthesized members — `#declared_members` (ADR-113 WD4, [#1082](https://github.com/rigortype/rigor/issues/1082))
+
+A `dynamic_return` rule answers a *type* for one call site at a time; it
+cannot say "class `User` has `email`, `name`, …". `#declared_members(class_name)`
+is the per-class enumeration hook the `rigor lens` declaration map
+([ADR-113](../adr/113-rigor-lens.md)) calls for plugin-synthesized
+members — the surface grep can never find on a DSL-generated member.
+
+The hook returns an `Array` of `{name:, kind:, type:}` Hashes:
+
+- `name` — the member name as a caller spells it (`String`).
+- `kind` — a `Symbol` grouping same-shaped members (`:column_reader`);
+  the lens collapses a group into one line of names.
+- `type` — the `Rigor::Type` the plugin answers for the member, or nil
+  where it does not commit to one. A member the plugin claims but
+  deliberately leaves dynamic carries `Rigor::Type::Combinator.untyped`
+  — the explicit `Dynamic[top]` answer, distinct from nil's "no
+  answer". rigor-activerecord's column readers answer `untyped` on
+  purpose: precise column types at member level were measured at 57
+  false positives on mastodon (#963).
+
+The default returns `[]`. The hook is off the `check` hot path
+(ADR-52): the lens invokes it and `check` never does, so its cost is a
+lens run's alone; it may read state `#prepare` built.
+rigor-activerecord is the first implementor — it enumerates column
+readers and their `column?` predicates, association accessors,
+declared scopes, enum attributes, and `macro_methods` (delegate /
+attachment / enum-predicate names) straight off the prepared
+`ModelIndex`.
+
 #### Machine-readable capability catalogue — `rigor plugins --capabilities` (ADR-37 Slice 3)
 
 `rigor plugins --capabilities` emits the per-plugin extension-protocol

@@ -450,6 +450,25 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       end
     end
 
+    # Issue #1110 — an instance-variable target takes the same bet, recorded through `Scope#with_optimistic_ivar`.
+    it "declines on an instance-variable fixed slot, matching `@x = xs.first`" do
+      type, = evaluate_with({ xs: array_of_string }, <<~RUBY)
+        @a, @b = xs
+        if @b.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "still elides on an instance-variable Tuple slot" do
+      type, = evaluate(<<~RUBY)
+        @a, @b = ["x", "y"]
+        if @b then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
     it "still elides on the nil slot of a wrapped scalar, which is exact rather than a bet" do
       type, = evaluate(<<~RUBY)
         a, b = 1

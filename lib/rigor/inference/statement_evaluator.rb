@@ -706,7 +706,8 @@ module Rigor
       # nested Prism::MultiTargetNode for the `(b, c)` form). Tuple-shaped right-hand sides produce per-slot types
       # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), a
       # union distributes over its members and a value with no implicit `to_ary` binds as `[rhs]` (issue #1094), and
-      # other carriers fall back to `Dynamic[Top]` per slot. The expression value is the right-hand side type
+      # other carriers fall back to `Dynamic[Top]` per slot. Instance-variable targets bind by the same rules, with the
+      # optimistic mark recorded per ivar (issue #1110). The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)

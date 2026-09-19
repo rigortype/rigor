@@ -3449,5 +3449,124 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(ivar_diags(result)).to be_empty
       end
     end
+
+    # Issue #1110 — an ivar destructured from `Array[T]` binds `T` (marked optimistic) in its own method and seeds
+    # `T` for a sibling, as `@x = xs.first` does; neither reading may fire on a correct program. The neighbours prove
+    # the targets are still bound: a slot that is exactly `nil` fires as it would for a local, and a seed that
+    # really holds `nil` still fails a declared return.
+    describe "destructuring into instance variables" do
+      it "fires nothing on the idiomatic Array[T] destructure, in the method or a sibling" do
+        result = analyze(<<~RUBY)
+          class DigitCursor
+            def initialize
+              @first, *@rest = rand(10).digits
+              raise ArgumentError, "no digits" if @first.nil?
+              @first.succ
+            end
+
+            def next_digit
+              @first.succ + @rest.size
+            end
+
+            def label
+              return "none" unless @first
+              @first.to_s
+            end
+          end
+        RUBY
+        expect(result.diagnostics.map(&:rule)).to be_empty
+      end
+
+      describe "against a declared RBS return" do
+        let(:version_sig) do
+          { "version.rbs" => <<~RBS }
+            class Version
+              def major_i: () -> Integer
+            end
+          RBS
+        end
+
+        def return_mismatches(result)
+          result.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+        end
+
+        it "does not fire when a sibling returns an ivar destructured from Array[T]" do
+          result = analyze(<<~RUBY, sig: version_sig)
+            class Version
+              def initialize
+                @major, @minor, @patch = RUBY_VERSION.split(".").map(&:to_i)
+              end
+
+              def major_i = @major
+            end
+          RUBY
+          expect(return_mismatches(result)).to be_empty
+        end
+
+        it "still fires when the only seed is nil" do
+          result = analyze(<<~RUBY, sig: version_sig)
+            class Version
+              def initialize
+                @major = nil
+              end
+
+              def major_i = @major
+            end
+          RUBY
+          expect(return_mismatches(result)).not_to be_empty
+        end
+      end
+
+      # The seed drops the binder's marks, so it must also skip the ADR-57 softening those marks keep honest:
+      # CRuby reaches `nil` in each slot below, and a sibling guard on it must not fold.
+      describe "a sibling guard on a slot that can be nil" do
+        def truthy_diags(result)
+          result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        end
+
+        it "does not fold on a present optional tuple slot, a literal optional slot, or a union member's nil" do
+          result = analyze(<<~RUBY)
+            class TupleOptional
+              def initialize(cond) = (@a, @b = 1, (cond ? nil : 3))
+              def truthy_fold = (@b ? :v : :n)
+              def unless_guard = (raise "x" unless @b)
+            end
+
+            class OptionalSlot
+              def initialize(flag) = (@p, @q = [1, flag ? "s" : nil])
+              def truthy_fold = (@q ? :v : :n)
+            end
+
+            class ResultShape
+              def initialize(ok) = (@status, @value = ok ? [:ok, "v"] : [:err])
+              def has_value = (@value ? :v : :n)
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still folds on a tuple slot that is never nil" do
+          result = analyze(<<~RUBY)
+            class Present
+              def initialize = (@a, @b = 1, 3)
+              def truthy_fold = (@b ? :v : :n)
+            end
+          RUBY
+          expect(truthy_diags(result).size).to eq(1)
+        end
+      end
+
+      it "still fires on a slot that is exactly nil" do
+        result = analyze(<<~RUBY)
+          class Padded
+            def initialize
+              @a, @b = 1
+              @b.succ
+            end
+          end
+        RUBY
+        expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+      end
+    end
   end
 end

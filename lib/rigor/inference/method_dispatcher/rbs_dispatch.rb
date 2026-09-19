@@ -66,6 +66,86 @@ module Rigor
         # objects answer to methods their RBS omits (`ActionController::Base`, `Hash`, …).
         ALLOWED_RBS_COMPLETE_ANCESTORS = ["Rigor::Plugin::Base"].freeze
 
+        # Issue #1094 — the methods through which a value can answer Ruby's implicit `to_ary` conversion.
+        # Multiple assignment and block auto-splat convert through `rb_check_array_type`, which calls
+        # `to_ary` when defined and otherwise asks `respond_to_missing?`, dispatching to `method_missing`
+        # when that answers true — so a `Delegator` destructures its target without defining `to_ary`.
+        ARRAY_CONVERSION_HOOKS = %i[to_ary method_missing respond_to_missing?].freeze
+
+        # The owners whose declarations of those hooks are the defaults rather than an override:
+        # `BasicObject#method_missing` raises and `Kernel#respond_to_missing?` answers false.
+        ARRAY_CONVERSION_DEFAULT_OWNERS = %w[::BasicObject ::Object ::Kernel].freeze
+
+        # Core value classes whose instances never convert — the answer with no RBS environment to hand.
+        ARRAY_CONVERSION_FREE_CORE_CLASSES = %w[
+          Integer Float Symbol String Hash Range Regexp Proc NilClass TrueClass FalseClass
+        ].freeze
+
+        # The classes `Array` itself inherits from. A `Nominal[Object]` is routinely an array at runtime, so
+        # the RBS walk below, which reads the named class's own ancestry, cannot vouch for them.
+        ARRAY_SUPERCLASSES = %w[Object BasicObject].freeze
+
+        # Issue #1094 — whether an instance of `class_name` provably has no implicit array conversion, so
+        # `a, b = value` binds `a` to the value and `b` to `nil` rather than splatting it. Shares ADR-43's
+        # rationale for when an RBS ancestry is closed: the RBS of a class the environment KNOWS is the method
+        # set every other negative rule already trusts (`call.undefined-method` fires on it), while a class the
+        # environment does not know — a Ruby-source class, whatever it inherits — is an open hierarchy and
+        # declines, exactly as ADR-43 keeps it on the Dynamic fallback. Modules and `Array`'s own superclasses
+        # decline because a value of those types is routinely something else. A project `def` of any hook on
+        # the class, its source ancestors, or the default owners declines too: the project's source outranks
+        # the RBS it did not write. Without a `scope` only the core list answers.
+        def array_conversion_free?(class_name, scope)
+          name = class_name.to_s.delete_prefix("::")
+          return false if project_defines_array_conversion?(name, scope)
+          return true if ARRAY_CONVERSION_FREE_CORE_CLASSES.include?(name)
+          return false if scope.nil? || ARRAY_SUPERCLASSES.include?(name)
+
+          rbs_ancestry_array_conversion_free?(name, scope.environment)
+        end
+
+        # ADR-17's boundary for what the project's source can add to a class: a `def` in the analysed file
+        # (`Scope#discovered_method*`, walked through the source ancestry) or in a `pre_eval:` file
+        # (`Environment#project_patched_methods`). Both are asked about the class, its RBS ancestors and the
+        # default owners, because a hook added to any of them reaches the instance.
+        def project_defines_array_conversion?(name, scope)
+          return false if scope.nil?
+
+          owners = [name, *rbs_instance_ancestor_names(name, scope.environment),
+                    *ARRAY_CONVERSION_DEFAULT_OWNERS.map { |owner| owner.delete_prefix("::") }].uniq
+          patched = scope.environment&.project_patched_methods
+          patched = nil if patched && patched.empty?
+          ARRAY_CONVERSION_HOOKS.any? do |hook|
+            scope.discovered_method_through_ancestors?(name, hook, :instance) ||
+              owners.any? do |owner|
+                scope.discovered_method?(owner, hook, :instance) ||
+                  !patched&.lookup(class_name: owner, method_name: hook, kind: :instance).nil?
+              end
+          end
+        end
+
+        def rbs_instance_ancestor_names(name, environment)
+          return [] if environment.nil? || !Rigor::Reflection.rbs_class_known?(name, environment: environment)
+
+          definition = Rigor::Reflection.instance_definition(name, environment: environment)
+          return [] if definition.nil?
+
+          definition.ancestors.ancestors.map { |ancestor| ancestor.name.to_s.delete_prefix("::") }
+        end
+
+        def rbs_ancestry_array_conversion_free?(name, environment)
+          return false if environment.nil?
+          return false unless Rigor::Reflection.rbs_class_known?(name, environment: environment)
+          return false if environment.rbs_module?(name)
+
+          definition = Rigor::Reflection.instance_definition(name, environment: environment)
+          return false if definition.nil?
+
+          ARRAY_CONVERSION_HOOKS.none? do |hook|
+            method = definition.methods[hook]
+            method && !ARRAY_CONVERSION_DEFAULT_OWNERS.include?(method.defined_in.to_s)
+          end
+        end
+
         # Shared empty returns for the argument-position type-variable binding (issue #303). The
         # no-candidate answer is by far the common case — every non-generic overload takes it — so it must
         # not allocate.

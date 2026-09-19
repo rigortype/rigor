@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "optimistic_origin"
+require_relative "method_dispatcher/rbs_dispatch"
 
 module Rigor
   module Inference
@@ -35,9 +36,25 @@ module Rigor
     #   `Scope#with_optimistic_local` ({Result#apply_to}) so the ADR-101 branch elision
     #   declines on them. A nested target under an optimistic slot inherits the mark (`nil`
     #   destructures to `nil` for every inner name); the rest never carries it.
+    # - A `Type::Union` distributes (issue #1094): each member decomposes on its own against the
+    #   same target tree, and each name binds the join of its per-member types. A member that binds
+    #   a name to `Dynamic[Top]` — every name, for a member no rule here decomposes — makes that
+    #   name `Dynamic[Top]` for the whole union rather than dropping out of the join. A member that
+    #   binds a name to bare `nil` while another binds a value drops out of that name's join, and
+    #   the name is marked optimistic: the per-slot softening of {slot_type}, applied across
+    #   members (see {join_member_bindings}). So `a, b = ints[1..]` (`Array[Integer] | nil`) binds
+    #   `Integer` to each slot, marked, exactly as a short `ints` would. A name is also optimistic
+    #   when any member marked it, the rule `Scope#join` applies to the same mark at a merge.
+    # - A value that provably has no implicit `to_ary` conversion
+    #   ({MethodDispatcher::RbsDispatch.array_conversion_free?}: `Integer`, `String`, `Hash`,
+    #   `nil`, ... and RBS-known classes whose ancestry neither defines `to_ary` nor overrides
+    #   `method_missing` / `respond_to_missing?`) is what Ruby wraps as `[rhs]`, so it decomposes
+    #   as that one-element `Tuple` (issue #1094): `a, b = 1` binds `1` and `nil`. The wrap is
+    #   exact rather than a bet, so it adds no mark.
     # - Everything else — raw `Array`, `Array[Dynamic[top]]`, `Dynamic[Array[T]]` (whose static
-    #   facet must not surface as a bare `T`), unions, `Top`, `Bot` — collapses to
-    #   `Dynamic[Top]` per slot.
+    #   facet must not surface as a bare `T`), a value that may convert (`SimpleDelegator`, a
+    #   Ruby-source class, a module, `Object`), `Top`, `Bot` — collapses to `Dynamic[Top]` per
+    #   slot.
     #
     # Targets the binder recognises:
     #
@@ -77,17 +94,19 @@ module Rigor
       module_function
 
       # @param rhs_type — type of the right-hand side
-      def bind(target_node, rhs_type)
-        bind_marked(target_node, rhs_type).types
+      # @param scope — the scope the destructure is evaluated in, which answers the `to_ary`
+      #   question for a class outside the core list; without one only the core list wraps.
+      def bind(target_node, rhs_type, scope: nil)
+        bind_marked(target_node, rhs_type, scope: scope).types
       end
 
       # @param optimistic — whether `rhs_type` itself is an optimistic slot of an enclosing
       #   decomposition (a block's `|(g, h)|` fed from an auto-splatted `Array[T]`), in which case
       #   every name bound under it inherits the mark.
-      def bind_marked(target_node, rhs_type, optimistic: false)
+      def bind_marked(target_node, rhs_type, optimistic: false, scope: nil)
         bindings = {}
         marked = []
-        visit(target_node, rhs_type, optimistic, bindings, marked)
+        visit(target_node, rhs_type, optimistic, bindings, marked, scope)
         Result.new(types: bindings, optimistic: marked.freeze)
       end
 
@@ -108,21 +127,71 @@ module Rigor
         end
       end
 
+      # The class whose instances `type` describes, for the `to_ary` question, or nil when `type`
+      # names no single class: `Dynamic`, `Top`, `Singleton`, `Intersection` and the rest decline.
+      # A union never reaches here; the binder distributes it first.
+      def conversion_class_name(type)
+        case type
+        when Type::Constant then type.value.class.name
+        when Type::Nominal then type.class_name
+        when Type::HashShape then "Hash"
+        when Type::IntegerRange then "Integer"
+        when Type::Refined, Type::Difference then conversion_class_name(type.base)
+        end
+      end
+
       class << self
         private
 
-        def visit(node, rhs_type, optimistic, bindings, marked)
+        def visit(node, rhs_type, optimistic, bindings, marked, scope)
+          return visit_union(node, rhs_type.members, optimistic, bindings, marked, scope) if rhs_type.is_a?(Type::Union)
+
           lefts = node.lefts || []
           rest = node.rest
           rights = node.rights || []
 
           fronts, rest_type, backs, slots_optimistic =
-            decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?)
+            decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?, scope: scope)
           rest_type = arity_free_rest(rest_type) if optimistic
           slot_mark = optimistic || slots_optimistic
-          lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked) }
+          lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked, scope) }
           bind_rest_target(rest, rest_type, bindings, marked) if rest
-          rights.each_with_index { |t, i| bind_target(t, backs[i], slot_mark, bindings, marked) }
+          rights.each_with_index { |t, i| bind_target(t, backs[i], slot_mark, bindings, marked, scope) }
+        end
+
+        # Every member walks the same target tree, so each binds the same names; the first member's
+        # key order is the declaration order.
+        def visit_union(node, members, optimistic, bindings, marked, scope)
+          walks = members.map do |member|
+            member_bindings = {}
+            member_marked = []
+            visit(node, member, optimistic, member_bindings, member_marked, scope)
+            [member_bindings, member_marked]
+          end
+          walks.first.first.each_key do |name|
+            types = walks.map { |member_bindings, _| member_bindings[name] }
+            joined, softened = join_member_bindings(types)
+            mark = softened || walks.any? { |_, member_marked| member_marked.include?(name) }
+            bind_name(name, joined, mark, bindings, marked)
+          end
+        end
+
+        # Returns `[type, softened]`. `Dynamic[Top]` from any member is the whole answer: the join
+        # must not let a decomposable member's precise type stand for a member nothing is known
+        # about. A member that binds the name to bare `nil` — a `nil` slot, a slot past a short
+        # member, or a `nil` member wrapped as `[nil]` — is left out of the join when another member
+        # binds a value, and `softened` reports it so the caller marks the name optimistic. This is
+        # {slot_type}'s ADR-57 softening across members: which member arrived is correlated with the
+        # other slots (`k, v = hash.find { ... }; v.x if k`, `status, value = ok ? [:ok, v] : [:err]`),
+        # and a per-slot `T | nil` fires `call.possible-nil-receiver` on the guarded read.
+        def join_member_bindings(types)
+          untyped = Type::Combinator.untyped
+          return [untyped, false] if types.any? { |type| type == untyped }
+
+          firm = types.reject { |type| nil_literal?(type) }
+          return [Type::Combinator.union(*types), false] if firm.empty? || firm.size == types.size
+
+          [Type::Combinator.union(*firm), true]
         end
 
         # Decomposes the right-hand side type into the per-slot types. Returns a `[fronts,
@@ -130,14 +199,23 @@ module Rigor
         # array of length `front_count`/`back_count`, `rest_type` either a `Rigor::Type` (when
         # `rest_present:` is true) or `nil`, and `optimistic` true when the fixed slots are the
         # short-array bet rather than known elements.
-        def decompose(rhs_type, front_count, back_count, rest_present:)
+        def decompose(rhs_type, front_count, back_count, rest_present:, scope:)
           if rhs_type.is_a?(Type::Tuple)
             [*decompose_tuple(rhs_type, front_count, back_count, rest_present: rest_present), false]
           elsif (element = array_element_type(rhs_type))
             [*decompose_array(element, front_count, back_count, rest_present: rest_present), true]
+          elsif wraps_as_single_element?(rhs_type, scope)
+            wrapped = Type::Combinator.tuple_of(rhs_type)
+            [*decompose_tuple(wrapped, front_count, back_count, rest_present: rest_present), false]
           else
             [*decompose_default(front_count, back_count, rest_present: rest_present), false]
           end
+        end
+
+        # Ruby's `[rhs]` wrap for a value with no implicit `to_ary`; see the module comment.
+        def wraps_as_single_element?(rhs_type, scope)
+          class_name = conversion_class_name(rhs_type)
+          !class_name.nil? && MethodDispatcher::RbsDispatch.array_conversion_free?(class_name, scope)
         end
 
         # Under an inherited mark the whole right-hand side may be the `nil` a short outer array padded in, and
@@ -221,12 +299,12 @@ module Rigor
           ]
         end
 
-        def bind_target(target, type, optimistic, bindings, marked)
+        def bind_target(target, type, optimistic, bindings, marked, scope)
           case target
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode
             bind_name(target.name, type, optimistic, bindings, marked)
           when Prism::MultiTargetNode
-            visit(target, type, optimistic, bindings, marked)
+            visit(target, type, optimistic, bindings, marked, scope)
           end
         end
 

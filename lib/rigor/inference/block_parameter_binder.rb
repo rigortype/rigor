@@ -37,6 +37,16 @@ module Rigor
     # records them through `Scope#with_optimistic_local` exactly as the statement-level `a, b = ints` does
     # (issue #1093; the shared rule lives in {MultiTargetBinder}).
     #
+    # A union whose every member is one of those two carriers (`[K, V] | [K]`, `Array[A] | [B, C]`)
+    # auto-splats member by member, and each position binds the join of the members' types — `Dynamic[Top]`
+    # when any member leaves it unfilled, and without a member's bare `nil` when another fills it (then
+    # optimistic) — optimistic too when any member's `Array[T]` arm marked it, as the statement form joins
+    # a union right-hand side (issue #1094). A union with any other member does not splat, and a lone value
+    # with no `to_ary` is NOT wrapped as `[value]` here the way `a, b = value` wraps it: the one-value premise
+    # of auto-splat is the RBS block signature's arity, which the binder cannot check against the yield, and
+    # a wrong wrap binds `nil` to a parameter the block receives a value in. A nested `|(g, h)|` destructures
+    # the one value the signature already placed, so it wraps like the statement form.
+    #
     # Block-local declarations after `;` (e.g., `|x; y, z|`) are still skipped — they are explicitly
     # block-local, so the outer scope MUST NOT observe them and the binder leaves them unbound.
     #
@@ -56,7 +66,7 @@ module Rigor
       # Binds the block's parameters into `scope`: {#bind}'s types through `Scope#with_local`, then the
       # optimistic mark for every name in {#optimistic}.
       def bind_onto(block_node, scope)
-        types = bind(block_node)
+        types = bind(block_node, scope: scope)
         MultiTargetBinder::Result.new(types: types, optimistic: @optimistic.dup.freeze).apply_to(scope)
       end
 
@@ -64,8 +74,11 @@ module Rigor
       #   parameters are skipped; MultiTargetNode destructuring slots delegate to {MultiTargetBinder} and
       #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind
       #   `:_1`, `:_2`, ... up to the maximum the block body refers to.
-      def bind(block_node)
+      # @param scope — the scope the block is entered from, which answers a nested destructure's `to_ary`
+      #   question ({MultiTargetBinder.bind_marked}).
+      def bind(block_node, scope: nil)
         reset_per_bind_state
+        @scope = scope
         params_root = block_node.parameters
         return {} if params_root.nil?
 
@@ -90,6 +103,7 @@ module Rigor
         @splat_rest_type = nil
         @optimistic_positions = []
         @optimistic = []
+        @scope = nil
       end
 
       # `|_1, _2|` numbered-parameter form. Prism exposes the implicit count through
@@ -146,12 +160,56 @@ module Rigor
 
         return unless splatting_parameter_list?(params_node)
 
-        first = @expected_param_types[0]
-        if first.is_a?(Type::Tuple)
-          apply_tuple_auto_splat(params_node, first.elements)
-        elsif (element = MultiTargetBinder.array_element_type(first))
-          apply_array_auto_splat(params_node, element)
+        members = auto_splat_members(@expected_param_types[0])
+        return if members.nil?
+
+        splats = members.map { |member| auto_splat_of(params_node, member) }
+        @expected_param_types, softened = join_positional_types(splats.map(&:types))
+        @optimistic_positions = (splats.flat_map(&:optimistic_positions) + softened).uniq
+        rests = splats.map(&:rest_type)
+        @splat_rest_type = rests.include?(nil) ? nil : Type::Combinator.union(*rests)
+      end
+
+      # The per-member result of one auto-splat arm: the positional table, the positions it binds
+      # optimistically, and the named rest's type (nil for the `Array[Dynamic[Top]]` default).
+      AutoSplat = Data.define(:types, :optimistic_positions, :rest_type)
+      private_constant :AutoSplat
+
+      # The carriers the value auto-splats as — itself, or every member of a union — or nil when any of them
+      # is neither a Tuple nor an `Array[T]`.
+      def auto_splat_members(type)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        splattable = members.all? { |m| m.is_a?(Type::Tuple) || MultiTargetBinder.array_element_type(m) }
+        splattable ? members : nil
+      end
+
+      def auto_splat_of(params_node, member)
+        if member.is_a?(Type::Tuple)
+          tuple_auto_splat(params_node, member.elements)
+        else
+          array_auto_splat(params_node, MultiTargetBinder.array_element_type(member))
         end
+      end
+
+      # Returns the joined table and the positions it softened. A single member's table is used as is; across
+      # members, a position any member leaves unfilled (a slot past a short Tuple) or fills with `Dynamic[Top]`
+      # stays `Dynamic[Top]`, and a member's bare `nil` drops out of a position another member fills with a
+      # value, the position then being optimistic — `MultiTargetBinder`'s cross-member softening.
+      def join_positional_types(tables)
+        return [tables.first, []] if tables.size == 1
+
+        softened = []
+        joined = Array.new(tables.map(&:size).max) do |i|
+          column = tables.map { |table| table[i] }
+          next Type::Combinator.untyped if column.any? { |t| t.nil? || t == Type::Combinator.untyped }
+
+          firm = column.reject { |t| t.is_a?(Type::Constant) && t.value.nil? }
+          next Type::Combinator.union(*column) if firm.empty? || firm.size == column.size
+
+          softened << i
+          Type::Combinator.union(*firm)
+        end
+        [joined, softened]
       end
 
       # CRuby's own condition (`vm_callee_setup_block_arg` / `setup_parameters_complex`): a block splats a lone
@@ -174,24 +232,25 @@ module Rigor
       # head (Ruby fills `|a, b = 1, c|` from the head when the tuple is long enough). The split is mirrored
       # rather than delegated to `MultiTargetBinder.decompose_tuple` because that one pads a missing slot with
       # `Constant[nil]` and softens `X | nil`; a block slot past the tuple has always bound `Dynamic[Top]`.
-      def apply_tuple_auto_splat(params_node, elements)
+      def tuple_auto_splat(params_node, elements)
         head = params_node.requireds.size + params_node.optionals.size
         posts = params_node.posts.size
         tail_start = params_node.rest.nil? ? head : [elements.size - posts, head].max
-        @expected_param_types = Array.new(head) { |i| elements[i] } +
-                                Array.new(posts) { |j| elements[tail_start + j] }
+        types = Array.new(head) { |i| elements[i] } + Array.new(posts) { |j| elements[tail_start + j] }
+        AutoSplat.new(types: types, optimistic_positions: [], rest_type: nil)
       end
 
       # Issue #1093 — the `Array[T]` arm of {#apply_auto_splat}: see the class comment for the per-slot rule.
-      def apply_array_auto_splat(params_node, element)
+      def array_auto_splat(params_node, element)
         required = params_node.requireds.size
         optional = params_node.optionals.size
         posts = params_node.posts.size
-        @expected_param_types = Array.new(required) { element } +
-                                Array.new(optional) { Type::Combinator.untyped } +
-                                Array.new(posts) { element }
-        @optimistic_positions = (0...required).to_a + ((required + optional)...(required + optional + posts)).to_a
-        @splat_rest_type = Type::Combinator.nominal_of("Array", type_args: [element])
+        AutoSplat.new(
+          types: Array.new(required) { element } + Array.new(optional) { Type::Combinator.untyped } +
+                 Array.new(posts) { element },
+          optimistic_positions: (0...required).to_a + ((required + optional)...(required + optional + posts)).to_a,
+          rest_type: Type::Combinator.nominal_of("Array", type_args: [element])
+        )
       end
 
       def bind_positionals(params_node, bindings, cursor)
@@ -274,7 +333,7 @@ module Rigor
           @optimistic << param.name if @optimistic_positions.include?(cursor)
         when Prism::MultiTargetNode
           nested = MultiTargetBinder.bind_marked(param, positional_type_at(cursor),
-                                                 optimistic: @optimistic_positions.include?(cursor))
+                                                 optimistic: @optimistic_positions.include?(cursor), scope: @scope)
           bindings.merge!(nested.types)
           @optimistic.concat(nested.optimistic)
         end

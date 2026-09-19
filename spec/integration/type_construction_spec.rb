@@ -1941,6 +1941,31 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/union_scalar_destructure.rb — issue #1094 union and [rhs] destructuring" do
+      let(:harness) { harness_for("union_scalar_destructure") }
+
+      # A union right-hand side distributes per member and joins per name; a value that provably has no
+      # `to_ary` binds as `[rhs]`; a class the project gives `to_ary` or `respond_to_missing?` stays Dynamic.
+      it "binds each slot to the join of its members and wraps only non-converting values" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # The correlated reads (`group.first if size`, `value.upcase if status == :ok`) are correct code; a
+      # member's bare `nil` joined into the slot would fire here, which is why the join softens it.
+      it "reports no possible-nil receiver on a slot guarded by its sibling" do
+        nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        expect(nil_receivers).to be_empty
+      end
+
+      # `x == nil` / `x != nil` over a softened slot is the same statement as `x.nil?`, so it inherits the
+      # optimistic mark and the flow rule declines rather than calling a live guard constant.
+      it "reports no always-truthy condition on a nil comparison over a softened slot" do
+        always = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(always).to be_empty
+      end
+    end
+
     describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do
       let(:harness) { harness_for("block_captured_writeback") }
 

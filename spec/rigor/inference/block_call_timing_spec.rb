@@ -119,6 +119,7 @@ RSpec.describe Rigor::Inference::BlockCallTiming do
         "raise" => 'raise "x"',
         "fail" => 'fail "x"',
         "Kernel.raise" => 'Kernel.raise "x"',
+        "::Kernel.raise" => '::Kernel.raise "x"',
         "exit" => "exit 1",
         "abort" => 'abort "x"',
         "throw" => "throw :done",

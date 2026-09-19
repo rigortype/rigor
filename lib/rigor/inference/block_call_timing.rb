@@ -51,11 +51,59 @@ module Rigor
 
       # Receiver-less (or `self.` / `Kernel.`) calls that never return normally: they raise, throw, or end
       # the process. Anything else — including `loop`, whose RBS return is `bot` although a `StopIteration`
-      # ends it normally — proves nothing.
+      # ends it normally ({.loop_may_complete?}) — proves nothing.
       NON_RETURNING_CALLS = %i[raise fail throw exit exit! abort].freeze
       private_constant :NON_RETURNING_CALLS
 
+      # Issue #1107 — the nodes a `loop` body may consist of while still provably unable to raise
+      # `StopIteration`: none of them dispatches a method, so nothing in the body can run code that raises.
+      # Everything else — every call (operators and `[]` included), `yield`, `super`, interpolation, a splat,
+      # a constant read (`const_missing`), a `rescue` — may, and declines.
+      STOP_ITERATION_FREE_NODES = [
+        Prism::StatementsNode, Prism::ParenthesesNode, Prism::ArgumentsNode,
+        Prism::BreakNode, Prism::NextNode, Prism::RedoNode, Prism::ReturnNode,
+        Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode,
+        Prism::StringNode, Prism::SymbolNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode, Prism::SelfNode,
+        Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode,
+        Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
+        Prism::IfNode, Prism::UnlessNode, Prism::ElseNode, Prism::AndNode, Prism::OrNode, Prism::ArrayNode
+      ].freeze
+      private_constant :STOP_ITERATION_FREE_NODES
+
       module_function
+
+      # Issue #1107 — whether a `loop` call can complete normally although its declared return is `bot`.
+      #
+      # `Kernel#loop` is `() { () -> void } -> bot` in core RBS, yet it rescues a `StopIteration` its block
+      # raises and returns that exception's `result` — the enumerator-draining idiom `loop { out << e.next }`
+      # returns `e`'s own `each` value. So the declared `bot` holds only for a body that provably cannot raise
+      # `StopIteration`: one built from {STOP_ITERATION_FREE_NODES} alone (`loop {}`, `loop { break 1 }`), in a
+      # block that declares no parameters. A `&blk` block-pass has no body to prove anything about and completes
+      # too.
+      #
+      # Gated on the spellings that reach the private `Kernel#loop` — receiver-less, `self.`, `Kernel.`,
+      # `::Kernel.` — so `obj.loop { ... }` is some other method, whose declared `bot` is that author's
+      # promise. A project redefinition of `loop` itself is not excluded: widening its `bot` costs precision,
+      # never a false positive.
+      def loop_may_complete?(call_node)
+        return false unless call_node.name == :loop && kernel_spelled_receiver?(call_node.receiver)
+
+        block = call_node.block
+        return false if block.nil?
+        return true unless block.is_a?(Prism::BlockNode)
+        # A parameter default (`|v = e.next|`) is evaluated on every iteration, since `loop` yields no
+        # arguments. Rather than walk the parameter list, any declared parameter widens.
+        return true if block.parameters
+        return false if block.body.nil?
+
+        may_raise_stop_iteration?(block.body)
+      end
+
+      def may_raise_stop_iteration?(node)
+        return true unless STOP_ITERATION_FREE_NODES.any? { |klass| node.is_a?(klass) }
+
+        node.compact_child_nodes.any? { |child| may_raise_stop_iteration?(child) }
+      end
 
       # Cheap name-only pre-gate, so a call that cannot be catalogued pays nothing further.
       def candidate_name?(method_name)
@@ -138,11 +186,13 @@ module Rigor
           !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }
         end
 
-        # Implicit self, `self.`, or the `Kernel` module itself — the spellings that reach Kernel's function.
+        # Implicit self, `self.`, or the `Kernel` module itself (`Kernel.` or the root-anchored `::Kernel.`) —
+        # the spellings that reach Kernel's function.
         def kernel_spelled_receiver?(receiver)
           case receiver
           when nil, Prism::SelfNode then true
           when Prism::ConstantReadNode then receiver.name == :Kernel
+          when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Kernel
           else false
           end
         end

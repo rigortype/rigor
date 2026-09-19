@@ -1542,8 +1542,13 @@ module Rigor
       # the block. A catalogued exactly-once yielder ({BlockCallTiming}) cannot, so when its block's normal
       # completion is unreachable the callee's result is too, and the call is its `break` arms alone — `bot`
       # when every path raises or returns instead.
+      #
+      # Issue #1107: `Kernel#loop` declares `-> bot` but returns normally, with `StopIteration#result`, when its
+      # block raises `StopIteration`. Unless the body provably cannot ({BlockCallTiming.loop_may_complete?}),
+      # that normal return is `untyped` — the result's declared type — so `loop { e.next }` is not `bot` and
+      # `loop { x = e.next; break x if x }` keeps its arm beside it.
       def call_dispatch_type_for(node, receiver_override: nil)
-        result = call_result_type_for(node, receiver_override: receiver_override)
+        result = loop_completion_type(node, call_result_type_for(node, receiver_override: receiver_override))
         arms = call_break_arm_types(node, receiver_override: receiver_override)
         if exactly_once_block_never_completes?(node, receiver_override)
           return arms.empty? ? Type::Combinator.bot : Type::Combinator.union(*arms)
@@ -1553,14 +1558,22 @@ module Rigor
         Type::Combinator.union(result, *arms)
       end
 
+      def loop_completion_type(node, result)
+        return result unless result.is_a?(Type::Bot) && BlockCallTiming.loop_may_complete?(node)
+
+        scope.record_dynamic_origin(node, DynamicOrigin::EXPLICIT_UNTYPED)
+        Type::Combinator.untyped
+      end
+
       # Whether `node` calls a catalogued exactly-once yielder ({BlockCallTiming}) with a literal block that can
       # never complete normally. Two proofs must BOTH hold. The syntactic one
       # ({BlockCallTiming.never_completes_normally?}) says every path ends in a jump or a non-returning Kernel
       # call. The block-return pass must also answer exactly `bot`: a reachable `next` joins its value instead
       # (#841), so `tap { next "s" }` completes and keeps the receiver, and a nil-bearing or `Dynamic` value or a
       # failed pass (`nil`) keeps the #853 union. The pass alone is not enough, because it also answers `bot`
-      # for a body whose last call merely DECLARES `-> bot` — `loop { e.next }` returns normally once `e` is
-      # drained, and trusting it made correct code report an always-falsey condition.
+      # for a body whose last call merely DECLARES `-> bot` — a project method's signature, or `loop` before
+      # #1107 widened it ({#loop_completion_type}); `loop { e.next }` returns normally once `e` is drained, and
+      # trusting it made correct code report an always-falsey condition.
       #
       # The pre-gates run cheapest-first because the block is re-typed here: the name, a `Prism::BlockNode` (a
       # `&blk` / `&:sym` block-pass carries no body to prove anything about), no arguments (none of the three

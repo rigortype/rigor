@@ -240,6 +240,38 @@ untyped, not a defect), the `Hash[Dynamic]#[]` family (already #531/#542 territo
 `singleton(User)#current` (declined lever), and the GitLab utility-singleton cluster
 (mostly resolved-method-untyped-return propagation, the #522 lane).
 
+## Implementation follow-up (2026-09-20): #1100 + #1099 measured
+
+The two DSL-plugin issues were implemented and re-measured on gitlab (same config,
+`severity_profile: lenient`, `rigor-graphql` + `rigor-grape` enabled; raw artifacts
+`gitlab.graphql.*` / `gitlab.grape.*` under `_reports/typing-holes/`):
+
+| run | precise | precision | lib/api holes |
+| --- | --- | --- | --- |
+| baseline | 878,626 / 1,472,166 | 59.68% | 62,091 / 169,043 |
+| + rigor-graphql (#1106) | 887,957 | 60.32% | 62,062 |
+| + rigor-grape (#1111) | 911,416 | **61.91%** | **47,783** |
+
+lib/api hole-name deltas over the graphql run: `params` −2,288, `expose` −2,171,
+`optional` −1,775, `route_setting` −1,337, `requires` −1,276, `desc` −1,064,
+`detail` −1,034, `Grape` const-reads −807, verb macros −0.5k each. New diagnostics
+introduced: three `call.possible-nil-receiver` warnings in `app/graphql/resolvers/`
+(`[…].compact.min` feeds `limit <= 0` — an honest nilable reveal, not an FP).
+
+What still reads opaque in lib/api (deferred, all documented in the plugin manual):
+`desc … do` bodies (DescContainer's `detail`/`success`/`tags` — the +0 `detail`/`tags`
+residual), `helpers do … end` bodies (anonymous-module `self`), helper-provided sends
+(`current_user`, `user_project`, `find_*`), and value-level `present`/`declared`
+results.
+
+Two substrate fixes the measurement exposed and the branch carries: the
+`BlockAsMethod` `self_type:` grammar gained named-class bindings
+(`"Grape::Validations::ParamsScope"`, `"singleton(Grape::API::Instance)"`), and both
+ancestor walks (the ADR-43 bridge and the new macro narrowing) now resolve as-written
+superclass names through `ancestor_name_candidates` — the raw table lookup died on
+`class AccessRequests < ::API::Base`-style rooted spellings, which is the dominant
+gitlab shape.
+
 ## What this note does not claim
 
 - Site-level cause assignments were not re-verified with same-file controls this round

@@ -663,10 +663,12 @@ module Rigor
       #
       # Returns an `Array` of `{name:, kind:, type:}` Hashes. `name` is the member name as a caller spells
       # it (String); `kind` is a Symbol grouping same-shaped members (`:column_reader`) — the lens
-      # collapses a group into one line; `type` is the `Rigor::Type` the plugin answers for the member, or
-      # nil where it does not commit to one. A member the plugin claims but deliberately leaves dynamic
-      # carries `Rigor::Type::Combinator.untyped` — the explicit `Dynamic[top]` answer, distinct from
-      # nil's "no answer".
+      # collapses a group into one line; `type` is the `Rigor::Type` the plugin commits to for the member
+      # itself, or nil where it does not commit to one. It is the member-level answer, not the best a
+      # typed call site can do: a plugin that narrows `user.name` to `String` on a written receiver but
+      # declines to type the bare `name` read reports `Dynamic[top]` here. A member the plugin claims
+      # but deliberately leaves dynamic carries `Rigor::Type::Combinator.untyped` — the explicit
+      # `Dynamic[top]` answer, distinct from nil's "no answer".
       #
       # The hook is off the `check` hot path (ADR-52): `rigor lens` invokes it, `check` never does. It may
       # read state `#prepare` built. The default returns `[]` — a plugin that synthesizes no enumerable

@@ -4091,11 +4091,14 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(scope[:type].describe).to eq("ActiveRecord::Relation[User]")
     end
 
-    it "lists the enum attribute, and its generated predicates under :macro_method" do
+    it "lists a schema-backed enum attribute once, as a column reader" do
       by_kind = declared_by_kind(plugin_after_run(models: LENS_MODELS), "User")
 
-      enum = by_kind.fetch(:enum).find { |m| m[:name] == "status" }
-      expect(enum[:type]).to eq(Rigor::Type::Combinator.untyped)
+      # `status` is a real column, so the column row already carries the name and no :enum row is
+      # emitted for it — a member never lists twice. The predicates Rails generates still ride in
+      # :macro_method with their affix-resolved names, and the plugin answers no type for them.
+      expect(by_kind.fetch(:column_reader).map { |m| m[:name] }).to include("status")
+      expect(by_kind[:enum]).to be_nil
 
       macro_names = by_kind.fetch(:macro_method).map { |m| m[:name] }
       expect(macro_names).to include("active?", "archived?")
@@ -4114,7 +4117,10 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(by_kind[:column_reader]).to be_nil
       expect(by_kind.fetch(:association_reader).map { |m| m[:name] }).to include("posts", "profile")
       expect(by_kind.fetch(:scope).map { |m| m[:name] }).to include("admins")
-      expect(by_kind.fetch(:enum).map { |m| m[:name] }).to include("status")
+      # With no schema the enum attribute has no column row, so it lists under :enum — and `type`
+      # stays nil because the plugin answers nothing for the bare attribute at `check`.
+      enum = by_kind.fetch(:enum).find { |m| m[:name] == "status" }
+      expect(enum[:type]).to be_nil
     end
   end
 end

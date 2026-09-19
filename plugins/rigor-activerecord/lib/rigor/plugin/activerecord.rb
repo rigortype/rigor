@@ -283,17 +283,25 @@ module Rigor
       # unknown class, a failed index, and a non-model class all answer `[]`; a reduced-mode index (no
       # schema) simply lists no columns.
       #
-      # `type` carries the type the plugin already answers for the member, per the issue's rule:
+      # `type` is the most conservative of the answers the plugin gives the member at `check` — a row
+      # that claimed a type `check` never produces would misstate the member (ADR-113 treats a lens
+      # answer differing from `check` as a bug):
       #
       # - `:scope` — `Relation[Model]`, the class-side answer `Post.published` gets.
       # - `:association_reader` — the same object {#association_return_type} contributes at a call
       #   site: `Relation[Target]` for a collection, `Nominal[Target]` (`| nil` for `has_one` /
       #   `optional: true`) for a singular, and nil for a polymorphic target the plugin cannot type.
-      # - `:column_reader` / `:column_predicate` — `Dynamic[top]` ON PURPOSE (#963): a precise column
-      #   type at member level was measured at 57 false positives on mastodon, so the plugin claims
-      #   the reader (and its Rails-generated `column?` predicate) and declines to say more.
-      # - `:enum` — the enum's attribute reader (`status`), `Dynamic[top]` for the same reason. The
-      #   per-value predicates Rails generates ride in `:macro_method` with their affix-resolved names.
+      # - `:column_reader` / `:column_predicate` — `Dynamic[top]` ON PURPOSE (#963): that is the
+      #   answer the bare, receiver-less read gets inside the model's own `def`, the only answer free
+      #   of receiver-type context. A written `user.name` still narrows to the column's type, but the
+      #   member-level answer stays dynamic — the precise variant at member level was measured at 57
+      #   false positives on mastodon.
+      # - `:enum` — the enum's attribute reader (`status`), listed ONLY when no column row already
+      #   carries the name (a non-column enum attribute, or a reduced-mode index with no schema). An
+      #   enum-backed column appears under `:column_reader` instead, so no member lists twice. The
+      #   plugin answers nothing for the bare enum attribute at `check`, so `type` is nil — not
+      #   `untyped`, which would claim an answer `check` does not give. The per-value predicates Rails
+      #   generates ride in `:macro_method` with their affix-resolved names.
       # - `:macro_method` — `delegate` names, attachment readers, enum predicates (#1049 records names
       #   only): the plugin knows the member exists and answers no type for it, so `type` is nil.
       def declared_members(class_name)
@@ -315,8 +323,8 @@ module Rigor
           entry.scopes.map do |name|
             { name: name, kind: :scope, type: relation_of(entry.class_name) }
           end +
-          entry.enums.keys.map do |column|
-            { name: column, kind: :enum, type: untyped }
+          (entry.enums.keys - entry.column_names).map do |column|
+            { name: column, kind: :enum, type: nil }
           end +
           entry.macro_methods.map do |name|
             { name: name, kind: :macro_method, type: nil }

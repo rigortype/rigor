@@ -69,7 +69,7 @@ typed accordingly." Canonical target: Sinatra's `get '/path' { ... }`
 | --- | --- | --- |
 | `receiver_constraint` | non-empty `String` | FQ class name the call's lexical receiver must be or inherit from. |
 | `method_names` | non-empty `Array<Symbol>` | DSL method names (coerced from `Symbol`/non-empty `String`) whose block runs as an instance method. |
-| `self_type` | `Symbol` | The `self`-binding kind inside the block. Default and only currently-valid value: `:receiver_instance`. `:receiver_singleton` / `:dsl_recorder` are reserved names, not yet accepted. |
+| `self_type` | `Symbol` or `String` | The `self`-binding inside the block. `:receiver_instance` (default) binds `Nominal[receiver class]` — the Sinatra contract. A String names the class the DSL `instance_eval`s the block on: `"Foo::Bar"` binds `Nominal[Foo::Bar]` (Grape `params` bodies on `Grape::Validations::ParamsScope`, verb bodies on `Grape::Endpoint`) and additionally matches `Nominal[Y ≤ receiver_constraint]` receivers, which is how a nested `requires do … end` inside a `params` body re-enters the same context. `"singleton(Foo::Bar)"` binds `Singleton[Foo::Bar]` (Grape `namespace` bodies on the `Grape::API::Instance` class object) and matches `Singleton` receivers only. `:receiver_singleton` / `:dsl_recorder` remain reserved names, not yet accepted. |
 
 ## Tier C — `HeredocTemplate` (`heredoc_templates:`)
 

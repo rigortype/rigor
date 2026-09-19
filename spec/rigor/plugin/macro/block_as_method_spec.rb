@@ -79,7 +79,7 @@ RSpec.describe Rigor::Plugin::Macro::BlockAsMethod do
       end.to raise_error(ArgumentError, /method_names/)
     end
 
-    it "rejects self_type values outside the slice-1a set" do
+    it "rejects self_type values outside the accepted set" do
       expect do
         described_class.new(
           receiver_constraint: "Sinatra::Base",
@@ -87,6 +87,45 @@ RSpec.describe Rigor::Plugin::Macro::BlockAsMethod do
           self_type: :dsl_recorder
         )
       end.to raise_error(ArgumentError, /self_type/)
+    end
+
+    it "accepts a named instance-binding self_type (#1099)" do
+      entry = described_class.new(
+        receiver_constraint: "Grape::API",
+        method_names: %i[params],
+        self_type: "Grape::Validations::ParamsScope"
+      )
+
+      expect(entry.self_type).to eq("Grape::Validations::ParamsScope")
+      expect(entry.self_type_name).to eq("Grape::Validations::ParamsScope")
+      expect(entry.named_instance_binding?).to be(true)
+      expect(entry.singleton_binding?).to be(false)
+      expect(entry.self_type).to be_frozen
+      expect(Ractor.shareable?(entry)).to be(true)
+    end
+
+    it "accepts a singleton-binding self_type (#1099)" do
+      entry = described_class.new(
+        receiver_constraint: "Grape::API",
+        method_names: %i[namespace],
+        self_type: "singleton(Grape::API::Instance)"
+      )
+
+      expect(entry.singleton_binding?).to be(true)
+      expect(entry.named_instance_binding?).to be(false)
+      expect(entry.self_type_name).to eq("Grape::API::Instance")
+    end
+
+    it "rejects malformed self_type Strings" do
+      ["foo::Bar", "singleton()", "singleton(Foo", "Foo Bar", ""].each do |bad|
+        expect do
+          described_class.new(
+            receiver_constraint: "Sinatra::Base",
+            method_names: %i[get],
+            self_type: bad
+          )
+        end.to raise_error(ArgumentError, /self_type/)
+      end
     end
   end
 

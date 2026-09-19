@@ -4,6 +4,8 @@ Status: **Accepted — floor + precision promotion landed (slices 1–7 + 6a/6b)
 
 > **Naming note (2026-06-13):** [ADR-60 WD2](60-pre-freeze-plugin-contract-consolidation.md) renamed two manifest value-object keywords this ADR's examples still show under their original spelling — `Macro::BlockAsMethod` `verbs:` → `method_names:`, and `Macro::NestedClassTemplate` `name_arg_position:` → `symbol_arg_position:`. The current binding shapes are in [`macro-substrate.md`](../internal-spec/macro-substrate.md); the old keywords now raise `ArgumentError`.
 
+> **Extension note (2026-09-20, #1099):** `Macro::BlockAsMethod` `self_type:` now also accepts a String naming the class the DSL `instance_eval`s the block on — `"Grape::Validations::ParamsScope"` binds a nominal `self`, `"singleton(Grape::API::Instance)"` binds the class object itself. Tier A's original contract (`:receiver_instance`, the Sinatra shape) is unchanged; the String form covers DSLs whose blocks run on a *different* object than the receiver, which the survey's Grape shape required. The grammar is pinned in [`macro-substrate.md`](../internal-spec/macro-substrate.md).
+
 Triggered by the per-library survey
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 covering Rails (`ActiveSupport::Concern`, ActiveStorage attached macros),

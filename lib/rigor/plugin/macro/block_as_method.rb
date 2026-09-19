@@ -36,9 +36,14 @@ module Rigor
       # - `method_names` — Array of Symbol method names. A call shape `<receiver_subclass>.get('/path') { ... }`
       #   matches when `:get` is in this list. (Named `verbs:` before ADR-60 WD2 normalised the macro
       #   value-object vocabulary.)
-      # - `self_type` — Symbol selecting the kind of `self`-binding the substrate applies inside the block.
-      #   Slice 1a accepts only `:receiver_instance` (the block runs as an instance method of the receiver
-      #   class). Other kinds (`:receiver_singleton`, `:dsl_recorder`) are reserved for later slices.
+      # - `self_type` — the `self`-binding the substrate applies inside the block. `:receiver_instance`
+      #   (the default) types `self` as an instance of the receiver class — the Sinatra contract. A String
+      #   binds `self` to a *named* class instead of the receiver: `"Grape::Endpoint"` binds
+      #   `Nominal[Grape::Endpoint]` (the block is `instance_eval`'d on an instance of that class, e.g. a
+      #   route body on `Grape::Endpoint`), and `"singleton(Grape::API::Instance)"` binds
+      #   `Singleton[Grape::API::Instance]` (the block is `instance_eval`'d on that *class object*, e.g.
+      #   a `namespace` body on `Grape::API::Instance`). Reserved Symbol names (`:receiver_singleton`,
+      #   `:dsl_recorder`) remain unaccepted.
       #
       # ## Ractor-shareability
       #
@@ -47,6 +52,13 @@ module Rigor
       class BlockAsMethod
         SELF_TYPE_RECEIVER_INSTANCE = :receiver_instance
         VALID_SELF_TYPES = [SELF_TYPE_RECEIVER_INSTANCE].freeze
+
+        CLASS_NAME_PATTERN = /[A-Z]\w*(?:::[A-Z]\w*)*/
+        # `self_type: "Foo::Bar"` — the block is `instance_eval`'d on an instance of `Foo::Bar`.
+        NAMED_SELF_TYPE_PATTERN = /\A#{CLASS_NAME_PATTERN}\z/
+        # `self_type: "singleton(Foo::Bar)"` — the block is `instance_eval`'d on the `Foo::Bar` class
+        # object itself (Grape's `namespace`/`route_param` bodies run on `Grape::API::Instance`).
+        SINGLETON_SELF_TYPE_PATTERN = /\Asingleton\((#{CLASS_NAME_PATTERN})\)\z/
 
         attr_reader :receiver_constraint, :method_names, :self_type
 
@@ -57,7 +69,7 @@ module Rigor
 
           @receiver_constraint = receiver_constraint.dup.freeze
           @method_names = method_names.map(&:to_sym).freeze
-          @self_type = self_type
+          @self_type = self_type.is_a?(String) ? self_type.dup.freeze : self_type
           freeze
         end
 
@@ -79,6 +91,31 @@ module Rigor
 
         def hash
           [receiver_constraint, method_names, self_type].hash
+        end
+
+        # The class name a String `self_type` binds `self` to — `"Foo::Bar"` for both the plain and the
+        # `singleton(Foo::Bar)` form — or `nil` for `:receiver_instance`.
+        def self_type_name
+          return nil unless self_type.is_a?(String)
+
+          self_type[SINGLETON_SELF_TYPE_PATTERN, 1] || self_type
+        end
+
+        # Whether a String `self_type` binds the *class object* (`"singleton(Foo::Bar)"`) rather than an
+        # instance (`"Foo::Bar"`). Nominal-receiver call sites only match instance-binding entries —
+        # a `singleton(...)` binding exists solely for `instance_eval`-on-class contracts, which always
+        # surface as `Singleton[X]` receivers.
+        def singleton_binding?
+          self_type.is_a?(String) && self_type.match?(SINGLETON_SELF_TYPE_PATTERN)
+        end
+
+        # Whether `self_type` names a class whose *instance* the block is `instance_eval`'d on
+        # (`"Foo::Bar"`). These entries are the only ones that also match `Nominal[Y]` receivers: inside
+        # an already-narrowed `instance_eval` body (`self : Nominal[ParamsScope]`), a nested call on
+        # `self` re-enters the same context. `:receiver_instance` keeps its original Singleton-only
+        # contract — a nominal receiver calling a class-level verb is a different (unmodelled) shape.
+        def named_instance_binding?
+          self_type.is_a?(String) && !singleton_binding?
         end
 
         private
@@ -108,10 +145,12 @@ module Rigor
 
         def validate_self_type!(self_type)
           return if VALID_SELF_TYPES.include?(self_type)
+          return if self_type.is_a?(String) &&
+                    (self_type.match?(NAMED_SELF_TYPE_PATTERN) || self_type.match?(SINGLETON_SELF_TYPE_PATTERN))
 
           raise ArgumentError,
-                "Plugin::Macro::BlockAsMethod#self_type must be one of #{VALID_SELF_TYPES.inspect}, " \
-                "got #{self_type.inspect}"
+                "Plugin::Macro::BlockAsMethod#self_type must be one of #{VALID_SELF_TYPES.inspect} " \
+                "or a class-name String ('Foo::Bar' / 'singleton(Foo::Bar)'), got #{self_type.inspect}"
         end
       end
     end

@@ -19,6 +19,7 @@ require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
+require_relative "macro_block_self_type"
 require_relative "element_read_widening"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
@@ -2868,9 +2869,38 @@ module Rigor
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected)
                                                 .bind_onto(block_node, scope.entering_opaque_block)
+        # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
+        # body's `self` to the object the DSL `instance_eval`s the block on (`params` on
+        # `Grape::Validations::ParamsScope`, `namespace` on the `Grape::API::Instance` class object, verb
+        # bodies on `Grape::Endpoint`). The expression-side narrowing
+        # ({ExpressionTyper#block_body_self_narrowing}) already applies the same contract to block-return
+        # typing; without it here the recorded per-node scopes — what `dump_type`/`assert_type` and the
+        # survey read — keep the enclosing `self_type` and every DSL call inside stays `Dynamic[top]`.
+        narrowed = call_node && narrow_macro_block_self(call_node)
+        scope_with_params = scope_with_params.with_self_type(narrowed) if narrowed
         block_local_names(block_node).reduce(scope_with_params) do |acc, name|
           acc.with_local(name, Type::Combinator.constant_of(nil))
         end
+      end
+
+      # The receiver an ADR-16 `block_as_methods:` match is keyed on: the explicit receiver's type, or the
+      # current `self_type` for an implicit-self DSL call (the `params do` / `namespace do` shapes, whose
+      # receiver is the enclosing `Singleton[X]`). A miss leaves the entry scope as built — the false-
+      # positive-safe direction.
+      def narrow_macro_block_self(call_node)
+        receiver_type =
+          if call_node.receiver
+            scope.type_of(call_node.receiver, tracer: tracer)
+          else
+            scope.self_type
+          end
+        return nil if receiver_type.nil?
+
+        MacroBlockSelfType.narrow_self_type_for(
+          scope: scope, call_node: call_node, receiver_type: receiver_type
+        )
+      rescue StandardError
+        nil
       end
 
       def block_local_names(block_node)

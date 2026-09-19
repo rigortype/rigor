@@ -105,6 +105,102 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
       expect(result).to be_nil
     end
 
+    describe "named self_type bindings (#1099)" do
+      # Plain helper methods rather than `let` — the outer group's fixtures already
+      # sit at the RSpec/MultipleMemoizedHelpers ceiling.
+      def grape_plugin_class
+        Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "grapefixture",
+            version: "0.1.0",
+            block_as_methods: [
+              Rigor::Plugin::Macro::BlockAsMethod.new(
+                receiver_constraint: "Grape::API",
+                method_names: %i[params],
+                self_type: "Grape::Validations::ParamsScope"
+              ),
+              Rigor::Plugin::Macro::BlockAsMethod.new(
+                receiver_constraint: "Grape::Validations::ParamsScope",
+                method_names: %i[requires],
+                self_type: "Grape::Validations::ParamsScope"
+              ),
+              Rigor::Plugin::Macro::BlockAsMethod.new(
+                receiver_constraint: "Grape::API",
+                method_names: %i[namespace],
+                self_type: "singleton(Grape::API::Instance)"
+              )
+            ]
+          )
+        end
+      end
+
+      def grape_registry
+        Rigor::Plugin::Registry.new(plugins: [grape_plugin_class.new(services: services)])
+      end
+
+      def grape_env
+        env = stub_environment(registry: grape_registry, hierarchy: { "API" => "Grape::API" })
+        allow(env).to receive(:singleton_for_name) { |name| Rigor::Type::Singleton.new(name) }
+        env
+      end
+
+      it "narrows a Singleton receiver to a named instance class" do
+        call = Prism.parse("params do; end").value.statements.body.first
+        result = described_class.narrow_self_type_for(
+          scope: scope_with(grape_env), call_node: call,
+          receiver_type: Rigor::Type::Singleton.new("API")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("Grape::Validations::ParamsScope"))
+      end
+
+      it "narrows a Singleton receiver to a named singleton class" do
+        call = Prism.parse("namespace :x do; end").value.statements.body.first
+        result = described_class.narrow_self_type_for(
+          scope: scope_with(grape_env), call_node: call,
+          receiver_type: Rigor::Type::Singleton.new("API")
+        )
+        expect(result).to eq(Rigor::Type::Singleton.new("Grape::API::Instance"))
+      end
+
+      it "matches a Nominal receiver for a named instance-binding entry" do
+        call = Prism.parse("requires :x do; end").value.statements.body.first
+        result = described_class.narrow_self_type_for(
+          scope: scope_with(grape_env), call_node: call,
+          receiver_type: Rigor::Type::Nominal.new("Grape::Validations::ParamsScope")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("Grape::Validations::ParamsScope"))
+      end
+
+      it "does not match a Nominal receiver for a singleton-binding entry" do
+        call = Prism.parse("namespace :x do; end").value.statements.body.first
+        result = described_class.narrow_self_type_for(
+          scope: scope_with(grape_env), call_node: call,
+          receiver_type: Rigor::Type::Nominal.new("Grape::API::Instance")
+        )
+        expect(result).to be_nil
+      end
+
+      it "walks the scope's discovered superclass chain when the environment cannot order the receiver" do
+        env = instance_double(Rigor::Environment, plugin_registry: grape_registry)
+        allow(env).to receive(:nominal_for_name) { |name| Rigor::Type::Nominal.new(name) }
+        allow(env).to receive(:singleton_for_name) { |name| Rigor::Type::Singleton.new(name) }
+        allow(env).to receive(:class_ordering) do |lhs, rhs|
+          lhs == rhs ? :equal : :unknown
+        end
+        scope = instance_double(
+          Rigor::Scope,
+          environment: env,
+          discovered_superclasses: { "Base" => "Grape::API", "API" => "Base" }
+        )
+        call = Prism.parse("params do; end").value.statements.body.first
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: call,
+          receiver_type: Rigor::Type::Singleton.new("API")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("Grape::Validations::ParamsScope"))
+      end
+    end
+
     it "returns nil when the plugin registry is empty" do
       env = stub_environment(registry: Rigor::Plugin::Registry::EMPTY, hierarchy: { "MyApp" => "Sinatra::Base" })
       result = described_class.narrow_self_type_for(

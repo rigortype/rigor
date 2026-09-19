@@ -1,0 +1,1 @@
+- **[engine]** A pure-Ruby XXH3-64 (`Rigor::Hashing::XXH3`) now provides the content hash behind `rigor lens` anchors — verified against the upstream xxHash sanity vectors and cross-checked with lisplens, with no new gem dependency. ([#1087](https://github.com/rigortype/rigor/pull/1087))

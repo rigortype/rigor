@@ -1,0 +1,3 @@
+class SliceDemo
+  def ints: () -> Array[Integer]
+end

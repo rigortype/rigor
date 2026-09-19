@@ -84,7 +84,7 @@ module Rigor
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
           add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
-          env = RBS::Environment.from_loader(rbs_loader)
+          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
           project_files = project_sig_files(signature_paths)
           add_project_signatures(env, signature_paths, deferred_signature_paths)
           # Issue #928 — the capability-role catalog goes in AFTER the project's own signatures, per
@@ -154,6 +154,43 @@ module Rigor
           shadowed
         rescue StandardError
           false
+        end
+
+        # Issue #1109 — the `rbs` gem (a `DEFAULT_LIBRARIES` entry, so in every run) ships the shims its
+        # own Steep check needs under `sig/shims/`, and one of them reopens a core module: `enumerable.rbs`
+        # prepends a `(2) -> Enumerator[[Elem, Elem], void]` overload to `Enumerable#each_slice`. That is
+        # a claim about rbs's own call sites, not about Ruby — `[1, 2, 3].each_slice(2)` yields `[3]` last
+        # — and it leaked into every analysed project: the blockless form typed as a fixed pair (so a
+        # `nil` guard on the second slot folded away) and the block form returned `void` instead of the
+        # receiver. Unloading the file leaves core's `Enumerator[Array[Elem], self]`, which agrees with the
+        # block form's `Array[Elem]`. The other shims (`bundler.rbs`, `rubygems.rbs`) only add missing
+        # declarations and stay. Fails soft to the env as built: an rbs whose `Environment` has no `#unload`, or a
+        # relocated shim keeps the pre-#1109 behaviour rather than failing the build.
+        RBS_LIBRARY = "rbs"
+        private_constant :RBS_LIBRARY
+        UNSOUND_CORE_SHIMS = %w[shims/enumerable.rbs].freeze
+        private_constant :UNSOUND_CORE_SHIMS
+
+        def unload_upstream_core_shims(env, rbs_loader)
+          return env unless env.respond_to?(:unload) && env.respond_to?(:each_rbs_source)
+
+          shim_names = upstream_core_shim_names(rbs_loader)
+          return env if shim_names.empty?
+
+          buffers = env.each_rbs_source.map(&:buffer).select { |buffer| shim_names.include?(buffer.name.to_s) }
+          buffers.empty? ? env : env.unload(buffers)
+        rescue StandardError
+          env
+        end
+
+        def upstream_core_shim_names(rbs_loader)
+          names = Set.new
+          rbs_loader.each_dir do |source, dir|
+            next unless source.respond_to?(:name) && source.name == RBS_LIBRARY
+
+            UNSOUND_CORE_SHIMS.each { |relative| names << Pathname(dir).join(relative).to_s }
+          end
+          names
         end
 
         # True when `content` parses as an RBS signature. {#virtual_rbs_collision_quarantined} uses this to

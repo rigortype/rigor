@@ -92,6 +92,23 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  # Issue #1109 — the `rbs` gem's `sig/shims/enumerable.rbs` prepends `(2) -> Enumerator[[Elem, Elem], void]`
+  # to `Enumerable#each_slice`, which CRuby contradicts (`[1, 2, 3].each_slice(2).to_a == [[1, 2], [3]]`).
+  describe "with the rbs library loaded" do
+    let(:rbs_library_loader) { described_class.new(libraries: ["rbs"]) }
+
+    it "drops the rbs gem's unsound Enumerable#each_slice shim overloads" do
+      method = rbs_library_loader.instance_method(class_name: "Array", method_name: :each_slice)
+      signatures = method.method_types.map(&:to_s)
+      expect(signatures).to include("(::Integer n) -> ::Enumerator[::Array[E], self]")
+      expect(signatures.grep(/\A\(2\)/)).to be_empty
+    end
+
+    it "keeps the rbs gem's own declarations" do
+      expect(rbs_library_loader.class_known?("RBS::Environment")).to be(true)
+    end
+  end
+
   describe "with project signature paths" do
     let(:project_loader) do
       described_class.new(

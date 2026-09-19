@@ -1,0 +1,11 @@
+---
+locals:
+  ints: Array[Integer]
+assertions:
+  '1': Enumerator[Array[Integer], Array[Integer]]
+  '2': 1 | 2
+  '3': 1 | 2
+  '4': Array[Integer]
+  '5': Enumerator[Array[Integer], Array[Integer]]
+  '6': Enumerator[Array[1 | 2 | 3], Array[Integer]]
+  '7': Enumerator[Array[1 | 2 | 3 | 4], Array[Integer]]

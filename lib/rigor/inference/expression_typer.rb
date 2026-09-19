@@ -9,6 +9,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
+require_relative "block_call_timing"
 require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
@@ -1536,12 +1537,48 @@ module Rigor
       # `ops.all? { |o| break false unless o; true }` still folds the no-break path to `Constant[true]`, and
       # the union with the `false` arm makes the call `bool` — no `flow.always-truthy-condition` on a program
       # that really can answer false.
+      #
+      # Issue #1095: the callee's result is kept because an arbitrary callee may return without ever running
+      # the block. A catalogued exactly-once yielder ({BlockCallTiming}) cannot, so when its block's normal
+      # completion is unreachable the callee's result is too, and the call is its `break` arms alone — `bot`
+      # when every path raises or returns instead.
       def call_dispatch_type_for(node, receiver_override: nil)
         result = call_result_type_for(node, receiver_override: receiver_override)
         arms = call_break_arm_types(node, receiver_override: receiver_override)
+        if exactly_once_block_never_completes?(node, receiver_override)
+          return arms.empty? ? Type::Combinator.bot : Type::Combinator.union(*arms)
+        end
         return result if arms.empty?
 
         Type::Combinator.union(result, *arms)
+      end
+
+      # Whether `node` calls a catalogued exactly-once yielder ({BlockCallTiming}) with a literal block that can
+      # never complete normally. Two proofs must BOTH hold. The syntactic one
+      # ({BlockCallTiming.never_completes_normally?}) says every path ends in a jump or a non-returning Kernel
+      # call. The block-return pass must also answer exactly `bot`: a reachable `next` joins its value instead
+      # (#841), so `tap { next "s" }` completes and keeps the receiver, and a nil-bearing or `Dynamic` value or a
+      # failed pass (`nil`) keeps the #853 union. The pass alone is not enough, because it also answers `bot`
+      # for a body whose last call merely DECLARES `-> bot` — `loop { e.next }` returns normally once `e` is
+      # drained, and trusting it made correct code report an always-falsey condition.
+      #
+      # The pre-gates run cheapest-first because the block is re-typed here: the name, a `Prism::BlockNode` (a
+      # `&blk` / `&:sym` block-pass carries no body to prove anything about), no arguments (none of the three
+      # takes one), the syntactic walk, then the resolved-owner check.
+      def exactly_once_block_never_completes?(node, receiver_override)
+        return false unless BlockCallTiming.candidate_name?(node.name)
+
+        block_node = node.block
+        return false unless block_node.is_a?(Prism::BlockNode) && block_node.body
+        return false if node.arguments
+        return false unless BlockCallTiming.never_completes_normally?(block_node.body, scope)
+
+        receiver = receiver_override || call_receiver_type_for(node)
+        return false unless BlockCallTiming.exactly_once_call?(
+          receiver_type: receiver, method_name: node.name, scope: scope
+        )
+
+        block_return_type_for(node, receiver, []).is_a?(Type::Bot)
       end
 
       def call_result_type_for(node, receiver_override: nil)

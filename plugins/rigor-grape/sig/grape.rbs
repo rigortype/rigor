@@ -1,0 +1,170 @@
+# Bundled RBS for the Grape / grape-entity declaration DSL (issue #1099).
+#
+# Grape's class-level endpoint DSL is dynamic at runtime: `Grape::API` subclasses forward every
+# declaration call to the base `Grape::API::Instance` class object via `delegate_missing_to` /
+# `override_all_methods!` (`lib/grape/api.rb`), and the Instance class gets the real definitions
+# from the `included do ... end` bodies of `Grape::DSL::{Routing,Validations,Configuration,
+# Helpers,Callbacks,Middleware,RequestResponse}`. Both sides answer the same singleton surface, so
+# the signatures live once in `Grape::DSL::ClassMethods` and are `extend`ed onto both classes.
+#
+# Return carriers follow the runtime implementation (grape 2.4.0, grape-entity 1.0): setup-style
+# declarations return the bookkeeping collection or the stored setting value, so `::Object?` /
+# `::Array[untyped]` is the honest reading — `void` would be dishonest AND is collapsed to
+# `Dynamic[top]` by the engine's void-value-use recovery, which is exactly what this plugin exists
+# to prevent.
+#
+# Block `self` bindings are NOT modelled here — they come from the manifest's `block_as_methods`
+# entries (`params` bodies on `Grape::Validations::ParamsScope`, `namespace` bodies on the
+# `Grape::API::Instance` class object, verb bodies on `Grape::Endpoint`).
+
+module Grape
+  module DSL
+    # Class-level declaration surface shared by `Grape::API` subclasses and `Grape::API::Instance`.
+    module ClassMethods
+      # Validations — `params` opens a `Grape::Validations::ParamsScope` and `instance_eval`s the
+      # block on it; returns the new scope (dsl/validations.rb).
+      def params: () ?{ () -> untyped } -> Grape::Validations::ParamsScope
+      def contract: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+
+      # Routing — the HTTP verbs are generated over `Grape::HTTP_SUPPORTED_METHODS` and delegate to
+      # `route`, which registers a `Grape::Endpoint` and returns validation-reset bookkeeping.
+      def get: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def put: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def post: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def delete: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def head: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def patch: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def options: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def route: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+
+      # Namespace family — `namespace`/`route_param`/`version`/`given`/`mounted` `instance_eval`
+      # their block on the Instance class object and return the block's value.
+      def namespace: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def route_param: (untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def group: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def resource: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def resources: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def segment: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def version: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def given: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def mounted: () { () -> untyped } -> ::Object?
+      def mount: (*untyped, **untyped) -> ::Object?
+      def scope: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def prefix: (?untyped) -> ::Object?
+
+      # Settings / configuration (dsl/settings.rb, dsl/configuration.rb).
+      def route_setting: (untyped, ?untyped) -> ::Object?
+      def unset_route_setting: (untyped) -> ::Object?
+      def global_setting: (untyped, ?untyped) -> ::Object?
+      def unset_global_setting: (untyped) -> ::Object?
+      def desc: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def description: (?untyped, **untyped) -> ::Object?
+      def entity: (?untyped) -> ::Object?
+      def detail: (?untyped) -> ::Object?
+      def content_type: (?untyped) -> ::Object?
+      def default_format: (?untyped) -> ::Object?
+      def format: (?untyped) -> ::Object?
+      def formatter: (*untyped, **untyped) -> ::Object?
+      def parser: (*untyped, **untyped) -> ::Object?
+      def default_error_formatter: (?untyped) -> ::Object?
+      def default_error_status: (?untyped) -> ::Object?
+      def error_format: (?untyped) -> ::Object?
+      def error_formatter: (*untyped, **untyped) -> ::Object?
+      def error_parser: (*untyped, **untyped) -> ::Object?
+      def cascade: (?untyped) -> ::Object?
+      def do_not_route_head!: () -> ::Object?
+      def do_not_route_options!: () -> ::Object?
+      def do_not_document!: () -> ::Object?
+      def http_basic: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def auth: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def http_digest: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def rescue_from: (*untyped, **untyped) ?{ (*untyped) -> untyped } -> ::Object?
+      def rescue_handlers: () -> ::Hash[untyped, untyped]
+      def represent: (*untyped, **untyped) -> ::Object?
+      def default_status: (?untyped) -> ::Object?
+
+      # Helpers / middleware / callbacks.
+      def helpers: (*untyped) ?{ () -> untyped } -> ::Object?
+      def use: (*untyped, **untyped) -> ::Object?
+      def middleware: (*untyped, **untyped) -> ::Object?
+      def insert_before: (*untyped, **untyped) -> ::Object?
+      def insert_after: (*untyped, **untyped) -> ::Object?
+      def before: () ?{ () -> untyped } -> ::Object?
+      def before_validation: () ?{ () -> untyped } -> ::Object?
+      def after_validation: () ?{ () -> untyped } -> ::Object?
+      def after: () ?{ () -> untyped } -> ::Object?
+      def finally: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+    end
+  end
+
+  class API
+    extend DSL::ClassMethods
+
+    # The class object a `Grape::API` subclass's declaration calls are forwarded to. `namespace`
+    # bodies `instance_eval` on this class object, so the same `extend`ed surface covers calls made
+    # inside them.
+    class Instance
+      extend DSL::ClassMethods
+    end
+  end
+
+  module Validations
+    # The receiver `params`/`requires`/`optional`/`given`/`with` blocks `instance_eval` on. Its
+    # DSL lives in `Grape::DSL::Parameters`; the declarations here cover the block-relevant and
+    # commonly-called subset.
+    class ParamsScope
+      def requires: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def optional: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def given: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def with: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def use: (*untyped) -> ::Object?
+      def mutually_exclusive: (*untyped) -> ::Object?
+      def exactly_one_of: (*untyped) -> ::Object?
+      def at_least_one_of: (*untyped) -> ::Object?
+      def all_or_none_of: (*untyped) -> ::Object?
+    end
+  end
+
+  # Runtime route context — verb bodies execute as `Grape::Endpoint` instance methods
+  # (`Grape::Endpoint#run` evaluates the stored block inside the endpoint instance). The methods
+  # here are `Grape::DSL::InsideRoute`, `Grape::DSL::Headers`, `Grape::DSL::Settings`, and the
+  # `def_delegators :request` surface (`params`/`headers`/`cookies`).
+  class Endpoint
+    def params: () -> ::Hash[untyped, untyped]
+    def headers: () -> ::Hash[untyped, untyped]
+    def cookies: () -> ::Hash[untyped, untyped]
+    def env: () -> ::Hash[untyped, untyped]
+    def request: () -> ::Object
+    def declared: (*untyped, **untyped) -> ::Hash[untyped, untyped]
+    def version: () -> ::Object?
+    def error!: (*untyped, **untyped) -> bot
+    def redirect: (untyped, **untyped) -> ::Object?
+    def status: (?untyped) -> ::Object?
+    def content_type: (?untyped) -> ::Object?
+    def body: (?untyped) -> ::Object?
+    def present: (*untyped, **untyped) -> ::Object?
+    def route: () -> ::Object?
+    def header: (?untyped, ?untyped) -> ::Object?
+    def route_setting: (untyped, ?untyped) -> ::Object?
+    def stream: (?untyped) ?{ () -> untyped } -> ::Object?
+    def sendfile: (?untyped) -> ::Object?
+    def error_response: (*untyped, **untyped) -> ::Object?
+  end
+
+  # grape-entity's declaration target (`class Foo < Grape::Entity`). `expose` bodies run via
+  # `block.call` — `self` stays the Entity subclass's class object — so nested `expose` calls
+  # resolve through the same singleton surface without a `block_as_methods` entry.
+  class Entity
+    def self.expose: (*untyped, **untyped) ?{ () -> untyped } -> ::Array[untyped]
+    def self.unexpose: (*untyped) -> ::Object?
+    def self.unexpose_all: () -> ::Object?
+    def self.with_options: (untyped) { () -> untyped } -> ::Object?
+    def self.documentation: () -> ::Hash[untyped, untyped]
+    def self.format_with: (untyped) { (untyped) -> untyped } -> ::Object
+    def self.root: (untyped, ?untyped) -> ::Object?
+    def self.root_element: (untyped) -> ::Object?
+    def self.represent: (*untyped, **untyped) -> ::Object
+    def self.present_collection: (?untyped, ?untyped) -> ::Object?
+    def self.root_exposures: () -> ::Object
+  end
+end

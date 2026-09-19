@@ -2,5 +2,5 @@
 locals:
   shape: Dynamic[top]
 assertions:
-  '1': "{ required: Hash[Dynamic[top], Dynamic[top]], optional: Hash[Dynamic[top],
-    Dynamic[top]], declared: { required: [], optional: [] } }"
+  '1': "{ required: Hash, optional: Hash, declared: { required: [], optional: [] }
+    }"

@@ -49,6 +49,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       expect(type.static_facet).to eq(ints)
     end
 
+    it "answers the raw nominal on a `-> self` return when every type argument is untyped" do
+      untyped = Rigor::Type::Combinator.untyped
+      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [untyped, untyped])
+      expect(dispatch(hash, :itself)).to eq(Rigor::Type::Combinator.nominal_of("Hash"))
+    end
+
     it "unions return types when receiver is a Union of known classes" do
       union = Rigor::Type::Combinator.union(
         Rigor::Type::Combinator.nominal_of(Integer),

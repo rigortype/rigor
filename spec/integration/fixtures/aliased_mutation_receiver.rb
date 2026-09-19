@@ -80,4 +80,4 @@ shape = SchemaWalk.collect([[:required, :email, nil], [:optional, :tags, [[:requ
 # rather than guessing which entry moved. It folds no condition here, so it is
 # not a false-positive source; tightening it would need element-level tracking
 # inside a `HashShape`, which is a separate feature.
-assert_type("{ required: Hash[Dynamic[top], Dynamic[top]], optional: Hash[Dynamic[top], Dynamic[top]], declared: { required: [], optional: [] } }", shape)
+assert_type("{ required: Hash, optional: Hash, declared: { required: [], optional: [] } }", shape)

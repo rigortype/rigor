@@ -72,10 +72,17 @@ Recognised surfaces:
   `given`, `mounted`) bind `self` to the `Grape::API::Instance` class
   object, matching Grape's `instance_eval`-on-class semantics, so nested
   declarations resolve the same surface.
+- **`desc 'x' do ... end` bodies** bind `self` to
+  `Grape::DSL::Desc::ConfigContext` — the closed `ROUTE_ATTRIBUTES`
+  setter surface — so `detail`, `success`, `failure`, `tags`,
+  `entity`, `hidden`, `is_array`, `consumes`, `headers`, `summary`,
+  `deprecated`, `named`, `nickname`, `produces`, `security`,
+  `http_codes`, `body_name`, `default`, `description`, and `params`
+  (the documentation setter, not `ParamsScope`) resolve.
 - **Verb bodies** bind `self` to `Grape::Endpoint`, so `params`,
   `headers`, `cookies`, `env`, `declared`, `present`, `error!`,
   `status`, `redirect`, `body`, `content_type`, `route`,
-  `route_setting`, `stream`, `sendfile`, `error_response` resolve.
+  `route_setting`, `stream`, `sendfile` resolve.
 - **`Grape::Entity` class bodies**: `expose`, `unexpose`,
   `with_options`, `documentation`, `format_with`, `root`,
   `root_element`, `represent`, `present_collection`, `root_exposures`.
@@ -86,7 +93,6 @@ Recognised surfaces:
 
 - `helpers do ... end` bodies (an anonymous module is `self` —
   unnameable).
-- `desc ... do ... end` documentation blocks (`DescContainer` DSL).
 - Named `params :name` scopes inside `helpers` and `contract` schema
   blocks.
 - Value-level typing: `present`/`declared` results against the declared

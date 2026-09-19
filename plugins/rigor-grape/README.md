@@ -40,6 +40,14 @@ Grape is more dynamic than the frameworks the substrate was built for:
    they sit in `open_receivers:` and undeclared calls stay opaque rather
    than diagnosed.
 
+`desc 'x' do ... end` bodies `instance_exec` on a generated
+`StrictHashConfiguration` settings class; they are modelled as
+`Grape::DSL::Desc::ConfigContext` — the closed `ROUTE_ATTRIBUTES`
+setter surface (`detail`, `success`, `failure`, `tags`, `entity`,
+`hidden`, `is_array`, `consumes`, `headers`, `params`, …), so an
+undeclared name inside a `desc` block still reads
+`call.undefined-method` like the runtime `NoMethodError`.
+
 `Grape::Entity#self.expose` bodies run via `block.call` — `self` stays
 the Entity class object — so nested `expose` calls resolve through the
 same `def self.` declarations with no block entry at all.
@@ -56,8 +64,6 @@ collapsed to `Dynamic[top]` by the engine's void-value recovery.
 
 - `helpers do ... end` bodies (`class_eval` on an anonymous module — no
   nameable self).
-- `desc ... do ... end` nested documentation blocks (the `DescContainer`
-  surface).
 - `use :name`-style named parameter scopes and `contract` schema blocks.
 - Typing `present`/`declared` results against the declared entity or
   params (runtime-shape work).

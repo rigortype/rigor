@@ -44,7 +44,13 @@ class ThingsAPI < Grape::API
 
   namespace :admin do
     route_setting :authorization, roles: %i[admin]
-    desc "Delete a thing"
+    desc "Delete a thing" do
+      detail "Requires the admin role"
+      success Entities::Thing
+      failure [{ code: 403, message: "Forbidden" }]
+      tags %w[things]
+      hidden false
+    end
     delete "/things/:id" do
       error!("forbidden", 403) unless params["id"]
       status 204

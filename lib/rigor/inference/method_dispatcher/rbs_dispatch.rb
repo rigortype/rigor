@@ -386,12 +386,29 @@ module Rigor
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
             registry = environment&.plugin_registry
-            scope.external_ancestor_name_candidates(class_name).each do |candidates|
-              hit = candidates.find do |candidate|
-                ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
-                  registry&.rbs_complete_ancestor?(candidate)
+            supers = scope.discovered_superclasses
+            queue = [class_name.to_s]
+            seen = {}
+            until queue.empty?
+              current = queue.shift
+              next if current.nil? || seen[current]
+
+              seen[current] = true
+              raw = supers[current]
+              next if raw.nil?
+
+              # The table stores the superclass AS WRITTEN — `"::API::Base"`, bare `"Base"` — so resolve
+              # each hop through the nesting-aware candidate list rather than a raw lookup. Deliberately
+              # NOT `external_ancestor_name_candidates`: that walk records `ancestry_sources` edges via
+              # `record_class_dependency`, which would mislabel a dispatch lookup as an ancestry edge.
+              scope.ancestor_name_candidates(current, raw).each do |candidate|
+                if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
+                   registry&.rbs_complete_ancestor?(candidate)
+                  return candidate
+                end
+
+                queue << candidate if supers.key?(candidate)
               end
-              return hit if hit
             end
             nil
           end

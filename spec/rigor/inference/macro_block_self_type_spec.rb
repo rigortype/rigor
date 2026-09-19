@@ -187,13 +187,16 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         allow(env).to receive(:class_ordering) do |lhs, rhs|
           lhs == rhs ? :equal : :unknown
         end
-        # `class API < ::Base` / `class Base < Grape::API` — the resolved candidate groups
-        # `external_ancestor_name_candidates` returns for a two-hop source-side ancestry.
+        # `class API < ::Base` / `class Base < Grape::API` — the source-side superclass
+        # table plus the nesting-aware candidate resolution the walk now goes through.
         scope = instance_double(
           Rigor::Scope,
           environment: env,
-          external_ancestor_name_candidates: [["Base"], ["Grape::API"]]
+          discovered_superclasses: { "API" => "::Base", "Base" => "Grape::API" }
         )
+        allow(scope).to receive(:ancestor_name_candidates) do |_subclass, raw|
+          [raw.to_s.sub(/\A::/, "")]
+        end
         call = Prism.parse("params do; end").value.statements.body.first
         result = described_class.narrow_self_type_for(
           scope: scope, call_node: call,

@@ -104,14 +104,30 @@ module Rigor
         return true if rbs_inherits?(name, constraint, environment)
 
         # Source-side ancestry — `class API < Grape::API` lives on the scope's discovery tables, not in
-        # the environment's RBS/registry ordering (the same reason ADR-43's bridge walks them).
-        # `external_ancestor_name_candidates` resolves the as-written superclass spelling against the
-        # declaration's header nesting — `class AccessRequests < ::API::Base` and `class X < Base` alike —
-        # which a raw `discovered_superclasses` walk cannot.
-        groups = scope&.external_ancestor_name_candidates(name)
-        groups&.any? do |candidates|
-          candidates.any? { |c| c == constraint || rbs_inherits?(c, constraint, environment) }
-        end || false
+        # the environment's RBS/registry ordering (the same reason ADR-43's bridge walks them). The
+        # superclass table stores names AS WRITTEN (`"::API::Base"`, bare `"Base"`), so each hop resolves
+        # through `ancestor_name_candidates` (rooted names, header nesting) rather than a raw table
+        # lookup. Deliberately NOT `external_ancestor_name_candidates`: that walk records
+        # `ancestry_sources` edges through `record_class_dependency`, which would mislabel a DSL-call
+        # lookup as an ancestry dependency.
+        supers = scope&.discovered_superclasses
+        queue = [name]
+        seen = {}
+        until queue.empty?
+          current = queue.shift
+          next if current.nil? || seen[current]
+
+          seen[current] = true
+          raw = supers&.[](current)
+          next if raw.nil?
+
+          scope.ancestor_name_candidates(current, raw).each do |candidate|
+            return true if candidate == constraint || rbs_inherits?(candidate, constraint, environment)
+
+            queue << candidate if supers.key?(candidate)
+          end
+        end
+        false
       rescue StandardError
         false
       end

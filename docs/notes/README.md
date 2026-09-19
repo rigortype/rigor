@@ -54,6 +54,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-01 | [Post-campaign opacity re-attribution — the sweep probe re-run on merged master](20260901-post-campaign-opacity-recheck.md) |
 | 2026-09-08 | [Provenance of every declaration in `sig/` — the seeding audit for ADR-107 G3](20260908-sig-provenance-audit.md) |
 | 2026-09-09 | [Where the 224 `no_source` declarations in `sig/` come from](20260909-sig-no-source-audit.md) |
+| 2026-09-19 | [Survey-corpus typing-hole census — per-node `Dynamic[top]` locations on 32 targets](20260919-survey-typing-holes.md) |
 
 ## Regression sweeps & real-project triage
 

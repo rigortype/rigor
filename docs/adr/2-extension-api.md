@@ -165,6 +165,8 @@ The same mechanism should support capability roles for standard and framework ob
 
 Rigor should ship an opinionated core catalog of common standard-library capability roles, such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they should not silently replace the core catalog.
 
+The shipped member-enumeration hook is `Plugin::Base#declared_members(class_name)` ([ADR-113](113-rigor-lens.md) WD4, #1082): a plugin returns the `{name:, kind:, type:}` rows for the members it synthesizes on a class, and the `rigor lens` declaration map renders them. It is additive to the call-site contract — `dynamic_return` still answers a type per call; `declared_members` lists the surface — and it stays off the `check` hot path (ADR-52), so `check` never invokes it.
+
 ## Reflection Layer Rebuilds
 
 The reflection layer should be layered by input source rather than rebuilt as one monolithic table. The initial layers are core and standard-library signatures, project source declarations, accepted RBS and inline signatures, generated signatures, and plugin-provided dynamic members.

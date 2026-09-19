@@ -48,6 +48,10 @@ class Rigor::Plugin::Base
   # is a bare `[]` and every real return comes from a plugin gem sig-gen never sees, so inference proposes
   # the empty literal rather than the declared element type.
   def template_units_for_file: (path: untyped, source: untyped) -> Array[untyped]
+  # sig-gen gap: #1082 — the hook's contract is `Array[{ name: String, kind: Symbol, type: Rigor::Type |
+  # nil }]`, but the default body is a bare `[]` and every real return comes from a plugin gem sig-gen
+  # never sees, so inference proposes the empty literal rather than the declared element type.
+  def declared_members: (untyped class_name) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.
   def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]

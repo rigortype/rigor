@@ -656,6 +656,27 @@ module Rigor
         []
       end
 
+      # ADR-113 WD4 (#1082) — enumerates the members this plugin synthesizes on `class_name`, for the
+      # `rigor lens` declaration map. A `dynamic_return` rule answers a TYPE for one call site at a time;
+      # nothing on that path can say "`User` has `email`, `name`, …", which is the fact grep can never
+      # find on a DSL-generated member. This hook is that per-class enumeration.
+      #
+      # Returns an `Array` of `{name:, kind:, type:}` Hashes. `name` is the member name as a caller spells
+      # it (String); `kind` is a Symbol grouping same-shaped members (`:column_reader`) — the lens
+      # collapses a group into one line; `type` is the `Rigor::Type` the plugin commits to for the member
+      # itself, or nil where it does not commit to one. It is the member-level answer, not the best a
+      # typed call site can do: a plugin that narrows `user.name` to `String` on a written receiver but
+      # declines to type the bare `name` read reports `Dynamic[top]` here. A member the plugin claims
+      # but deliberately leaves dynamic carries `Rigor::Type::Combinator.untyped` — the explicit
+      # `Dynamic[top]` answer, distinct from nil's "no answer".
+      #
+      # The hook is off the `check` hot path (ADR-52): `rigor lens` invokes it, `check` never does. It may
+      # read state `#prepare` built. The default returns `[]` — a plugin that synthesizes no enumerable
+      # members has nothing to declare.
+      def declared_members(class_name) # rubocop:disable Lint/UnusedMethodArgument
+        []
+      end
+
       # Builds a `Rigor::Analysis::Diagnostic` positioned at a Prism `node` for return from
       # `#diagnostics_for_file`. Internalises the 1-based `line` / `start_column + 1` convention every plugin
       # otherwise re-derives by hand, so authors pass the node and the message/severity/rule rather than

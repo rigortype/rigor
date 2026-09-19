@@ -951,4 +951,15 @@ RSpec.describe Rigor::Plugin::Base do
       end
     end
   end
+
+  describe "#declared_members (ADR-113 WD4)" do
+    it "returns [] by default" do
+      klass = Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0")
+      end
+      plugin = klass.new(services: services)
+
+      expect(plugin.declared_members("User")).to eq([])
+    end
+  end
 end

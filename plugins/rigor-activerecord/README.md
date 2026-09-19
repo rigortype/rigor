@@ -113,6 +113,7 @@ digest and the cache would never invalidate.
 | Prism DSL interpretation | `SchemaParser` recursive descent on `create_table` blocks |
 | Two-pass cross-file analysis | discoverer walks the project, analyzer walks per file |
 | Deferred cross-file attribution | `ModelDiscoverer#fold_concern_declarations` — a concern's `included do` scopes / associations / macro methods reach a model along the `include` edges recorded in the first pass, resolved only once every file is read |
+| `Plugin::Base#declared_members` (ADR-113 WD4) | `#declared_members` reads the prepared `ModelIndex` and enumerates columns (+ `?` predicates), associations, scopes, enums, and `macro_methods` for `rigor lens` — off the `check` hot path |
 | `did_you_mean`-style UX | `Analyzer#closest_column` (Levenshtein ≤ 3) |
 
 The end-user view of what these surfaces produce — diagnostics,

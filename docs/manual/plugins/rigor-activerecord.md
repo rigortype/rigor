@@ -271,6 +271,17 @@ close every model in the project.
 
 ## Plugin internals
 
+The plugin also answers `Plugin::Base#declared_members` (ADR-113
+WD4): it enumerates each model's synthesized members — column
+readers and `column?` predicates, association accessors, declared
+scopes, enum attributes, and macro-defined names — off the prepared
+model index, so `rigor lens` can list `User`'s members without a
+grep-able declaration. A row carries the member-level type the
+plugin commits to: `Dynamic[top]` for column readers on purpose
+(the bare, receiver-less read's answer — a written `user.name`
+still narrows to the column's type), and a type only where the
+plugin already answers one at `check`.
+
 Architecture (the cached schema-parser → model-index → analyzer
 chain), the source layout, how to run the demo, and the plugin
 contract surfaces this plugin exercises are documented in the

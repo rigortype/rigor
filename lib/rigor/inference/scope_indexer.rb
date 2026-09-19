@@ -2832,7 +2832,7 @@ module Rigor
       # the enclosing cref — `[]` for the first spelling, `["Admin"]` for the second. A class reopened under two
       # spellings keeps the LAST one walked, matching how `superclasses` itself merges.
       #
-      # @return })] `[superclasses, header_nestings]`
+      # @return the `[superclasses, header_nestings]` pair
       def build_superclass_tables(root, source_path = nil)
         accumulator = { superclasses: {}, header_nestings: {} }
         walk_class_superclasses(root, [], accumulator, source_path)
@@ -3811,7 +3811,6 @@ module Rigor
       # `Singleton[Object]` fallback anyway. The residual leak is `Class`-only (`M.new`, `M.superclass`), which mistypes
       # only code that raises `NoMethodError` at runtime.
       #
-      # @param paths — project file paths.
       def discovered_classes_for_paths(paths, buffer: nil)
         accumulator = {}
         paths.each do |path|
@@ -3839,7 +3838,6 @@ module Rigor
       # monkey-patch on a core/stdlib/gem class is called cross-file (ADR-17). First write wins, matching `def_nodes`'
       # own merge order.
       #
-      # @param paths — project file paths.
       # @return
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
@@ -4065,9 +4063,6 @@ module Rigor
       # Error degradation is identical to the two independent loops it replaces: a read / parse failure (the
       # rescue's real target) contributes nothing to either table. The subset-scoped callers
       # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
-      #
-      # @param paths — project file paths.
-      # @return `{ classes: Hash, def_index: Hash }`.
       def discovered_project_index_for_paths(paths, buffer: nil)
         classes = {}
         acc = new_def_index_accumulator

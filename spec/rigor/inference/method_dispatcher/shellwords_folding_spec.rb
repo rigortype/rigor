@@ -15,8 +15,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
                                  ))
   end
 
-  # ── escape / shellescape ─────────────────────────────────────────────
-
   describe "escape / shellescape" do
     it "escapes a plain string" do
       expect(fold(:escape, c("hello"))).to eq(c("hello"))
@@ -47,8 +45,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
       expect(fold(:escape, c("a"), c("b"))).to be_nil
     end
   end
-
-  # ── split / shellsplit / shellwords ──────────────────────────────────
 
   describe "split / shellsplit / shellwords" do
     it "splits a simple command line" do
@@ -89,8 +85,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
       expect(fold(:split, c("a b"), c("x"))).to be_nil
     end
   end
-
-  # ── join / shelljoin ──────────────────────────────────────────────────
 
   describe "join / shelljoin" do
     it "joins an array of plain tokens" do
@@ -133,8 +127,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
     end
   end
 
-  # ── dispatch_target? guard ────────────────────────────────────────────
-
   describe "receiver identity guard" do
     it "declines for a non-Shellwords singleton" do
       result = described_class.try_dispatch(cc(
@@ -158,8 +150,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
       expect(fold(:nonexistent, c("x"))).to be_nil
     end
   end
-
-  # ── split round-trips through join ───────────────────────────────────
 
   describe "split/join round-trip" do
     it "Shellwords.join(Shellwords.split(cmd)) reconstructs the command" do

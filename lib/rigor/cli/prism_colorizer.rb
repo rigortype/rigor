@@ -35,7 +35,6 @@ module Rigor
 
       VARIABLE_TOKENS = %i[INSTANCE_VARIABLE CLASS_VARIABLE GLOBAL_VARIABLE].freeze
 
-      # @param source — Ruby source.
       # @return the source with ANSI colour escapes, or
       #   the input unchanged when lexing surfaces an error.
       def colorize(source)

@@ -83,7 +83,6 @@ module Rigor
         # Loads the project's configured plugins, runs every `#prepare`, and returns the union of every
         # published `:reachability_roots` and `:reachability_references` fact.
         #
-        # @param configuration — the loaded project configuration.
         # @param plugin_requirer — how a plugin gem is brought into the process, called with the gem name. The
         #   same seam `Analysis::Runner` exposes, so a spec can register a plugin class without publishing a
         #   gem.

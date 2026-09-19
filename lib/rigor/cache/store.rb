@@ -65,7 +65,6 @@ module Rigor
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
-      # @param root — cache root directory.
       # @param read_only — when true, every disk-side side-effect is suppressed: `fetch_or_compute`
       #   still reads existing entries (hits, gated on a current `schema_version.txt` marker — see
       #   {#ensure_schema_version!}) and still runs the producer block on miss, but it does NOT write the

@@ -63,9 +63,6 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/list #
-  # ------------------------------------------------------------------ #
-
   describe "tools/list" do
     it "lists the seven expected tool names" do
       resp = request(id: 2, method: "tools/list")
@@ -87,9 +84,6 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — unknown tool #
-  # ------------------------------------------------------------------ #
-
   describe "tools/call with an unknown name" do
     it "returns a -32602 error" do
       resp = tool_call("rigor_nonexistent")
@@ -99,9 +93,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — rigor_explain (fast, catalog-only,
-  # no file I/O) # ------------------------------------------------------------------ #
-
+  # Catalogue-only: no file I/O, so this block stays fast.
   describe "rigor_explain" do
     it "returns a JSON catalog entry for a known rule" do
       resp = tool_call("rigor_explain", { "rule" => "call.undefined-method" })
@@ -130,9 +122,6 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — rigor_check #
-  # ------------------------------------------------------------------ #
-
   describe "rigor_check" do
     it "returns a JSON diagnostic report for a clean file" do
       resp = tool_call("rigor_check", { "paths" => ["lib/rigor/version.rb"] })
@@ -145,9 +134,6 @@ RSpec.describe Rigor::MCP::Server do
       expect(parsed["diagnostics"]).to be_an(Array)
     end
   end
-
-  # ------------------------------------------------------------------ # tools/call — rigor_type_of #
-  # ------------------------------------------------------------------ #
 
   describe "rigor_type_of" do
     it "returns missing-args error when file/line/col are absent" do
@@ -169,9 +155,6 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — rigor_annotate #
-  # ------------------------------------------------------------------ #
-
   describe "rigor_annotate" do
     it "returns missing-arg error when file is absent" do
       resp = tool_call("rigor_annotate")
@@ -187,9 +170,6 @@ RSpec.describe Rigor::MCP::Server do
       expect(text).to include("VERSION")
     end
   end
-
-  # ------------------------------------------------------------------ # tools/call — rigor_triage #
-  # ------------------------------------------------------------------ #
 
   describe "rigor_triage" do
     it "returns a JSON triage report for a known path" do
@@ -208,9 +188,6 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — rigor_coverage #
-  # ------------------------------------------------------------------ #
-
   describe "rigor_coverage" do
     it "returns a JSON precision-coverage report for a known path" do
       resp = tool_call("rigor_coverage", { "paths" => ["lib/rigor/version.rb"] })
@@ -223,18 +200,12 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ # tools/call — rigor_sig_gen #
-  # ------------------------------------------------------------------ #
-
   describe "rigor_sig_gen" do
     it "threads --params= into argv when a params argument is provided" do
       argv = server.send(:build_argv, "rigor_sig_gen", { "params" => "observed" })
       expect(argv).to include("--params=observed")
     end
   end
-
-  # ------------------------------------------------------------------ # Session-level --config default propagation #
-  # ------------------------------------------------------------------ #
 
   describe "config_path session default" do
     it "is threaded into build_argv as a --config flag" do

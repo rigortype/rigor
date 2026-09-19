@@ -14,8 +14,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
                                  ))
   end
 
-  # ── escapeHTML / escape_html / h ──────────────────────────────────────
-
   describe "escapeHTML / escape_html / h" do
     it "escapes <, >, &, \" to HTML entities" do
       expect(fold(:escapeHTML, c('<p class="x">&</p>')))
@@ -35,8 +33,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
     end
   end
 
-  # ── unescapeHTML / unescape_html ──────────────────────────────────────
-
   describe "unescapeHTML / unescape_html" do
     it "unescapes HTML entities back to raw characters" do
       expect(fold(:unescapeHTML, c("&lt;p&gt;&amp;&lt;/p&gt;")))
@@ -52,8 +48,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
     end
   end
 
-  # ── escape / unescape (URL) ───────────────────────────────────────────
-
   describe "CGI.escape / unescape (URL)" do
     it "URL-encodes special characters" do
       expect(fold(:escape, c("hello world"))).to eq(c("hello+world"))
@@ -63,8 +57,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
       expect(fold(:unescape, c("hello+world"))).to eq(c("hello world"))
     end
   end
-
-  # ── escapeURIComponent / escape_uri_component ─────────────────────────
 
   describe "CGI.escapeURIComponent / escape_uri_component" do
     it "percent-encodes special characters" do
@@ -76,15 +68,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
     end
   end
 
-  # ── unescapeURIComponent ──────────────────────────────────────────────
-
   describe "CGI.unescapeURIComponent" do
     it "percent-decodes" do
       expect(fold(:unescapeURIComponent, c("hello%20world"))).to eq(c("hello world"))
     end
   end
-
-  # ── escapeElement / escape_element ────────────────────────────────────
 
   describe "CGI.escapeElement / escape_element" do
     it "escapes only the named HTML elements" do
@@ -102,8 +90,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
       expect(fold(:escapeElement, c("<br>"), Rigor::Type::Combinator.nominal_of("String"))).to be_nil
     end
   end
-
-  # ── Decline / edge cases ──────────────────────────────────────────────
 
   describe "decline cases" do
     it "declines for a non-Constant argument" do

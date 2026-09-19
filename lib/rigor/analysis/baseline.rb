@@ -275,7 +275,7 @@ module Rigor
         YAML.dump(document)
       end
 
-      # The number of buckets recorded. Useful for the CLI summary on `generate`.
+      # The bucket count the `generate` summary reports.
       def size
         buckets.size
       end

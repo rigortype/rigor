@@ -859,7 +859,6 @@ module Rigor
         DidYouMean::SpellChecker.new(dictionary: dictionary).correct(name.to_s).first
       end
 
-      # Convenience accessor — `manifest` on the instance returns the class-level manifest declaration.
       def manifest
         self.class.manifest
       end

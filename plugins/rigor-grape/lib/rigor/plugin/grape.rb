@@ -29,7 +29,6 @@ module Rigor
     # ## Deferred (documented in README)
     #
     # - `helpers do ... end` bodies (`class_eval` on an anonymous Module — unnamed self).
-    # - `desc ... do ... end` nested documentation DSL (DescContainer's own surface).
     # - Typing `present`/`declared` results against the declared entity/params (runtime shape).
     class Grape < Rigor::Plugin::Base
       # `namespace`-family bodies evaluate as instance methods of the Instance *class object*
@@ -104,6 +103,23 @@ module Rigor
             receiver_constraint: "Grape::Validations::ParamsScope",
             method_names: PARAMS_SCOPE_METHODS,
             self_type: "Grape::Validations::ParamsScope"
+          ),
+          # `desc 'x' do ... end` — the config block `instance_exec`s on a generated
+          # `SettingsContainer` subclass (`StrictHashConfiguration.config_class(*Desc::
+          # ROUTE_ATTRIBUTES)` in dsl/desc.rb): `detail`, `success`, `failure`, `tags`, `entity`,
+          # `hidden`, `is_array`, `consumes`, `headers`, … each take one value and return it.
+          # Modelled as the `Grape::DSL::Desc::ConfigContext` sig carrier — a closed surface, so a
+          # misspelt or invented setter still reads `call.undefined-method`, matching the runtime
+          # NoMethodError.
+          Rigor::Plugin::Macro::BlockAsMethod.new(
+            receiver_constraint: "Grape::API",
+            method_names: %i[desc],
+            self_type: "Grape::DSL::Desc::ConfigContext"
+          ),
+          Rigor::Plugin::Macro::BlockAsMethod.new(
+            receiver_constraint: "Grape::API::Instance",
+            method_names: %i[desc],
+            self_type: "Grape::DSL::Desc::ConfigContext"
           ),
           # Verb bodies run inside `Grape::Endpoint` instances.
           Rigor::Plugin::Macro::BlockAsMethod.new(

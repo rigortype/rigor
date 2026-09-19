@@ -165,6 +165,31 @@ RSpec.describe "rigor-grape integration" do
     expect(dump_types(source)).to eq(%w[Object? Object?])
   end
 
+  # `desc 'x' do ... end` `instance_exec`s on a generated SettingsContainer subclass
+  # (StrictHashConfiguration.config_class(*Desc::ROUTE_ATTRIBUTES) via desc_container) — the
+  # dominant gitlab `lib/api` desc-block idiom (`detail`/`success`/`failure`/`tags`).
+  it "binds `desc` block self to the route-attribute config context" do
+    source = <<~RUBY
+      class API < Grape::API
+        desc 'Create a thing' do
+          Rigor.dump_type(detail 'This feature was introduced in 1.0')
+          Rigor.dump_type(success Entities::Thing)
+          Rigor.dump_type(success code: 200, model: Entities::Thing)
+          Rigor.dump_type(failure [{ code: 400 }])
+          Rigor.dump_type(tags %w[things])
+          Rigor.dump_type(entity Entities::Thing)
+          Rigor.dump_type(hidden true)
+        end
+        namespace :things do
+          desc 'List things' do
+            Rigor.dump_type(is_array true)
+          end
+        end
+      end
+    RUBY
+    expect(dump_types(source)).to eq(%w[Object? Object? Object? Object? Object? Object? Object? Object?])
+  end
+
   it "types `Endpoint#cookies` as Grape::Cookies, not Hash" do
     source = <<~RUBY
       class API < Grape::API

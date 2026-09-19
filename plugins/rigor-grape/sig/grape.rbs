@@ -105,6 +105,40 @@ module Grape
       def after: () { () -> untyped } -> ::Object?
       def finally: () { () -> untyped } -> ::Object?
     end
+
+    module Desc
+      # The `instance_exec` target of a `desc 'x' do ... end` config block. At runtime this is an
+      # anonymous class built by `StrictHashConfiguration.config_class(*Desc::ROUTE_ATTRIBUTES)`
+      # (`dsl/desc.rb` `desc_container`) — a CLOSED surface of one-argument setters that store and
+      # return the assigned value (`@settings[name] = new_value`), plus the `success`/`failure`
+      # aliases singleton-defined on the context. Names outside `ROUTE_ATTRIBUTES` raise
+      # `NoMethodError` at runtime, so this receiver stays out of `open_receivers`: an undeclared
+      # call inside a `desc` block genuinely fails.
+      class ConfigContext
+        def body_name: (untyped) -> ::Object?
+        def consumes: (untyped) -> ::Object?
+        def default: (untyped) -> ::Object?
+        def deprecated: (untyped) -> ::Object?
+        def description: (untyped) -> ::Object?
+        def detail: (untyped) -> ::Object?
+        def entity: (untyped) -> ::Object?
+        def headers: (untyped) -> ::Object?
+        def hidden: (untyped) -> ::Object?
+        def http_codes: (untyped) -> ::Object?
+        def is_array: (untyped) -> ::Object?
+        def named: (untyped) -> ::Object?
+        def nickname: (untyped) -> ::Object?
+        def params: (untyped) -> ::Object?
+        def produces: (untyped) -> ::Object?
+        def security: (untyped) -> ::Object?
+        def summary: (untyped) -> ::Object?
+        def tags: (untyped) -> ::Object?
+        def success: (*untyped) -> ::Object?
+        def failure: (*untyped) -> ::Object?
+        def configuration: () -> untyped
+        def to_hash: () -> ::Hash[untyped, untyped]
+      end
+    end
   end
 
   class API

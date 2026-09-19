@@ -1554,20 +1554,24 @@ module Rigor
       end
 
       # Whether `node` calls a catalogued exactly-once yielder ({BlockCallTiming}) with a literal block that can
-      # never complete normally. "Never completes" is the block-return pass's own answer — it types a body
-      # whose every path ends in `break` / `raise` / `return` as `bot`, and a reachable `next` joins that value
-      # instead (#841), so `tap { next "s" }` completes and keeps the receiver. Only an exact `bot` counts: a
-      # nil-bearing or `Dynamic` block value, or a failed pass (`nil`), keeps the #853 union.
+      # never complete normally. Two proofs must BOTH hold. The syntactic one
+      # ({BlockCallTiming.never_completes_normally?}) says every path ends in a jump or a non-returning Kernel
+      # call. The block-return pass must also answer exactly `bot`: a reachable `next` joins its value instead
+      # (#841), so `tap { next "s" }` completes and keeps the receiver, and a nil-bearing or `Dynamic` value or a
+      # failed pass (`nil`) keeps the #853 union. The pass alone is not enough, because it also answers `bot`
+      # for a body whose last call merely DECLARES `-> bot` — `loop { e.next }` returns normally once `e` is
+      # drained, and trusting it made correct code report an always-falsey condition.
       #
       # The pre-gates run cheapest-first because the block is re-typed here: the name, a `Prism::BlockNode` (a
       # `&blk` / `&:sym` block-pass carries no body to prove anything about), no arguments (none of the three
-      # takes one), then the resolved-owner check.
+      # takes one), the syntactic walk, then the resolved-owner check.
       def exactly_once_block_never_completes?(node, receiver_override)
         return false unless BlockCallTiming.candidate_name?(node.name)
 
         block_node = node.block
         return false unless block_node.is_a?(Prism::BlockNode) && block_node.body
         return false if node.arguments
+        return false unless BlockCallTiming.never_completes_normally?(block_node.body, scope)
 
         receiver = receiver_override || call_receiver_type_for(node)
         return false unless BlockCallTiming.exactly_once_call?(

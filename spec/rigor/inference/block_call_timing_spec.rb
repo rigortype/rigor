@@ -108,6 +108,118 @@ RSpec.describe Rigor::Inference::BlockCallTiming do
       end
     end
 
+    # Review of #1095: the block-return pass's `bot` is not proof on its own — a body ending in a call whose RBS
+    # merely declares `-> bot` (`Kernel#loop`) can still complete. A syntactic walk must agree.
+    describe "the syntactic proof ANDed with the block-return pass" do
+      def tap_type(body, prelude: "")
+        dumped_type("#{ints}#{prelude}dump_type(ints.tap do\n#{body}\nend)")
+      end
+
+      {
+        "raise" => 'raise "x"',
+        "fail" => 'fail "x"',
+        "Kernel.raise" => 'Kernel.raise "x"',
+        "exit" => "exit 1",
+        "abort" => 'abort "x"',
+        "throw" => "throw :done",
+        "redo" => "redo",
+        "begin/rescue/retry" => "begin\n  raise \"x\"\nrescue StandardError\n  retry\nend",
+        "a ternary whose arms both raise" => 'flag ? raise("a") : raise("b")',
+        "an if whose arms both raise" => "if flag\n  raise \"a\"\nelse\n  fail \"b\"\nend",
+        "raise under an ensure" => "begin\n  raise \"x\"\nensure\n  puts 1\nend"
+      }.each do |label, body|
+        it "types #{label} as bot" do
+          expect(tap_type(body)).to eq("bot")
+        end
+      end
+
+      it "types a block-level return as bot" do
+        expect(dumped_type(<<~RUBY)).to eq("bot")
+          def run
+            xs = [1, 2].map { |x| x + 1 }
+            dump_type(xs.tap { return 1 })
+          end
+        RUBY
+      end
+
+      # The syntactic walk accepts both shapes, but the block-return pass does not type them `bot` (it did not
+      # on the first head of this change either), and both proofs must hold. Conservative, not wrong: the
+      # answer is master's. Flip these to `bot` when the block-return pass learns `self.raise` and a raise
+      # inside an element position.
+      it "keeps the receiver for self.raise and a raise inside an array literal, as master does" do
+        expect(tap_type('self.raise "x"')).to eq("Array[Integer]")
+        expect(tap_type('[raise("x")]')).to eq("Array[Integer]")
+      end
+
+      {
+        "loop { break }" => "loop { break }",
+        "loop { e.next }" => "loop { e.next }",
+        "while + break" => "while flag\n  break\nend",
+        "until + break" => "until flag\n  break\nend",
+        "begin/rescue" => "begin\n  raise \"x\"\nrescue StandardError\n  nil\nend",
+        "a rescue modifier" => 'raise("x") rescue nil',
+        "catch/throw" => "catch(:done) { throw :done }",
+        "a conditional raise" => 'raise "x" if flag',
+        "a raise under && " => 'flag && raise("x")',
+        "a nested block's break" => "[1].each { break 3 }",
+        "0.times { raise }" => '0.times { raise "x" }'
+      }.each do |label, body|
+        it "keeps the receiver for #{label}" do
+          expect(tap_type(body, prelude: "e = [1, 2].each\n")).to eq("Array[Integer]")
+        end
+      end
+
+      it "keeps the receiver for a user-level method named raise at the top level" do
+        expect(tap_type('raise "x"', prelude: "def raise(*) = nil\n")).to eq("Array[Integer]")
+      end
+    end
+
+    describe "the review's `loop` repros produce no diagnostic" do
+      def diagnostics_for(source)
+        analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics
+      end
+
+      let(:drainer) do
+        <<~RUBY
+          class Drainer
+            def initialize = (@e = [1, 2].each)
+            def flag = [true, false].sample
+            def optional
+              u = flag ? [].tap { |a| loop { a << @e.next } } : nil
+              u.push(2) if u
+            end
+            def either
+              s = flag ? [].tap { |a| loop { a << @e.next } } : "str"
+              s.push(1) if s.respond_to?(:push)
+            end
+          end
+        RUBY
+      end
+
+      it "fires no always-falsey condition and no undefined method on the drained-enumerator tap" do
+        rules = diagnostics_for(drainer).map(&:rule)
+        expect(rules & %w[flow.always-truthy-condition call.undefined-method]).to be_empty
+      end
+
+      it "still fires on the positive neighbour whose tap block really always raises" do
+        # The same shape with `raise` in place of the drain: the tap IS bot there, so the condition is
+        # provably falsey and the flow rule is right to say so.
+        source = drainer.sub("[].tap { |a| loop { a << @e.next } } : nil", '[].tap { |_a| raise "x" } : nil')
+        expect(diagnostics_for(source).map(&:rule)).to include("flow.always-truthy-condition")
+      end
+
+      it "keeps a rescue-modifier nil only possible, not definite" do
+        messages = diagnostics_for(<<~RUBY).map(&:message)
+          def run
+            e = [1].each
+            t = [].tap { |a| loop { a << e.next } } rescue nil
+            t.size
+          end
+        RUBY
+        expect(messages.grep(/for nil/)).to be_empty
+      end
+    end
+
     describe "callees without the summary" do
       it "keeps each's receiver beside an unconditional break" do
         # `each` may never yield on an empty receiver, so its normal return stays reachable.
@@ -212,6 +324,26 @@ RSpec.describe Rigor::Inference::BlockCallTiming do
           end
           dump_type(Err.new.tap { break "s" })
         RUBY
+      end
+
+      it "declines once the project reopens a core mixin with its own tap" do
+        expect(dumped_type(<<~RUBY)).to eq('"s" | Array[Integer]')
+          module Enumerable
+            def tap = :x
+          end
+          #{ints}dump_type(ints.tap { break "s" })
+        RUBY
+      end
+
+      %w[Module Class].each do |root|
+        it "declines for a class object once the project patches #{root}#tap" do
+          expect(dumped_type(<<~RUBY)).not_to eq('"s"')
+            class #{root}
+              def tap = :x
+            end
+            dump_type(String.tap { break "s" })
+          RUBY
+        end
       end
 
       it "declines for a Dynamic receiver" do

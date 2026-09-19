@@ -44,6 +44,17 @@ module Rigor
       PATCHABLE_ROOTS = %w[Object Kernel BasicObject].freeze
       private_constant :PATCHABLE_ROOTS
 
+      # A class object's own metaclass ancestry adds these ahead of `Object`, so a patch on either one
+      # redefines the method for every class-object receiver.
+      SINGLETON_ROOTS = %w[Class Module].freeze
+      private_constant :SINGLETON_ROOTS
+
+      # Receiver-less (or `self.` / `Kernel.`) calls that never return normally: they raise, throw, or end
+      # the process. Anything else — including `loop`, whose RBS return is `bot` although a `StopIteration`
+      # ends it normally — proves nothing.
+      NON_RETURNING_CALLS = %i[raise fail throw exit exit! abort].freeze
+      private_constant :NON_RETURNING_CALLS
+
       module_function
 
       # Cheap name-only pre-gate, so a call that cannot be catalogued pays nothing further.
@@ -74,8 +85,81 @@ module Rigor
         false
       end
 
+      # Syntactic proof that a block body cannot complete normally: every path through it ends in a
+      # block-level `break` (which targets the yielding call), `return`, `redo`, or a non-returning Kernel call
+      # ({NON_RETURNING_CALLS}) — or in an expression that must evaluate one of those first. This is ANDed
+      # with the block-return pass's `bot`, never used alone, because a `bot` can also flow out of a callee's
+      # declared return that is not a promise the call never completes (`Kernel#loop` is `-> bot`, yet a
+      # `StopIteration` from `e.next` ends it normally). A shape the walk does not recognise declines.
+      #
+      # Only unconditionally evaluated children are descended: a nested block, lambda, `def` or loop is never
+      # entered (its body may not run, and it retargets `break`), a call's block is not a child the call
+      # promises to run, and `&&` / `||` count only their left operand. A `begin` with `rescue` qualifies only
+      # when its body and every rescue clause must exit; an `ensure` that must exit qualifies on its own.
+      def never_completes_normally?(node, scope)
+        case node
+        when Prism::StatementsNode then node.body.any? { |statement| never_completes_normally?(statement, scope) }
+        when Prism::BreakNode, Prism::ReturnNode, Prism::RedoNode, Prism::RetryNode then true
+        when Prism::ParenthesesNode then never_completes_normally?(node.body, scope)
+        when Prism::CallNode then call_never_returns?(node, scope)
+        when Prism::IfNode, Prism::UnlessNode then conditional_never_completes?(node, scope)
+        when Prism::AndNode, Prism::OrNode then never_completes_normally?(node.left, scope)
+        when Prism::BeginNode then begin_never_completes?(node, scope)
+        when Prism::ArrayNode then node.elements.any? { |element| never_completes_normally?(element, scope) }
+        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode
+          never_completes_normally?(node.value, scope)
+        else false
+        end
+      end
+
       class << self
         private
+
+        def call_never_returns?(node, scope)
+          return true if never_completes_normally?(node.receiver, scope)
+          return true if node.arguments&.arguments&.any? { |argument| never_completes_normally?(argument, scope) }
+          return false unless NON_RETURNING_CALLS.include?(node.name)
+
+          kernel_spelled_receiver?(node.receiver) && scope.top_level_def_for(node.name).nil?
+        end
+
+        # Implicit self, `self.`, or the `Kernel` module itself — the spellings that reach Kernel's function.
+        def kernel_spelled_receiver?(receiver)
+          case receiver
+          when nil, Prism::SelfNode then true
+          when Prism::ConstantReadNode then receiver.name == :Kernel
+          else false
+          end
+        end
+
+        def conditional_never_completes?(node, scope)
+          return true if never_completes_normally?(node.predicate, scope)
+
+          alternative = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
+          return false if node.statements.nil? || alternative.nil?
+
+          never_completes_normally?(node.statements, scope) && branch_never_completes?(alternative, scope)
+        end
+
+        def branch_never_completes?(branch, scope)
+          case branch
+          when Prism::ElseNode then never_completes_normally?(branch.statements, scope)
+          else never_completes_normally?(branch, scope)
+          end
+        end
+
+        def begin_never_completes?(node, scope)
+          return true if node.ensure_clause && never_completes_normally?(node.ensure_clause.statements, scope)
+          return false unless never_completes_normally?(node.statements, scope)
+
+          rescue_clause = node.rescue_clause
+          while rescue_clause
+            return false unless never_completes_normally?(rescue_clause.statements, scope)
+
+            rescue_clause = rescue_clause.subsequent
+          end
+          true
+        end
 
         def project_redefines_root?(method_name, scope)
           return true if scope.top_level_def_for(method_name)
@@ -109,11 +193,17 @@ module Rigor
 
           if kind == :singleton
             definition = Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: scope)
+            return false if singleton_ancestor_patched?(class_name, method_name, scope)
+
             return declared_on_catalogue?(definition, method_name)
           end
 
           definition = Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
-          return declared_on_catalogue?(definition, method_name) if definition
+          if definition
+            return false if rbs_ancestor_patched?(class_name, method_name, scope)
+
+            return declared_on_catalogue?(definition, method_name)
+          end
           return false if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
 
           project_class_resolves_to_catalogue?(class_name, method_name, scope)
@@ -144,9 +234,37 @@ module Rigor
           definition = Rigor::Reflection.instance_method_definition(known, method_name, scope: scope)
           # A mixin whose RBS does not mention the method contributes nothing; a CLASS that lacks it is a
           # `BasicObject` lineage, where the call does not reach `Kernel` at all.
+          return false if rbs_ancestor_patched?(known, method_name, scope)
           return scope.environment.rbs_module?(known) if definition.nil?
 
           declared_on_catalogue?(definition, method_name)
+        end
+
+        # The RBS declaration says where the method was DECLARED; a project reopening of a core ancestor
+        # (`module Enumerable; def tap = :x; end`) redefines it without touching RBS, and discovery records
+        # it under the ancestor's own name. So every RBS ancestor — mixins included — is asked.
+        def rbs_ancestor_patched?(class_name, method_name, scope)
+          names_patched?(rbs_ancestor_names(class_name, scope), method_name, :instance, scope)
+        end
+
+        # A class object dispatches through its own and its superclasses' singleton methods, then through
+        # `Class`, `Module`, `Object`, `Kernel` as instance methods.
+        def singleton_ancestor_patched?(class_name, method_name, scope)
+          names_patched?(rbs_ancestor_names(class_name, scope), method_name, :singleton, scope) ||
+            names_patched?(SINGLETON_ROOTS, method_name, :instance, scope)
+        end
+
+        def names_patched?(names, method_name, kind, scope)
+          patched = scope.environment&.project_patched_methods
+          names.any? do |name|
+            scope.discovered_method?(name, method_name, kind) ||
+              patched&.lookup(class_name: name, method_name: method_name, kind: kind)
+          end
+        end
+
+        def rbs_ancestor_names(class_name, scope)
+          loader = scope.environment&.rbs_loader
+          loader ? loader.ancestor_names_for(class_name.to_s) : []
         end
       end
     end

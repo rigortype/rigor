@@ -33,8 +33,9 @@ RSpec.describe "Kernel#loop completion on StopIteration", type: :runner do
       RUBY
     end
 
-    it "widens the Kernel. and self. spellings and a block-pass" do
+    it "widens the Kernel., ::Kernel. and self. spellings and a block-pass" do
       expect(dumped_type("#{drain}dump_type(Kernel.loop { e.next })")).to eq("Dynamic[top]")
+      expect(dumped_type("#{drain}dump_type(::Kernel.loop { e.next })")).to eq("Dynamic[top]")
       expect(dumped_type("#{drain}dump_type(self.loop { e.next })")).to eq("Dynamic[top]")
       expect(dumped_type("blk = proc { 1 }\ndump_type(loop(&blk))")).to eq("Dynamic[top]")
     end
@@ -46,6 +47,21 @@ RSpec.describe "Kernel#loop completion on StopIteration", type: :runner do
         end
         #{drain}dump_type(drain_all(e))
       RUBY
+    end
+
+    it "widens a block that declares a parameter, whose default runs on every iteration" do
+      expect(dumped_type("#{drain}dump_type(loop { |v = e.next| v })")).to eq("Dynamic[top]")
+      expect(dumped_type("dump_type(loop { |_v| break 1 })")).to eq("1 | Dynamic[top]")
+    end
+
+    {
+      "an operator" => "x = 0\ndump_type(loop { x = x + 1; break x })",
+      "an index read" => "xs = [1]\ndump_type(loop { break xs[0] })",
+      "an operator-assign" => "x = 0\ndump_type(loop { x += 1; break x })"
+    }.each do |label, source|
+      it "widens a body with #{label}, since any dispatched method may raise" do
+        expect(dumped_type(source)).to include("Dynamic[top]")
+      end
     end
 
     # Conservative, not wrong: `raise "x"` is a call, and the walk does not tell it from
@@ -79,6 +95,15 @@ RSpec.describe "Kernel#loop completion on StopIteration", type: :runner do
           def loop = raise("never returns")
         end
         #{drain}dump_type(Spinner.new.loop { e.next })
+      RUBY
+    end
+
+    # Deliberately not excluded: a project `loop` that declares or infers `bot` is widened too, which costs
+    # precision and never a false positive, so the spec pins the widening rather than the project's `bot`.
+    it "widens a top-level project def loop as well" do
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+        def loop = raise("never returns")
+        #{drain}dump_type(loop { e.next })
       RUBY
     end
 

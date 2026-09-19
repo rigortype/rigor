@@ -77,19 +77,23 @@ module Rigor
       # `Kernel#loop` is `() { () -> void } -> bot` in core RBS, yet it rescues a `StopIteration` its block
       # raises and returns that exception's `result` — the enumerator-draining idiom `loop { out << e.next }`
       # returns `e`'s own `each` value. So the declared `bot` holds only for a body that provably cannot raise
-      # `StopIteration`: one built from {STOP_ITERATION_FREE_NODES} alone (`loop {}`, `loop { break 1 }`). A
-      # `&blk` block-pass has no body to prove anything about and completes too.
+      # `StopIteration`: one built from {STOP_ITERATION_FREE_NODES} alone (`loop {}`, `loop { break 1 }`), in a
+      # block that declares no parameters. A `&blk` block-pass has no body to prove anything about and completes
+      # too.
       #
-      # Gated on the spellings that reach the private `Kernel#loop` — receiver-less, `self.`, `Kernel.` — so
-      # `obj.loop { ... }` is some other method, whose declared `bot` is that author's promise. A project
-      # redefinition of `loop` itself is not excluded: widening its `bot` costs precision, never a false
-      # positive.
+      # Gated on the spellings that reach the private `Kernel#loop` — receiver-less, `self.`, `Kernel.`,
+      # `::Kernel.` — so `obj.loop { ... }` is some other method, whose declared `bot` is that author's
+      # promise. A project redefinition of `loop` itself is not excluded: widening its `bot` costs precision,
+      # never a false positive.
       def loop_may_complete?(call_node)
         return false unless call_node.name == :loop && kernel_spelled_receiver?(call_node.receiver)
 
         block = call_node.block
         return false if block.nil?
         return true unless block.is_a?(Prism::BlockNode)
+        # A parameter default (`|v = e.next|`) is evaluated on every iteration, since `loop` yields no
+        # arguments. Rather than walk the parameter list, any declared parameter widens.
+        return true if block.parameters
         return false if block.body.nil?
 
         may_raise_stop_iteration?(block.body)
@@ -182,11 +186,13 @@ module Rigor
           !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }
         end
 
-        # Implicit self, `self.`, or the `Kernel` module itself — the spellings that reach Kernel's function.
+        # Implicit self, `self.`, or the `Kernel` module itself (`Kernel.` or the root-anchored `::Kernel.`) —
+        # the spellings that reach Kernel's function.
         def kernel_spelled_receiver?(receiver)
           case receiver
           when nil, Prism::SelfNode then true
           when Prism::ConstantReadNode then receiver.name == :Kernel
+          when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Kernel
           else false
           end
         end

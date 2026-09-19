@@ -212,10 +212,137 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(bindings).to eq(p: tuple, i: non_neg)
       end
 
-      it "leaves non-Tuple single expected element unchanged (no auto-splat for Nominal[Array])" do
+      it "leaves a non-Array single expected element unchanged" do
         block = parse_block("foo { |a, b| a }")
         bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
         expect(bindings).to eq(a: integer_nominal, b: untyped)
+      end
+
+      it "splats a Tuple across |k, *rest| and the trailing-comma |k,| form" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        with_rest = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |k, *r| k }"))
+        expect(with_rest[:k]).to eq(integer_nominal)
+        trailing = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |k,| k }"))
+        expect(trailing).to eq(k: integer_nominal)
+      end
+
+      it "reads a trailing positional after a rest from the Tuple's tail (|*r, v|)" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |*r, v| v }"))
+        expect(bindings[:v]).to eq(string_nominal)
+      end
+
+      it "splits |a, *r, b| over a Tuple into head, middle and tail" do
+        float = Rigor::Type::Combinator.nominal_of("Float")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal, float)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, *r, b| b }"))
+        expect(bindings.slice(:a, :b)).to eq(a: integer_nominal, b: float)
+      end
+
+      it "binds a trailing positional past a short Tuple to Dynamic[Top]" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, *r, b| b }"))
+        expect(bindings.slice(:a, :b)).to eq(a: integer_nominal, b: untyped)
+      end
+
+      it "starts every #bind from the declared types, so a reused binder does not splat twice" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        binder = described_class.new(expected_param_types: [tuple])
+        binder.bind(parse_block("h.each { |k, v| k }"))
+        expect(binder.bind(parse_block("h.each { |pair| pair }"))).to eq(pair: tuple)
+
+        array = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+        reused = described_class.new(expected_param_types: [array])
+        reused.bind(parse_block("xs.each { |g, *r| g }"))
+        expect(reused.bind(parse_block("xs.each { |*r| r }")))
+          .to eq(r: Rigor::Type::Combinator.nominal_of("Array", type_args: [untyped]))
+        expect(reused.optimistic).to be_empty
+      end
+
+      it "does not splat into |a = 1, *r|, which CRuby leaves unsplatted" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        array = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+        [tuple, array].each do |carrier|
+          binder = described_class.new(expected_param_types: [carrier])
+          bindings = binder.bind(parse_block("xs.each { |a = 1, *r| a }"))
+          expect(bindings[:a]).to eq(carrier), "for #{carrier.describe}"
+          expect(binder.optimistic).to be_empty
+        end
+      end
+
+      it "splats |a = 1, b = 2|, which has more than one optional" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a = 1, b = 2| a }"))
+        expect(bindings).to eq(a: integer_nominal, b: string_nominal)
+      end
+
+      it "does not splat into |a, &b|" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, &b| a }"))
+        expect(bindings[:a]).to eq(tuple)
+      end
+
+      it "does not splat into a lone |*rest|" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |*r| r }"))
+        expect(bindings).to eq(r: Rigor::Type::Combinator.nominal_of("Array", type_args: [untyped]))
+      end
+    end
+
+    # Issue #1093 — a single yielded `Array[T]` (`each_slice`, `each_cons`, `Array[Array[T]]#each`).
+    describe "block auto-splat of a single Array[T] yield" do
+      def array_of(element)
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+      end
+
+      it "binds T to each positional slot and marks them optimistic" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("ints.each_slice(2) { |g, h| g }")))
+          .to eq(g: integer_nominal, h: integer_nominal)
+        expect(binder.optimistic).to contain_exactly(:g, :h)
+      end
+
+      it "binds Array[T] to a named rest, unmarked, and splats the trailing-comma form" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("ints.each_slice(2) { |g, *r| g }")))
+          .to eq(g: integer_nominal, r: array_of(integer_nominal))
+        expect(binder.optimistic).to contain_exactly(:g)
+
+        trailing = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(trailing.bind(parse_block("ints.each_slice(2) { |g,| g }"))).to eq(g: integer_nominal)
+      end
+
+      it "keeps Dynamic[Top] for an optional positional, whose short-array value is its default" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("ints.each_slice(2) { |g, h = 5| g }"))).to eq(g: integer_nominal, h: untyped)
+        expect(binder.optimistic).to contain_exactly(:g)
+      end
+
+      it "leaves a single-parameter block holding the whole Array[T]" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("ints.each_slice(2) { |g| g }"))).to eq(g: array_of(integer_nominal))
+        expect(binder.optimistic).to be_empty
+      end
+
+      it "does not splat Dynamic[Array[T]] or Array[untyped]" do
+        [Rigor::Type::Combinator.dynamic(array_of(integer_nominal)), array_of(untyped)].each do |carrier|
+          bindings = described_class.new(expected_param_types: [carrier]).bind(parse_block("xs.each { |g, h| g }"))
+          expect(bindings).to eq(g: carrier, h: untyped)
+        end
+      end
+
+      it "destructures |(g, h)| over an Array[T] element and marks the inner names" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        expect(binder.bind(parse_block("nested.each { |(g, h)| g }"))).to eq(g: integer_nominal, h: integer_nominal)
+        expect(binder.optimistic).to contain_exactly(:g, :h)
+      end
+
+      it "records the marks on the scope through #bind_onto" do
+        binder = described_class.new(expected_param_types: [array_of(integer_nominal)])
+        scope = binder.bind_onto(parse_block("ints.each_slice(2) { |g, *r| g }"), Rigor::Scope.empty)
+        expect(scope.local(:g)).to eq(integer_nominal)
+        expect(scope.optimistic_local(:g)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+        expect(scope.optimistic_local(:r)).to be_nil
       end
     end
   end

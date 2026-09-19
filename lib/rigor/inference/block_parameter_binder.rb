@@ -29,6 +29,14 @@ module Rigor
     # single-argument cousin of `_1`: the binder produces `{ it: expected_param_types[0] }` so the body's
     # `Prism::ItLocalVariableReadNode` lookup sees the same type as the explicit `|x|` form would.
     #
+    # A single yielded `Array[T]` (`ints.each_slice(2) { |g, h| }`) auto-splats like a Tuple does, but with
+    # no arity to read: each required / trailing positional binds `T`, a named `*rest` binds `Array[T]`, and
+    # an optional positional keeps `Dynamic[Top]` (a short array hands it its default, not `nil`). A short
+    # array pads the positionals with `nil` at runtime, so those names — and every name a nested
+    # `|(g, h)|` destructure binds from an `Array[T]` slot — are reported as optimistic, and {#bind_onto}
+    # records them through `Scope#with_optimistic_local` exactly as the statement-level `a, b = ints` does
+    # (issue #1093; the shared rule lives in {MultiTargetBinder}).
+    #
     # Block-local declarations after `;` (e.g., `|x; y, z|`) are still skipped — they are explicitly
     # block-local, so the outer scope MUST NOT observe them and the binder leaves them unbound.
     #
@@ -38,7 +46,18 @@ module Rigor
       #   the binder cannot fill from this array (because the array is shorter than the parameter list, or
       #   because the slot is a kind we do not pull from the array) default to `Dynamic[Top]`.
       def initialize(expected_param_types: [])
-        @expected_param_types = expected_param_types
+        @declared_param_types = expected_param_types
+        reset_per_bind_state
+      end
+
+      # The names the last {#bind} bound optimistically nil-free (see the class comment).
+      attr_reader :optimistic
+
+      # Binds the block's parameters into `scope`: {#bind}'s types through `Scope#with_local`, then the
+      # optimistic mark for every name in {#optimistic}.
+      def bind_onto(block_node, scope)
+        types = bind(block_node)
+        MultiTargetBinder::Result.new(types: types, optimistic: @optimistic.dup.freeze).apply_to(scope)
       end
 
       # @return ordered map from parameter name to bound type. Anonymous
@@ -46,6 +65,7 @@ module Rigor
       #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind
       #   `:_1`, `:_2`, ... up to the maximum the block body refers to.
       def bind(block_node)
+        reset_per_bind_state
         params_root = block_node.parameters
         return {} if params_root.nil?
 
@@ -62,6 +82,15 @@ module Rigor
       end
 
       private
+
+      # {#apply_auto_splat} rewrites the positional table for the block it is binding, so every {#bind} starts
+      # from the declared types again; a binder reused across blocks must not see the previous block's splat.
+      def reset_per_bind_state
+        @expected_param_types = @declared_param_types
+        @splat_rest_type = nil
+        @optimistic_positions = []
+        @optimistic = []
+      end
 
       # `|_1, _2|` numbered-parameter form. Prism exposes the implicit count through
       # `NumberedParametersNode#maximum` (the highest `_N` referenced in the body); we materialise bindings
@@ -107,20 +136,62 @@ module Rigor
       # `k.<method-not-on-Tuple>` would false-fire.
       #
       # The rule fires only when (a) the receiver yields exactly one value (`expected_param_types.size ==
-      # 1`), (b) the block declares more than one positional slot, and (c) that single expected element is a
-      # Tuple. Multi-arg yields (e.g. `each_with_index`'s `(element, index)` pair) are NOT auto-splatted —
-      # matching Ruby semantics where a multi-arg yield to a `|a, b, c|` block fills the extra slot with nil
-      # rather than splatting any element.
+      # 1`), (b) the parameter list is one CRuby splats (see {#splatting_parameter_list?}), and (c) that single
+      # expected element is a Tuple or an `Array[T]` carrier
+      # ({MultiTargetBinder.array_element_type}). Multi-arg yields (e.g. `each_with_index`'s `(element,
+      # index)` pair) are NOT auto-splatted — matching Ruby semantics where a multi-arg yield to a `|a, b, c|`
+      # block fills the extra slot with nil rather than splatting any element.
       def apply_auto_splat(params_node)
         return unless @expected_param_types.size == 1
 
-        pos_count = params_node.requireds.size + params_node.optionals.size + params_node.posts.size
-        return unless pos_count > 1
+        return unless splatting_parameter_list?(params_node)
 
         first = @expected_param_types[0]
-        return unless first.is_a?(Type::Tuple)
+        if first.is_a?(Type::Tuple)
+          apply_tuple_auto_splat(params_node, first.elements)
+        elsif (element = MultiTargetBinder.array_element_type(first))
+          apply_array_auto_splat(params_node, element)
+        end
+      end
 
-        @expected_param_types = first.elements
+      # CRuby's own condition (`vm_callee_setup_block_arg` / `setup_parameters_complex`): a block splats a lone
+      # array argument when it has a mandatory positional (`lead + post > 0`) or more than one optional, except a
+      # bare `|a|` (the iseq's `ambiguous_param0`). So `|k, *r|`, `|*r, v|`, `|a = 1, b = 2|` and the
+      # trailing-comma `|k,|` (Prism's `ImplicitRestNode`) splat, while `|*r|`, `|a = 1, *r|` and `|a, &b|` /
+      # `|a, k: 1|` do not.
+      def splatting_parameter_list?(params_node)
+        mandatory = params_node.requireds.size + params_node.posts.size
+        optional = params_node.optionals.size
+        return false unless mandatory.positive? || optional > 1
+
+        !(mandatory == 1 && optional.zero? && params_node.rest.nil?)
+      end
+
+      # The Tuple arm of {#apply_auto_splat}. Leading positionals (required, then optional) read from the head;
+      # trailing positionals after a rest read from the tail, with the rest absorbing the middle — the split
+      # `MultiTargetBinder` applies to `a, *r, b = tuple`, so `|*r, v|` over `[K, V]` binds `v` to `V` and
+      # `|a, *r, b|` over `[A, B, C]` binds `b` to `C`. Without a rest the trailing positionals continue from the
+      # head (Ruby fills `|a, b = 1, c|` from the head when the tuple is long enough). The split is mirrored
+      # rather than delegated to `MultiTargetBinder.decompose_tuple` because that one pads a missing slot with
+      # `Constant[nil]` and softens `X | nil`; a block slot past the tuple has always bound `Dynamic[Top]`.
+      def apply_tuple_auto_splat(params_node, elements)
+        head = params_node.requireds.size + params_node.optionals.size
+        posts = params_node.posts.size
+        tail_start = params_node.rest.nil? ? head : [elements.size - posts, head].max
+        @expected_param_types = Array.new(head) { |i| elements[i] } +
+                                Array.new(posts) { |j| elements[tail_start + j] }
+      end
+
+      # Issue #1093 — the `Array[T]` arm of {#apply_auto_splat}: see the class comment for the per-slot rule.
+      def apply_array_auto_splat(params_node, element)
+        required = params_node.requireds.size
+        optional = params_node.optionals.size
+        posts = params_node.posts.size
+        @expected_param_types = Array.new(required) { element } +
+                                Array.new(optional) { Type::Combinator.untyped } +
+                                Array.new(posts) { element }
+        @optimistic_positions = (0...required).to_a + ((required + optional)...(required + optional + posts)).to_a
+        @splat_rest_type = Type::Combinator.nominal_of("Array", type_args: [element])
       end
 
       def bind_positionals(params_node, bindings, cursor)
@@ -160,7 +231,8 @@ module Rigor
         rest = params_node.rest
         return unless rest.respond_to?(:name) && rest&.name
 
-        bindings[rest.name] = Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
+        bindings[rest.name] =
+          @splat_rest_type || Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
       end
 
       def bind_keywords(params_node, bindings)
@@ -199,9 +271,12 @@ module Rigor
         case param
         when Prism::RequiredParameterNode
           bindings[param.name] = positional_type_at(cursor)
+          @optimistic << param.name if @optimistic_positions.include?(cursor)
         when Prism::MultiTargetNode
-          nested = MultiTargetBinder.bind(param, positional_type_at(cursor))
-          bindings.merge!(nested)
+          nested = MultiTargetBinder.bind_marked(param, positional_type_at(cursor),
+                                                 optimistic: @optimistic_positions.include?(cursor))
+          bindings.merge!(nested.types)
+          @optimistic.concat(nested.optimistic)
         end
       end
 

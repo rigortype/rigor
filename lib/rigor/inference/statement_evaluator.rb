@@ -704,13 +704,12 @@ module Rigor
       # `a, b = rhs` — Slice 5 phase 2 sub-phase 2 destructuring. Evaluates the right-hand side under the entry scope,
       # then decomposes its type against the multi-write target tree (Prism::MultiWriteNode#lefts/rest/rights, including
       # nested Prism::MultiTargetNode for the `(b, c)` form). Tuple-shaped right-hand sides produce per-slot types
-      # element-wise; other carriers fall back to `Dynamic[Top]` per slot. The expression value is the right-hand side
-      # type (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
+      # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), and
+      # other carriers fall back to `Dynamic[Top]` per slot. The expression value is the right-hand side type
+      # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        bindings = MultiTargetBinder.bind(node, rhs_type)
-        post = bindings.reduce(post_rhs) { |acc, (name, type)| acc.with_local(name, type) }
-        [rhs_type, post]
+        [rhs_type, MultiTargetBinder.bind_marked(node, rhs_type).apply_to(post_rhs)]
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1478,8 +1477,7 @@ module Rigor
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind(index_node, element_type)
-                           .reduce(scope) { |s, (name, type)| s.with_local(name, type) }
+          MultiTargetBinder.bind_marked(index_node, element_type).apply_to(scope)
         else
           scope
         end
@@ -2865,12 +2863,10 @@ module Rigor
       # when the runtime would actually `NoMethodError` on `nil`.
       def build_block_entry_scope(call_node, block_node)
         expected = expected_block_param_types_for(call_node)
-        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
         # Issue #316 — every block body enters with `self` unmodelled (`Scope#entering_opaque_block`); the
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
-        scope_with_params = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
-          acc.with_local(name, type)
-        end
+        scope_with_params = BlockParameterBinder.new(expected_param_types: expected)
+                                                .bind_onto(block_node, scope.entering_opaque_block)
         block_local_names(block_node).reduce(scope_with_params) do |acc, name|
           acc.with_local(name, Type::Combinator.constant_of(nil))
         end

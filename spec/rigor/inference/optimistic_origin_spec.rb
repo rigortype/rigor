@@ -334,4 +334,60 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(arms_of(type)).to contain_exactly(1, "none")
     end
   end
+
+  # Issue #1093 — a short array pads a destructured slot with `nil`, so `a, b = xs` binds each fixed slot
+  # to `T` under the same bet as `xs.first`, on the statement and the block surface alike.
+  describe "destructuring an Array[T]" do
+    def array_of_array_of_string
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [array_of_string])
+    end
+
+    it "declines on a statement-level fixed slot, matching `xs.first`" do
+      type, = evaluate_with({ xs: array_of_string }, <<~RUBY)
+        a, b = xs
+        if b.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a trailing slot after a rest" do
+      type, = evaluate_with({ xs: array_of_string }, <<~RUBY)
+        *init, last = xs
+        if last then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on an auto-splatted block parameter" do
+      type, = evaluate_with({ xs: array_of_array_of_string }, <<~RUBY)
+        xs.map { |g, h| if h then 1 else "none" end }
+      RUBY
+
+      expect(type.describe).to eq(Rigor::Type::Combinator.nominal_of(
+        "Array", type_args: [Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of("none")
+        )]
+      ).describe)
+    end
+
+    it "still elides on a Tuple slot, whose element is known to be present" do
+      type, = evaluate(<<~RUBY)
+        a, b = ["x", "y"]
+        if b then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on a statement-level rest, which is an Array even when the source is short" do
+      type, = evaluate_with({ xs: array_of_string }, <<~RUBY)
+        a, *rest = xs
+        if rest then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+  end
 end

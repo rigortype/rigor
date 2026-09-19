@@ -388,4 +388,87 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result).to eq(p: dyn, q: dyn, r: union(constant(3), constant(4)))
     end
   end
+
+  # Issue #1110. Instance-variable targets decompose by the local rules and are reported apart from locals.
+  describe "instance-variable targets" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:int_or_nil) { Rigor::Type::Combinator.union(integer, constant(nil)) }
+
+    def array_of(element)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+    end
+
+    it "binds fixed, rest and nested ivar targets apart from locals, with their own marks" do
+      rows = array_of(array_of(integer))
+      result = described_class.bind_marked(parse_multi_write("@first, (x, @y), *@rest = rows"), rows)
+      expect(result.types).to eq(x: integer)
+      expect(result.optimistic).to contain_exactly(:x)
+      expect(result.ivars).to eq(:@first => array_of(integer), :@y => integer, :@rest => rows)
+      expect(result.optimistic_ivars).to contain_exactly(:@first, :@y)
+    end
+
+    it "wraps a value with no to_ary as [rhs] for ivars too" do
+      result = described_class.bind_marked(parse_multi_write("@a, @b = 1"), constant(1))
+      expect(result.ivars).to eq(:@a => constant(1), :@b => constant(nil))
+      expect(result.optimistic_ivars).to be_empty
+    end
+
+    it "records the ivar binding and its mark on the scope through Result#apply_to" do
+      result = described_class.bind_marked(parse_multi_write("@a, *@r = ints"), array_of(integer))
+      scope = result.apply_to(Rigor::Scope.empty)
+      expect(scope.ivar(:@a)).to eq(integer)
+      expect(scope.optimistic_ivar(:@a)).to eq(Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+      expect(scope.ivar(:@r)).to eq(array_of(integer))
+      expect(scope.optimistic_ivar(:@r)).to be_nil
+      expect(scope.local(:a)).to be_nil
+    end
+
+    it "leaves a local-only destructure without ivar bindings" do
+      result = described_class.bind_marked(parse_multi_write("a, b = ints"), array_of(integer))
+      expect(result.ivars).to be_empty
+      expect(result.optimistic_ivars).to be_empty
+    end
+  end
+
+  # Issue #1110. The mark-free reading the class-ivar seed uses: every bet becomes its nil-inclusive type.
+  describe ".bind_marked with soften: false" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+
+    def array_of(element)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+    end
+
+    def union(*members)
+      Rigor::Type::Combinator.union(*members)
+    end
+
+    it "widens an Array[T] fixed slot to T | nil and keeps the rest Array[T], unmarked" do
+      result = described_class.bind_marked(parse_multi_write("@a, *@r, @z = ints"), array_of(integer), soften: false)
+      expect(result.ivars).to eq(:@a => union(integer, constant(nil)), :@r => array_of(integer),
+                                 :@z => union(integer, constant(nil)))
+      expect(result.optimistic_ivars).to be_empty
+    end
+
+    it "keeps a present optional tuple slot's nil, where the default mode softens it" do
+      rhs = tuple(constant(1), union(string, constant(nil)))
+      node = parse_multi_write("@a, @b = x")
+      expect(described_class.bind_marked(node, rhs, soften: false).ivars[:@b]).to eq(union(string, constant(nil)))
+      expect(described_class.bind_marked(node, rhs).ivars[:@b]).to eq(string)
+    end
+
+    it "keeps a union member's bare nil in the join instead of marking the name" do
+      rhs = union(tuple(constant(:ok), string), tuple(constant(:err)))
+      result = described_class.bind_marked(parse_multi_write("@s, @v = x"), rhs, soften: false)
+      expect(result.ivars[:@v]).to eq(union(string, constant(nil)))
+      expect(result.optimistic_ivars).to be_empty
+    end
+
+    it "still binds a known Tuple slot exactly" do
+      result = described_class.bind_marked(parse_multi_write("@a, @b = x"), tuple(constant(1), constant(2)),
+                                           soften: false)
+      expect(result.ivars).to eq(:@a => constant(1), :@b => constant(2))
+    end
+  end
 end

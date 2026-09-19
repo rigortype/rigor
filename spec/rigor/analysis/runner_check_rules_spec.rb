@@ -3449,5 +3449,44 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(ivar_diags(result)).to be_empty
       end
     end
+
+    # Issue #1110 — an ivar destructured from `Array[T]` binds `T` (marked optimistic) in its own method and seeds
+    # `T | nil` for a sibling; neither reading may fire on a correct program. The neighbour proves the targets are
+    # still bound: a slot that is exactly `nil` fires as it would for a local.
+    describe "destructuring into instance variables" do
+      it "fires nothing on the idiomatic Array[T] destructure, in the method or a sibling" do
+        result = analyze(<<~RUBY)
+          class DigitCursor
+            def initialize
+              @first, *@rest = rand(10).digits
+              raise ArgumentError, "no digits" if @first.nil?
+              @first.succ
+            end
+
+            def next_digit
+              @first.succ + @rest.size
+            end
+
+            def label
+              return "none" unless @first
+              @first.to_s
+            end
+          end
+        RUBY
+        expect(result.diagnostics.map(&:rule)).to be_empty
+      end
+
+      it "still fires on a slot that is exactly nil" do
+        result = analyze(<<~RUBY)
+          class Padded
+            def initialize
+              @a, @b = 1
+              @b.succ
+            end
+          end
+        RUBY
+        expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+      end
+    end
   end
 end

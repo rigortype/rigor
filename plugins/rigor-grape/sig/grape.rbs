@@ -80,7 +80,10 @@ module Grape
       def http_digest: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
       def rescue_from: (*untyped, **untyped) ?{ (*untyped) -> untyped } -> ::Object?
       def rescue_handlers: () -> ::Hash[untyped, untyped]
-      def represent: (*untyped, **untyped) -> ::Object?
+      # `represent` forwards to `Entity.represent`, whose result is an entity, an array of
+      # entities, or a `{root => inner}` Hash depending on the call — untyped is the honest
+      # carrier (a `::Object` return invents `undefined method` findings on every chained call).
+      def represent: (*untyped, **untyped) -> untyped
       def default_status: (?untyped) -> ::Object?
 
       # Helpers / middleware / callbacks.
@@ -134,7 +137,9 @@ module Grape
     def headers: () -> ::Hash[untyped, untyped]
     def cookies: () -> ::Hash[untyped, untyped]
     def env: () -> ::Hash[untyped, untyped]
-    def request: () -> ::Object
+    # `request` is a `Grape::Request` (Rack::Request subclass) at runtime — untyped rather than
+    # `::Object` so `request.params`/`request.GET` chains don't read as undefined-method findings.
+    def request: () -> untyped
     def declared: (*untyped, **untyped) -> ::Hash[untyped, untyped]
     def version: () -> ::Object?
     def error!: (*untyped, **untyped) -> bot
@@ -142,8 +147,10 @@ module Grape
     def status: (?untyped) -> ::Object?
     def content_type: (?untyped) -> ::Object?
     def body: (?untyped) -> ::Object?
-    def present: (*untyped, **untyped) -> ::Object?
-    def route: () -> ::Object?
+    # `present` returns the representation (entity, Hash, or the bare object) — untyped.
+    def present: (*untyped, **untyped) -> untyped
+    # `route` is the `Grape::Router::Route` for the current endpoint — untyped.
+    def route: () -> untyped
     def header: (?untyped, ?untyped) -> ::Object?
     def route_setting: (untyped, ?untyped) -> ::Object?
     def stream: (?untyped) ?{ () -> untyped } -> ::Object?
@@ -163,8 +170,18 @@ module Grape
     def self.format_with: (untyped) { (untyped) -> untyped } -> ::Object
     def self.root: (untyped, ?untyped) -> ::Object?
     def self.root_element: (untyped) -> ::Object?
-    def self.represent: (*untyped, **untyped) -> ::Object
+    # Result is an Entity instance, an Array of them, or a `{root => inner}` Hash
+    # (`lib/grape_entity/entity.rb` `self.represent`) — untyped, not `::Object`, so chained
+    # `serializable_hash` / `map` / exposed-attribute reads stay quiet.
+    def self.represent: (*untyped, **untyped) -> untyped
     def self.present_collection: (?untyped, ?untyped) -> ::Object?
-    def self.root_exposures: () -> ::Object
+    # Runtime returns `Exposure::NestingExposure::NestedExposures` (an `Enumerable` wrapper);
+    # `::Array[untyped]` is the honest reading for the enumerable methods callers use.
+    def self.root_exposures: () -> ::Array[untyped]
+
+    # The instance-side output surface — `serializable_hash` is the primary representation
+    # output (`nil` when the wrapped object is nil); `as_json`/`to_json` delegate to it.
+    def serializable_hash: (?untyped) -> ::Hash[untyped, untyped]?
+    def as_json: (*untyped, **untyped) -> untyped
   end
 end

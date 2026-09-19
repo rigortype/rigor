@@ -136,7 +136,7 @@ RSpec.describe "rigor-grape integration" do
       end
     RUBY
     expect(dump_types(source)).to eq(
-      ["Hash[Dynamic[top], Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]", "Object?", "bot"]
+      ["Hash[Dynamic[top], Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]", "Dynamic[top]", "bot"]
     )
   end
 

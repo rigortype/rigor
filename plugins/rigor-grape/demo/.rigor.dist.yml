@@ -1,0 +1,8 @@
+paths:
+  - demo.rb
+
+plugins:
+  - rigor-grape
+
+cache:
+  path: tmp/.rigor/cache

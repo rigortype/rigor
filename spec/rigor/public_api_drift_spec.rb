@@ -373,8 +373,11 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     eql?(req:other)
     hash()
     method_names()
+    named_instance_binding?()
     receiver_constraint()
     self_type()
+    self_type_name()
+    singleton_binding?()
     to_h()
   ].freeze
 

@@ -1,0 +1,229 @@
+# Bundled RBS for the Grape / grape-entity declaration DSL (issue #1099).
+#
+# Grape's class-level endpoint DSL is dynamic at runtime: `Grape::API` subclasses forward every
+# declaration call to the base `Grape::API::Instance` class object via `delegate_missing_to` /
+# `override_all_methods!` (`lib/grape/api.rb`), and the Instance class gets the real definitions
+# from the `included do ... end` bodies of `Grape::DSL::{Routing,Validations,Configuration,
+# Helpers,Callbacks,Middleware,RequestResponse}`. Both sides answer the same singleton surface, so
+# the signatures live once in `Grape::DSL::ClassMethods` and are `extend`ed onto both classes.
+#
+# Return carriers follow the runtime implementation (grape 2.4.0, grape-entity 1.0): setup-style
+# declarations return the bookkeeping collection or the stored setting value, so `::Object?` /
+# `::Array[untyped]` is the honest reading — `void` would be dishonest AND is collapsed to
+# `Dynamic[top]` by the engine's void-value-use recovery, which is exactly what this plugin exists
+# to prevent.
+#
+# Provenance (docs/agents/type-authoring.md): `rigor sig-gen` cannot produce this file — the DSL
+# methods it declares have no `def` in the gems' source (they are generated through
+# `override_all_methods!` / `delegate_missing_to` / `StrictHashConfiguration`), so every entry was
+# hand-derived by reading the grape 2.4.x / grape-entity 1.0 source. Members that do not exist at
+# that version's runtime location are deliberately absent — declaring them would let a genuinely
+# failing call resolve silently.
+#
+# Block `self` bindings are NOT modelled here — they come from the manifest's `block_as_methods`
+# entries (`params` bodies on `Grape::Validations::ParamsScope`, `namespace` bodies on the
+# `Grape::API::Instance` class object, verb bodies on `Grape::Endpoint`).
+
+module Grape
+  module DSL
+    # Class-level declaration surface shared by `Grape::API` subclasses and `Grape::API::Instance`.
+    module ClassMethods
+      # Validations — `params` opens a `Grape::Validations::ParamsScope` and `instance_eval`s the
+      # block on it; returns the new scope (dsl/validations.rb).
+      def params: () ?{ () -> untyped } -> Grape::Validations::ParamsScope
+      def contract: (?untyped) ?{ () -> untyped } -> ::Object?
+
+      # Routing — the HTTP verbs are generated over `Grape::HTTP_SUPPORTED_METHODS` and delegate to
+      # `route` (`def route(methods, paths = ['/'], route_options = {}, &block)`).
+      def get: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def put: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def post: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def delete: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def head: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def patch: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def options: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def route: (untyped, ?untyped, ?untyped) ?{ () -> untyped } -> ::Object?
+
+      # Namespace family — `namespace`/`scope`/`route_param`/`version`/`given`/`mounted`
+      # `instance_eval` their block on the Instance class object and return the block's value.
+      # `group`/`resource`/`resources`/`segment` are aliases of `namespace`; `scope` routes
+      # through `within_namespace { nest(block) }` (dsl/routing.rb).
+      def namespace: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def route_param: (untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def group: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def resource: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def resources: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def segment: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def version: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def given: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def mounted: () { () -> untyped } -> ::Object?
+      def mount: (untyped, *untyped) -> ::Object?
+      def scope: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def prefix: (?untyped) -> ::Object?
+
+      # Settings / configuration (dsl/settings.rb, dsl/configuration.rb).
+      def route_setting: (untyped, ?untyped) -> ::Object?
+      def unset_route_setting: (untyped) -> ::Object?
+      def global_setting: (untyped, ?untyped) -> ::Object?
+      def unset_global_setting: (untyped) -> ::Object?
+      # `description` / `entity` / `detail` / `failure` / `success` and friends are NOT API-level
+      # methods — they belong to the anonymous `config_context` a `desc` block `instance_exec`s on
+      # (`Grape::Util::StrictHashConfiguration`). That surface is deferred (README); declaring the
+      # names here would silently resolve calls that fail at runtime.
+      def desc: (untyped, ?untyped) ?{ () -> untyped } -> ::Object?
+      def content_type: (untyped, untyped) -> ::Object?
+      def default_format: (?untyped) -> ::Object?
+      def format: (?untyped) -> ::Object?
+      def formatter: (untyped, untyped) -> ::Object?
+      def parser: (untyped, untyped) -> ::Object?
+      def default_error_formatter: (?untyped) -> ::Object?
+      def default_error_status: (?untyped) -> ::Object?
+      def error_formatter: (untyped, untyped) -> ::Object?
+      def cascade: (?untyped) -> ::Object?
+      def do_not_route_head!: () -> ::Object?
+      def do_not_route_options!: () -> ::Object?
+      def do_not_document!: () -> ::Object?
+      def http_basic: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def auth: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def http_digest: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def rescue_from: (*untyped, **untyped) ?{ (*untyped) -> untyped } -> ::Object?
+      # `represent` forwards to `Entity.represent`, whose result is an entity, an array of
+      # entities, or a `{root => inner}` Hash depending on the call — untyped is the honest
+      # carrier (a `::Object` return invents `undefined method` findings on every chained call).
+      # Runtime arity is `represent(model_class, options)` (dsl/request_response.rb).
+      def represent: (untyped, untyped) -> untyped
+
+      # Helpers / middleware / callbacks.
+      def helpers: (*untyped) ?{ () -> untyped } -> ::Object?
+      def use: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def middleware: () -> ::Object?
+      def insert_before: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def insert_after: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def before: () { () -> untyped } -> ::Object?
+      def before_validation: () { () -> untyped } -> ::Object?
+      def after_validation: () { () -> untyped } -> ::Object?
+      def after: () { () -> untyped } -> ::Object?
+      def finally: () { () -> untyped } -> ::Object?
+    end
+  end
+
+  class API
+    extend DSL::ClassMethods
+
+    # The class object a `Grape::API` subclass's declaration calls are forwarded to. `namespace`
+    # bodies `instance_eval` on this class object, so the same `extend`ed surface covers calls made
+    # inside them.
+    class Instance
+      extend DSL::ClassMethods
+    end
+  end
+
+  module Validations
+    # The receiver `params`/`requires`/`optional`/`given`/`with` blocks `instance_eval` on. Its
+    # DSL lives in `Grape::DSL::Parameters`; the declarations here cover the block-relevant and
+    # commonly-called subset.
+    class ParamsScope
+      def requires: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def optional: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def given: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def with: (*untyped, **untyped) ?{ () -> untyped } -> ::Object?
+      def use: (*untyped) -> ::Object?
+      def mutually_exclusive: (*untyped) -> ::Object?
+      def exactly_one_of: (*untyped) -> ::Object?
+      def at_least_one_of: (*untyped) -> ::Object?
+      def all_or_none_of: (*untyped) -> ::Object?
+    end
+  end
+
+  # Runtime route context — verb bodies execute as `Grape::Endpoint` instance methods
+  # (`Grape::Endpoint#run` evaluates the stored block inside the endpoint instance). The methods
+  # here are `Grape::DSL::InsideRoute`, `Grape::DSL::Headers`, `Grape::DSL::Settings`, and the
+  # `def_delegators :request` surface (`params`/`headers`/`cookies`).
+  class Endpoint
+    def params: () -> ::Hash[untyped, untyped]
+    def headers: () -> ::Hash[untyped, untyped]
+    # `Endpoint#cookies` delegates to `Grape::Request#cookies`, which builds a `Grape::Cookies`
+    # wrapper — not a Hash (`lib/grape/cookies.rb`, `lib/grape/request.rb`).
+    def cookies: () -> Grape::Cookies
+    def env: () -> ::Hash[untyped, untyped]
+    # `request` is a `Grape::Request` (Rack::Request subclass) at runtime — untyped rather than
+    # `::Object` so `request.params`/`request.GET` chains don't read as undefined-method findings.
+    def request: () -> untyped
+    def declared: (*untyped, **untyped) -> ::Hash[untyped, untyped]
+    def version: () -> ::Object?
+    def error!: (*untyped, **untyped) -> bot
+    def redirect: (untyped url, ?permanent: untyped, ?body: untyped) -> ::Object?
+    def status: (?untyped) -> ::Object?
+    def content_type: (?untyped) -> ::Object?
+    def body: (?untyped) -> ::Object?
+    # `present` returns the representation (entity, Hash, or the bare object) — untyped.
+    def present: (*untyped, **untyped) -> untyped
+    # `route` is the `Grape::Router::Route` for the current endpoint — untyped.
+    def route: () -> untyped
+    def header: (?untyped, ?untyped) -> ::Object?
+    def route_setting: (untyped, ?untyped) -> ::Object?
+    def stream: (?untyped) -> ::Object?
+    def sendfile: (?untyped) -> ::Object?
+    # `error_response` lives on `Grape::Middleware::Error`, not on the endpoint — not declared here.
+  end
+
+  # The Rack-cookie wrapper `Grape::Request#cookies` returns (`def_delegators :cookies` for `[]`
+  # and `each`, plus its own `[]=` / `delete` / `response_cookies`). Not a Hash.
+  class Cookies
+    def []: (untyped) -> untyped
+    def []=: (untyped, untyped) -> untyped
+    def each: (*untyped) ?{ (*untyped) -> untyped } -> untyped
+    def response_cookies: () { (untyped, untyped) -> untyped } -> untyped
+    def delete: (untyped, **untyped) -> untyped
+  end
+
+  # grape-entity's declaration target (`class Foo < Grape::Entity`). `expose` bodies run via
+  # `block.call` — `self` stays the Entity subclass's class object — so nested `expose` calls
+  # resolve through the same singleton surface without a `block_as_methods` entry.
+  class Entity
+    def self.expose: (*untyped, **untyped) ?{ () -> untyped } -> ::Array[untyped]
+    def self.unexpose: (*untyped) -> ::Object?
+    def self.unexpose_all: () -> ::Object?
+    def self.with_options: (untyped) { () -> untyped } -> ::Object?
+    def self.documentation: () -> ::Hash[untyped, untyped]
+    # Returns `formatters[name.to_sym] = block` — the registered Proc.
+    def self.format_with: (untyped) { (untyped) -> untyped } -> ::Proc
+    def self.root: (untyped, ?untyped) -> ::Object?
+    def self.root_element: (untyped) -> ::Object?
+    # Result is an Entity instance, an Array of them, or a `{root => inner}` Hash
+    # (`lib/grape_entity/entity.rb` `self.represent`) — untyped, not `::Object`, so chained
+    # `serializable_hash` / `map` / exposed-attribute reads stay quiet.
+    def self.represent: (*untyped, **untyped) -> untyped
+    def self.present_collection: (?untyped, ?untyped) -> ::Object?
+    # Runtime returns `Exposure::NestingExposure::NestedExposures` — an `Enumerable` wrapper with
+    # `find_by` / `select_by` / `delete_by` that Array does not have.
+    def self.root_exposures: () -> Exposure::NestingExposure::NestedExposures
+
+    # The instance-side output surface — `serializable_hash` is the primary representation
+    # output (`nil` when the wrapped object is nil); `as_json`/`to_json` delegate to it.
+    def serializable_hash: (?untyped) -> ::Hash[untyped, untyped]?
+    def as_json: (*untyped, **untyped) -> untyped
+
+    module Exposure
+      class NestingExposure
+        # `Enumerable` wrapper over the exposure list (grape-entity `nested_exposures.rb`):
+        # `each`/`to_ary`/`to_a`/`[]`/`size`/`empty?`/`==` delegate to the inner Array, and
+        # `find_by`/`select_by`/`delete_by`/`<<`/`clear` are its own API.
+        class NestedExposures
+          include Enumerable[untyped]
+          def find_by: (untyped) -> untyped
+          def select_by: (untyped) -> untyped
+          def <<: (untyped) -> untyped
+          def delete_by: (*untyped) -> untyped
+          def clear: () -> untyped
+          def to_ary: () -> ::Array[untyped]
+          def to_a: () -> ::Array[untyped]
+          def []: (*untyped) -> untyped
+          def ==: (untyped) -> bool
+          def size: () -> ::Integer
+          def empty?: () -> bool
+        end
+      end
+    end
+  end
+end

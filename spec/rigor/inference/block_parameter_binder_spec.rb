@@ -226,6 +226,39 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(trailing).to eq(k: integer_nominal)
       end
 
+      it "reads a trailing positional after a rest from the Tuple's tail (|*r, v|)" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |*r, v| v }"))
+        expect(bindings[:v]).to eq(string_nominal)
+      end
+
+      it "splits |a, *r, b| over a Tuple into head, middle and tail" do
+        float = Rigor::Type::Combinator.nominal_of("Float")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal, float)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, *r, b| b }"))
+        expect(bindings.slice(:a, :b)).to eq(a: integer_nominal, b: float)
+      end
+
+      it "binds a trailing positional past a short Tuple to Dynamic[Top]" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("xs.each { |a, *r, b| b }"))
+        expect(bindings.slice(:a, :b)).to eq(a: integer_nominal, b: untyped)
+      end
+
+      it "starts every #bind from the declared types, so a reused binder does not splat twice" do
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        binder = described_class.new(expected_param_types: [tuple])
+        binder.bind(parse_block("h.each { |k, v| k }"))
+        expect(binder.bind(parse_block("h.each { |pair| pair }"))).to eq(pair: tuple)
+
+        array = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+        reused = described_class.new(expected_param_types: [array])
+        reused.bind(parse_block("xs.each { |g, *r| g }"))
+        expect(reused.bind(parse_block("xs.each { |*r| r }")))
+          .to eq(r: Rigor::Type::Combinator.nominal_of("Array", type_args: [untyped]))
+        expect(reused.optimistic).to be_empty
+      end
+
       it "does not splat into a lone |*rest|" do
         tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
         bindings = described_class.new(expected_param_types: [tuple]).bind(parse_block("h.each { |*r| r }"))

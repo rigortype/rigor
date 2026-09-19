@@ -46,10 +46,8 @@ module Rigor
       #   the binder cannot fill from this array (because the array is shorter than the parameter list, or
       #   because the slot is a kind we do not pull from the array) default to `Dynamic[Top]`.
       def initialize(expected_param_types: [])
-        @expected_param_types = expected_param_types
-        @splat_rest_type = nil
-        @optimistic_positions = []
-        @optimistic = []
+        @declared_param_types = expected_param_types
+        reset_per_bind_state
       end
 
       # The names the last {#bind} bound optimistically nil-free (see the class comment).
@@ -67,7 +65,7 @@ module Rigor
       #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind
       #   `:_1`, `:_2`, ... up to the maximum the block body refers to.
       def bind(block_node)
-        @optimistic = []
+        reset_per_bind_state
         params_root = block_node.parameters
         return {} if params_root.nil?
 
@@ -84,6 +82,15 @@ module Rigor
       end
 
       private
+
+      # {#apply_auto_splat} rewrites the positional table for the block it is binding, so every {#bind} starts
+      # from the declared types again; a binder reused across blocks must not see the previous block's splat.
+      def reset_per_bind_state
+        @expected_param_types = @declared_param_types
+        @splat_rest_type = nil
+        @optimistic_positions = []
+        @optimistic = []
+      end
 
       # `|_1, _2|` numbered-parameter form. Prism exposes the implicit count through
       # `NumberedParametersNode#maximum` (the highest `_N` referenced in the body); we materialise bindings
@@ -143,10 +150,25 @@ module Rigor
 
         first = @expected_param_types[0]
         if first.is_a?(Type::Tuple)
-          @expected_param_types = first.elements
+          apply_tuple_auto_splat(params_node, first.elements)
         elsif (element = MultiTargetBinder.array_element_type(first))
           apply_array_auto_splat(params_node, element)
         end
+      end
+
+      # The Tuple arm of {#apply_auto_splat}. Leading positionals (required, then optional) read from the head;
+      # trailing positionals after a rest read from the tail, with the rest absorbing the middle — the split
+      # `MultiTargetBinder` applies to `a, *r, b = tuple`, so `|*r, v|` over `[K, V]` binds `v` to `V` and
+      # `|a, *r, b|` over `[A, B, C]` binds `b` to `C`. Without a rest the trailing positionals continue from the
+      # head (Ruby fills `|a, b = 1, c|` from the head when the tuple is long enough). The split is mirrored
+      # rather than delegated to `MultiTargetBinder.decompose_tuple` because that one pads a missing slot with
+      # `Constant[nil]` and softens `X | nil`; a block slot past the tuple has always bound `Dynamic[Top]`.
+      def apply_tuple_auto_splat(params_node, elements)
+        head = params_node.requireds.size + params_node.optionals.size
+        posts = params_node.posts.size
+        tail_start = params_node.rest.nil? ? head : [elements.size - posts, head].max
+        @expected_param_types = Array.new(head) { |i| elements[i] } +
+                                Array.new(posts) { |j| elements[tail_start + j] }
       end
 
       # Issue #1093 — the `Array[T]` arm of {#apply_auto_splat}: see the class comment for the per-slot rule.

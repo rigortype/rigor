@@ -118,6 +118,7 @@ module Rigor
 
           fronts, rest_type, backs, slots_optimistic =
             decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?)
+          rest_type = arity_free_rest(rest_type) if optimistic
           slot_mark = optimistic || slots_optimistic
           lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked) }
           bind_rest_target(rest, rest_type, bindings, marked) if rest
@@ -137,6 +138,17 @@ module Rigor
           else
             [*decompose_default(front_count, back_count, rest_present: rest_present), false]
           end
+        end
+
+        # Under an inherited mark the whole right-hand side may be the `nil` a short outer array padded in, and
+        # `(p, *q) = nil` binds `q = []`. A Tuple rest would claim the middle elements are present
+        # (`q.first.nil?` folding to `false`), so it widens to `Array[union of the middle]`, which admits the
+        # empty array; an empty middle has no element type to offer and stays `Array[Dynamic[top]]`.
+        def arity_free_rest(rest_type)
+          return rest_type unless rest_type.is_a?(Type::Tuple)
+
+          element = rest_type.elements.empty? ? Type::Combinator.untyped : Type::Combinator.union(*rest_type.elements)
+          Type::Combinator.nominal_of("Array", type_args: [element])
         end
 
         def decompose_array(element, front_count, back_count, rest_present:)

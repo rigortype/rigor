@@ -159,6 +159,20 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result.optimistic).to contain_exactly(:p, :q, :r)
     end
 
+    it "widens a nested Tuple rest under an inherited mark to an arity-free Array" do
+      element = tuple(integer, string)
+      result = described_class.bind_marked(parse_multi_write("(p, *q), r = pairs"), array_of(element))
+      expect(result.types).to eq(p: integer, q: array_of(string), r: element)
+      expect(result.optimistic).to contain_exactly(:p, :r)
+    end
+
+    it "keeps a nested Tuple rest precise when nothing above it is optimistic" do
+      node = parse_multi_write("(p, *q), r = pair")
+      result = described_class.bind_marked(node, tuple(tuple(integer, string), integer))
+      expect(result.types).to eq(p: integer, q: tuple(string), r: integer)
+      expect(result.optimistic).to be_empty
+    end
+
     it "marks the names under an optimistic parent slot even when the slot itself is a Tuple" do
       node = Prism.parse("foo { |(g, h)| g }").value.statements.body.first.block.parameters.parameters.requireds.first
       result = described_class.bind_marked(node, tuple(integer, string), optimistic: true)

@@ -171,7 +171,6 @@ module Rigor
         # since the implicit path would false-positive on `redirect_to` / `head` / early returns.
         #
         # @param ancestors — the lexical ancestor chain
-        # @param path — file being analysed
         # @param io_boundary — the plugin's {Rigor::Plugin::IoBoundary}; #629 — every filesystem
         #   question this phase asks goes through it, so "no such template" is a recorded dependency and
         #   the run-result cache invalidates once the template appears

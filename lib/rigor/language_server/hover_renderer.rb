@@ -83,9 +83,9 @@ module Rigor
         )
       end
 
-      # @return , nil] the resolved method definition, the receiver
-      #   class name, and the dispatch kind (`:instance` or `:singleton`); nil when the receiver shape isn't
-      #   yet supported or the method doesn't resolve through the RBS env.
+      # @return `[definition, receiver_class_name, kind]` — the resolved method definition (nil when the
+      #   method doesn't resolve through the RBS env), the receiver class name, and the dispatch kind
+      #   (`:instance` or `:singleton`); `[nil, nil, nil]` when the receiver shape isn't yet supported.
       def lookup_method(receiver_type, method_name, scope)
         case receiver_type
         when Type::Singleton

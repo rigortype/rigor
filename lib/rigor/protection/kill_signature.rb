@@ -20,7 +20,6 @@ module Rigor
         [diagnostic.rule, diagnostic.path, diagnostic.line, diagnostic.column, diagnostic.message]
       end
 
-      # @return the signature set of `diagnostics`.
       def signatures_of(diagnostics)
         diagnostics.to_set { |diagnostic| of(diagnostic) }
       end

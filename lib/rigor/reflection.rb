@@ -447,7 +447,7 @@ module Rigor
       nil
     end
 
-    # Returns the full RBS singleton-side class definition.
+    # The singleton-side twin of {#instance_definition}, nil under the same conditions.
     def singleton_definition(class_name, scope: nil, environment: nil)
       loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?

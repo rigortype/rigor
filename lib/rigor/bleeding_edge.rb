@@ -195,12 +195,10 @@ module Rigor
 
     module_function
 
-    # @return the whole overlay.
     def features
       FEATURES
     end
 
-    # @return every feature id in the overlay.
     def feature_ids
       FEATURES.map(&:id)
     end

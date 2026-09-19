@@ -422,10 +422,6 @@ module Rigor
       # scope. The catalogue mirrors {.case_equality_target_class}: static class/module
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
       # string-endpoint ranges and regexp literals narrow to `String`.
-      #
-      # @param subject — the `case` subject.
-      # @param conditions — the `when`
-      #   clause's `conditions` array.
       def case_when_scopes(subject, conditions, scope)
         # C1 — `case x when /re/` runs `/re/ === x`, which sets the regex match-data globals
         # exactly as a successful `=~` does. Narrow `$~`/`$&`/`$1..$N` on the clause body (the

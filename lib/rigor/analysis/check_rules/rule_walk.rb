@@ -109,7 +109,7 @@ module Rigor
             end
           end
 
-          # The context the children of `node` descend under. Mirrors {RuleWalk.descend}.
+          # Mirrors {RuleWalk.descend}.
           def descend(node, context)
             RuleWalk.descend(node, context)
           end

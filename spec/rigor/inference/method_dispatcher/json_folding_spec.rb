@@ -15,8 +15,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::JSONFolding do
                                  ))
   end
 
-  # ── generate / pretty_generate ─────────────────────────────────────────
-
   describe "generate / pretty_generate" do
     it "types JSON.pretty_generate({}) as Nominal[String]" do
       hash_arg = Rigor::Type::Combinator.hash_shape_of({})
@@ -40,8 +38,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::JSONFolding do
       expect(fold(:pretty_generate, hash_arg, opts)).to eq(string_t)
     end
   end
-
-  # ── decline / edge cases ────────────────────────────────────────────────
 
   describe "decline cases" do
     it "declines for JSON.parse — an unrelated JSON method stays untyped" do

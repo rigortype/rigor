@@ -57,7 +57,6 @@ module Rigor
 
       # @param receiver_type — type of the receiver expression, or
       #   `nil` for an implicit-self call.
-      # @param arg_types — positional argument types.
       # @param block_type — inferred return type of the
       #   accompanying `do ... end` / `{ ... }` block (Slice 6 phase C
       #   sub-phase 2). When non-nil, the dispatcher prefers an

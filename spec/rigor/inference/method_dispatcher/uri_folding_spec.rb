@@ -14,8 +14,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
                                  ))
   end
 
-  # ── encode_www_form_component ─────────────────────────────────────────
-
   describe "encode_www_form_component" do
     it "percent-encodes special characters" do
       expect(fold(:encode_www_form_component, c("hello world")))
@@ -33,8 +31,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
     end
   end
 
-  # ── decode_www_form_component ─────────────────────────────────────────
-
   describe "decode_www_form_component" do
     it "decodes percent-encoded strings" do
       expect(fold(:decode_www_form_component, c("hello+world")))
@@ -45,8 +41,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
       expect(fold(:decode_www_form_component, c("hello"))).to eq(c("hello"))
     end
   end
-
-  # ── encode_uri_component / decode_uri_component ────────────────────────
 
   describe "encode_uri_component / decode_uri_component" do
     it "encodes special characters" do
@@ -61,8 +55,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
       expect(result.value).to be_a(String)
     end
   end
-
-  # ── Decline / edge cases ──────────────────────────────────────────────
 
   describe "decline cases" do
     it "declines for a non-Constant argument" do
@@ -110,8 +102,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
       expect(fold(:join, c("https://example.com/"), c("a"))).to be_nil
     end
   end
-
-  # ── encode_www_form / decode_www_form ─────────────────────────────────
 
   describe "encode_www_form" do
     def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)

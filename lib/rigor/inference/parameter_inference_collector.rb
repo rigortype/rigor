@@ -329,7 +329,8 @@ module Rigor
           arg.is_a?(Prism::AssocSplatNode)
       end
 
-      # @return , nil]
+      # @return the callee's `[class_name, method_name, kind, def_node]`, or nil when the receiver's class
+      #   or the method's `def` is not in the project index
       def resolve_callee(call_node, scope, index)
         if call_node.receiver.nil?
           class_name, kind = implicit_self_target(scope)

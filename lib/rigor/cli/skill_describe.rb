@@ -148,7 +148,6 @@ module Rigor
         @deep = deep
       end
 
-      # @return the full describe report.
       def render
         catalog = catalog_skills
         state = ProjectStateProbe.new(@root).to_h

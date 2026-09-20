@@ -484,11 +484,12 @@ module Rigor
       # engine's own veto still sees the member through its pre-`::Object` RBS arm, so a top-level `def` of
       # the name does not bind either.
       #
-      # The cut-off is `ExpressionTyper#rbs_declared_before_object?`'s and NOT its own-class sibling's, and
-      # the difference is the whole point: RBS's definition builder resolves through ancestors, so a reader
-      # declared on a `sig/application_record.rbs` superclass or on an `include`d module comes back with
-      # THAT owner, and an own-class test would call it undeclared and displace it one ancestor up. What the
-      # cut-off keeps out is an owner at or after a top-level `def`'s own rung — `Object`, `Kernel`,
+      # The cut-off is `Inference::ExternalAncestorResolution.declared_before_object?`'s and NOT its
+      # own-class sibling's, and the difference is the whole point: RBS's definition builder resolves
+      # through ancestors, so a reader declared on a `sig/application_record.rbs` superclass or on an
+      # `include`d module comes back with THAT owner, and an own-class test would call it undeclared and
+      # displace it one ancestor up. What the cut-off keeps out is an owner at or after a top-level
+      # `def`'s own rung — `Object`, `Kernel`,
       # `BasicObject` — whose names say nothing about whether the model answers. Instance-side only, so a
       # sidecar declaring `def self.name` is correctly not counted. Fail-soft: an unreadable environment
       # declines to claim a declaration exists, which leaves the member visible to the veto.

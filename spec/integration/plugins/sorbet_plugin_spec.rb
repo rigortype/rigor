@@ -721,6 +721,53 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "does not bind DeclBuilder when a nearer extended module defines `sig`" do
+      # `extend T::Sig; extend CustomSig` — the later extend is nearer, so `CustomSig#sig`
+      # answers the call at runtime and picks the block's self. Narrowing to DeclBuilder would
+      # misread a perfectly ordinary custom DSL method.
+      source = <<~RUBY
+        module CustomSig
+          def sig(&blk)
+            nil
+          end
+        end
+        class F
+          extend T::Sig
+          extend CustomSig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when a nearer extended module does not define `sig`" do
+      source = <<~RUBY
+        module Plain
+          def helper
+            :ok
+          end
+        end
+        class F
+          extend T::Sig
+          extend Plain
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "does not fall through to the global `T::Sig` when a project module owns the extend edge" do
       # `Outer::T::Sig` is a project-defined module — `extend T::Sig` inside `Outer` binds it at
       # runtime, so `sig` must NOT resolve through the plugin's global `T::Sig` declaration.
@@ -773,6 +820,21 @@ RSpec.describe "plugins/rigor-sorbet" do
 
       result = run_plugin(source: source)
       offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "accepts both `T.type_alias` forms — positional type and block" do
+      # Runtime signature is `type_alias(type=nil, &blk)` — the positional form is the legacy
+      # migration path and must not report `call.wrong-arity`.
+      source = <<~RUBY
+        A = T.type_alias(String)
+        B = T.type_alias { Integer }
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select do |d|
+        %w[call.wrong-arity call.undefined-method].include?(d.rule)
+      end
       expect(offenders).to be_empty
     end
 

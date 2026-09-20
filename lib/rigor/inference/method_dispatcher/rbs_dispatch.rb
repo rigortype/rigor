@@ -808,13 +808,12 @@ module Rigor
             nil
           end
 
-          # The module names `current` extends, source table first (`discovered_extends`, as-written
-          # — reversed, since Ruby's singleton ancestry searches the most recently extended module
-          # first) then the RBS side (`singleton_extended_modules`, already qualified) — an RBS
-          # superclass like `T::Struct` declares `extend T::Props::ClassMethods` in signature, and a
-          # source subclass inherits it.
+          # The module names `current` extends, source table first (`discovered_extends`, stored in
+          # singleton-ancestor search order — nearest edge first) then the RBS side
+          # (`singleton_extended_modules`, already qualified) — an RBS superclass like `T::Struct`
+          # declares `extend T::Props::ClassMethods` in signature, and a source subclass inherits it.
           def each_extended_module_name(current, extends, environment, &)
-            (extends[current] || []).reverse_each(&)
+            (extends[current] || []).each(&)
             (environment&.singleton_extended_modules(current) || []).each(&)
           end
 

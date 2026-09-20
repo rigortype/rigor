@@ -3273,11 +3273,17 @@ module Rigor
         end
       end
 
+      # The table stores search order, not call order: a later `extend` statement prepends its module
+      # (`extend A; extend B` → singleton ancestors `[B, A]`) while the arguments of a single
+      # `extend A, B` keep call order (`[A, B]`). Prepending each call's argument list preserves both,
+      # and consumers iterating the list forward read the same order the singleton ancestry searches.
       def record_extend_targets(node, current_class, accumulator)
+        targets = []
         node.arguments&.arguments&.each do |arg|
           target = arg.is_a?(Prism::SelfNode) ? current_class : Source::ConstantPath.qualified_name(arg)
-          (accumulator[current_class] ||= []) << target if target
+          targets << target if target
         end
+        (accumulator[current_class] ||= []).unshift(*targets) unless targets.empty?
       end
 
       # The materialization half of #526: for every `C extends M`, M's INSTANCE defs become C's

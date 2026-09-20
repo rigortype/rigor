@@ -46,7 +46,9 @@ module T
   def self.self_type: () -> ::T::Types::Base
   def self.attached_class: () -> ::T::Types::Base
   def self.type_parameter: (::Symbol name) -> ::T::Types::TypeParameter
-  def self.type_alias: () { () -> untyped } -> ::T::Types::Base
+  # `type=nil, &blk` — the positional form is a kept-for-migration legacy path (`_types.rb`);
+  # the block form wraps in `T::Private::Types::TypeAlias`.
+  def self.type_alias: (?untyped type) ?{ () -> untyped } -> ::T::Types::Base
 
   # `T.proc` returns a DeclBuilder in `Modes.proc` (`T::Private::Methods.start_proc`), so the
   # `T.proc.params(x: Integer).returns(String)` chain resolves through the same builder surface.

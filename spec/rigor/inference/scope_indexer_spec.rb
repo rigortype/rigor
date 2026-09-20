@@ -2173,6 +2173,50 @@ Unrelated
       expect(last_statement_type(source).describe).to eq(":own")
     end
 
+    it "gives the FIRST argument of one `extend A, B` call precedence (#1097)" do
+      # `extend A, B` makes A the nearer singleton ancestor — `extend_features` prepends each
+      # argument in turn, so the table must keep call order within a single statement.
+      source = <<~RUBY
+        module Farther
+          def label
+            :farther
+          end
+        end
+        module Nearer
+          def label
+            :nearer
+          end
+        end
+        module Registry
+          extend Nearer, Farther
+        end
+        Registry.label
+      RUBY
+      expect(last_statement_type(source).describe).to eq(":nearer")
+    end
+
+    it "gives a LATER `extend` statement precedence over an earlier one (#1097)" do
+      # `extend A; extend B` puts B nearer — each statement prepends its own argument list.
+      source = <<~RUBY
+        module Earlier
+          def label
+            :earlier
+          end
+        end
+        module Later
+          def label
+            :later
+          end
+        end
+        module Registry
+          extend Earlier
+          extend Later
+        end
+        Registry.label
+      RUBY
+      expect(last_statement_type(source).describe).to eq(":later")
+    end
+
     it "contributes nothing for an extend target with no discovered defs (control)" do
       source = "module Registry\n  extend SomeGemModule\nend\nRegistry.helper\n"
       expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")

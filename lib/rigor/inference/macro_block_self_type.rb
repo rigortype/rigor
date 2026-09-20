@@ -47,7 +47,8 @@ module Rigor
         # by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
         entries.each do |entry|
-          narrowed = entry_self_type_for(entry, singleton_name, nominal_name, scope, environment)
+          narrowed = entry_self_type_for(entry, singleton_name, nominal_name, call_node.name,
+                                         scope, environment)
           return narrowed if narrowed
         end
         nil
@@ -57,16 +58,19 @@ module Rigor
       # receivers exist only inside an already-narrowed `instance_eval` body — they can only re-enter a
       # *named instance*-binding entry (`params`-family nesting on `Nominal[ParamsScope]`).
       # `:receiver_instance` and `singleton(...)` entries keep their Singleton-only contract.
-      def entry_self_type_for(entry, singleton_name, nominal_name, scope, environment)
+      def entry_self_type_for(entry, singleton_name, nominal_name, method_name, scope, environment)
         return nil if singleton_name.nil? && !entry.named_instance_binding?
 
         receiver_name = singleton_name || nominal_name
         matched = receiver_class_inherits_from?(receiver_name, entry.receiver_constraint, environment, scope)
         # `extend M` lifts M's instance surface onto the class object — `class F; extend T::Sig;
         # sig { ... }; end` calls `sig` on `Singleton[F]` even though F does not INHERIT from
-        # T::Sig. Singleton receivers therefore also match through the extends edge.
+        # T::Sig. Singleton receivers therefore also match through the extends edge — but only when
+        # the module that actually ANSWERS `method_name` is the constrained one: a nearer `extend`
+        # whose module defines the same name owns the call and picks the block's self at runtime.
         if !matched && singleton_name
-          matched = singleton_extends_reach?(receiver_name, entry.receiver_constraint, scope, environment)
+          matched = singleton_extends_reach?(receiver_name, entry.receiver_constraint, method_name,
+                                             scope, environment)
         end
         return nil unless matched
 
@@ -143,14 +147,13 @@ module Rigor
         false
       end
 
-      # The `extend`-edge twin of `source_ancestors_reach?`: true when `class_name` — or one of its
-      # discovered superclasses — extends a module resolving to `constraint`. Source `extend` targets
-      # arrive as-written and resolve through `ancestor_name_candidates`; RBS-side `extend` edges come
-      # from `Environment#singleton_extended_modules`, which is how `class Doc < T::Struct` picks up
-      # `T::Struct`'s own `extend T::Sig`. A candidate that resolves to a project class or a different
-      # RBS name owns the edge — the source-extend fold already handles project modules — so the walk
-      # stops consulting that edge's remaining fallbacks.
-      def singleton_extends_reach?(class_name, constraint, scope, environment)
+      # The `extend`-edge twin of `source_ancestors_reach?`: true when the module that would answer
+      # `method_name` on `class_name`'s singleton — walked through `extend` edges, nearest first, then
+      # up the discovered superclass chain — resolves to `constraint`. Source `extend` targets are
+      # stored in singleton-ancestor search order and resolve through `ancestor_name_candidates`;
+      # RBS-side `extend` edges come from `Environment#singleton_extended_modules`, which is how
+      # `class Doc < T::ImmutableStruct` picks up `T::ImmutableStruct`'s own `extend T::Sig`.
+      def singleton_extends_reach?(class_name, constraint, method_name, scope, environment)
         return false if scope.nil?
 
         supers = scope.discovered_superclasses
@@ -162,7 +165,8 @@ module Rigor
           next if current.nil? || seen[current]
 
           seen[current] = true
-          return true if extended_module_matches?(current, extends, constraint, scope, environment)
+          owner = extended_module_call_owner(current, extends, method_name, scope, environment)
+          return owner == constraint || rbs_inherits?(owner, constraint, environment) if owner
 
           raw = supers[current]
           scope.ancestor_name_candidates(current, raw).each { |c| queue << c } if raw
@@ -172,20 +176,35 @@ module Rigor
         false
       end
 
-      # One walk hop of `singleton_extends_reach?`: true when `current` extends a module resolving
-      # to `constraint`, consulting the source extend table first then the RBS singleton-extension
-      # side. A candidate resolving to a project class or a different RBS name owns its edge.
-      def extended_module_matches?(current, extends, constraint, scope, environment)
+      # One hop of `singleton_extends_reach?`: the module that answers `method_name` among `current`'s
+      # `extend` edges, or nil when none of them define it (the walk then continues to the
+      # superclass). An `extend` edge binds the first resolution candidate that exists at runtime —
+      # a project class or an RBS-known name — and an edge whose bound module lacks the method simply
+      # does not answer, so the search moves to the next edge, exactly like the singleton ancestry.
+      def extended_module_call_owner(current, extends, method_name, scope, environment)
         (extends[current] || []).each do |mod_name|
-          scope.ancestor_name_candidates(current, mod_name).each do |candidate|
-            return true if candidate == constraint || rbs_inherits?(candidate, constraint, environment)
-            break if scope.known_user_class?(candidate) ||
-                     Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
+          owner = scope.ancestor_name_candidates(current, mod_name).find do |candidate|
+            scope.known_user_class?(candidate) ||
+              Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
           end
+          next if owner.nil? || !extended_module_defines?(owner, method_name, scope, environment)
+
+          return owner
         end
-        (environment.singleton_extended_modules(current) || []).any? do |mod_name|
-          mod_name == constraint || rbs_inherits?(mod_name, constraint, environment)
+        (environment.singleton_extended_modules(current) || []).each do |mod_name|
+          return mod_name if extended_module_defines?(mod_name, method_name, scope, environment)
         end
+        nil
+      end
+
+      # `extend M` answers through M's INSTANCE surface — a source `def` inside the module or an RBS
+      # instance declaration (which already resolves through M's own `include`s, so `T::Generic`'s
+      # `include T::Helpers` answers `abstract!` on the extend edge).
+      def extended_module_defines?(mod_name, method_name, scope, environment)
+        return true if scope.discovered_method?(mod_name, method_name, :instance)
+
+        !Rigor::Reflection.instance_method_definition(mod_name, method_name,
+                                                      environment: environment).nil?
       end
 
       def rbs_inherits?(class_name, constraint, environment)

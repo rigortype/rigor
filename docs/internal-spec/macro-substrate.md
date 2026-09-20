@@ -58,15 +58,18 @@ rules (consistent with the rest of the plugin-contract carriers):
   receiver class **equals or inherits from** that fully-qualified name,
   matched through `Environment#class_ordering`. For `Singleton[X]`
   receivers (class-level DSL calls) the match also consults the
-  `extend` edge: an entry fires when `X` — or one of its discovered
-  superclasses — `extend`s a module resolving to the constraint,
-  whether the `extend` is recorded in source (`scope.discovered_extends`)
-  or declared in RBS (`Environment#singleton_extended_modules`). That is
-  how `class F; extend T::Sig; sig { ... }; end` and `class Doc <
-  T::Struct; sig { ... }; end` both reach the `sig` entry (#1097). A
-  candidate that resolves to a project class or a different RBS name owns
-  the edge — the match stops there rather than falling through to a
-  coincidental global name.
+  `extend` edge: an entry fires when the module that would answer the
+  call on `X`'s singleton — walked through `extend` edges in
+  singleton-ancestor search order (`scope.discovered_extends` stores
+  nearest-first), then up the discovered superclass chain, including
+  RBS-declared `extend`s surfaced by
+  `Environment#singleton_extended_modules` — resolves to the
+  constraint and actually defines `method_name`. That is how `class F;
+  extend T::Sig; sig { ... }; end` and `class Doc < T::ImmutableStruct;
+  sig { ... }; end` both reach the `sig` entry (#1097) — while a nearer
+  `extend` whose module defines the same name (`extend T::Sig; extend
+  CustomSig`) owns the call and the binding declines, since that custom
+  method picks the block's self at runtime.
 
 ## Tier A — `BlockAsMethod` (`block_as_methods:`)
 

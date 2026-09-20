@@ -232,7 +232,11 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         Rigor::Plugin::Registry.new(plugins: [sorbet_plugin_class.new(services: services)])
       end
 
-      def sorbet_scope(env, supers:, extends:)
+      # `extends:` lists are in singleton-ancestor search order (nearest edge first), matching what
+      # `record_extend_targets` stores. `known:` names the classes that exist in the fake universe —
+      # an extend edge binds the first existing candidate — and `defines:` the instance methods each
+      # module actually declares, which is what decides the call's owner.
+      def sorbet_scope(env, supers:, extends:, known: %w[T::Sig], defines: { "T::Sig" => [:sig] })
         scope = instance_double(
           Rigor::Scope,
           environment: env,
@@ -242,7 +246,10 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         allow(scope).to receive(:ancestor_name_candidates) do |_subclass, raw|
           [raw.to_s.sub(/\A::/, "")]
         end
-        allow(scope).to receive(:known_user_class?).and_return(false)
+        allow(scope).to receive(:known_user_class?) { |name| known.include?(name) }
+        allow(scope).to receive(:discovered_method?) do |klass, meth, kind|
+          kind == :instance && (defines[klass] || []).include?(meth)
+        end
         scope
       end
 
@@ -287,6 +294,34 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           receiver_type: Rigor::Type::Singleton.new("Fetcher")
         )
         expect(result).to be_nil
+      end
+
+      it "does not match when a nearer extended module owns the call" do
+        # `extend T::Sig; extend CustomSig` — stored search order puts CustomSig first; it defines
+        # `sig`, so its `sig` runs and picks the block self — not DeclBuilder.
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["CustomSig", "T::Sig"] },
+               known: %w[T::Sig CustomSig], defines: { "CustomSig" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "matches when a nearer extended module does not define the method" do
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["Plain", "T::Sig"] },
+               known: %w[T::Sig Plain], defines: { "T::Sig" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
       end
 
       it "does not match a Nominal receiver through the extends edge" do

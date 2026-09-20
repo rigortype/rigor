@@ -693,6 +693,26 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "shadows a sig call inside a `module_function def` body" do
+      # `module_function def m` wraps its DefNode in a call — the walk must still descend so the
+      # body's `sig` reads as deferred and the later `def self.sig` shadows it.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          module_function def helper
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
     it "still binds DeclBuilder when `def self.sig` follows the call on the SAME line" do
       # Statement order within a line is execution order — `sig {}; def self.sig` resolves through
       # `T::Sig` at runtime. Ordering by def-site line alone would treat the def as shadowing.

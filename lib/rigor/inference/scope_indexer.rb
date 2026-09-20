@@ -2684,7 +2684,23 @@ module Rigor
         module_function_on = false
         statements_of(body).each do |stmt|
           if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
-            module_function_on = true if bare_module_function?(stmt)
+            if bare_module_function?(stmt)
+              module_function_on = true
+            else
+              # `module_function :x` carries no DefNode; `module_function def x` does — the def is a
+              # module function and its body is still a deferred range, so record/descend rather
+              # than letting the `next` swallow it.
+              stmt.arguments&.arguments&.each do |arg|
+                if arg.is_a?(Prism::DefNode)
+                  record_deferred_def(arg, qualified_prefix, in_singleton_class, true, ranges)
+                  arg.rigor_each_child do |child|
+                    walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
+                  end
+                else
+                  walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, ranges)
+                end
+              end
+            end
             next
           end
           if stmt.is_a?(Prism::DefNode)

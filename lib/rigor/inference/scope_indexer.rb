@@ -1800,11 +1800,19 @@ module Rigor
             return
           end
         when Prism::ConstantWriteNode
-          record_constant_write(node, qualified_prefix, default_scope, accumulator,
-                                qualified_write_name(qualified_prefix, node.name.to_s), self_owner)
+          # A bare write inside a `class <<` body lands on the singleton's own constant
+          # table — a name nothing else can produce — so it declines rather than filing
+          # under the enclosing class.
+          unless singleton_self
+            record_constant_write(node, qualified_prefix, default_scope, accumulator,
+                                  qualified_write_name(qualified_prefix, node.name.to_s), self_owner)
+          end
           return
         when Prism::ConstantPathWriteNode
-          full = constant_path_write_key(node.target, qualified_prefix, default_scope, self_owner)
+          # `self::BAR =` inside a `class <<` body writes on the singleton — unnameable —
+          # so the OPAQUE self declines it; every other path resolves as usual.
+          key_self = singleton_self ? OPAQUE_SELF : self_owner
+          full = constant_path_write_key(node.target, qualified_prefix, default_scope, key_self)
           record_constant_write(node, qualified_prefix, default_scope, accumulator, full, self_owner) if full
           return
         end
@@ -1813,8 +1821,9 @@ module Rigor
                                      singleton_self)
       end
 
-      # `self` inside a `class <<` body is the singleton — a `self::`-anchored eval
-      # receiver below declines rather than resolving against the enclosing class.
+      # `self` inside a `class <<` body is the singleton — writes to `self`-anchored or
+      # bare targets land on its constant table (unnameable, so they decline) and a
+      # `self::`-anchored eval receiver raises NameError at runtime, so it declines too.
       def walk_singleton_class_writes(node, qualified_prefix, default_scope, accumulator,
                                       self_owner, singleton_self)
         walk_constant_writes(node.expression, qualified_prefix, default_scope, accumulator,
@@ -2201,15 +2210,18 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
+          # `class << self` inside an eval body opens the RECEIVER's singleton — self is
+          # the eval receiver there — so the override supplies the base, not the lexical
+          # prefix. `class << <non-constant>` opens a singleton the walk cannot name —
+          # its body walks ownerless, keeping the singleton marker so `self::` receivers
+          # still decline.
+          singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix) || []
+          walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
+                                     methods_acc, def_nodes_acc, source_path, def_owner_prefix)
           if node.body
-            # `class << self` inside an eval body opens the RECEIVER's singleton — self is
-            # the eval receiver there — so the override supplies the base, not the lexical prefix.
-            singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix)
-            if singleton_prefix
-              walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc, source_path)
-              return
-            end
+            walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc, source_path)
           end
+          return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
@@ -3094,14 +3106,14 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          if node.body
-            singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
-                                                      qualified_prefix)
-            if singleton_prefix
-              walk_singleton_body(node.body, singleton_prefix, true, accumulator)
-              return
-            end
-          end
+          # `class << <non-constant>` opens a singleton the walk cannot name — its body
+          # walks ownerless, keeping the singleton marker so `self::` receivers still decline.
+          singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
+                                                    qualified_prefix) || []
+          walk_singleton_def_nodes(node.expression, qualified_prefix, in_singleton_class,
+                                   accumulator, def_owner_prefix)
+          walk_singleton_body(node.body, singleton_prefix, true, accumulator) if node.body
+          return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
@@ -3930,7 +3942,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator,
                                    def_owner_prefix = nil)
         return current_visibility unless node.is_a?(Prism::Node)
@@ -3944,13 +3956,9 @@ module Rigor
             return current_visibility
           end
         when Prism::SingletonClassNode
-          if node.body
-            singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix)
-            if singleton_prefix
-              walk_method_visibilities(node.body, singleton_prefix, true, :public, accumulator)
-              return current_visibility
-            end
-          end
+          walk_visibility_singleton_class(node, qualified_prefix, in_singleton_class, current_visibility,
+                                          accumulator, owner_prefix, def_owner_prefix)
+          return current_visibility
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
@@ -3986,6 +3994,16 @@ module Rigor
           end
         end
         current_visibility
+      end
+
+      # `class << <non-constant>` opens a singleton the walk cannot name — its body
+      # walks ownerless, keeping the singleton marker so `self::` receivers still decline.
+      def walk_visibility_singleton_class(node, qualified_prefix, in_singleton_class, current_visibility,
+                                          accumulator, owner_prefix, def_owner_prefix)
+        singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix) || []
+        walk_method_visibilities(node.expression, qualified_prefix, in_singleton_class,
+                                 current_visibility, accumulator, def_owner_prefix)
+        walk_method_visibilities(node.body, singleton_prefix, true, :public, accumulator) if node.body
       end
 
       # The eval-block arm of {#walk_method_visibilities}: the block is a fresh class body under
@@ -5134,8 +5152,9 @@ module Rigor
 
         case node
         when Prism::SingletonClassNode
-          # `self` inside is the singleton — a `self::`-anchored eval receiver below
-          # declines rather than resolving against the enclosing class.
+          # `self` inside is the singleton — writes to `self`-anchored or bare targets
+          # land on its constant table (unnameable, so they decline) and a
+          # `self::`-anchored eval receiver raises NameError at runtime, so it declines too.
           walk_constant_write_census(node.expression, qualified_prefix, tables, self_owner,
                                      meta_owner, singleton_self: singleton_self)
           if node.body
@@ -5150,7 +5169,7 @@ module Rigor
             return
           end
         else
-          census_constant_write(node, qualified_prefix, tables, self_owner)
+          census_constant_write(node, qualified_prefix, tables, self_owner, singleton_self: singleton_self)
         end
 
         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner,
@@ -5177,37 +5196,59 @@ module Rigor
       # Censuses `node` when it is any constant-assigning form. Only a plain `ConstantWriteNode` /
       # `ConstantPathWriteNode` can contribute a VALUE; every other form is recorded unpublishable, which
       # suppresses publication of the name exactly as a second file's write would.
-      def census_constant_write(node, qualified_prefix, tables, self_owner = nil)
+      # Writes inside a `class <<` body (`singleton_self`) to a bare or `self`-anchored
+      # target land on the singleton's own constant table — a name nothing else can
+      # produce — so they record nothing rather than fabricating an enclosing-class name
+      # or a wildcard retraction for a constant they cannot touch.
+      def census_constant_write(node, qualified_prefix, tables, self_owner = nil,
+                                singleton_self: false)
         case node
         when Prism::ConstantWriteNode
+          return if singleton_self
+
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
                                        constant_literal_value(node.value), tables,
                                        alias_of: constant_alias_source(node.value))
         when Prism::ConstantPathWriteNode
+          return if singleton_self && node.target.parent.is_a?(Prism::SelfNode)
+
           record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
                                        constant_path_write_literal(node, self_owner), tables,
                                        nameable: nameable_write_target?(node.target, self_owner),
                                        alias_of: constant_alias_source(node.value))
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
+          return if singleton_self
+
           record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables)
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
-          record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                       nil, tables, nameable: nameable_write_target?(node.target, self_owner))
+          census_path_write(node, qualified_prefix, tables, self_owner, singleton_self: singleton_self)
         when Prism::MultiWriteNode
-          census_multi_write_constants(node, qualified_prefix, tables, self_owner)
+          census_multi_write_constants(node, qualified_prefix, tables, self_owner, singleton_self: singleton_self)
         end
+      end
+
+      def census_path_write(node, qualified_prefix, tables, self_owner, singleton_self: false)
+        return if singleton_self && node.target.parent.is_a?(Prism::SelfNode)
+
+        record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
+                                     nil, tables, nameable: nameable_write_target?(node.target, self_owner))
       end
 
       # `A, B = :x, :y` and `A, *rest = …`. A destructured element's value is a projection of the right-hand
       # side, which this syntactic walk does not evaluate, so every constant target is censused unpublishable.
-      def census_multi_write_constants(node, qualified_prefix, tables, self_owner = nil)
+      def census_multi_write_constants(node, qualified_prefix, tables, self_owner = nil,
+                                       singleton_self: false)
         targets = node.lefts + node.rights
         targets << node.rest if node.rest
         targets.each do |target|
           case target
           when Prism::ConstantTargetNode
+            next if singleton_self
+
             record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, tables)
           when Prism::ConstantPathTargetNode
+            next if singleton_self && target.parent.is_a?(Prism::SelfNode)
+
             record_constant_write_census(constant_path_write_name(target, qualified_prefix, self_owner),
                                          nil, tables, nameable: nameable_write_target?(target, self_owner))
           end

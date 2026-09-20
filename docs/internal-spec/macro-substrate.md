@@ -95,11 +95,13 @@ rules (consistent with the rest of the plugin-contract carriers):
   resolves against the enclosing receiver — `Y.class_eval {
   self::X.class_eval { def h; end } }` installs `Y::X#h`, never
   `M::X#h` under the lexical `module M` — while a CONSTANT receiver
-  still resolves through the write site's nesting (`Y.class_eval`
-  inside `M::Y.class_eval` at top level opens the top-level `Y`, not
-  `M::Y` again). Inside a `class <<` body `self` is the singleton, so
-  a `self::` receiver declines to name a class — the read raises
-  `NameError` at runtime. A cross-file def and a file the index
+  resolves against the write site's innermost lexical rung
+  (`Y.class_eval` inside `M::Y.class_eval` at top level opens the
+  top-level `Y`, not `M::Y` again; a receiver that would resolve
+  through a middle nesting rung still files as written). Inside a
+  `class <<` body `self` is the singleton — `self::X` reads and
+  `self::X` / bare constant writes land on its constant table, which
+  the tables cannot name, so both decline. A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

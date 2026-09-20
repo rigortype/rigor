@@ -2438,6 +2438,59 @@ Unrelated
       expect(table).not_to have_key("Object::X")
     end
 
+    it "declines `self::` and bare constant writes inside a `class <<` body" do
+      # Both forms write the singleton's own constant table — `#<Class:Y>::X` — a name
+      # nothing else can produce, so neither files under `Y` nor retracts `X`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class Y
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      expect(writes).to be_empty
+    end
+
+    it "declines `self::` constant writes inside `class <<` in the typed table" do
+      program = parse(<<~RUBY)
+        class Y
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.in_source_constants).not_to have_key("Y::X")
+      expect(scope.in_source_constants).not_to have_key("Y::W")
+    end
+
+    it "files defs inside `class << <non-constant>` under no class rather than the enclosing one" do
+      # `class << obj` opens `obj`'s singleton — `def h` binds `obj.h`, never `Y#h`.
+      table = methods_for(<<~RUBY)
+        class Y
+          class << obj
+            def h; end
+          end
+        end
+      RUBY
+      expect(table.fetch("Y", {})).not_to have_key(:h)
+    end
+
+    it "declines a `self::` eval receiver inside `class << <non-constant>`" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class Y
+          class << obj
+            self::X.class_eval { include T }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Y::X")
+    end
+
     it "attributes `extend` inside a nested `self.class_eval` block to the enclosing receiver" do
       table = described_class.build_discovered_extends(parse(<<~RUBY))
         module T; end

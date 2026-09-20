@@ -62,12 +62,18 @@ module Rigor
       # read the RBS environment, which files no cross-file edge, so this suppresses exactly the intended
       # one. `withhold` is a `[yield, nil]` fast path when nothing is recording, which is every ordinary
       # run.
+      #
+      # `mixins: false` narrows the walk to the SUPERCLASS chain. #527 slice 1 lands `< Hash` before
+      # `include Enumerable` so that slice 2's measurement stays its own, and the narrowing belongs to
+      # the CALLER rather than to this module: the implicit-self veto must keep walking both edges,
+      # because Ruby reaches an included module's methods too.
+      # rubocop:disable-next Metrics/ParameterLists
       def resolve(class_name, method_name, kind = :instance, scope:, environment: nil, name_memo: nil,
-                  record_dependencies: true)
+                  record_dependencies: true, mixins: true)
         return nil if class_name.nil? || scope.nil?
         return nil unless kind == :instance
 
-        compute(class_name, method_name, kind, scope, environment, name_memo, record_dependencies)
+        compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
       end
 
       # The RBS method definition for `class_name`, or nil for a class the environment does not know, a
@@ -127,13 +133,15 @@ module Rigor
         []
       end
 
-      def compute(class_name, method_name, kind, scope, environment, name_memo, record_dependencies)
+      # rubocop:disable-next Metrics/ParameterLists
+      def compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
+        kind = :instance
         own = method_definition(class_name, method_name, kind, scope: scope, environment: environment)
         if declared_before_object?(own, class_name, scope: scope, environment: environment)
           return [own, class_name.to_s].freeze
         end
 
-        groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies)
+        groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
         groups.each do |candidates|
           answer = first_known_candidate_answer(candidates, method_name, kind, scope, environment)
           return answer if answer
@@ -161,12 +169,14 @@ module Rigor
       # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
       # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency
       # of its answer, not that they should be replayed somewhere else.
-      def ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies)
+      def ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
         memo = name_memo || {}
-        return scope.external_ancestor_name_candidates(class_name, name_memo: memo) if record_dependencies
+        if record_dependencies
+          return scope.external_ancestor_name_candidates(class_name, name_memo: memo, mixins: mixins)
+        end
 
         Analysis::DependencyRecorder.withhold do
-          scope.external_ancestor_name_candidates(class_name, name_memo: memo)
+          scope.external_ancestor_name_candidates(class_name, name_memo: memo, mixins: mixins)
         end.first
       end
       private_class_method :ancestor_candidate_groups

@@ -5,6 +5,7 @@ require_relative "../../type"
 require_relative "../../rbs_extended"
 require_relative "../range_constant"
 require_relative "../rbs_type_translator"
+require_relative "../external_ancestor_resolution"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
 require_relative "overload_selector"
@@ -438,9 +439,14 @@ module Rigor
             # apply. Bounded to the allow-list, so open hierarchies stay on the Dynamic fallback (no false
             # positive on `< ActionController::Base`).
             ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
-            return nil unless ancestor
+            return lookup_method_on(environment, ancestor, kind, method_name) if ancestor
 
-            lookup_method_on(environment, ancestor, kind, method_name)
+            # Issue #527 slice 1 — the same shape, one RBS ancestry wider: a Ruby-source subclass of a
+            # CORE or STDLIB class (`class SubHash < Hash`, `< StandardError`, `< ::StringScanner`)
+            # resolves its inherited calls there. Injected HERE rather than as a new tier because
+            # `dispatch_one` keys `self`, `instance`, the type-variable map and `SelfSubstitute` on the
+            # RECEIVER's class name, so changing only the lookup gets the correct binding for free.
+            core_stdlib_ancestor_method(environment, class_name, kind, method_name, scope)
           end
 
           def lookup_method_on(environment, class_name, kind, method_name)
@@ -479,6 +485,127 @@ module Rigor
                                   registry&.rbs_complete_ancestor?(candidate)
             end
             nil
+          end
+
+          # Issue #527 slice 1 — the RBS instance definition a Ruby-source class inherits from a CORE or
+          # STDLIB ancestor, or nil. `Oj::EasyHash < Hash` answering `Dynamic[top]` to `has_key?` while
+          # `{}.has_key?` folds was the largest single opacity family in the 2026-09-01 corpus sweep.
+          #
+          # Why this is not ADR-43's rejected alternative A. That ADR declined blanket inherited
+          # resolution because firing `call.undefined-method` against a PARTIAL gem RBS "would frighten
+          # working code". Two things narrow it here. The ancestry is core / stdlib, whose RBS is the
+          # method set every negative rule already trusts for a direct receiver of it. And the negative
+          # rules do not reach these receivers anyway: `undefined_method_diagnostic` and
+          # `arity_envelope_for` gate on `Reflection.rbs_class_known?` of the RECEIVER, which a
+          # Ruby-source subclass never is. So the risk this arm carries is not a new firing but a
+          # WRONG PRECISE TYPE propagating one hop — which is what the declines below are about.
+          #
+          # The declines, in order of what they protect:
+          #
+          # * `class_name` itself RBS-known — the direct lookup already had authority.
+          # * an ADR-26 plugin-declared open receiver, whose surface is larger than its declarations.
+          # * the subclass or a nearer SOURCE ancestor declares the name (ADR-110): the runtime calls
+          #   the project's `def`, and resolving the inherited declaration would answer about a method
+          #   that never runs. Asked of both discovery tables, because neither sees the whole of what a
+          #   `def` / `attr_*` / `define_method` / `alias` contributes, and both suppress on budget
+          #   exhaustion rather than answering "not declared" from an unfinished walk.
+          # * the walked ancestor, or the class the declaration is actually written on, is not core /
+          #   stdlib. That is what keeps `class MyController < ActionController::Base` on `Dynamic[top]`
+          #   (no RBS at all), and a subclass of an RBS-shipping GEM there too — slice 3's question.
+          # * an ADR-17 `pre_eval:` patch declares the name on the receiver or on any ancestor of the
+          #   owner: the project has replaced the very method whose declaration this would adopt.
+          #
+          # Type variables are NOT inferred: a `Nominal[SubHash]` receiver carries no type arguments, so
+          # `build_type_vars` yields the empty map and `Hash[K, V]`'s free variables degrade to
+          # `Dynamic[top]` per the translator's contract. `SubHash#keys` is `Array[Dynamic[top]]`, which
+          # is exactly what a raw `Hash` receiver already answers — honest rather than a loss.
+          def core_stdlib_ancestor_method(environment, class_name, kind, method_name, scope)
+            return nil if scope.nil? || kind != :instance
+            return nil if environment.nil?
+
+            memo = core_stdlib_memo(environment, scope)
+            key = [class_name.to_s, method_name.to_sym]
+            return memo[key] if memo&.key?(key)
+
+            answer = compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+            memo[key] = answer if memo
+            answer
+          end
+
+          # The declines are conjunctive, so their ORDER is free — and it is chosen so the two that walk
+          # the project's tables run LAST, only once a core / stdlib declaration is actually in hand.
+          # Every unresolved call on a Ruby-source receiver reaches here (`Widget.new.price` on a plain
+          # project class), and those walks read `Scope#superclass_of` / `#includes_of`, which file an
+          # ADR-46 ancestry edge. Running them unconditionally turned every cross-class METHOD call into
+          # a file-granular ancestry dependency — coarser than the symbol edge ADR-46 slice 4 files, and
+          # pinned against by `dependency_recorder_spec`. Reached at all, the edge is genuine: this
+          # answer does depend on the project not declaring the name on that ancestry.
+          def compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+            return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
+            return nil if environment.plugin_registry&.open_receiver?(class_name)
+
+            definition, owner = Inference::ExternalAncestorResolution.resolve(
+              class_name, method_name, :instance,
+              scope: scope, environment: environment, record_dependencies: false, mixins: false
+            )
+            return nil if definition.nil?
+            return nil unless core_or_stdlib_owned?(environment, owner, definition)
+            return nil if project_patched_through_ancestors?(environment, class_name, owner, method_name)
+            return nil if source_declares_through_ancestors?(scope, class_name, method_name)
+
+            definition
+          end
+
+          # ADR-110's precedence, asked of both tables the project's own members land in. Either one
+          # answering true is a decline; both suppress (answer true) when their shared
+          # `Scope::ANCESTOR_WALK_LIMIT` budget runs out, and record a `BudgetTrace` hit there.
+          def source_declares_through_ancestors?(scope, class_name, method_name)
+            return true if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
+
+            !scope.user_def_through_ancestors(class_name, method_name).first.nil?
+          end
+
+          # Both ends of the declaration have to be core / stdlib: the ancestor the walk asked (`Hash`,
+          # `StringScanner`) and the class the declaration is written on (`Exception` for
+          # `StandardError#message`, `Comparable` for a `clamp`). Either being a gem's or the project's
+          # own RBS is slice 3's question, not this one's.
+          def core_or_stdlib_owned?(environment, owner, definition)
+            loader = environment.rbs_loader
+            return false if loader.nil? || !loader.respond_to?(:core_or_stdlib_class?)
+            return false unless loader.core_or_stdlib_class?(owner)
+
+            declared_on = definition.respond_to?(:defined_in) ? definition.defined_in : nil
+            return false if declared_on.nil?
+
+            loader.core_or_stdlib_class?(declared_on.to_s)
+          end
+
+          # ADR-17 — a `pre_eval:` file that reopens the receiver or any ancestor of the owner and
+          # redefines the name. The declaration this arm would adopt is then not the method that runs.
+          def project_patched_through_ancestors?(environment, class_name, owner, method_name)
+            patched = environment.project_patched_methods
+            return false if patched.nil? || patched.empty?
+
+            owners = [class_name.to_s.delete_prefix("::"), *rbs_instance_ancestor_names(owner, environment)]
+            owners.any? do |name|
+              !patched.lookup(class_name: name, method_name: method_name, kind: :instance).nil?
+            end
+          end
+
+          # Run-scoped memo for the whole decision. Every call site of a class asks the same
+          # `(class, method)` question, and the answer is a pure function of the frozen discovery index
+          # and the environment, so it is cacheable on their identity. A run that is RECORDING ADR-46
+          # dependency edges bypasses it: the shadow probes above read the project's method tables, and
+          # a memo would swallow that edge for every file after the first.
+          CORE_STDLIB_ANCESTOR_MEMO_KEY = :__rigor_core_stdlib_ancestor_dispatch__
+          private_constant :CORE_STDLIB_ANCESTOR_MEMO_KEY
+
+          def core_stdlib_memo(environment, scope)
+            return nil if Rigor::Analysis::DependencyRecorder.active?
+
+            store = (Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY] ||= {}.compare_by_identity)
+            by_discovery = (store[scope.discovery] ||= {}.compare_by_identity)
+            by_discovery[environment] ||= {}
           end
 
           # BFS over the scope's as-written superclass table, yielding every resolved ancestor name.

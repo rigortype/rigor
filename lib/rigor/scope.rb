@@ -928,7 +928,11 @@ module Rigor
     # environment, which this frozen-index walk does not read. The caller takes the first candidate its own
     # oracle knows and ignores the rest, the same "most-qualified first" order the project-side resolution
     # uses.
-    def external_ancestor_name_candidates(class_name, name_memo: {})
+    # Issue #527 slice 1 — `mixins: false` follows the SUPERCLASS chain only. Ruby reaches an included
+    # module's methods too, so the default answers the whole ancestry; a consumer resolving one KIND of
+    # inheritance edge at a time (the dispatch arm lands `< Hash` before `include Enumerable`) narrows
+    # it, the same way {#singleton_def_through_ancestors} narrows {#enqueue_ancestors}.
+    def external_ancestor_name_candidates(class_name, name_memo: {}, mixins: true)
       groups = []
       queue = [class_name.to_s]
       seen = {}
@@ -939,17 +943,23 @@ module Rigor
 
         seen[current] = true
         visited += 1
-        break if visited > ANCESTOR_WALK_LIMIT
+        if visited > ANCESTOR_WALK_LIMIT
+          # Issue #527 — the give-up is a budget event, not an answer. Consumers read the groups as
+          # "the ancestors this class reaches", so a truncated list must be visible in `--stats`
+          # alongside the other walks' exhaustions rather than silently short.
+          Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
+          break
+        end
 
-        collect_external_ancestors(current, queue, groups, name_memo)
+        collect_external_ancestors(current, queue, groups, name_memo, mixins: mixins)
       end
       groups
     end
 
     # One node of {#external_ancestor_name_candidates}: the project-declared ancestors continue the walk,
     # everything else is reported as a candidate list.
-    def collect_external_ancestors(current, queue, groups, name_memo)
-      raw_names = includes_of(current).dup
+    def collect_external_ancestors(current, queue, groups, name_memo, mixins: true)
+      raw_names = mixins ? includes_of(current).dup : []
       raw_super = superclass_of(current)
       raw_names << raw_super if raw_super
       raw_names.each do |raw|

@@ -43,6 +43,19 @@ module Rigor
       # cache HIT. Never a real path, so it must never be reported as one (issue #696).
       CACHED_LOCATION_BUFFER_NAME = "<cached>"
 
+      # Issue #527 — the two directory trees whose `.rbs` files ARE Ruby's own surface: the `rbs` gem's
+      # `core/` and its bundled `stdlib/` repository. {#core_stdlib_classes} tests a declaration's file
+      # against them. Resolved once at load time, on the main Ractor: reading these constants walks a
+      # chain of non-`Ractor.shareable?` module constants and raises `Ractor::IsolationError` inside a
+      # worker (see {#prewarm}). Empty when the rbs version in use does not expose them, which switches
+      # the feature off rather than widening it.
+      CORE_STDLIB_ROOTS = begin
+        [::RBS::EnvironmentLoader::DEFAULT_CORE_ROOT, ::RBS::Repository::DEFAULT_STDLIB_ROOT]
+          .compact.map { |root| "#{root}/".freeze }.freeze
+      rescue StandardError
+        [].freeze
+      end
+
       # Cap on how many quarantined `signature_paths:` files {#warn_about_quarantined_signatures} lists by name
       # before collapsing the tail to "… and N more" — a broken generator can emit many, and a wall of parse
       # errors buries the signal.
@@ -1506,6 +1519,50 @@ module Rigor
         Set.new.freeze
       end
       private :build_project_declared_classes
+
+      # Issue #527 — the class / module names whose PRIMARY declaration lives in the `rbs` gem's own
+      # `core/` or `stdlib/` tree, top-level prefix stripped.
+      #
+      # The distinction it draws is narrower than {#project_declared_classes}'s: not "who wrote this
+      # signature" but "is this Ruby's own documented surface". A core / stdlib signature is the method
+      # set every negative check rule already trusts for a direct receiver of the class, which is what
+      # lets a Ruby-source SUBCLASS of one resolve its inherited calls there (`RbsDispatch`'s
+      # `core_stdlib_ancestor_method`). A GEM's RBS is a different claim — routinely partial, which is
+      # ADR-43's whole reason for declining blanket inherited resolution — so it is deliberately outside
+      # this set even when the gem ships signatures and even when it is one of {DEFAULT_LIBRARIES}
+      # (`prism`, `rbs` are gems whose signatures ship with the gem, not entries of rbs's `stdlib/`).
+      #
+      # Attribution is by buffer NAME, the same mechanism and the same limits as
+      # {#project_declared_classes}: it survives the ADR-54 environment cache, and an old blob's
+      # `<cached>` sentinel lands every class OUTSIDE the set — the feature switches off rather than
+      # widening, which is the direction ADR-5 wants. Memoised per loader; one pass over `class_decls`.
+      def core_stdlib_classes
+        @state[:core_stdlib_classes] ||= build_core_stdlib_classes
+      end
+
+      def build_core_stdlib_classes
+        environment = env
+        return Set.new.freeze if environment.nil? || CORE_STDLIB_ROOTS.empty?
+
+        names = environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
+          decl = self.class.primary_decl_for(entry)
+          next if decl.nil?
+
+          path = self.class.declaration_buffer_name(decl)
+          next if path.nil?
+
+          acc << rbs_name.to_s.delete_prefix("::") if CORE_STDLIB_ROOTS.any? { |root| path.start_with?(root) }
+        end
+        names.freeze
+      rescue ::RBS::BaseError
+        Set.new.freeze
+      end
+      private :build_core_stdlib_classes
+
+      # True when `class_name` is declared by Ruby core or a stdlib library (see {#core_stdlib_classes}).
+      def core_or_stdlib_class?(class_name)
+        core_stdlib_classes.include?(class_name.to_s.delete_prefix("::"))
+      end
 
       # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
       def project_declared_class?(class_name)

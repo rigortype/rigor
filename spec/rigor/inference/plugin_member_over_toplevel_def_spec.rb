@@ -264,7 +264,8 @@ RSpec.describe "a plugin-supplied member beats a top-level def of the same name 
   #
   # The three arms differ only in WHERE the declaration sits. RBS's definition builder resolves through
   # ancestors, so a superclass sidecar and an included module's come back owned by the ancestor — which is
-  # why the decline mirrors `ExpressionTyper#rbs_declared_before_object?` rather than its own-class sibling.
+  # why the decline mirrors `Inference::ExternalAncestorResolution.declared_before_object?` rather than
+  # its own-class sibling.
   it "keeps a project-declared RBS type at the implicit-self spelling" do
     messages = ar_messages(<<~RUBY, signatures: { "user.rbs" => user_rbs })
       has_many :posts

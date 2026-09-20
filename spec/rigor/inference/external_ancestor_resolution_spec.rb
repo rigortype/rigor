@@ -5,8 +5,8 @@
 # `ExpressionTyper#rbs_ancestor_answers?` asked this question as a boolean for the #633 / ADR-110
 # implicit-self binding veto; the dispatch side of #527 asks the same walk for the definition it found
 # and the class it asked. This file pins the resolver's own contract — the `[definition, owner_name]`
-# shape, the `::Object` cut-off, the dependency-recording flag and the memo — so a later slice changing
-# the dispatch consumer cannot quietly change what the veto reads.
+# shape, the `::Object` cut-off and the dependency-recording flag — so a later slice changing the
+# dispatch consumer cannot quietly change what the veto reads.
 #
 # The veto's own end-to-end behaviour is pinned by `self_class_method_over_toplevel_def_spec.rb` and
 # `plugin_member_over_toplevel_def_spec.rb`, which is what makes this extraction observable-free.
@@ -41,8 +41,6 @@ RSpec.describe Rigor::Inference::ExternalAncestorResolution do
     )
     Rigor::Scope.empty(environment: environment).with_discovery(index)
   end
-
-  before { described_class.reset_memo! }
 
   describe ".resolve" do
     it "reports the definition and the ancestor it was asked of for a source subclass of a core class" do
@@ -115,24 +113,18 @@ RSpec.describe Rigor::Inference::ExternalAncestorResolution do
     end
   end
 
-  describe "the memo" do
-    it "returns the same answer object for a repeated (class, method, kind)" do
-      first = described_class.resolve("MyError", :message, :instance, scope: scope)
-      second = described_class.resolve("MyError", :message, :instance, scope: scope)
+  # No memo here on purpose — see the module's own comment. This pins the property a memo keyed on
+  # fewer tables than the walk reads would break: `Scope#resolve_ancestor_class_name` consults
+  # `discovered_def_nodes` through `known_user_class?`, so declaring `Set` a project class turns it
+  # from an EXTERNAL candidate into a node the walk descends into, and the answer must change. The two
+  # scopes below share `discovered_superclasses` by identity, which is what an identity-keyed memo on
+  # that table alone would have collided on.
+  it "answers per scope, never serving one scope's answer to another" do
+    plain = scope_with(superclasses: { "Sub" => "Set" })
+    expect(described_class.resolve("Sub", :add, :instance, scope: plain)&.last).to eq("Set")
 
-      expect(second).to equal(first)
-    end
-
-    it "keeps a recording caller off the memo, so every file records its own edge" do
-      sources = { "MyError" => ["app/my_error.rb:1"] }
-      recording_scope = scope_with(superclasses: { "MyError" => "StandardError" }, class_sources: sources)
-      described_class.resolve("MyError", :message, :instance, scope: recording_scope)
-
-      record = Rigor::Analysis::DependencyRecorder.record_for("app/reader.rb") do
-        described_class.resolve("MyError", :message, :instance, scope: recording_scope)
-      end
-
-      expect(record.ancestry_sources).to include("app/my_error.rb")
-    end
+    shadowed = plain.with_discovery(plain.discovery.with(discovered_def_nodes: { "Set" => {} }))
+    expect(shadowed.discovered_superclasses).to equal(plain.discovered_superclasses)
+    expect(described_class.resolve("Sub", :add, :instance, scope: shadowed)).to be_nil
   end
 end

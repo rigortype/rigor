@@ -148,7 +148,8 @@ unconditional `untyped` at the implicit-self spelling would displace a `sig/user
 `User#name` — and only at that spelling, leaving `name` and `self.name` typed differently in one
 method body. The implicit-self path therefore declines whenever RBS answers the name with an owner
 that is not `Object` / `Kernel` / `BasicObject`, mirroring
-`ExpressionTyper#rbs_declared_before_object?`. The cut-off is the MRO one and not its own-class
+`Inference::ExternalAncestorResolution.declared_before_object?` (`ExpressionTyper#rbs_declared_before_object?`
+until #527 slice 0 gave the walk one owner). The cut-off is the MRO one and not its own-class
 sibling on purpose: RBS's definition builder resolves through ancestors, so a reader declared on a
 `sig/application_record.rbs` superclass or on an `include`d module comes back owned by THAT ancestor,
 and an own-class test would call it undeclared and displace it one ancestor up — the same defect,

@@ -19,24 +19,22 @@ module Rigor
     # walk but wants the definition and its owner so it can dispatch there. Two copies of an MRO cut-off
     # rule is one copy too many, so the boolean is now `!resolve(...).nil?`.
     #
-    # Two things the consumers do NOT share, and which are therefore parameters:
+    # The one thing the consumers do NOT share is the ADR-46 cross-file edge, and that is
+    # `record_dependencies:`. The implicit-self veto genuinely READ the ancestor's declaration sites to
+    # decide a binding, so its walk records them. A dispatch lookup asking "does some ancestor happen to
+    # declare this?" did not, and filing an edge for it would mislabel the lookup as an ancestry edge —
+    # which is why `RbsDispatch.each_source_ancestor_candidate` read the raw discovery tables instead of
+    # this walk. The suppression is #992's {Analysis::DependencyRecorder.withhold} around the walk, NOT
+    # a flag threaded into `Scope`: an ADR-2 plugin-facing bypass of dependency recording would produce
+    # a silently stale warm cache that no diagnostic diff can show.
     #
-    # * `record_dependencies:` — the ADR-46 cross-file edge. The implicit-self veto genuinely READ the
-    #   ancestor's declaration sites to decide a binding, so its walk records them. A dispatch lookup
-    #   asking "does some ancestor happen to declare this?" must not be filed as an ancestry edge, which
-    #   is exactly what `RbsDispatch.each_source_ancestor_candidate` avoided by reading the raw tables;
-    #   threading the flag keeps that property while sharing the walk.
-    # * the memo — see {resolve}. The dispatch hot path asks the same `(class, method, kind)` question
-    #   for every call site of a class, and the walk is a pure function of the frozen discovery tables
-    #   plus the RBS loader, so the answer is cacheable on their identity.
+    # There is deliberately NO memo here. The dispatch consumer this module is being extracted FOR does
+    # not exist yet, and a memo keyed on the tables this slice happens to name would be keyed on less
+    # than the walk reads — `Scope#resolve_ancestor_class_name` consults `discovered_def_nodes` and
+    # `discovered_methods` through `known_user_class?`, and `ancestor_name_candidates` reads
+    # `discovered_header_nestings`. The slice that brings the hot path brings the memo, keyed on what
+    # that consumer actually reads.
     module ExternalAncestorResolution
-      # Thread-local memo store, keyed by the identity of everything the answer depends on:
-      # `discovered_superclasses` / `discovered_includes` (the walk) and the RBS loader (the oracle).
-      # Modelled on `ExpressionTyper#class_graph_buckets` — the same "a memo that outlives its inputs
-      # serves one scope's answer to another" lesson from #682.
-      MEMO_KEY = :__rigor_external_ancestor_resolution__
-      private_constant :MEMO_KEY
-
       # The owner a name must PRECEDE for its declaration to win an MRO. See {declared_before_object?}.
       OBJECT_OWNER = "Object"
       private_constant :OBJECT_OWNER
@@ -57,23 +55,19 @@ module Rigor
       #
       # `kind` is `:instance` today. The singleton side of the walk (a module's `def self.` reached
       # through a discovered `include`, #527 slice 6) is not implemented, and declines rather than
-      # guessing — which is what the engine answers there now. It is a parameter, and part of the memo
-      # key, so that slice lands without re-keying the cache.
+      # guessing — which is what the engine answers there now.
+      #
+      # `record_dependencies: false` runs the ancestry walk under {Analysis::DependencyRecorder.withhold}
+      # so its reads reach no consumer. Only the WALK is withheld: the `Reflection` lookups around it
+      # read the RBS environment, which files no cross-file edge, so this suppresses exactly the intended
+      # one. `withhold` is a `[yield, nil]` fast path when nothing is recording, which is every ordinary
+      # run.
       def resolve(class_name, method_name, kind = :instance, scope:, environment: nil, name_memo: nil,
                   record_dependencies: true)
         return nil if class_name.nil? || scope.nil?
         return nil unless kind == :instance
 
-        # Recording is a SIDE EFFECT of the walk, and the memo would swallow it for every file after the
-        # first. A normal run never activates the recorder, so the hot path keeps its cache; the
-        # incremental-dependency run pays the walk and keeps its edges.
-        bucket = memo_bucket(scope, environment) unless record_dependencies && Analysis::DependencyRecorder.active?
-        key = [class_name.to_s, method_name.to_sym, kind]
-        return bucket[key] if bucket&.key?(key)
-
-        answer = compute(class_name, method_name, kind, scope, environment, name_memo, record_dependencies)
-        bucket[key] = answer if bucket
-        answer
+        compute(class_name, method_name, kind, scope, environment, name_memo, record_dependencies)
       end
 
       # The RBS method definition for `class_name`, or nil for a class the environment does not know, a
@@ -139,9 +133,7 @@ module Rigor
           return [own, class_name.to_s].freeze
         end
 
-        groups = scope.external_ancestor_name_candidates(
-          class_name, name_memo: name_memo || {}, record_dependencies: record_dependencies
-        )
+        groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies)
         groups.each do |candidates|
           answer = first_known_candidate_answer(candidates, method_name, kind, scope, environment)
           return answer if answer
@@ -166,16 +158,18 @@ module Rigor
       end
       private_class_method :first_known_candidate_answer
 
-      def memo_bucket(scope, environment)
-        loader = rbs_loader_for(scope, environment)
-        return nil if loader.nil?
+      # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
+      # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency
+      # of its answer, not that they should be replayed somewhere else.
+      def ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies)
+        memo = name_memo || {}
+        return scope.external_ancestor_name_candidates(class_name, name_memo: memo) if record_dependencies
 
-        store = (Thread.current[MEMO_KEY] ||= {}.compare_by_identity)
-        by_super = (store[scope.discovered_superclasses] ||= {}.compare_by_identity)
-        by_includes = (by_super[scope.discovered_includes] ||= {}.compare_by_identity)
-        by_includes[loader] ||= {}
+        Analysis::DependencyRecorder.withhold do
+          scope.external_ancestor_name_candidates(class_name, name_memo: memo)
+        end.first
       end
-      private_class_method :memo_bucket
+      private_class_method :ancestor_candidate_groups
 
       def rbs_loader_for(scope, environment)
         (environment || scope&.environment)&.rbs_loader
@@ -183,12 +177,6 @@ module Rigor
         nil
       end
       private_class_method :rbs_loader_for
-
-      # Drops the thread-local memo. For specs that rebuild an RBS environment in place; a normal run
-      # relies on the identity keying instead.
-      def reset_memo!
-        Thread.current[MEMO_KEY] = nil
-      end
     end
   end
 end

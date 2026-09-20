@@ -41,12 +41,28 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
     end
 
     it "is not generics-specific: a String subclass resolves too" do
-      expect(dumps(<<~RUBY)).to eq(%w[String Integer])
+      expect(dumps(<<~RUBY)).to eq(%w[Integer Integer])
         class SubStr < String
           def probe
-            dump_type(upcase)
             dump_type(length)
+            dump_type(bytesize)
           end
+        end
+      RUBY
+    end
+
+    it "keeps a `-> self` / `-> instance` return on the RECEIVER, which is what CRuby does" do
+      expect(dumps(<<~RUBY)).to eq(%w[SubHash SubStr MyError])
+        class SubHash < Hash
+          def probe = dump_type(clear)
+        end
+
+        class SubStr < String
+          def probe = dump_type(force_encoding("UTF-8"))
+        end
+
+        class MyError < StandardError
+          def probe = dump_type(exception("x"))
         end
       RUBY
     end
@@ -144,6 +160,49 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
       RUBY
     end
 
+    # The blocker the first draft shipped: CRuby PRESERVES the subclass where core/stdlib RBS names
+    # the base class, so adopting the declaration answered `Nominal[Hash]` for a value that is a
+    # `SubHash` — and because `Hash` is RBS-known, the negative rules read it as a closed surface and
+    # fired `call.undefined-method` on working code one hop downstream. Verified against the
+    # interpreter: each of these really does return the subclass at runtime.
+    it "declines a declaration that returns the walked ancestor or one of its own RBS ancestors" do
+      types = dumps(<<~RUBY, prelude: %(require "set"\nrequire "pathname"\nrequire "date"\n))
+        class SubHash < Hash
+          def probe = dump_type(merge({}))
+        end
+
+        class SubSet < Set
+          def probe = dump_type(flatten)
+        end
+
+        class SubPath < Pathname
+          def probe = dump_type(basename)
+        end
+
+        class SubDate < Date
+          def probe = dump_type(self + 1)
+        end
+      RUBY
+      expect(types).to eq(["Dynamic[top]"] * 4)
+    end
+
+    it "fires nothing downstream of such a return — the ADR-5 case that forced the decline" do
+      source = <<~RUBY
+        require "pathname"
+
+        class SubHash < Hash
+          def extra = 1
+          def probe = merge({}).extra
+        end
+
+        class SubPath < Pathname
+          def extra = 1
+          def probe = basename.extra
+        end
+      RUBY
+      expect(rules(source)).not_to include("call.undefined-method")
+    end
+
     it "declines a name owned by Object or Kernel, which sit at or after a top-level def's MRO rung" do
       expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
         class SubHash < Hash
@@ -167,6 +226,52 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
           end
         end
       RUBY
+    end
+
+    # Issue #992's surface mark. `ScopeIndexer` records a `Klass.include(M)` written outside the class
+    # body because it can add members the in-body walks never see; `#992`'s arity rule already declines
+    # on it, and so must this.
+    it "declines a class an outside-the-body include or prepend can have widened" do
+      expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+        module Ext
+          def empty? = 42
+        end
+
+        class Extended < Hash; end
+        Extended.include(Ext)
+
+        def probe = dump_type(Extended.new.empty?)
+      RUBY
+    end
+
+    # ADR-17. The patch sits on an INTERMEDIATE source ancestor, which the first draft missed: it
+    # asked only the receiver and the OWNER's RBS ancestors, so `Leaf` adopted `Hash#key?` while the
+    # method that runs is `Middle#key?` from the `pre_eval:` file.
+    it "declines when a pre_eval patch redefines the name on a source ancestor between the two" do
+      result = analyze(
+        files: {
+          "app.rb" => <<~RUBY,
+            require "rigor/testing"
+            include Rigor::Testing
+
+            class Middle < Hash; end
+
+            class Leaf < Middle
+              def probe = dump_type(key?(:a))
+            end
+          RUBY
+          "patch.rb" => <<~RUBY
+            class Middle
+              def key?(other) = 42
+            end
+          RUBY
+        },
+        config: { "paths" => %w[app.rb], "pre_eval" => %w[patch.rb] }
+      )
+      types = result.diagnostics.filter_map do |d|
+        d.message.delete_prefix("dump_type: ") if d.message.start_with?("dump_type")
+      end
+      expect(types).to eq(["Dynamic[top]"])
     end
 
     it "leaves the constructor and the receiver carrier alone" do

@@ -3,8 +3,10 @@
 Status: **Accepted — slice 1 landed, 2026-09-20.** A Ruby-source class whose discovered SUPERCLASS
 chain reaches a class declared by Ruby core or a stdlib library now resolves its inherited instance
 calls against that ancestor's RBS. `class SubHash < Hash` answers `has_key?` with `bool`,
-`class MyError < StandardError` answers `message` with `String`,
-`Kramdown::Utils::StringScanner < ::StringScanner` answers `scan` with `String?`. The include /
+`class MyError < StandardError` answers `message` with `String`, `class S < ::StringScanner` answers
+`scan` with `String?`. (NOT `Kramdown::Utils::StringScanner`, which the 2026-09-01 sweep named: that
+class is RBS-known through kramdown's own partial `sig/`, so WD4's first decline applies to it — see
+Limitations.) The include /
 prepend side (issue #527 slice 2), any-RBS-known ancestor (slice 3), `super` (slice 5) and the
 singleton side (slice 6) are out of scope here and land, or do not, on their own measurements. This
 ADR partially supersedes [ADR-43](43-rbs-complete-ancestor-resolution.md)'s rejected alternative A —
@@ -31,11 +33,11 @@ call sites in the low thousands. The subclass is a Ruby class the analysis can s
 ancestor is `Hash`. Nothing about that pair is a partial gem RBS.
 
 **What the intervening two years changed, and it is load-bearing.** ADR-43's wall is not reachable
-through dispatch at HEAD. `undefined_method_diagnostic` declines at
-[`check_rules.rb:730`](../../lib/rigor/analysis/check_rules.rb) on `Reflection.rbs_class_known?`, and
-`arity_envelope_for` takes the source-only lane for the same reason — both keyed on the **receiver**,
-which for a Ruby-source subclass is never RBS-known. That gate predates ADR-43 (`7b780f5c8`). So the
-FP this ADR must argue about is not the one ADR-43 argued about.
+through dispatch at HEAD. `CheckRules#undefined_method_diagnostic` declines on
+`Reflection.rbs_class_known?`, and `arity_envelope_for` takes the source-only lane for the same
+reason — both keyed on the **receiver**, which for a Ruby-source subclass is never RBS-known. That
+gate predates ADR-43 (`7b780f5c8`). So the FP this ADR must argue about is not the one ADR-43 argued
+about — it is the one the next section names, and the one that a first draft of this slice shipped.
 
 ## Decision
 
@@ -80,10 +82,12 @@ deliberately does not open.
 
 | Decline | Protects against |
 | --- | --- |
-| `class_name` is itself RBS-known | the direct lookup already had authority |
+| `class_name` is itself RBS-known | the direct lookup already had authority — and a PARTIAL project sidecar that declares the class without its superclass, which is kramdown's case |
 | an ADR-26 plugin-declared open receiver | a surface larger than its declarations |
 | the walked ancestor, or the class the declaration is written on, is not core / stdlib | `< ActionController::Base` (no RBS at all) and `< Prism::Visitor` (a gem that ships RBS) — slice 3's question |
-| an ADR-17 `pre_eval:` patch declares the name on the receiver or on any ancestor of the owner | adopting a declaration for a method the project has replaced |
+| **the declaration RETURNS the walked owner or one of the owner's own RBS ancestors** | see WD7 — this is the decline the first draft lacked, and the one that fired `call.undefined-method` on working code |
+| an issue #992 `ENVELOPE_DYNAMIC_MARK` on the receiver or a source ancestor | a `Klass.include(M)` / `class_eval` written OUTSIDE the class body, which can add members the in-body walks never see |
+| an ADR-17 `pre_eval:` patch declares the name on the receiver, on a SOURCE ancestor between it and the owner, or on any RBS ancestor of the owner | adopting a declaration for a method the project has replaced |
 | the subclass or a nearer SOURCE ancestor declares the name ([ADR-110](110-inherited-declaration-precedence.md)) | answering about a method that never runs |
 | the walk exceeds `Scope::ANCESTOR_WALK_LIMIT` | an unbounded or cyclic hierarchy; recorded as a `BudgetTrace` hit, and the ADR-110 probes suppress rather than answer "not declared" from an unfinished walk |
 
@@ -98,6 +102,29 @@ and acquire one job: an allow-listed ancestor BYPASSES the declines above. That 
 for — `Rigor::Plugin::Base` is neither core nor stdlib, and the point of naming it was that its RBS
 is authoritative anyway. Deleting it would have dropped the plugin contract's teeth; leaving it as a
 parallel mechanism would have left two answers to one question.
+
+**WD7 — a declaration that returns the walked ancestry is not adopted, and the answer is DECLINE
+rather than `-> self`.** CRuby preserves the SUBCLASS where core / stdlib RBS names the base class:
+`SubHash#merge` returns a `SubHash`, `SubSet#flatten` a `SubSet`, `SubPathname#basename` a
+`SubPathname`, `SubDate#+` a `SubDate`, and the same holds for `Time#utc / localtime / gmtime`,
+`Date#- >> << next_day succ` and `Pathname#dirname expand_path sub cleanpath`. Adopting the
+declaration answers `Nominal[Hash]`, and because `Hash` IS RBS-known the negative rules read that as
+a CLOSED surface — so `sub.merge({}).own_method` drew an `error`-severity `call.undefined-method` on
+working code. That is precisely the wrong-precise propagation the boundary section below names, and a
+first draft of this slice shipped it.
+
+RBS cannot distinguish the two families: `String#upcase: () -> String` really does return a plain
+`String` for a subclass (Ruby 3.0 changed that) while `Hash#merge: () -> Hash[K, V]` really does
+return the subclass, and the two declarations are the same shape. The alternative — substituting the
+receiver, as if the declaration read `-> self` — would be right for `merge` and wrong for `upcase`,
+and its wrongness is not purely a false negative: a `Nominal[SubStr]` that is really a `String`
+narrows an `is_a?` guard and can reach `clause.unreachable` on a branch the runtime takes. DECLINE is
+master's `Dynamic[top]`, so it provably cannot regress a corpus target, and that is the ADR-5 answer.
+
+The cost is real and is stated rather than hidden: `SubStr#upcase` no longer resolves. `-> self` and
+`-> instance` returns are untouched and keep their precision, because those already substitute the
+receiver: `SubHash#clear` → `SubHash`, `SubStr#force_encoding` → `SubStr`, `MyError#exception` →
+`MyError`, all of which match CRuby.
 
 **WD6 — core / stdlib membership is read off the declaration, not a list.**
 `RbsLoader#core_or_stdlib_class?` tests a class's primary declaration's file against the `rbs` gem's
@@ -131,7 +158,21 @@ receiver alone.
   correction belongs.
 - **Corpus evidence does not discriminate what it cannot reach.** A `check` sweep over targets that
   ship no `sig/` measures the gem-RBS declines vacuously. The gem-shipping-RBS decline
-  (`< Prism::Visitor`) and the `pre_eval:` decline are pinned by fixture, not by corpus.
+  (`< Prism::Visitor`), the `pre_eval:` decline and the outside-the-body-`include` decline are pinned
+  by fixture, not by corpus. **The 14-target corpus gate did not catch WD7's false positive either**:
+  no target happened to contain a `sub.<base-returning method>.<sub-only method>` chain. A green
+  corpus gate is evidence that nothing regressed on those targets, not that the rule is sound.
+- **kramdown, the sweep's second-largest named population, is NOT fixed by this slice.**
+  `Kramdown::Utils::StringScanner` is declared by kramdown's own
+  `sig/kramdown/utils/string_scanner.rbs`, which omits the `< ::StringScanner` superclass, so the
+  class is RBS-known and WD4's first decline applies. The 26 opaque sites are real; their cause is a
+  partial project sidecar, which is #653's "writing more RBS made the run worse" shape, and reading a
+  source superclass that the project's own sig omits is a separate decision.
+- **A source reopen of a core class switches the feature off for its subclasses.** A project file
+  containing `class Hash; def whatever; end; end` puts `Hash` in `discovered_methods`, and the
+  ADR-110 probe then declines for every `Hash` subclass and every name. That is false-negative-safe
+  and deliberate — the project's source outranks the RBS it did not write — but it means the feature
+  is silently absent in a project that monkey-patches a core class anywhere.
 - **The cached-environment sentinel switches the feature off, not on.** Buffer names survive the
   ADR-54 environment cache (#725), but an old blob's `<cached>` sentinel lands every class outside
   the core / stdlib set. The failure direction is a silent return to `Dynamic[top]`, never a wider
@@ -143,6 +184,9 @@ receiver alone.
 - **(rejected) A new dispatch tier ahead of `RbsDispatch`.** Would have had to re-derive `self`
   binding, the `instance` projection, the type-variable map and `SelfSubstitute`, all of which
   `dispatch_one` already keys on the receiver's class name. A lookup change gets them for free.
+- **(rejected) Treating an owner-returning declaration as `-> self`.** See WD7. More precision, but
+  it claims a subtype the runtime does not always produce, and a wrong subtype reaches narrowing and
+  reachability, not only method lookup. Revisit only with a way to tell the two families apart.
 - **(rejected) Widening `ALLOWED_RBS_COMPLETE_ANCESTORS` with core class names.** Membership there
   means "this RBS is complete, so a call it omits is a mistake" — a claim about the negative rules.
   Core RBS is not complete in that sense (`Hash` answers to whatever a program defines on it), and

@@ -133,7 +133,6 @@ module Rigor
         []
       end
 
-      # rubocop:disable-next Metrics/ParameterLists
       def compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
         kind = :instance
         own = method_definition(class_name, method_name, kind, scope: scope, environment: environment)

@@ -550,10 +550,87 @@ module Rigor
             )
             return nil if definition.nil?
             return nil unless core_or_stdlib_owned?(environment, owner, definition)
-            return nil if project_patched_through_ancestors?(environment, class_name, owner, method_name)
+            return nil if returns_the_walked_ancestry?(definition, owner, environment)
+            return nil if dynamic_surface_through_ancestors?(scope, class_name)
+            return nil if project_patched_through_ancestors?(environment, scope, class_name, owner, method_name)
             return nil if source_declares_through_ancestors?(scope, class_name, method_name)
 
             definition
+          end
+
+          # The blocker this slice was first written without. CRuby PRESERVES THE SUBCLASS where core /
+          # stdlib RBS names the base class: `SubHash#merge` returns a `SubHash`, `SubSet#flatten` a
+          # `SubSet`, `SubPathname#basename` a `SubPathname`, `SubDate#+` a `SubDate` — verified against
+          # the interpreter. Adopting the declaration answers `Nominal[Hash]`, and because `Hash` IS
+          # RBS-known the negative rules then read it as a CLOSED surface: `sub.merge({}).own_method`
+          # drew an `error`-severity `call.undefined-method` on working code. That is ADR-5's failure
+          # exactly, one hop downstream — the propagation this slice's own boundary section names.
+          #
+          # RBS cannot distinguish the two families. `String#upcase: () -> String` really does return a
+          # plain `String` for a `String` subclass (Ruby 3.0 changed that), while `Hash#merge: () ->
+          # Hash[K, V]` really does return the subclass, and the two declarations are the same shape.
+          # So the answer is DECLINE, which is master's `Dynamic[top]` and therefore provably cannot
+          # regress a corpus target — rather than substituting the receiver as if the declaration read
+          # `-> self`. That substitution would be right for `merge` and wrong for `upcase`, and its
+          # wrongness is not purely a false negative: a `Nominal[SubStr]` that is really a `String`
+          # narrows `is_a?` guards and can reach `clause.unreachable` on a branch the runtime takes.
+          #
+          # `-> self` and `-> instance` returns are NOT affected and keep their precision: those already
+          # resolve against the receiver (`SubHash#clear` → `SubHash`, `SubStr#force_encoding` →
+          # `SubStr`, `MyError#exception` → `MyError`), which is what CRuby does.
+          #
+          # Unwrapping is deliberately shallow — the top-level type plus union members and the inside of
+          # an optional. A class named only inside a type ARGUMENT (`-> Array[Hash[K, V]]`) describes the
+          # elements, not the returned object, and declining on it would be over-broad. An `Alias` that
+          # expands to the owner is not followed; that is a known gap in the FN direction.
+          def returns_the_walked_ancestry?(definition, owner, environment)
+            names = [owner.to_s.delete_prefix("::"), *rbs_instance_ancestor_names(owner, environment)].to_set
+            method_types = definition.respond_to?(:method_types) ? definition.method_types : nil
+            return false if method_types.nil?
+
+            method_types.any? do |method_type|
+              return_type = method_type.type.respond_to?(:return_type) ? method_type.type.return_type : nil
+              returned_class_names(return_type).any? { |name| names.include?(name) }
+            end
+          rescue StandardError
+            # A signature whose return type cannot be read is a gap, and a gap declines.
+            true
+          end
+
+          # The class names an RBS return type can denote for the OBJECT that comes back, unwrapping a
+          # union and an optional and nothing else. See {returns_the_walked_ancestry?}.
+          def returned_class_names(type, depth = 0)
+            return [] if type.nil? || depth > RETURN_TYPE_UNWRAP_DEPTH
+
+            case type
+            when ::RBS::Types::ClassInstance then [type.name.to_s.delete_prefix("::")]
+            when ::RBS::Types::Optional then returned_class_names(type.type, depth + 1)
+            when ::RBS::Types::Union then type.types.flat_map { |member| returned_class_names(member, depth + 1) }
+            else []
+            end
+          end
+
+          # A union of optionals of unions is not a thing anyone writes; the cap is a loop guard.
+          RETURN_TYPE_UNWRAP_DEPTH = 4
+          private_constant :RETURN_TYPE_UNWRAP_DEPTH
+
+          # Issue #992's surface mark: a `Klass.include(M)` / `.prepend(M)` / `class_eval` written
+          # OUTSIDE the class body, which `ScopeIndexer` records as `ENVELOPE_DYNAMIC_MARK` because it
+          # can add members the in-body walks never see. `class Extended < Hash; end` followed by
+          # `Extended.include(Ext)` where `Ext#empty?` returns `42` must not adopt `Hash#empty?`. Asked
+          # of the receiver and of every SOURCE ancestor between it and the owner, because a mark on an
+          # intermediate reaches the receiver just as well.
+          def dynamic_surface_through_ancestors?(scope, class_name)
+            return true if dynamic_surface?(scope, class_name)
+
+            each_source_ancestor_candidate(scope, class_name) do |candidate|
+              return true if dynamic_surface?(scope, candidate)
+            end
+            false
+          end
+
+          def dynamic_surface?(scope, class_name)
+            scope.parameter_envelopes_of(class_name).key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
           end
 
           # ADR-110's precedence, asked of both tables the project's own members land in. Either one
@@ -580,13 +657,17 @@ module Rigor
             loader.core_or_stdlib_class?(declared_on.to_s)
           end
 
-          # ADR-17 — a `pre_eval:` file that reopens the receiver or any ancestor of the owner and
-          # redefines the name. The declaration this arm would adopt is then not the method that runs.
-          def project_patched_through_ancestors?(environment, class_name, owner, method_name)
+          # ADR-17 — a `pre_eval:` file that reopens the receiver, any SOURCE ancestor between it and the
+          # owner, or any RBS ancestor of the owner, and redefines the name. The declaration this arm
+          # would adopt is then not the method that runs. The source chain is the half the first draft
+          # missed: `class Middle < Hash; end; class Leaf < Middle; end` with a `pre_eval:`
+          # `class Middle; def key?(k) = 42; end` answered `bool` for a call that returns `42`.
+          def project_patched_through_ancestors?(environment, scope, class_name, owner, method_name)
             patched = environment.project_patched_methods
             return false if patched.nil? || patched.empty?
 
             owners = [class_name.to_s.delete_prefix("::"), *rbs_instance_ancestor_names(owner, environment)]
+            each_source_ancestor_candidate(scope, class_name) { |candidate| owners << candidate }
             owners.any? do |name|
               !patched.lookup(class_name: name, method_name: method_name, kind: :instance).nil?
             end

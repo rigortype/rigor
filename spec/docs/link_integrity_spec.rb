@@ -115,10 +115,24 @@ RSpec.describe "documentation link integrity" do
   # its own; this is the same pin for the larger corpus here.
   #
   # A floor rather than an exact count, because this corpus DOES grow: every new document with a relative
-  # link adds one. It is set close to the current 248 on purpose — a loose floor here would only detect
-  # losing `docs/adr/` (111 of the 248), and no other subtree is large enough to trip one.
+  # link adds one. Set close to the current 248 on purpose. 230 was still too loose: `docs/design/` (17)
+  # and `docs/type-specification/` (18, the BINDING spec) each fit inside the slack, so either could be
+  # excluded and land exactly on the boundary, green.
   it "generates a link-checking example for a plausible number of docs, so the above is not vacuous" do
-    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 230
+    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 240
+  end
+
+  # Counting documents is not enough: the link extractor is a single point of failure that the document
+  # count cannot see through. Relaxing the fenced-code stripper to `/```.*```/m` — a plausible
+  # simplification — takes the links actually checked from 2899 to 2439 while only 7 documents drop out,
+  # so 16% of the corpus silently stops being verified and every floor above still passes.
+  it "extracts a plausible number of links, so a weakened extractor cannot quietly shrink the corpus" do
+    helper = Object.new.extend(LinkIntegrityHelpers)
+    total = LINK_INTEGRITY_LINKED_DOCS.sum do |md_path|
+      helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).size
+    end
+
+    expect(total).to be >= 2800
   end
 
   # The glob cannot silently miss a new document, but the EXCLUDE can silently drop a whole subtree, and

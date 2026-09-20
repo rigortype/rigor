@@ -57,6 +57,12 @@ module HandbookSnippets
         body = []
       end
     end
+    # A fence left unclosed at end of file is NOT dropped. Dropping it is the silent direction — the
+    # block is then neither run nor audited, which is the whole defect this file exists for. Kept, so
+    # it reaches the audit below, or the parse check in the example, or the count pin. One of the
+    # three is always loud.
+    found << [info, body.join] if info
+
     found
   end
 
@@ -74,8 +80,18 @@ module HandbookSnippets
     end
   end
 
+  # Line-wise and comment-aware. A substring test over the whole block kept counting a snippet whose
+  # assertions had all been commented out — the block stays, the count stays 20, and nothing is
+  # verified. That is not hypothetical: `6a5225a1` took the corpus from 24 to 20 by DELETING
+  # `assert_type` lines so that failing snippets would pass, and commenting them out instead would
+  # have moved nothing.
   def executable?(block)
-    block.include?("assert_type(") || block.include?("dump_type(")
+    block.each_line.any? do |line|
+      stripped = line.sub(/\A\s+/, "")
+      next false if stripped.start_with?("#")
+
+      stripped.include?("assert_type(") || stripped.include?("dump_type(")
+    end
   end
 
   # Executable blocks the scan above will not run, stated as an allow-list rather than a list of known
@@ -108,8 +124,19 @@ RSpec.describe "handbook executable snippets", :aggregate_failures do
   HANDBOOK_SNIPPETS_BY_FILE.each do |path, snippets|
     context File.basename(path) do
       snippets.each do |snip|
-        it "snippet #{snip[:index]} — no assert.type-mismatch" do
+        it "snippet #{snip[:index]} — parses, and no assert.type-mismatch" do
           result = analyze(snip[:source])
+
+          # Checked FIRST, and separately. A snippet that does not parse never evaluates its own
+          # `assert_type`, so the mismatch filter below finds nothing and the example passes having
+          # verified nothing — a wrong assertion hidden behind a stray `def (` was green. A parse
+          # failure surfaces as a diagnostic with no rule.
+          unparsed = result.diagnostics.select { |d| d.rule.nil? }
+          expect(unparsed).to be_empty,
+                              "#{snip[:file]} snippet #{snip[:index]} does not parse, so its " \
+                              "assertions were never evaluated:\n" +
+                              unparsed.map { |d| "  line #{d.line}: #{d.message}" }.join("\n")
+
           mismatches = result.diagnostics.select { |d| d.rule == "assert.type-mismatch" }
           expect(mismatches).to be_empty,
                                 "#{snip[:file]} snippet #{snip[:index]}:\n" +

@@ -63,9 +63,19 @@ module RigorWorktreeReferenceClone
     dir
   end
 
+  # The developer's own git config must not reach the fixture: a global
+  # `commit.gpgsign` or `core.hooksPath` would otherwise fail `build_source` and
+  # turn this into a red suite on their machine while the script under test is
+  # fine. `Bundler.with_unbundled_env` covers Bundler's variables, not git's.
+  HERMETIC_GIT_ENV = {
+    "GIT_CONFIG_GLOBAL" => File::NULL,
+    "GIT_CONFIG_SYSTEM" => File::NULL,
+    "GIT_CONFIG_NOSYSTEM" => "1"
+  }.freeze
+
   def git(dir, *args)
     Bundler.with_unbundled_env do
-      system("git", "-C", dir, *args, out: File::NULL, err: File::NULL) ||
+      system(HERMETIC_GIT_ENV, "git", "-C", dir, *args, out: File::NULL, err: File::NULL) ||
         raise("git #{args.join(' ')} failed in #{dir}")
     end
   end

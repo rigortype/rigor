@@ -71,19 +71,25 @@ wt_root=${RIGOR_WT_ROOT:-$(dirname "$main")/rigor-wt}
 wt=$wt_root/$slug
 if [ -e "$wt" ]; then die "$wt already exists"; fi
 
-# Pick a copy-on-write cp. macOS `cp -Rc` uses clonefile(2) and silently falls
-# back to copyfile(2) across filesystems; GNU cp gets --reflink=auto (CoW on
-# btrfs/xfs, plain copy elsewhere); anything else does a plain recursive copy.
+# Pick a copy-on-write cp. GNU cp gets --reflink=auto (CoW on btrfs/xfs, and on
+# APFS since coreutils 9.x; a plain copy elsewhere); BSD/macOS `cp -Rc` uses
+# clonefile(2) and silently falls back to copyfile(2) across filesystems;
+# anything else does a plain recursive copy.
+#
+# Probe `cp` itself rather than `uname`: the Nix Flake this repo mandates for
+# development puts GNU coreutils ahead of /bin on PATH, so on macOS INSIDE the
+# Flake `cp` is GNU and `cp -Rc` fails with `invalid option -- 'c'` — which,
+# under `set -e`, aborted the script after `git worktree add` had already
+# registered the worktree.
 cow_cp() {
   local src=$1 dst=$2
-  case "$(uname)" in
-    Darwin) cp -Rc "$src" "$dst" ;;
-    *) if cp --version 2>/dev/null | grep -q coreutils; then
-         cp -a --reflink=auto "$src" "$dst"
-       else
-         cp -R "$src" "$dst"
-       fi ;;
-  esac
+  if cp --version 2>/dev/null | grep -q coreutils; then
+    cp -a --reflink=auto "$src" "$dst"
+  elif [ "$(uname)" = Darwin ]; then
+    cp -Rc "$src" "$dst"
+  else
+    cp -R "$src" "$dst"
+  fi
 }
 
 # `cp -R SRC DST` with DST an EXISTING directory copies INTO it, so any copy
@@ -95,8 +101,11 @@ rm_wt_path() { # rm_wt_path ABS
     "$wt"/?*) ;;
     *) die "internal error: refusing to remove '$target' (outside $wt)" ;;
   esac
+  # `..` as a COMPONENT, not as a substring: `$wt` is normalized below, but a
+  # substring test would also reject an ordinary entry named `..foo`, and would
+  # NOT have been what made a `RIGOR_WT_ROOT` containing `..` safe.
   case "$target" in
-    *..*) die "internal error: refusing to remove '$target' (contains '..')" ;;
+    ../*|*/../*|*/..) die "internal error: refusing to remove '$target' (traverses '..')" ;;
   esac
   rm -rf "$target"
 }
@@ -155,6 +164,11 @@ else
   echo "==> git worktree add $wt -b $branch $start"
   git -C "$main" worktree add "$wt" -b "$branch" "$start"
 fi
+
+# `RIGOR_WT_ROOT` (and `$main`) may contain `..`; resolve the worktree to a
+# physical path now that it exists, so every destination the removal guard sees
+# is traversal-free.
+wt=$(cd "$wt" && pwd -P)
 
 echo "==> cloning the gem bundle (copy-on-write)"
 clone_into_wt vendor/bundle

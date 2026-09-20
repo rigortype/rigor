@@ -112,6 +112,14 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `Type::AnonymousClassName.match?`'s `class_name.is_a?(String) && class_name.start_with?(PREFIX)` over an
 # untyped parameter calls `start_with?` on `String` rather than on `untyped`; sig-gen proves `bool`, the
 # declared return, and the row leaves `unrenderable` for generated-equivalent (`type.rbs` -1).
+#
+# 662 since #1101. A composite receiver is now dispatched per projected member, so a union with a
+# `Dynamic[top]` member reaches the receiver-independent `UniversalObjectDispatch` table it could not
+# reach as a union: `Literals#symbol_named?`'s `node.is_a?(Prism::SymbolNode)` over a `Dynamic[top]?`
+# parameter, and `Scope#published_constant?`'s `!locally_declared_constant?(name)` over a
+# `false | true | Dynamic[top]` return, both fold `bool` instead of `untyped`. Each method's inferred
+# return reaches the `bool` its declaration states, so both rows leave `unrenderable` for parameter
+# intent (`scope.rbs` -1, `source.rbs` -1).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -146,9 +154,9 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 110,
+  "sig/rigor/scope.rbs" => 109,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
-  "sig/rigor/source.rbs" => 9,
+  "sig/rigor/source.rbs" => 8,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
   "sig/rigor/type.rbs" => 211

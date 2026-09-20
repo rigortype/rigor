@@ -254,7 +254,13 @@ module Rigor
         if fallback_result.is_a?(Type::Dynamic)
           scope&.record_dynamic_origin(call_node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
         end
-        fallback_result
+        return fallback_result if fallback_result
+
+        # Issue #1101 — composite-receiver projection, the last tier. Every tier above needs a
+        # receiver it can name; a `Union` or a `Difference` is not one, so a composite receiver whose
+        # members WOULD each resolve still lands `Dynamic[top]`. Retry per projected member through
+        # this same chain. See {#try_composite_receiver} for the projection rule and why it sits here.
+        try_composite_receiver(context)
       end
 
       # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a
@@ -938,6 +944,115 @@ module Rigor
 
           environment.singleton_for_name("Class")
         end
+      end
+
+      # Issue #1101 — the composite-receiver projection tier, the LAST thing `resolve` tries.
+      #
+      # Every tier above needs a receiver it can *name*: `receiver_descriptor`, the discovered-method
+      # lookup, the dependency-source and synthesized-stub tiers and the user-class fallback all switch
+      # on `Nominal` / `Singleton` / a member carrier. A `Union` or a `Difference` is none of those, so a
+      # composite receiver whose members would each resolve perfectly well still fell through the whole
+      # chain and landed `Dynamic[top]`.
+      #
+      # `RbsDispatch` already distributes over a `Union` (and erases a `Difference` to its base, #533),
+      # but it does so INSIDE one tier, so a member that needs a LOWER tier — a user class with no RBS,
+      # a discovered `def`, an opt-in gem — makes the whole union decline. That is the corpus shape:
+      # rigor-actionpack types `params[:k]` as `ActionController::Parameters | nil`, the `Parameters` arm
+      # resolves only through the user-class fallback, and so `params[:k].present?` / `#==` / `#blank?` /
+      # `#to_s` read opaque on every Rails app. Measured by toggling this file alone: the named-pair
+      # census drains 137 sites on redmine and 56 on mastodon, and `rigor check` reports the same
+      # diagnostics on both arms across eight survey targets.
+      #
+      # **Why the bottom and not next to `RbsDispatch`.** Sitting here, the tier can only ever replace a
+      # `Dynamic[top]` the typer was about to produce — the same ADR-5 argument {UniversalObjectDispatch}
+      # makes. Hoisting the projection above `RbsDispatch` would change answers that resolve today, which
+      # is a different change with a different measurement.
+      #
+      # **The projection rule** (`receiver_projection` below; the normative statement lives in
+      # [`inference-engine.md`](docs/internal-spec/inference-engine.md) § "Composite receivers"):
+      #
+      # - `Union[A, B, …]` projects to its members. Each is dispatched through this same chain and the
+      #   results are unioned; if ANY member declines, the whole tier declines. Never a partial answer —
+      #   a union whose members disagree about whether the method exists is exactly the case where an
+      #   answer would be a guess.
+      # - `Difference[base, nil]` projects to `base` with its nil-valued members removed. Removing `nil`
+      #   from a receiver cannot change method resolution at all: `NilClass` is nobody's ancestor, so
+      #   every remaining inhabitant looks a method up exactly as a plain `base` inhabitant does, and the
+      #   carrier is value-set-equal to the projection. This is `T.must(x)` (rigor-sorbet's
+      #   `strip_nil`), which builds `Difference[inferred(x), Constant[nil]]` — over a `T?` local that
+      #   base IS a union, which is why the two arms compose rather than being separate features.
+      # - Any other `Difference` DECLINES. `A − B` for a real `B` is a claim about which inhabitants
+      #   survive, and the projection has nowhere to put it: dispatching on `A` re-admits exactly the
+      #   overrides `B` contributed, and over a union base (`(String | Integer) − Integer` is Strings
+      #   only) it re-admits a member the difference eliminated and unions in its answer — a WIDER type
+      #   than today's decline, on a shape no corpus target produces. Subtracting a class from a union
+      #   needs an algebra the `Difference` carrier does not have (it removes a value set, not a member),
+      #   so the honest answer is to keep declining until something demands it. `RbsDispatch`'s #533
+      #   erasure is untouched and still answers these for an RBS-known base.
+      #
+      # `self` binds to the PROJECTED receiver, not to the composite: the projection is the exact set of
+      # inhabitants that can reach the method, so a `-> self` method (`dup`, `itself`, `tap`) answers per
+      # member and the union reassembles them — `(String | Symbol)#itself` is `String | Symbol`. Nothing is
+      # lost on the `Difference` arm because the projection is value-set-equal to the carrier there. This
+      # falls out of re-entering `resolve` rather than needing a `self_type_override`.
+      def try_composite_receiver(context)
+        members = receiver_projection(context.receiver)
+        return nil if members.nil? || members.size > COMPOSITE_PROJECTION_MEMBERS
+
+        results = members.map do |member|
+          resolve(
+            receiver_type: member, method_name: context.method_name, arg_types: context.args,
+            block_type: context.block_type, environment: context.environment,
+            call_node: context.call_node, scope: context.scope
+          )
+        end
+        return nil if results.any?(&:nil?)
+
+        Type::Combinator.union(*results)
+      end
+
+      # An upper bound on the fan-out, because this tier re-runs the FULL dispatch chain per member.
+      # Real unions are two or three members wide; a receiver wider than this is a join the engine has
+      # already lost precision on, and paying N chain walks to union N answers is not worth it.
+      COMPOSITE_PROJECTION_MEMBERS = 8
+      private_constant :COMPOSITE_PROJECTION_MEMBERS
+
+      # The receivers each member of a composite carrier is dispatched as, or nil when the carrier is not
+      # projectable. Every member returned MUST itself be non-composite: that is what bounds the re-entry
+      # into `resolve` at one level, by construction rather than by a counter — the nested call reaches
+      # this tier with a receiver it declines immediately. A normalized `Union` never holds a `Union`, so
+      # the only shape the guard turns away is a `Difference` over a `Difference` (`T.must(T.must(x))`),
+      # which nothing in the corpus produces and which declines exactly as it did before.
+      def receiver_projection(receiver)
+        members =
+          case receiver
+          when Type::Union then receiver.members
+          when Type::Difference then difference_projection(receiver)
+          end
+        return nil if members.nil? || members.empty?
+        return nil if members.any? { |member| member.is_a?(Type::Union) || member.is_a?(Type::Difference) }
+
+        members
+      end
+
+      # `Difference[base, nil]` projects to `base` minus its nil-valued members; every other difference
+      # declines. Returns nil (decline) when the removal empties the base — a `Difference[nil, nil]` has
+      # no inhabitant to dispatch on, and answering `bot` here would be a fold, not a dispatch.
+      def difference_projection(difference)
+        return nil unless nil_valued_type?(difference.removed)
+
+        base = difference.base
+        retained = base.is_a?(Type::Union) ? base.members.reject { |m| nil_valued_type?(m) } : [base]
+        return nil if retained.empty?
+
+        retained
+      end
+
+      # `nil` as either carrier spells it: the value-pinned `Constant[nil]` the engine normally produces,
+      # and the `Nominal[NilClass]` a widened or RBS-sourced position carries.
+      def nil_valued_type?(type)
+        (type.is_a?(Type::Constant) && type.value.nil?) ||
+          (type.is_a?(Type::Nominal) && type.class_name == "NilClass")
       end
 
       # Slice 7 phase 8 — meta-introspection shortcuts. The default `Object#class` RBS return

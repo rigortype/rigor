@@ -165,6 +165,10 @@ module Rigor
           next if current.nil? || seen[current]
 
           seen[current] = true
+          # The class's own singleton defs sit ahead of EVERY `extend` in its singleton ancestry —
+          # `class F; extend T::Sig; def self.sig(&b); end; end` calls F's method, not T::Sig's.
+          return current == constraint if scope.discovered_method?(current, method_name, :singleton)
+
           owner = extended_module_call_owner(current, extends, method_name, scope, environment)
           return owner == constraint || rbs_inherits?(owner, constraint, environment) if owner
 

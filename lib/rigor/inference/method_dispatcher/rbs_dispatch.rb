@@ -749,12 +749,14 @@ module Rigor
           # `extend M` lifts M's INSTANCE surface onto the extending class object's singleton, so a
           # singleton call on a Ruby-source class can resolve through a module the class — or one of
           # its discovered superclasses — extends. Returns the first resolved candidate name that a
-          # loaded plugin allow-lists, or nil. Same guards as the superclass bridge: no scope means no
-          # walk, an RBS-known receiver already answered through the direct lookup, and a nearer
-          # source `def self.x` shadows any bridged module method.
+          # loaded plugin allow-lists, or nil. Same guards as the superclass bridge, minus the
+          # RBS-known receiver exit: the direct lookup has already missed by the time this runs, and
+          # a class that is BOTH source-defined and RBS-known (`class F` in `sig/` plus `extend T::Sig`
+          # in the body) still carries the source edge — the runtime ancestry contains the module
+          # either way, so withholding the bridge would leave a real `sig` opaque. A nearer source
+          # `def self.x` still shadows any bridged module method.
           def allowed_rbs_complete_extended_module(environment, class_name, method_name, scope)
             return nil if scope.nil?
-            return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
             registry = environment&.plugin_registry
             return nil if registry.nil?

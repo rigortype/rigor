@@ -64,12 +64,15 @@ rules (consistent with the rest of the plugin-contract carriers):
   nearest-first), then up the discovered superclass chain, including
   RBS-declared `extend`s surfaced by
   `Environment#singleton_extended_modules` — resolves to the
-  constraint and actually defines `method_name`. That is how `class F;
-  extend T::Sig; sig { ... }; end` and `class Doc < T::ImmutableStruct;
-  sig { ... }; end` both reach the `sig` entry (#1097) — while a nearer
-  `extend` whose module defines the same name (`extend T::Sig; extend
-  CustomSig`) owns the call and the binding declines, since that custom
-  method picks the block's self at runtime.
+  constraint and actually defines `method_name`. The class's own
+  singleton defs precede every `extend` edge — `def self.sig` on the
+  class itself answers before `T::Sig` ever could. That is how `class
+  F; extend T::Sig; sig { ... }; end` and `class Doc <
+  T::ImmutableStruct; sig { ... }; end` both reach the `sig` entry
+  (#1097) — while a nearer `extend` whose module defines the same name
+  (`extend T::Sig; extend CustomSig`), or the class's own
+  `def self.sig`, owns the call and the binding declines, since that
+  custom method picks the block's self at runtime.
 
 ## Tier A — `BlockAsMethod` (`block_as_methods:`)
 

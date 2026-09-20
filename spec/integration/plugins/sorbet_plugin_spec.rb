@@ -576,6 +576,47 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(offenders.map(&:message)).to include(a_string_matching(/upcase.*for nil/))
     end
 
+    it "does not bind DeclBuilder when the class overrides `sig` with `def self.sig`" do
+      # A class's own singleton method precedes every `extend` in the singleton ancestry, so
+      # F's `sig` runs and `class_exec`s the block on F — DeclBuilder is not the block's self.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still resolves `sig` when the class is also declared in project RBS" do
+      # `class F` in `sig/` makes F RBS-known, but its RBS need not repeat the source
+      # `extend T::Sig` — the bridge still honours the source edge.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+      sig = "class F\n  def unrelated: () -> void\nend\n"
+
+      result = run_plugin(source: source, files: { "sig/f.rbs" => sig },
+                          signature_paths: ["sig"])
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "binds the sig block's self to DeclBuilder so unknown builder verbs still warn" do
       source = <<~RUBY
         class Worker

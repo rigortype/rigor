@@ -236,7 +236,8 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
       # `record_extend_targets` stores. `known:` names the classes that exist in the fake universe —
       # an extend edge binds the first existing candidate — and `defines:` the instance methods each
       # module actually declares, which is what decides the call's owner.
-      def sorbet_scope(env, supers:, extends:, known: %w[T::Sig], defines: { "T::Sig" => [:sig] })
+      def sorbet_scope(env, supers:, extends:, known: %w[T::Sig],
+                       defines: { "T::Sig" => [:sig] }, singleton_defines: {})
         scope = instance_double(
           Rigor::Scope,
           environment: env,
@@ -248,7 +249,8 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         end
         allow(scope).to receive(:known_user_class?) { |name| known.include?(name) }
         allow(scope).to receive(:discovered_method?) do |klass, meth, kind|
-          kind == :instance && (defines[klass] || []).include?(meth)
+          table = kind == :singleton ? singleton_defines : defines
+          (table[klass] || []).include?(meth)
         end
         scope
       end
@@ -322,6 +324,21 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           receiver_type: Rigor::Type::Singleton.new("Fetcher")
         )
         expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "does not match when the class defines its own singleton method" do
+        # `def self.sig` on the class precedes every `extend` in the singleton ancestry — the
+        # custom method answers and picks the block's self.
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["T::Sig"] },
+               singleton_defines: { "Fetcher" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
       end
 
       it "does not match a Nominal receiver through the extends edge" do

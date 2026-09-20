@@ -2491,6 +2491,112 @@ Unrelated
       expect(table).not_to have_key("Y::X")
     end
 
+    it "declines bare writes inside eval/meta blocks under `class <<` — cref never rebinds" do
+      # `Module.nesting` stays lexical through every block: the write lands on
+      # `#<Class:C>::X`, a name nothing else can produce, in each form.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class Foo; end
+        class C
+          class << self
+            Foo.class_eval { X = 1 }
+            obj.instance_eval { Y = 1 }
+            K = Class.new { Z = 1 }
+          end
+        end
+      RUBY
+      expect(writes.keys).to be_empty
+    end
+
+    it "declines `self::` writes inside a meta-new block under `class <<`" do
+      # `K` itself is unnameable, so the block's anonymous class is too — `self::Y`
+      # there cannot be spelled `C::K::Y`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            K = Class.new { self::Y = 1 }
+          end
+        end
+      RUBY
+      expect(writes.keys).to be_empty
+    end
+
+    it "files defs inside an eval-nested `self::` receiver under `class <<` nowhere" do
+      # `self::X` reads the singleton's constant table — NameError unless `X` lives
+      # there — never `C`, so `def h` must not land on `C`.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            self::X.class_eval { def h; end }
+          end
+        end
+      RUBY
+      expect(table.fetch("C", {})).not_to have_key(:h)
+    end
+
+    it "files a `class` declaration inside `class <<` nowhere — the pushed cref is the singleton's" do
+      # `class D` under `class <<` reopens `#<Class:C>::D`; `class ::T` re-anchors
+      # at the top level and stays nameable.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            class D
+              def m; end
+            end
+            class ::T
+              def n; end
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::D")
+      expect(table.fetch("T", {})).to have_key(:n)
+    end
+
+    it "files a `class` declaration inside `class << Foo` nowhere — the pushed cref is Foo's singleton's" do
+      table = methods_for(<<~RUBY)
+        class Foo; end
+        class C
+          class << Foo
+            class D
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Foo::D")
+      expect(table).not_to have_key("C::D")
+    end
+
+    it "files a `class` declaration inside an eval block under `class <<` nowhere" do
+      # `Foo.class_eval { class D }` — nesting stays `[#<Class:C>, C]` — opens
+      # `#<Class:C>::D`, not `Foo::D` or `C::D`.
+      table = methods_for(<<~RUBY)
+        class Foo; end
+        class C
+          class << self
+            Foo.class_eval { class D; def m; end }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::D")
+      expect(table).not_to have_key("Foo::D")
+    end
+
+    it "declines `self::` and bare constant writes inside `class <<` in the typed table" do
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.in_source_constants).not_to have_key("C::X")
+      expect(scope.in_source_constants).not_to have_key("C::W")
+    end
+
     it "attributes `extend` inside a nested `self.class_eval` block to the enclosing receiver" do
       table = described_class.build_discovered_extends(parse(<<~RUBY))
         module T; end

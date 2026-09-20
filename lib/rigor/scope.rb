@@ -50,8 +50,8 @@ module Rigor
     def discovered_parameter_envelopes = @discovery.discovered_parameter_envelopes
     def discovered_superclasses = @discovery.discovered_superclasses
 
-    # Issue #1097 — `{file path => [[start_offset, end_offset, name, kind], ...]}`, the def / block /
-    # lambda body ranges {singleton_def_shadows_call?} / {instance_def_shadows_call?} order a
+    # Issue #1097 — `{file path => [[start_offset, end_offset, name, kind, owner], ...]}`, the def /
+    # block / lambda body ranges {singleton_def_shadows_call?} / {instance_def_shadows_call?} order a
     # project-defined override against.
     def discovered_deferred_ranges = @discovery.discovered_deferred_ranges
     def discovered_includes = @discovery.discovered_includes

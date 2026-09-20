@@ -794,6 +794,86 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "orders an `F.class_eval`-installed `def self.sig` against the call" do
+      # The eval block runs in place as F's class body, so the def inside it installs F.sig —
+      # a nameable receiver gives the row its owner and the eager call orders against it.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          F.class_eval { def self.sig(&blk) = class_exec(&blk) }
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when the `class_eval`-installed `def self.sig` follows the call" do
+      # `class_eval`'s block runs eagerly during the class body — but the call BEFORE it resolves
+      # through `extend T::Sig` because the def has not executed yet. Without a named owner the
+      # eval-installed def could never order and the answer would fall back to `exists` —
+      # over-shadowing a call that really binds DeclBuilder.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          class_eval { def self.sig(&blk) = class_exec(&blk) }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let `module_function` inside an `END` block mark earlier defs" do
+      # `END` runs at interpreter exit — its `module_function` can never flip `def sig` during the
+      # module body, so `sig` still binds T::Sig's DeclBuilder.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          END { module_function }
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let `module_function` inside a foreign `class_eval` block mark M's defs" do
+      # `Other.class_eval` rebinds self — the `module_function` inside toggles Other, not M —
+      # so `def sig` stays an instance method and the call binds DeclBuilder.
+      source = <<~RUBY
+        module Other; end
+
+        module M
+          extend T::Sig
+          Other.class_eval { module_function }
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "orders a `sig` call eagerly inside a `class_eval` block" do
       source = <<~RUBY
         class F

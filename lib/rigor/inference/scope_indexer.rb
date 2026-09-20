@@ -2673,7 +2673,7 @@ module Rigor
           return walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
                                         ranges)
         end
-        if node.is_a?(Prism::CallNode) && node.block && SELF_REBINDING_EVAL_CALLS.include?(node.name)
+        if node.is_a?(Prism::CallNode) && eval_block_call?(node)
           return walk_eval_block_call(node, qualified_prefix, in_singleton_class, inside_deferred,
                                       mf_offsets, ranges)
         end
@@ -2705,7 +2705,7 @@ module Rigor
           # under an empty prefix so defs record a nil owner and never join another class's ordering
           # scan (containment still answers).
           prefix = singleton_class_prefix(node, qualified_prefix) || []
-          walk_deferred_body(node.body, prefix, true, ranges) if node.body
+          walk_deferred_body(node.body, prefix, true, inside_deferred, ranges) if node.body
           return
         end
 
@@ -2721,7 +2721,7 @@ module Rigor
           walk_deferred_ranges(node.superclass, qualified_prefix, in_singleton_class, inside_deferred,
                                mf_offsets, ranges)
         end
-        walk_deferred_body(node.body, child_prefix, false, ranges) if node.body
+        walk_deferred_body(node.body, child_prefix, false, inside_deferred, ranges) if node.body
       end
 
       def walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
@@ -2744,21 +2744,28 @@ module Rigor
           walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
                                ranges)
         end
-        walk_deferred_body(meta_new_block_body(node), child_prefix, false, ranges)
+        walk_deferred_body(meta_new_block_body(node), child_prefix, false, inside_deferred, ranges)
       end
 
-      # Body-level entry for a class / module / `class <<` / meta-`new` body: prescans the body's
-      # `module_function` state first ({#collect_module_function_state} — bare-call offsets plus the
-      # retro-install and `module_function def x` rows), then walks each statement with the offsets
-      # in hand. The prescan looks through nested containers (`if` / `begin` / `rescue` / blocks)
-      # because a `module_function` that RAN there still flips later defs — position, not statement
-      # nesting, is what orders it. It stays out of nested class / module / `class <<` / def bodies,
-      # where the call would target a different module.
-      def walk_deferred_body(body, qualified_prefix, in_singleton_class, ranges)
+      # Body-level entry for a class / module / `class <<` / meta-`new` / eval-block body: prescans
+      # the body's `module_function` state first ({#collect_module_function_state} — bare-call
+      # offsets plus the retro-install and `module_function def x` rows), then walks each statement
+      # with the offsets in hand. The prescan looks through nested containers (`if` / `begin` /
+      # `rescue` / blocks) because a `module_function` that RAN there still flips later defs —
+      # position, not statement nesting, is what orders it. It stays out of nested class / module /
+      # `class <<` / def bodies, where the call would target a different module. A body nested
+      # inside a deferred range installs its defs at invocation, not in place, so the prescan —
+      # which exists to NAME rows for the ordering scan — is skipped there and every def records a
+      # containment-only row instead.
+      def walk_deferred_body(body, qualified_prefix, in_singleton_class, inside_deferred, ranges)
         mf_offsets = []
-        collect_module_function_state(body, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+        unless inside_deferred
+          collect_module_function_state(body, qualified_prefix, in_singleton_class, mf_offsets,
+                                        ranges)
+        end
         statements_of(body).each do |stmt|
-          walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, false, mf_offsets, ranges)
+          walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
         end
       end
 
@@ -2766,21 +2773,50 @@ module Rigor
       # one are module functions), a `:singleton` row at each `module_function :name` call — the
       # retro-install happens AT THE CALL, not the def — and a `:both` / `:singleton` row for a
       # `module_function def x` argument. Nested class / module / `class <<` / def bodies are skipped:
-      # `module_function` there targets a different module. Blocks, lambdas and control-flow
-      # containers are entered — their `self` is still this module, so the call really can toggle.
+      # `module_function` there targets a different module. An `END` body is skipped too — it runs at
+      # interpreter exit, after every def — and so is a `*_eval` / `*_exec` block, whose `self`
+      # rebinds to the receiver's module. Blocks, lambdas and control-flow containers are entered —
+      # their `self` is still this module, so the call really can toggle.
       def collect_module_function_state(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
         return unless node.is_a?(Prism::Node)
         return if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
-                  node.is_a?(Prism::SingletonClassNode) || node.is_a?(Prism::DefNode)
+                  node.is_a?(Prism::SingletonClassNode) || node.is_a?(Prism::DefNode) ||
+                  node.is_a?(Prism::PostExecutionNode)
 
-        if node.is_a?(Prism::CallNode) && module_function_toggle?(node)
-          collect_module_function_call(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
-          return
+        if node.is_a?(Prism::CallNode)
+          if module_function_toggle?(node)
+            return collect_module_function_call(node, qualified_prefix, in_singleton_class,
+                                                mf_offsets, ranges)
+          end
+          if eval_block_call?(node)
+            return collect_eval_call_state(node, qualified_prefix, in_singleton_class, mf_offsets,
+                                           ranges)
+          end
         end
 
         node.rigor_each_child do |child|
           collect_module_function_state(child, qualified_prefix, in_singleton_class, mf_offsets, ranges)
         end
+      end
+
+      # The prescan's eval arm: a `*_eval` / `*_exec` block's self rebinds to the receiver's module,
+      # so only the call's receiver and arguments keep this module's `module_function` context.
+      def collect_eval_call_state(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+        if node.receiver
+          collect_module_function_state(node.receiver, qualified_prefix, in_singleton_class,
+                                        mf_offsets, ranges)
+        end
+        node.arguments&.arguments&.each do |arg|
+          collect_module_function_state(arg, qualified_prefix, in_singleton_class, mf_offsets,
+                                        ranges)
+        end
+      end
+
+      # Whether `node` is a `*_eval` / `*_exec` call with a literal block — the self-rebinding form
+      # both the deferred-ranges walk and the `module_function` prescan treat as another module's
+      # class body.
+      def eval_block_call?(node)
+        node.block.is_a?(Prism::BlockNode) && SELF_REBINDING_EVAL_CALLS.include?(node.name)
       end
 
       def collect_module_function_call(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
@@ -2794,6 +2830,9 @@ module Rigor
               ranges << [arg.location.start_offset, arg.location.end_offset, arg.name, kind, owner]
             elsif (name = symbol_argument_name(arg))
               ranges << [node.location.start_offset, node.location.end_offset, name, :singleton, owner]
+            else
+              collect_module_function_state(arg, qualified_prefix, in_singleton_class, mf_offsets,
+                                            ranges)
             end
           end
         end
@@ -2804,9 +2843,10 @@ module Rigor
       end
 
       # A `class_eval` / `module_eval` / `class_exec` / `module_exec` block is NOT deferred: it runs
-      # eagerly during the receiver's call, as a class-ish body. Its defs belong to the receiver's
-      # surface, which the walk cannot always name, so they are walked under an empty prefix — a nil
-      # owner keeps them out of every class's ordering scan while their own ranges still answer
+      # eagerly during the receiver's call, as a class-ish body — its `module_function` state gets
+      # its own prescan, and its defs belong to the RECEIVER's surface. A nameable receiver gives
+      # the body that owner ({#eval_receiver_prefix}); anything else is walked ownerless so its
+      # defs stay out of every class's ordering scan while their own ranges still answer
       # containment for deeper nesting. Other block forms stay deferred: `each` / `define_method` /
       # callbacks yield-or-store on terms syntax cannot separate, and the conservative answer there
       # is "deferred".
@@ -2820,8 +2860,31 @@ module Rigor
           walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
                                ranges)
         end
-        node.block&.rigor_each_child do |child|
-          walk_deferred_ranges(child, [], false, inside_deferred, [], ranges)
+        block = node.block
+        eval_prefix = eval_receiver_prefix(node, qualified_prefix) || []
+        block.parameters&.rigor_each_child do |child|
+          walk_deferred_ranges(child, eval_prefix, false, inside_deferred, [], ranges)
+        end
+        return unless block.body
+
+        walk_deferred_body(block.body, eval_prefix, false, inside_deferred, ranges)
+      end
+
+      # The owner an eval-family block body evaluates under. A bare or `self` receiver keeps the
+      # enclosing class — `class_eval`'s self IS that class — and a constant receiver names its
+      # own class, the same convention {singleton_class_prefix} applies to `class <<`. Any other
+      # receiver shape is unnameable: nil sends the body down the ownerless path.
+      def eval_receiver_prefix(node, qualified_prefix)
+        receiver = node.receiver
+        return qualified_prefix if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        rendered = singleton_receiver_constant_name(receiver)
+        return nil unless rendered
+
+        if !qualified_prefix.empty? && qualified_prefix.last == rendered
+          qualified_prefix
+        else
+          rendered.split("::")
         end
       end
 
@@ -3498,6 +3561,9 @@ module Rigor
 
       def walk_class_extends(node, qualified_prefix, current_class, accumulator, in_singleton: false)
         return unless node.is_a?(Prism::Node)
+        # `END { ... }` runs at interpreter exit — nothing inside it executes during the class
+        # body, so its `module_function` / `extend` calls cannot reshape the singleton surface.
+        return if node.is_a?(Prism::PostExecutionNode)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
@@ -3517,11 +3583,41 @@ module Rigor
           current_class = nil unless in_singleton
         when Prism::CallNode
           record_extend_call(node, current_class, accumulator, in_singleton: in_singleton)
+          if eval_block_call?(node)
+            return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
+                                          in_singleton: in_singleton)
+          end
         end
 
         node.rigor_each_child do |child|
           walk_class_extends(child, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
         end
+      end
+
+      # `X.class_eval { ... }` runs the block as X's class body — its `extend` / `module_function`
+      # calls land on X's singleton surface, not the enclosing class's. An unnameable receiver
+      # keeps the enclosing owner (the deliberately over-approximate direction this table already
+      # takes).
+      def walk_eval_extends_call(node, qualified_prefix, current_class, accumulator, in_singleton:)
+        eval_class = eval_receiver_name(node, qualified_prefix) || current_class
+        if node.receiver
+          walk_class_extends(node.receiver, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton)
+        end
+        node.arguments&.arguments&.each do |arg|
+          walk_class_extends(arg, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton)
+        end
+        node.block.rigor_each_child do |child|
+          walk_class_extends(child, qualified_prefix, eval_class, accumulator)
+        end
+      end
+
+      # The class a `*_eval` / `*_exec` block body opens — the nameable receiver, or nil when the
+      # receiver is not nameable ({#eval_receiver_prefix} spelled as a name).
+      def eval_receiver_name(node, qualified_prefix)
+        prefix = eval_receiver_prefix(node, qualified_prefix)
+        prefix && !prefix.empty? ? prefix.join("::") : nil
       end
 
       # Inside a `class << self` body the mixin calls are the singleton-side ones and `extend` is not:
@@ -4512,8 +4608,8 @@ module Rigor
           constant_writes: file_index[:constant_writes].transform_values { |by_path| by_path.values.first },
           data_member_layouts: file_index[:data_member_layouts],
           struct_member_layouts: file_index[:struct_member_layouts],
-          # Issue #1097 — plain `[Integer, Integer, Symbol, Symbol]` rows, so the bundle stays
-          # Marshal-clean.
+          # Issue #1097 — plain `[Integer, Integer, Symbol, Symbol, String]` rows, so the bundle
+          # stays Marshal-clean.
           deferred_ranges: file_index[:deferred_ranges]
         }
       end

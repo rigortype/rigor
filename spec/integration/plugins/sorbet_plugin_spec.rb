@@ -597,6 +597,63 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "still binds DeclBuilder for a sig call deferred inside a method body when T::Sig owns it" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.target = m
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
+    end
+
+    it "does not bind DeclBuilder for a deferred sig call when `def self.sig` follows `m`" do
+      # `sig` inside `def self.m` runs when `m` is called — after the class body finished installing
+      # `F.sig` — so the later `def self.sig` owns the call even though it lexically follows `m`.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+          def self.target = m
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when `def self.sig` follows the call on the SAME line" do
+      # Statement order within a line is execution order — `sig {}; def self.sig` resolves through
+      # `T::Sig` at runtime. Ordering by def-site line alone would treat the def as shadowing.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }; def self.sig(&blk) = class_exec(&blk)
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "still binds DeclBuilder when `def self.sig` is defined AFTER the sig call" do
       # `def` takes effect at execution: a `sig { ... }` call that precedes the later override
       # still resolves through `extend T::Sig` at runtime, so the block binding must not be

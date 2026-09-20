@@ -784,16 +784,17 @@ module Rigor
     # executes. Such a def precedes every `extend` in the singleton ancestry, so once it exists it owns the
     # call — but `sig { ... }` written BEFORE `def self.sig` in the same body still resolves through the
     # already-extended module, because `def` takes effect at execution. The site table stores
-    # `"path:line"`: a def in the file under analysis shadows only when it starts on an earlier-or-equal
-    # line, and a def in another file can never be ordered against the call site, so it conservatively
-    # counts as shadowing. A nil `call_node` (position-less dispatch probes) does the same.
+    # `"path:line"`: ordering applies only to calls executed eagerly in the same file's class body — a
+    # call inside a def body runs at invocation time, and a def in another file can never be ordered
+    # against the call site, so both conservatively count as shadowing. A nil `call_node`
+    # (position-less dispatch probes) does the same.
     def singleton_def_shadows_call?(class_name, method_name, call_node)
       site = user_singleton_def_site_for(class_name, method_name)
       # A discovered def with no recorded site (an `attr_*` sibling, a bundle seed that predates the
       # table) cannot be ordered — treat it as shadowing rather than pretending it does not exist.
       return discovered_method?(class_name, method_name, :singleton) if site.nil?
 
-      def_shadows_call?(site, call_node)
+      def_shadows_call?(site, call_node) { singleton_def_for(class_name, method_name) }
     end
 
     # The instance-side twin of {#singleton_def_shadows_call?}: whether `class_name`'s `def method_name`
@@ -802,21 +803,64 @@ module Rigor
       site = user_def_site_for(class_name, method_name)
       return discovered_method?(class_name, method_name, :instance) if site.nil?
 
-      def_shadows_call?(site, call_node)
+      def_shadows_call?(site, call_node) { user_def_for(class_name, method_name) }
     end
 
     # Shared ordering half of the two `*_def_shadows_call?` predicates, over a resolved `"path:line"`
-    # site. Only a same-file site can be ordered against the call at all.
+    # site — FIRST-wins per method, so the line it carries is the earliest definition's, which is the
+    # one that decides whether a def exists at call time. Only a same-file site can be ordered against
+    # the call at all; a foreign file and a nil `call_node` (position-less dispatch probes) both
+    # conservatively count as shadowing. So does a call inside ANY def body of this file — it runs at
+    # method-invocation time, after the class body finished, so lexical order does not apply to it.
+    # On a same-line tie (`sig {}; def self.sig`) the resolved def node's byte offset decides — but
+    # only when it sits on the site's own line, since the def-node table is later-wins and a different
+    # line means a second definition, which cannot order the first.
     def def_shadows_call?(site, call_node)
-      return false if site.nil?
       return true if call_node.nil?
 
       path, _sep, line = site.rpartition(":")
       return true unless path == source_path
 
-      line.to_i <= call_node.location.start_line
+      return true if inside_same_file_def_body?(call_node)
+
+      site_line = line.to_i
+      call_line = call_node.location.start_line
+      return site_line < call_line unless site_line == call_line
+
+      node = yield
+      return true if node.nil? || node.location.start_line != site_line
+
+      node.location.start_offset <= call_node.location.start_offset
     end
     private :def_shadows_call?
+
+    # Whether `call_node` sits inside any `def` body recorded for this file. Runs only on the
+    # `*_def_shadows_call?` path — i.e. once a same-named project def already exists — so the full
+    # instance/singleton table sweep stays rare. Sites filter the sweep to this file before the
+    # (possibly `DefHandle`, ADR-85) node is resolved.
+    def inside_same_file_def_body?(call_node)
+      loc = call_node.location
+      prefix = "#{source_path}:"
+      [
+        [@discovery.discovered_def_nodes, @discovery.discovered_def_sources],
+        [@discovery.discovered_singleton_def_nodes, @discovery.discovered_singleton_def_sources]
+      ].any? do |nodes_table, sources_table|
+        nodes_table.any? do |class_name, methods|
+          sites = sources_table[class_name]
+          methods.any? do |method_name, entry|
+            site = sites&.[](method_name)
+            next false unless site&.start_with?(prefix)
+
+            node = Inference::DefNodeResolver.resolve(entry)
+            next false if node.nil?
+
+            body = node.location
+            body.start_offset <= loc.start_offset && loc.end_offset <= body.end_offset
+          end
+        end
+      end
+    end
+    private :inside_same_file_def_body?
 
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —

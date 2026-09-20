@@ -150,6 +150,49 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result).to eq([str_type])
     end
 
+    # Issue #1140 — the splice forms store the value's ELEMENTS, so a two-index
+    # `arr[i, n] = other` reads `other` through `collection_element_types` exactly
+    # as `concat`/`replace` do.
+    it "flat_maps a two-index []= splice's value through collection_element_types" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, array_arg])
+      expect(result).to eq([str_type])
+    end
+
+    it "flat_maps a constant-Range []= splice's value through collection_element_types" do
+      tuple_arg = Rigor::Type::Combinator.tuple_of(int_type, str_type)
+      range_arg = Rigor::Type::Combinator.constant_of(0..1)
+      result = described_class.send(:array_added_elements, :[]=, [range_arg, tuple_arg])
+      expect(result).to eq([int_type, str_type])
+    end
+
+    it "treats a nominal Range index as a splice" do
+      range_arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [int_type])
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [range_arg, array_arg])
+      expect(result).to eq([str_type])
+    end
+
+    it "joins both readings when the index may be a scalar or a Range" do
+      union_index = Rigor::Type::Combinator.union(int_type, Rigor::Type::Combinator.constant_of(0..1))
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [union_index, array_arg])
+      expect(result).to contain_exactly(array_arg, str_type)
+    end
+
+    it "joins both readings when the index is untyped" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(
+        :array_added_elements, :[]=, [Rigor::Type::Combinator.untyped, array_arg]
+      )
+      expect(result).to contain_exactly(array_arg, str_type)
+    end
+
+    it "contributes no element evidence for a splice of a non-collection value" do
+      result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, str_type])
+      expect(result).to eq([])
+    end
+
     it "reports the single argument for a single-value fill" do
       expect(described_class.send(:array_added_elements, :fill, [int_type])).to eq([int_type])
     end

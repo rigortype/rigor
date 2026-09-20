@@ -50,8 +50,10 @@ module Rigor
       # The element types a single content-mutator call introduces into an Array, given the
       # per-argument types (already typed by the caller in the scope the arguments are evaluated
       # in). `concat`/`replace` take collection arguments, so their element evidence is the
-      # arguments' OWN element types unioned; the rest append the argument values directly. Returns
-      # `[]` when there is no element evidence (e.g. a `<<` with no resolvable arg).
+      # arguments' OWN element types unioned; the `[]=` splice forms (`arr[i, n] = other` /
+      # `arr[range] = other`) store their value's elements the same way and read it through the
+      # same unwrap (issue #1140). The rest append the argument values directly. Returns `[]` when
+      # there is no element evidence (e.g. a `<<` with no resolvable arg).
       def array_added_elements(method_name, arg_types)
         return [] if arg_types.empty?
 
@@ -62,15 +64,16 @@ module Rigor
           # `insert(index, *objs)` — first arg is the position.
           arg_types.drop(1)
         when :[]=
-          # `arr[i] = v` / `arr[i, n] = v` — value is the last argument.
-          #
-          # The SPLICE forms (`arr[i, n] = other` / `arr[range] = other`) store `other`'s ELEMENTS,
-          # not `other` itself, so reading the value as one element over-widens: `a[0, 2] = [1, 2]`
-          # contributes `Array[Integer]` where `Integer` is the truth. Left alone deliberately —
-          # the answer is a superset either way, so it can only cost precision, and splitting the
-          # arities here would need the receiver's own element type to unwrap against. Revisit if a
-          # corpus site ever reads an element back through a splice-built array.
-          [arg_types.last]
+          # `arr[i] = v` stores `v` as ONE element — the index arguments precede the value.
+          # The splice forms store the value's ELEMENTS instead (issue #1140): `a[0, 2] = [1, 2]`
+          # puts `Integer`s in the receiver, not an `Array[Integer]`. An index the engine cannot
+          # classify (`a[x] = v` with `x` untyped, or a `Range | Integer` union) may be either
+          # form, so both readings join — the union is a superset of the truth either way.
+          case index_store_form(arg_types)
+          when :splice then collection_element_types(arg_types.last)
+          when :either then [arg_types.last] + collection_element_types(arg_types.last)
+          else [arg_types.last]
+          end
         when :fill
           # `fill(value)` — only the no-block single-value form adds a concrete element; block /
           # range forms are conservatively ignored (the arity-forget already widened the binding).
@@ -275,6 +278,34 @@ module Rigor
 
       def union_members(type)
         type.is_a?(Type::Union) ? type.members : [type]
+      end
+
+      # How an `arr[...] = v` call's index arguments place the stored value: `:splice` — the
+      # value's ELEMENTS land in the receiver (`arr[i, n] = v` takes two index slots,
+      # `arr[range] = v` takes a Range); `:element` — the value itself is one stored element
+      # (`arr[i] = v`); `:either` — the index cannot be classified (`a[x] = v` with `x` untyped,
+      # a splat, or a `Range | Integer` union), so the store may be either form.
+      def index_store_form(arg_types)
+        return :splice if arg_types.size > 2
+
+        members = union_members(arg_types.first)
+        return :splice if members.all? { |m| range_index?(m) }
+        return :element if members.none? { |m| range_index?(m) || m.is_a?(Type::Dynamic) }
+
+        :either
+      end
+
+      # True when an index position holds a Range carrier — a static `Constant<Range>` (`0..1`),
+      # a `Nominal[Range]` (`(0..n)`), or a refinement / difference over either. `IntegerRange`
+      # and `FloatRange` are scalar number refinements rather than Range objects and correctly
+      # decline, as does every ordinary scalar index.
+      def range_index?(type)
+        case type
+        when Type::Constant then type.value.is_a?(::Range)
+        when Type::Nominal then type.class_name == "Range"
+        when Type::Difference, Type::Refined then range_index?(type.base)
+        else false
+        end
       end
 
       # Element types carried by a collection binding, regardless of which carrier holds them: a

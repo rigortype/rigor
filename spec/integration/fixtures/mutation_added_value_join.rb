@@ -44,6 +44,29 @@ slotted = [1, 2]
 slotted[0] = 6
 assert_type("Array[Dynamic[top] | Integer]", slotted)
 
+# --- Issue #1140 — the SPLICE forms store the value's ELEMENTS, not the
+# value itself: `a[0, 2] = [1, 2]` puts `Integer`s in the receiver, so the
+# element parameter gains `Integer`, never `Array[Integer]`. ---
+spliced = []
+spliced[0, 2] = [1, 2]
+assert_type("Array[Dynamic[top] | Integer]", spliced)
+assert_type("Dynamic[top] | Integer", spliced.last)
+
+spliced_range = []
+spliced_range[0..1] = [1, 2]
+assert_type("Array[Dynamic[top] | Integer]", spliced_range)
+assert_type("Dynamic[top] | Integer", spliced_range.last)
+
+# An index the engine cannot classify may be either form, so the element
+# parameter covers BOTH readings — the value as one element and the value's
+# own elements.
+def ambiguous_index(x)
+  a = []
+  a[x] = [1, 2]
+  assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", a)
+  a
+end
+
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.
 # This seam sees one store, and the widening is a one-way door, so the

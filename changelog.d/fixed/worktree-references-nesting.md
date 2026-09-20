@@ -1,0 +1,1 @@
+- **[dev]** `bin/rigor-worktree --with-references` now copies each `references/` checkout to its own path rather than one level inside it, and fails loudly when a copy does not land — the nested copy still answered `git rev-parse HEAD`, so a reference-reading gate skipped while `make docs-check` reported green ([#1137](https://github.com/rigortype/rigor/pull/1137)).

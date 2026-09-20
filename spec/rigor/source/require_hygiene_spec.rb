@@ -86,4 +86,29 @@ RSpec.describe "Rigor::Source helper require hygiene" do
       MSG
     end
   end
+
+  # Each example above is a `Dir.glob` evaluated inside itself, and `lib_root` is `__dir__`-relative —
+  # this file moving one directory deeper is enough to make it resolve to nothing. Then every example
+  # rejects nothing and the whole gate reports green having read no source at all. Reproduced: pointing
+  # `lib_root` at a missing directory left 5 examples and 0 failures.
+  it "scans the whole lib tree, so the checks above are not vacuous" do
+    expect(lib_files.size).to be >= 400
+    expect(lib_files).to include(File.join(lib_root, "rigor", "source", "constant_path.rb"))
+  end
+
+  # A helper that no lib file references makes its own example above examine nothing: the reject closure
+  # short-circuits on every file, and `offenders` comes back empty for the same reason it would if every
+  # file were correct. That is not a defect to repair here — the example exists for the moment a lib file
+  # DOES reference the helper — but which examples are currently examining nothing should be visible
+  # rather than silent, so the set is pinned. `Source::NodeChildren` is defined in lib and exercised by
+  # its own spec, but no lib file names it today. Shrinking this list is the good direction; growing it
+  # means an example quietly stopped covering anything.
+  it "records which Source helpers no lib file references, so a check that examines nothing is visible" do
+    names = SourceRequireHygiene::HELPERS.keys
+    referenced = lib_files.flat_map do |path|
+      source_helpers_referenced(Prism.parse(File.read(path, encoding: Encoding::UTF_8)).value, names)
+    end.uniq
+
+    expect(names - referenced).to eq(%i[NodeChildren])
+  end
 end

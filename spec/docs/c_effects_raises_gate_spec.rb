@@ -96,6 +96,24 @@ module CEffectsRaisesAudit
     end
   end
 
+  # How many rows the scan above actually read a C body for. `violations` returning `[]` is ambiguous:
+  # "every row is correct" and "no row could be resolved" produce the same empty array, and the checkout
+  # probe cannot separate them — it looks for ONE file, so a checkout holding only `object.c` passes it
+  # while every other row's `c_body_at` resolves to nil and the audit silently examines almost nothing.
+  def resolved_bodies(root:, glob:)
+    Dir.glob(glob).sum do |yml_path|
+      catalog = YAML.safe_load_file(yml_path, permitted_classes: [Symbol])
+      resolved = 0
+      each_c_row(catalog) do |_class_name, _method_name, row|
+        c_body_at = row["c_body_at"]
+        next if c_body_at.nil? || c_body_at == "not_found"
+
+        resolved += 1 unless extract_c_body(root, c_body_at).nil?
+      end
+      resolved
+    end
+  end
+
   def each_c_row(catalog)
     (catalog["classes"] || {}).each do |class_name, class_data|
       %w[instance_methods singleton_methods].each do |kind|
@@ -181,6 +199,27 @@ RSpec.describe "builtin catalogue c_effects raises facet" do
     expect(violations).to be_empty,
                           "c_effects omits `raises` for a row whose own c_body_at raises " \
                           "(fix the data — see #756):\n" + violations.map { |v| "  → #{v}" }.join("\n")
+  end
+
+  # The audit above is a `Dir.glob` evaluated inside the example, scanning a catalogue whose rows resolve
+  # against an OPTIONAL checkout. Both inputs can vanish without a failure: emptying
+  # `data/builtins/ruby_core/` leaves 2 examples and 0 failures, and so does a `references/ruby` holding
+  # only the `object.c` the probe looks for — the probe passes, every other row resolves to nil, and
+  # `violations` is empty because nothing was read rather than because everything was right.
+  #
+  # A floor with slack, per `plugin_io_boundary_spec.rb`: 1255 of the 1287 rows carrying a `c_body_at`
+  # resolve today, and the corpus grows as the catalogue is extended.
+  it "resolves a plausible number of C bodies, so the audit above is not vacuous" do
+    unless CEffectsRaisesAudit.ruby_reference_checked_out?(C_EFFECTS_RAISES_GATE_REPO_ROOT)
+      skip "references/ruby is an optional submodule (AGENTS.md) and is not checked out here"
+    end
+
+    resolved = CEffectsRaisesAudit.resolved_bodies(
+      root: C_EFFECTS_RAISES_GATE_REPO_ROOT,
+      glob: File.join(C_EFFECTS_RAISES_GATE_REPO_ROOT, "data/builtins/ruby_core/*.yml")
+    )
+
+    expect(resolved).to be >= 1000
   end
 
   # #756's mandatory clause: "the gate is green" and "the gate can execute the fail path" are different

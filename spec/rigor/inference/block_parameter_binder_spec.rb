@@ -331,10 +331,11 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(binder.optimistic).to be_empty
       end
 
-      it "does not splat Dynamic[Array[T]] or Array[untyped]" do
+      it "binds Dynamic[Top] per slot for Dynamic[Array[T]] or Array[untyped], which it cannot decompose" do
         [Rigor::Type::Combinator.dynamic(array_of(integer_nominal)), array_of(untyped)].each do |carrier|
-          bindings = described_class.new(expected_param_types: [carrier]).bind(parse_block("xs.each { |g, h| g }"))
-          expect(bindings).to eq(g: carrier, h: untyped)
+          binder = described_class.new(expected_param_types: [carrier])
+          expect(binder.bind(parse_block("xs.each { |g, h| g }"))).to eq(g: untyped, h: untyped)
+          expect(binder.optimistic).to be_empty
         end
       end
 
@@ -399,10 +400,116 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(binder.optimistic).to contain_exactly(:a, :b)
       end
 
-      it "does not splat a union with a member that is not a Tuple or Array[T], nor wrap a lone scalar" do
-        yielded = union(tuple(integer_nominal, string_nominal), Rigor::Type::Combinator.constant_of(nil))
+      it "does not splat, nor wrap, a carrier with no array member" do
+        yielded = union(string_nominal, Rigor::Type::Combinator.constant_of(nil))
         bindings = described_class.new(expected_param_types: [yielded]).bind(parse_block("xs.each { |a, b| a }"))
         expect(bindings).to eq(a: yielded, b: untyped)
+
+        lone = described_class.new(expected_param_types: [string_nominal])
+        expect(lone.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: string_nominal, b: untyped)
+      end
+    end
+
+    # Issue #1116 — the parameter list decides the splat, so a carrier the binder cannot decompose must not
+    # leave the whole value on the first parameter. Each fallback is paired with the precise carrier it must
+    # not disturb, so a change that widened everything to Dynamic[Top] could not pass both.
+    describe "block auto-splat of a carrier it cannot decompose" do
+      def array_of(element)
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+      end
+
+      def union(*members)
+        Rigor::Type::Combinator.union(*members)
+      end
+
+      def tuple(*elements)
+        Rigor::Type::Combinator.tuple_of(*elements)
+      end
+
+      def nil_type
+        Rigor::Type::Combinator.constant_of(nil)
+      end
+
+      def array_nominal
+        Rigor::Type::Combinator.nominal_of("Array")
+      end
+
+      # `[1, 2].tap { |a, b| }` — #1092 widens the `-> self` yield of a literal-tuple receiver to the raw
+      # `Array`, which has no element type to hand the slots.
+      it "binds Dynamic[Top] per slot for a raw Array, where the Tuple it widened from stays precise" do
+        binder = described_class.new(expected_param_types: [array_nominal])
+        expect(binder.bind(parse_block("[1, 2].tap { |a, b| a }"))).to eq(a: untyped, b: untyped)
+        expect(binder.optimistic).to be_empty
+
+        precise = described_class.new(expected_param_types: [tuple(integer_nominal, string_nominal)])
+        expect(precise.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: integer_nominal, b: string_nominal)
+      end
+
+      it "leaves a single-parameter block holding the whole raw Array" do
+        binder = described_class.new(expected_param_types: [array_nominal])
+        expect(binder.bind(parse_block("[1, 2].tap { |a| a }"))).to eq(a: array_nominal)
+        expect(binder.bind(parse_block("[1, 2].tap { it }"))).to eq(it: array_nominal)
+      end
+
+      it "binds the default Array[Dynamic[Top]] to a named rest under a raw Array" do
+        binder = described_class.new(expected_param_types: [array_nominal])
+        expect(binder.bind(parse_block("[1, 2].tap { |a, *r| a }"))).to eq(a: untyped, r: array_of(untyped))
+        expect(binder.bind(parse_block("[1, 2].tap { |*r, z| z }"))).to eq(r: array_of(untyped), z: untyped)
+      end
+
+      # `[[1, "a"], nil].each { |a, b| }` — CRuby hands the `nil` iteration `a = nil, b = nil`, because `nil`
+      # has no `to_ary`, so the member contributes `nil` to every slot and #1094's softening takes it out.
+      it "gives a nil member nil per slot, softened out of a position another member fills" do
+        yielded = union(tuple(integer_nominal, string_nominal), nil_type)
+        binder = described_class.new(expected_param_types: [yielded])
+        expect(binder.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: integer_nominal, b: string_nominal)
+        expect(binder.optimistic).to contain_exactly(:a, :b)
+
+        over_array = described_class.new(expected_param_types: [union(array_of(integer_nominal), nil_type)])
+        expect(over_array.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: integer_nominal, b: integer_nominal)
+        expect(over_array.optimistic).to contain_exactly(:a, :b)
+      end
+
+      it "floors every slot when an opaque or non-array member joins a precise one" do
+        [array_nominal, string_nominal].each do |other|
+          yielded = union(tuple(integer_nominal, string_nominal), other)
+          bindings = described_class.new(expected_param_types: [yielded]).bind(parse_block("xs.each { |a, b| a }"))
+          expect(bindings).to eq(a: untyped, b: untyped)
+        end
+      end
+
+      # `str.scan(/(\w+)=(\w+)/) { |name, body| }` — joining the whole match's `String` against a capture's
+      # `String?` would hand `name` a `String?` and fire `call.possible-nil-receiver` on `name.to_sym`,
+      # which the two groups' correlated invariant makes a false positive (ADR-5).
+      it "floors a String | Array[String?] yield rather than joining the capture's nil into it" do
+        yielded = union(string_nominal, array_of(union(string_nominal, nil_type)))
+        bindings = described_class.new(expected_param_types: [yielded]).bind(parse_block("s.scan(re) { |a, b| a }"))
+        expect(bindings).to eq(a: untyped, b: untyped)
+      end
+
+      # A `Dynamic` facet decides only whether CRuby would splat: `array_element_type` declines every
+      # `Dynamic` wrapper (#1093), so however precise the facet is, the positions take the floor rather
+      # than the whole value.
+      it "floors a Dynamic over any array carrier, precise facet or not" do
+        [array_of(integer_nominal), tuple(integer_nominal, string_nominal),
+         union(array_of(integer_nominal), nil_type)].each do |facet|
+          carrier = Rigor::Type::Combinator.dynamic(facet)
+          binder = described_class.new(expected_param_types: [carrier])
+          expect(binder.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: untyped, b: untyped)
+          expect(binder.optimistic).to be_empty
+        end
+      end
+
+      it "leaves a Dynamic over a non-array facet on the first slot, as no splat would" do
+        carrier = Rigor::Type::Combinator.dynamic(string_nominal)
+        bindings = described_class.new(expected_param_types: [carrier]).bind(parse_block("xs.each { |a, b| a }"))
+        expect(bindings).to eq(a: carrier, b: untyped)
+      end
+
+      it "reads the numbered-parameter twin of the raw-Array case the same way" do
+        binder = described_class.new(expected_param_types: [array_nominal])
+        expect(binder.bind(parse_block("[1, 2].tap { _1; _2 }"))).to eq(_1: untyped, _2: untyped)
+        expect(binder.bind(parse_block("[1, 2].tap { _1 }"))).to eq(_1: array_nominal)
       end
     end
 

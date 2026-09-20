@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "block_auto_splat"
 require_relative "multi_target_binder"
 
 module Rigor
@@ -32,23 +33,13 @@ module Rigor
     # `Prism::ItLocalVariableReadNode` lookup sees the same type as the explicit `|x|` form would, and it
     # never auto-splats.
     #
-    # A single yielded `Array[T]` (`ints.each_slice(2) { |g, h| }`) auto-splats like a Tuple does, but with
-    # no arity to read: each required / trailing positional binds `T`, a named `*rest` binds `Array[T]`, and
-    # an optional positional keeps `Dynamic[Top]` (a short array hands it its default, not `nil`). A short
-    # array pads the positionals with `nil` at runtime, so those names — and every name a nested
-    # `|(g, h)|` destructure binds from an `Array[T]` slot — are reported as optimistic, and {#bind_onto}
-    # records them through `Scope#with_optimistic_local` exactly as the statement-level `a, b = ints` does
-    # (issue #1093; the shared rule lives in {MultiTargetBinder}).
-    #
-    # A union whose every member is one of those two carriers (`[K, V] | [K]`, `Array[A] | [B, C]`)
-    # auto-splats member by member, and each position binds the join of the members' types — `Dynamic[Top]`
-    # when any member leaves it unfilled, and without a member's bare `nil` when another fills it (then
-    # optimistic) — optimistic too when any member's `Array[T]` arm marked it, as the statement form joins
-    # a union right-hand side (issue #1094). A union with any other member does not splat, and a lone value
-    # with no `to_ary` is NOT wrapped as `[value]` here the way `a, b = value` wraps it: the one-value premise
-    # of auto-splat is the RBS block signature's arity, which the binder cannot check against the yield, and
-    # a wrong wrap binds `nil` to a parameter the block receives a value in. A nested `|(g, h)|` destructures
-    # the one value the signature already placed, so it wraps like the statement form.
+    # A block whose parameter list CRuby splats spreads the one yielded value across its positionals;
+    # {BlockAutoSplat} owns that rule and its carrier arms, and this binder only applies the table it
+    # answers. Every name the spread binds from an `Array[T]` slot — and every name a nested `|(g, h)|`
+    # destructure binds from one — is reported as optimistic, and {#bind_onto} records those through
+    # `Scope#with_optimistic_local` exactly as the statement-level `a, b = ints` does (issue #1093; the
+    # shared rule lives in {MultiTargetBinder}). A nested `|(g, h)|` destructures the one value the
+    # signature already placed, so it wraps like the statement form.
     #
     # Block-local declarations after `;` (e.g., `|x; y, z|`) are still skipped — they are explicitly
     # block-local, so the outer scope MUST NOT observe them and the binder leaves them unbound.
@@ -115,7 +106,7 @@ module Rigor
       # positionals would, so the body's `LocalVariableReadNode` lookups see the same types and marks.
       def bind_numbered_parameters(numbered_node)
         arity = numbered_node.maximum
-        apply_auto_splat(ParameterShape.new(required: arity, optional: 0, post: 0, rest: false))
+        apply_auto_splat(BlockAutoSplat::ParameterShape.of_arity(arity))
 
         bindings = {}
         arity.times do |i|
@@ -136,7 +127,7 @@ module Rigor
         params_node = params_root.parameters
         return {} if params_node.nil?
 
-        apply_auto_splat(ParameterShape.of(params_node))
+        apply_auto_splat(BlockAutoSplat::ParameterShape.of(params_node))
 
         bindings = {}
         bind_positionals(params_node, bindings, 0)
@@ -147,8 +138,8 @@ module Rigor
         bindings
       end
 
-      # Ruby blocks (NOT lambdas) auto-splat a single yielded Tuple-shaped value when the block declares more
-      # than one required positional parameter:
+      # Ruby blocks (NOT lambdas) auto-splat a single yielded array-ish value when the parameter list is
+      # one CRuby splats:
       #
       #   { a: 1 }.each { |k, v| ... }
       #
@@ -157,118 +148,21 @@ module Rigor
       # the binder would assign `k = Tuple[K, V]` and `v = Dynamic[Top]`, and any call on
       # `k.<method-not-on-Tuple>` would false-fire.
       #
-      # The rule fires only when (a) the receiver yields exactly one value (`expected_param_types.size ==
-      # 1`), (b) the parameter list is one CRuby splats (see {#splatting_parameter_list?}), and (c) that single
-      # expected element is a Tuple or an `Array[T]` carrier
-      # ({MultiTargetBinder.array_element_type}). Multi-arg yields (e.g. `each_with_index`'s `(element,
-      # index)` pair) are NOT auto-splatted — matching Ruby semantics where a multi-arg yield to a `|a, b, c|`
-      # block fills the extra slot with nil rather than splatting any element.
+      # The rule fires only when the receiver yields exactly one value (`expected_param_types.size == 1`)
+      # and {BlockAutoSplat} answers a table for that value and `shape`. A multi-arg yield (e.g.
+      # `each_with_index`'s `(element, index)` pair) is NOT auto-splatted — matching Ruby semantics where a
+      # multi-arg yield to a `|a, b, c|` block fills the extra slot with nil rather than splatting any
+      # element.
       def apply_auto_splat(shape)
         return unless @expected_param_types.size == 1
+        return unless shape.splats?
 
-        return unless splatting_parameter_list?(shape)
+        table = BlockAutoSplat.for(shape, @expected_param_types[0])
+        return if table.nil?
 
-        members = auto_splat_members(@expected_param_types[0])
-        return if members.nil?
-
-        splats = members.map { |member| auto_splat_of(shape, member) }
-        @expected_param_types, softened = join_positional_types(splats.map(&:types))
-        @optimistic_positions = (splats.flat_map(&:optimistic_positions) + softened).uniq
-        rests = splats.map(&:rest_type)
-        @splat_rest_type = rests.include?(nil) ? nil : Type::Combinator.union(*rests)
-      end
-
-      # The positional part of a parameter list, as counts: all the auto-splat rule reads. An explicit
-      # `BlockParametersNode` list and a numbered-parameter block (`maximum` required positionals) both
-      # reduce to it, so the two spellings cannot drift.
-      ParameterShape = Data.define(:required, :optional, :post, :rest) do
-        def self.of(params_node)
-          new(required: params_node.requireds.size, optional: params_node.optionals.size,
-              post: params_node.posts.size, rest: !params_node.rest.nil?)
-        end
-      end
-      private_constant :ParameterShape
-
-      # The per-member result of one auto-splat arm: the positional table, the positions it binds
-      # optimistically, and the named rest's type (nil for the `Array[Dynamic[Top]]` default).
-      AutoSplat = Data.define(:types, :optimistic_positions, :rest_type)
-      private_constant :AutoSplat
-
-      # The carriers the value auto-splats as — itself, or every member of a union — or nil when any of them
-      # is neither a Tuple nor an `Array[T]`.
-      def auto_splat_members(type)
-        members = type.is_a?(Type::Union) ? type.members : [type]
-        splattable = members.all? { |m| m.is_a?(Type::Tuple) || MultiTargetBinder.array_element_type(m) }
-        splattable ? members : nil
-      end
-
-      def auto_splat_of(shape, member)
-        if member.is_a?(Type::Tuple)
-          tuple_auto_splat(shape, member.elements)
-        else
-          array_auto_splat(shape, MultiTargetBinder.array_element_type(member))
-        end
-      end
-
-      # Returns the joined table and the positions it softened. A single member's table is used as is; across
-      # members, a position any member leaves unfilled (a slot past a short Tuple) or fills with `Dynamic[Top]`
-      # stays `Dynamic[Top]`, and a member's bare `nil` drops out of a position another member fills with a
-      # value, the position then being optimistic — `MultiTargetBinder`'s cross-member softening.
-      def join_positional_types(tables)
-        return [tables.first, []] if tables.size == 1
-
-        softened = []
-        joined = Array.new(tables.map(&:size).max) do |i|
-          column = tables.map { |table| table[i] }
-          next Type::Combinator.untyped if column.any? { |t| t.nil? || t == Type::Combinator.untyped }
-
-          firm = column.reject { |t| t.is_a?(Type::Constant) && t.value.nil? }
-          next Type::Combinator.union(*column) if firm.empty? || firm.size == column.size
-
-          softened << i
-          Type::Combinator.union(*firm)
-        end
-        [joined, softened]
-      end
-
-      # CRuby's own condition (`vm_callee_setup_block_arg` / `setup_parameters_complex`): a block splats a lone
-      # array argument when it has a mandatory positional (`lead + post > 0`) or more than one optional, except a
-      # bare `|a|` (the iseq's `ambiguous_param0`). So `|k, *r|`, `|*r, v|`, `|a = 1, b = 2|` and the
-      # trailing-comma `|k,|` (Prism's `ImplicitRestNode`) splat, while `|*r|`, `|a = 1, *r|` and `|a, &b|` /
-      # `|a, k: 1|` do not.
-      def splatting_parameter_list?(shape)
-        mandatory = shape.required + shape.post
-        return false unless mandatory.positive? || shape.optional > 1
-
-        !(mandatory == 1 && shape.optional.zero? && !shape.rest)
-      end
-
-      # The Tuple arm of {#apply_auto_splat}. Leading positionals (required, then optional) read from the head;
-      # trailing positionals after a rest read from the tail, with the rest absorbing the middle — the split
-      # `MultiTargetBinder` applies to `a, *r, b = tuple`, so `|*r, v|` over `[K, V]` binds `v` to `V` and
-      # `|a, *r, b|` over `[A, B, C]` binds `b` to `C`. Without a rest the trailing positionals continue from the
-      # head (Ruby fills `|a, b = 1, c|` from the head when the tuple is long enough). The split is mirrored
-      # rather than delegated to `MultiTargetBinder.decompose_tuple` because that one pads a missing slot with
-      # `Constant[nil]` and softens `X | nil`; a block slot past the tuple has always bound `Dynamic[Top]`.
-      def tuple_auto_splat(shape, elements)
-        head = shape.required + shape.optional
-        posts = shape.post
-        tail_start = shape.rest ? [elements.size - posts, head].max : head
-        types = Array.new(head) { |i| elements[i] } + Array.new(posts) { |j| elements[tail_start + j] }
-        AutoSplat.new(types: types, optimistic_positions: [], rest_type: nil)
-      end
-
-      # Issue #1093 — the `Array[T]` arm of {#apply_auto_splat}: see the class comment for the per-slot rule.
-      def array_auto_splat(shape, element)
-        required = shape.required
-        optional = shape.optional
-        posts = shape.post
-        AutoSplat.new(
-          types: Array.new(required) { element } + Array.new(optional) { Type::Combinator.untyped } +
-                 Array.new(posts) { element },
-          optimistic_positions: (0...required).to_a + ((required + optional)...(required + optional + posts)).to_a,
-          rest_type: Type::Combinator.nominal_of("Array", type_args: [element])
-        )
+        @expected_param_types = table.types
+        @optimistic_positions = table.optimistic_positions
+        @splat_rest_type = table.rest_type
       end
 
       def bind_positionals(params_node, bindings, cursor)

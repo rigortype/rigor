@@ -55,7 +55,12 @@ when only the fixture arm did. Options:
 
 - `--with-references` — CoW-clones every populated `references/*`
   checkout and re-points each copied `.git` file at the shared module
-  store. Fine because `references/` is **read-only** here.
+  store. Fine because `references/` is **read-only** here. The script
+  then compares each copy's **top-level entries** against the main
+  clone's and **exits non-zero** if one did not land, because the cheap
+  looks do not discriminate: a checkout copied one level deep still
+  lists under `ls references/` and still answers `git -C
+  references/<name> rev-parse HEAD`, while the gate that reads it skips.
 - or run `make init-submodules` inside the worktree.
 
 Verify a reference-reading gate actually **executed** (not `pending` /

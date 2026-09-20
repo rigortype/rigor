@@ -71,25 +71,88 @@ wt_root=${RIGOR_WT_ROOT:-$(dirname "$main")/rigor-wt}
 wt=$wt_root/$slug
 if [ -e "$wt" ]; then die "$wt already exists"; fi
 
-# Pick a copy-on-write cp. macOS `cp -Rc` uses clonefile(2) and silently falls
-# back to copyfile(2) across filesystems; GNU cp gets --reflink=auto (CoW on
-# btrfs/xfs, plain copy elsewhere); anything else does a plain recursive copy.
+# Pick a copy-on-write cp. GNU cp gets --reflink=auto (CoW on btrfs/xfs, and on
+# APFS since coreutils 9.x; a plain copy elsewhere); BSD/macOS `cp -Rc` uses
+# clonefile(2) and silently falls back to copyfile(2) across filesystems;
+# anything else does a plain recursive copy.
+#
+# Probe `cp` itself rather than `uname`: the Nix Flake this repo mandates for
+# development puts GNU coreutils ahead of /bin on PATH, so on macOS INSIDE the
+# Flake `cp` is GNU and `cp -Rc` fails with `invalid option -- 'c'` — which,
+# under `set -e`, aborted the script after `git worktree add` had already
+# registered the worktree.
 cow_cp() {
   local src=$1 dst=$2
-  case "$(uname)" in
-    Darwin) cp -Rc "$src" "$dst" ;;
-    *) if cp --version 2>/dev/null | grep -q coreutils; then
-         cp -a --reflink=auto "$src" "$dst"
-       else
-         cp -R "$src" "$dst"
-       fi ;;
+  if cp --version 2>/dev/null | grep -q coreutils; then
+    cp -a --reflink=auto "$src" "$dst"
+  elif [ "$(uname)" = Darwin ]; then
+    cp -Rc "$src" "$dst"
+  else
+    cp -R "$src" "$dst"
+  fi
+}
+
+# `cp -R SRC DST` with DST an EXISTING directory copies INTO it, so any copy
+# destination must be cleared first or the payload lands one level too deep
+# (references/ruby/ruby). Guarded: this can only ever remove a path inside $wt.
+rm_wt_path() { # rm_wt_path ABS
+  local target=$1
+  case "$target" in
+    "$wt"/?*) ;;
+    *) die "internal error: refusing to remove '$target' (outside $wt)" ;;
   esac
+  # `..` as a COMPONENT, not as a substring: `$wt` is normalized below, but a
+  # substring test would also reject an ordinary entry named `..foo`, and would
+  # NOT have been what made a `RIGOR_WT_ROOT` containing `..` safe.
+  case "$target" in
+    ../*|*/../*|*/..) die "internal error: refusing to remove '$target' (traverses '..')" ;;
+  esac
+  rm -rf "$target"
+}
+
+# `git rev-parse HEAD` is NOT a verification of a reference clone: the `.git`
+# pointer written below sits at the right level and resolves against the shared
+# module store even when the CONTENTS landed one directory deeper, which is
+# exactly the failure this catches. So compare the copy's top-level entries
+# against the source's — a nested copy has a single directory named after the
+# submodule where the source has its whole checkout, and
+# `references/ruby/object.c` (the file spec/docs/c_effects_raises_gate_spec.rb
+# opens) is absent. Comparing entries rather than probing a name out of
+# `git ls-tree HEAD` is also what holds for the SPARSE checkouts
+# (references/phpstan, references/TypeScript-Website), whose working trees
+# deliberately materialize only part of HEAD.
+reference_entries() { # reference_entries DIR -> top-level names, `.git` excluded
+  local dir=$1 f out=""
+  for f in "$dir"/* "$dir"/.[!.]*; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    case "${f##*/}" in .git) continue ;; esac
+    out+="${f##*/}"$'\n'
+  done
+  printf '%s' "$out"
+}
+
+verify_reference_clone() { # verify_reference_clone SRC DST
+  local src=$1 dst=$2 name
+  name=$(basename "$dst")
+  if [ "$(reference_entries "$src")" != "$(reference_entries "$dst")" ]; then
+    echo "  ERROR: references/$name: the copy at $dst does not have the same contents as" >&2
+    echo "         $src. A nested or partial copy still answers 'git rev-parse HEAD' and" >&2
+    echo "         still lists under 'ls references/', so it looks correct while a" >&2
+    echo "         reference-reading gate SKIPs on it." >&2
+    return 1
+  fi
+  if ! git -C "$dst" rev-parse --verify --quiet HEAD >/dev/null; then
+    echo "  ERROR: references/$name: git linkage does not resolve" >&2
+    return 1
+  fi
+  return 0
 }
 
 clone_into_wt() { # clone_into_wt REL   (REL is relative to the repo root)
   local rel=$1
   if [ ! -e "$main/$rel" ]; then echo "  skip $rel (absent in main clone)"; return 0; fi
   mkdir -p "$wt/$(dirname "$rel")"
+  rm_wt_path "$wt/$rel"
   cow_cp "$main/$rel" "$wt/$rel"
   echo "  cloned $rel"
 }
@@ -101,6 +164,11 @@ else
   echo "==> git worktree add $wt -b $branch $start"
   git -C "$main" worktree add "$wt" -b "$branch" "$start"
 fi
+
+# `RIGOR_WT_ROOT` (and `$main`) may contain `..`; resolve the worktree to a
+# physical path now that it exists, so every destination the removal guard sees
+# is traversal-free.
+wt=$(cd "$wt" && pwd -P)
 
 echo "==> cloning the gem bundle (copy-on-write)"
 clone_into_wt vendor/bundle
@@ -125,19 +193,31 @@ fi
 
 if [ "$with_references" -eq 1 ]; then
   echo "==> cloning references/ submodule checkouts (read-only)"
+  ref_failures=0
   for d in "$main"/references/*/; do
     name=$(basename "$d")
     if [ ! -e "${d}.git" ]; then echo "  skip references/$name (not initialized in main)"; continue; fi
+    # `git worktree add` has already created an EMPTY placeholder directory for
+    # every registered submodule path. Copying onto it would nest the checkout
+    # (references/ruby/ruby), which every cheap look — `ls references/`,
+    # `git -C references/ruby rev-parse HEAD` — reports as correct while a
+    # reference-reading gate SKIPs. Clear it so the copy lands at the path.
+    rm_wt_path "$wt/references/$name"
     cow_cp "${d%/}" "$wt/references/$name"
     # A submodule `.git` file is relative to the main clone; re-point the copy
     # at the shared module store so read-only git commands resolve.
     printf 'gitdir: %s/.git/modules/references/%s\n' "$main" "$name" > "$wt/references/$name/.git"
-    if git -C "$wt/references/$name" rev-parse --verify --quiet HEAD >/dev/null; then
+    if verify_reference_clone "${d%/}" "$wt/references/$name"; then
       echo "  cloned references/$name"
     else
-      echo "  WARNING: references/$name cloned but its git linkage looks wrong" >&2
+      ref_failures=$((ref_failures + 1))
     fi
   done
+  if [ "$ref_failures" -ne 0 ]; then
+    die "$ref_failures references/ checkout(s) did not land correctly in $wt. The worktree
+exists, but a reference-reading gate would SKIP there and \`make docs-check\` would
+still report green. Re-create the worktree rather than trusting a gate run in it."
+  fi
 fi
 
 echo

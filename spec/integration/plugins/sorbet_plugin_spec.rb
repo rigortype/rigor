@@ -796,7 +796,9 @@ RSpec.describe "plugins/rigor-sorbet" do
 
     it "orders an `F.class_eval`-installed `def self.sig` against the call" do
       # The eval block runs in place as F's class body, so the def inside it installs F.sig —
-      # a nameable receiver gives the row its owner and the eager call orders against it.
+      # a nameable receiver gives the row its owner and the eager call orders against it. (This
+      # shape also passes via the `exists` fallback; the discriminating case is the NEXT spec,
+      # where the call precedes the eval call and only an ordered row answers correctly.)
       source = <<~RUBY
         class F
           extend T::Sig
@@ -840,6 +842,28 @@ RSpec.describe "plugins/rigor-sorbet" do
           extend T::Sig
           END { module_function }
           def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let a foreign `class_eval`-installed `def self.sig` shadow M's call" do
+      # `Other.class_eval` installs `Other.sig` — the def-site tables must attribute the def to
+      # the eval RECEIVER, or the phantom `M.sig` entry makes `exists` shadow a call that resolves
+      # through `extend T::Sig` at runtime.
+      source = <<~RUBY
+        module Other; end
+
+        module M
+          extend T::Sig
+          Other.class_eval { def self.sig(&blk) = class_exec(&blk) }
           sig { params(x: Integer).bogus_terminus }
           def m(x); end
         end

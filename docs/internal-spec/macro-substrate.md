@@ -85,7 +85,8 @@ rules (consistent with the rest of the plugin-contract carriers):
   ranges: `Const = Class.new do … end` and `class_eval`-family blocks
   run during the enclosing body — the eval block's defs belong to
   the receiver's surface, so a nameable receiver supplies their
-  owner. A cross-file def and a file the index
+  owner (the def-site, method, visibility, and extends tables
+  attribute eval-block bodies to the same receiver). A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

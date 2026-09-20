@@ -2217,6 +2217,31 @@ Unrelated
       expect(last_statement_type(source).describe).to eq(":later")
     end
 
+    it "folds `include` inside `class << self`'s eval block — the singleton's own body (#1097)" do
+      # `class_eval` with no receiver inside `class << self` runs the block as the SINGLETON
+      # class's body, so `include Tools` lands on C's singleton ancestry exactly like a literal
+      # `include` there — C.label resolves.
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "class C\n  class << self\n    class_eval { include Tools }\n  end\nend\n" \
+               "C.label\n"
+      expect(last_statement_type(source).describe).to eq('"tool"')
+    end
+
+    it "does not fold `extend` inside `class << self`'s eval block — it lands on the metaclass" do
+      # `extend` inside the singleton's eval body extends the singleton's OWN singleton (the
+      # metaclass squared) — `C.label` does not resolve, so no edge may be recorded.
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "class C\n  class << self\n    class_eval { extend Tools }\n  end\nend\n" \
+               "C.label\n"
+      expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    it "folds `module_function()` — empty parens are the bare toggle (#1097)" do
+      source = "module Util\n  module_function()\n  def message(text)\n    text\n  end\nend\n" \
+               "Util.message(:hi)\n"
+      expect(last_statement_type(source).describe).to eq(":hi")
+    end
+
     it "contributes nothing for an extend target with no discovered defs (control)" do
       source = "module Registry\n  extend SomeGemModule\nend\nRegistry.helper\n"
       expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")

@@ -73,7 +73,9 @@ RSpec.describe "ScopeIndexer parameter envelopes (#992)" do
     expect(table.fetch("N")).to include(module_mark => opaque)
     expect(table.fetch("A")).to include(dynamic_mark => opaque)
     expect(table.fetch("B")).to include(dynamic_mark => opaque)
-    expect(table.fetch("C")).to include(dynamic_mark => opaque)
+    # A constant-receiver eval block's defs attribute to the receiver, so `C#f` is a
+    # literal def — no dynamic mark. The STRING eval form stays opaque (`A` above).
+    expect(table.fetch("C")).to eq(%i[instance f] => [0, 0, false])
   end
 
   it "adds the project-wide key only on a whole-project pass" do

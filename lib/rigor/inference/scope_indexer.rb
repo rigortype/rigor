@@ -2172,6 +2172,10 @@ module Rigor
           record_alias_or_undef(node, qualified_prefix, in_singleton_class, methods_acc)
           return
         when Prism::CallNode
+          if eval_block_call?(node)
+            return walk_eval_methods_and_defs(node, qualified_prefix, in_singleton_class, methods_acc,
+                                              def_nodes_acc, source_path)
+          end
           anonymous = record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
           if anonymous
             walk_anonymous_meta_block(node, anonymous, qualified_prefix, in_singleton_class, methods_acc,
@@ -2182,6 +2186,28 @@ module Rigor
 
         node.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
+                                     source_path)
+        end
+      end
+
+      # {#walk_eval_singleton_defs}'s combined-walk twin: a `*_eval` / `*_exec` block's defs,
+      # `attr_*`s and metaprogrammed methods belong to the RECEIVER's class — `X.class_eval {
+      # attr_reader :a }` inside `module M` records `X#a`, not `M#a`. An unnameable receiver keeps
+      # the enclosing prefix (over-approximate, as the def tables already are).
+      def walk_eval_methods_and_defs(node, qualified_prefix, in_singleton_class, methods_acc,
+                                     def_nodes_acc, source_path)
+        if node.receiver
+          walk_methods_and_def_nodes(node.receiver, qualified_prefix, in_singleton_class, methods_acc,
+                                     def_nodes_acc, source_path)
+        end
+        node.arguments&.arguments&.each do |arg|
+          walk_methods_and_def_nodes(arg, qualified_prefix, in_singleton_class, methods_acc,
+                                     def_nodes_acc, source_path)
+        end
+        eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
+        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
+        node.block.rigor_each_child do |child|
+          walk_methods_and_def_nodes(child, eval_prefix, eval_in_singleton, methods_acc, def_nodes_acc,
                                      source_path)
         end
       end
@@ -2862,23 +2888,27 @@ module Rigor
         end
         block = node.block
         eval_prefix = eval_receiver_prefix(node, qualified_prefix) || []
+        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         block.parameters&.rigor_each_child do |child|
-          walk_deferred_ranges(child, eval_prefix, false, inside_deferred, [], ranges)
+          walk_deferred_ranges(child, eval_prefix, eval_in_singleton, inside_deferred, [], ranges)
         end
         return unless block.body
 
-        walk_deferred_body(block.body, eval_prefix, false, inside_deferred, ranges)
+        walk_deferred_body(block.body, eval_prefix, eval_in_singleton, inside_deferred, ranges)
       end
 
       # The owner an eval-family block body evaluates under. A bare or `self` receiver keeps the
       # enclosing class — `class_eval`'s self IS that class — and a constant receiver names its
-      # own class, the same convention {singleton_class_prefix} applies to `class <<`. Any other
-      # receiver shape is unnameable: nil sends the body down the ownerless path.
+      # own class, the same convention {singleton_class_prefix} applies to `class <<`. A receiver
+      # that renders no static path — a variable, a call, a dynamic-base `expr::Bar` — is DECLINED
+      # like {constant_path_write_key} declines dynamic write targets: `qualified_name`'s lenient
+      # render would drop the dynamic segment and file the body's defs under a class the eval
+      # never opened.
       def eval_receiver_prefix(node, qualified_prefix)
         receiver = node.receiver
         return qualified_prefix if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
-        rendered = singleton_receiver_constant_name(receiver)
+        rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
         return nil unless rendered
 
         if !qualified_prefix.empty? && qualified_prefix.last == rendered
@@ -2886,6 +2916,21 @@ module Rigor
         else
           rendered.split("::")
         end
+      end
+
+      # Whether an eval-family call's block rebinds `self` to the receiver spelled in source — false
+      # for the bare and `self`-receiver forms, whose block keeps the ENCLOSING self (including the
+      # singleton class inside `class << self`).
+      def eval_named_receiver?(node)
+        !(node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+      end
+
+      # The `in_singleton_class` flag an eval-family block body inherits: a named receiver opens
+      # that class's OWN body (`false`), while a bare or `self` receiver stays in whatever context
+      # the enclosing body already is — `class << self; class_eval { … }` opens the singleton's
+      # body, so `include` inside is still a singleton-ancestor edge.
+      def eval_body_singleton?(node, in_singleton_class)
+        in_singleton_class && !eval_named_receiver?(node)
       end
 
       def record_deferred_def(def_node, qualified_prefix, in_singleton_class, inside_deferred,
@@ -2911,8 +2956,11 @@ module Rigor
       # `module_function` toggle threads correctly across the body's *sibling* statements (a child-by-child recursion
       # would reset it). At the top level / inside an arbitrary node there is no `module_function` state to carry, so
       # descent is a plain per-child walk.
-      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator)
+      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
         return unless node.is_a?(Prism::Node)
+        if node.is_a?(Prism::CallNode) && eval_block_call?(node)
+          return walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator)
+        end
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
@@ -2943,6 +2991,28 @@ module Rigor
 
         node.rigor_each_child do |child|
           walk_singleton_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      # The singleton-def twin of {#walk_eval_block_call}: a `*_eval` / `*_exec` block's defs belong
+      # to the RECEIVER's class, so the block body is entered under the eval owner with the matching
+      # singleton flag — `X.class_eval { def self.m }` inside `module M` records `X.m`, not a phantom
+      # `M.m`. An unnameable receiver keeps the enclosing prefix (the over-approximate direction the
+      # def tables already take). The block body is a class body, so it walks through
+      # {#walk_singleton_body} and gets its own `module_function` threading.
+      def walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator)
+        walk_singleton_def_nodes(node.receiver, qualified_prefix, in_singleton_class, accumulator) if node.receiver
+        node.arguments&.arguments&.each do |arg|
+          walk_singleton_def_nodes(arg, qualified_prefix, in_singleton_class, accumulator)
+        end
+        eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
+        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
+        body = node.block.body
+        return walk_singleton_body(body, eval_prefix, eval_in_singleton, accumulator) if
+          body.is_a?(Prism::StatementsNode)
+
+        node.block.rigor_each_child do |child|
+          walk_singleton_def_nodes(child, eval_prefix, eval_in_singleton, accumulator)
         end
       end
 
@@ -3597,9 +3667,11 @@ module Rigor
       # `X.class_eval { ... }` runs the block as X's class body — its `extend` / `module_function`
       # calls land on X's singleton surface, not the enclosing class's. An unnameable receiver
       # keeps the enclosing owner (the deliberately over-approximate direction this table already
-      # takes).
+      # takes). A bare or `self` receiver keeps the singleton flag too — `class << self`'s eval
+      # block opens the singleton's body, so `include` inside is still the singleton-side edge.
       def walk_eval_extends_call(node, qualified_prefix, current_class, accumulator, in_singleton:)
         eval_class = eval_receiver_name(node, qualified_prefix) || current_class
+        eval_in_singleton = eval_body_singleton?(node, in_singleton)
         if node.receiver
           walk_class_extends(node.receiver, qualified_prefix, current_class, accumulator,
                              in_singleton: in_singleton)
@@ -3609,7 +3681,8 @@ module Rigor
                              in_singleton: in_singleton)
         end
         node.block.rigor_each_child do |child|
-          walk_class_extends(child, qualified_prefix, eval_class, accumulator)
+          walk_class_extends(child, qualified_prefix, eval_class, accumulator,
+                             in_singleton: eval_in_singleton)
         end
       end
 
@@ -3635,7 +3708,7 @@ module Rigor
         case node.name
         when :extend then record_extend_targets(node, current_class, accumulator)
         when :module_function
-          (accumulator[current_class] ||= []) << current_class if node.arguments.nil?
+          (accumulator[current_class] ||= []) << current_class if bare_module_function?(node)
         end
       end
 
@@ -3700,7 +3773,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength
+      # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
         return current_visibility unless node.is_a?(Prism::Node)
 
@@ -3730,6 +3803,11 @@ module Rigor
           record_def_visibility(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
           return current_visibility
         when Prism::CallNode
+          if eval_block_call?(node)
+            walk_eval_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                   accumulator)
+            return current_visibility
+          end
           updated = apply_visibility_call(node, qualified_prefix, current_visibility, accumulator)
           return updated unless updated.equal?(current_visibility)
         end
@@ -3748,6 +3826,26 @@ module Rigor
           end
         end
         current_visibility
+      end
+
+      # The eval-block arm of {#walk_method_visibilities}: the block is a fresh class body under
+      # the receiver's prefix — visibility starts at `:public`, and nothing inside it leaks back to
+      # this body's modifier state. An unnameable receiver keeps the enclosing prefix.
+      def walk_eval_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
+                                 accumulator)
+        if node.receiver
+          walk_method_visibilities(node.receiver, qualified_prefix, in_singleton_class,
+                                   current_visibility, accumulator)
+        end
+        node.arguments&.arguments&.each do |arg|
+          walk_method_visibilities(arg, qualified_prefix, in_singleton_class, current_visibility,
+                                   accumulator)
+        end
+        eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
+        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
+        node.block.rigor_each_child do |child|
+          walk_method_visibilities(child, eval_prefix, eval_in_singleton, :public, accumulator)
+        end
       end
 
       def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
@@ -3868,9 +3966,9 @@ module Rigor
       # - a receiverless call from {SURFACE_EVAL_CALLS}, a {SURFACE_NAMING_CALLS} call whose name is computed,
       #   a {SURFACE_SEND_CALLS} call, or a mixin of a non-constant marks the lexical class
       #   {Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK};
-      # - the same calls on a constant receiver (`Widget.class_eval { … }`, `Widget.include(M)`) mark every
-      #   name that constant can denote from here, because this walk records the block's `def`s on the
-      #   LEXICAL class, not on the receiver;
+      # - the same calls on a constant receiver (`Widget.include(M)`, a `Widget.class_eval "…"` string
+      #   eval — the BLOCK form's defs attribute to the receiver and never reach this method) mark every
+      #   name that constant can denote from here;
       # - any other receiverless call makes the envelope of every method a literal argument names opaque —
       #   `memoize :f`, `def_delegator :@x, :f`, `alias_method :g, :f` — unless it is {NAME_NEUTRAL_MACROS}.
       def record_surface_evidence(node, qualified_prefix, tables)

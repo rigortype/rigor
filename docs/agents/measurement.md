@@ -108,6 +108,25 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
 - **Wall time is noise; allocations are the signal.** Running heavy projects back to back throttles
   later ones. A perf hypothesis is decided by the deterministic allocation delta plus held
   diagnostic counts.
+- **Allocations do not see retention, and the reported `Memory peak` sees it only in a sequential
+  run.** A memo that never frees what it caches is invisible on the allocation axis: bounding
+  `ExpressionTyper#class_graph_buckets` to one slot dropped 28.7 MB of held heap and moved `lib`
+  allocations by −368 objects, i.e. nothing. The two RSS readings to hand are worse than merely
+  noisy. `RunStats.peak_rss_bytes` has no `/proc` on macOS and falls back to `ps -o rss=` — CURRENT
+  RSS of THIS process when the stats are built — and `Runner::PoolCoordinator` analyses every slice
+  in a forked child, so under `--workers=N` the figure cannot see a worker's retention at all: the
+  same A/B that separates cleanly at the default `parallel.workers: 0` reported ~257 MB on both arms
+  at `--workers=4`. `tool/bench.rb`'s `peak_rss_kb` is `nil` off Linux, so a local `make bench-perf`
+  gates wall and allocations while the Linux CI run also gates RSS (`rss_pct` in
+  `bench/thresholds.yml`). Decide a retention hypothesis on what the run still HOLDS instead:
+  analyse in-process with `--workers=0`, then `GC.start(full_mark: true, immediate_sweep: true)` a
+  few times and read `GC.stat(:heap_live_slots)` and `ObjectSpace.memsize_of_all`
+  (`require "objspace"`). Those two hold to a few hundred slots and 0.2 MB across reps — two orders
+  of magnitude inside the effect — where the reported `Memory peak` spans ~7 % per arm and needs
+  most of a dozen alternated reps to separate 5 %. A retention change also wants its own spec: the
+  answers stay correct and only the residue differs, so no diagnostic assertion can fail. Pin the
+  storage shape (`spec/rigor/inference/class_graph_memo_slot_spec.rb`) and check the spec fails
+  against the unbounded arm before trusting it.
 - **Keep the instrument.** A note in `docs/notes/` records the numbers, not the harness that produced
   them — the positive control, the trap-clearing flags, the classifier. Push the instrumented build
   as its own branch and name it in the note's limitations section; a follow-up question against the

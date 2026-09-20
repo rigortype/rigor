@@ -2064,26 +2064,49 @@ module Rigor
       CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
       private_constant :CLASS_GRAPH_CACHE_KEY
 
-      # Run-scoped memo for the static class-graph resolvers below. They are pure functions of the *frozen*
-      # project index trio (`discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`) —
-      # `user_def_for` / `superclass_of` / `includes_of` read nothing else, and never touch the current
-      # scope's locals or narrowings — so a result computed for one `(class, method)` is valid for every
-      # `Scope` that shares those tables. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the memo lives
-      # on `Thread.current` rather than on `self`. It is keyed by the *identity* of the three frozen tables
-      # (nested `compare_by_identity` stores): a new analysis generation, or any `Scope` that swaps an index
-      # via `with_discovered_*`, transparently lands in a fresh bucket while everything sharing the tables
-      # shares the memo. Steady-state cost is three identity-keyed hash reads and zero allocation — the `||=`
-      # chains only allocate on the first miss of a generation. (Pool mode forks per worker, so the
-      # `Thread.current` store is process-local and never crosses a project boundary.)
+      # Memo for the static class-graph resolvers below. They are pure functions of the scope's *frozen*
+      # discovery tables — `user_def_for` / `superclass_of` / `includes_of` and the ancestor-name resolver
+      # read nothing else, and never touch the current scope's locals or narrowings — so a result computed
+      # for one `(class, method)` is valid for every `Scope` carrying the same {DiscoveryIndex}.
+      #
+      # The key is that index's identity, NOT the three tables the walk is usually described by. Five
+      # tables are in play: `discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`,
+      # plus `discovered_header_nestings` and `discovered_methods`, which {Scope#ancestor_name_candidates}
+      # and {Scope#known_user_class?} read when resolving an ancestor name to a project class. Keying on
+      # the trio alone would let a `discovery.with(discovered_methods: …)` that happens to share the trio
+      # serve a name resolution computed against the OLD table. The index that owns all five is one
+      # object, so keying on it is both cheaper to check and correct by construction — and stays correct
+      # when a sixth table joins the walk.
+      #
+      # ONE slot, replaced rather than accumulated — the same shape, and now the same key, as
+      # {MethodDispatcher::RbsDispatch}'s `core_stdlib_memo`. `ExpressionTyper` is rebuilt per
+      # `Scope#type_of`, so the slot lives on `Thread.current` rather than on `self`. A `Scope` merges its
+      # file's discovery with the project pre-pass, so every analysed file arrives with a fresh index: an
+      # identity-keyed *store* grew one bucket per file and, because the keys ARE the tables, pinned every
+      # file's whole discovery index for the length of the run. What that bought, measured over
+      # `lib`+`plugins`: 552 buckets holding 1,834 entries between them, and 58 of 80,106 calls answered
+      # across files — 149 of the 701 slot switches returned to a bucket seen before, all of them in the
+      # seed phases that revisit the project index. One slot gives those 58 answers up and allocates 706
+      # buckets instead of 552, and still allocates FEWER objects over `lib` than the store did (−368),
+      # because one `equal?` is cheaper than three identity-hash lookups.
+      #
+      # Steady-state cost is one `equal?` check and zero allocation; the array and the buckets are
+      # allocated once per index. (Pool mode forks per worker, so the `Thread.current` slot is
+      # process-local and never crosses a project boundary — and note that the parent's reported
+      # `Memory peak` therefore does not see a worker's share of this at all.)
       def class_graph_buckets
-        store = (Thread.current[CLASS_GRAPH_CACHE_KEY] ||= {}.compare_by_identity)
-        by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
-        by_super = (by_def[scope.discovered_superclasses] ||= {}.compare_by_identity)
-        # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
-        # is a pure function of the same frozen index trio — the sibling resolver it walks reads nothing
-        # else.
-        by_super[scope.discovered_includes] ||=
-          { name: {}, user_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }
+        discovery = scope.discovery
+        slot = Thread.current[CLASS_GRAPH_CACHE_KEY]
+        unless slot && slot[0].equal?(discovery)
+          # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
+          # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
+          # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
+          slot = [discovery,
+                  { name: {}, user_def: {}, self_pure: {}.compare_by_identity,
+                    yields: {}.compare_by_identity }]
+          Thread.current[CLASS_GRAPH_CACHE_KEY] = slot
+        end
+        slot[1]
       end
 
       def resolve_user_def_through_ancestors(class_name, method_name)

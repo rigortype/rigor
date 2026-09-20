@@ -487,6 +487,25 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
         expect(bindings).to eq(a: untyped, b: untyped)
       end
 
+      # A `Dynamic` facet decides only whether CRuby would splat: `array_element_type` declines every
+      # `Dynamic` wrapper (#1093), so however precise the facet is, the positions take the floor rather
+      # than the whole value.
+      it "floors a Dynamic over any array carrier, precise facet or not" do
+        [array_of(integer_nominal), tuple(integer_nominal, string_nominal),
+         union(array_of(integer_nominal), nil_type)].each do |facet|
+          carrier = Rigor::Type::Combinator.dynamic(facet)
+          binder = described_class.new(expected_param_types: [carrier])
+          expect(binder.bind(parse_block("xs.each { |a, b| a }"))).to eq(a: untyped, b: untyped)
+          expect(binder.optimistic).to be_empty
+        end
+      end
+
+      it "leaves a Dynamic over a non-array facet on the first slot, as no splat would" do
+        carrier = Rigor::Type::Combinator.dynamic(string_nominal)
+        bindings = described_class.new(expected_param_types: [carrier]).bind(parse_block("xs.each { |a, b| a }"))
+        expect(bindings).to eq(a: carrier, b: untyped)
+      end
+
       it "reads the numbered-parameter twin of the raw-Array case the same way" do
         binder = described_class.new(expected_param_types: [array_nominal])
         expect(binder.bind(parse_block("[1, 2].tap { _1; _2 }"))).to eq(_1: untyped, _2: untyped)

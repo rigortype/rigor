@@ -24,10 +24,10 @@ module Rigor
     #   positional, `Dynamic[Top]` to every optional one (a short array hands it its default, not `nil`),
     #   and `Array[T]` to a named rest. A short array pads the fixed positions with `nil` at runtime, so
     #   those positions are reported optimistic (issue #1093);
-    # - an opaque array carrier — a raw `Array`, an `Array[untyped]` / `Array[top]`, or a wrapper over one —
-    #   binds `Dynamic[Top]` to every position: the floor `MultiTargetBinder` binds for the same
-    #   undecomposable right-hand side, and the reason `[1, 2].tap { |a, b| a.succ }` no longer reads `a` as
-    #   the whole `Array` (issue #1116);
+    # - an opaque array carrier — a raw `Array`, an `Array[untyped]` / `Array[top]`, a `Refined` /
+    #   `Difference` over either, or a `Dynamic` over any `Array` however precise — binds `Dynamic[Top]` to
+    #   every position: the floor `MultiTargetBinder` binds for the same undecomposable right-hand side, and
+    #   the reason `[1, 2].tap { |a, b| a.succ }` no longer reads `a` as the whole `Array` (issue #1116);
     # - a bare `nil` binds `nil` to every position. `nil` has no `to_ary`, so CRuby passes it as the one
     #   argument and `|a, b|` sees `nil, nil` — which is also what the wrap `[nil]` pads to, so the two
     #   readings agree here, and {join} takes that `nil` back out of any position another member fills;
@@ -77,11 +77,14 @@ module Rigor
 
       # A positional table: the type per position, the positions bound optimistically, and the named rest's
       # type (nil for the `Array[Dynamic[Top]]` default). One arm produces one; {join} folds them into one.
+      # Private as a name — {#for} hands the folded value out, and nothing outside constructs one.
       Table = Data.define(:types, :optimistic_positions, :rest_type)
+      private_constant :Table
 
       # The arm kinds that make a member an array as far as the spread is concerned, so that a union
       # carrying one of them spreads even where its other members do not decompose.
       ARRAY_CARRIER_ARMS = %i[tuple array opaque].freeze
+      private_constant :ARRAY_CARRIER_ARMS
 
       module_function
 
@@ -111,13 +114,19 @@ module Rigor
         :unknown
       end
 
-      # A carrier that names `Array` without offering an element type {MultiTargetBinder.array_element_type}
-      # will decompose: the raw `Array`, an `Array[untyped]` / `Array[top]`, and a wrapper over either.
+      # A carrier that is an array the module may not decompose into per-position types: the raw `Array`, an
+      # `Array[untyped]` / `Array[top]`, a `Refined` / `Difference` over either, and a `Dynamic` over ANY
+      # carrier that would license the spread — `Dynamic[Array[Integer]]`, `Dynamic[[Integer, String]]`,
+      # `Dynamic[Array[Integer] | nil]` alike. {MultiTargetBinder.array_element_type} declines every
+      # `Dynamic` wrapper on purpose: the value is gradual, and projecting its static facet would hand each
+      # position a bare `T` that licenses the negative rules (issue #1093, ADR-5). That is a reason to floor
+      # the positions, not a reason to leave the whole value on the first parameter, so the facet decides
+      # only whether CRuby would splat.
       def opaque_array_carrier?(type)
         case type
         when Type::Nominal then type.class_name == "Array"
         when Type::Refined, Type::Difference then opaque_array_carrier?(type.base)
-        when Type::Dynamic then opaque_array_carrier?(type.static_facet)
+        when Type::Dynamic then !arms_of(type.static_facet).nil?
         else false
         end
       end
@@ -197,6 +206,11 @@ module Rigor
       end
 
       def nil_literal?(type) = type.is_a?(Type::Constant) && type.value.nil?
+
+      # {#for} is the whole surface; the arms and the fold are this module's own business, and keeping them
+      # off the singleton stops a caller reaching past the fold for one member's table.
+      private_class_method :arms_of, :arm_of, :opaque_array_carrier?, :table_for, :tuple_table, :array_table,
+                           :uniform_table, :join, :join_types, :nil_literal?
     end
   end
 end

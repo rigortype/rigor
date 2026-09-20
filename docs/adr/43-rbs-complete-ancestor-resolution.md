@@ -1,6 +1,8 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Accepted — fully landed (WD1–WD6), 2026-06-03.**
+Status: **Accepted — fully landed (WD1–WD6), 2026-06-03.** Rejected alternative A is partially
+superseded by [ADR-114](114-core-stdlib-ancestor-dispatch.md) (2026-09-20), which narrows it to the
+gem case and keeps this ADR's allow-list as the bypass of its declines.
 Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
 against an **allow-listed** RBS-only ancestor, so the engine warns on misuse of
 that ancestor's contract surface — the motivating case being the
@@ -192,11 +194,20 @@ RBS omits.
 
 ## Rejected / deferred alternatives
 
-- **(rejected) Blanket inherited-RBS-ancestor resolution.** Resolve inherited
+- **(rejected; PARTIALLY SUPERSEDED by [ADR-114](114-core-stdlib-ancestor-dispatch.md), #527)
+  Blanket inherited-RBS-ancestor resolution.** Resolve inherited
   methods for *every* RBS ancestor, not an allow-list. Rejected: reintroduces
   the Rails-controller false-positive wall (Context) — partial gem RBS turns
   every omitted inherited method into a `call.undefined-method` FP on working
   code. Violates the project's top-tier false-positive discipline.
+  **ADR-114 narrows this rejection to the GEM case**: a CORE or STDLIB ancestor
+  (`class SubHash < Hash`, `< StandardError`, `< ::StringScanner`) now resolves,
+  on the grounds that its RBS is the method set the negative rules already trust
+  for a direct receiver of it — and that those rules do not reach a Ruby-source
+  subclass receiver at all, because they gate on `Reflection.rbs_class_known?` of
+  the RECEIVER. The rejection stands unchanged for a gem's RBS, which is what the
+  Rails-controller wall is actually about, and for the allow-list's own role:
+  ADR-114 WD5 keeps `ALLOWED_RBS_COMPLETE_ANCESTORS` as the BYPASS of its declines.
 
 - **(rejected) Strict Steep target over `plugins/*`** (note § "Option A").
   Steep types `self` as the bare RBS `Base`, so it false-positives on every
@@ -230,6 +241,10 @@ RBS omits.
   override rules gain a second, RBS-ancestor-vs-Ruby-override surface to act on
   (a possible follow-up; not in v1 scope).
 - **ADR-37 / ADR-40** — the declarative manifest route WD4 defers to.
+- **[ADR-114](114-core-stdlib-ancestor-dispatch.md)** (core / stdlib ancestor
+  dispatch) — partially supersedes rejected alternative A above, and demotes
+  `ALLOWED_RBS_COMPLETE_ANCESTORS` from "the only way in" to "the bypass of the
+  declines"; the constant, the manifest field and their contract are unchanged.
 
 [the plugin-contract RBS]: ../../sig/rigor/plugin/base.rbs
 [`spec/integration/plugin_contract_conformance_spec.rb`]: ../../spec/integration/plugin_contract_conformance_spec.rb

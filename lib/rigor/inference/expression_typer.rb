@@ -1336,9 +1336,7 @@ module Rigor
       # know that one did, so it reads the presence of an answer. Dependency recording stays ON: this
       # arm genuinely read the ancestor's declaration to decide the binding.
       def rbs_ancestor_answers?(class_name, method_name)
-        !ExternalAncestorResolution.resolve(
-          class_name, method_name, :instance, scope: scope, name_memo: class_graph_buckets[:name]
-        ).nil?
+        !ExternalAncestorResolution.resolve(class_name, method_name, :instance, scope: scope).nil?
       end
 
       # The singleton side: a class-body `self` is `Singleton[Foo]`, where an implicit-self call reaches

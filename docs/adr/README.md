@@ -128,6 +128,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Superseded (by ADR-112; the probe measurements stand) |
 | ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
 | ADR-113 | [`rigor lens`: a declaration map with type provenance, for agents and tools](113-rigor-lens.md) | Accepted (nothing implemented yet) |
+| ADR-114 | [Inherited dispatch into core and stdlib RBS](114-core-stdlib-ancestor-dispatch.md) | Accepted (#527 slice 1 landed: instance-side superclass walk; slices 2/3/5/6 out of scope, partially supersedes ADR-43's rejected alternative A) |
 
 ## Adding a New ADR
 

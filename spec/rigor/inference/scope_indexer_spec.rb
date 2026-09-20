@@ -2335,6 +2335,55 @@ Unrelated
       expect(singleton_defs).not_to have_key("M")
     end
 
+    it "resolves a `self` / bare / `self::` eval receiver against the ENCLOSING eval's self" do
+      # Inside `Y.class_eval` self IS Y — a nested `self.class_eval`, bare `class_eval`, or
+      # `self::X.class_eval` re-opens Y (or Y::X), never the lexical `module M`.
+      table = methods_for(<<~RUBY)
+        class Y; end
+        module M
+          Y.class_eval do
+            self.class_eval { def h1; end }
+            class_eval { def h2; end }
+            self::X.class_eval { def h3; end }
+            self::F::G.class_eval { def h4; end }
+          end
+        end
+      RUBY
+      expect(table).to include(
+        "Y" => { h1: :instance, h2: :instance },
+        "Y::X" => { h3: :instance },
+        "Y::F::G" => { h4: :instance }
+      )
+      expect(table).not_to have_key("M")
+      expect(table).not_to have_key("M::X")
+    end
+
+    it "attributes `extend` inside a nested `self.class_eval` block to the enclosing receiver" do
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            self.class_eval { extend T }
+          end
+        end
+      RUBY
+      expect(table).to include("Y" => ["T"])
+      expect(table).not_to have_key("M")
+    end
+
+    it "attributes `include` inside a `self::`-receiver eval block to the resolved owner" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            self::X.class_eval { include T }
+          end
+        end
+      RUBY
+      expect(table).to include("Y::X" => ["T"])
+      expect(table).not_to have_key("M")
+    end
+
     it "names the owner of a `self::X.class_eval` block from the enclosing namespace" do
       # `self::X` inside `module M` resolves to `M::X` — the eval block's defs land there.
       table = methods_for(<<~RUBY)

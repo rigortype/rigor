@@ -90,7 +90,11 @@ rules (consistent with the rest of the plugin-contract carriers):
   two-context, though — `Module.nesting` does not change in an
   eval block, so a `class` / `module` / constant write inside one
   still files under the lexical namespace while `def`s bind to the
-  receiver. A cross-file def and a file the index
+  receiver. Inside an eval body `self` is the receiver too, so a
+  nested `self.class_eval`, bare `class_eval`, or `self::X.class_eval`
+  resolves against the enclosing receiver — `Y.class_eval {
+  self::X.class_eval { def h; end } }` installs `Y::X#h`, never
+  `M::X#h` under the lexical `module M`. A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

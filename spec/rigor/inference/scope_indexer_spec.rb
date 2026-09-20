@@ -2623,6 +2623,175 @@ Unrelated
       expect(table).not_to have_key("M")
     end
 
+    it "declines a `self::` eval receiver nested in a bare eval under `class <<`" do
+      # The bare `class_eval` keeps the singleton's body — `self::X` inside still
+      # raises NameError at runtime — so the inner receiver declines rather than
+      # re-anchoring to `C`.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            class_eval { self::X.class_eval { extend T } }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::X")
+      expect(table).not_to have_key("X")
+    end
+
+    it "declines a `self::` eval receiver inside a `class` declaration under `class <<`" do
+      # `class D` opens `#<Class:C>::D` — `self` inside is that unnameable class, so
+      # `self::X` there cannot be spelled `C::D::X`.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            class D
+              self::X.class_eval { include T }
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("X")
+      expect(table).not_to have_key("C::D::X")
+      expect(table).not_to have_key("D::X")
+    end
+
+    it "declines a `self::` eval receiver inside an opaque eval body" do
+      # `obj.instance_eval`'s self is the receiver object — `self::X` resolves on its
+      # singleton, a table nothing names — never `C::X`.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          obj.instance_eval { self::X.class_eval { include T } }
+        end
+      RUBY
+      expect(table).not_to have_key("C::X")
+      expect(table).not_to have_key("X")
+    end
+
+    it "declines a bare eval receiver under `class << <non-self>`" do
+      # `class << Foo`'s `class_eval` runs the block on `#<Class:Foo>` — `extend` lands
+      # on its own singleton, a surface nothing names — never `C`'s.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class Foo; end
+        class C
+          class << Foo
+            class_eval { extend T }
+            class_eval { module_function }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+      expect(table).not_to have_key("Foo")
+    end
+
+    it "attributes `extend` inside a meta-new block to the block's class" do
+      # `K = Class.new { extend M }` extends `K` — the enclosing class's singleton is
+      # untouched.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          K = Class.new { extend T }
+        end
+      RUBY
+      expect(table).to include("C::K" => ["T"])
+      expect(table).not_to have_key("C")
+    end
+
+    it "attributes `include` inside a meta-new block to the block's class" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          K = Class.new { include T }
+        end
+      RUBY
+      expect(table).to include("C::K" => ["T"])
+      expect(table).not_to have_key("C")
+    end
+
+    it "declines meta-new mixin calls under `class <<`" do
+      # `K` lands on the singleton's constant table — unnameable — so the block's
+      # class owns nothing the tables can key.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            K = Class.new { extend T }
+          end
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            K = Class.new { include T }
+          end
+        end
+      RUBY
+      expect(extends).not_to have_key("C::K")
+      expect(extends).not_to have_key("C")
+      expect(includes).not_to have_key("C::K")
+      expect(includes).not_to have_key("C")
+    end
+
+    it "files `class D` under `class <<` nowhere in the superclass and def-nesting tables" do
+      # `#<Class:C>::D`'s ancestry and the defs' `Module.nesting` would publish a `C::D`
+      # rung MRI never creates.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class D < Base
+              def m; end
+            end
+          end
+        end
+      RUBY
+      supers, header_nestings = described_class.build_superclass_tables(program)
+      expect(supers).not_to have_key("C::D")
+      expect(header_nestings).not_to have_key("C::D")
+      nestings = described_class.build_def_nestings(program)
+      def_node = program.statements.body.first.body.body.first.body.body.first.body.body.first
+      expect(nestings[def_node]).to eq(["C"])
+    end
+
+    it "files meta-new member layouts under `class <<` nowhere" do
+      data = described_class.build_data_member_layouts(parse(<<~RUBY))
+        class C
+          class << self
+            K = Data.define(:x)
+            class D < Data.define(:y); end
+          end
+        end
+      RUBY
+      struct = described_class.build_struct_member_layouts(parse(<<~RUBY))
+        class C
+          class << self
+            K = Struct.new(:x)
+            class D < Struct.new(:y); end
+          end
+        end
+      RUBY
+      expect(data).not_to have_key("C::K")
+      expect(data).not_to have_key("C::D")
+      expect(struct).not_to have_key("C::K")
+      expect(struct).not_to have_key("C::D")
+    end
+
+    it "files `class D` method defs under `class <<` nowhere in the class-def table" do
+      defs = described_class.collect_class_method_defs(parse(<<~RUBY))
+        class C
+          class << self
+            class D
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(defs).not_to have_key("C::D")
+    end
+
     it "names the owner of a `self::X.class_eval` block from the enclosing namespace" do
       # `self::X` inside `module M` resolves to `M::X` — the eval block's defs land there.
       table = methods_for(<<~RUBY)

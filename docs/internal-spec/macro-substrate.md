@@ -101,7 +101,21 @@ rules (consistent with the rest of the plugin-contract carriers):
   through a middle nesting rung still files as written). Inside a
   `class <<` body `self` is the singleton — `self::X` reads and
   `self::X` / bare constant writes land on its constant table, which
-  the tables cannot name, so both decline. A cross-file def and a file the index
+  the tables cannot name, so both decline. The same unnameable cref
+  governs declarations: `class D` inside `class <<` opens
+  `#<singleton>::D`, so every discovery walk — methods, singleton
+  defs, visibilities, includes/extends, superclasses, def nestings,
+  ivars, member layouts — files its facts under no class rather than
+  a fabricated `C::D`, and only a `::`-rooted header re-anchors. Eval
+  and meta blocks keep that cref while rebinding `self`
+  (`Foo.class_eval { X = 1 }` under `class <<` still writes the
+  singleton's table), so a `self::`-anchored eval receiver declines
+  in every consumer walk — methods, singleton defs, visibilities,
+  deferred ranges, includes, and extends alike — and a bare or
+  `self` receiver under `class << <non-self>` names nothing. Meta-new
+  blocks do the opposite: `K = Class.new { extend M }` extends `K`,
+  so the mixin tables attribute the block to the nameable `K` and
+  decline only when `K` itself is unnameable. A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

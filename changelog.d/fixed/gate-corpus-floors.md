@@ -1,0 +1,1 @@
+- **[dev]** The builtin-catalogue C-effects audit and the `Source` require-hygiene gate now fail when their scans read nothing — an empty catalogue, a `references/ruby` holding only the one file the checkout probe looks for, or a mistargeted lib root each left them reporting green having examined no rows at all ([#1139](https://github.com/rigortype/rigor/pull/1139)).

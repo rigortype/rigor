@@ -928,7 +928,14 @@ module Rigor
     # environment, which this frozen-index walk does not read. The caller takes the first candidate its own
     # oracle knows and ignores the rest, the same "most-qualified first" order the project-side resolution
     # uses.
-    def external_ancestor_name_candidates(class_name, name_memo: {})
+    #
+    # Issue #527 slice 0 — `record_dependencies: false` walks the same edges without filing the ADR-46
+    # ancestry edge for each node. A caller that READ an ancestor's declaration to decide a binding
+    # depends on it and must record; a dispatch lookup merely asking "does some ancestor happen to
+    # declare this name?" does not, and filing it would mislabel the lookup as an ancestry edge. That
+    # was `RbsDispatch.each_source_ancestor_candidate`'s reason for reading the raw tables instead of
+    # this walk; the flag keeps the property while the walk itself stays in one place.
+    def external_ancestor_name_candidates(class_name, name_memo: {}, record_dependencies: true)
       groups = []
       queue = [class_name.to_s]
       seen = {}
@@ -941,16 +948,21 @@ module Rigor
         visited += 1
         break if visited > ANCESTOR_WALK_LIMIT
 
-        collect_external_ancestors(current, queue, groups, name_memo)
+        collect_external_ancestors(current, queue, groups, name_memo, record_dependencies: record_dependencies)
       end
       groups
     end
 
     # One node of {#external_ancestor_name_candidates}: the project-declared ancestors continue the walk,
     # everything else is reported as a candidate list.
-    def collect_external_ancestors(current, queue, groups, name_memo)
-      raw_names = includes_of(current).dup
-      raw_super = superclass_of(current)
+    def collect_external_ancestors(current, queue, groups, name_memo, record_dependencies: true)
+      if record_dependencies
+        raw_names = includes_of(current).dup
+        raw_super = superclass_of(current)
+      else
+        raw_names = (@discovery.discovered_includes[current] || []).dup
+        raw_super = @discovery.discovered_superclasses[current]
+      end
       raw_names << raw_super if raw_super
       raw_names.each do |raw|
         resolved = resolve_ancestor_class_name(current, raw, name_memo)

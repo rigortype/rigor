@@ -17,6 +17,7 @@ require_relative "budget_trace"
 require_relative "captured_locals"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
+require_relative "external_ancestor_resolution"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
 require_relative "fallback"
@@ -1329,25 +1330,15 @@ module Rigor
       # environment, so the declaration that decides the question is written about an ancestor the project
       # does not declare (`StandardError`, `Array`, `Comparable`) — each is asked on its own terms, and
       # each of them is itself before `::Object` in the reader's MRO by construction.
+      #
+      # Issue #527 slice 0 — the walk itself lives in {ExternalAncestorResolution}, which reports WHICH
+      # declaration answered because the dispatch side needs to dispatch there. This tier only needs to
+      # know that one did, so it reads the presence of an answer. Dependency recording stays ON: this
+      # arm genuinely read the ancestor's declaration to decide the binding.
       def rbs_ancestor_answers?(class_name, method_name)
-        definition = safe_rbs_method_definition(class_name, method_name, :instance)
-        return true if rbs_declared_before_object?(definition, class_name)
-
-        scope.external_ancestor_name_candidates(class_name, name_memo: class_graph_buckets[:name])
-             .any? { |candidates| external_ancestor_answers?(candidates, method_name) }
-      end
-
-      # The first candidate spelling the RBS environment knows is the ancestor Ruby resolves; a name it
-      # knows nothing about contributes no evidence either way.
-      def external_ancestor_answers?(candidates, method_name)
-        candidates.each do |candidate|
-          next if instance_ancestor_names(candidate).empty?
-
-          return rbs_declared_before_object?(
-            safe_rbs_method_definition(candidate, method_name, :instance), candidate
-          )
-        end
-        false
+        !ExternalAncestorResolution.resolve(
+          class_name, method_name, :instance, scope: scope, name_memo: class_graph_buckets[:name]
+        ).nil?
       end
 
       # The singleton side: a class-body `self` is `Singleton[Foo]`, where an implicit-self call reaches
@@ -1374,56 +1365,16 @@ module Rigor
         !members.nil? && members.include?(method_name.to_sym)
       end
 
+      # Issue #527 slice 0 — the RBS lookup, its `rescue`, and the `::Object` MRO cut-off moved to
+      # {ExternalAncestorResolution}, which the dispatch side reads too. These stay as this class's
+      # spelling of them, because three other tiers here (`try_overriding_def_dispatch`,
+      # {#singleton_self_answers?}) ask the own-class question without the ancestor walk.
       def safe_rbs_method_definition(class_name, method_name, kind)
-        if kind == :singleton
-          Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: scope)
-        else
-          Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
-        end
-      rescue StandardError
-        nil
+        ExternalAncestorResolution.method_definition(class_name, method_name, kind, scope: scope)
       end
 
-      # True when the RBS declaration found for the name sits on `class_name` itself rather than on an
-      # ancestor; mirrors `CheckRules#defined_on?` and `SigGen::Generator#declared_on_class_itself?`.
       def rbs_declared_on_class?(definition, class_name)
-        return false if definition.nil?
-        return false unless definition.respond_to?(:defined_in)
-
-        defined_in = definition.defined_in
-        return false if defined_in.nil?
-
-        defined_in.to_s.delete_prefix("::") == class_name.to_s.delete_prefix("::")
-      end
-
-      # Issue #633 — true when the declaration's owner sits strictly before `::Object` in `class_name`'s
-      # instance MRO, i.e. Ruby dispatches to it ahead of a top-level `def` (which is `Object`'s own
-      # private instance method). The own class trivially qualifies. An owner absent from the ancestor
-      # list, an unbuildable class, and an ancestry that does not reach `Object` (a `BasicObject`
-      # descendant) all answer false, leaving the historical top-level binding untouched.
-      def rbs_declared_before_object?(definition, class_name)
-        return true if rbs_declared_on_class?(definition, class_name)
-        return false if definition.nil? || !definition.respond_to?(:defined_in)
-
-        owner = definition.defined_in
-        return false if owner.nil?
-
-        ancestors = instance_ancestor_names(class_name)
-        object_index = ancestors.index("Object")
-        owner_index = ancestors.index(owner.to_s.delete_prefix("::"))
-        !object_index.nil? && !owner_index.nil? && owner_index < object_index
-      end
-
-      # The class's instance-side ancestors in MRO order, `::`-stripped, or `[]` for a class the RBS
-      # environment does not know or cannot build. Read through the loader's accessor rather than
-      # `instance_definition(...).ancestors` because that is the one wired to the ancestor-name cache and
-      # marked as RIGOR'S OWN demand — ordering two ancestors is not the analysis asking whether either
-      # one's methods resolve, and the `rbs.coverage` bookkeeping must not record it as such.
-      def instance_ancestor_names(class_name)
-        loader = scope.environment&.rbs_loader
-        loader ? loader.ancestor_names_for(class_name.to_s) : []
-      rescue StandardError
-        []
+        ExternalAncestorResolution.declared_on_class?(definition, class_name)
       end
 
       # Issue #520 — Ruby defines the value of an attribute / index assignment (`x.attr = v`, `h[k] = v`)

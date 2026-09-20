@@ -666,10 +666,20 @@ module Rigor
 
           # The two exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
           # branch below because a plugin is consulted ONCE for the whole receiver, union included, so the
-          # gate belongs where that one consult is rather than duplicated into each shape's path. On the
-          # union side that is placement, not demonstrated coverage: no fixture reaches the gate through
-          # `union_undefined_method_diagnostic` today — every plugin-typed union anyone has built carries a
-          # `Singleton` arm, which `union_arm_blocks_undefined_fire?` declines on outright.
+          # gate belongs where that one consult is rather than duplicated into each shape's path.
+          #
+          # The union side of that placement IS reachable, contrary to what this comment used to say. The
+          # shape needs a non-nil union of at least two RBS-DECLARED classes — an undeclared arm is an
+          # ADR-26 open receiver and `union_arm_blocks_undefined_fire?` bails before the method lookup,
+          # which is why the earlier probes read silent and were misread as the gate being unreachable.
+          # `spec/integration/composite_receiver_plugin_typed_suppression_spec.rb` builds it. What keeps
+          # the gate from firing there today is that the dispatcher no longer records a plugin-typed call
+          # it declined (#1101), not that no such union can be built.
+          #
+          # Note what the gate would do if it were reached: the scalar `Ledger#settle` a plugin declares
+          # is exempt here, while `(Ledger | Invoice)#settle` is not, because the union rule's own
+          # `method_present_anywhere?` reads RBS and project source and never asks the registry. Closing
+          # that asymmetry is #653's union coverage, not this rule's placement.
           # See {#call_site_exempt?}.
           return nil if call_site_exempt?(call_node, scope)
 

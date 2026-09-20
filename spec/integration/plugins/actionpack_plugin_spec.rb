@@ -390,6 +390,30 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    # Issue #1101 — the layer under the typing above. `params[:key]` is `Parameters | nil`, and until the
+    # dispatcher projected a composite receiver the whole union landed `Dynamic[top]`: the `Parameters`
+    # arm resolves only through the user-class ancestor fallback, a tier BELOW the one that distributed
+    # unions. `#to_s` is the selector this harness can assert without loading a second plugin —
+    # `#present?` / `#blank?` come from `rigor-activesupport-core-ext`'s `Object` rows, which the survey
+    # configs enable and this one does not.
+    it "resolves a method call on the nilable `params[:key]` through both arms (#1101)" do
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params[:q].to_s)
+            Rigor.dump_type(params[:q].nil?)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        # `NilClass#to_s` folds to `""`; the `Parameters` arm reaches `Object#to_s`.
+        expect(dumps[0]).to include("\"\" | String")
+        expect(dumps[1]).to include("bool")
+        expect(dumps).to all(satisfy { |m| !m.include?("Dynamic[top]") })
+      end
+    end
+
     it "draws no possible-nil-receiver on an assigned `params[:key]` — the `[] -> Parameters?` hazard (#534)" do
       # `#[] -> Parameters | nil` fixes every fold above and still carries the chain, but
       # `call.possible-nil-receiver` fires on `Prism::LocalVariableReadNode` receivers

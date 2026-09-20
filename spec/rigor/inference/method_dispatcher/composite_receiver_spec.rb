@@ -25,6 +25,7 @@ RSpec.describe "MethodDispatcher composite-receiver projection" do
   # A class no RBS knows — the stand-in for `ActionController::Parameters`, which the actionpack plugin
   # mints as a nominal and which ships no signature. It resolves only through the user-class fallback.
   def rbs_less = comb.nominal_of("ProjectOnlyWidget")
+  def other_rbs_less = comb.nominal_of("ProjectOnlyGadget")
   def nil_constant = comb.constant_of(nil)
 
   describe "the positive control this file's declines are read against" do
@@ -45,19 +46,26 @@ RSpec.describe "MethodDispatcher composite-receiver projection" do
     end
 
     it "binds `self` to the projected member, so a `-> self` method reassembles the union" do
-      receiver = comb.union(comb.nominal_of("String"), comb.nominal_of("Symbol"))
+      # Both members are RBS-less on purpose: with `String | Symbol` the RBS tier's own union arm
+      # answers first and the example would pass without this tier existing at all. `Kernel#dup` is
+      # `-> self`, and the user-class fallback substitutes each member as its own `self`.
+      receiver = comb.union(rbs_less, other_rbs_less)
 
-      expect(dispatch(receiver, :itself)).to eq(receiver)
+      expect(dispatch(receiver, :dup)).to eq(receiver)
     end
 
     it "declines as a whole when ANY member declines — never a partial answer" do
-      # `Integer` has no `#upcase`. A union that answered `String` here would be claiming the method
-      # exists on a receiver half of whose inhabitants raise NoMethodError.
-      receiver = comb.union(comb.nominal_of("String"), comb.nominal_of("Integer"))
+      # The RBS-less member reaches only the user-class fallback, which resolves `#to_s` through
+      # `Object` and has no `#upcase` to offer. A union that answered `String` for `#upcase` would be
+      # claiming the method exists on a receiver half of whose inhabitants raise NoMethodError.
+      # (`String | Integer` would make the same point but never reach this tier — the RBS tier's own
+      # union arm declines it first, so the example would pass with this tier deleted.)
+      receiver = comb.union(rbs_less, comb.nominal_of("String"))
 
       expect(dispatch(receiver, :upcase)).to be_nil
-      # Positive neighbour on the same receiver: a selector BOTH members carry still resolves.
-      expect(dispatch(receiver, :to_s)).not_to be_nil
+      # Positive neighbour on the same receiver: a selector BOTH members carry resolves, and only this
+      # tier can answer it — the RBS tier declines the union because the RBS-less arm has no signature.
+      expect(dispatch(receiver, :to_s)).to eq(comb.nominal_of("String"))
     end
   end
 

@@ -93,9 +93,12 @@ module Rigor
         result
       end
 
-      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # `plugin_typed_sink` is internal bookkeeping for the composite-receiver tier below: when it is an
+      # Array, an answering plugin tier PUSHES the call node instead of recording it on the scope, and
+      # the tier commits the buffer only if it goes on to answer. See {#try_composite_receiver}.
+      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
                   block_type: nil, environment: nil,
-                  call_node: nil, scope: nil)
+                  call_node: nil, scope: nil, plugin_typed_sink: nil)
         return nil if receiver_type.nil?
 
         # Build the call context once and thread it — unchanged — through every tier
@@ -125,7 +128,19 @@ module Rigor
           # RBS's, and `call.undefined-method` reads that record instead of re-deciding from the receiver's
           # (possibly partial) signature. Recorded for EVERY plugin answer, dynamic or precise: the
           # incoherence the record closes is about which subsystem typed the call, not about the type.
-          scope&.record_plugin_typed_call(call_node)
+          #
+          # Under a composite-receiver projection the record is BUFFERED instead (#1101). It is the one
+          # recording in this method that is set-only — `Scope#plugin_typed_calls` has no removal, and
+          # `CheckRules#call_site_exempt?` / `#source_arity_envelope` read it as an exemption — so a
+          # member a plugin answers beside a member that declines would exempt a call this dispatcher
+          # never typed, silencing `call.undefined-method` and `call.wrong-arity` on a true positive. The
+          # `record_dynamic_origin` writes below and in the tiers that follow need no such care: that
+          # table is last-wins and the caller's fail-soft widening overwrites it.
+          if plugin_typed_sink
+            plugin_typed_sink << call_node
+          else
+            scope&.record_plugin_typed_call(call_node)
+          end
           if plugin_result.is_a?(Type::Dynamic)
             scope&.record_dynamic_origin(call_node, DynamicOrigin::FRAMEWORK_DSL_BOUNDARY)
           end
@@ -999,15 +1014,17 @@ module Rigor
         members = receiver_projection(context.receiver)
         return nil if members.nil? || members.size > COMPOSITE_PROJECTION_MEMBERS
 
+        plugin_typed = []
         results = members.map do |member|
           resolve(
             receiver_type: member, method_name: context.method_name, arg_types: context.args,
             block_type: context.block_type, environment: context.environment,
-            call_node: context.call_node, scope: context.scope
+            call_node: context.call_node, scope: context.scope, plugin_typed_sink: plugin_typed
           )
         end
         return nil if results.any?(&:nil?)
 
+        plugin_typed.uniq.each { |node| context.scope&.record_plugin_typed_call(node) }
         Type::Combinator.union(*results)
       end
 
@@ -1021,8 +1038,9 @@ module Rigor
       # projectable. Every member returned MUST itself be non-composite: that is what bounds the re-entry
       # into `resolve` at one level, by construction rather than by a counter — the nested call reaches
       # this tier with a receiver it declines immediately. A normalized `Union` never holds a `Union`, so
-      # the only shape the guard turns away is a `Difference` over a `Difference` (`T.must(T.must(x))`),
-      # which nothing in the corpus produces and which declines exactly as it did before.
+      # the shapes the guard turns away are a `Difference` over a `Difference` (`T.must(T.must(x))`) and a
+      # `Union` holding one (`c ? T.must(y) : Bar.new`, which normalizes to `(A - nil) | Bar`). Both
+      # decline exactly as they did before this tier existed; neither appears in the survey corpus.
       def receiver_projection(receiver)
         members =
           case receiver
@@ -1036,13 +1054,18 @@ module Rigor
       end
 
       # `Difference[base, nil]` projects to `base` minus its nil-valued members; every other difference
-      # declines. Returns nil (decline) when the removal empties the base — a `Difference[nil, nil]` has
-      # no inhabitant to dispatch on, and answering `bot` here would be a fold, not a dispatch.
+      # declines. The nil filter runs over a scalar base as well as a union one, so the rule stays total:
+      # `Combinator.difference` does not normalize `NilClass - nil` (or `nil - nil`) to `Bot`, and this
+      # tier must not project `[NilClass]` and answer a NilClass method for a carrier with no inhabitant.
+      # Nothing observable turns on it today — `RbsDispatch`'s #533 erasure sits above this tier and
+      # already answers a nil-only base from the base's own descriptor — which is why the guard is here
+      # rather than in `Combinator`, where it would be a normalization change with its own blast radius.
       def difference_projection(difference)
         return nil unless nil_valued_type?(difference.removed)
 
         base = difference.base
-        retained = base.is_a?(Type::Union) ? base.members.reject { |m| nil_valued_type?(m) } : [base]
+        members = base.is_a?(Type::Union) ? base.members : [base]
+        retained = members.reject { |member| nil_valued_type?(member) }
         return nil if retained.empty?
 
         retained

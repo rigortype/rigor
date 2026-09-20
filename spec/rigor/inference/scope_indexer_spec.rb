@@ -2358,6 +2358,86 @@ Unrelated
       expect(table).not_to have_key("M::X")
     end
 
+    it "resolves a constant eval receiver through the write site's LEXICAL nesting, not the eval self" do
+      # `Y` inside `M::Y.class_eval` at top level is the TOP-LEVEL `Y` — constant
+      # lookup in an eval body stays lexical, and a class is never a member of its own
+      # constant table.
+      table = methods_for(<<~RUBY)
+        module M
+          class Y; end
+        end
+        class Y; end
+        M::Y.class_eval do
+          Y.class_eval { def m; end }
+        end
+      RUBY
+      expect(table).to include("Y" => { m: :instance })
+      expect(table.fetch("M::Y", {})).not_to have_key(:m)
+    end
+
+    it "resolves a constant eval receiver through nesting inside a foreign eval body" do
+      # `Y` written in `M::Y`'s body resolves via `Module.nesting` to `M::Y`, even
+      # though the enclosing eval's self is `Z`.
+      table = methods_for(<<~RUBY)
+        class Z; end
+        module M
+          class Y
+            Z.class_eval do
+              Y.class_eval { def m; end }
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::Y" => { m: :instance })
+      expect(table).not_to have_key("Y")
+    end
+
+    it "opens a `class <<` operand through the lexical nesting inside an eval body" do
+      # `class << Y` inside `M::Y.class_eval` at top level opens the TOP-LEVEL `Y`'s
+      # singleton — the same lexical resolution an eval receiver gets.
+      table = methods_for(<<~RUBY)
+        module M
+          class Y; end
+        end
+        class Y; end
+        M::Y.class_eval do
+          class << Y
+            def s; end
+          end
+        end
+      RUBY
+      expect(table).to include("Y" => { s: :singleton })
+      expect(table.fetch("M::Y", {})).not_to have_key(:s)
+    end
+
+    it "declines a `self::` eval receiver inside a `class <<` body" do
+      # Inside `class << self` self is the singleton — `self::X` raises NameError at
+      # runtime unless the constant lives on that singleton — so the receiver declines
+      # rather than filing the block under a class it never opened.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            class << self
+              self::X.class_eval { include T }
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Y::X")
+      expect(table).not_to have_key("M::X")
+    end
+
+    it "keys a `self::` receiver under `Object` as the bare top-level name" do
+      table = methods_for(<<~RUBY)
+        Object.class_eval do
+          self::X.class_eval { def m; end }
+        end
+      RUBY
+      expect(table).to include("X" => { m: :instance })
+      expect(table).not_to have_key("Object::X")
+    end
+
     it "attributes `extend` inside a nested `self.class_eval` block to the enclosing receiver" do
       table = described_class.build_discovered_extends(parse(<<~RUBY))
         module T; end

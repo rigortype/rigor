@@ -1781,10 +1781,14 @@ module Rigor
       OBJECT_OWNER = "Object"
       private_constant :OBJECT_OWNER
 
-      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator, self_owner = nil)
+      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator, self_owner = nil,
+                               singleton_self: false)
         return unless node.is_a?(Prism::Node)
 
         case node
+        when Prism::SingletonClassNode
+          return walk_singleton_class_writes(node, qualified_prefix, default_scope, accumulator,
+                                             self_owner, singleton_self)
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
@@ -1805,7 +1809,30 @@ module Rigor
           return
         end
 
-        walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner)
+        walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner,
+                                     singleton_self)
+      end
+
+      # `self` inside a `class <<` body is the singleton — a `self::`-anchored eval
+      # receiver below declines rather than resolving against the enclosing class.
+      def walk_singleton_class_writes(node, qualified_prefix, default_scope, accumulator,
+                                      self_owner, singleton_self)
+        walk_constant_writes(node.expression, qualified_prefix, default_scope, accumulator,
+                             self_owner, singleton_self: singleton_self)
+        return unless node.body
+
+        walk_constant_writes(node.body, qualified_prefix, default_scope, accumulator,
+                             self_owner, singleton_self: true)
+      end
+
+      # The self a `self::`-anchored eval receiver resolves against, given the enclosing
+      # body's self — an eval block's own receiver. Inside a `class <<` body self is a
+      # singleton the walk cannot name, so the receiver stays opaque; an OPAQUE self
+      # stays opaque either way.
+      def rebound_self_base(owner, singleton_self)
+        return OPAQUE_SELF if singleton_self
+
+        owner.is_a?(String) ? owner.split("::") : owner
       end
 
       # Recursion into `node`'s children, swapping `self` for the ONE child a self-rebinding call evaluates
@@ -1818,14 +1845,16 @@ module Rigor
       # `rebound` is non-nil only where {#rebound_block_self} already saw a `Prism::BlockNode` in the `block`
       # field, and no other child of a call can be one — a receiver is an expression, arguments sit under
       # `ArgumentsNode`, and a `&blk` pass-through is a `BlockArgumentNode`.
-      def walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner)
-        # `self_owner` is the enclosing body's self — an eval block's own receiver — so a
-        # `self::`-anchored receiver inside one resolves against it; an OPAQUE self stays opaque.
-        self_base = self_owner.is_a?(String) ? self_owner.split("::") : self_owner
-        rebound = rebound_block_self(node, qualified_prefix, default_scope, nil, self_base)
+      def walk_constant_write_children(node, qualified_prefix, default_scope, accumulator, self_owner,
+                                       singleton_self)
+        rebound = rebound_block_self(node, qualified_prefix, default_scope, nil,
+                                     rebound_self_base(self_owner, singleton_self))
         node.rigor_each_child do |child|
-          owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
-          walk_constant_writes(child, qualified_prefix, default_scope, accumulator, owner)
+          rebinds_self = rebound && child.is_a?(Prism::BlockNode)
+          owner = rebinds_self ? rebound : self_owner
+          child_singleton = singleton_self && !rebinds_self
+          walk_constant_writes(child, qualified_prefix, default_scope, accumulator, owner,
+                               singleton_self: child_singleton)
         end
       end
 
@@ -1891,7 +1920,7 @@ module Rigor
           return OPAQUE_SELF if self_prefix == OPAQUE_SELF
 
           prefix = self_prefix || qualified_prefix
-          return (prefix + tail).join("::")
+          return collapse_object_owner(prefix + tail).join("::")
         end
 
         name = Source::ConstantPath.qualified_name_or_nil(receiver)
@@ -2175,7 +2204,7 @@ module Rigor
           if node.body
             # `class << self` inside an eval body opens the RECEIVER's singleton — self is
             # the eval receiver there — so the override supplies the base, not the lexical prefix.
-            singleton_prefix = singleton_class_prefix(node, owner_prefix)
+            singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix)
             if singleton_prefix
               walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc, source_path)
               return
@@ -2238,7 +2267,8 @@ module Rigor
                                      def_nodes_acc, source_path, def_owner_prefix)
         end
         self_prefix = def_owner_prefix || qualified_prefix
-        eval_prefix = eval_receiver_prefix(node, self_prefix) || self_prefix
+        eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
+                                           in_singleton: in_singleton_class) || self_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         node.block.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, eval_in_singleton, methods_acc, def_nodes_acc,
@@ -2327,14 +2357,18 @@ module Rigor
       #     as `Foo.<name>` exactly as for a plain constant read.
       #   - Any other expression (variable, method call) returns nil
       #     so the walker falls through and skips the body.
-      def singleton_class_prefix(node, qualified_prefix)
-        return qualified_prefix if node.expression.is_a?(Prism::SelfNode)
+      def singleton_class_prefix(node, self_prefix, lexical_prefix)
+        return self_prefix if node.expression.is_a?(Prism::SelfNode)
 
         rendered = singleton_receiver_constant_name(node.expression)
         return nil unless rendered
 
-        if !qualified_prefix.empty? && qualified_prefix.last == rendered
-          qualified_prefix
+        # Same lexical rule {eval_receiver_prefix} applies: `class << Y` resolves `Y`
+        # through the write site's nesting, never through the eval-derived self —
+        # `class << Y` inside `M::Y.class_eval` at top level opens the TOP-LEVEL `Y`'s
+        # singleton.
+        if !lexical_prefix.empty? && lexical_prefix.last == rendered
+          lexical_prefix
         else
           rendered.split("::")
         end
@@ -2767,7 +2801,8 @@ module Rigor
           # under an empty prefix so defs record a nil owner and never join another class's ordering
           # scan (containment still answers). Inside an eval body `class << self` opens the
           # RECEIVER's singleton, so the owner override supplies the base.
-          prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix) || []
+          prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
+                                          qualified_prefix) || []
           walk_deferred_body(node.body, prefix, true, inside_deferred, ranges) if node.body
           return
         end
@@ -2932,7 +2967,8 @@ module Rigor
         # the block is the enclosing eval's receiver, so the enclosing def-owner supplies
         # the base for `self` / bare / `self::` receivers.
         self_prefix = def_owner_prefix || qualified_prefix
-        eval_prefix = eval_receiver_prefix(node, self_prefix) || []
+        eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
+                                           in_singleton: in_singleton_class) || []
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         block.parameters&.rigor_each_child do |child|
           walk_deferred_ranges(child, qualified_prefix, eval_in_singleton, inside_deferred, [],
@@ -2946,28 +2982,37 @@ module Rigor
 
       # The owner an eval-family block body evaluates under, given the enclosing body's SELF
       # prefix — `def_owner_prefix || qualified_prefix` at the call sites, because `self`
-      # inside an eval body is the enclosing eval's receiver, not the lexical class. A bare
-      # or `self` receiver keeps that self — `class_eval`'s self IS the block's self — and a
-      # constant receiver names its own class, the same convention {singleton_class_prefix}
-      # applies to `class <<`. A receiver that renders no static path — a variable, a call,
-      # a dynamic-base `expr::Bar` — is DECLINED like {constant_path_write_key} declines
-      # dynamic write targets: `qualified_name`'s lenient render would drop the dynamic
-      # segment and file the body's defs under a class the eval never opened.
-      def eval_receiver_prefix(node, self_prefix)
+      # inside an eval body is the enclosing eval's receiver, not the lexical class — and the
+      # LEXICAL prefix, which answers the constant-receiver case: constant lookup in an eval
+      # body stays lexical, so `Y.class_eval` written inside `M::Y.class_eval` at top level
+      # re-opens the TOP-LEVEL `Y`, never `M::Y` again (a class is not a member of its own
+      # constant table). A bare or `self` receiver keeps the enclosing self — `class_eval`'s
+      # self IS the block's self — and a constant receiver names its own class, the same
+      # convention {singleton_class_prefix} applies to `class <<`. A receiver that renders no
+      # static path — a variable, a call, a dynamic-base `expr::Bar` — is DECLINED like
+      # {constant_path_write_key} declines dynamic write targets: `qualified_name`'s lenient
+      # render would drop the dynamic segment and file the body's defs under a class the eval
+      # never opened.
+      def eval_receiver_prefix(node, self_prefix, lexical_prefix, in_singleton: false)
         receiver = node.receiver
         return self_prefix if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
         # `self::Foo` / `self::Foo::Bar` names the enclosing self's path — the same
-        # resolution {constant_path_write_key} gives a `self::` write target.
+        # resolution {constant_path_write_key} gives a `self::` write target. Inside a
+        # `class <<` body self is a singleton the walk cannot name — the read raises
+        # NameError at runtime unless the constant lives on that singleton — so the
+        # receiver declines there rather than filing the body under the lexical class.
         if (tail = self_anchored_tail(receiver))
-          return self_prefix + tail
+          return nil if in_singleton
+
+          return collapse_object_owner(self_prefix + tail)
         end
 
         rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
         return nil unless rendered
 
-        if !self_prefix.empty? && self_prefix.last == rendered
-          self_prefix
+        if !lexical_prefix.empty? && lexical_prefix.last == rendered
+          lexical_prefix
         else
           rendered.split("::")
         end
@@ -2985,6 +3030,14 @@ module Rigor
           current = current.parent
         end
         current.is_a?(Prism::SelfNode) ? segments : nil
+      end
+
+      # `Object`'s constants ARE the top-level constants — every discovery table keys them
+      # bare, the same collapse {self_write_name} applies — so a `self::`-anchored path
+      # rooted at `Object` drops the segment rather than filing under a name nothing else
+      # produces.
+      def collapse_object_owner(prefix)
+        prefix.first == OBJECT_OWNER ? prefix[1..] : prefix
       end
 
       # Whether an eval-family call's block rebinds `self` to the receiver spelled in source — false
@@ -3042,7 +3095,8 @@ module Rigor
           end
         when Prism::SingletonClassNode
           if node.body
-            singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix)
+            singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
+                                                      qualified_prefix)
             if singleton_prefix
               walk_singleton_body(node.body, singleton_prefix, true, accumulator)
               return
@@ -3082,7 +3136,8 @@ module Rigor
           walk_singleton_def_nodes(arg, qualified_prefix, in_singleton_class, accumulator, def_owner_prefix)
         end
         self_prefix = def_owner_prefix || qualified_prefix
-        eval_prefix = eval_receiver_prefix(node, self_prefix) || self_prefix
+        eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
+                                           in_singleton: in_singleton_class) || self_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         body = node.block.body
         if body.is_a?(Prism::StatementsNode)
@@ -3631,7 +3686,8 @@ module Rigor
         accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
       end
 
-      def walk_class_includes(node, qualified_prefix, current_class, accumulator)
+      def walk_class_includes(node, qualified_prefix, current_class, accumulator,
+                              singleton_self: false)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -3647,15 +3703,20 @@ module Rigor
           # methods, not the instance surface this table feeds. Descending with no owner keeps any nested
           # declaration walked (a `ClassNode` child sets its own owner) while the mixin calls in the
           # singleton body record nothing, which is what `extends` is for — and since #915 the extend walk
-          # does take them, so the form is recorded rather than dropped.
+          # does take them, so the form is recorded rather than dropped. `self` inside is
+          # the singleton — a `self::` receiver below raises NameError at runtime, so it
+          # declines rather than resolving against the enclosing class.
           current_class = nil
+          singleton_self = true
         when Prism::CallNode
           record_mixin_call(node, current_class, accumulator)
-          return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator)
+          return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator,
+                                          singleton_self)
         end
 
         node.rigor_each_child do |child|
-          walk_class_includes(child, qualified_prefix, current_class, accumulator)
+          walk_class_includes(child, qualified_prefix, current_class, accumulator,
+                              singleton_self: singleton_self)
         end
       end
 
@@ -3670,18 +3731,22 @@ module Rigor
       # An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
       # nothing: the class exists but this walk cannot name it, and naming the lexical enclosure instead is
       # the one answer Ruby is guaranteed not to have written.
-      def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator)
-        # `current_class` is the enclosing body's self — an eval block's own receiver, so a
-        # `self::`-anchored receiver inside one resolves against it.
-        rebound = rebound_block_self(node, qualified_prefix, nil, nil, current_class&.split("::"))
+      def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator, singleton_self)
+        rebound = rebound_block_self(node, qualified_prefix, nil, nil,
+                                     rebound_self_base(current_class, singleton_self))
         node.rigor_each_child do |child|
+          rebinds_self = rebound && child.is_a?(Prism::BlockNode)
           owner =
-            if rebound && child.is_a?(Prism::BlockNode)
+            if rebinds_self
               rebound == OPAQUE_SELF ? nil : rebound
             else
               current_class
             end
-          walk_class_includes(child, qualified_prefix, owner, accumulator)
+          # A rebound block's own self is the receiver again — the singleton marker dies
+          # with the enclosing `class <<` body it described.
+          child_singleton = singleton_self && !rebinds_self
+          walk_class_includes(child, qualified_prefix, owner, accumulator,
+                              singleton_self: child_singleton)
         end
       end
 
@@ -3711,7 +3776,8 @@ module Rigor
         accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
       end
 
-      def walk_class_extends(node, qualified_prefix, current_class, accumulator, in_singleton: false)
+      def walk_class_extends(node, qualified_prefix, current_class, accumulator, in_singleton: false,
+                             singleton_self: false)
         return unless node.is_a?(Prism::Node)
         # `END { ... }` runs at interpreter exit — nothing inside it executes during the class
         # body, so its `module_function` / `extend` calls cannot reshape the singleton surface.
@@ -3733,16 +3799,20 @@ module Rigor
           # their own owner, so the marker cannot leak past the singleton body it belongs to.
           in_singleton = node.expression.is_a?(Prism::SelfNode)
           current_class = nil unless in_singleton
+          # `self` inside is the singleton — a `self::` receiver below raises NameError at
+          # runtime, so it declines rather than resolving against the enclosing class.
+          singleton_self = true
         when Prism::CallNode
           record_extend_call(node, current_class, accumulator, in_singleton: in_singleton)
           if eval_block_call?(node)
             return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
-                                          in_singleton: in_singleton)
+                                          in_singleton: in_singleton, singleton_self: singleton_self)
           end
         end
 
         node.rigor_each_child do |child|
-          walk_class_extends(child, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
+          walk_class_extends(child, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton, singleton_self: singleton_self)
         end
       end
 
@@ -3751,16 +3821,18 @@ module Rigor
       # keeps the enclosing owner (the deliberately over-approximate direction this table already
       # takes). A bare or `self` receiver keeps the singleton flag too — `class << self`'s eval
       # block opens the singleton's body, so `include` inside is still the singleton-side edge.
-      def walk_eval_extends_call(node, qualified_prefix, current_class, accumulator, in_singleton:)
-        eval_class = eval_receiver_name(node, qualified_prefix, current_class&.split("::")) || current_class
+      def walk_eval_extends_call(node, qualified_prefix, current_class, accumulator, in_singleton:,
+                                 singleton_self: false)
+        eval_class = eval_receiver_name(node, qualified_prefix, current_class&.split("::"),
+                                        in_singleton: singleton_self) || current_class
         eval_in_singleton = eval_body_singleton?(node, in_singleton)
         if node.receiver
           walk_class_extends(node.receiver, qualified_prefix, current_class, accumulator,
-                             in_singleton: in_singleton)
+                             in_singleton: in_singleton, singleton_self: singleton_self)
         end
         node.arguments&.arguments&.each do |arg|
           walk_class_extends(arg, qualified_prefix, current_class, accumulator,
-                             in_singleton: in_singleton)
+                             in_singleton: in_singleton, singleton_self: singleton_self)
         end
         node.block.rigor_each_child do |child|
           walk_class_extends(child, qualified_prefix, eval_class, accumulator,
@@ -3772,8 +3844,9 @@ module Rigor
       # receiver is not nameable ({#eval_receiver_prefix} spelled as a name). `self_prefix` is the
       # enclosing body's self — the owner the extends walk already tracks — so a `self` / bare /
       # `self::` receiver inside an eval body names the enclosing eval's class.
-      def eval_receiver_name(node, qualified_prefix, self_prefix = nil)
-        prefix = eval_receiver_prefix(node, self_prefix || qualified_prefix)
+      def eval_receiver_name(node, qualified_prefix, self_prefix = nil, in_singleton: false)
+        prefix = eval_receiver_prefix(node, self_prefix || qualified_prefix, qualified_prefix,
+                                      in_singleton: in_singleton)
         prefix && !prefix.empty? ? prefix.join("::") : nil
       end
 
@@ -3872,7 +3945,7 @@ module Rigor
           end
         when Prism::SingletonClassNode
           if node.body
-            singleton_prefix = singleton_class_prefix(node, owner_prefix)
+            singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix)
             if singleton_prefix
               walk_method_visibilities(node.body, singleton_prefix, true, :public, accumulator)
               return current_visibility
@@ -3930,7 +4003,8 @@ module Rigor
                                    accumulator, def_owner_prefix)
         end
         self_prefix = def_owner_prefix || qualified_prefix
-        eval_prefix = eval_receiver_prefix(node, self_prefix) || self_prefix
+        eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
+                                           in_singleton: in_singleton_class) || self_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         node.block.rigor_each_child do |child|
           walk_method_visibilities(child, qualified_prefix, eval_in_singleton, :public, accumulator,
@@ -5054,10 +5128,21 @@ module Rigor
       # `||=` constant write, a `ConstantTargetNode` under a `MultiWriteNode` (`A, B = :x, :y`), a `self::X =`
       # whose target renders no qualified name, and the inner write of a chain (`C = D = :x`), which is why a
       # `ConstantWriteNode` descends into its own rvalue instead of returning.
-      def walk_constant_write_census(node, qualified_prefix, tables, self_owner = nil, meta_owner = nil)
+      def walk_constant_write_census(node, qualified_prefix, tables, self_owner = nil, meta_owner = nil,
+                                     singleton_self: false)
         return unless node.is_a?(Prism::Node)
 
         case node
+        when Prism::SingletonClassNode
+          # `self` inside is the singleton — a `self::`-anchored eval receiver below
+          # declines rather than resolving against the enclosing class.
+          walk_constant_write_census(node.expression, qualified_prefix, tables, self_owner,
+                                     meta_owner, singleton_self: singleton_self)
+          if node.body
+            walk_constant_write_census(node.body, qualified_prefix, tables, self_owner,
+                                       meta_owner, singleton_self: true)
+          end
+          return
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
           if child_prefix
@@ -5068,10 +5153,8 @@ module Rigor
           census_constant_write(node, qualified_prefix, tables, self_owner)
         end
 
-        # `self_owner` is the enclosing body's self — an eval block's own receiver — so a
-        # `self::`-anchored receiver inside one resolves against it; an OPAQUE self stays opaque.
-        self_base = self_owner.is_a?(String) ? self_owner.split("::") : self_owner
-        rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner, self_base)
+        rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner,
+                                     rebound_self_base(self_owner, singleton_self))
         # A `ConstantWriteNode`'s only child is its rvalue, so this reaches exactly the call whose block the
         # constant names — and nil everywhere else, leaving every other descent as it was.
         #
@@ -5083,8 +5166,11 @@ module Rigor
         child_meta_owner = meta_new_block_owner(node, qualified_prefix)
         child_meta_owner ||= meta_owner unless unwrap_freeze_tail(node).equal?(node)
         node.rigor_each_child do |child|
-          owner = rebound && child.is_a?(Prism::BlockNode) ? rebound : self_owner
-          walk_constant_write_census(child, qualified_prefix, tables, owner, child_meta_owner)
+          rebinds_self = rebound && child.is_a?(Prism::BlockNode)
+          owner = rebinds_self ? rebound : self_owner
+          child_singleton = singleton_self && !rebinds_self
+          walk_constant_write_census(child, qualified_prefix, tables, owner, child_meta_owner,
+                                     singleton_self: child_singleton)
         end
       end
 

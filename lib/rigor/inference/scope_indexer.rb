@@ -286,9 +286,11 @@ module Rigor
       # pair the fold with a table a different parse produced, as {#merge_ancestry_tables} is.
       def merge_extend_tables(default_scope, root)
         file_extends = build_discovered_extends(root)
+        # The table stores singleton-ancestor search order, so the file under analysis — the
+        # later-loading contribution for a reopened class — prepends over the cross-file seed.
         merged = default_scope.discovered_extends.merge(
           file_extends
-        ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
+        ) { |_class, cross_file, per_file| (per_file + cross_file).uniq }
         [file_extends, merged]
       end
 
@@ -4191,6 +4193,14 @@ module Rigor
         additions.each { |cn, mods| target[cn] = ((target[cn] || []) + mods).uniq }
       end
 
+      # The `extends` half cannot share {#accumulate_module_lists}: that table stores
+      # singleton-ancestor search order ({#record_extend_targets}), so a file scanned later
+      # contributes NEARER entries for a reopened class — prepend, matching the per-statement
+      # convention. `includes` stays append because its table keeps call order instead.
+      def accumulate_extend_lists(target, additions)
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
+      end
+
       # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed
       # bundle: the plain-data tables verbatim, the def-node tables re-expressed as `[node_id, name,
       # fingerprint]` triples (the path is the bundle key), the class-source names (path implicit), and the
@@ -4364,7 +4374,7 @@ module Rigor
         acc[:superclasses].merge!(superclasses)
         merge_header_nestings(acc[:header_nestings], header_nestings)
         accumulate_module_lists(acc[:includes], includes)
-        accumulate_module_lists(acc[:extends], build_discovered_extends(root))
+        accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
                              acc[:compact_headers])
         merge_constant_literal_tables(acc, root, path)

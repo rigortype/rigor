@@ -579,10 +579,21 @@ module Rigor
           # resolve against the receiver (`SubHash#clear` → `SubHash`, `SubStr#force_encoding` →
           # `SubStr`, `MyError#exception` → `MyError`), which is what CRuby does.
           #
-          # Unwrapping is deliberately shallow — the top-level type plus union members and the inside of
-          # an optional. A class named only inside a type ARGUMENT (`-> Array[Hash[K, V]]`) describes the
-          # elements, not the returned object, and declining on it would be over-broad. An `Alias` that
-          # expands to the owner is not followed; that is a known gap in the FN direction.
+          # The test looks for the owner ANYWHERE in the return type, type arguments included. A first
+          # draft unwrapped only the top level, unions and optionals, on the reasoning that a class named
+          # inside `Array[...]` describes the elements rather than the returned object — true, and beside
+          # the point, because the ELEMENTS are subclass instances too. `Pathname#children: () ->
+          # Array[Pathname]` hands back an array of `SubPath`s (likewise `entries`, `each_child`,
+          # `ascend`, `descend`, `find`; only `glob` yields a plain `Pathname`), so
+          # `sub.children.first.own_method` fired the same `call.undefined-method` one level down.
+          # `Date#step`, `Date#upto` and `Set#classify` are the same family and escaped only by the shape
+          # of their declarations.
+          #
+          # The cost of the deeper walk is in the direction WD7 already accepts: `SubStr#chars` →
+          # `Array[String]` now declines although CRuby really does yield plain `String`s. `keys`,
+          # `to_a` and `classify` are unaffected, their arguments being type variables or `self`.
+          #
+          # An `Alias` that expands to the owner is not followed; that is a known gap in the FN direction.
           def returns_the_walked_ancestry?(definition, owner, environment)
             names = [owner.to_s.delete_prefix("::"), *rbs_instance_ancestor_names(owner, environment)].to_set
             method_types = definition.respond_to?(:method_types) ? definition.method_types : nil
@@ -590,28 +601,31 @@ module Rigor
 
             method_types.any? do |method_type|
               return_type = method_type.type.respond_to?(:return_type) ? method_type.type.return_type : nil
-              returned_class_names(return_type).any? { |name| names.include?(name) }
+              mentions_class?(return_type, names)
             end
           rescue StandardError
             # A signature whose return type cannot be read is a gap, and a gap declines.
             true
           end
 
-          # The class names an RBS return type can denote for the OBJECT that comes back, unwrapping a
-          # union and an optional and nothing else. See {returns_the_walked_ancestry?}.
-          def returned_class_names(type, depth = 0)
-            return [] if type.nil? || depth > RETURN_TYPE_UNWRAP_DEPTH
+          # Whether any of `names` appears as a class instance anywhere in `type`, descending through
+          # every child an RBS type exposes — union members, the inside of an optional, and type
+          # ARGUMENTS. See {returns_the_walked_ancestry?}.
+          def mentions_class?(type, names, depth = 0)
+            return false if type.nil? || depth > RETURN_TYPE_UNWRAP_DEPTH
+            return true if own_class_name_matches?(type, names)
+            return false unless type.respond_to?(:each_type)
 
-            case type
-            when ::RBS::Types::ClassInstance then [type.name.to_s.delete_prefix("::")]
-            when ::RBS::Types::Optional then returned_class_names(type.type, depth + 1)
-            when ::RBS::Types::Union then type.types.flat_map { |member| returned_class_names(member, depth + 1) }
-            else []
-            end
+            type.each_type.any? { |child| mentions_class?(child, names, depth + 1) }
           end
 
-          # A union of optionals of unions is not a thing anyone writes; the cap is a loop guard.
-          RETURN_TYPE_UNWRAP_DEPTH = 4
+          def own_class_name_matches?(type, names)
+            type.is_a?(::RBS::Types::ClassInstance) && names.include?(type.name.to_s.delete_prefix("::"))
+          end
+
+          # A guard against a pathological or cyclic signature, not a semantic limit: real return types
+          # nest a level or two (`Array[Pathname]`, `Hash[Symbol, Array[String]]`).
+          RETURN_TYPE_UNWRAP_DEPTH = 8
           private_constant :RETURN_TYPE_UNWRAP_DEPTH
 
           # Issue #992's surface mark: a `Klass.include(M)` / `.prepend(M)` / `class_eval` written

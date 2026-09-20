@@ -85,7 +85,7 @@ deliberately does not open.
 | `class_name` is itself RBS-known | the direct lookup already had authority — and a PARTIAL project sidecar that declares the class without its superclass, which is kramdown's case |
 | an ADR-26 plugin-declared open receiver | a surface larger than its declarations |
 | the walked ancestor, or the class the declaration is written on, is not core / stdlib | `< ActionController::Base` (no RBS at all) and `< Prism::Visitor` (a gem that ships RBS) — slice 3's question |
-| **the declaration RETURNS the walked owner or one of the owner's own RBS ancestors** | see WD7 — this is the decline the first draft lacked, and the one that fired `call.undefined-method` on working code |
+| **the declaration's return type NAMES the walked owner or one of the owner's own RBS ancestors, anywhere including inside a type argument** | see WD7 — this is the decline the first draft lacked, and the one that fired `call.undefined-method` on working code |
 | an issue #992 `ENVELOPE_DYNAMIC_MARK` on the receiver or a source ancestor | a `Klass.include(M)` / `class_eval` written OUTSIDE the class body, which can add members the in-body walks never see |
 | an ADR-17 `pre_eval:` patch declares the name on the receiver, on a SOURCE ancestor between it and the owner, or on any RBS ancestor of the owner | adopting a declaration for a method the project has replaced |
 | the subclass or a nearer SOURCE ancestor declares the name ([ADR-110](110-inherited-declaration-precedence.md)) | answering about a method that never runs |
@@ -113,18 +113,35 @@ a CLOSED surface — so `sub.merge({}).own_method` drew an `error`-severity `cal
 working code. That is precisely the wrong-precise propagation the boundary section below names, and a
 first draft of this slice shipped it.
 
+**The test is for the owner ANYWHERE in the return type, type arguments included.** A first draft
+unwrapped only the top level, unions and optionals, reasoning that a class named inside `Array[...]`
+describes the elements rather than the returned object. True, and beside the point: the ELEMENTS are
+subclass instances too. `Pathname#children: () -> Array[Pathname]` hands back an array of
+`SubPath`s — verified against the interpreter, as are `entries`, `each_child`, `ascend`, `descend`
+and `find`; only `glob` yields a plain `Pathname` — so `sub.children.first.own_method` fired the same
+diagnostic one level down. `Date#step`, `Date#upto` and `Set#classify` are the same family and
+escaped the shallow test only by the shape of their declarations.
+
 RBS cannot distinguish the two families: `String#upcase: () -> String` really does return a plain
 `String` for a subclass (Ruby 3.0 changed that) while `Hash#merge: () -> Hash[K, V]` really does
 return the subclass, and the two declarations are the same shape. The alternative — substituting the
-receiver, as if the declaration read `-> self` — would be right for `merge` and wrong for `upcase`,
-and its wrongness is not purely a false negative: a `Nominal[SubStr]` that is really a `String`
-narrows an `is_a?` guard and can reach `clause.unreachable` on a branch the runtime takes. DECLINE is
-master's `Dynamic[top]`, so it provably cannot regress a corpus target, and that is the ADR-5 answer.
+receiver, as if the declaration read `-> self` — would be right for `merge` and wrong for `upcase`.
+Its wrongness is also not confined to method lookup: a `Nominal[SubStr]` that is really a `String` is
+a claim the narrowing and reachability rules read too, so the error mode is not bounded to a missed
+diagnostic the way a plain `Dynamic[top]` is. DECLINE is master's answer, so it provably cannot
+regress a corpus target, and under ADR-5 that settles it even where the wider blast radius is a
+principle rather than a demonstrated firing.
 
-The cost is real and is stated rather than hidden: `SubStr#upcase` no longer resolves. `-> self` and
-`-> instance` returns are untouched and keep their precision, because those already substitute the
-receiver: `SubHash#clear` → `SubHash`, `SubStr#force_encoding` → `SubStr`, `MyError#exception` →
-`MyError`, all of which match CRuby.
+**The cost is the whole owner-returning surface, and it is stated rather than hidden.** Not just
+`SubStr#upcase`: an `Array` subclass loses `map / select / sort / first(n)`, a `Hash` subclass
+`to_h / select / reject / invert / compact`, a `String` subclass `+ * sub gsub strip to_s chars`,
+plus `Exception#cause`, `Time#+ -` and `Set#divide`. Those answer `Dynamic[top]`, which is what they
+answered before this ADR, so the slice's measured gains sit entirely outside that surface —
+`has_key?`, `size`, `message`, `backtrace`, `scan`, `pos`, `length`, `keys`.
+
+`-> self` and `-> instance` returns are untouched and keep their precision, because those already
+substitute the receiver: `SubHash#clear` → `SubHash`, `SubStr#force_encoding` → `SubStr`,
+`MyError#exception` → `MyError`, all of which match CRuby.
 
 **WD6 — core / stdlib membership is read off the declaration, not a list.**
 `RbsLoader#core_or_stdlib_class?` tests a class's primary declaration's file against the `rbs` gem's
@@ -160,8 +177,11 @@ receiver alone.
   ship no `sig/` measures the gem-RBS declines vacuously. The gem-shipping-RBS decline
   (`< Prism::Visitor`), the `pre_eval:` decline and the outside-the-body-`include` decline are pinned
   by fixture, not by corpus. **The 14-target corpus gate did not catch WD7's false positive either**:
-  no target happened to contain a `sub.<base-returning method>.<sub-only method>` chain. A green
-  corpus gate is evidence that nothing regressed on those targets, not that the rule is sound.
+  no target happened to contain a `sub.<base-returning method>.<sub-only method>` chain, and it did
+  not catch WD7's nested-argument half (`sub.children.first.<sub-only method>`) either. A green
+  corpus gate is evidence that nothing regressed on those targets, not that the rule is sound. Both
+  halves were found by review against the interpreter, which is the check that actually discriminates
+  here.
 - **kramdown, the sweep's second-largest named population, is NOT fixed by this slice.**
   `Kramdown::Utils::StringScanner` is declared by kramdown's own
   `sig/kramdown/utils/string_scanner.rbs`, which omits the `< ::StringScanner` superclass, so the

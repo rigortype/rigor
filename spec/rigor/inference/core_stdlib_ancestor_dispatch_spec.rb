@@ -186,6 +186,40 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
       expect(types).to eq(["Dynamic[top]"] * 4)
     end
 
+    # The same defect one level down, inside a type ARGUMENT. `Pathname#children: () ->
+    # Array[Pathname]` hands back an array of SUBCLASS instances — verified against the interpreter,
+    # as are `entries`, `each_child`, `ascend`, `descend` and `find`; only `glob` yields a plain
+    # `Pathname`. A first draft unwrapped only the top level and fired here.
+    it "declines when the owner appears inside a type argument, not only at the top level" do
+      types = dumps(<<~RUBY, prelude: %(require "pathname"\n))
+        class SubPath < Pathname
+          def probe
+            dump_type(children)
+            dump_type(children.first)
+          end
+        end
+      RUBY
+      expect(types).to eq(["Dynamic[top]", "Dynamic[top]"])
+    end
+
+    it "fires nothing downstream of a nested owner return either" do
+      source = <<~RUBY
+        require "pathname"
+
+        class SubPath < Pathname
+          def extra = 1
+
+          def probe
+            children.first.extra
+            children.each { |c| c.extra }
+            each_child { |c| c.extra }
+            ascend.first.extra
+          end
+        end
+      RUBY
+      expect(rules(source)).not_to include("call.undefined-method")
+    end
+
     it "fires nothing downstream of such a return — the ADR-5 case that forced the decline" do
       source = <<~RUBY
         require "pathname"

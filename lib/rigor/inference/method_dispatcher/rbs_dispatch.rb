@@ -592,20 +592,29 @@ module Rigor
             end
           end
 
-          # Run-scoped memo for the whole decision. Every call site of a class asks the same
-          # `(class, method)` question, and the answer is a pure function of the frozen discovery index
-          # and the environment, so it is cacheable on their identity. A run that is RECORDING ADR-46
+          # Memo for the whole decision. Every call site of a class asks the same `(class, method)`
+          # question, and the answer is a pure function of the frozen discovery index and the
+          # environment, so it is cacheable on their identity. A run that is RECORDING ADR-46
           # dependency edges bypasses it: the shadow probes above read the project's method tables, and
           # a memo would swallow that edge for every file after the first.
+          #
+          # ONE slot, replaced rather than accumulated — see {ExternalAncestorResolution}'s twin for
+          # the measurement. A `Scope` hands each analysed file its own discovery index, so an
+          # identity-keyed store would pin every file's index, and every RBS definition resolved
+          # against it, for the length of the run.
           CORE_STDLIB_ANCESTOR_MEMO_KEY = :__rigor_core_stdlib_ancestor_dispatch__
           private_constant :CORE_STDLIB_ANCESTOR_MEMO_KEY
 
           def core_stdlib_memo(environment, scope)
             return nil if Rigor::Analysis::DependencyRecorder.active?
 
-            store = (Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY] ||= {}.compare_by_identity)
-            by_discovery = (store[scope.discovery] ||= {}.compare_by_identity)
-            by_discovery[environment] ||= {}
+            discovery = scope.discovery
+            slot = Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY]
+            unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
+              slot = [discovery, environment, {}]
+              Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY] = slot
+            end
+            slot[2]
           end
 
           # BFS over the scope's as-written superclass table, yielding every resolved ancestor name.

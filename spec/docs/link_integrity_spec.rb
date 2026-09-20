@@ -79,19 +79,23 @@ module LinkIntegrityHelpers
   end
 end
 
+# The docs that actually generate a link-checking example below: not excluded, and carrying at least one
+# relative link to check. Hoisted to a constant so the guard on its size can read it from inside an example.
+LINK_INTEGRITY_LINKED_DOCS = begin
+  helper = Object.new.extend(LinkIntegrityHelpers)
+  Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].select do |md_path|
+    next false if md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/").match?(LINK_INTEGRITY_EXCLUDE)
+
+    helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
+  end
+end.freeze
+
 RSpec.describe "documentation link integrity" do
   extend LinkIntegrityHelpers
   include LinkIntegrityHelpers
 
-  Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].each do |md_path|
+  LINK_INTEGRITY_LINKED_DOCS.each do |md_path|
     rel = md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")
-    next if rel.match?(LINK_INTEGRITY_EXCLUDE)
-
-    pre_check = extract_relative_links(
-      File.read(md_path, encoding: "utf-8"),
-      File.dirname(md_path)
-    )
-    next if pre_check.empty?
 
     it "#{rel} — all relative links exist" do
       broken = extract_relative_links(
@@ -102,6 +106,55 @@ RSpec.describe "documentation link integrity" do
                         "Broken links in #{md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")}:\n" +
                         broken.map { |t| "  → #{t.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")} " }.join("\n")
     end
+  end
+
+  # The per-file examples above are generated at load time, so a scan that matches nothing produces NO
+  # example and this file reports green having checked nothing — moving `docs/` aside takes it from 251
+  # examples to 3, with no failure and no count anyone asserts. The self-referential scan below already
+  # carries this guard for its own corpus, and `packaged_link_integrity_spec.rb` carries it for both of
+  # its own; this is the same pin for the larger corpus here.
+  #
+  # A floor rather than an exact count, because this corpus DOES grow: every new document with a relative
+  # link adds one. Set close to the current 248 on purpose. 230 was still too loose: `docs/design/` (17)
+  # and `docs/type-specification/` (18, the BINDING spec) each fit inside the slack, so either could be
+  # excluded and land exactly on the boundary, green.
+  it "generates a link-checking example for a plausible number of docs, so the above is not vacuous" do
+    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 240
+  end
+
+  # Counting documents is not enough: the link extractor is a single point of failure that the document
+  # count cannot see through. Relaxing the fenced-code stripper to `/```.*```/m` — a plausible
+  # simplification — takes the links actually checked from 2899 to 2439 while only 7 documents drop out,
+  # so 16% of the corpus silently stops being verified and every floor above still passes.
+  #
+  # The slack is sized for a structural loss, not a nibble: every extractor change that drops a whole
+  # SHAPE of link goes red (tables −408, list items −614, `..` paths −1336, the greedy stripper −449),
+  # while a 2% trim does not. It is deliberately not tighter, because `docs/adr/README.md` alone carries
+  # 116 links and rewriting that index is a legitimate edit that should not have to touch this number.
+  it "extracts a plausible number of links, so a weakened extractor cannot quietly shrink the corpus" do
+    helper = Object.new.extend(LinkIntegrityHelpers)
+    total = LINK_INTEGRITY_LINKED_DOCS.sum do |md_path|
+      helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).size
+    end
+
+    expect(total).to be >= 2700
+  end
+
+  # The glob cannot silently miss a new document, but the EXCLUDE can silently drop a whole subtree, and
+  # it is the one line an author edits to make a noisy directory go away: adding `manual/` to it takes the
+  # scan from 248 documents to 200 with no failure. So state what the exclusion is allowed to cover rather
+  # than only how much survives it. `docs/notes/` records what a URL said at the time and the frozen
+  # changelog archives are a historical record — rewriting either to satisfy a gate would falsify it.
+  it "excludes nothing beyond docs/notes/ and the frozen changelog archives" do
+    excluded = Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")]
+               .map { |path| path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/") }
+               .grep(LINK_INTEGRITY_EXCLUDE)
+    unexpected = excluded.reject { |rel| rel.start_with?("notes/") || rel.match?(/\ACHANGELOG-0\.\d+\.x\.md\z/) }
+
+    expect(unexpected).to be_empty,
+                          "LINK_INTEGRITY_EXCLUDE has grown past the two surfaces it documents, so " \
+                          "these documents' links are no longer checked by anything:\n" +
+                          unexpected.map { |rel| "  → #{rel}" }.join("\n")
   end
 
   # #438: a self-referential GitHub URL names a ref in THIS repository, so it is checkable offline — and it is

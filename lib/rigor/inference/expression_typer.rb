@@ -2165,16 +2165,40 @@ module Rigor
       OVERRIDE_GATE_CACHE_KEY = :__rigor_overridable_method_gate__
       private_constant :OVERRIDE_GATE_CACHE_KEY
 
-      # Run-scoped memo for {#overridden_in_project?}, keyed (like `class_graph_buckets`) by the identity of
-      # the frozen discovery trio so a new analysis generation lands in a fresh bucket, then nested `kind →
-      # owner → method_name`. The predicate is a pure function of those tables. Nesting avoids allocating a
-      # composite cache key on the hot path (the gate runs on every adopted self-call return), so a
-      # steady-state hit is three identity hash reads + two string/symbol hash reads with zero allocation.
+      # Memo for {#overridden_in_project?}, nested `kind → owner → method_name`. The predicate is a pure
+      # function of the scope's frozen discovery tables, so that index's *identity* is what says whether a
+      # bucket still applies. Nesting under `kind` and `owner` avoids allocating a composite cache key on
+      # the hot path (the gate runs on every adopted self-call return), so a steady-state hit is one
+      # `equal?` check and three keyed hash reads with zero allocation.
+      #
+      # The key is the whole {Scope::DiscoveryIndex}, NOT the `discovered_def_nodes` /
+      # `discovered_superclasses` / `discovered_includes` trio the walk is usually described by — the same
+      # key, for the same reason, as {#class_graph_buckets}. {#related_to_owner?} reaches
+      # {Scope#ancestor_name_candidates} and {Scope#known_user_class?}, which read
+      # `discovered_header_nestings` and `discovered_methods` as well, so a trio key would let an index
+      # that swapped only one of those serve an answer computed against the old table. Over `lib`+`plugins`
+      # the two keys switch the same 113 times, so correctness here is free.
+      #
+      # ONE slot, replaced rather than accumulated — the same shape as
+      # {MethodDispatcher::RbsDispatch}'s `core_stdlib_memo`. A `Scope` merges its file's discovery with the
+      # project pre-pass, so every analysed file gets a fresh index: an identity-keyed *store* grew one
+      # bucket per file and, because the key IS the index, pinned every file's whole discovery index for the
+      # length of the run — 109 live buckets over `lib`+`plugins`, one per distinct trio at every key level,
+      # holding 418 answers between them (211 instance, 207 singleton).
+      #
+      # What the store bought for that was one bucket's worth of cross-file reuse, not 109: only the
+      # project-seed scope recurs, because {Analysis::Runner} types each file's pre-passes under it before
+      # {ScopeIndexer} merges the file's own discovery in. A bucket is two small hashes, so giving that up
+      # is free — unlike {#method_definers_index} below, whose bucket costs a full table scan and which is
+      # keyed and bounded differently for exactly that reason.
       def override_gate_buckets
-        store = (Thread.current[OVERRIDE_GATE_CACHE_KEY] ||= {}.compare_by_identity)
-        by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
-        by_super = (by_def[scope.discovered_superclasses] ||= {}.compare_by_identity)
-        by_super[scope.discovered_includes] ||= { instance: {}, singleton: {} }
+        discovery = scope.discovery
+        slot = Thread.current[OVERRIDE_GATE_CACHE_KEY]
+        unless slot && slot[0].equal?(discovery)
+          slot = [discovery, { instance: {}, singleton: {} }]
+          Thread.current[OVERRIDE_GATE_CACHE_KEY] = slot
+        end
+        slot[1]
       end
 
       # True when some discovered project class/module — distinct from `owner` — redefines `(method_name,
@@ -2214,14 +2238,65 @@ module Rigor
       METHOD_DEFINERS_INDEX_KEY = :__rigor_method_definers_index__
       private_constant :METHOD_DEFINERS_INDEX_KEY
 
-      # Per-generation `method_name (Symbol) → [owner names]` inverted index over the instance / singleton
-      # def tables, memoised by the identity of the def table it inverts (a new analysis generation lands in
-      # a fresh bucket). The toplevel sentinel is excluded — a toplevel `def` has no class ancestry and so
-      # can never be an override.
+      # The second way. Two flat thread slots rather than one slot holding an array of ways: a
+      # `Thread.current[KEY] ||= […]` seeds the store with an array LITERAL, which folds to a tuple whose
+      # elements are pinned, and the engine then reads the `way[0].equal?(…)` guards below as always-falsey
+      # (`make check` fires `flow.always-truthy-condition` on this very file). Two keys read as two plain
+      # `Thread.current` reads and keep the guards analysable.
+      METHOD_DEFINERS_INDEX_ALT_KEY = :__rigor_method_definers_index_alt__
+      private_constant :METHOD_DEFINERS_INDEX_ALT_KEY
+
+      # `method_name (Symbol) → [owner names]` inverted index over the instance / singleton def tables,
+      # valid for exactly as long as the table it inverts: a new analysis generation, or a `Scope` that swaps
+      # its index through {Scope#with_discovery}, needs a fresh one. The toplevel sentinel is excluded — a
+      # toplevel `def` has no class ancestry and so can never be an override.
+      #
+      # Bounded to TWO slots, replaced rather than accumulated. This memo is the costliest member of the
+      # per-file-store family, because it does not hold a handful of resolved answers but a whole inverted
+      # index built over a file's merged def table: an identity-keyed *store* held 135 of them over
+      # `lib`+`plugins` — 744,431 index rows, 50.0 MB in the index hashes and their owner-name arrays alone,
+      # on top of the def tables the keys pinned.
+      #
+      # Two, and not the one slot the cheaper memos in this family use, because the tables ALTERNATE.
+      # {Analysis::Runner} types each file's pre-passes under the project-seed scope and its main pass under
+      # the file's merged tables. Where a file reaches this gate from BOTH phases the request sequence is
+      # `seed, file_1, seed, file_2, …`, and a single slot evicts the seed's index once per file and
+      # rebuilds it on the next — a full scan of the seed's whole def table, every file. 200 synthetic
+      # files shaped that way measured +22.6 % allocations against the store, which a bounded slot must not
+      # cost. Two ways — a most-recently-used slot and one alternate, swapped on a hit in the alternate —
+      # cover that period-2 shape exactly: the same 200 files rebuild 201 times, matching the store.
+      #
+      # Wider rotations are not covered, and do not need to be. On `lib`+`plugins` only 6 of the 109 gating
+      # files consult the seed's table, so its uses are separated by many other files' tables and fall out
+      # of both ways: five rebuilds of a 700-entry table remain, about 4 ms. Retention is bounded at two
+      # generations either way, which is what the store failed to do.
+      #
+      # A way is `[def_nodes, singleton_def_nodes, instance_index, singleton_index]`, so it keys on BOTH def
+      # tables and a gate call that alternates instance and singleton kinds within one file does not rebuild
+      # either. Each index is still built lazily: a run that never asks a singleton question never pays for
+      # the singleton index.
+      #
+      # DELIBERATELY not keyed on the whole {Scope::DiscoveryIndex}, unlike {#class_graph_buckets} and
+      # {#override_gate_buckets} above. {#build_method_definers_index} reads the ONE table it is handed and
+      # nothing else, so the def tables are already the complete key, and the index object is a strictly
+      # narrower one: the project-seed scope carries a fresh index per file while its def tables stay the
+      # same object. Over the 200 synthetic files above, an index-keyed memo misses all 400 times where a
+      # def-table-keyed one misses 201 — it would rebuild the seed's 934-entry table once per file and hand
+      # back the +22.6 % this bound exists to avoid. Check that number before widening this key to match
+      # its siblings.
       def method_definers_index(kind)
-        table = kind == :singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
-        store = (Thread.current[METHOD_DEFINERS_INDEX_KEY] ||= {}.compare_by_identity)
-        store[table] ||= build_method_definers_index(table)
+        def_nodes = scope.discovered_def_nodes
+        singleton_def_nodes = scope.discovered_singleton_def_nodes
+        way = Thread.current[METHOD_DEFINERS_INDEX_KEY]
+        unless way && way[0].equal?(def_nodes) && way[1].equal?(singleton_def_nodes)
+          alt = Thread.current[METHOD_DEFINERS_INDEX_ALT_KEY]
+          alt = nil unless alt && alt[0].equal?(def_nodes) && alt[1].equal?(singleton_def_nodes)
+          Thread.current[METHOD_DEFINERS_INDEX_ALT_KEY] = way
+          way = alt || [def_nodes, singleton_def_nodes, nil, nil]
+          Thread.current[METHOD_DEFINERS_INDEX_KEY] = way
+        end
+        singleton = kind == :singleton
+        way[singleton ? 3 : 2] ||= build_method_definers_index(singleton ? singleton_def_nodes : def_nodes)
       end
 
       def build_method_definers_index(table)

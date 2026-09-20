@@ -597,6 +597,28 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "still binds DeclBuilder when `def self.sig` is defined AFTER the sig call" do
+      # `def` takes effect at execution: a `sig { ... }` call that precedes the later override
+      # still resolves through `extend T::Sig` at runtime, so the block binding must not be
+      # suppressed by a def the discovery table already knows about.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "still resolves `sig` when the class is also declared in project RBS" do
       # `class F` in `sig/` makes F RBS-known, but its RBS need not repeat the source
       # `extend T::Sig` — the bridge still honours the source edge.

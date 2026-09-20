@@ -47,7 +47,7 @@ module Rigor
         # by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
         entries.each do |entry|
-          narrowed = entry_self_type_for(entry, singleton_name, nominal_name, call_node.name,
+          narrowed = entry_self_type_for(entry, singleton_name, nominal_name, call_node,
                                          scope, environment)
           return narrowed if narrowed
         end
@@ -58,9 +58,10 @@ module Rigor
       # receivers exist only inside an already-narrowed `instance_eval` body — they can only re-enter a
       # *named instance*-binding entry (`params`-family nesting on `Nominal[ParamsScope]`).
       # `:receiver_instance` and `singleton(...)` entries keep their Singleton-only contract.
-      def entry_self_type_for(entry, singleton_name, nominal_name, method_name, scope, environment)
+      def entry_self_type_for(entry, singleton_name, nominal_name, call_node, scope, environment)
         return nil if singleton_name.nil? && !entry.named_instance_binding?
 
+        method_name = call_node.name
         receiver_name = singleton_name || nominal_name
         matched = receiver_class_inherits_from?(receiver_name, entry.receiver_constraint, environment, scope)
         # `extend M` lifts M's instance surface onto the class object — `class F; extend T::Sig;
@@ -70,7 +71,7 @@ module Rigor
         # whose module defines the same name owns the call and picks the block's self at runtime.
         if !matched && singleton_name
           matched = singleton_extends_reach?(receiver_name, entry.receiver_constraint, method_name,
-                                             scope, environment)
+                                             call_node, scope, environment)
         end
         return nil unless matched
 
@@ -153,7 +154,7 @@ module Rigor
       # stored in singleton-ancestor search order and resolve through `ancestor_name_candidates`;
       # RBS-side `extend` edges come from `Environment#singleton_extended_modules`, which is how
       # `class Doc < T::ImmutableStruct` picks up `T::ImmutableStruct`'s own `extend T::Sig`.
-      def singleton_extends_reach?(class_name, constraint, method_name, scope, environment)
+      def singleton_extends_reach?(class_name, constraint, method_name, call_node, scope, environment)
         return false if scope.nil?
 
         supers = scope.discovered_superclasses
@@ -166,10 +167,11 @@ module Rigor
 
           seen[current] = true
           # The class's own singleton defs sit ahead of EVERY `extend` in its singleton ancestry —
-          # `class F; extend T::Sig; def self.sig(&b); end; end` calls F's method, not T::Sig's.
-          return current == constraint if scope.discovered_method?(current, method_name, :singleton)
+          # `class F; extend T::Sig; def self.sig(&b); end; end` calls F's method, not T::Sig's —
+          # once the def has executed; a `def` written after this call has not run yet.
+          return current == constraint if scope.singleton_def_shadows_call?(current, method_name, call_node)
 
-          owner = extended_module_call_owner(current, extends, method_name, scope, environment)
+          owner = extended_module_call_owner(current, extends, method_name, call_node, scope, environment)
           return owner == constraint || rbs_inherits?(owner, constraint, environment) if owner
 
           raw = supers[current]
@@ -185,27 +187,31 @@ module Rigor
       # superclass). An `extend` edge binds the first resolution candidate that exists at runtime —
       # a project class or an RBS-known name — and an edge whose bound module lacks the method simply
       # does not answer, so the search moves to the next edge, exactly like the singleton ancestry.
-      def extended_module_call_owner(current, extends, method_name, scope, environment)
+      def extended_module_call_owner(current, extends, method_name, call_node, scope, environment)
         (extends[current] || []).each do |mod_name|
           owner = scope.ancestor_name_candidates(current, mod_name).find do |candidate|
             scope.known_user_class?(candidate) ||
               Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
           end
-          next if owner.nil? || !extended_module_defines?(owner, method_name, scope, environment)
+          next if owner.nil? ||
+                  !extended_module_defines?(owner, method_name, call_node, scope, environment)
 
           return owner
         end
         (environment.singleton_extended_modules(current) || []).each do |mod_name|
-          return mod_name if extended_module_defines?(mod_name, method_name, scope, environment)
+          return mod_name if extended_module_defines?(mod_name, method_name, call_node,
+                                                      scope, environment)
         end
         nil
       end
 
       # `extend M` answers through M's INSTANCE surface — a source `def` inside the module or an RBS
       # instance declaration (which already resolves through M's own `include`s, so `T::Generic`'s
-      # `include T::Helpers` answers `abstract!` on the extend edge).
-      def extended_module_defines?(mod_name, method_name, scope, environment)
-        return true if scope.discovered_method?(mod_name, method_name, :instance)
+      # `include T::Helpers` answers `abstract!` on the extend edge). The source `def` counts only
+      # once it has executed: a module reopened AFTER the call site still lacks the method at call
+      # time, so the walk moves on exactly as the runtime ancestry would.
+      def extended_module_defines?(mod_name, method_name, call_node, scope, environment)
+        return true if scope.instance_def_shadows_call?(mod_name, method_name, call_node)
 
         !Rigor::Reflection.instance_method_definition(mod_name, method_name,
                                                       environment: environment).nil?

@@ -248,9 +248,11 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           [raw.to_s.sub(/\A::/, "")]
         end
         allow(scope).to receive(:known_user_class?) { |name| known.include?(name) }
-        allow(scope).to receive(:discovered_method?) do |klass, meth, kind|
-          table = kind == :singleton ? singleton_defines : defines
-          (table[klass] || []).include?(meth)
+        allow(scope).to receive(:singleton_def_shadows_call?) do |klass, meth, _node|
+          (singleton_defines[klass] || []).include?(meth)
+        end
+        allow(scope).to receive(:instance_def_shadows_call?) do |klass, meth, _node|
+          (defines[klass] || []).include?(meth)
         end
         scope
       end

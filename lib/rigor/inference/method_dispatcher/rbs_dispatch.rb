@@ -269,7 +269,8 @@ module Rigor
             return nil unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope,
+                                              call_node: call_node)
             return nil unless method_definition
             return nil if public_only && method_private?(method_definition)
             # Issue #823 — a declaration that states the member's presence and parameters but not its
@@ -428,7 +429,7 @@ module Rigor
               method_definition.accessibility == :private
           end
 
-          def lookup_method(environment, class_name, kind, method_name, scope = nil)
+          def lookup_method(environment, class_name, kind, method_name, scope = nil, call_node: nil)
             direct = lookup_method_on(environment, class_name, kind, method_name)
             return direct if direct
 
@@ -446,7 +447,8 @@ module Rigor
             # `T::Sig#sig`. Same contract as the superclass bridge: only allow-listed (manifest
             # `rbs_complete_extends:`) modules qualify, so open hierarchies stay on Dynamic.
             if kind == :singleton
-              mod = allowed_rbs_complete_extended_module(environment, class_name, method_name, scope)
+              mod = allowed_rbs_complete_extended_module(environment, class_name, method_name, scope,
+                                                         call_node)
               return lookup_method_on(environment, mod, :instance, method_name) if mod
             end
 
@@ -755,7 +757,8 @@ module Rigor
           # in the body) still carries the source edge — the runtime ancestry contains the module
           # either way, so withholding the bridge would leave a real `sig` opaque. A nearer source
           # `def self.x` still shadows any bridged module method.
-          def allowed_rbs_complete_extended_module(environment, class_name, method_name, scope)
+          def allowed_rbs_complete_extended_module(environment, class_name, method_name, scope,
+                                                   call_node = nil)
             return nil if scope.nil?
 
             registry = environment&.plugin_registry
@@ -770,7 +773,10 @@ module Rigor
               next if current.nil? || seen[current]
 
               seen[current] = true
-              return nil if scope.discovered_method?(current, method_name, :singleton)
+              # The class's own `def self.x` sits ahead of every `extend` — once it has run.
+              # `singleton_def_shadows_call?` orders the def against the call site, so a `def self.sig`
+              # written AFTER this `sig {}` does not suppress the bridge.
+              return nil if scope.singleton_def_shadows_call?(current, method_name, call_node)
 
               resolved = rbs_complete_extended_module_for(current, extends, environment, scope,
                                                           registry, method_name)

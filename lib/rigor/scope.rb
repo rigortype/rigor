@@ -780,6 +780,44 @@ module Rigor
       site
     end
 
+    # Issue #1097 — whether `class_name`'s own singleton `def method_name` has RUN by the time `call_node`
+    # executes. Such a def precedes every `extend` in the singleton ancestry, so once it exists it owns the
+    # call — but `sig { ... }` written BEFORE `def self.sig` in the same body still resolves through the
+    # already-extended module, because `def` takes effect at execution. The site table stores
+    # `"path:line"`: a def in the file under analysis shadows only when it starts on an earlier-or-equal
+    # line, and a def in another file can never be ordered against the call site, so it conservatively
+    # counts as shadowing. A nil `call_node` (position-less dispatch probes) does the same.
+    def singleton_def_shadows_call?(class_name, method_name, call_node)
+      site = user_singleton_def_site_for(class_name, method_name)
+      # A discovered def with no recorded site (an `attr_*` sibling, a bundle seed that predates the
+      # table) cannot be ordered — treat it as shadowing rather than pretending it does not exist.
+      return discovered_method?(class_name, method_name, :singleton) if site.nil?
+
+      def_shadows_call?(site, call_node)
+    end
+
+    # The instance-side twin of {#singleton_def_shadows_call?}: whether `class_name`'s `def method_name`
+    # has run by call time — for `extend M` edges, where M's instance surface is what answers.
+    def instance_def_shadows_call?(class_name, method_name, call_node)
+      site = user_def_site_for(class_name, method_name)
+      return discovered_method?(class_name, method_name, :instance) if site.nil?
+
+      def_shadows_call?(site, call_node)
+    end
+
+    # Shared ordering half of the two `*_def_shadows_call?` predicates, over a resolved `"path:line"`
+    # site. Only a same-file site can be ordered against the call at all.
+    def def_shadows_call?(site, call_node)
+      return false if site.nil?
+      return true if call_node.nil?
+
+      path, _sep, line = site.rpartition(":")
+      return true unless path == source_path
+
+      line.to_i <= call_node.location.start_line
+    end
+    private :def_shadows_call?
+
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —
     # per-file plus the cross-file project pre-pass — and consumed by

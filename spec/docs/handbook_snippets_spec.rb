@@ -1,26 +1,34 @@
 # frozen_string_literal: true
 
 # Verify that every executable code block in docs/handbook/ stays accurate as the engine evolves.
-# "Executable" means the block contains an `assert_type(...)` or `dump_type(...)` call — the two Rigor
-# introspection helpers that pin inferred types in prose.
+# "Executable" means the block CALLS `assert_type(...)` or `dump_type(...)` — the two Rigor introspection
+# helpers that pin inferred types in prose. "Calls" is decided by parsing the block, not by searching its
+# text: an occurrence inside a comment, a string, a heredoc or after `__END__` is not an assertion, and
+# each of those is a separate rule for a line scanner but the same answer for a parser.
 #
 # A block that fires `assert.type-mismatch` is a documentation error: the prose claims a type that the engine
-# no longer produces.
+# no longer produces. A block that does not PARSE is worse than either, because it evaluates none of its own
+# assertions and so passes a mismatch check trivially — that is checked first, and against Prism directly
+# rather than against the analyzer's diagnostics, which are silenced entirely for a source that fails to
+# parse and contains `%>` (`Rigor::Analysis::ErbTemplateDetector`).
 #
 # Blocks that use only the `#=> dump_type: TypeString` annotation convention (documentation-only comments, not
 # method calls) are not tested here — they are presentation markers for `rigor annotate`.
 
 require "spec_helper"
+require "prism"
 
 HANDBOOK_SNIPPETS_DIR = File.expand_path("../../docs/handbook", __dir__)
 
 module HandbookSnippets
-  # Fences that may legitimately contain the text `assert_type(` without being a Ruby snippet: a block
-  # quoting CLI output or a diagnostic. Everything else carrying an introspection call is either checked
-  # (```ruby) or a mis-spelled snippet. A BARE fence is deliberately not on this list — a bare block
-  # holding `assert_type(` is far more likely to be a snippet that lost its language tag than output, and
-  # the repair is one word — but that is the one arm that could fail a correct document, so if a bare
-  # block ever legitimately quotes such a diagnostic, move it to ```text rather than widening this list.
+  HELPERS = %i[assert_type dump_type].freeze
+
+  # Fences that may legitimately contain a call to an introspection helper without being a Ruby snippet: a
+  # block quoting CLI output or a diagnostic. Everything else carrying such a call is either run (```ruby)
+  # or a mis-spelled snippet. A BARE fence is deliberately not on this list — a bare block calling
+  # `assert_type` is far more likely to be a snippet that lost its language tag than output, and the repair
+  # is one word — but that is the one arm that could fail a correct document, so if a bare block ever
+  # legitimately quotes such a call, move it to ```text rather than widening this list.
   OUTPUT_FENCES = %w[text sh diff].freeze
 
   module_function
@@ -35,9 +43,9 @@ module HandbookSnippets
   # shift the way a regex pairing `^`-anchored closers does — a single indented closer left a later
   # block unmatched and silently disarmed the audit for the rest of the file.
   #
-  # Marker handling is deliberately literal: `~~~ruby` is a Ruby fence and is run, while ````ruby (four
-  # backticks, a wrapper for markdown that itself contains fences) is not, and is flagged if it carries
-  # an introspection call. Neither spelling occurs in the handbook today.
+  # Marker handling is deliberately literal: ```` ``` ```` and `~~~` are both fences and both close a
+  # block, so `~~~ruby` is run like ```ruby, while ````ruby (four backticks, a wrapper for markdown that
+  # itself contains fences) is neither. Neither spelling occurs in the handbook today.
   def blocks(path)
     found = []
     info = nil
@@ -66,8 +74,9 @@ module HandbookSnippets
     found
   end
 
-  # The blocks the gate runs: fenced exactly ```ruby, and calling an introspection helper. `index` counts
-  # every ```ruby block in the file, executable or not, so a snippet's number matches what a reader counts.
+  # The blocks the gate runs: fenced `ruby` (either marker), and calling an introspection helper. `index`
+  # counts every `ruby`-fenced block in the file, executable or not, so a snippet's number matches what a
+  # reader counts in the source.
   def extract_snippets(path)
     idx = 0
     blocks(path).filter_map do |info, block|
@@ -80,30 +89,33 @@ module HandbookSnippets
     end
   end
 
-  # Line-wise and comment-aware. A substring test over the whole block kept counting a snippet whose
-  # assertions had all been commented out — the block stays, the count stays 20, and nothing is
-  # verified. That is not hypothetical: `6a5225a1` took the corpus from 24 to 20 by DELETING
-  # `assert_type` lines so that failing snippets would pass, and commenting them out instead would
-  # have moved nothing.
+  # Whether the block CALLS a helper, decided from the AST. A textual test counted an assertion that had
+  # been disabled: first `#`-commented, then — once `#` was special-cased — `=begin`/`=end`, a trailing
+  # comment, a heredoc, a string, `__END__`. Each is a separate rule to write and the next one is always
+  # the one nobody thought of; a parser answers all of them at once. A block that does not parse still
+  # yields a partial tree, so a ```ruby snippet broken by a typo is still counted and still reaches the
+  # parse check rather than quietly leaving the corpus.
   def executable?(block)
-    block.each_line.any? do |line|
-      stripped = line.sub(/\A\s+/, "")
-      next false if stripped.start_with?("#")
+    calls_helper?(Prism.parse(block).value)
+  end
 
-      stripped.include?("assert_type(") || stripped.include?("dump_type(")
-    end
+  def calls_helper?(node)
+    return false unless node.is_a?(Prism::Node)
+    return true if node.is_a?(Prism::CallNode) && node.receiver.nil? && HELPERS.include?(node.name)
+
+    node.compact_child_nodes.any? { |child| calls_helper?(child) }
   end
 
   # Executable blocks the scan above will not run, stated as an allow-list rather than a list of known
   # mis-spellings: ```rb was the spelling that prompted this, but ```irb and ```console were equally
-  # invisible, and enumerating mistakes only ever covers the ones already made. (`~~~ruby` needs no
-  # entry — the scanner accepts `~~~` as a fence marker, so such a block is RUN rather than flagged.)
+  # invisible, and enumerating mistakes only ever covers the ones already made. The allow-list is consulted
+  # BEFORE the block is parsed, so a ```text block quoting a diagnostic is never even inspected.
   def misspelled_fences
     markdown_files.flat_map do |path|
       blocks(path).filter_map do |info, block|
-        next unless executable?(block)
         next if info == "ruby"
         next if OUTPUT_FENCES.include?(info.split(/\s+/).first.to_s.downcase)
+        next unless executable?(block)
 
         "  → #{File.basename(path)}: ```#{info.empty? ? '(no language)' : info} — respell as ```ruby"
       end
@@ -125,18 +137,20 @@ RSpec.describe "handbook executable snippets", :aggregate_failures do
     context File.basename(path) do
       snippets.each do |snip|
         it "snippet #{snip[:index]} — parses, and no assert.type-mismatch" do
+          # Checked FIRST, separately, and against Prism rather than the analyzer. A snippet that does not
+          # parse evaluates none of its own assertions, so the mismatch filter below finds nothing and the
+          # example passes having verified nothing — a deliberately wrong assertion behind a stray `def (`
+          # was green. Asking the analyzer is not enough: for a source that fails to parse AND contains
+          # `%>`, `ErbTemplateDetector` makes it return no diagnostics at all, so even a rule-less-
+          # diagnostic check reports clean.
+          parse_errors = Prism.parse(snip[:source]).errors
+          expect(parse_errors).to be_empty,
+                                  "#{snip[:file]} snippet #{snip[:index]} does not parse, so its " \
+                                  "assertions were never evaluated:\n" +
+                                  parse_errors.map { |e| "  line #{e.location.start_line}: #{e.message}" }
+                                              .join("\n")
+
           result = analyze(snip[:source])
-
-          # Checked FIRST, and separately. A snippet that does not parse never evaluates its own
-          # `assert_type`, so the mismatch filter below finds nothing and the example passes having
-          # verified nothing — a wrong assertion hidden behind a stray `def (` was green. A parse
-          # failure surfaces as a diagnostic with no rule.
-          unparsed = result.diagnostics.select { |d| d.rule.nil? }
-          expect(unparsed).to be_empty,
-                              "#{snip[:file]} snippet #{snip[:index]} does not parse, so its " \
-                              "assertions were never evaluated:\n" +
-                              unparsed.map { |d| "  line #{d.line}: #{d.message}" }.join("\n")
-
           mismatches = result.diagnostics.select { |d| d.rule == "assert.type-mismatch" }
           expect(mismatches).to be_empty,
                                 "#{snip[:file]} snippet #{snip[:index]}:\n" +
@@ -151,12 +165,12 @@ RSpec.describe "handbook executable snippets", :aggregate_failures do
   # 20 examples to 0 with no failure, and no one asserts the count (CI's shard-coverage job compares the
   # shards to each other, and `binpacker`'s "discovered" figure is a count of FILES, not examples).
   #
-  # Exact, not a floor. The count has been 20 at every one of the last fourteen release tags while 33
-  # commits touched `docs/handbook`, so this is a static corpus and an exact pin has never had anything to
-  # churn on. A floor is what a GROWING corpus gets (`plugin_io_boundary_spec.rb` guards 169 files with a
-  # floor of 50); carrying that shape over here bought nothing and cost everything — at `>= 15` any single
-  # handbook file, or five snippets, could be deleted green. The edit that changes this number belongs in
-  # the diff next to the edit that changes the handbook.
+  # Exact, not a floor. The count is not static — it moved eight times between 2026-05-07 and 2026-06-11
+  # (17 → 19 → 21 → 22 → 17 → 18 → 20 → 24 → 20) — but it has been 20 since, and every one of those moves
+  # belonged in the diff that caused it. A floor is what a GROWING corpus gets
+  # (`plugin_io_boundary_spec.rb` guards 169 files with a floor of 50, one per plugin); carrying that
+  # shape over here bought nothing and cost everything — at `>= 15` any single handbook file, or five
+  # snippets, could be deleted green.
   it "runs every executable snippet in the handbook, and there are exactly 20 of them" do
     expect(HANDBOOK_SNIPPET_COUNT).to eq(20)
   end

@@ -126,13 +126,18 @@ RSpec.describe "documentation link integrity" do
   # count cannot see through. Relaxing the fenced-code stripper to `/```.*```/m` — a plausible
   # simplification — takes the links actually checked from 2899 to 2439 while only 7 documents drop out,
   # so 16% of the corpus silently stops being verified and every floor above still passes.
+  #
+  # The slack is sized for a structural loss, not a nibble: every extractor change that drops a whole
+  # SHAPE of link goes red (tables −408, list items −614, `..` paths −1336, the greedy stripper −449),
+  # while a 2% trim does not. It is deliberately not tighter, because `docs/adr/README.md` alone carries
+  # 116 links and rewriting that index is a legitimate edit that should not have to touch this number.
   it "extracts a plausible number of links, so a weakened extractor cannot quietly shrink the corpus" do
     helper = Object.new.extend(LinkIntegrityHelpers)
     total = LINK_INTEGRITY_LINKED_DOCS.sum do |md_path|
       helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).size
     end
 
-    expect(total).to be >= 2800
+    expect(total).to be >= 2700
   end
 
   # The glob cannot silently miss a new document, but the EXCLUDE can silently drop a whole subtree, and

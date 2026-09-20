@@ -112,9 +112,30 @@ RSpec.describe "documentation link integrity" do
   # example and this file reports green having checked nothing — moving `docs/` aside takes it from 251
   # examples to 3, with no failure and no count anyone asserts. The self-referential scan below already
   # carries this guard for its own corpus, and `packaged_link_integrity_spec.rb` carries it for both of
-  # its own; this is the same pin for the larger corpus here. A floor with slack, per that house style.
+  # its own; this is the same pin for the larger corpus here.
+  #
+  # A floor rather than an exact count, because this corpus DOES grow: every new document with a relative
+  # link adds one. It is set close to the current 248 on purpose — a loose floor here would only detect
+  # losing `docs/adr/` (111 of the 248), and no other subtree is large enough to trip one.
   it "generates a link-checking example for a plausible number of docs, so the above is not vacuous" do
-    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 150
+    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 230
+  end
+
+  # The glob cannot silently miss a new document, but the EXCLUDE can silently drop a whole subtree, and
+  # it is the one line an author edits to make a noisy directory go away: adding `manual/` to it takes the
+  # scan from 248 documents to 200 with no failure. So state what the exclusion is allowed to cover rather
+  # than only how much survives it. `docs/notes/` records what a URL said at the time and the frozen
+  # changelog archives are a historical record — rewriting either to satisfy a gate would falsify it.
+  it "excludes nothing beyond docs/notes/ and the frozen changelog archives" do
+    excluded = Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")]
+               .map { |path| path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/") }
+               .grep(LINK_INTEGRITY_EXCLUDE)
+    unexpected = excluded.reject { |rel| rel.start_with?("notes/") || rel.match?(/\ACHANGELOG-0\.\d+\.x\.md\z/) }
+
+    expect(unexpected).to be_empty,
+                          "LINK_INTEGRITY_EXCLUDE has grown past the two surfaces it documents, so " \
+                          "these documents' links are no longer checked by anything:\n" +
+                          unexpected.map { |rel| "  → #{rel}" }.join("\n")
   end
 
   # #438: a self-referential GitHub URL names a ref in THIS repository, so it is checkable offline — and it is

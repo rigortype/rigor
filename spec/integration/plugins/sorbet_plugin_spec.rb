@@ -713,6 +713,103 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "orders against F's OWN def, not another class's earlier `def self.sig`" do
+      # A's def precedes the call in the file but belongs to a different owner — at runtime F's `sig`
+      # call resolves through `extend T::Sig` because F's own def has not run yet.
+      source = <<~RUBY
+        class A
+          def self.sig(&blk) = class_exec(&blk)
+        end
+
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "shadows when a `module_function` toggle hides inside a nested `if`" do
+      # `module_function` inside a container still flips the module's mode when it runs — a later
+      # `def sig` is a module function, so M.sig exists by the time the `sig` call evaluates.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          if true
+            module_function
+          end
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows via `module_function :sig` — the retro-install happens at the call" do
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          def sig(&blk) = class_exec(&blk)
+          module_function :sig
+          sig { params(x: Integer).bogus_terminus }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "does not let a def nested inside another def order an eager call" do
+      # `def self.sig` inside `def self.m` only installs when `m` is invoked — it never runs during
+      # the class body, so the eager `sig` call resolves through `T::Sig`.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            def self.sig(&blk) = class_exec(&blk)
+          end
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "orders a `sig` call eagerly inside a `class_eval` block" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          class_eval { sig { params(x: Integer).bogus_terminus } }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
     it "still binds DeclBuilder when `def self.sig` follows the call on the SAME line" do
       # Statement order within a line is execution order — `sig {}; def self.sig` resolves through
       # `T::Sig` at runtime. Ordering by def-site line alone would treat the def as shadowing.

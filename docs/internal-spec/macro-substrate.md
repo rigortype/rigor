@@ -71,11 +71,18 @@ rules (consistent with the rest of the plugin-contract carriers):
   decides this from `discovered_deferred_ranges`, the per-file def /
   block / lambda body-range table: a call contained in any such range
   is deferred to invocation time and is always shadowed, while an eager
-  class-body call is shadowed only by a same-name def whose start offset
-  precedes it (byte offsets, so same-line defs order correctly; the
-  earliest matching def decides, so a later redefinition cannot
-  resurrect the bridge). A cross-file def and a file the index never
-  saw both count as shadowed — the conservative direction, since
+  class-body call is shadowed only by a same-name, same-owner def whose
+  start offset precedes it (byte offsets, so same-line defs order
+  correctly; the earliest matching def decides, so a later redefinition
+  cannot resurrect the bridge; rows carry the qualified owner, so
+  another class's `def self.sig` cannot order `F`'s call). Defs nested
+  inside a deferred range — a `def` inside a method body or block —
+  install at invocation time and are excluded from ordering, while
+  `module_function` rows model the mode toggle and the `module_function
+  :x` retro-install at the call site. Eagerly-evaluated bodies are not
+  ranges: `Const = Class.new do … end` and `class_eval`-family blocks
+  run during the enclosing body. A cross-file def and a file the index
+  never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class
   F; extend T::Sig; sig { ... }; end` and `class Doc <

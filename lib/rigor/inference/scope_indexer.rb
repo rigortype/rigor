@@ -259,11 +259,13 @@ module Rigor
 
       # Issue #1097 — this file's def / block / lambda ranges merged over the cross-file seed; the
       # ordering predicates key the table by `source_path`, so the entry must exist even on a run
-      # that never built the project pre-pass.
+      # that never built the project pre-pass. When the pre-pass DID run the entry is already the
+      # identical walk product — keep it instead of re-walking the AST.
       def merge_deferred_ranges_seed(default_scope, root)
-        default_scope.discovered_deferred_ranges.merge(
-          default_scope.source_path => build_deferred_ranges(root)
-        )
+        seeded = default_scope.discovered_deferred_ranges
+        return seeded if seeded.key?(default_scope.source_path)
+
+        seeded.merge(default_scope.source_path => build_deferred_ranges(root))
       end
 
       def merge_envelope_seed(default_scope, file_envelopes)
@@ -2617,14 +2619,16 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # Issue #1097 — `[[start_offset, end_offset, name, kind], ...]` for every `def` / block / lambda
-      # body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
-      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (any def,
-      # block, or lambda — it runs at invocation time, after every class-body `def` installed) and,
-      # for an eager class-body call, where the earliest same-name def starts. Def rows carry the
-      # method name and its `:instance` / `:singleton` / `:both` (`module_function`) kind — the kind
-      # filter keeps a `def sig` from ordering `def self.sig`'s shadow question — while block and
-      # lambda rows carry nils and answer only containment.
+      # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
+      # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
+      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (it runs at
+      # invocation time, after every class-body `def` installed) and, for an eager class-body call,
+      # where the earliest same-name def OF THE SAME OWNER starts. Def rows carry the method name,
+      # its `:instance` / `:singleton` / `:both` (`module_function`) kind, and the qualified owner —
+      # the owner filter keeps `class A; def self.sig` from ordering `class F`'s `sig` call, and the
+      # kind filter keeps `def sig` from ordering `def self.sig`'s shadow question. Block / lambda /
+      # `END` rows and defs nested inside another deferred range (they install at invocation time,
+      # not during the enclosing body's own eval) carry nil name / kind / owner — containment only.
       # The two position-keyed per-file indexes: the def / block / lambda body ranges issue #1097's
       # `*_def_shadows_call?` predicates order a same-name def against, and the class-declaration
       # sites `record_class_sources` accumulates.
@@ -2636,93 +2640,208 @@ module Rigor
 
       def build_deferred_ranges(root)
         ranges = []
-        walk_deferred_ranges(root, [], false, ranges)
+        walk_deferred_ranges(root, [], false, false, [], ranges)
         ranges.freeze
       end
 
       # The deferred-ranges walk, shaped on {#walk_singleton_def_nodes}: class / module / `class <<`
-      # bodies go through {#walk_deferred_body} so a bare `module_function` toggle threads across
-      # sibling statements; every other node recurses per child. A `DefNode` records its own range
-      # AND descends — a nested `def` or block inside its body is still a range the containment half
-      # needs.
-      def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, ranges)
+      # / meta-`new` bodies go through {#walk_deferred_body}, which prescans `module_function` state;
+      # every other node recurses per child. A `DefNode` records its own range AND descends — a
+      # nested `def` or block inside its body is still a range the containment half needs.
+      def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
         return unless node.is_a?(Prism::Node)
 
-        case node
-        when Prism::ClassNode, Prism::ModuleNode
-          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-          if child_prefix
-            walk_deferred_body(node.body, child_prefix, false, ranges) if node.body
-            return
-          end
-        when Prism::SingletonClassNode
-          if node.body
-            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
-            if singleton_prefix
-              walk_deferred_body(node.body, singleton_prefix, true, ranges)
-              return
-            end
-          end
-        when Prism::DefNode
-          record_deferred_def(node, qualified_prefix, in_singleton_class, false, ranges)
-          node.rigor_each_child do |child|
-            walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
-          end
+        if CLASS_BODY_NODES.any? { |kind| node.is_a?(kind) }
+          return walk_deferred_lexical_body(node, qualified_prefix, in_singleton_class,
+                                            inside_deferred, mf_offsets, ranges)
+        end
+        if META_WRITE_NODES.any? { |kind| node.is_a?(kind) }
+          return walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                        mf_offsets, ranges)
+        end
+        if node.is_a?(Prism::DefNode)
+          record_deferred_def(node, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
+                              ranges)
+          return walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
+                                        ranges)
+        end
+        if DEFERRED_RANGE_NODES.any? { |kind| node.is_a?(kind) }
+          # Deferred: a call inside runs at invocation / interpreter-exit time. `BEGIN`
+          # (PreExecutionNode) is the opposite — eager, before the class body — and stays unlisted.
+          ranges << [node.location.start_offset, node.location.end_offset, nil, nil, nil]
+          return walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
+                                        ranges)
+        end
+        if node.is_a?(Prism::CallNode) && node.block && SELF_REBINDING_EVAL_CALLS.include?(node.name)
+          return walk_eval_block_call(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                      mf_offsets, ranges)
+        end
+
+        walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+      end
+
+      DEFERRED_RANGE_NODES = [Prism::BlockNode, Prism::LambdaNode, Prism::PostExecutionNode].freeze
+      META_WRITE_NODES = [Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
+                          Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode].freeze
+      CLASS_BODY_NODES = [Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :DEFERRED_RANGE_NODES, :META_WRITE_NODES, :CLASS_BODY_NODES
+
+      def walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                 mf_offsets, ranges)
+        node.rigor_each_child do |child|
+          walk_deferred_ranges(child, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+        end
+      end
+
+      def walk_deferred_lexical_body(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                     mf_offsets, ranges)
+        if node.is_a?(Prism::SingletonClassNode)
+          walk_deferred_ranges(node.expression, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+          # `class << <non-constant>` opens a singleton the walk cannot name — its body is walked
+          # under an empty prefix so defs record a nil owner and never join another class's ordering
+          # scan (containment still answers).
+          prefix = singleton_class_prefix(node, qualified_prefix) || []
+          walk_deferred_body(node.body, prefix, true, ranges) if node.body
           return
-        when Prism::BlockNode, Prism::LambdaNode
-          ranges << [node.location.start_offset, node.location.end_offset, nil, nil]
+        end
+
+        child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+        unless child_prefix
+          walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                 mf_offsets, ranges)
+          return
+        end
+
+        # `class Foo < expr` — a superclass expression can still hide defs and deferred calls.
+        if node.is_a?(Prism::ClassNode) && node.superclass
+          walk_deferred_ranges(node.superclass, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+        end
+        walk_deferred_body(node.body, child_prefix, false, ranges) if node.body
+      end
+
+      def walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                 mf_offsets, ranges)
+        child_prefix = meta_new_body_prefix(node, qualified_prefix)
+        call = meta_new_block_call(node)
+        unless child_prefix && call
+          walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
+                                 mf_offsets, ranges)
+          return
+        end
+
+        # `Const = Class.new do ... end` — the block IS the new class's body and runs eagerly, not a
+        # deferred range. The rvalue's receiver / arguments still get the ordinary walk.
+        if call.receiver
+          walk_deferred_ranges(call.receiver, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+        end
+        call.arguments&.arguments&.each do |arg|
+          walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
+                               ranges)
+        end
+        walk_deferred_body(meta_new_block_body(node), child_prefix, false, ranges)
+      end
+
+      # Body-level entry for a class / module / `class <<` / meta-`new` body: prescans the body's
+      # `module_function` state first ({#collect_module_function_state} — bare-call offsets plus the
+      # retro-install and `module_function def x` rows), then walks each statement with the offsets
+      # in hand. The prescan looks through nested containers (`if` / `begin` / `rescue` / blocks)
+      # because a `module_function` that RAN there still flips later defs — position, not statement
+      # nesting, is what orders it. It stays out of nested class / module / `class <<` / def bodies,
+      # where the call would target a different module.
+      def walk_deferred_body(body, qualified_prefix, in_singleton_class, ranges)
+        mf_offsets = []
+        collect_module_function_state(body, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+        statements_of(body).each do |stmt|
+          walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, false, mf_offsets, ranges)
+        end
+      end
+
+      # The `module_function` prescan over one body's subtree: bare-call offsets (defs starting after
+      # one are module functions), a `:singleton` row at each `module_function :name` call — the
+      # retro-install happens AT THE CALL, not the def — and a `:both` / `:singleton` row for a
+      # `module_function def x` argument. Nested class / module / `class <<` / def bodies are skipped:
+      # `module_function` there targets a different module. Blocks, lambdas and control-flow
+      # containers are entered — their `self` is still this module, so the call really can toggle.
+      def collect_module_function_state(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+        return unless node.is_a?(Prism::Node)
+        return if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
+                  node.is_a?(Prism::SingletonClassNode) || node.is_a?(Prism::DefNode)
+
+        if node.is_a?(Prism::CallNode) && module_function_toggle?(node)
+          collect_module_function_call(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+          return
         end
 
         node.rigor_each_child do |child|
-          walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
+          collect_module_function_state(child, qualified_prefix, in_singleton_class, mf_offsets, ranges)
         end
       end
 
-      # Statement-level counterpart of {#walk_singleton_body}: tracks the bare-`module_function`
-      # toggle so a module-function `def` records `:both`, and recurses into every other statement.
-      def walk_deferred_body(body, qualified_prefix, in_singleton_class, ranges)
-        module_function_on = false
-        statements_of(body).each do |stmt|
-          if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
-            if bare_module_function?(stmt)
-              module_function_on = true
-            else
-              # `module_function :x` carries no DefNode; `module_function def x` does — the def is a
-              # module function and its body is still a deferred range, so record/descend rather
-              # than letting the `next` swallow it.
-              stmt.arguments&.arguments&.each do |arg|
-                if arg.is_a?(Prism::DefNode)
-                  record_deferred_def(arg, qualified_prefix, in_singleton_class, true, ranges)
-                  arg.rigor_each_child do |child|
-                    walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
-                  end
-                else
-                  walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, ranges)
-                end
-              end
+      def collect_module_function_call(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
+        if bare_module_function?(node)
+          mf_offsets << node.location.start_offset
+        else
+          owner = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
+          node.arguments&.arguments&.each do |arg|
+            if arg.is_a?(Prism::DefNode)
+              kind = def_singleton?(arg, qualified_prefix, in_singleton_class) ? :singleton : :both
+              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name, kind, owner]
+            elsif (name = symbol_argument_name(arg))
+              ranges << [node.location.start_offset, node.location.end_offset, name, :singleton, owner]
             end
-            next
           end
-          if stmt.is_a?(Prism::DefNode)
-            record_deferred_def(stmt, qualified_prefix, in_singleton_class, module_function_on, ranges)
-            stmt.rigor_each_child do |child|
-              walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
-            end
-            next
-          end
-          walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, ranges)
+        end
+        return unless node.block
+
+        collect_module_function_state(node.block, qualified_prefix, in_singleton_class, mf_offsets,
+                                      ranges)
+      end
+
+      # A `class_eval` / `module_eval` / `class_exec` / `module_exec` block is NOT deferred: it runs
+      # eagerly during the receiver's call, as a class-ish body. Its defs belong to the receiver's
+      # surface, which the walk cannot always name, so they are walked under an empty prefix — a nil
+      # owner keeps them out of every class's ordering scan while their own ranges still answer
+      # containment for deeper nesting. Other block forms stay deferred: `each` / `define_method` /
+      # callbacks yield-or-store on terms syntax cannot separate, and the conservative answer there
+      # is "deferred".
+      def walk_eval_block_call(node, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+        if node.receiver
+          walk_deferred_ranges(node.receiver, qualified_prefix, in_singleton_class, inside_deferred,
+                               mf_offsets, ranges)
+        end
+        node.arguments&.arguments&.each do |arg|
+          walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
+                               ranges)
+        end
+        node.block&.rigor_each_child do |child|
+          walk_deferred_ranges(child, [], false, inside_deferred, [], ranges)
         end
       end
 
-      def record_deferred_def(def_node, qualified_prefix, in_singleton_class, module_function_on, ranges)
+      def record_deferred_def(def_node, qualified_prefix, in_singleton_class, inside_deferred,
+                              mf_offsets, ranges)
+        start = def_node.location.start_offset
+        if inside_deferred
+          ranges << [start, def_node.location.end_offset, nil, nil, nil]
+          return
+        end
+
         kind = if def_singleton?(def_node, qualified_prefix, in_singleton_class)
                  :singleton
-               elsif module_function_on
+               elsif mf_offsets.any? { |offset| offset < start }
                  :both
                else
                  :instance
                end
-        ranges << [def_node.location.start_offset, def_node.location.end_offset, def_node.name, kind]
+        owner = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
+        ranges << [start, def_node.location.end_offset, def_node.name, kind, owner]
       end
 
       # Walks every node, entering class/module/singleton-class bodies via {#walk_singleton_body} so a bare
@@ -2850,14 +2969,30 @@ module Rigor
       end
 
       # Direct statement children of a class/module body node (a `Prism::StatementsNode`, a `Prism::BeginNode` wrapping
-      # one, or a lone statement). Returns an empty list for an empty body.
+      # one, or a lone statement). A body-level `begin`'s `rescue` / `else` / `ensure` clauses are still body-level —
+      # `class F; x; rescue; def m; end; end` installs `F#m` — so their statements are included after the main list.
+      # Returns an empty list for an empty body.
       def statements_of(body)
         case body
         when Prism::StatementsNode then body.body
-        when Prism::BeginNode then statements_of(body.statements)
+        when Prism::BeginNode then statements_of(body.statements) + begin_clause_statements(body)
         when nil then []
         else [body]
         end
+      end
+
+      # The statement lists a `BeginNode` keeps off its main `statements`: every rescue clause (chained
+      # via `subsequent`), the `else` body, and the `ensure` body.
+      def begin_clause_statements(node)
+        statements = []
+        clause = node.rescue_clause
+        while clause
+          statements.concat(statements_of(clause.statements))
+          clause = clause.subsequent
+        end
+        statements.concat(statements_of(node.else_clause.statements)) if node.else_clause
+        statements.concat(statements_of(node.ensure_clause.statements)) if node.ensure_clause
+        statements
       end
 
       def record_singleton_def_node(def_node, qualified_prefix, in_singleton_class, module_function_on, accumulator)

@@ -67,8 +67,9 @@ module Rigor
           # `arr[i] = v` stores `v` as ONE element — the index arguments precede the value.
           # The splice forms store the value's ELEMENTS instead (issue #1140): `a[0, 2] = [1, 2]`
           # puts `Integer`s in the receiver, not an `Array[Integer]`. An index the engine cannot
-          # classify (`a[x] = v` with `x` untyped, or a `Range | Integer` union) may be either
-          # form, so both readings join — the union is a superset of the truth either way.
+          # classify (`a[x] = v` with `x` untyped, a `Range | Integer` union, or a splat that
+          # may vanish inside the brackets) may be either form, so both readings join — the
+          # union is a superset of the truth either way.
           case index_store_form(arg_types)
           when :splice then collection_element_types(arg_types.last)
           when :either then [arg_types.last] + collection_element_types(arg_types.last)
@@ -283,12 +284,29 @@ module Rigor
       # How an `arr[...] = v` call's index arguments place the stored value: `:splice` — the
       # value's ELEMENTS land in the receiver (`arr[i, n] = v` takes two index slots,
       # `arr[range] = v` takes a Range); `:element` — the value itself is one stored element
-      # (`arr[i] = v`); `:either` — the index cannot be classified (`a[x] = v` with `x` untyped,
-      # a splat, or a `Range | Integer` union), so the store may be either form.
+      # (`arr[i] = v`); `:either` — the store may be either form.
+      #
+      # A splat inside the brackets types as `Dynamic[top]`, indistinguishable from an untyped
+      # index, so every Dynamic leading argument counts as arity-unknown: `a[0, *xs] = v` stores
+      # `v` itself when `xs` is empty and `v`'s elements otherwise. Two or more PROVABLE index
+      # arguments are always a splice however the rest expand; one provable argument reduces to
+      # the single-index question when the maybes vanish; zero provable arguments leaves the
+      # store's form to whichever index a splat yields.
       def index_store_form(arg_types)
-        return :splice if arg_types.size > 2
+        leading = arg_types[0...-1]
+        return single_index_form(leading.first) if leading.size == 1
 
-        members = union_members(arg_types.first)
+        definite = leading.reject { |t| t.is_a?(Type::Dynamic) }
+        return :splice if definite.size >= 2
+        return :either if definite.empty?
+
+        range_index?(definite.first) ? :splice : :either
+      end
+
+      # The one-index question: a Range carrier is a splice, a definite scalar an element store,
+      # and anything between (`Dynamic`, a `Range | Integer` union) may be either.
+      def single_index_form(index_type)
+        members = union_members(index_type)
         return :splice if members.all? { |m| range_index?(m) }
         return :element if members.none? { |m| range_index?(m) || m.is_a?(Type::Dynamic) }
 

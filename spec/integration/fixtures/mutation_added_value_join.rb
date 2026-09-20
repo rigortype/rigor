@@ -67,6 +67,23 @@ def ambiguous_index(x)
   a
 end
 
+# A splat inside the brackets leaves the runtime arity open: `a[0, *xs] = v`
+# stores `v` itself when `xs` is empty and `v`'s elements otherwise. Two
+# provable index arguments stay a splice however the splat expands.
+def splat_index(xs)
+  a = []
+  a[0, *xs] = [1, 2]
+  assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", a)
+  a
+end
+
+def two_index_splat(xs)
+  a = []
+  a[0, 1, *xs] = [1, 2]
+  assert_type("Array[Dynamic[top] | Integer]", a)
+  a
+end
+
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.
 # This seam sees one store, and the widening is a one-way door, so the

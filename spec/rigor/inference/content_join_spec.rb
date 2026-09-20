@@ -193,6 +193,40 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result).to eq([])
     end
 
+    # A splat inside the brackets types as `Dynamic[top]` but can vanish at runtime, so
+    # `a[0, *xs] = v` is a scalar store when `xs` is empty — both readings must join.
+    it "joins both readings when a leading index argument may be a splat" do
+      index = Rigor::Type::Combinator.constant_of(0)
+      untyped = Rigor::Type::Combinator.untyped
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [index, untyped, array_arg])
+      expect(result).to contain_exactly(array_arg, str_type)
+    end
+
+    it "joins both readings when every index argument is untyped" do
+      untyped = Rigor::Type::Combinator.untyped
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [untyped, untyped, array_arg])
+      expect(result).to contain_exactly(array_arg, str_type)
+    end
+
+    it "stays a splice when two index arguments are provable however a splat expands" do
+      untyped = Rigor::Type::Combinator.untyped
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(
+        :array_added_elements, :[]=, [int_type, int_type, untyped, array_arg]
+      )
+      expect(result).to eq([str_type])
+    end
+
+    it "stays a splice when the single provable index is a Range" do
+      untyped = Rigor::Type::Combinator.untyped
+      range_arg = Rigor::Type::Combinator.constant_of(0..1)
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [range_arg, untyped, array_arg])
+      expect(result).to eq([str_type])
+    end
+
     it "reports the single argument for a single-value fill" do
       expect(described_class.send(:array_added_elements, :fill, [int_type])).to eq([int_type])
     end

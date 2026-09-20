@@ -21,6 +21,8 @@ locals:
   shoveled: Array[1 | 2 | Dynamic[top] | Integer]
   slotted: Array[Dynamic[top] | Integer]
   sorted: Array[1 | 2]
+  spliced: Array[Dynamic[top] | Integer]
+  spliced_range: Array[Dynamic[top] | Integer]
   stack: Array[Dynamic[top] | Integer]
   unshifted: Array[1 | 2 | Dynamic[top] | Integer]
   untouched: "[1, 2]"
@@ -32,21 +34,28 @@ assertions:
   '5': Array[Dynamic[top] | Integer]
   '6': Array[Dynamic[top] | Integer]
   '7': Array[Dynamic[top] | Integer]
-  '8': Array[Dynamic[top] | String]
+  '8': Dynamic[top] | Integer
   '9': Array[Dynamic[top] | Integer]
-  '10': Array[1 | 2 | Dynamic[top]]
-  '11': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
-  '12': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
-  '13': Array[Dynamic[top] | Integer | String]
-  '14': Array[Dynamic[top] | Integer | String]
-  '15': Array[Dynamic[top] | Integer | String]
-  '16': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
+  '10': Dynamic[top] | Integer
+  '11': Array[Array[Integer] | Dynamic[top] | Integer]
+  '12': Array[Array[Integer] | Dynamic[top] | Integer]
+  '13': Array[Dynamic[top] | Integer]
+  '14': Array[Dynamic[top] | Integer]
+  '15': Array[Dynamic[top] | String]
+  '16': Array[Dynamic[top] | Integer]
+  '17': Array[1 | 2 | Dynamic[top]]
+  '18': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
+  '19': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '20': Array[Dynamic[top] | Integer | String]
+  '21': Array[Dynamic[top] | Integer | String]
+  '22': Array[Dynamic[top] | Integer | String]
+  '23': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
     Dynamic[top]] | String]
-  '17': Array[:multi | Dynamic[top] | Symbol]
-  '18': Integer
-  '19': Array[1 | 2 | 3]
-  '20': Array[1 | 2]
-  '21': Array[1 | 2]
-  '22': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
-  '23': Array[1 | 2 | Dynamic[top] | Integer]
-  '24': "[1, 2]"
+  '24': Array[:multi | Dynamic[top] | Symbol]
+  '25': Integer
+  '26': Array[1 | 2 | 3]
+  '27': Array[1 | 2]
+  '28': Array[1 | 2]
+  '29': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
+  '30': Array[1 | 2 | Dynamic[top] | Integer]
+  '31': "[1, 2]"

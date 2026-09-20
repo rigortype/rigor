@@ -79,19 +79,23 @@ module LinkIntegrityHelpers
   end
 end
 
+# The docs that actually generate a link-checking example below: not excluded, and carrying at least one
+# relative link to check. Hoisted to a constant so the guard on its size can read it from inside an example.
+LINK_INTEGRITY_LINKED_DOCS = begin
+  helper = Object.new.extend(LinkIntegrityHelpers)
+  Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].select do |md_path|
+    next false if md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/").match?(LINK_INTEGRITY_EXCLUDE)
+
+    helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
+  end
+end.freeze
+
 RSpec.describe "documentation link integrity" do
   extend LinkIntegrityHelpers
   include LinkIntegrityHelpers
 
-  Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].each do |md_path|
+  LINK_INTEGRITY_LINKED_DOCS.each do |md_path|
     rel = md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")
-    next if rel.match?(LINK_INTEGRITY_EXCLUDE)
-
-    pre_check = extract_relative_links(
-      File.read(md_path, encoding: "utf-8"),
-      File.dirname(md_path)
-    )
-    next if pre_check.empty?
 
     it "#{rel} — all relative links exist" do
       broken = extract_relative_links(
@@ -102,6 +106,15 @@ RSpec.describe "documentation link integrity" do
                         "Broken links in #{md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")}:\n" +
                         broken.map { |t| "  → #{t.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")} " }.join("\n")
     end
+  end
+
+  # The per-file examples above are generated at load time, so a scan that matches nothing produces NO
+  # example and this file reports green having checked nothing — moving `docs/` aside takes it from 251
+  # examples to 3, with no failure and no count anyone asserts. The self-referential scan below already
+  # carries this guard for its own corpus, and `packaged_link_integrity_spec.rb` carries it for both of
+  # its own; this is the same pin for the larger corpus here. A floor with slack, per that house style.
+  it "generates a link-checking example for a plausible number of docs, so the above is not vacuous" do
+    expect(LINK_INTEGRITY_LINKED_DOCS.size).to be >= 150
   end
 
   # #438: a self-referential GitHub URL names a ref in THIS repository, so it is checkable offline — and it is

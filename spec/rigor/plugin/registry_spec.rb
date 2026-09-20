@@ -30,6 +30,13 @@ class RigorPluginRegistrySpecRbsAncestorPlugin < Rigor::Plugin::Base
            rbs_complete_ancestors: ["GraphQL::Schema::Object"])
 end
 
+# The extend-edge twin — a named plugin class declaring `rbs_complete_extends:`, for the
+# `Registry#rbs_complete_extends` / `#rbs_complete_extends?` tests.
+class RigorPluginRegistrySpecRbsExtendsPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-rbs-extends-plugin", version: "0.0.1",
+           rbs_complete_extends: ["T::Sig"])
+end
+
 # ADR-28 — a named plugin class declaring `protocol_contracts:`, for the `Registry#protocol_contracts` /
 # `#contracts_for_path` tests.
 class RigorPluginRegistrySpecContractPlugin < Rigor::Plugin::Base
@@ -246,6 +253,25 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.rbs_complete_ancestor?("GraphQL::Schema::Object")).to be(true)
       expect(registry.rbs_complete_ancestor?("String")).to be(false)
       expect(registry.rbs_complete_ancestor?(nil)).to be(false)
+    end
+  end
+
+  describe "#rbs_complete_extends / #rbs_complete_extends?" do
+    it "is empty when no plugin declares rbs_complete_extends" do
+      expect(described_class::EMPTY.rbs_complete_extends).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.rbs_complete_extends).to eq([])
+      expect(registry.rbs_complete_extends?("T::Sig")).to be(false)
+    end
+
+    it "aggregates declared rbs_complete_extends and answers the membership predicate" do
+      extends_plugin = RigorPluginRegistrySpecRbsExtendsPlugin.new(services: services)
+      registry = described_class.new(plugins: [extends_plugin])
+
+      expect(registry.rbs_complete_extends).to eq(%w[T::Sig])
+      expect(registry.rbs_complete_extends?("T::Sig")).to be(true)
+      expect(registry.rbs_complete_extends?("String")).to be(false)
+      expect(registry.rbs_complete_extends?(nil)).to be(false)
     end
   end
 

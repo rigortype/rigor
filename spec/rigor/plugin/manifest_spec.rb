@@ -317,6 +317,33 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["rbs_complete_ancestors"]).to eq(%w[GraphQL::Schema::Object])
     end
 
+    it "accepts rbs_complete_extends as an Array of module-name Strings" do
+      m = described_class.new(
+        id: "sorbet", version: "0.1.0",
+        rbs_complete_extends: ["T::Sig", "T::Helpers"]
+      )
+      expect(m.rbs_complete_extends).to eq(%w[T::Sig T::Helpers])
+      expect(m.rbs_complete_extends).to be_frozen
+    end
+
+    it "defaults rbs_complete_extends to an empty array" do
+      m = described_class.new(id: "sorbet", version: "0.1.0")
+      expect(m.rbs_complete_extends).to eq([])
+    end
+
+    it "rejects non-String / empty-String rbs_complete_extends entries" do
+      expect do
+        described_class.new(id: "sorbet", version: "0.1.0", rbs_complete_extends: [:Foo])
+      end.to raise_error(ArgumentError, /rbs_complete_extends/)
+    end
+
+    it "round-trips rbs_complete_extends through to_h" do
+      m = described_class.new(
+        id: "sorbet", version: "0.1.0", rbs_complete_extends: ["T::Sig"]
+      )
+      expect(m.to_h["rbs_complete_extends"]).to eq(%w[T::Sig])
+    end
+
     it "accepts signature_paths as an Array of relative-path Strings (ADR-25)" do
       m = described_class.new(
         id: "as", version: "0.1.0", signature_paths: ["sig", "sig/overlay"]
@@ -770,6 +797,7 @@ RSpec.describe Rigor::Plugin::Manifest do
       [:owns_receivers, [""], "non-empty String"],
       [:open_receivers, [""], "non-empty String"],
       [:rbs_complete_ancestors, [""], "non-empty String"],
+      [:rbs_complete_extends, [""], "non-empty String"],
       [:type_node_resolvers, [:x], "Rigor::Plugin::TypeNodeResolver instances"],
       [:block_as_methods, [:x], "Rigor::Plugin::Macro::BlockAsMethod instances"],
       [:heredoc_templates, [:x], "Rigor::Plugin::Macro::HeredocTemplate instances"],

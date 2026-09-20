@@ -553,6 +553,255 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # Issue #1097 — the annotation DSL EXPRESSIONS themselves type: `sig` resolves through
+  # `extend T::Sig` (manifest `rbs_complete_extends:`), the sig block's self binds to
+  # `T::Private::Methods::DeclBuilder` (`block_as_methods:`), the `T::X[...]` constructors and
+  # `T.*` functions answer through the bundled `sig/sorbet.rbs`, and the `T::Struct`/`T::Enum`
+  # families carry their macros through the `rbs_complete_ancestors` superclass bridge.
+  describe "annotation DSL surface (issue #1097)" do
+    it "resolves `sig` through `extend T::Sig` so a chained call reports NilClass" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          result = sig { returns(Integer) }
+          result.upcase
+          def run; 1; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      # `sig` typed to nil (declare_sig's real return) — `result.upcase` proves the call site is
+      # not `Dynamic[top]`, which would silence the check entirely.
+      expect(offenders.map(&:message)).to include(a_string_matching(/upcase.*for nil/))
+    end
+
+    it "binds the sig block's self to DeclBuilder so unknown builder verbs still warn" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "types `params`/`returns`/`void`/`checked`/`override`/`abstract` builder chains" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          sig { abstract.params(x: Integer).returns(String) }
+          def run(x); x.to_s; end
+          sig { override.void.checked(:never) }
+          def stop; nil; end
+          sig { overridable.returns(Integer) }
+          def retries; 0; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `T::Sig::WithoutRuntime.sig` as a module-singleton call" do
+      source = <<~RUBY
+        class Worker
+          T::Sig::WithoutRuntime.sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "types the `T::Array[...]` / `T::Hash[...]` constructors" do
+      source = <<~RUBY
+        T::Array[Integer].bogus_constructor_call
+        T::Hash[Symbol, Integer].bogus_constructor_call
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_constructor_call.*TypedArray/))
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_constructor_call.*TypedHash/))
+    end
+
+    it "resolves `T::Helpers` / `T::Generic` macros through `extend`" do
+      source = <<~RUBY
+        class Base
+          extend T::Helpers
+          extend T::Generic
+          abstract!
+          interface!
+          Elem = type_member
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `prop` / `const` on a `T::Struct` subclass" do
+      source = <<~RUBY
+        class Doc < T::Struct
+          prop :name, String
+          const :ttl, Integer
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "binds the sig block to DeclBuilder on a `T::ImmutableStruct` subclass (RBS-side extend edge)" do
+      # `T::ImmutableStruct` is the only `T::Struct`-family class that `extend`s `T::Sig` at
+      # runtime (`struct.rb`) — the match comes from that bundled-RBS edge, surfaced via
+      # `singleton_extended_modules`.
+      source = <<~RUBY
+        class Doc < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not bind `sig` on a plain `T::Struct` subclass (runtime has no extend T::Sig)" do
+      # `T::InexactStruct`/`T::Struct` carry no `extend T::Sig` — `sig` inside the body raises at
+      # runtime, so the block must NOT bind DeclBuilder (an invented edge would silently resolve
+      # a call that cannot run).
+      source = <<~RUBY
+        class Doc < T::Struct
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "continues past an allow-listed extend module that lacks the method" do
+      # `extend T::Helpers` then `extend T::Generic`: `type_member` lives on T::Generic. The
+      # bridge must search every extended module (not stop at the first allow-listed one), so the
+      # call resolves to `T::Types::TypeMember` and `bogus` reports against it.
+      source = <<~RUBY
+        class Node
+          extend T::Helpers
+          extend T::Generic
+          type_member.bogus
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus.*TypeMember/)
+      )
+    end
+
+    it "does not fall through to the global `T::Sig` when a project module owns the extend edge" do
+      # `Outer::T::Sig` is a project-defined module — `extend T::Sig` inside `Outer` binds it at
+      # runtime, so `sig` must NOT resolve through the plugin's global `T::Sig` declaration.
+      source = <<~RUBY
+        module Outer
+          module T
+            module Sig
+            end
+          end
+          class F
+            extend T::Sig
+            sig { bogus_terminus }
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "keeps a zero-arg `prop` silent on a `T::Struct` subclass (signature-reading rules stay off)" do
+      # The superclass bridge is a signature LOOKUP only — the subclass stays outside RBS, so
+      # `call.wrong-arity` does not fire on its calls (the ADR-43 contract; see plugin.md). This
+      # example pins that deliberately-lenient reading for the Struct family.
+      source = <<~RUBY
+        class Doc < T::Struct
+          prop
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select do |d|
+        %w[call.undefined-method call.wrong-arity].include?(d.rule)
+      end
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `enums` and the `new` calls inside its block on a `T::Enum` subclass" do
+      source = <<~RUBY
+        class Suit < T::Enum
+          enums do
+            Spades = new(true)
+            Hearts = new(false)
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "adopts the asserted type for `T.let` / `T.cast` (recognizer path stays authoritative)" do
+      source = <<~RUBY
+        # typed: true
+        x = T.let("hi", String)
+        x.no_such_string_method
+        y = T.cast(1, Integer)
+        y.no_such_int_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_string_method.*for String/))
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_int_method.*for Integer/))
+    end
+
+    it "keeps an undeclared `T.*` call opaque instead of firing undefined-method" do
+      source = <<~RUBY
+        T.this_does_not_exist(1)
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+  end
+
   describe "mixin chain resolution (ADR-11 slice 8)" do
     # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs declared on a `Generated*` module up to the host
     # class via the recorded `include` / `extend` chain.

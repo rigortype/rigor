@@ -29,6 +29,14 @@ module Rigor
     # The {TypeTranslator} table documents coverage. Most of Sorbet's vocabulary translates; remaining
     # gaps (`T.proc`, `T::Struct` subclasses, `T.attached_class`, etc.) degrade silently to `Dynamic[top]`.
     #
+    # Issue #1097 — the plugin also ships `sig/sorbet.rbs`, a bundled declaration of the annotation DSL
+    # surface itself: `T`'s type-expression functions, the `T::X[...]` constructors, `T::Sig`'s `sig`
+    # verb (reached via the manifest `rbs_complete_extends:` bridge over `extend T::Sig`), the
+    # `DeclBuilder` the sig block `instance_eval`s on (via `block_as_methods:`), and the
+    # `T::Struct` / `T::Enum` family (via `rbs_complete_ancestors:`). The value-side assertions
+    # (`T.let`/`T.cast`/`T.must`/…) stay recogniser-owned — RBS cannot express "return the asserted
+    # type" — and `T`'s declared surface is intentionally partial behind `open_receivers:`.
+    #
     # Architecture: per-run `Catalog` is built lazily on first access by walking every configured `paths:`
     # entry's `.rb` files plus every `rbi_paths:` entry's `.rbi` files (slice 4) via the plugin's
     # `IoBoundary`. The catalog is frozen after the first build and consulted by the `dynamic_return` rule
@@ -70,7 +78,43 @@ module Rigor
           # effect of recursing into the parent root.
           "rbi_paths" => { kind: :array, default: ["sorbet/rbi"] },
           "enforce_sigil" => { kind: :boolean, default: true }
-        }
+        },
+        # #1097 — bundled sorbet-runtime DSL surface (`sig/sorbet.rbs`). `sig` itself reaches the
+        # class object through `extend T::Sig` (or the `< T::ImmutableStruct` / `< T::Enum`
+        # family, which carry the edge themselves), which is
+        # why `rbs_complete_extends:` — the extend-edge allow-list — carries `T::Sig` /
+        # `T::Helpers` / `T::Generic`, and `rbs_complete_ancestors:` carries the Struct/Enum family
+        # for the subclass bridge.
+        signature_paths: ["sig"],
+        rbs_complete_extends: %w[T::Sig T::Helpers T::Generic],
+        rbs_complete_ancestors: %w[T::Struct T::InexactStruct T::ImmutableStruct T::Enum],
+        # `sig { ... }` bodies are `instance_eval`'d on a `DeclBuilder`
+        # (`T::Private::Methods._run_builder`), so `params` / `returns` / `void` resolve on the
+        # builder, not the enclosing class. `T::Sig::WithoutRuntime.sig` is the direct-call twin —
+        # a singleton method on the module, matching by name equality.
+        block_as_methods: [
+          Rigor::Plugin::Macro::BlockAsMethod.new(
+            receiver_constraint: "T::Sig",
+            method_names: %i[sig],
+            self_type: "T::Private::Methods::DeclBuilder"
+          ),
+          Rigor::Plugin::Macro::BlockAsMethod.new(
+            receiver_constraint: "T::Sig::WithoutRuntime",
+            method_names: %i[sig],
+            self_type: "T::Private::Methods::DeclBuilder"
+          )
+        ],
+        # The declared surface is deliberately partial — `T` is an open module whose runtime
+        # surface is much larger than the DSL (version-dependent internals, `T::Private::*`,
+        # `T::Configuration`, `T::Utils`). Open receivers keep an unmodelled `T.something` opaque
+        # rather than a `call.undefined-method` false positive. `DeclBuilder` is NOT open —
+        # `sig { typo }` is a real bug and stays a diagnostic.
+        open_receivers: %w[T T::Sig T::Sig::WithoutRuntime T::Helpers T::Generic
+                           T::Utils T::Configuration T::Private T::Private::Methods
+                           T::Props T::Props::ClassMethods T::Props::CustomType
+                           T::Types T::Types::Base T::Array T::Hash T::Set
+                           T::Enumerable T::Enumerator T::Range T::Class
+                           T::InexactStruct T::Struct T::ImmutableStruct T::Enum]
       )
 
       def init(services)

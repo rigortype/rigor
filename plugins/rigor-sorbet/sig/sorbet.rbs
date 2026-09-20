@@ -1,0 +1,275 @@
+# Bundled RBS for the sorbet-runtime annotation DSL (issue #1097).
+#
+# sorbet-runtime ships RBI, not RBS, so none of the annotation surface (`T`, `T::Sig`, the
+# `DeclBuilder` behind `sig { ... }`, the `T::Array[...]` constructors, the `T::Helpers` /
+# `T::Generic` class macros) resolves for the analyzer. This file declares that surface so the
+# DSL *expressions themselves* type; the plugin's `AssertionRecognizer` continues to own the
+# value-sensitive calls (`T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` /
+# `T.reveal_type` / `T.unsafe`) ahead of this RBS — the signatures here deliberately agree with
+# it (`T.unsafe` stays `untyped`, `T.bind` returns `nil`) for the cases the recognizer declines.
+#
+# Provenance (docs/agents/type-authoring.md): `rigor sig-gen` cannot produce this file — the DSL
+# methods are installed by `Module#extend` hooks and `instance_eval` in sorbet-runtime's source
+# (sorbet-runtime 0.5.11766, `lib/types/{sig,_types,generic,helpers,struct,enum}.rb` and
+# `lib/types/private/methods/decl_builder.rb`), so every entry was hand-derived by reading that
+# source. Members that do not exist at that version's runtime location are deliberately absent.
+#
+# Two Rigor-side mechanisms complete the picture (manifest fields):
+#
+# - `rbs_complete_extends:` — `extend T::Sig` in a class/module body is what puts `sig` on the
+#   class object's singleton; the dispatch bridge resolves those calls through the module's
+#   instance surface declared here.
+# - `block_as_methods:` — `sig`'s block is `instance_eval`'d on a `DeclBuilder`
+#   (`T::Private::Methods.declare_sig` → `DeclBuilder#instance_eval`), so `sig` bodies bind
+#   `self` to `T::Private::Methods::DeclBuilder`, NOT to the enclosing class.
+
+module T
+  # `T::Boolean` is a runtime constant (`T.any(TrueClass, FalseClass)` → a `T::Types::Union`
+  # instance), not a module — it appears in `params`/`returns` argument position as a const read.
+  Boolean: ::T::Types::Union
+
+  # The type-ASSERTION functions (`T.let`, `T.cast`, `T.assert_type!`, `T.bind`, `T.must`,
+  # `T.must_because`, `T.reveal_type`, `T.absurd`, `T.unsafe`) are deliberately NOT declared here.
+  # Their static return is the *asserted* type (the second argument, translated) or the nil-stripped
+  # inner type — semantics RBS cannot express — so the plugin's `AssertionRecognizer` /
+  # `AbsurdRecognizer` owns them ahead of dispatch, and a declined call degrades through `T`'s
+  # `open_receivers:` entry to opaque rather than a wrong `X` reading.
+
+  # Type-expression constructors — used in `params`/`returns` argument position.
+  def self.nilable: (untyped type) -> ::T::Types::Base
+  def self.untyped: () -> ::T::Types::Base
+  def self.noreturn: () -> ::T::Types::Base
+  def self.anything: () -> ::T::Types::Base
+  def self.all: (untyped type_a, untyped type_b, *untyped types) -> ::T::Types::Base
+  def self.any: (untyped type_a, untyped type_b, *untyped types) -> ::T::Types::Base
+  def self.class_of: (untyped arg) -> ::T::Types::Base
+  def self.self_type: () -> ::T::Types::Base
+  def self.attached_class: () -> ::T::Types::Base
+  def self.type_parameter: (::Symbol name) -> ::T::Types::TypeParameter
+  def self.type_alias: () { () -> untyped } -> ::T::Types::Base
+
+  # `T.proc` returns a DeclBuilder in `Modes.proc` (`T::Private::Methods.start_proc`), so the
+  # `T.proc.params(x: Integer).returns(String)` chain resolves through the same builder surface.
+  def self.proc: () -> ::T::Private::Methods::DeclBuilder
+end
+
+# `T::Sig` is a mixin a class EXTENDS (`extend T::Sig`) to gain the class-level `sig` verb —
+# sorbet-runtime does not patch `Module`. `sig` itself returns nil at runtime
+# (`declare_sig` stores the DeclarationBlock and returns nil).
+module T::Sig
+  def sig: (?untyped arg0) ?{ () -> untyped } -> nil
+
+  # `T::Sig::WithoutRuntime.sig { ... }` is a no-op shim for contexts where the runtime wrapper
+  # cannot be installed; it is called ON the module, so `sig` here is a module-singleton method.
+  # `extend T::Sig::WithoutRuntime` installs nothing at runtime, so no instance `sig` is declared.
+  module WithoutRuntime
+    def self.sig: (?untyped arg0) ?{ () -> untyped } -> nil
+  end
+end
+
+# The builder `sig`'s block is `instance_eval`'d on (`DeclBuilder#instance_eval(&blk)` via
+# `T::Private::Methods._run_builder`). Every DSL method returns `self` so the
+# `params(...).returns(...).checked(:always)` chain keeps typing.
+class T::Private::Methods::DeclBuilder
+  def params: (*untyped unused_positional_params, **untyped params) -> self
+  def returns: (untyped type) -> self
+  def void: () -> self
+  def bind: (untyped type) -> self
+  def checked: (untyped level) -> self
+  def on_failure: (*untyped args) -> self
+  def abstract: () -> self
+  def final: () -> self
+  def override: (?allow_incompatible: bool) -> self
+  def overridable: () -> self
+  def type_parameters: (*untyped names) -> self
+end
+
+# The `T::X[...]` type constructors are modules with a singleton `[]` (`_types.rb`), returning the
+# corresponding `T::Types::TypedX` instance. The carriers below exist so the constructor's return
+# reads as a real nominal rather than `Dynamic[top]`.
+module T::Array
+  def self.[]: (untyped type) -> ::T::Types::TypedArray
+end
+
+module T::Hash
+  def self.[]: (untyped keys, untyped values) -> ::T::Types::TypedHash
+end
+
+module T::Set
+  def self.[]: (untyped type) -> ::T::Types::TypedSet
+end
+
+module T::Enumerable
+  def self.[]: (untyped type) -> ::T::Types::TypedEnumerable
+end
+
+module T::Enumerator
+  def self.[]: (untyped type) -> ::T::Types::TypedEnumerator
+end
+
+module T::Range
+  def self.[]: (untyped type) -> ::T::Types::TypedRange
+end
+
+module T::Class
+  def self.[]: (untyped type) -> ::T::Types::TypedClass
+end
+
+# Carrier classes for the `T::X[...]` constructors and the `T.*` type-expression functions. The
+# internal `T::Types::*` class names are the runtime classes (`types/types/*.rb`).
+module T::Types
+  class Base
+  end
+
+  class TypedArray < Base
+  end
+
+  class TypedHash < Base
+  end
+
+  class TypedSet < Base
+  end
+
+  class TypedEnumerable < Base
+  end
+
+  class TypedEnumerator < Base
+  end
+
+  class TypedRange < Base
+  end
+
+  class TypedClass < Base
+  end
+
+  class Union < Base
+  end
+
+  class Intersection < Base
+  end
+
+  class TypeParameter < Base
+  end
+
+  class TypeMember < Base
+  end
+
+  class TypeTemplate < Base
+  end
+
+  class Proc < Base
+  end
+end
+
+# `extend T::Helpers` installs the class/module declaration macros (`abstract!`, `interface!`,
+# `final!`, `sealed!`, `requires_ancestor`, `mixes_in_class_methods`). All return void-ish values
+# from `T::Private::{Abstract,Final,Sealed}` bookkeeping (`helpers.rb`).
+module T::Helpers
+  def abstract!: () -> void
+  def interface!: () -> void
+  def final!: () -> void
+  def sealed!: () -> void
+  def mixes_in_class_methods: (::Module mod, *::Module mods) -> void
+  def requires_ancestor: () { () -> untyped } -> void
+end
+
+# `extend T::Generic` installs the type-member macros — `Elem = type_member` is the common shape
+# (`generic.rb`). `[]` is the generic-application stub (`def [](*types); self; end`).
+module T::Generic
+  # `generic.rb` — `extend T::Generic` alone also installs the helper macros: the module
+  # `include`s `T::Helpers` (and `Kernel`), so its instance surface carries `abstract!` et al.
+  include T::Helpers
+
+  def []: (*untyped types) -> self
+  def type_member: (?untyped variance) ?{ () -> untyped } -> ::T::Types::TypeMember
+  def type_template: (?untyped variance) ?{ () -> untyped } -> ::T::Types::TypeTemplate
+  def has_attached_class!: (?untyped variance) ?{ () -> untyped } -> void
+end
+
+# `T::Props` is the property mixin; its `included` hook `extend`s the includer with
+# `ClassMethods` (`mixes_in_class_methods`), which is where `prop` / `const` live. The hook itself
+# is not modelled — `include T::Props` alone does not put `prop` on the class in this
+# declaration either — but the `T::Struct` family below declares the same `extend` edges directly,
+# matching the runtime outcome for `< T::Struct` subclasses.
+module T::Props
+  module ClassMethods
+    def prop: (::Symbol name, untyped cls, **untyped rules) -> void
+    def const: (::Symbol name, untyped cls_or_args, **untyped args) -> void
+    def props: () -> ::Hash[untyped, untyped]
+    def plugins: () -> ::Array[untyped]
+    def decorator: () -> ::T::Props::Decorator
+    def decorator_class: () -> ::Class
+    def validate_prop_value: (untyped prop, untyped val) -> void
+    def plugin: (untyped mod) -> void
+  end
+
+  class Decorator
+  end
+
+  module CustomType
+  end
+
+  module Serializable
+    # `serializable.rb` — lifted onto includers via `mixes_in_class_methods`.
+    module ClassMethods
+      def prop_by_serialized_forms: () -> ::Hash[untyped, untyped]
+      def from_hash: (untyped hash, ?bool strict) -> untyped
+      def from_hash!: (untyped hash) -> untyped
+    end
+  end
+
+  module Plugin
+    # `plugin.rb` — `mixes_in_class_methods(ClassMethods)`; `included` re-registers the plugin
+    # (`child.plugin(self)`), which is what extends `plugin::ClassMethods` onto the target.
+    module ClassMethods
+      def included: (untyped child) -> void
+    end
+  end
+end
+
+# The `T::Struct` family. `struct.rb` has `T::InexactStruct` `include T::Props` (+Serializable,
+# +Constructor); the `mixes_in_class_methods` hooks extend `T::Props::ClassMethods` (then the
+# registered `T::Props::Plugin::ClassMethods`) and `T::Props::Serializable::ClassMethods` onto the
+# class — verified against the runtime singleton ancestry. Neither `T::Sig` nor `T::Helpers` is
+# extended here: `sig` inside a `class Doc < T::Struct` body raises at runtime unless the subclass
+# adds `extend T::Sig` itself (dependabot's `TokenBucket` does exactly that). Only
+# `T::ImmutableStruct` extends `T::Sig` (`struct.rb` — it annotates its own `initialize`). The
+# edges are declared directly so subclasses resolve `prop` / `const` / `from_hash` through the
+# `rbs_complete_ancestors` superclass bridge.
+class T::InexactStruct
+  extend T::Props::ClassMethods
+  extend T::Props::Plugin::ClassMethods
+  extend T::Props::Serializable::ClassMethods
+end
+
+class T::Struct < T::InexactStruct
+end
+
+class T::ImmutableStruct < T::InexactStruct
+  extend T::Sig
+end
+
+# `T::Enum` — `enum.rb` `extend`s `T::Sig` and `T::Props::CustomType`; `enums` `yield`s its block
+# so `X = new` inside keeps the subclass's class-object self.
+class T::Enum
+  extend T::Sig
+  extend T::Props::CustomType
+
+  def self.enums: () { () -> untyped } -> void
+  def serialize: () -> ::String
+end
+
+# Namespace-only declarations so bare const reads (`T::Utils`, `T::Configuration`,
+# `T::Private::Methods`) type as `Singleton[...]` instead of `Dynamic[top]`. Their singleton
+# surface is intentionally NOT modelled — they are covered by `open_receivers:` so calls on them
+# degrade to opaque rather than firing `call.undefined-method` on an unmodelled private API.
+module T::Utils
+end
+
+module T::Configuration
+end
+
+module T::Private
+  module Methods
+  end
+end

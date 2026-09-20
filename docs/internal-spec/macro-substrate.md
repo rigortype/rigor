@@ -56,7 +56,17 @@ rules (consistent with the rest of the plugin-contract carriers):
 - **`receiver_constraint` matching.** Every tier carries a
   `receiver_constraint`; the entry fires when the call's lexical
   receiver class **equals or inherits from** that fully-qualified name,
-  matched through `Environment#class_ordering`.
+  matched through `Environment#class_ordering`. For `Singleton[X]`
+  receivers (class-level DSL calls) the match also consults the
+  `extend` edge: an entry fires when `X` — or one of its discovered
+  superclasses — `extend`s a module resolving to the constraint,
+  whether the `extend` is recorded in source (`scope.discovered_extends`)
+  or declared in RBS (`Environment#singleton_extended_modules`). That is
+  how `class F; extend T::Sig; sig { ... }; end` and `class Doc <
+  T::Struct; sig { ... }; end` both reach the `sig` entry (#1097). A
+  candidate that resolves to a project class or a different RBS name owns
+  the edge — the match stops there rather than falling through to a
+  coincidental global name.
 
 ## Tier A — `BlockAsMethod` (`block_as_methods:`)
 

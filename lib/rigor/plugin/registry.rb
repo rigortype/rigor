@@ -385,6 +385,18 @@ module Rigor
         @rbs_complete_ancestors_set.include?(class_name.to_s)
       end
 
+      # The extend-edge twin of `rbs_complete_ancestors` — the aggregate set of module names declared via
+      # manifest `rbs_complete_extends:`. `RbsDispatch`'s singleton bridge consults it for `extend M`
+      # edges in project source: `class F; extend T::Sig; sig { ... }; end` resolves `sig` through
+      # `T::Sig`'s bundled RBS instance surface.
+      attr_reader :rbs_complete_extends
+
+      def rbs_complete_extends?(class_name)
+        return false if class_name.nil?
+
+        @rbs_complete_extends_set.include?(class_name.to_s)
+      end
+
       # ADR-28 — flat, ordered list of every loaded plugin's path-scoped method-protocol contracts, in
       # plugin registration order. Read from each plugin's `#protocol_contracts` (which the manifest backs
       # by default but a plugin MAY override to fold in per-project config). Consumed by
@@ -451,6 +463,8 @@ module Rigor
         @open_receivers_set = @open_receivers.to_set.freeze
         @rbs_complete_ancestors = aggregate_class_names(manifests, :rbs_complete_ancestors)
         @rbs_complete_ancestors_set = @rbs_complete_ancestors.to_set.freeze
+        @rbs_complete_extends = aggregate_class_names(manifests, :rbs_complete_extends)
+        @rbs_complete_extends_set = @rbs_complete_extends.to_set.freeze
         @type_node_resolvers = manifests.flat_map { |m| m&.type_node_resolvers || [] }.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}

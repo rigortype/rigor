@@ -47,6 +47,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         :unrelated
       end
     end
+    allow(env).to receive(:singleton_extended_modules).and_return([])
     env
   end
 
@@ -203,6 +204,99 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           receiver_type: Rigor::Type::Singleton.new("API")
         )
         expect(result).to eq(Rigor::Type::Nominal.new("Grape::Validations::ParamsScope"))
+      end
+    end
+
+    describe "extend-edge matching (#1097)" do
+      # `class F; extend T::Sig; sig { ... }; end` — F does not INHERIT from `T::Sig`; the DSL
+      # verb reaches the class object through the `extend` edge. The matcher therefore consults
+      # `scope.discovered_extends` (source-side) and `Environment#singleton_extended_modules`
+      # (RBS-side, e.g. `T::Struct`'s own `extend T::Sig`) alongside the inheritance walk.
+      def sorbet_plugin_class
+        Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "sorbetfixture",
+            version: "0.1.0",
+            block_as_methods: [
+              Rigor::Plugin::Macro::BlockAsMethod.new(
+                receiver_constraint: "T::Sig",
+                method_names: %i[sig],
+                self_type: "T::Private::Methods::DeclBuilder"
+              )
+            ]
+          )
+        end
+      end
+
+      def sorbet_registry
+        Rigor::Plugin::Registry.new(plugins: [sorbet_plugin_class.new(services: services)])
+      end
+
+      def sorbet_scope(env, supers:, extends:)
+        scope = instance_double(
+          Rigor::Scope,
+          environment: env,
+          discovered_superclasses: supers,
+          discovered_extends: extends
+        )
+        allow(scope).to receive(:ancestor_name_candidates) do |_subclass, raw|
+          [raw.to_s.sub(/\A::/, "")]
+        end
+        allow(scope).to receive(:known_user_class?).and_return(false)
+        scope
+      end
+
+      def sorbet_env(rbs_extends: {})
+        env = instance_double(Rigor::Environment, plugin_registry: sorbet_registry)
+        allow(env).to receive(:nominal_for_name) { |name| Rigor::Type::Nominal.new(name) }
+        allow(env).to receive(:class_ordering) { |lhs, rhs| lhs == rhs ? :equal : :unknown }
+        allow(env).to receive(:singleton_extended_modules) { |name| rbs_extends.fetch(name, []) }
+        allow(env).to receive(:rbs_loader).and_return(nil)
+        env
+      end
+
+      let(:sig_call) { Prism.parse("sig { returns(Integer) }").value.statements.body.first }
+
+      it "matches a Singleton receiver whose class `extend`s the constraint module" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["T::Sig"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "matches through an RBS-side `extend` edge on a discovered superclass" do
+        # `class Doc < T::Struct` — Doc's own source has no `extend`, but T::Struct's bundled
+        # RBS declares `extend T::Sig`, which `singleton_extended_modules` reports.
+        env = sorbet_env(rbs_extends: { "T::Struct" => ["T::Sig", "T::Props::ClassMethods"] })
+        scope = sorbet_scope(env, supers: { "Doc" => "T::Struct" }, extends: {})
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Doc")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "does not match when the class extends an unrelated module" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["Other::DSL"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "does not match a Nominal receiver through the extends edge" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["T::Sig"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Nominal.new("Fetcher")
+        )
+        expect(result).to be_nil
       end
     end
 

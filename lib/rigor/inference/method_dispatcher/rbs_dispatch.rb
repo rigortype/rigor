@@ -441,6 +441,15 @@ module Rigor
             ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
             return lookup_method_on(environment, ancestor, kind, method_name) if ancestor
 
+            # `extend M` in a class/module body lifts M's INSTANCE surface onto the extending object's
+            # singleton — `class F; extend T::Sig; sig { ... }; end` resolves `sig` through
+            # `T::Sig#sig`. Same contract as the superclass bridge: only allow-listed (manifest
+            # `rbs_complete_extends:`) modules qualify, so open hierarchies stay on Dynamic.
+            if kind == :singleton
+              mod = allowed_rbs_complete_extended_module(environment, class_name, method_name, scope)
+              return lookup_method_on(environment, mod, :instance, method_name) if mod
+            end
+
             # Issue #527 slice 1 — the same shape, one RBS ancestry wider: a Ruby-source subclass of a
             # CORE or STDLIB class (`class SubHash < Hash`, `< StandardError`, `< ::StringScanner`)
             # resolves its inherited calls there. Injected HERE rather than as a new tier because
@@ -734,6 +743,79 @@ module Rigor
                 queue << candidate if supers.key?(candidate)
               end
             end
+          end
+
+          # The extend-edge twin of `allowed_rbs_complete_ancestor` (manifest `rbs_complete_extends:`).
+          # `extend M` lifts M's INSTANCE surface onto the extending class object's singleton, so a
+          # singleton call on a Ruby-source class can resolve through a module the class — or one of
+          # its discovered superclasses — extends. Returns the first resolved candidate name that a
+          # loaded plugin allow-lists, or nil. Same guards as the superclass bridge: no scope means no
+          # walk, an RBS-known receiver already answered through the direct lookup, and a nearer
+          # source `def self.x` shadows any bridged module method.
+          def allowed_rbs_complete_extended_module(environment, class_name, method_name, scope)
+            return nil if scope.nil?
+            return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
+
+            registry = environment&.plugin_registry
+            return nil if registry.nil?
+
+            supers = scope.discovered_superclasses
+            extends = scope.discovered_extends
+            queue = [class_name.to_s]
+            seen = {}
+            until queue.empty?
+              current = queue.shift
+              next if current.nil? || seen[current]
+
+              seen[current] = true
+              return nil if scope.discovered_method?(current, method_name, :singleton)
+
+              resolved = rbs_complete_extended_module_for(current, extends, environment, scope,
+                                                          registry, method_name)
+              return resolved if resolved
+
+              raw = supers[current]
+              scope.ancestor_name_candidates(current, raw).each { |c| queue << c } if raw
+            end
+            nil
+          end
+
+          # One walk hop of `allowed_rbs_complete_extended_module`: the first allow-listed module
+          # `current` extends that actually DEFINES `method_name`, or nil. Each `extend` edge binds
+          # to the first resolution candidate that exists at runtime — a project class owns the
+          # edge (the source-extend fold already contributed its singleton defs) and an RBS-known
+          # name that is not allow-listed, or that lacks the method, is still the module Ruby would
+          # call through, so neither falls through to a later lexical fallback. An allow-listed
+          # module that simply does not declare the method yields to the NEXT extended module —
+          # Ruby's singleton ancestry searches every extended module in turn.
+          def rbs_complete_extended_module_for(current, extends, environment, scope, registry,
+                                               method_name)
+            each_extended_module_name(current, extends, environment) do |mod_name|
+              scope.ancestor_name_candidates(current, mod_name).each do |candidate|
+                project_owned = scope.known_user_class?(candidate)
+                rbs_known = !project_owned &&
+                            Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
+                next unless project_owned || rbs_known
+
+                if rbs_known && registry.rbs_complete_extends?(candidate) &&
+                   lookup_method_on(environment, candidate, :instance, method_name)
+                  return candidate
+                end
+
+                break
+              end
+            end
+            nil
+          end
+
+          # The module names `current` extends, source table first (`discovered_extends`, as-written
+          # — reversed, since Ruby's singleton ancestry searches the most recently extended module
+          # first) then the RBS side (`singleton_extended_modules`, already qualified) — an RBS
+          # superclass like `T::Struct` declares `extend T::Props::ClassMethods` in signature, and a
+          # source subclass inherits it.
+          def each_extended_module_name(current, extends, environment, &)
+            (extends[current] || []).reverse_each(&)
+            (environment&.singleton_extended_modules(current) || []).each(&)
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the

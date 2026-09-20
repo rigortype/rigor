@@ -49,7 +49,8 @@ module Rigor
       attr_reader :target_gems
 
       attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
-                  :owns_receivers, :open_receivers, :rbs_complete_ancestors, :type_node_resolvers,
+                  :owns_receivers, :open_receivers, :rbs_complete_ancestors, :rbs_complete_extends,
+                  :type_node_resolvers,
                   :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
@@ -67,7 +68,7 @@ module Rigor
         id:, version:,
         description: nil, config_schema: {}, target_gems: [],
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], rbs_complete_ancestors: [],
-        type_node_resolvers: [],
+        rbs_complete_extends: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
@@ -83,6 +84,7 @@ module Rigor
         validate_owns_receivers!(owns_receivers)
         validate_open_receivers!(open_receivers)
         validate_rbs_complete_ancestors!(rbs_complete_ancestors)
+        validate_rbs_complete_extends!(rbs_complete_extends)
         validate_type_node_resolvers!(type_node_resolvers)
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
@@ -102,7 +104,7 @@ module Rigor
                       hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
         assign_target_gems(target_gems)
-        assign_rbs_complete_ancestors(rbs_complete_ancestors)
+        assign_rbs_complete_ancestors(rbs_complete_ancestors, rbs_complete_extends)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
@@ -144,8 +146,9 @@ module Rigor
       private :assign_target_gems
 
       # ADR-43 WD4 — assigned outside assign_fields (which already carries the maximum positional arity).
-      def assign_rbs_complete_ancestors(rbs_complete_ancestors)
+      def assign_rbs_complete_ancestors(rbs_complete_ancestors, rbs_complete_extends)
         @rbs_complete_ancestors = rbs_complete_ancestors.map { |c| c.to_s.dup.freeze }.freeze
+        @rbs_complete_extends = rbs_complete_extends.map { |c| c.to_s.dup.freeze }.freeze
       end
       private :assign_rbs_complete_ancestors
 
@@ -237,6 +240,7 @@ module Rigor
           "owns_receivers" => owns_receivers,
           "open_receivers" => open_receivers,
           "rbs_complete_ancestors" => rbs_complete_ancestors,
+          "rbs_complete_extends" => rbs_complete_extends,
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
@@ -428,6 +432,18 @@ module Rigor
       # receivers, so only classes the plugin's `signature_paths:` declares exhaustively belong here.
       def validate_rbs_complete_ancestors!(rbs_complete_ancestors)
         validate_array_of!("rbs_complete_ancestors", rbs_complete_ancestors, "non-empty String") do |c|
+          c.is_a?(String) && !c.empty?
+        end
+      end
+
+      # `rbs_complete_extends:` is the extend-edge twin of `rbs_complete_ancestors:` (ADR-43 WD4): it names
+      # the MODULES whose bundled RBS instance surface is complete, so a project `extend M` in a class or
+      # module body lets singleton-side calls on that class resolve M's declared instance methods
+      # (`class F; extend T::Sig; sig { ... }; end` reaching `T::Sig#sig`). Same completeness rule: a
+      # module whose declared surface is partial does not belong here — the extend edge would misreport
+      # real calls as `call.undefined-method`.
+      def validate_rbs_complete_extends!(rbs_complete_extends)
+        validate_array_of!("rbs_complete_extends", rbs_complete_extends, "non-empty String") do |c|
           c.is_a?(String) && !c.empty?
         end
       end

@@ -49,6 +49,13 @@ slug_for_alice = slug.normalise("Alice Doe")
 puts(slug_for_alice)
 puts(length_is_even.inspect)
 
+# Issue #1097 — the bundled sorbet-runtime RBS also types the annotation DSL's own expressions:
+# `T::Array[...]` / `T.nilable(...)` resolve to their `T::Types::*` carriers instead of
+# `Dynamic[top]`, and `sig { ... }` itself returns nil (matching `declare_sig`'s runtime return).
+annotation = T.nilable(String)
+labels_type = T::Array[String]
+puts(annotation.inspect, labels_type.inspect)
+
 # ADR-11 slice 2 — type-assertion calls. T.let / T.cast / T.must / T.unsafe are recognised at the call
 # site and contribute the asserted return type directly.
 counter = T.let(0, Integer)

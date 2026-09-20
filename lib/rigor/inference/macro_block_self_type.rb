@@ -61,7 +61,14 @@ module Rigor
         return nil if singleton_name.nil? && !entry.named_instance_binding?
 
         receiver_name = singleton_name || nominal_name
-        return nil unless receiver_class_inherits_from?(receiver_name, entry.receiver_constraint, environment, scope)
+        matched = receiver_class_inherits_from?(receiver_name, entry.receiver_constraint, environment, scope)
+        # `extend M` lifts M's instance surface onto the class object — `class F; extend T::Sig;
+        # sig { ... }; end` calls `sig` on `Singleton[F]` even though F does not INHERIT from
+        # T::Sig. Singleton receivers therefore also match through the extends edge.
+        if !matched && singleton_name
+          matched = singleton_extends_reach?(receiver_name, entry.receiver_constraint, scope, environment)
+        end
+        return nil unless matched
 
         narrowed_self_type(entry, receiver_name, environment)
       end
@@ -134,6 +141,51 @@ module Rigor
           end
         end
         false
+      end
+
+      # The `extend`-edge twin of `source_ancestors_reach?`: true when `class_name` — or one of its
+      # discovered superclasses — extends a module resolving to `constraint`. Source `extend` targets
+      # arrive as-written and resolve through `ancestor_name_candidates`; RBS-side `extend` edges come
+      # from `Environment#singleton_extended_modules`, which is how `class Doc < T::Struct` picks up
+      # `T::Struct`'s own `extend T::Sig`. A candidate that resolves to a project class or a different
+      # RBS name owns the edge — the source-extend fold already handles project modules — so the walk
+      # stops consulting that edge's remaining fallbacks.
+      def singleton_extends_reach?(class_name, constraint, scope, environment)
+        return false if scope.nil?
+
+        supers = scope.discovered_superclasses
+        extends = scope.discovered_extends
+        queue = [class_name.to_s]
+        seen = {}
+        until queue.empty?
+          current = queue.shift
+          next if current.nil? || seen[current]
+
+          seen[current] = true
+          return true if extended_module_matches?(current, extends, constraint, scope, environment)
+
+          raw = supers[current]
+          scope.ancestor_name_candidates(current, raw).each { |c| queue << c } if raw
+        end
+        false
+      rescue StandardError
+        false
+      end
+
+      # One walk hop of `singleton_extends_reach?`: true when `current` extends a module resolving
+      # to `constraint`, consulting the source extend table first then the RBS singleton-extension
+      # side. A candidate resolving to a project class or a different RBS name owns its edge.
+      def extended_module_matches?(current, extends, constraint, scope, environment)
+        (extends[current] || []).each do |mod_name|
+          scope.ancestor_name_candidates(current, mod_name).each do |candidate|
+            return true if candidate == constraint || rbs_inherits?(candidate, constraint, environment)
+            break if scope.known_user_class?(candidate) ||
+                     Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
+          end
+        end
+        (environment.singleton_extended_modules(current) || []).any? do |mod_name|
+          mod_name == constraint || rbs_inherits?(mod_name, constraint, environment)
+        end
       end
 
       def rbs_inherits?(class_name, constraint, environment)

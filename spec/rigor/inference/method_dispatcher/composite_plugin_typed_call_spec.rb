@@ -12,10 +12,14 @@ require "spec_helper"
 # records is `record_dynamic_origin`, which is last-wins and overwritten by the caller's fail-soft
 # widening, so it needs no such care.
 #
-# No `rigor check` fixture can pin this today: both consumer rules need to name a receiver CLASS, and
-# neither names a union, so a polluted entry is currently unobservable through diagnostics. That makes
-# this a latent-state assertion by necessity — and the reason it is worth pinning is exactly that the
-# trap springs the day a rule learns to read a composite receiver.
+# This file pins the dispatcher-level contract. The SUPPRESSION it prevents is real and reachable, and
+# `spec/integration/composite_receiver_plugin_typed_suppression_spec.rb` is the end-to-end proof:
+# `call_site_exempt?` runs ahead of the receiver-shape branch, so it covers
+# `union_undefined_method_diagnostic` too, and a stuck record silences a genuine union miss. An earlier
+# draft of this header claimed no `rigor check` fixture could reach it, on the strength of a probe whose
+# project classes had no `sig/` — which made every arm an ADR-26 open receiver and the union rule
+# silent for a reason that had nothing to do with the record. Closing the receivers is the ingredient
+# that probe lacked.
 RSpec.describe "MethodDispatcher composite-receiver plugin-typed recording" do
   def comb = Rigor::Type::Combinator
 

@@ -133,7 +133,10 @@ module Rigor
           # recording in this method that is set-only — `Scope#plugin_typed_calls` has no removal, and
           # `CheckRules#call_site_exempt?` / `#source_arity_envelope` read it as an exemption — so a
           # member a plugin answers beside a member that declines would exempt a call this dispatcher
-          # never typed, silencing `call.undefined-method` and `call.wrong-arity` on a true positive. The
+          # never typed, silencing `call.undefined-method` and `call.wrong-arity` on a firing that stands.
+          # `call_site_exempt?` runs ahead of the receiver-shape branch, so the union rule is covered by
+          # it too and the suppression is reachable end to end — the arms are measured in
+          # `spec/integration/composite_receiver_plugin_typed_suppression_spec.rb`. The
           # `record_dynamic_origin` writes below and in the tiers that follow need no such care: that
           # table is last-wins and the caller's fail-soft widening overwrites it.
           if plugin_typed_sink

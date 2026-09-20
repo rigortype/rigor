@@ -198,9 +198,7 @@ module Rigor
       # make a disagreeing name opaque here, which "same-file declarations win" would silently undo.
       def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes, file_envelopes)
         def_nodes, def_nestings = merge_def_node_tables(default_scope, root, file_def_nodes)
-        singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
-          build_discovered_singleton_def_nodes(root)
-        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, root)
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
@@ -220,8 +218,8 @@ module Rigor
         #
         # Issue #898 — and the same walk's table is now kept, merged over the cross-file seed the way
         # `includes` is: `Narrowing` asks it what a class object's singleton ancestry holds.
-        file_extends, extends = merge_extend_tables(default_scope, root)
-        methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope)
+        extends, methods_table = merge_and_fold_extends(default_scope, root, def_nodes,
+                                                        singleton_def_nodes, seeded_scope)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -236,8 +234,35 @@ module Rigor
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
             data_member_layouts: data_member_layouts,
-            struct_member_layouts: struct_member_layouts
+            struct_member_layouts: struct_member_layouts,
+            discovered_deferred_ranges: merge_deferred_ranges_seed(default_scope, root)
           )
+        )
+      end
+
+      # Per-file singleton def nodes merged OVER the cross-file seed (same-file declaration is
+      # authoritative for its own classes, sibling-file defs are preserved).
+      def merge_singleton_def_nodes(default_scope, root)
+        default_scope.discovered_singleton_def_nodes.merge(
+          build_discovered_singleton_def_nodes(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+      end
+
+      # The `extend`-edge half of {#merge_project_method_indexes}: merges this file's `extend`s over the
+      # cross-file seed AND folds them against the merged def tables — the #526 fold that turns an
+      # extended module's instance defs into singleton-side method entries on the extending class.
+      def merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope)
+        file_extends, extends = merge_extend_tables(default_scope, root)
+        methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope)
+        [extends, methods_table]
+      end
+
+      # Issue #1097 — this file's def / block / lambda ranges merged over the cross-file seed; the
+      # ordering predicates key the table by `source_path`, so the entry must exist even on a run
+      # that never built the project pre-pass.
+      def merge_deferred_ranges_seed(default_scope, root)
+        default_scope.discovered_deferred_ranges.merge(
+          default_scope.source_path => build_deferred_ranges(root)
         )
       end
 
@@ -2592,6 +2617,98 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
+      # Issue #1097 — `[[start_offset, end_offset, name, kind], ...]` for every `def` / block / lambda
+      # body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
+      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (any def,
+      # block, or lambda — it runs at invocation time, after every class-body `def` installed) and,
+      # for an eager class-body call, where the earliest same-name def starts. Def rows carry the
+      # method name and its `:instance` / `:singleton` / `:both` (`module_function`) kind — the kind
+      # filter keeps a `def sig` from ordering `def self.sig`'s shadow question — while block and
+      # lambda rows carry nils and answer only containment.
+      # The two position-keyed per-file indexes: the def / block / lambda body ranges issue #1097's
+      # `*_def_shadows_call?` predicates order a same-name def against, and the class-declaration
+      # sites `record_class_sources` accumulates.
+      def record_file_positions(acc, path, root, superclasses, includes, file_def_nodes)
+        acc[:deferred_ranges][path] = build_deferred_ranges(root)
+        record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
+                             acc[:compact_headers])
+      end
+
+      def build_deferred_ranges(root)
+        ranges = []
+        walk_deferred_ranges(root, [], false, ranges)
+        ranges.freeze
+      end
+
+      # The deferred-ranges walk, shaped on {#walk_singleton_def_nodes}: class / module / `class <<`
+      # bodies go through {#walk_deferred_body} so a bare `module_function` toggle threads across
+      # sibling statements; every other node recurses per child. A `DefNode` records its own range
+      # AND descends — a nested `def` or block inside its body is still a range the containment half
+      # needs.
+      def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, ranges)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+          if child_prefix
+            walk_deferred_body(node.body, child_prefix, false, ranges) if node.body
+            return
+          end
+        when Prism::SingletonClassNode
+          if node.body
+            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            if singleton_prefix
+              walk_deferred_body(node.body, singleton_prefix, true, ranges)
+              return
+            end
+          end
+        when Prism::DefNode
+          record_deferred_def(node, qualified_prefix, in_singleton_class, false, ranges)
+          node.rigor_each_child do |child|
+            walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
+          end
+          return
+        when Prism::BlockNode, Prism::LambdaNode
+          ranges << [node.location.start_offset, node.location.end_offset, nil, nil]
+        end
+
+        node.rigor_each_child do |child|
+          walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
+        end
+      end
+
+      # Statement-level counterpart of {#walk_singleton_body}: tracks the bare-`module_function`
+      # toggle so a module-function `def` records `:both`, and recurses into every other statement.
+      def walk_deferred_body(body, qualified_prefix, in_singleton_class, ranges)
+        module_function_on = false
+        statements_of(body).each do |stmt|
+          if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
+            module_function_on = true if bare_module_function?(stmt)
+            next
+          end
+          if stmt.is_a?(Prism::DefNode)
+            record_deferred_def(stmt, qualified_prefix, in_singleton_class, module_function_on, ranges)
+            stmt.rigor_each_child do |child|
+              walk_deferred_ranges(child, qualified_prefix, in_singleton_class, ranges)
+            end
+            next
+          end
+          walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, ranges)
+        end
+      end
+
+      def record_deferred_def(def_node, qualified_prefix, in_singleton_class, module_function_on, ranges)
+        kind = if def_singleton?(def_node, qualified_prefix, in_singleton_class)
+                 :singleton
+               elsif module_function_on
+                 :both
+               else
+                 :instance
+               end
+        ranges << [def_node.location.start_offset, def_node.location.end_offset, def_node.name, kind]
+      end
+
       # Walks every node, entering class/module/singleton-class bodies via {#walk_singleton_body} so a bare
       # `module_function` toggle threads correctly across the body's *sibling* statements (a child-by-child recursion
       # would reset it). At the top level / inside an arbitrary node there is no `module_function` state to carry, so
@@ -4128,6 +4245,9 @@ module Rigor
         # {DefNodeResolver} re-attaches it to the node it mints, so both paths answer the same chain for the
         # same body without either one keying a table by an object the other never sees.
         acc[:def_nestings].merge!(file_index[:def_nestings] || {})
+        # Issue #1097 — keyed by file path, so the merge is a plain union (a bundle-restored file
+        # contributes exactly the ranges its cold walk recorded).
+        acc[:deferred_ranges].merge!(file_index[:deferred_ranges] || {})
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
       end
@@ -4240,7 +4360,10 @@ module Rigor
           # the bundle key). Plain data, so the bundle stays Marshal-clean.
           constant_writes: file_index[:constant_writes].transform_values { |by_path| by_path.values.first },
           data_member_layouts: file_index[:data_member_layouts],
-          struct_member_layouts: file_index[:struct_member_layouts]
+          struct_member_layouts: file_index[:struct_member_layouts],
+          # Issue #1097 — plain `[Integer, Integer, Symbol, Symbol]` rows, so the bundle stays
+          # Marshal-clean.
+          deferred_ranges: file_index[:deferred_ranges]
         }
       end
 
@@ -4269,7 +4392,10 @@ module Rigor
           # rebuild, but default so any in-flight fold stays total.
           constant_writes: (bundle[:constant_writes] || {}).transform_values { |descriptor| { path => descriptor } },
           data_member_layouts: bundle[:data_member_layouts],
-          struct_member_layouts: bundle[:struct_member_layouts]
+          struct_member_layouts: bundle[:struct_member_layouts],
+          # Issue #1097 — a pre-24 bundle lacks the key; the SCHEMA bump makes such a blob a cold
+          # rebuild, but default so any in-flight fold stays total.
+          deferred_ranges: bundle[:deferred_ranges] || {}
         }
       end
 
@@ -4301,6 +4427,7 @@ module Rigor
         { def_nodes: {}, def_nestings: {}.compare_by_identity,
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
           superclasses: {}, header_nestings: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {},
+          deferred_ranges: {},
           parameter_envelopes: {}, class_sources: {},
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
           compact_headers: {},
@@ -4327,7 +4454,7 @@ module Rigor
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
         acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes method_visibilities
-           methods parameter_envelopes class_sources constant_sources].each do |key|
+           methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -4375,8 +4502,7 @@ module Rigor
         merge_header_nestings(acc[:header_nestings], header_nestings)
         accumulate_module_lists(acc[:includes], includes)
         accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
-        record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
-                             acc[:compact_headers])
+        record_file_positions(acc, path, root, superclasses, includes, file_def_nodes)
         merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, root)

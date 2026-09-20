@@ -26,6 +26,7 @@ module Rigor
       :discovered_method_visibilities,
       :discovered_parameter_envelopes,
       :discovered_superclasses,
+      :discovered_deferred_ranges,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_extends,
@@ -131,6 +132,14 @@ module Rigor
         # contribution agrees. Read by `call.wrong-arity` for a method no signature declares.
         discovered_parameter_envelopes: EMPTY_TABLE,
         discovered_superclasses: EMPTY_TABLE,
+        # Issue #1097 — `{file path => [[start_offset, end_offset, name, kind], ...]}`, every `def` /
+        # block / lambda body range in the file. `Scope#*_def_shadows_call?` reads it to tell an eager
+        # class-body call (orderable by offset against a same-name def entry) from a deferred one
+        # (contained in any range — it runs at invocation time, when every class-body def exists).
+        # Def entries carry the method name and `:instance` / `:singleton` / `:both` (module_function)
+        # kind; block / lambda entries carry nils and answer only the containment half. Plain data,
+        # so the ADR-85 seed bundle round-trips it unchanged.
+        discovered_deferred_ranges: EMPTY_TABLE,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified

@@ -411,6 +411,7 @@ module Rigor
         @project_discovered_includes = {}.freeze
         # Issue #898 — the singleton-side twin of the include table (`extend M` / `extend self`).
         @project_discovered_extends = {}.freeze
+        @project_discovered_deferred_ranges = {}.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
@@ -1457,6 +1458,7 @@ module Rigor
         @project_discovered_header_nestings = discovery.discovered_header_nestings
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_extends = discovery.discovered_extends
+        @project_discovered_deferred_ranges = discovery.discovered_deferred_ranges
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
@@ -1967,6 +1969,9 @@ module Rigor
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
+        unless @project_discovered_deferred_ranges.empty?
+          tables[:discovered_deferred_ranges] = @project_discovered_deferred_ranges
+        end
         seed_parameter_envelope_table(tables)
         seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)

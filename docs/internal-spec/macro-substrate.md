@@ -65,12 +65,23 @@ rules (consistent with the rest of the plugin-contract carriers):
   RBS-declared `extend`s surfaced by
   `Environment#singleton_extended_modules` — resolves to the
   constraint and actually defines `method_name`. The class's own
-  singleton defs precede every `extend` edge — `def self.sig` on the
-  class itself answers before `T::Sig` ever could. That is how `class
+  singleton defs precede every `extend` edge — but only once they have
+  RUN: `sig { ... }; def self.sig` still binds `T::Sig`, because the
+  `def` has not executed at call time. `Scope#singleton_def_shadows_call?`
+  decides this from `discovered_deferred_ranges`, the per-file def /
+  block / lambda body-range table: a call contained in any such range
+  is deferred to invocation time and is always shadowed, while an eager
+  class-body call is shadowed only by a same-name def whose start offset
+  precedes it (byte offsets, so same-line defs order correctly; the
+  earliest matching def decides, so a later redefinition cannot
+  resurrect the bridge). A cross-file def and a file the index never
+  saw both count as shadowed — the conservative direction, since
+  binding `DeclBuilder` where a project method owns the call would
+  invent diagnostics. That is how `class
   F; extend T::Sig; sig { ... }; end` and `class Doc <
   T::ImmutableStruct; sig { ... }; end` both reach the `sig` entry
   (#1097) — while a nearer `extend` whose module defines the same name
-  (`extend T::Sig; extend CustomSig`), or the class's own
+  (`extend T::Sig; extend CustomSig`), or the class's own already-run
   `def self.sig`, owns the call and the binding declines, since that
   custom method picks the block's self at runtime.
 

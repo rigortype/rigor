@@ -111,7 +111,11 @@ module Rigor
       # reads for a method no signature declares. A pre-23 bundle folds as "no envelopes", which only ever
       # withholds a check, but a warm run that withholds where a cold run fires is still the
       # `--verify-incremental` divergence 14 was bumped for.
-      SCHEMA = 23
+      # 24: issue #1097 gives each seed bundle a `deferred_ranges` table — the per-file def / block /
+      # lambda body ranges `Scope#*_def_shadows_call?` orders a project-defined `sig` override
+      # against. A pre-24 bundle would fold as "no ranges", which the predicate reads as "cannot
+      # order → shadow" — a warm run declining the binding where a cold run binds.
+      SCHEMA = 24
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

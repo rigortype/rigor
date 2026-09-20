@@ -636,6 +636,63 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "shadows when the FIRST of two same-line `def self.sig`s precedes the call" do
+      # The site table is first-wins but the def-node table is later-wins: ordering must come from the
+      # earliest same-name def range, or the second def's offset would read this as unshadowed.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.sig(&blk) = class_exec(&blk); sig { params(x: Integer).bogus_terminus }; def self.sig(&blk) = class_exec(&blk)
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows a sig call inside a `define_singleton_method` block" do
+      # The block body runs when `m` is invoked — after `def self.sig` installed — so F's own `sig`
+      # owns the call even though the block lexically precedes the def.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          define_singleton_method(:m) { sig { params(x: Integer).bogus_terminus } }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows a sig call inside an OVERWRITTEN method's dead body" do
+      # `def self.m` is redefined below, so the def-node table keeps only the later body — but the
+      # dead body's `sig` is still a deferred call, and the ranges table retains every def.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.m; end
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
     it "still binds DeclBuilder when `def self.sig` follows the call on the SAME line" do
       # Statement order within a line is execution order — `sig {}; def self.sig` resolves through
       # `T::Sig` at runtime. Ordering by def-site line alone would treat the def as shadowing.

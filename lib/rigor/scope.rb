@@ -49,6 +49,11 @@ module Rigor
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
     def discovered_parameter_envelopes = @discovery.discovered_parameter_envelopes
     def discovered_superclasses = @discovery.discovered_superclasses
+
+    # Issue #1097 — `{file path => [[start_offset, end_offset, name, kind], ...]}`, the def / block /
+    # lambda body ranges {singleton_def_shadows_call?} / {instance_def_shadows_call?} order a
+    # project-defined override against.
+    def discovered_deferred_ranges = @discovery.discovered_deferred_ranges
     def discovered_includes = @discovery.discovered_includes
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
@@ -794,7 +799,7 @@ module Rigor
       # table) cannot be ordered — treat it as shadowing rather than pretending it does not exist.
       return discovered_method?(class_name, method_name, :singleton) if site.nil?
 
-      def_shadows_call?(site, call_node) { singleton_def_for(class_name, method_name) }
+      def_shadows_call?(site, method_name, :singleton, call_node)
     end
 
     # The instance-side twin of {#singleton_def_shadows_call?}: whether `class_name`'s `def method_name`
@@ -803,64 +808,46 @@ module Rigor
       site = user_def_site_for(class_name, method_name)
       return discovered_method?(class_name, method_name, :instance) if site.nil?
 
-      def_shadows_call?(site, call_node) { user_def_for(class_name, method_name) }
+      def_shadows_call?(site, method_name, :instance, call_node)
     end
 
     # Shared ordering half of the two `*_def_shadows_call?` predicates, over a resolved `"path:line"`
-    # site — FIRST-wins per method, so the line it carries is the earliest definition's, which is the
-    # one that decides whether a def exists at call time. Only a same-file site can be ordered against
-    # the call at all; a foreign file and a nil `call_node` (position-less dispatch probes) both
-    # conservatively count as shadowing. So does a call inside ANY def body of this file — it runs at
-    # method-invocation time, after the class body finished, so lexical order does not apply to it.
-    # On a same-line tie (`sig {}; def self.sig`) the resolved def node's byte offset decides — but
-    # only when it sits on the site's own line, since the def-node table is later-wins and a different
-    # line means a second definition, which cannot order the first.
-    def def_shadows_call?(site, call_node)
+    # site and this file's `discovered_deferred_ranges` (issue #1097). The site — FIRST-wins per
+    # method — establishes that a def of this name and kind exists and pins it to one file; the ranges
+    # then answer the two timing questions. A call CONTAINED in any def / block / lambda body range
+    # runs at invocation time, after the class body finished, so it is always shadowed. An eager
+    # class-body call is shadowed only by a same-name def whose start offset precedes it — comparing
+    # offsets (not lines) keeps `sig { ... }; def self.sig` on one line ordering correctly, and taking
+    # the EARLIEST matching range (not the def-node table's later-wins entry) keeps
+    # `def self.sig; sig {}; def self.sig` honest. A foreign file, a nil `call_node` (position-less
+    # dispatch probes), or a file the index never saw all conservatively count as shadowing.
+    def def_shadows_call?(site, method_name, kind, call_node)
       return true if call_node.nil?
 
-      path, _sep, line = site.rpartition(":")
+      path, = site.rpartition(":")
       return true unless path == source_path
 
-      return true if inside_same_file_def_body?(call_node)
+      ranges = @discovery.discovered_deferred_ranges[path]
+      return true if ranges.nil?
 
-      site_line = line.to_i
-      call_line = call_node.location.start_line
-      return site_line < call_line unless site_line == call_line
-
-      node = yield
-      return true if node.nil? || node.location.start_line != site_line
-
-      node.location.start_offset <= call_node.location.start_offset
+      deferred_ranges_shadow_call?(ranges, method_name.to_sym, kind, call_node.location)
     end
     private :def_shadows_call?
 
-    # Whether `call_node` sits inside any `def` body recorded for this file. Runs only on the
-    # `*_def_shadows_call?` path — i.e. once a same-named project def already exists — so the full
-    # instance/singleton table sweep stays rare. Sites filter the sweep to this file before the
-    # (possibly `DefHandle`, ADR-85) node is resolved.
-    def inside_same_file_def_body?(call_node)
-      loc = call_node.location
-      prefix = "#{source_path}:"
-      [
-        [@discovery.discovered_def_nodes, @discovery.discovered_def_sources],
-        [@discovery.discovered_singleton_def_nodes, @discovery.discovered_singleton_def_sources]
-      ].any? do |nodes_table, sources_table|
-        nodes_table.any? do |class_name, methods|
-          sites = sources_table[class_name]
-          methods.any? do |method_name, entry|
-            site = sites&.[](method_name)
-            next false unless site&.start_with?(prefix)
+    # The range scan behind {#def_shadows_call?}: `true` the moment the call proves deferred —
+    # contained in ANY range — otherwise whether the earliest matching-kind def of `method_name`
+    # starts before the call.
+    def deferred_ranges_shadow_call?(ranges, method_name, kind, call_loc)
+      earliest = nil
+      ranges.each do |(start, finish, name, def_kind)|
+        return true if start <= call_loc.start_offset && call_loc.end_offset <= finish
+        next unless name == method_name && (def_kind == kind || def_kind == :both)
 
-            node = Inference::DefNodeResolver.resolve(entry)
-            next false if node.nil?
-
-            body = node.location
-            body.start_offset <= loc.start_offset && loc.end_offset <= body.end_offset
-          end
-        end
+        earliest = start if earliest.nil? || start < earliest
       end
+      earliest.nil? || earliest <= call_loc.start_offset
     end
-    private :inside_same_file_def_body?
+    private :deferred_ranges_shadow_call?
 
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —

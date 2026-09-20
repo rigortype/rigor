@@ -1,0 +1,1 @@
+- **[dev]** The handbook-snippet and documentation-link gates now assert that they scanned a plausible corpus, and the handbook gate fails when an executable snippet carries a fence its scan cannot see — both previously reported green having checked nothing ([#1138](https://github.com/rigortype/rigor/pull/1138)).

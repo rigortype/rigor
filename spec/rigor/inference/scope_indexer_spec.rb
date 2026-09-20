@@ -2248,6 +2248,121 @@ Unrelated
     end
   end
 
+  # #1097 — inside a `*_eval` / `*_exec` block, `Module.nesting` stays LEXICAL while `def`
+  # binds to the receiver: the discovery walks carry both contexts — declarations and
+  # constant writes file under the enclosing namespace, def-ish leaves under the receiver.
+  describe "eval-block dual context (#1097)" do
+    def methods_for(source)
+      described_class.build_methods_and_def_nodes(parse(source)).first
+    end
+
+    it "files a `class` declaration inside an eval block under the LEXICAL namespace" do
+      # `X.class_eval { class Inner }` inside `module M` opens `M::Inner` — `Module.nesting`
+      # does not change in an eval block — so `def h` inside belongs to `M::Inner`, not `X::Inner`.
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            class Inner
+              def h; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::Inner" => { h: :instance })
+      expect(table).not_to have_key("X::Inner")
+    end
+
+    it "files a meta-new constant write inside an eval block under the lexical namespace" do
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            K = Class.new do
+              def h; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::K" => { h: :instance })
+      expect(table).not_to have_key("X::K")
+    end
+
+    it "records `class << self` inside an eval block on the RECEIVER's singleton" do
+      # self inside `X.class_eval` is X, so `class << self` opens X's singleton — `def m` is X.m.
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            class << self
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("X" => { m: :singleton })
+      expect(table).not_to have_key("M")
+    end
+
+    it "gives a def inside an eval-nested declaration the LEXICAL owner in deferred ranges" do
+      ranges = described_class.build_deferred_ranges(parse(<<~RUBY))
+        class X; end
+        module M
+          X.class_eval do
+            class Inner
+              def h; end
+            end
+          end
+        end
+      RUBY
+      h_rows = ranges.select { |row| row[2] == :h }
+      expect(h_rows.map(&:last)).to eq(["M::Inner"])
+    end
+
+    it "attributes `def self.x` inside an eval block to the receiver in every table" do
+      source = <<~RUBY
+        class X; end
+        module M
+          X.class_eval do
+            def self.g; end
+          end
+        end
+      RUBY
+      program = parse(source)
+      expect(methods_for(source)).to include("X" => { g: :singleton })
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(program)
+      expect(singleton_defs.fetch("X")).to have_key(:g)
+      expect(singleton_defs).not_to have_key("M")
+    end
+
+    it "names the owner of a `self::X.class_eval` block from the enclosing namespace" do
+      # `self::X` inside `module M` resolves to `M::X` — the eval block's defs land there.
+      table = methods_for(<<~RUBY)
+        module M
+          self::X.class_eval do
+            def h; end
+          end
+        end
+      RUBY
+      expect(table).to include("M::X" => { h: :instance })
+      expect(table).not_to have_key("M")
+    end
+
+    it "attributes a bare `private` toggle inside an eval block to the receiver's table" do
+      table = described_class.build_discovered_method_visibilities(parse(<<~RUBY))
+        class X; end
+        module M
+          X.class_eval do
+            private
+            def f; end
+          end
+        end
+      RUBY
+      expect(table).to include("X" => { f: :private })
+      expect(table).not_to have_key("M")
+    end
+  end
+
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
   # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
   # is exactly what the peel it replaces could not do.

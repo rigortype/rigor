@@ -2129,10 +2129,17 @@ module Rigor
       # right accumulator) and the original `walk_methods` returning at `AliasMethodNode` (its symbol-only children
       # carry no def / class node, so not descending them is byte-identical for `def_nodes` too). See
       # {#build_methods_and_def_nodes}.
-      def walk_methods_and_def_nodes(node, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
-                                     source_path = nil)
+      # `def_owner_prefix` overrides the prefix def-ish leaves record under — inside a
+      # `*_eval` / `*_exec` block body it is the receiver's prefix while `qualified_prefix`
+      # stays LEXICAL: `Module.nesting` does not change in an eval block, so `def` binds
+      # to the receiver but `class` / `module` / constant writes still file under the
+      # enclosing namespace. Declaration branches recurse with the override cleared —
+      # inside `X.class_eval { class Inner; def h }` the def belongs to `M::Inner` again.
+      def walk_methods_and_def_nodes(node, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc, # rubocop:disable Metrics/AbcSize
+                                     source_path = nil, def_owner_prefix = nil)
         return unless node.is_a?(Prism::Node)
 
+        owner_prefix = def_owner_prefix || qualified_prefix
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
@@ -2145,7 +2152,9 @@ module Rigor
           end
         when Prism::SingletonClassNode
           if node.body
-            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            # `class << self` inside an eval body opens the RECEIVER's singleton — self is
+            # the eval receiver there — so the override supplies the base, not the lexical prefix.
+            singleton_prefix = singleton_class_prefix(node, owner_prefix)
             if singleton_prefix
               walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc, source_path)
               return
@@ -2164,21 +2173,21 @@ module Rigor
             return
           end
         when Prism::DefNode
-          record_def_method(node, qualified_prefix, in_singleton_class, methods_acc)
-          record_def_body_evidence(node, qualified_prefix, methods_acc)
-          record_def_node(node, qualified_prefix, in_singleton_class, def_nodes_acc)
+          record_def_method(node, owner_prefix, in_singleton_class, methods_acc)
+          record_def_body_evidence(node, owner_prefix, methods_acc)
+          record_def_node(node, owner_prefix, in_singleton_class, def_nodes_acc)
           return
         when Prism::AliasMethodNode, Prism::UndefNode
-          record_alias_or_undef(node, qualified_prefix, in_singleton_class, methods_acc)
+          record_alias_or_undef(node, owner_prefix, in_singleton_class, methods_acc)
           return
         when Prism::CallNode
           if eval_block_call?(node)
             return walk_eval_methods_and_defs(node, qualified_prefix, in_singleton_class, methods_acc,
-                                              def_nodes_acc, source_path)
+                                              def_nodes_acc, source_path, def_owner_prefix)
           end
-          anonymous = record_call_node_methods(node, qualified_prefix, in_singleton_class, methods_acc, source_path)
+          anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc, source_path)
           if anonymous
-            walk_anonymous_meta_block(node, anonymous, qualified_prefix, in_singleton_class, methods_acc,
+            walk_anonymous_meta_block(node, anonymous, owner_prefix, in_singleton_class, methods_acc,
                                       def_nodes_acc, source_path)
             return
           end
@@ -2186,29 +2195,32 @@ module Rigor
 
         node.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc,
-                                     source_path)
+                                     source_path, def_owner_prefix)
         end
       end
 
       # {#walk_eval_singleton_defs}'s combined-walk twin: a `*_eval` / `*_exec` block's defs,
       # `attr_*`s and metaprogrammed methods belong to the RECEIVER's class — `X.class_eval {
       # attr_reader :a }` inside `module M` records `X#a`, not `M#a`. An unnameable receiver keeps
-      # the enclosing prefix (over-approximate, as the def tables already are).
+      # the enclosing prefix (over-approximate, as the def tables already are). Declarations
+      # inside the block stay LEXICAL — `X.class_eval { class Inner }` inside `module M`
+      # opens `M::Inner`, so the body walks under `qualified_prefix` with the receiver
+      # prefix supplied as the def-owner override.
       def walk_eval_methods_and_defs(node, qualified_prefix, in_singleton_class, methods_acc,
-                                     def_nodes_acc, source_path)
+                                     def_nodes_acc, source_path, def_owner_prefix = nil)
         if node.receiver
           walk_methods_and_def_nodes(node.receiver, qualified_prefix, in_singleton_class, methods_acc,
-                                     def_nodes_acc, source_path)
+                                     def_nodes_acc, source_path, def_owner_prefix)
         end
         node.arguments&.arguments&.each do |arg|
           walk_methods_and_def_nodes(arg, qualified_prefix, in_singleton_class, methods_acc,
-                                     def_nodes_acc, source_path)
+                                     def_nodes_acc, source_path, def_owner_prefix)
         end
         eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         node.block.rigor_each_child do |child|
-          walk_methods_and_def_nodes(child, eval_prefix, eval_in_singleton, methods_acc, def_nodes_acc,
-                                     source_path)
+          walk_methods_and_def_nodes(child, qualified_prefix, eval_in_singleton, methods_acc, def_nodes_acc,
+                                     source_path, eval_prefix)
         end
       end
 
@@ -2674,38 +2686,40 @@ module Rigor
       # / meta-`new` bodies go through {#walk_deferred_body}, which prescans `module_function` state;
       # every other node recurses per child. A `DefNode` records its own range AND descends — a
       # nested `def` or block inside its body is still a range the containment half needs.
+      # `def_owner_prefix` is the eval-body override described on {#walk_methods_and_def_nodes}:
+      # an explicit owner for def rows while declarations stay lexical (`[]` = ownerless).
       def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix = nil)
         return unless node.is_a?(Prism::Node)
 
         if CLASS_BODY_NODES.any? { |kind| node.is_a?(kind) }
           return walk_deferred_lexical_body(node, qualified_prefix, in_singleton_class,
-                                            inside_deferred, mf_offsets, ranges)
+                                            inside_deferred, mf_offsets, ranges, def_owner_prefix)
         end
         if META_WRITE_NODES.any? { |kind| node.is_a?(kind) }
           return walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                        mf_offsets, ranges)
+                                        mf_offsets, ranges, def_owner_prefix)
         end
         if node.is_a?(Prism::DefNode)
-          record_deferred_def(node, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
-                              ranges)
+          record_deferred_def(node, def_owner_prefix || qualified_prefix, in_singleton_class,
+                              inside_deferred, mf_offsets, ranges)
           return walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
-                                        ranges)
+                                        ranges, def_owner_prefix)
         end
         if DEFERRED_RANGE_NODES.any? { |kind| node.is_a?(kind) }
           # Deferred: a call inside runs at invocation / interpreter-exit time. `BEGIN`
           # (PreExecutionNode) is the opposite — eager, before the class body — and stays unlisted.
           ranges << [node.location.start_offset, node.location.end_offset, nil, nil, nil]
           return walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
-                                        ranges)
+                                        ranges, def_owner_prefix)
         end
         if node.is_a?(Prism::CallNode) && eval_block_call?(node)
           return walk_eval_block_call(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                      mf_offsets, ranges)
+                                      mf_offsets, ranges, def_owner_prefix)
         end
 
         walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
       end
 
       DEFERRED_RANGE_NODES = [Prism::BlockNode, Prism::LambdaNode, Prism::PostExecutionNode].freeze
@@ -2715,22 +2729,23 @@ module Rigor
       private_constant :DEFERRED_RANGE_NODES, :META_WRITE_NODES, :CLASS_BODY_NODES
 
       def walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                 mf_offsets, ranges)
+                                 mf_offsets, ranges, def_owner_prefix = nil)
         node.rigor_each_child do |child|
           walk_deferred_ranges(child, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
         end
       end
 
       def walk_deferred_lexical_body(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                     mf_offsets, ranges)
+                                     mf_offsets, ranges, def_owner_prefix = nil)
         if node.is_a?(Prism::SingletonClassNode)
           walk_deferred_ranges(node.expression, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
           # `class << <non-constant>` opens a singleton the walk cannot name — its body is walked
           # under an empty prefix so defs record a nil owner and never join another class's ordering
-          # scan (containment still answers).
-          prefix = singleton_class_prefix(node, qualified_prefix) || []
+          # scan (containment still answers). Inside an eval body `class << self` opens the
+          # RECEIVER's singleton, so the owner override supplies the base.
+          prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix) || []
           walk_deferred_body(node.body, prefix, true, inside_deferred, ranges) if node.body
           return
         end
@@ -2738,25 +2753,25 @@ module Rigor
         child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
         unless child_prefix
           walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                 mf_offsets, ranges)
+                                 mf_offsets, ranges, def_owner_prefix)
           return
         end
 
         # `class Foo < expr` — a superclass expression can still hide defs and deferred calls.
         if node.is_a?(Prism::ClassNode) && node.superclass
           walk_deferred_ranges(node.superclass, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
         end
         walk_deferred_body(node.body, child_prefix, false, inside_deferred, ranges) if node.body
       end
 
       def walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                 mf_offsets, ranges)
+                                 mf_offsets, ranges, def_owner_prefix = nil)
         child_prefix = meta_new_body_prefix(node, qualified_prefix)
         call = meta_new_block_call(node)
         unless child_prefix && call
           walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
-                                 mf_offsets, ranges)
+                                 mf_offsets, ranges, def_owner_prefix)
           return
         end
 
@@ -2764,11 +2779,11 @@ module Rigor
         # deferred range. The rvalue's receiver / arguments still get the ordinary walk.
         if call.receiver
           walk_deferred_ranges(call.receiver, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
         end
         call.arguments&.arguments&.each do |arg|
           walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
-                               ranges)
+                               ranges, def_owner_prefix)
         end
         walk_deferred_body(meta_new_block_body(node), child_prefix, false, inside_deferred, ranges)
       end
@@ -2783,15 +2798,17 @@ module Rigor
       # inside a deferred range installs its defs at invocation, not in place, so the prescan —
       # which exists to NAME rows for the ordering scan — is skipped there and every def records a
       # containment-only row instead.
-      def walk_deferred_body(body, qualified_prefix, in_singleton_class, inside_deferred, ranges)
+      def walk_deferred_body(body, qualified_prefix, in_singleton_class, inside_deferred, ranges,
+                             def_owner_prefix = nil)
+        owner_prefix = def_owner_prefix || qualified_prefix
         mf_offsets = []
         unless inside_deferred
-          collect_module_function_state(body, qualified_prefix, in_singleton_class, mf_offsets,
+          collect_module_function_state(body, owner_prefix, in_singleton_class, mf_offsets,
                                         ranges)
         end
         statements_of(body).each do |stmt|
           walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
         end
       end
 
@@ -2877,24 +2894,29 @@ module Rigor
       # callbacks yield-or-store on terms syntax cannot separate, and the conservative answer there
       # is "deferred".
       def walk_eval_block_call(node, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix = nil)
         if node.receiver
           walk_deferred_ranges(node.receiver, qualified_prefix, in_singleton_class, inside_deferred,
-                               mf_offsets, ranges)
+                               mf_offsets, ranges, def_owner_prefix)
         end
         node.arguments&.arguments&.each do |arg|
           walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
-                               ranges)
+                               ranges, def_owner_prefix)
         end
         block = node.block
+        # The body walks under the LEXICAL prefix — `Module.nesting` does not change in an
+        # eval block — with the receiver's prefix (or ownerless `[]`) as the def-owner
+        # override: `X.class_eval { class Inner }` still opens `M::Inner`.
         eval_prefix = eval_receiver_prefix(node, qualified_prefix) || []
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         block.parameters&.rigor_each_child do |child|
-          walk_deferred_ranges(child, eval_prefix, eval_in_singleton, inside_deferred, [], ranges)
+          walk_deferred_ranges(child, qualified_prefix, eval_in_singleton, inside_deferred, [],
+                               ranges, eval_prefix)
         end
         return unless block.body
 
-        walk_deferred_body(block.body, eval_prefix, eval_in_singleton, inside_deferred, ranges)
+        walk_deferred_body(block.body, qualified_prefix, eval_in_singleton, inside_deferred, ranges,
+                           eval_prefix)
       end
 
       # The owner an eval-family block body evaluates under. A bare or `self` receiver keeps the
@@ -2907,6 +2929,13 @@ module Rigor
       def eval_receiver_prefix(node, qualified_prefix)
         receiver = node.receiver
         return qualified_prefix if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        # `self::Foo` names the enclosing namespace's `Foo` — the same resolution
+        # {constant_path_write_key} gives a `self::` write target. The tail is a bare
+        # constant name: `self::Foo::Bar` parses with a ConstantPathNode parent, not SelfNode.
+        if receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.is_a?(Prism::SelfNode)
+          return qualified_prefix + [receiver.name.to_s]
+        end
 
         rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
         return nil unless rendered
@@ -2956,10 +2985,12 @@ module Rigor
       # `module_function` toggle threads correctly across the body's *sibling* statements (a child-by-child recursion
       # would reset it). At the top level / inside an arbitrary node there is no `module_function` state to carry, so
       # descent is a plain per-child walk.
-      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
+      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator, # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+                                   def_owner_prefix = nil)
         return unless node.is_a?(Prism::Node)
         if node.is_a?(Prism::CallNode) && eval_block_call?(node)
-          return walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator)
+          return walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator,
+                                          def_owner_prefix)
         end
 
         case node
@@ -2971,7 +3002,7 @@ module Rigor
           end
         when Prism::SingletonClassNode
           if node.body
-            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix)
             if singleton_prefix
               walk_singleton_body(node.body, singleton_prefix, true, accumulator)
               return
@@ -2985,12 +3016,13 @@ module Rigor
             return
           end
         when Prism::DefNode
-          record_singleton_def_node(node, qualified_prefix, in_singleton_class, false, accumulator)
+          record_singleton_def_node(node, def_owner_prefix || qualified_prefix, in_singleton_class, false,
+                                    accumulator)
           return
         end
 
         node.rigor_each_child do |child|
-          walk_singleton_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
+          walk_singleton_def_nodes(child, qualified_prefix, in_singleton_class, accumulator, def_owner_prefix)
         end
       end
 
@@ -3000,19 +3032,24 @@ module Rigor
       # `M.m`. An unnameable receiver keeps the enclosing prefix (the over-approximate direction the
       # def tables already take). The block body is a class body, so it walks through
       # {#walk_singleton_body} and gets its own `module_function` threading.
-      def walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator)
-        walk_singleton_def_nodes(node.receiver, qualified_prefix, in_singleton_class, accumulator) if node.receiver
+      def walk_eval_singleton_defs(node, qualified_prefix, in_singleton_class, accumulator,
+                                   def_owner_prefix = nil)
+        if node.receiver
+          walk_singleton_def_nodes(node.receiver, qualified_prefix, in_singleton_class, accumulator,
+                                   def_owner_prefix)
+        end
         node.arguments&.arguments&.each do |arg|
-          walk_singleton_def_nodes(arg, qualified_prefix, in_singleton_class, accumulator)
+          walk_singleton_def_nodes(arg, qualified_prefix, in_singleton_class, accumulator, def_owner_prefix)
         end
         eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         body = node.block.body
-        return walk_singleton_body(body, eval_prefix, eval_in_singleton, accumulator) if
-          body.is_a?(Prism::StatementsNode)
+        if body.is_a?(Prism::StatementsNode)
+          return walk_singleton_body(body, qualified_prefix, eval_in_singleton, accumulator, eval_prefix)
+        end
 
         node.block.rigor_each_child do |child|
-          walk_singleton_def_nodes(child, eval_prefix, eval_in_singleton, accumulator)
+          walk_singleton_def_nodes(child, qualified_prefix, eval_in_singleton, accumulator, eval_prefix)
         end
       end
 
@@ -3082,22 +3119,24 @@ module Rigor
       # bare-`module_function` toggle: once a bare `module_function` is seen, every subsequent `def` in the body
       # registers as a singleton method. Nested classes/modules/defs and `module_function :a, :b` named forms recurse /
       # record through the general walker so the toggle stays scoped to its own body.
-      def walk_singleton_body(body, qualified_prefix, in_singleton_class, accumulator)
+      def walk_singleton_body(body, qualified_prefix, in_singleton_class, accumulator,
+                              def_owner_prefix = nil)
+        owner_prefix = def_owner_prefix || qualified_prefix
         module_function_on = false
         statements_of(body).each do |stmt|
           if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
             if bare_module_function?(stmt)
               module_function_on = true
             else
-              record_module_function_names(stmt, qualified_prefix, body, accumulator)
+              record_module_function_names(stmt, owner_prefix, body, accumulator)
             end
             next
           end
           if stmt.is_a?(Prism::DefNode)
-            record_singleton_def_node(stmt, qualified_prefix, in_singleton_class, module_function_on, accumulator)
+            record_singleton_def_node(stmt, owner_prefix, in_singleton_class, module_function_on, accumulator)
             next
           end
-          walk_singleton_def_nodes(stmt, qualified_prefix, in_singleton_class, accumulator)
+          walk_singleton_def_nodes(stmt, qualified_prefix, in_singleton_class, accumulator, def_owner_prefix)
         end
       end
 
@@ -3774,9 +3813,11 @@ module Rigor
       end
 
       # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-      def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+      def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator,
+                                   def_owner_prefix = nil)
         return current_visibility unless node.is_a?(Prism::Node)
 
+        owner_prefix = def_owner_prefix || qualified_prefix
         case node
         when Prism::ClassNode, Prism::ModuleNode
           child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
@@ -3786,7 +3827,7 @@ module Rigor
           end
         when Prism::SingletonClassNode
           if node.body
-            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            singleton_prefix = singleton_class_prefix(node, owner_prefix)
             if singleton_prefix
               walk_method_visibilities(node.body, singleton_prefix, true, :public, accumulator)
               return current_visibility
@@ -3800,15 +3841,15 @@ module Rigor
             return current_visibility
           end
         when Prism::DefNode
-          record_def_visibility(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+          record_def_visibility(node, owner_prefix, in_singleton_class, current_visibility, accumulator)
           return current_visibility
         when Prism::CallNode
           if eval_block_call?(node)
             walk_eval_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
-                                   accumulator)
+                                   accumulator, def_owner_prefix)
             return current_visibility
           end
-          updated = apply_visibility_call(node, qualified_prefix, current_visibility, accumulator)
+          updated = apply_visibility_call(node, owner_prefix, current_visibility, accumulator)
           return updated unless updated.equal?(current_visibility)
         end
 
@@ -3818,33 +3859,36 @@ module Rigor
           local_visibility = current_visibility
           node.rigor_each_child do |child|
             local_visibility = walk_method_visibilities(child, qualified_prefix, in_singleton_class,
-                                                        local_visibility, accumulator)
+                                                        local_visibility, accumulator, def_owner_prefix)
           end
         else
           node.rigor_each_child do |child|
-            walk_method_visibilities(child, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+            walk_method_visibilities(child, qualified_prefix, in_singleton_class, current_visibility,
+                                     accumulator, def_owner_prefix)
           end
         end
         current_visibility
       end
 
       # The eval-block arm of {#walk_method_visibilities}: the block is a fresh class body under
-      # the receiver's prefix — visibility starts at `:public`, and nothing inside it leaks back to
-      # this body's modifier state. An unnameable receiver keeps the enclosing prefix.
+      # the receiver's def-owner — visibility starts at `:public`, and nothing inside it leaks
+      # back to this body's modifier state. An unnameable receiver keeps the enclosing prefix;
+      # declarations inside stay lexical.
       def walk_eval_visibilities(node, qualified_prefix, in_singleton_class, current_visibility,
-                                 accumulator)
+                                 accumulator, def_owner_prefix = nil)
         if node.receiver
           walk_method_visibilities(node.receiver, qualified_prefix, in_singleton_class,
-                                   current_visibility, accumulator)
+                                   current_visibility, accumulator, def_owner_prefix)
         end
         node.arguments&.arguments&.each do |arg|
           walk_method_visibilities(arg, qualified_prefix, in_singleton_class, current_visibility,
-                                   accumulator)
+                                   accumulator, def_owner_prefix)
         end
         eval_prefix = eval_receiver_prefix(node, qualified_prefix) || qualified_prefix
         eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         node.block.rigor_each_child do |child|
-          walk_method_visibilities(child, eval_prefix, eval_in_singleton, :public, accumulator)
+          walk_method_visibilities(child, qualified_prefix, eval_in_singleton, :public, accumulator,
+                                   eval_prefix)
         end
       end
 

@@ -2970,6 +2970,152 @@ Unrelated
       expect(writes.keys).to include("Foo::BAR")
       expect(writes.keys).not_to include("C::D::Foo::BAR")
     end
+
+    it "keeps a ROOTED meta-new class's whole body nameable under `class <<`" do
+      # `::K` lands at the top level — the block is `K`'s ordinary class body: member,
+      # mixin, visibility, `def`, and `self::V` facts all file under `K`.
+      source = <<~RUBY
+        module I; end
+        module E; end
+        class C
+          class << self
+            ::K = Struct.new(:x) do
+              include I
+              extend E
+              private
+              def m = x
+              self::V = 1
+            end.freeze
+          end
+        end
+      RUBY
+      methods, def_nodes = described_class.build_methods_and_def_nodes(parse(source))
+      expect(methods.fetch("K", {})).to include(m: :instance, x: :instance)
+      expect(def_nodes.fetch("K", {})).to have_key(:m)
+      expect(described_class.build_discovered_includes(parse(source))).to include("K" => ["I"])
+      expect(described_class.build_discovered_extends(parse(source))).to include("K" => ["E"])
+      visibility = described_class.build_discovered_method_visibilities(parse(source))
+      expect(visibility.fetch("K", {})).to include(m: :private)
+      struct = described_class.build_struct_member_layouts(parse(source))
+      expect(struct.fetch("K", {}).fetch(:members, [])).to include(:x)
+    end
+
+    it "keys `self::V` inside a rooted meta-new block under the class it names" do
+      # `self` inside `::K = Struct.new do … end` is `K` — `self::V` writes `K::V`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            ::K = Struct.new(:x) do
+              self::V = 1
+            end.freeze
+          end
+        end
+      RUBY
+      expect(writes.keys).to include("K::V")
+    end
+
+    it "discovers `::K = Class.new` under `class <<` in both discovery tables" do
+      # `resolve_meta_factory_call` only unwraps to a Data/Struct factory — a bare
+      # `Class.new` is recognised by `meta_new_constant_rvalue?` directly, and a
+      # `::`-rooted write stays nameable below the singleton.
+      source = "class C\n  class << self\n    ::K = Class.new { def m = 1 }\n  end\nend\n"
+      idx = described_class.index(parse(source), default_scope: default_scope)
+      expect(idx[parse(source).statements.body.first].discovered_classes).to have_key("K")
+
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, source)
+        expect(described_class.discovered_classes_for_paths([a])).to have_key("K")
+      end
+    end
+
+    it "keeps explicit-base meta-new writes nameable under `class <<`" do
+      # `C::K2` and `Foo::F` resolve their base lexically — the write lands on the
+      # spelled path, not the singleton's table.
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, <<~RUBY)
+          class Foo; end
+          class C
+            class << self
+              ::K = Class.new
+              C::K2 = Class.new
+              Foo::F = Class.new
+              K3 = Class.new
+            end
+          end
+        RUBY
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).to have_key("K")
+        expect(discovered).to have_key("C::C::K2") # compact-header approximation, same as outside
+        expect(discovered).to have_key("C::Foo::F")
+        expect(discovered).not_to have_key("C::K3")
+      end
+    end
+
+    it "keeps explicit-base class headers nameable under `class <<`" do
+      # `class C::CD` resolves `C` lexically — nameable under the same compact-header
+      # approximation the non-singleton walk uses; `class self::D` lands on the
+      # singleton and stays unnameable.
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, <<~RUBY)
+          class C
+            class << self
+              class C::CD; end
+              class self::SD; end
+              class Bare; end
+            end
+          end
+        RUBY
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).to have_key("C::C::CD")
+        expect(discovered).not_to have_key("C::SD")
+        expect(discovered).not_to have_key("C::Bare")
+      end
+    end
+
+    it "declines `self::`-anchored meta-new writes under `class <<`" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "class C\n  class << self\n    self::K = Class.new\n  end\nend\n")
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).not_to have_key("C::K")
+        expect(discovered).not_to have_key("K")
+      end
+    end
+
+    it "records aliases inside a rooted declaration under `class <<`" do
+      # `class ::K` re-anchors — `alias copied original` inside belongs to `K`.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class ::K
+              def original = :ok
+              alias copied original
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      def_node = idx[program].user_def_for("K", :copied)
+      expect(def_node).to be_a(Prism::DefNode)
+      expect(def_node.name).to eq(:original)
+    end
+
+    it "does not record singleton-body aliases under the enclosing class" do
+      # `alias` directly under `class <<` binds on `#<Class:C>` — the map files nothing.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            def original = :ok
+            alias copied original
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+    end
   end
 
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the

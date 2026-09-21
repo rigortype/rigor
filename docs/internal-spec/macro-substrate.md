@@ -110,8 +110,11 @@ rules (consistent with the rest of the plugin-contract carriers):
   (`discovered_classes`, `class_sources`, `declared_types`,
   `local_constant_names`) register no `C::D`/`C::K` either — a name
   `known_namespace?` would otherwise cross-contaminate every
-  `D`-family resolution with — and only a `::`-rooted header
-  re-anchors. The `class <<` EXPRESSION is the exception that proves
+  `D`-family resolution with. Only a bare header or write (and a
+  `self::` base) is unnameable there: every explicit-base path —
+  `::T`, `C::D`, `Foo::Bar`, `::K =`, `C::K =` — resolves its base
+  lexically and re-anchors under the same compact-header
+  approximation the non-singleton walk uses. The `class <<` EXPRESSION is the exception that proves
   the boundary: it evaluates in the enclosing context before the
   singleton opens, so `class << (class D; self; end)` still declares
   `C::D`, and `class << self` INSIDE a singleton body opens the

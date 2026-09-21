@@ -48,7 +48,8 @@ module Rigor
       # The probe {#could_be_range?} passes to `accepts` — interned because the question is asked
       # once per `[]=` index member.
       RANGE_INDEX_PROBE = Type::Combinator.nominal_of("Range")
-      private_constant :RANGE_INDEX_PROBE
+      ARRAY_PROBE = Type::Combinator.nominal_of("Array")
+      private_constant :RANGE_INDEX_PROBE, :ARRAY_PROBE
 
       module_function
 
@@ -291,19 +292,19 @@ module Rigor
       # `arr[range] = v` takes a Range); `:element` — the value itself is one stored element
       # (`arr[i] = v`); `:either` — the store may be either form.
       #
-      # A splat inside the brackets types as `Dynamic[top]`, indistinguishable from an untyped
-      # index, so every Dynamic leading argument counts as arity-unknown: `a[0, *xs] = v` stores
-      # `v` itself when `xs` is empty and `v`'s elements otherwise. Two or more PROVABLE index
-      # arguments are always a splice however the rest expand; one provable argument reduces to
-      # the single-index question when the maybes vanish; zero provable arguments leaves the
-      # store's form to whichever index a splat yields.
+      # A splat inside the brackets is marked `nil` by the caller — its expansion can change the
+      # store's arity (`a[0, *xs] = v` stores `v` itself when `xs` is empty and `v`'s elements
+      # otherwise). An ordinary argument counts as a provable index however untyped it is:
+      # `a[i, n] = v` is a splice at every binding of `i` and `n`. Two or more provable indices
+      # are therefore always a splice however a splat expands; one provable index beside a splat
+      # reduces to the Range question (extra expansion only reaches an arity error, never a
+      # scalar store); zero provable indices leaves the form to whatever the splat yields.
       def index_store_form(arg_types)
         leading = arg_types[0...-1]
-        return single_index_form(leading.first) if leading.size == 1
-
-        definite = leading.grep_v(Type::Dynamic)
+        definite = leading.compact
         return :splice if definite.size >= 2
         return :either if definite.empty?
+        return single_index_form(definite.first) if definite.size == leading.size
 
         range_index?(definite.first) ? :splice : :either
       end
@@ -342,12 +343,14 @@ module Rigor
       # returns `["x"]` stores `"x"`). `nil` is no exception — `a[i, n] = nil` stores a single
       # nil.
       #
-      # Every member that is not a literal Array carries a `Dynamic[top]` arm beside itself:
-      # nothing here can prove the member's class does not define `to_ary` — a `Nominal` may be
-      # a subclass that declares one, and the project may reopen even a non-subclassable core
-      # class (ADR-17's patched-methods tier resolves exactly those). A `Tuple` is the one
-      # exact carrier: a literal Array's `to_ary` is the builtin self-return, the same
-      # builtin-semantics line the rest of this method rests on.
+      # Every member that is not an Array carrier keeps a `Dynamic[top]` arm beside itself:
+      # `to_ary` is consulted for a NON-Array value, and nothing here can prove the member's
+      # class does not define one — a `Nominal` may be a subclass that declares it, and the
+      # project may reopen even a non-subclassable core class (ADR-17's patched-methods tier
+      # resolves exactly those). The two exact carriers are the ones `Array#[]=` splices
+      # without a coercion: a `Tuple` literal's elements, and a `Nominal[Array]`'s own type
+      # arguments — an Array object is spliced directly even when its class overrides
+      # `to_ary`.
       def splice_stored_elements(value_type)
         union_members(value_type).flat_map do |member|
           base = member
@@ -358,7 +361,14 @@ module Rigor
             base.elements
           when Type::Nominal
             if base.class_name == "Array"
-              base.type_args + [Type::Combinator.untyped]
+              # `Array#[]=` splices an Array RHS directly — `to_ary` is never consulted
+              # for an Array object, even a subclass overriding it — so the elements
+              # join exactly (a bare `Array` signature left them unknown, not absent).
+              base.type_args.empty? ? [Type::Combinator.untyped] : base.type_args
+            elsif ARRAY_PROBE.accepts(base).yes?
+              # A definite Array subclass is spliced the same way; its elements are
+              # unknown to this seam.
+              [Type::Combinator.untyped]
             else
               [member, Type::Combinator.untyped]
             end

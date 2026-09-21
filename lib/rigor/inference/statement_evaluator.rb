@@ -653,7 +653,9 @@ module Rigor
         return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
-        list.map { |arg| scope.type_of(arg, tracer: tracer) } + [stored_type]
+        # A splat argument is marked `nil` — its expansion decides the store's arity at
+        # runtime, which an untyped index type could not express (issue #1140).
+        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : scope.type_of(arg, tracer: tracer) } + [stored_type]
       end
 
       # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
@@ -2713,7 +2715,7 @@ module Rigor
         return [] if stored.nil?
 
         list = args.respond_to?(:arguments) ? args.arguments : args
-        list.map { |a| block_entry.type_of(a, tracer: tracer) } + [stored]
+        list.map { |a| a.is_a?(Prism::SplatNode) ? nil : block_entry.type_of(a, tracer: tracer) } + [stored]
       rescue StandardError
         []
       end
@@ -2836,7 +2838,15 @@ module Rigor
         arguments = call_node.arguments
         return [] if arguments.nil?
 
-        arguments.arguments.map { |arg| block_entry.type_of(arg, tracer: tracer) }
+        list = arguments.arguments
+        list.map.with_index do |arg, i|
+          # For `[]=` a splat in an index position leaves the store's arity open — it is
+          # marked `nil` for {ContentJoin.array_added_elements}, which counts it as
+          # arity-unknown rather than as the untyped index it would type as (issue #1140).
+          next nil if call_node.name == :[]= && i < list.size - 1 && arg.is_a?(Prism::SplatNode)
+
+          block_entry.type_of(arg, tracer: tracer)
+        end
       rescue StandardError
         []
       end

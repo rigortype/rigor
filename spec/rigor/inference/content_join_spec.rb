@@ -156,7 +156,7 @@ RSpec.describe Rigor::Inference::ContentJoin do
     it "flat_maps a two-index []= splice's value through collection_element_types" do
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, array_arg])
-      expect(result).to eq([str_type, Rigor::Type::Combinator.untyped])
+      expect(result).to eq([str_type])
     end
 
     it "flat_maps a constant-Range []= splice's value through collection_element_types" do
@@ -170,14 +170,14 @@ RSpec.describe Rigor::Inference::ContentJoin do
       range_arg = Rigor::Type::Combinator.nominal_of("Range", type_args: [int_type])
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(:array_added_elements, :[]=, [range_arg, array_arg])
-      expect(result).to eq([str_type, Rigor::Type::Combinator.untyped])
+      expect(result).to eq([str_type])
     end
 
     it "joins both readings when the index may be a scalar or a Range" do
       union_index = Rigor::Type::Combinator.union(int_type, Rigor::Type::Combinator.constant_of(0..1))
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(:array_added_elements, :[]=, [union_index, array_arg])
-      expect(result).to contain_exactly(array_arg, str_type, Rigor::Type::Combinator.untyped)
+      expect(result).to contain_exactly(array_arg, str_type)
     end
 
     it "joins both readings when the index is untyped" do
@@ -185,7 +185,7 @@ RSpec.describe Rigor::Inference::ContentJoin do
       result = described_class.send(
         :array_added_elements, :[]=, [Rigor::Type::Combinator.untyped, array_arg]
       )
-      expect(result).to contain_exactly(array_arg, str_type, Rigor::Type::Combinator.untyped)
+      expect(result).to contain_exactly(array_arg, str_type)
     end
 
     # `a[i, n] = "x"` does not splice a String — Ruby stores the non-Array RHS itself
@@ -240,7 +240,7 @@ RSpec.describe Rigor::Inference::ContentJoin do
         Rigor::Type::Combinator.top
       ].each do |index|
         result = described_class.send(:array_added_elements, :[]=, [index, array_arg])
-        expect(result).to contain_exactly(array_arg, str_type, Rigor::Type::Combinator.untyped)
+        expect(result).to contain_exactly(array_arg, str_type)
       end
     end
 
@@ -252,7 +252,7 @@ RSpec.describe Rigor::Inference::ContentJoin do
       result = described_class.send(
         :array_added_elements, :[]=, [Rigor::Type::Combinator.nominal_of("MyRange"), array_arg]
       )
-      expect(result).to contain_exactly(array_arg, str_type, Rigor::Type::Combinator.untyped)
+      expect(result).to contain_exactly(array_arg, str_type)
     end
 
     it "stays an element store when the index is provably disjoint from Range" do
@@ -268,38 +268,43 @@ RSpec.describe Rigor::Inference::ContentJoin do
       end
     end
 
-    # A splat inside the brackets types as `Dynamic[top]` but can vanish at runtime, so
+    # A splat inside the brackets is marked `nil` — it can vanish at runtime, so
     # `a[0, *xs] = v` is a scalar store when `xs` is empty — both readings must join.
+    # An ordinary untyped argument is still a provable index: `a[i, n] = v` splices at
+    # every binding.
     it "joins both readings when a leading index argument may be a splat" do
       index = Rigor::Type::Combinator.constant_of(0)
-      untyped = Rigor::Type::Combinator.untyped
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
-      result = described_class.send(:array_added_elements, :[]=, [index, untyped, array_arg])
-      expect(result).to contain_exactly(array_arg, str_type, untyped)
+      result = described_class.send(:array_added_elements, :[]=, [index, nil, array_arg])
+      expect(result).to contain_exactly(array_arg, str_type)
     end
 
-    it "joins both readings when every index argument is untyped" do
+    it "joins both readings when the only index argument is a splat" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(:array_added_elements, :[]=, [nil, array_arg])
+      expect(result).to contain_exactly(array_arg, str_type)
+    end
+
+    it "splices two index arguments however untyped they are" do
       untyped = Rigor::Type::Combinator.untyped
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(:array_added_elements, :[]=, [untyped, untyped, array_arg])
-      expect(result).to contain_exactly(array_arg, str_type, untyped)
+      expect(result).to eq([str_type])
     end
 
     it "stays a splice when two index arguments are provable however a splat expands" do
-      untyped = Rigor::Type::Combinator.untyped
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(
-        :array_added_elements, :[]=, [int_type, int_type, untyped, array_arg]
+        :array_added_elements, :[]=, [int_type, int_type, nil, array_arg]
       )
-      expect(result).to eq([str_type, untyped])
+      expect(result).to eq([str_type])
     end
 
     it "stays a splice when the single provable index is a Range" do
-      untyped = Rigor::Type::Combinator.untyped
       range_arg = Rigor::Type::Combinator.constant_of(0..1)
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
-      result = described_class.send(:array_added_elements, :[]=, [range_arg, untyped, array_arg])
-      expect(result).to eq([str_type, untyped])
+      result = described_class.send(:array_added_elements, :[]=, [range_arg, nil, array_arg])
+      expect(result).to eq([str_type])
     end
 
     it "reports the single argument for a single-value fill" do

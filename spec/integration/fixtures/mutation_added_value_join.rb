@@ -84,6 +84,15 @@ def two_index_splat(xs)
   a
 end
 
+# Ordinary arguments are provable indices however untyped — `a[i, n] = v`
+# splices at every binding of i and n, so only the value's elements join.
+def two_untyped_index(i, n)
+  a = []
+  a[i, n] = [1, 2]
+  assert_type("Array[Dynamic[top] | Integer]", a)
+  a
+end
+
 # A NON-Array splice RHS does not splice — Ruby stores the value itself
 # as one element (`a[0, 1] = "x"` leaves the String inside; `a[0, 1] = nil`
 # leaves a nil — assigning `[]` is the deletion form). A nominal member

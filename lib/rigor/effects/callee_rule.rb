@@ -64,7 +64,10 @@ module Rigor
       # Rules that answer for one call node.
       SITE_RULES = %w[rails_render rails_render_partial].freeze
 
-      # Rules that answer for a whole unit, from its owner and its own key.
+      # Rules that answer for a whole unit, from its owner and its own key. A UNIT rule may additionally
+      # be applied **per format arm** of a `respond_to` block (#1071): the arm is the unit's own body, and
+      # the arm's format is a literal the unit scan read, so it travels as data the same way the unit's key
+      # does.
       UNIT_RULES = %w[rails_implicit_render].freeze
 
       RULES = (SITE_RULES + UNIT_RULES).freeze
@@ -112,12 +115,13 @@ module Rigor
         end
       end
 
-      # Applies a unit rule. Reads no node.
+      # Applies a unit rule. Reads no node; a `format:` from a `respond_to` arm (#1071) narrows the
+      # template the rule names from the default to that arm's own. Nil, or absent (`DEFAULT_FORMAT`).
       #
       # @return the {Callee} the rule named, or nil.
-      def unit(name, owner_class:, unit_key: nil)
+      def unit(name, owner_class:, unit_key: nil, format: nil)
         case name.to_s
-        when "rails_implicit_render" then rails_implicit_render(owner_class, unit_key)
+        when "rails_implicit_render" then rails_implicit_render(owner_class, unit_key, format: format)
         end
       end
 
@@ -172,8 +176,12 @@ module Rigor
         name.nil? ? nil : template_callee(name, format, retry_formats)
       end
 
-      # Rails' implicit render: an action that never rendered still renders `<controller>/<action>`.
-      def rails_implicit_render(owner_class, unit_key)
+      # Rails' implicit render: an action that never rendered still renders `<controller>/<action>`. A
+      # `respond_to` arm (#1071) is the same convention per format: `format.js` with no responding block
+      # renders `<controller>/<action>.js`, so the rule narrows the format it answers for, and an arm that
+      # IS answered outright is not applied at all (the unit scan decides that half and calls with the
+      # arm's format only for arms that still fall through).
+      def rails_implicit_render(owner_class, unit_key, format: nil)
         directory = controller_directory(owner_class)
         return nil if directory.nil? || unit_key.nil?
 
@@ -181,7 +189,7 @@ module Rigor
         return nil unless /\A[a-z_][A-Za-z0-9_]*[?!=]?\z/.match?(action)
         return nil if action.end_with?("?", "!", "=")
 
-        template_callee("#{directory}/#{action}", DEFAULT_FORMAT)
+        template_callee("#{directory}/#{action}", format || DEFAULT_FORMAT)
       end
 
       # `UsersController` → `users`; `Admin::UsersController` → `admin/users`. A class whose name does not

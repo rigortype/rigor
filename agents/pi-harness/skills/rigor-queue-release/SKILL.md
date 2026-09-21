@@ -109,6 +109,19 @@ Every turn:
 7. Stay in this session — do not require a wrapper restart. Resume later with
    `pi -c` in the same project.
 
+
+## Shared lane traps (feed into LaneInput / spawn)
+
+From `docs/notes/20260921-queue-release-lane-experience.md` (when on branch):
+
+- Pin Flash registry id on spawn (`opencode-go/deepseek-v4.1-flash` or current).
+- Child ~30m is enough for code, **not** for dual-project corpus `check` twice —
+  tell lanes to skip full corpus; collect counts in PR body / residual, or run
+  measurement out-of-band.
+- Remind `--body-file` for any `gh pr/issue create` (parent and children).
+- Worktree bundle: main `vendor/bundle` via untracked `.bundle/config`.
+- Prefer change-named PR branches; changelog after PR number.
+
 ## Approved gate
 
 After CI is green on a draft PR:

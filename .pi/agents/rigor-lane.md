@@ -36,6 +36,17 @@ Expect a `LaneInput` (or equivalent) covering:
 If the task is incomplete or acceptance is uncheckable, escalate via
 `contact_supervisor` with `reason: "need_decision"` (or report `Blocked — need human`).
 
+
+## Preflight (v0.4.0 batch lessons)
+
+1. Bundle: untracked `.bundle/config` with `BUNDLE_PATH` → main checkout `vendor/bundle`.
+2. Branch: create `<change-slug>-<issue>` locally before push (not `pi-subagents/…`).
+3. `gh` bodies: `--body-file` only (no backtick heredocs).
+4. Read `gh issue view N --comments` before trusting LaneInput known-causes.
+5. No full mastodon/redmine corpus loops here — escalate / note residual; parent owns budget.
+6. Changelog fragment after the PR number exists.
+7. Escalate contradictions; do not silent-extend scope.
+
 ## Output
 
 - Implementation that satisfies Acceptance (targeted local checks only)

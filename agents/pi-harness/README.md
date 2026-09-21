@@ -259,6 +259,10 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 - No full in-tree orchestrator yet; **takt is optional**.
 - No parallel full-suite `make verify` on the host.
 - Lanes do not own long-lived CI watchers / sleep loops.
+- Lane preflight (bundle path, `--body-file`, change-named branch, no in-session
+  full corpus): see `skills/rigor-lane/SKILL.md` and
+  `scripts/worktree-bundle-config.sh`. Batch write-up:
+  `docs/notes/20260921-queue-release-lane-experience.md`.
 - Issues remain the backlog (ADR-98).
 - Docs (C) flow waits until architect→lane works once; survey queue is available via `/queue-survey`.
 - mise stays runtimes-only (ADR-115 WD5).

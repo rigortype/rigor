@@ -18,12 +18,14 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 # npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 pi install -l ./agents/pi-harness --approve
 # or rely on committed .pi/settings.json:
-#   { "packages": ["../agents/pi-harness"] }
+#   { "packages": ["../agents/pi-harness", "npm:pi-subagents"] }
+pi install -l npm:pi-subagents --approve   # if settings already list it, pi list is enough
 pi list
 ```
 
-Only `.pi/settings.json` is written (project-local). Do not use global
-`~/.pi` for this package.
+Only `.pi/settings.json` is written (project-local), plus install artifacts under
+`.pi/npm/` (gitignored). Do not use global `~/.pi` for this package. Project
+agents under `.pi/agents/` are committed.
 
 After install, skills register as `/skill:rigor-architect` (etc.) and
 slash prompts as `/architect`, `/lane`, `/reviewer`, `/docs`,
@@ -52,7 +54,7 @@ sets `--model` and scopes Ctrl+P via `--models`:
 ```bash
 ./agents/pi-harness/scripts/run-role.sh architect
 ISSUE=123 ./agents/pi-harness/scripts/run-role.sh lane
-MODEL=claude-bridge/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
+MODEL=anthropic/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
 DRY_RUN=1 ./agents/pi-harness/scripts/run-role.sh architect   # print argv only
 PRINT=1 ./agents/pi-harness/scripts/run-role.sh architect -nt "…"  # pi -p
 ```
@@ -61,33 +63,16 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
-| architect / orchestrator | `claude-bridge/claude-opus-5` | `anthropic/claude-opus-5`, `xai/grok-4.5`, `*opus*`, `grok*` |
+| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
 | lane | `deepseek/deepseek-flash` | `deepseek/*flash*` |
-| reviewer | `claude-bridge/claude-fable-5` | `anthropic/*fable*`, then Opus/Grok-class |
+| reviewer | `anthropic/claude-fable-5` | `*fable*`, then Opus/Grok-class |
 | docs | `google/gemini-3.8-flash` | `gemini-flash-latest`, `*gemini*flash*` |
-
-### Claude Max via [pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge)
-
-Rigor’s Claude Max subscription is preferred over Anthropic API keys for
-architect / reviewer / orchestrator:
-
-```bash
-# once per machine (global; not in this repo)
-pi install npm:pi-claude-bridge
-# ~/.pi/agent/claude-bridge.json — Max plan
-# { "provider": { "plan": "max" } }
-pi --list-models claude-bridge   # should list opus/fable/…
-```
-
-Requires `claude` CLI logged in. Models appear as `claude-bridge/claude-opus-5`
-etc. Do **not** leave `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` exported when
-using the bridge (they override the Claude Code child).
 
 If no provider is configured, the script **exits with `pi auth` / `/login`
 guidance** instead of silently using an unbound default.
 
-Auth cheatsheet: Claude Max via bridge (preferred), else `ANTHROPIC_API_KEY`,
-`XAI_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`. Inspect: `pi --list-models`.
+Auth cheatsheet: `ANTHROPIC_API_KEY` / Claude subscription, `XAI_API_KEY`,
+`DEEPSEEK_API_KEY`, `GEMINI_API_KEY`. Inspect: `pi --list-models`.
 
 ## v1 path (architect → lane)
 
@@ -113,11 +98,59 @@ Or in an already-running trusted project session (package installed):
 
 ## Interactive queues
 
-Primary entry: open **`pi`** in the Rigor repo (trusted project; package already
+Primary entry: open **`pi`** in the Rigor repo (trusted project; packages already
 listed in `.pi/settings.json`), then invoke the slash prompt or skill. Stay in
 that session and drive the turn protocol with `next` / `do #N` / `skip` / `stop`
 (Japanese: `次` / `やる #N` / `スキップ` / `止めて`). Resume later with
 `pi -c` (same project session).
+
+### Parallel lanes via pi-subagents
+
+Requires project package `npm:pi-subagents` in [`.pi/settings.json`](../../.pi/settings.json)
+alongside `../agents/pi-harness`. Custom agents live in
+[`.pi/agents/`](../../.pi/agents/) (`rigor-lane.md`, `rigor-reviewer.md`).
+
+After ranking in a `/queue-release` or `/queue-survey` session, say `spawn` /
+`spawn N` / `全部やれ` / `parallel` (or `next` / `do #N` for one unit) and the
+parent should fan out with managed worktrees — not ask you to run
+`run-role.sh` in another terminal.
+
+Managed `worktree: true` is documented for `workflowScript` children
+(`runs.run` / `runs.all`), not as a reliable direct `{ agent, task }` knob:
+
+```text
+# One lane
+subagent({
+  async: true,
+  worktree: true,
+  workflowScript: `return runs.run("lane", { agent: "rigor-lane", task: <LaneInput>, worktree: true })`
+})
+
+# N lanes (one top-level async workflow)
+subagent({
+  async: true,
+  worktree: true,
+  workflowScript: `return runs.all([
+    { key: "i1", agent: "rigor-lane", task: <LaneInput1>, worktree: true },
+    { key: "i2", agent: "rigor-lane", task: <LaneInput2>, worktree: true }
+  ])`
+})
+```
+
+**Caveats**
+
+- Source checkout must be **clean** before managed worktree fanout (excluding
+  `.pi/subagents/` runtime state). Isolation is rejected for a dirty tree.
+- Do **not** auto-merge worktree patches into master without a human.
+- Lane model default is `deepseek/deepseek-flash`; reviewer prefers
+  `claude-bridge/claude-fable-5`. If those ids do not resolve for your
+  providers, pin with `MODEL=` on `run-role.sh`, pass `model:` on the
+  `subagent` / child launch, or set `subagents.agentOverrides` in Pi settings.
+- **Survey:** a managed worktree of *rigor* does **not** satisfy exclusivity of
+  `~/repo/ruby/rigor-survey/<project>` — still assign disjoint survey checkouts.
+
+Fallback when pi-subagents is unavailable: LaneInput +
+`./agents/pi-harness/scripts/run-role.sh lane`.
 
 ### Release pre-clear
 
@@ -178,6 +211,9 @@ agents/pi-harness/
   prompts/*.md          # slash /architect … /queue-release /queue-survey
   scripts/run-role.sh
   scripts/run-queue.sh  # optional; prefer pi → /queue-…
+
+.pi/settings.json       # packages: ../agents/pi-harness, npm:pi-subagents
+.pi/agents/*.md         # project subagents (rigor-lane, rigor-reviewer)
 ```
 
 ## Non-goals (v1)

@@ -599,11 +599,15 @@ module Rigor
       # The expression value is the result type, matching Ruby's semantics: `(x = params[:f] ||= []); x` observes the
       # post-`||=` value, not the rvalue alone.
       def eval_index_or_write(node)
-        rhs_type, post_rhs = sub_eval(node.value, scope)
-        current_type = scope.type_of(node, tracer: tracer)
-        result_type = Type::Combinator.union(Narrowing.narrow_truthy(current_type), rhs_type)
+        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        result_type = index_write_stored_type(node, scope)
 
-        key_node = first_index_argument(node)
+        # A narrowing is keyed on ONE literal slot — `a[k]` — but a multi-index `||=` reads and
+        # stores a splice REGION (`a[0, 1] ||= v`), so keying the result on the first index would
+        # record `a[0]`'s type as the region answer: `a[0, 1] ||= []` would claim `a[0]` non-nil
+        # where the store splices nothing and `a[0]` stays nil at runtime. Decline the record for
+        # any form but the single-index one.
+        key_node = single_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
         # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
         # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
@@ -621,31 +625,85 @@ module Rigor
 
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
       # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
-      # `eval_index_or_write` does, so they take the same widening; the value itself is still typed by the expression
-      # typer (`type_of_assignment_write`), which is what the default did.
+      # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
+      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone, which the
+      # expression typer's `type_of_assignment_write` answer would join as if it were what got stored.
       def eval_index_write(node)
-        stored = scope.type_of(node, tracer: tracer)
+        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        stored = index_write_stored_type(node, scope)
         [stored,
-         IndexWriteWidening.widen(node: node, current_scope: scope,
+         IndexWriteWidening.widen(node: node, current_scope: post_rhs,
                                   arg_types: index_write_arg_types(node, stored))]
       end
 
-      # `[key_type, stored_value_type]` for an index-write node, shaped exactly like a `[]=` call's
-      # argument list so the widening seam can join it the same way (issue #560). The stored value is
-      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's already-computed
-      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and the one
-      # the retained element evidence provably no longer covers. Returns `[]` when the key is unresolvable,
-      # which reproduces the pre-join widening.
+      # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
+      # call's argument list so the widening seam can join it the same way (issue #560) — a
+      # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
+      # value, which is what lets the join read it as a splice (issue #1140). The stored value is
+      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's
+      # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
+      # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
+      # when the key is unresolvable, which reproduces the pre-join widening.
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
       def index_write_arg_types(node, stored_type)
-        key_node = first_index_argument(node)
-        return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
+        args = node.arguments
+        return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
         return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
 
-        [scope.type_of(key_node, tracer: tracer), stored_type]
+        list = args.respond_to?(:arguments) ? args.arguments : args
+        # A splat argument is marked `nil` — its expansion decides the store's arity at
+        # runtime, which an untyped index type could not express (issue #1140).
+        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : scope.type_of(arg, tracer: tracer) } + [stored_type]
+      end
+
+      # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
+      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`.
+      # `type_of(node)` cannot answer it: every index-write node types as its rvalue, so a `+=`
+      # would join the RHS as if it were the stored value — `a[0, 1] += [2]` reads `a[0, 1] + [2]`,
+      # not `[2]` (issue #1140). Any other node falls back to its own type (a multi-assign index
+      # target keeps its untyped answer).
+      def index_write_stored_type(node, type_scope)
+        case node
+        when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode
+          current = index_read_type(node, type_scope)
+          narrowed = if node.is_a?(Prism::IndexOrWriteNode)
+                       Narrowing.narrow_truthy(current)
+                     else
+                       Narrowing.narrow_falsey(current)
+                     end
+          Type::Combinator.union(narrowed, type_scope.type_of(node.value, tracer: tracer))
+        when Prism::IndexOperatorWriteNode
+          MethodDispatcher.dispatch(
+            receiver_type: index_read_type(node, type_scope), method_name: node.binary_operator,
+            arg_types: [type_scope.type_of(node.value, tracer: tracer)],
+            environment: type_scope.environment
+          ) || Type::Combinator.untyped
+        else
+          type_scope.type_of(node, tracer: tracer)
+        end
+      end
+
+      # The `receiver[i]` read a compound index write performs before storing — the `[]` dispatch
+      # on the receiver's own type with the write's index arguments (a splat reads untyped),
+      # refined by a recorded indexed narrowing when the single-index form names a stable slot.
+      def index_read_type(node, read_scope)
+        receiver = read_scope.type_of(node.receiver, tracer: tracer)
+        args = node.arguments
+        list = args.respond_to?(:arguments) ? args.arguments : Array(args)
+        index_types = list.map do |arg|
+          arg.is_a?(Prism::SplatNode) ? Type::Combinator.untyped : read_scope.type_of(arg, tracer: tracer)
+        end
+
+        key = single_index_argument(node)
+        address = key && IndexedNarrowing.stable_address(node.receiver, key)
+        narrowed = address && read_scope.indexed_narrowing(*address)
+        narrowed || MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: :[], arg_types: index_types,
+          environment: read_scope.environment
+        ) || Type::Combinator.untyped
       end
 
       # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
@@ -684,12 +742,15 @@ module Rigor
         content_arg_types(call_node, scope)
       end
 
-      def first_index_argument(node)
+      # The index node of an index-write when it holds exactly one index argument — the only form
+      # whose stored value lands on a nameable slot (`a[k]`). Multi-index forms address a splice
+      # region and answer `nil`.
+      def single_index_argument(node)
         args = node.arguments
         return nil if args.nil?
 
         list = args.respond_to?(:arguments) ? args.arguments : args
-        list.first
+        list.size == 1 ? list.first : nil
       end
 
       def dispatch_operator(current, rhs, operator)
@@ -2679,13 +2740,33 @@ module Rigor
         return nil unless arrayish?(pre_state)
 
         added = calls.flat_map do |c|
-          # Index-write on an array (`a[i] += v`) introduces no new element evidence we can cheaply attribute — the
-          # array-arity forget already widened the binding; contribute nothing.
-          next [] if index_write?(c)
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+          # through `[]=` the same way — emit its index arguments ahead of the node's own stored
+          # type so the join classifies the same splice / element forms the straight-line path
+          # does (issue #1140).
+          next ContentJoin.array_added_elements(:[]=, index_write_block_arg_types(c, block_entry)) if index_write?(c)
 
           ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
         ContentJoin.join_array_content(pre_state, added)
+      end
+
+      # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
+      # block-entry scope — the stored value is what the write stores through `[]=`, which for a
+      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, not the
+      # rvalue the node itself types as); a multi-assign target stays untyped.
+      # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
+      def index_write_block_arg_types(node, block_entry)
+        args = node.arguments
+        return [] if args.nil?
+
+        stored = index_write_stored_type(node, block_entry)
+        return [] if stored.nil?
+
+        list = args.respond_to?(:arguments) ? args.arguments : args
+        list.map { |a| a.is_a?(Prism::SplatNode) ? nil : block_entry.type_of(a, tracer: tracer) } + [stored]
+      rescue StandardError
+        []
       end
 
       # Walks the block body for content-mutator calls (`<<`, `push`, `[]=`, …) whose receiver is a captured outer local
@@ -2785,7 +2866,9 @@ module Rigor
         args = content_arg_types(node, block_entry)
         return [] if args.size < 2
 
-        [[args.first, args.last]]
+        # A splat index marker (`nil`) means unknown arity only to the Array classifier;
+        # read as a key it is an unknown value — degrade to untyped (issue #1140).
+        [[args.first || Type::Combinator.untyped, args.last]]
       end
 
       # Type of the index expression of an index-write node (`h[k] ||= v`).
@@ -2806,7 +2889,15 @@ module Rigor
         arguments = call_node.arguments
         return [] if arguments.nil?
 
-        arguments.arguments.map { |arg| block_entry.type_of(arg, tracer: tracer) }
+        list = arguments.arguments
+        list.map.with_index do |arg, i|
+          # For `[]=` a splat in an index position leaves the store's arity open — it is
+          # marked `nil` for {ContentJoin.array_added_elements}, which counts it as
+          # arity-unknown rather than as the untyped index it would type as (issue #1140).
+          next nil if call_node.name == :[]= && i < list.size - 1 && arg.is_a?(Prism::SplatNode)
+
+          block_entry.type_of(arg, tracer: tracer)
+        end
       rescue StandardError
         []
       end

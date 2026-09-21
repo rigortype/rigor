@@ -44,6 +44,106 @@ slotted = [1, 2]
 slotted[0] = 6
 assert_type("Array[Dynamic[top] | Integer]", slotted)
 
+# --- Issue #1140 — the SPLICE forms store the value's ELEMENTS, not the
+# value itself: `a[0, 2] = [1, 2]` puts `Integer`s in the receiver, so the
+# element parameter gains `Integer`, never `Array[Integer]`. ---
+spliced = []
+spliced[0, 2] = [1, 2]
+assert_type("Array[Dynamic[top] | Integer]", spliced)
+assert_type("Dynamic[top] | Integer", spliced.last)
+
+spliced_range = []
+spliced_range[0..1] = [1, 2]
+assert_type("Array[Dynamic[top] | Integer]", spliced_range)
+assert_type("Dynamic[top] | Integer", spliced_range.last)
+
+# An index the engine cannot classify may be either form, so the element
+# parameter covers BOTH readings — the value as one element and the value's
+# own elements.
+def ambiguous_index(x)
+  a = []
+  a[x] = [1, 2]
+  assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", a)
+  a
+end
+
+# A splat inside the brackets leaves the runtime arity open: `a[0, *xs] = v`
+# stores `v` itself when `xs` is empty and `v`'s elements otherwise. Two
+# provable index arguments stay a splice however the splat expands.
+def splat_index(xs)
+  a = []
+  a[0, *xs] = [1, 2]
+  assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", a)
+  a
+end
+
+def two_index_splat(xs)
+  a = []
+  a[0, 1, *xs] = [1, 2]
+  assert_type("Array[Dynamic[top] | Integer]", a)
+  a
+end
+
+# Ordinary arguments are provable indices however untyped — `a[i, n] = v`
+# splices at every binding of i and n, so only the value's elements join.
+def two_untyped_index(i, n)
+  a = []
+  a[i, n] = [1, 2]
+  assert_type("Array[Dynamic[top] | Integer]", a)
+  a
+end
+
+# A NON-Array splice RHS does not splice — Ruby stores the value itself
+# as one element (`a[0, 1] = "x"` leaves the String inside; `a[0, 1] = nil`
+# leaves a nil — assigning `[]` is the deletion form). A nominal member
+# could still be a `to_ary`-defining subclass at runtime, so the union
+# keeps a gradual arm for whatever a coercion would have put in.
+spliced_scalar = []
+spliced_scalar[0, 1] = "x"
+assert_type("Array[Dynamic[top] | String]", spliced_scalar)
+assert_type("Dynamic[top] | String", spliced_scalar.last)
+
+spliced_nil = []
+spliced_nil[0, 1] = nil
+assert_type("Array[Dynamic[top]?]", spliced_nil)
+
+# An index typed broadly enough to hold a Range at runtime may splice, so
+# the element parameter covers BOTH readings — the value as one element
+# and the value's own elements.
+broad_index = []
+broad_index[Object.new] = [1, 2]
+assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", broad_index)
+
+# --- Compound index-writes keep EVERY index argument when the stored
+# value joins — `a[0, 1] += [2]` stores the compound machinery's
+# `a[0, 1] + [2]` through the same two-index splice form as a direct
+# `[]=`, so its elements join, never the result array itself. ---
+compound_splice = []
+compound_splice[0, 1] += [2]
+assert_type("Array[Dynamic[top] | Integer]", compound_splice)
+
+or_splice = []
+or_splice[0, 1] ||= [2]
+assert_type("Array[Dynamic[top] | Integer]", or_splice)
+
+and_splice = [0]
+and_splice[0, 1] &&= [2]
+assert_type("Array[Dynamic[top] | Integer]", and_splice)
+
+# A multi-index `||=` addresses a splice REGION, not the slot its first
+# index names — `a[0, 1] ||= []` splices nothing in, so `a[0]` keeps the
+# honest element type instead of a recorded non-nil claim. The single-
+# index form still records its narrowing — and the stored value is the
+# `||=` result `a[0] || :x`, which keeps a truthy-arm the untyped slot
+# read cannot rule out beside the rvalue.
+splice_or = []
+splice_or[0, 1] ||= []
+assert_type("Dynamic[top]", splice_or[0])
+
+single_or = []
+single_or[0] ||= :x
+assert_type(":x | Dynamic[top]", single_or[0])
+
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.
 # This seam sees one store, and the widening is a one-way door, so the
@@ -89,6 +189,14 @@ assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]", csv_option
 or_written = {}
 or_written[:a] ||= 1
 assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", or_written)
+
+# A splat in a hash `[]=`'s key position is an unknown KEY, not unknown
+# arity — the pair must still join, with the key degrading to
+# `Dynamic[top]` rather than the store being dropped wholesale.
+splat_key = { a: 1 }
+splat_args = [:b]
+splat_key[*splat_args] = 2
+assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", splat_key)
 
 # --- mail's `Message#to_yaml`, the shape that pinned the open-parameter
 # rule down. Several straight-line stores into a hash seeded `{}`, then
@@ -210,6 +318,17 @@ def block_path_stays_precise
   [1, 2, 3].each { |x| acc.push(x) }
   assert_type("Array[1 | 2 | 3]", acc)
   acc.last
+end
+
+# The block-path twin of the compound splice: an index-write inside the
+# body used to contribute nothing at all, so the same scan completeness
+# applies — every index argument reaches the join ahead of the node's
+# stored type, and the splice elements land precisely (issue #1140).
+def block_splice_stays_precise
+  a = []
+  [1].each { a[0, 1] ||= [2] }
+  assert_type("Array[2]", a)
+  a
 end
 
 # --- two live master FPs this join removes, kept as regression pins.

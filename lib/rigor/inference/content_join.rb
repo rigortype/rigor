@@ -45,13 +45,22 @@ module Rigor
       # block body for, and the gate the straight-line path types its arguments behind.
       CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
 
+      # The probes {#could_be_range?} passes to `accepts` — interned because the questions are
+      # asked once per `[]=` index member.
+      RANGE_INDEX_PROBE = Type::Combinator.nominal_of("Range")
+      OBJECT_INDEX_PROBE = Type::Combinator.nominal_of("Object")
+      ARRAY_PROBE = Type::Combinator.nominal_of("Array")
+      private_constant :RANGE_INDEX_PROBE, :OBJECT_INDEX_PROBE, :ARRAY_PROBE
+
       module_function
 
       # The element types a single content-mutator call introduces into an Array, given the
       # per-argument types (already typed by the caller in the scope the arguments are evaluated
       # in). `concat`/`replace` take collection arguments, so their element evidence is the
-      # arguments' OWN element types unioned; the rest append the argument values directly. Returns
-      # `[]` when there is no element evidence (e.g. a `<<` with no resolvable arg).
+      # arguments' OWN element types unioned; the `[]=` splice forms (`arr[i, n] = other` /
+      # `arr[range] = other`) store their value's elements the same way and read it through the
+      # same unwrap (issue #1140). The rest append the argument values directly. Returns `[]` when
+      # there is no element evidence (e.g. a `<<` with no resolvable arg).
       def array_added_elements(method_name, arg_types)
         return [] if arg_types.empty?
 
@@ -62,15 +71,17 @@ module Rigor
           # `insert(index, *objs)` — first arg is the position.
           arg_types.drop(1)
         when :[]=
-          # `arr[i] = v` / `arr[i, n] = v` — value is the last argument.
-          #
-          # The SPLICE forms (`arr[i, n] = other` / `arr[range] = other`) store `other`'s ELEMENTS,
-          # not `other` itself, so reading the value as one element over-widens: `a[0, 2] = [1, 2]`
-          # contributes `Array[Integer]` where `Integer` is the truth. Left alone deliberately —
-          # the answer is a superset either way, so it can only cost precision, and splitting the
-          # arities here would need the receiver's own element type to unwrap against. Revisit if a
-          # corpus site ever reads an element back through a splice-built array.
-          [arg_types.last]
+          # `arr[i] = v` stores `v` as ONE element — the index arguments precede the value.
+          # The splice forms store the value's ELEMENTS instead (issue #1140): `a[0, 2] = [1, 2]`
+          # puts `Integer`s in the receiver, not an `Array[Integer]`. An index the engine cannot
+          # classify (`a[x] = v` with `x` untyped, a `Range | Integer` union, or a splat that
+          # may vanish inside the brackets) may be either form, so both readings join — the
+          # union is a superset of the truth either way.
+          case index_store_form(arg_types)
+          when :splice then splice_stored_elements(arg_types.last)
+          when :either then [arg_types.last] + splice_stored_elements(arg_types.last)
+          else [arg_types.last]
+          end
         when :fill
           # `fill(value)` — only the no-block single-value form adds a concrete element; block /
           # range forms are conservatively ignored (the arity-forget already widened the binding).
@@ -277,15 +288,158 @@ module Rigor
         type.is_a?(Type::Union) ? type.members : [type]
       end
 
+      # How an `arr[...] = v` call's index arguments place the stored value: `:splice` — the
+      # value's ELEMENTS land in the receiver (`arr[i, n] = v` takes two index slots,
+      # `arr[range] = v` takes a Range); `:element` — the value itself is one stored element
+      # (`arr[i] = v`); `:either` — the store may be either form.
+      #
+      # A splat inside the brackets is marked `nil` by the caller — its expansion can change the
+      # store's arity (`a[0, *xs] = v` stores `v` itself when `xs` is empty and `v`'s elements
+      # otherwise). An ordinary argument counts as a provable index however untyped it is:
+      # `a[i, n] = v` is a splice at every binding of `i` and `n`. Two or more provable indices
+      # are therefore always a splice however a splat expands; one provable index beside a splat
+      # reduces to the Range question (extra expansion only reaches an arity error, never a
+      # scalar store); zero provable indices leaves the form to whatever the splat yields.
+      def index_store_form(arg_types)
+        leading = arg_types[0...-1]
+        definite = leading.compact
+        return :splice if definite.size >= 2
+        return :either if definite.empty?
+        return single_index_form(definite.first) if definite.size == leading.size
+
+        range_index?(definite.first) ? :splice : :either
+      end
+
+      # The one-index question: a Range carrier is a splice, a definite scalar an element store,
+      # and anything between — a union straddling both, a broad index that may still hold a
+      # Range at runtime — may be either.
+      def single_index_form(index_type)
+        members = union_members(index_type)
+        return :splice if members.all? { |m| definite_range?(m) }
+        return :element if members.none? { |m| could_be_range?(m) }
+
+        :either
+      end
+
+      # True when the index position PROVABLY holds a Range: a Range carrier {#range_index?}
+      # recognizes, or a member acceptance proves a subtype of `Range` — a loaded
+      # `class MyRange < Range` answers `yes` there where the name check cannot see it. An
+      # unresolvable subclass answers `maybe`, which correctly declines here and still reaches
+      # {#could_be_range?}'s `either` reading. A gradual member accepts in BOTH directions
+      # (`Range` accepts it optimistically), so it must be excluded before asking — an untyped
+      # index may hold a scalar just as well and stays `either`. The exclusion reads through a
+      # `Difference` / `Refined` to its base: acceptance projects the wrapper onto the base too,
+      # so a `non-nil` or refined `Dynamic` answers `yes` there exactly like the bare gradual
+      # while still being free to hold a scalar at runtime.
+      def definite_range?(member)
+        return true if range_index?(member)
+
+        case member
+        when Type::Dynamic, Type::Top then false
+        when Type::Difference, Type::Refined then definite_range?(member.base)
+        else member.respond_to?(:accepts) && RANGE_INDEX_PROBE.accepts(member).yes?
+        end
+      end
+
+      # True when the index position MAY hold a Range at runtime: a definite Range carrier
+      # (`Constant[0..1]` accepts only its own value, so acceptance alone cannot see it),
+      # `Dynamic`, a carrier the engine cannot answer for, and every type related to
+      # `Nominal[Range]` in EITHER direction — `Object`/`Enumerable`/`top` above it, a
+      # project `class MyRange < Range` below it (an unresolvable class name answers `maybe`,
+      # never `no`, so subclass-ness cannot be ruled out).
+      #
+      # `no` in both directions is a real disjointness only when the member's values are
+      # provably `Object` instances — a fixed-class value set that single inheritance keeps
+      # from ever being a Range (`Integer`, a non-Range `Constant`, a `Tuple`). A MODULE
+      # member fails that probe (`Comparable`'s ancestors exclude `Object` — a module has no
+      # superclass chain), and rightly so: `class MyRange < Range; include Comparable; end`
+      # satisfies the annotation and still splices at runtime.
+      def could_be_range?(member)
+        return true if range_index?(member)
+
+        case member
+        when Type::Intersection
+          # An intersected value sits in EVERY member's value set, so it can be a Range only
+          # when every member allows one — `String & Comparable` cannot be (a String never
+          # is), `Object & Comparable` can (`MyRange < Range; include Comparable` satisfies
+          # both). Asked member-wise because the `Object` probe below answers yes when ANY
+          # intersected member accepts it.
+          member.members.all? { |part| could_be_range?(part) }
+        when Type::Maybe then could_be_range?(member.value_type)
+        else
+          return true unless member.respond_to?(:accepts)
+          return true unless member.accepts(RANGE_INDEX_PROBE).no? &&
+                             RANGE_INDEX_PROBE.accepts(member).no?
+
+          !OBJECT_INDEX_PROBE.accepts(member).yes?
+        end
+      end
+
+      # Element types a splice RHS adds to the receiver, read member-wise. Ruby splices an
+      # Array RHS (`a[0, 1] = [1, 2]` puts `Integer`s in — a bare `Nominal[Array]` splices
+      # elements the signature left untyped, which are unknown rather than none), and stores a
+      # NON-Array RHS as one element UNLESS the value coerces through `to_ary`, in which case
+      # the returned array's elements splice instead (`a[0, 1] = obj` where `obj.to_ary`
+      # returns `["x"]` stores `"x"`). `nil` is no exception — `a[i, n] = nil` stores a single
+      # nil.
+      #
+      # Every member that is not an Array carrier keeps a `Dynamic[top]` arm beside itself:
+      # `to_ary` is consulted for a NON-Array value, and nothing here can prove the member's
+      # class does not define one — a `Nominal` may be a subclass that declares it, and the
+      # project may reopen even a non-subclassable core class (ADR-17's patched-methods tier
+      # resolves exactly those). The two exact carriers are the ones `Array#[]=` splices
+      # without a coercion: a `Tuple` literal's elements, and a `Nominal[Array]`'s own type
+      # arguments — an Array object is spliced directly even when its class overrides
+      # `to_ary`.
+      def splice_stored_elements(value_type)
+        union_members(value_type).flat_map do |member|
+          base = member
+          base = base.base while base.is_a?(Type::Difference) || base.is_a?(Type::Refined)
+
+          case base
+          when Type::Tuple
+            base.elements
+          when Type::Nominal
+            if base.class_name == "Array"
+              # `Array#[]=` splices an Array RHS directly — `to_ary` is never consulted
+              # for an Array object, even a subclass overriding it — so the elements
+              # join exactly (a bare `Array` signature left them unknown, not absent).
+              base.type_args.empty? ? [Type::Combinator.untyped] : base.type_args
+            elsif ARRAY_PROBE.accepts(base).yes?
+              # A definite Array subclass is spliced the same way; its elements are
+              # unknown to this seam.
+              [Type::Combinator.untyped]
+            else
+              [member, Type::Combinator.untyped]
+            end
+          else
+            [member, Type::Combinator.untyped]
+          end
+        end
+      end
+
+      # True when an index position holds a Range carrier — a static `Constant<Range>` (`0..1`),
+      # a `Nominal[Range]` (`(0..n)`), or a refinement / difference over either. `IntegerRange`
+      # and `FloatRange` are scalar number refinements rather than Range objects and correctly
+      # decline, as does every ordinary scalar index.
+      def range_index?(type)
+        case type
+        when Type::Constant then type.value.is_a?(::Range)
+        when Type::Nominal then type.class_name == "Range"
+        when Type::Difference, Type::Refined then range_index?(type.base)
+        else false
+        end
+      end
+
       # Element types carried by a collection binding, regardless of which carrier holds them: a
       # `Tuple` lists them, a `Nominal[Array, [E]]` has one element param, a bare `Array` /
       # anything else yields none.
       #
       # A `Difference` reads through to its base: `non-empty-array[T]` holds `T`s, and the seams
       # that read a seed from BEFORE the arity-forget ran (see {#join_array_content}) meet the
-      # refinement carrier itself where they used to meet the base the widening had left. Declining
-      # it there would hand the continuation the widened base ALONE, with every appended arm missing
-      # — a wrong type, not a wide one.
+      # refinement carrier itself where they used to meet the base the widening had left.
+      # Declining it there would hand the continuation the widened base ALONE, with every appended
+      # arm missing — a wrong type, not a wide one.
       def collection_element_types(type)
         case type
         when Type::Tuple

@@ -1,7 +1,10 @@
 ---
 locals:
+  and_splice: Array[Dynamic[top] | Integer]
+  broad_index: Array[Array[Integer] | Dynamic[top] | Integer]
   built: Array[Dynamic[top] | String]
   compound: Array[Dynamic[top] | Integer]
+  compound_splice: Array[Dynamic[top] | Integer]
   csv_options: Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
   emptied: Array[1 | 2 | Dynamic[top] | Integer]
   fixed_include: Array[1 | 2 | Dynamic[top] | Integer]
@@ -12,6 +15,7 @@ locals:
   fp_slot: Array[Dynamic[top] | Integer]
   genuine: "[1, 2]"
   mixed: Array[1 | 2 | Dynamic[top]]
+  or_splice: Array[Dynamic[top] | Integer]
   or_written: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
   pinned_seed: Array[:multi | Dynamic[top] | Symbol]
   popped: Array[1 | 2]
@@ -19,8 +23,16 @@ locals:
   refined: Array[1 | 2 | Dynamic[top] | Integer] | non-empty-array[1 | 2 | Dynamic[top]
     | Integer | String]
   shoveled: Array[1 | 2 | Dynamic[top] | Integer]
+  single_or: Array[Dynamic[top] | Symbol]
   slotted: Array[Dynamic[top] | Integer]
   sorted: Array[1 | 2]
+  splat_args: "[:b]"
+  splat_key: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  splice_or: Array[Dynamic[top]]
+  spliced: Array[Dynamic[top] | Integer]
+  spliced_nil: Array[Dynamic[top]?]
+  spliced_range: Array[Dynamic[top] | Integer]
+  spliced_scalar: Array[Dynamic[top] | String]
   stack: Array[Dynamic[top] | Integer]
   unshifted: Array[1 | 2 | Dynamic[top] | Integer]
   untouched: "[1, 2]"
@@ -32,21 +44,40 @@ assertions:
   '5': Array[Dynamic[top] | Integer]
   '6': Array[Dynamic[top] | Integer]
   '7': Array[Dynamic[top] | Integer]
-  '8': Array[Dynamic[top] | String]
+  '8': Dynamic[top] | Integer
   '9': Array[Dynamic[top] | Integer]
-  '10': Array[1 | 2 | Dynamic[top]]
-  '11': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
-  '12': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
-  '13': Array[Dynamic[top] | Integer | String]
-  '14': Array[Dynamic[top] | Integer | String]
-  '15': Array[Dynamic[top] | Integer | String]
-  '16': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
+  '10': Dynamic[top] | Integer
+  '11': Array[Array[Integer] | Dynamic[top] | Integer]
+  '12': Array[Array[Integer] | Dynamic[top] | Integer]
+  '13': Array[Dynamic[top] | Integer]
+  '14': Array[Dynamic[top] | Integer]
+  '15': Array[Dynamic[top] | String]
+  '16': Dynamic[top] | String
+  '17': Array[Dynamic[top]?]
+  '18': Array[Array[Integer] | Dynamic[top] | Integer]
+  '19': Array[Dynamic[top] | Integer]
+  '20': Array[Dynamic[top] | Integer]
+  '21': Array[Dynamic[top] | Integer]
+  '22': Dynamic[top]
+  '23': ":x | Dynamic[top]"
+  '24': Array[Dynamic[top] | Integer]
+  '25': Array[Dynamic[top] | String]
+  '26': Array[Dynamic[top] | Integer]
+  '27': Array[1 | 2 | Dynamic[top]]
+  '28': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
+  '29': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '30': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '31': Array[Dynamic[top] | Integer | String]
+  '32': Array[Dynamic[top] | Integer | String]
+  '33': Array[Dynamic[top] | Integer | String]
+  '34': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
     Dynamic[top]] | String]
-  '17': Array[:multi | Dynamic[top] | Symbol]
-  '18': Integer
-  '19': Array[1 | 2 | 3]
-  '20': Array[1 | 2]
-  '21': Array[1 | 2]
-  '22': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
-  '23': Array[1 | 2 | Dynamic[top] | Integer]
-  '24': "[1, 2]"
+  '35': Array[:multi | Dynamic[top] | Symbol]
+  '36': Integer
+  '37': Array[1 | 2 | 3]
+  '38': Array[2]
+  '39': Array[1 | 2]
+  '40': Array[1 | 2]
+  '41': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
+  '42': Array[1 | 2 | Dynamic[top] | Integer]
+  '43': "[1, 2]"

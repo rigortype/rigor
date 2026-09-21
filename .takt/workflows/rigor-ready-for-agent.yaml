@@ -1,7 +1,7 @@
 name: rigor-ready-for-agent
 description: >
   Rigor ready-for-agent trial workflow (ADR-115): plan → implement →
-  draft PR → CI watch → adversarial review → fix loop. Encodes the
+  draft PR → CI watch → triple Approved gate (Grok:max → Opus:high → Fable:medium) → fix loop. Encodes the
   long quality-stable loop that plain `pure` omits.
 max_steps: 40
 initial_step: plan
@@ -70,13 +70,35 @@ steps:
     edit: false
     rules:
       - condition: CI green
-        next: adversarial_review
+        next: adversarial_review_grok
       - condition: CI red
         next: fix
       - condition: CI stalled
         next: ABORT
 
-  - name: adversarial_review
+  - name: adversarial_review_grok
+    persona: adversary
+    policy: rigor-lane
+    instruction: adversarial-review
+    edit: false
+    rules:
+      - condition: Approved
+        next: adversarial_review_opus
+      - condition: Needs fix
+        next: fix
+
+  - name: adversarial_review_opus
+    persona: adversary
+    policy: rigor-lane
+    instruction: adversarial-review
+    edit: false
+    rules:
+      - condition: Approved
+        next: adversarial_review_fable
+      - condition: Needs fix
+        next: fix
+
+  - name: adversarial_review_fable
     persona: adversary
     policy: rigor-lane
     instruction: adversarial-review

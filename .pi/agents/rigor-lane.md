@@ -7,7 +7,7 @@ advertise: true
 aliases: lane, rigor-worker
 acceptanceRole: writer
 model: opencode-go/deepseek-v4.1-flash
-thinking: medium
+thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false

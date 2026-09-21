@@ -109,6 +109,17 @@ Every turn:
 7. Stay in this session — do not require a wrapper restart. Resume later with
    `pi -c` in the same project.
 
+## Triple Approved gate
+
+After CI is green on a draft PR, do **not** treat it as merge-ready until all three
+reviewer agents return `Approved` (any `Needs fix` → fix lane, then re-gate):
+
+1. `subagent` → `rigor-reviewer-grok` (`thinking: max`)
+2. `subagent` → `rigor-reviewer-opus` (`thinking: high`)
+3. `subagent` → `rigor-reviewer` (`thinking: medium`)
+
+Never merge from this queue skill; human or a later ship step owns merge.
+
 ## When to call architect / lane vs stay here
 
 | Stay in this session | Hand off |
@@ -116,6 +127,7 @@ Every turn:
 | Ranking, triage, evidence, proposing next unit | Architect: only if a unit needs a fresh LaneInput |
 | Waiting on next/skip/stop / spawn | Lane: prefer `subagent` → `rigor-lane` + managed worktree; fallback `run-role.sh lane` |
 | Sparse CI verdict after a lane push | — |
+| CI green on a draft PR | Spawn triple gate: `rigor-reviewer-grok` (max) → `rigor-reviewer-opus` (high) → `rigor-reviewer` (medium); unanimous Approved only |
 
 ## Finish phrases
 

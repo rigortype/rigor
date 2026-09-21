@@ -123,7 +123,7 @@ v1 succeeds when this path works **once**:
    those contracts.
 3. Each lane **pushes its head SHA and stops** (no CI watcher).
 4. `orchestrator` (or external poll + resume) owns CI.
-5. A **separate** adversarial `reviewer` judges the result.
+5. A **triple Approved gate** judges the result: Grok:max → Opus:high → Fable:medium (unanimous `Approved` only; any `Needs fix` → fix loop).
 
 Survey (B) and docs (C) wait until that path has landed once. Stubs in
 `agents/pi-harness/` are not the acceptance proof; the end-to-end run is.

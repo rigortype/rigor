@@ -1,6 +1,14 @@
 # Role: reviewer
 
-Model band: **Fable** (or Opus/Grok-class for adversarial engine review).
+Model bands (triple Approved gate — **unanimous**):
+
+| Pass | Prefer | Thinking |
+| --- | --- | --- |
+| 1 | Grok (`xai/grok-4.6`) | `max` |
+| 2 | Opus (`claude-bridge/claude-opus-5`) | `high` |
+| 3 | Fable (`claude-bridge/claude-fable-5`) | `medium` |
+
+Agents: `rigor-reviewer-grok`, `rigor-reviewer-opus`, `rigor-reviewer`.
 
 ## Persona
 
@@ -15,6 +23,7 @@ Read-only unless a later fix step is entered. Never merge.
 
 - Draft PR URL / diff
 - Issue Acceptance (architect contract)
+- Optional: prior pass summaries from earlier gate agents
 
 **Output**
 
@@ -22,6 +31,11 @@ Read-only unless a later fix step is entered. Never merge.
   step can act on)
 - Prefer a concrete counterexample over trusting green CI alone when
   behaviour is claimed
+
+**Gate rule (orchestrator)**
+
+- Advance only when **all three** passes return `Approved`
+- Any `Needs fix` → fix loop; do not treat partial Approved as merge-ready
 
 ## Non-goals
 

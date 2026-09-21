@@ -630,22 +630,25 @@ module Rigor
                                   arg_types: index_write_arg_types(node, stored))]
       end
 
-      # `[key_type, stored_value_type]` for an index-write node, shaped exactly like a `[]=` call's
-      # argument list so the widening seam can join it the same way (issue #560). The stored value is
-      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's already-computed
-      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and the one
-      # the retained element evidence provably no longer covers. Returns `[]` when the key is unresolvable,
-      # which reproduces the pre-join widening.
+      # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
+      # call's argument list so the widening seam can join it the same way (issue #560) — a
+      # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
+      # value, which is what lets the join read it as a splice (issue #1140). The stored value is
+      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's
+      # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
+      # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
+      # when the key is unresolvable, which reproduces the pre-join widening.
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
       def index_write_arg_types(node, stored_type)
-        key_node = first_index_argument(node)
-        return MutationWidening::NO_ARG_TYPES if key_node.nil? || stored_type.nil?
+        args = node.arguments
+        return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
         return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
 
-        [scope.type_of(key_node, tracer: tracer), stored_type]
+        list = args.respond_to?(:arguments) ? args.arguments : args
+        list.map { |arg| scope.type_of(arg, tracer: tracer) } + [stored_type]
       end
 
       # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
@@ -2679,13 +2682,32 @@ module Rigor
         return nil unless arrayish?(pre_state)
 
         added = calls.flat_map do |c|
-          # Index-write on an array (`a[i] += v`) introduces no new element evidence we can cheaply attribute — the
-          # array-arity forget already widened the binding; contribute nothing.
-          next [] if index_write?(c)
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+          # through `[]=` the same way — emit its index arguments ahead of the node's own stored
+          # type so the join classifies the same splice / element forms the straight-line path
+          # does (issue #1140).
+          next ContentJoin.array_added_elements(:[]=, index_write_block_arg_types(c, block_entry)) if index_write?(c)
 
           ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
         ContentJoin.join_array_content(pre_state, added)
+      end
+
+      # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
+      # block-entry scope — the stored value is the node's own type (the compound result for
+      # `a[i] += v`, the `||` union for `a[i] ||= v`, `Dynamic[top]` for a multi-assign target).
+      # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
+      def index_write_block_arg_types(node, block_entry)
+        args = node.arguments
+        return [] if args.nil?
+
+        stored = block_entry.type_of(node, tracer: tracer)
+        return [] if stored.nil?
+
+        list = args.respond_to?(:arguments) ? args.arguments : args
+        list.map { |a| block_entry.type_of(a, tracer: tracer) } + [stored]
+      rescue StandardError
+        []
       end
 
       # Walks the block body for content-mutator calls (`<<`, `push`, `[]=`, …) whose receiver is a captured outer local

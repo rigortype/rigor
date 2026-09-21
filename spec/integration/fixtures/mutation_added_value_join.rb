@@ -105,6 +105,22 @@ broad_index = []
 broad_index[Object.new] = [1, 2]
 assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", broad_index)
 
+# --- Compound index-writes keep EVERY index argument when the stored
+# value joins — `a[0, 1] += [2]` stores the compound machinery's
+# `a[0, 1] + [2]` through the same two-index splice form as a direct
+# `[]=`, so its elements join, never the result array itself. ---
+compound_splice = []
+compound_splice[0, 1] += [2]
+assert_type("Array[Dynamic[top] | Integer]", compound_splice)
+
+or_splice = []
+or_splice[0, 1] ||= [2]
+assert_type("Array[Dynamic[top] | Integer]", or_splice)
+
+and_splice = [0]
+and_splice[0, 1] &&= [2]
+assert_type("Array[Dynamic[top] | Integer]", and_splice)
+
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.
 # This seam sees one store, and the widening is a one-way door, so the
@@ -271,6 +287,17 @@ def block_path_stays_precise
   [1, 2, 3].each { |x| acc.push(x) }
   assert_type("Array[1 | 2 | 3]", acc)
   acc.last
+end
+
+# The block-path twin of the compound splice: an index-write inside the
+# body used to contribute nothing at all, so the same scan completeness
+# applies — every index argument reaches the join ahead of the node's
+# stored type, and the splice elements land precisely (issue #1140).
+def block_splice_stays_precise
+  a = []
+  [1].each { a[0, 1] ||= [2] }
+  assert_type("Array[2]", a)
+  a
 end
 
 # --- two live master FPs this join removes, kept as regression pins.

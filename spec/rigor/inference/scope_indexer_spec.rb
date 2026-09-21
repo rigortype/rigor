@@ -2402,6 +2402,65 @@ Unrelated
       expect(aliases.fetch("X", {})).not_to have_key(:kw)
     end
 
+    it "declines `def` inside `class <<` + `instance_eval` — the unnameable metaclass" do
+      # MRI: `class << S; instance_eval` re-evaluates the SAME singleton self, so a `def`
+      # binds on the singleton's own singleton — `#<Class:#<Class:S>>` — which nothing
+      # names, while `define_method` stays on the singleton's instance surface (`S.dm`).
+      table = methods_for(<<~RUBY)
+        class S
+          class << self
+            instance_eval { def meta; end }
+            instance_eval { define_method(:dm) {} }
+          end
+        end
+      RUBY
+      expect(table.fetch("S", {})).to include(dm: :singleton)
+      expect(table.fetch("S", {})).not_to have_key(:meta)
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval { def meta; end }
+          end
+        end
+      RUBY
+      expect(singleton_defs.fetch("S", {})).not_to have_key(:meta)
+    end
+
+    it "keeps `include` but declines `extend` inside `class <<` + `instance_eval`" do
+      # `include` mixes into `#<Class:S>` — S's singleton-ancestor edge, like `class_eval`
+      # there. `extend` targets `#<Class:#<Class:S>>`, which nothing names.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module M2; end
+        module M3; end
+        class S
+          class << self
+            instance_eval { include M2 }
+            instance_eval { extend M3 }
+          end
+        end
+      RUBY
+      expect(extends["S"]).to eq(["M2"])
+      expect(extends).not_to have_key("M3")
+    end
+
+    it "does not file a `def` under an unnameable cref at `<toplevel>`" do
+      # `class << obj` opens a singleton nothing names; a `def` or a `class self::Q` inside
+      # belongs to `#<Class:obj>`-side objects — recording them under `<toplevel>` would let
+      # an implicit-self call resolve a method Ruby never installed there.
+      _methods, def_nodes = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class C2
+          class << obj
+            def s1; end
+            class self::Q
+              def m2; end
+            end
+          end
+        end
+      RUBY
+      expect(def_nodes.fetch("<toplevel>", {})).to be_empty
+      expect(def_nodes.fetch("C2", {})).to be_empty
+    end
+
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
       # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
       # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL

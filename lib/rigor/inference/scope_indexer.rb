@@ -737,9 +737,10 @@ module Rigor
       end
 
       # The eval-family arm of {#walk_class_ivars}: `def`-keyed ivar facts belong to the
-      # receiver's class for `class_eval`, and to the receiver's SINGLETON for `instance_eval`
-      # (`defs_singleton` — `X.instance_eval { def m = @x }` writes `X`'s own `@x`, never an
-      # instance's). `self::` declarations anchor on the receiver the same way.
+      # receiver's class for `class_eval`, and to the receiver's singleton self for
+      # `instance_eval` (`defs_singleton` — `X.instance_eval { def m; @x = 1 }` writes
+      # `X`'s own `@x`, typed `singleton(X)` the way `def self.m` is). `self::`
+      # declarations anchor on the receiver the same way.
       def walk_ivars_eval_call?(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/ParameterLists
                                 read_before_write, init_writes, method_assign_effects,
                                 def_owner, singleton_cref, defs_singleton: false)
@@ -1353,7 +1354,7 @@ module Rigor
                                                        defs_singleton: defs_singleton)
         end
         self_prefix = def_owner || prefix
-        unnameable = unnameable_eval_self?(false, def_owner, prefix, singleton_cref)
+        unnameable = unnameable_eval_self?(singleton_cref, def_owner, prefix, singleton_cref)
         eval_prefix = eval_receiver_prefix(root, self_prefix, prefix,
                                            unnameable_self: unnameable) || []
         if (body = root.block.body)
@@ -2883,15 +2884,25 @@ module Rigor
           end
         when Prism::DefNode
           # `defs_singleton` is the instance_eval split: `def`/`alias` bind on the receiver's
-          # singleton while `define_method`/`attr_*` calls stay instance-side.
-          singleton_def = in_singleton_class || defs_singleton
-          record_def_method(node, owner_prefix, singleton_def, methods_acc)
-          record_def_body_evidence(node, owner_prefix, methods_acc)
-          record_def_node(node, owner_prefix, singleton_def, def_nodes_acc)
+          # singleton while `define_method`/`attr_*` calls stay instance-side. An empty owner
+          # prefix — an explicit `[]` def-owner (anonymous factory block, declined eval
+          # receiver, a singleton nothing names) or any ownerless prefix under an unnameable
+          # cref — is NOT top level; `record_def_node` would file the def under `<toplevel>`
+          # where an implicit-self call could find a method Ruby never installed there.
+          unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
+                 (singleton_cref && owner_prefix.empty?)
+            singleton_def = in_singleton_class || defs_singleton
+            record_def_method(node, owner_prefix, singleton_def, methods_acc)
+            record_def_body_evidence(node, owner_prefix, methods_acc)
+            record_def_node(node, owner_prefix, singleton_def, def_nodes_acc)
+          end
           return
         when Prism::AliasMethodNode, Prism::UndefNode
-          record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
-                                methods_acc)
+          unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
+                 (singleton_cref && owner_prefix.empty?)
+            record_alias_or_undef(node, owner_prefix, in_singleton_class || defs_singleton,
+                                  methods_acc)
+          end
           return
         when Prism::CallNode
           if receiver_eval_call?(node)
@@ -2944,15 +2955,15 @@ module Rigor
                                            singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
-        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         # `instance_eval` splits the two surfaces: `def`/`alias` bind on the receiver's
         # singleton (`defs_singleton`), while `define_method`/`attr_*` are calls on the
-        # receiver-as-module and install INSTANCE methods — `in_singleton_class` stays off.
-        call_singleton = eval_in_singleton && !INSTANCE_EVAL_CALLS.include?(node.name)
+        # receiver-as-module and install INSTANCE methods — `in_singleton_class` stays off
+        # for a class receiver.
+        call_singleton, defs_flag = eval_body_def_context(node, in_singleton_class)
         node.block.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, call_singleton, methods_acc, def_nodes_acc,
                                      source_path, eval_prefix, singleton_cref: singleton_cref,
-                                                               defs_singleton: eval_in_singleton)
+                                                               defs_singleton: defs_flag)
         end
       end
 
@@ -3270,9 +3281,15 @@ module Rigor
         return nil unless receiver_eval_call?(node)
 
         self_prefix = self_owner || qualified_prefix
-        unnameable = unnameable_eval_self?(false, self_owner, qualified_prefix, singleton_cref)
+        unnameable = unnameable_eval_self?(singleton_cref, self_owner, qualified_prefix,
+                                           singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
+        # An unnameable enclosing self — a `class <<` body, an ownerless eval or factory
+        # block — means a bare/`self`/`self::` receiver names nothing these leaf tables can
+        # key on; `eval_receiver_prefix` still answers `self_prefix` for the bare form, so
+        # the ownerless marker is applied here.
+        eval_prefix = EMPTY_PREFIX if unnameable && !eval_named_receiver?(node)
         [[node.receiver, *node.arguments&.arguments.to_a].compact, node.block.body, eval_prefix]
       end
 
@@ -3545,9 +3562,9 @@ module Rigor
       def walk_deferred_def_leaf(node, qualified_prefix, in_singleton_class, inside_deferred, # rubocop:disable Metrics/ParameterLists
                                  mf_offsets, ranges, def_owner_prefix, singleton_cref,
                                  defs_singleton)
-        record_deferred_def(node, def_owner_prefix || qualified_prefix,
-                            in_singleton_class || defs_singleton, inside_deferred, mf_offsets,
-                            ranges)
+        owner = defs_singleton == :unnameable ? EMPTY_PREFIX : (def_owner_prefix || qualified_prefix)
+        record_deferred_def(node, owner, in_singleton_class || defs_singleton, inside_deferred,
+                            mf_offsets, ranges)
         walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
                                ranges, def_owner_prefix, singleton_cref: singleton_cref,
                                                          defs_singleton: defs_singleton)
@@ -3724,13 +3741,6 @@ module Rigor
         end
       end
 
-      # Whether `node` is a `*_eval` / `*_exec` call with a literal block — the self-rebinding form
-      # both the deferred-ranges walk and the `module_function` prescan treat as another module's
-      # class body.
-      def eval_block_call?(node)
-        node.block.is_a?(Prism::BlockNode) && SELF_REBINDING_EVAL_CALLS.include?(node.name)
-      end
-
       # The wider form: any call whose block rebinds `self` to the receiver — `instance_eval` and
       # `instance_exec` included. Walks that read `self`-anchored facts use this gate; walks that
       # own `def` leaves additionally split on {INSTANCE_EVAL_CALLS}, whose `def`s bind on the
@@ -3791,21 +3801,20 @@ module Rigor
                                            singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
-        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         # `instance_eval`'s `def`s bind on the receiver's singleton (`defs_singleton`) while the
         # body itself is an ordinary class-body context — `class << self` inside still opens the
-        # receiver's nameable singleton, so `in_singleton_class` stays off for it.
-        call_singleton = eval_in_singleton && !INSTANCE_EVAL_CALLS.include?(node.name)
+        # receiver's nameable singleton, so `in_singleton_class` stays off for a class receiver.
+        call_singleton, defs_flag = eval_body_def_context(node, in_singleton_class)
         block.parameters&.rigor_each_child do |child|
           walk_deferred_ranges(child, qualified_prefix, call_singleton, inside_deferred, [],
                                ranges, eval_prefix, singleton_cref: singleton_cref,
-                                                    defs_singleton: eval_in_singleton)
+                                                    defs_singleton: defs_flag)
         end
         return unless block.body
 
         walk_deferred_body(block.body, qualified_prefix, call_singleton, inside_deferred, ranges,
                            eval_prefix, singleton_cref: singleton_cref,
-                                        defs_singleton: eval_in_singleton)
+                                        defs_singleton: defs_flag)
       end
 
       # The owner an eval-family block body evaluates under, given the enclosing body's SELF
@@ -3887,6 +3896,27 @@ module Rigor
       def eval_body_singleton?(node, in_singleton_class)
         INSTANCE_EVAL_CALLS.include?(node.name) ||
           (in_singleton_class && !eval_named_receiver?(node))
+      end
+
+      # The two flags an eval-family block body gives a def-owning walk: the
+      # `in_singleton_class` its calls on the receiver-as-module inherit, and the
+      # `defs_singleton` its `def`/`alias` leaves record under — `true` when they
+      # bind on the receiver's singleton, `:unnameable` when that singleton is one
+      # nothing names. `instance_eval` splits the surfaces for a class receiver —
+      # `def` lands on `#<Class:X>` while `define_method`/`attr_*` install `X#`
+      # instance methods — so `call_singleton` stays off there. Inside an
+      # already-singleton body a bare/`self` `instance_eval` re-evaluates the SAME
+      # singleton self, where the split inverts: calls land on the singleton's
+      # instance surface exactly like `class_eval`'s (`class << S; instance_eval {
+      # define_method(:m) {} }` installs `S.m`), while `def` binds on the
+      # singleton's own singleton — `#<Class:#<Class:S>>` — which nothing names.
+      def eval_body_def_context(node, in_singleton_class)
+        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
+        singleton_self_eval = INSTANCE_EVAL_CALLS.include?(node.name) &&
+                              in_singleton_class && !eval_named_receiver?(node)
+        call_singleton = eval_in_singleton &&
+                         (!INSTANCE_EVAL_CALLS.include?(node.name) || singleton_self_eval)
+        [call_singleton, singleton_self_eval ? :unnameable : eval_in_singleton]
       end
 
       def record_deferred_def(def_node, qualified_prefix, in_singleton_class, inside_deferred,
@@ -4010,21 +4040,21 @@ module Rigor
                                            singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
-        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         # `instance_eval`'s `def`s bind on the receiver's singleton (`defs_singleton`) while the
         # body keeps ordinary class-body semantics for `class << self` — `in_singleton_class`
-        # stays off so the nested `class <<` still names the receiver.
-        call_singleton = eval_in_singleton && !INSTANCE_EVAL_CALLS.include?(node.name)
+        # stays off for a class receiver so the nested `class <<` still names it.
+        call_singleton, defs_flag = eval_body_def_context(node, in_singleton_class)
         body = node.block.body
         if body.is_a?(Prism::StatementsNode)
           return walk_singleton_body(body, qualified_prefix, call_singleton, accumulator,
                                      eval_prefix, singleton_cref: singleton_cref,
-                                                  defs_singleton: eval_in_singleton)
+                                                  defs_singleton: defs_flag)
         end
 
         node.block.rigor_each_child do |child|
-          walk_singleton_def_nodes(child, qualified_prefix, eval_in_singleton, accumulator, eval_prefix,
-                                   singleton_cref: singleton_cref)
+          walk_singleton_def_nodes(child, qualified_prefix, call_singleton, accumulator, eval_prefix,
+                                   singleton_cref: singleton_cref,
+                                   defs_singleton: defs_flag)
         end
       end
 
@@ -4162,7 +4192,7 @@ module Rigor
         end
         lexical = nesting_lexical_prefix(nesting)
         self_prefix = self_base || lexical
-        unnameable = unnameable_eval_self?(false, self_base, lexical, singleton_cref)
+        unnameable = unnameable_eval_self?(singleton_cref, self_base, lexical, singleton_cref)
         eval_self = eval_receiver_prefix(node, self_prefix, lexical,
                                          unnameable_self: unnameable) || []
         if (body = node.block.body)
@@ -4197,8 +4227,12 @@ module Rigor
             next
           end
           if stmt.is_a?(Prism::DefNode)
-            record_singleton_def_node(stmt, owner_prefix, in_singleton_class || defs_singleton,
-                                      module_function_on, accumulator)
+            # `:unnameable` is the `class <<` + `instance_eval` definee — the singleton's own
+            # singleton — which this table cannot name either.
+            unless defs_singleton == :unnameable
+              record_singleton_def_node(stmt, owner_prefix, in_singleton_class || defs_singleton,
+                                        module_function_on, accumulator)
+            end
             next
           end
           walk_singleton_def_nodes(stmt, qualified_prefix, in_singleton_class, accumulator,
@@ -5145,12 +5179,16 @@ module Rigor
         unnameable = singleton_self || (singleton_cref && current_class.nil?)
         eval_class = eval_receiver_name(node, qualified_prefix, current_class&.split("::"),
                                         unnameable_self: unnameable)
-        # `instance_eval` keeps the instance-mixin channel: `include`/`extend` inside are calls
-        # on the receiver-as-module (`X.instance_eval { include M }` is `X.include(M)`, an
-        # include edge), not the singleton mixins a `class <<` body or `class_eval` under it
-        # produces. Only `def`/`alias` bind on the receiver's singleton there.
+        # `instance_eval` keeps the instance-mixin channel for a class receiver:
+        # `include`/`extend` inside are calls on the receiver-as-module (`X.instance_eval
+        # { include M }` is `X.include(M)`, an include edge), not singleton mixins. Inside
+        # an already-singleton body a bare/`self` `instance_eval` re-evaluates the SAME
+        # singleton self — `class << S; instance_eval { include M }` mixes M into
+        # `#<Class:S>`, the same singleton-ancestor edge a `class_eval` there produces —
+        # while `def`/`alias` bind on the singleton's own singleton either way.
         eval_in_singleton = eval_body_singleton?(node, in_singleton) &&
-                            !INSTANCE_EVAL_CALLS.include?(node.name)
+                            (!INSTANCE_EVAL_CALLS.include?(node.name) ||
+                             (in_singleton && !eval_named_receiver?(node)))
         if node.receiver
           walk_class_extends(node.receiver, qualified_prefix, current_class, accumulator,
                              in_singleton: in_singleton, singleton_self: singleton_self,
@@ -5387,15 +5425,15 @@ module Rigor
                                            singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
-        eval_in_singleton = eval_body_singleton?(node, in_singleton_class)
         # `instance_eval`'s `def`s are singleton-side (`defs_singleton` — skipped by the
         # instance-visibility table), while `public`/`private` are calls on the
-        # receiver-as-module and stay instance-side (`in_singleton_class` off).
-        call_singleton = eval_in_singleton && !INSTANCE_EVAL_CALLS.include?(node.name)
+        # receiver-as-module and stay instance-side (`in_singleton_class` off) for a class
+        # receiver.
+        call_singleton, defs_flag = eval_body_def_context(node, in_singleton_class)
         node.block.rigor_each_child do |child|
           walk_method_visibilities(child, qualified_prefix, call_singleton, :public, accumulator,
                                    eval_prefix, singleton_cref: singleton_cref,
-                                                defs_singleton: eval_in_singleton)
+                                                defs_singleton: defs_flag)
         end
       end
 
@@ -7054,7 +7092,7 @@ module Rigor
           collect_class_decls(part, qualified_prefix, accumulator, compacts, self_prefix,
                               singleton_cref: singleton_cref)
         end
-        unnameable = unnameable_eval_self?(false, self_prefix, qualified_prefix, singleton_cref)
+        unnameable = unnameable_eval_self?(singleton_cref, self_prefix, qualified_prefix, singleton_cref)
         eval_self = eval_receiver_prefix(node, self_prefix || qualified_prefix, qualified_prefix,
                                          unnameable_self: unnameable) || []
         if (body = node.block.body)

@@ -138,7 +138,15 @@ rules (consistent with the rest of the plugin-contract carriers):
   the instance surface. The def-owning walks carry that as a
   separate `defs_singleton` flag so only the keyword forms move; a
   `define_method` body or an unnamed `Class.new { … }`-family block
-  walks ownerless. Meta-new
+  walks ownerless. Inside an already-singleton body the split
+  inverts: a bare or `self` `instance_eval` re-evaluates the SAME
+  singleton self, so calls land on the singleton's instance surface
+  exactly like `class_eval`'s there (`class << S; instance_eval {
+  define_method(:m) }` installs `S.m`, and `include`/`extend`
+  produce the same singleton-ancestor edge), while `def`/`alias`
+  bind on the singleton's OWN singleton — `#<Class:#<Class:S>>` —
+  which nothing names; the walks mark that definee `:unnameable`
+  and decline the leaves rather than filing them under `S`. Meta-new
   blocks do the opposite: `K = Class.new { extend M }` extends `K`,
   so the mixin tables attribute the block to the nameable `K` and
   decline only when `K` itself is unnameable, with the factory call's

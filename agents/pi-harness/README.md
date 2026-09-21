@@ -27,7 +27,7 @@ Only `.pi/settings.json` is written (project-local). Do not use global
 
 After install, skills register as `/skill:rigor-architect` (etc.) and
 slash prompts as `/architect`, `/lane`, `/reviewer`, `/docs`,
-`/orchestrator`.
+`/orchestrator`, `/queue-release`, `/queue-survey`.
 
 ## Roles
 
@@ -38,6 +38,8 @@ slash prompts as `/architect`, `/lane`, `/reviewer`, `/docs`,
 | `reviewer` | Fable (or Opus/Grok-class) | `rigor-reviewer` | Adversarial review of engine changes |
 | `docs` | Gemini Flash | `rigor-docs` | JA publish + EN docs finish; docs-only |
 | `orchestrator` | Opus / Grok-class | `rigor-orchestrator` | Issue selection, CI watch, merge judgment |
+| queue (release) | Opus / claude-bridge opus / Grok | `rigor-queue-release` | Interactive pre-clear before a cut (`/queue-release`) |
+| queue (survey) | Opus / claude-bridge opus / Grok | `rigor-queue-survey` | Interactive survey coverage holes (`/queue-survey`) |
 
 I/O shapes: [`contracts/README.md`](contracts/README.md). Role stubs:
 [`roles/`](roles/).
@@ -108,6 +110,62 @@ Or in an already-running trusted project session (package installed):
 /lane       # paste LaneInput
 ```
 
+
+## Interactive queues
+
+Primary entry: open **`pi`** in the Rigor repo (trusted project; package already
+listed in `.pi/settings.json`), then invoke the slash prompt or skill. Stay in
+that session and drive the turn protocol with `next` / `do #N` / `skip` / `stop`
+(Japanese: `次` / `やる #N` / `スキップ` / `止めて`). Resume later with
+`pi -c` (same project session).
+
+### Release pre-clear
+
+Clears merge-valuable Issues before a cut. Example user ask:
+「vX.Y.Z リリース前に対処した方がいいタスクを解消して」.
+
+```bash
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+cd /path/to/rigor
+pi
+# then:
+/queue-release v1.2.3
+# or: /skill:rigor-queue-release
+```
+
+Hard rule: target version is **context only**. Never seal changelog, bump
+VERSION, open `release/x.y.z`, or run `/rigor-release-prep` unless the user
+explicitly invoked release-prep. When appropriate, say the cut is one
+`/rigor-release-prep` away.
+
+### Survey coverage
+
+Collects rigor-survey coverage holes → prefer Issues → sequential着手.
+Example: 「rigor-survey カバレッジの穴を収集して順次着手して」.
+
+```bash
+pi
+/queue-survey
+# or: /queue-survey /Users/megurine/repo/ruby/rigor-survey
+# or: /skill:rigor-queue-survey
+```
+
+Hard rule: measuring targets need **disjoint** checkouts across agents.
+
+### Optional wrapper
+
+If you want a dedicated `--session-id` / bound orchestrator model without a
+bare `pi` first:
+
+```bash
+DRY_RUN=1 ./agents/pi-harness/scripts/run-queue.sh release
+TARGET=v1.2.3 ./agents/pi-harness/scripts/run-queue.sh release
+CONTINUE=1 ./agents/pi-harness/scripts/run-queue.sh survey
+```
+
+Skills remain the source of truth for the turn protocol; the wrapper only
+launches pi with skill + session-id.
+
 ## Package layout
 
 ```
@@ -116,9 +174,10 @@ agents/pi-harness/
   README.md
   roles/*.md            # reference stubs
   contracts/README.md
-  skills/rigor-*/SKILL.md
-  prompts/*.md          # slash /architect /lane /reviewer /docs /orchestrator
+  skills/rigor-*/SKILL.md   # includes rigor-queue-release / rigor-queue-survey
+  prompts/*.md          # slash /architect … /queue-release /queue-survey
   scripts/run-role.sh
+  scripts/run-queue.sh  # optional; prefer pi → /queue-…
 ```
 
 ## Non-goals (v1)
@@ -127,5 +186,5 @@ agents/pi-harness/
 - No parallel full-suite `make verify` on the host.
 - Lanes do not own long-lived CI watchers / sleep loops.
 - Issues remain the backlog (ADR-98).
-- Survey (B) and docs (C) flows wait until architect→lane works once.
+- Docs (C) flow waits until architect→lane works once; survey queue is available via `/queue-survey`.
 - mise stays runtimes-only (ADR-115 WD5).

@@ -38,3 +38,12 @@ CiWatchOutput:
 - Human may still be required for push/PR approval (ADR-115 trial findings)
 
 Model band: Opus / Grok-class (bound by `scripts/run-role.sh`).
+
+## Related queue skills
+
+For multi-turn interactive queues in the same `pi` session, prefer:
+
+- `/queue-release` → skill `rigor-queue-release` (pre-clear before a cut; not release-prep)
+- `/queue-survey` → skill `rigor-queue-survey` (coverage holes; disjoint survey targets)
+
+Resume with `pi -c`. See those skills for the turn protocol.

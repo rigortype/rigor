@@ -2,9 +2,8 @@
 name: rigor-reviewer
 description: >-
   Adversarial review of a Rigor draft PR against architect Acceptance.
-  Orchestrator picks one available band (Grok:max / Opus:high / Fable:medium);
-  advanced engine work uses Fable alone or Grok+Opus. Never merge. Finish
-  Approved or Needs fix.
+  Default Grok:max; add Opus:high when complex; reserve Fable:medium for
+  complex design. Never merge. Finish Approved or Needs fix.
 ---
 
 # Rigor reviewer (ADR-115)
@@ -14,19 +13,14 @@ Load and follow:
 - Role: [`../../roles/reviewer.md`](../../roles/reviewer.md)
 - Contracts: [`../../contracts/README.md`](../../contracts/README.md)
 
-## Approved gate (budget-aware)
+## Approved gate
 
-**Not unanimous.** Orchestrator selects reviewer(s):
-
-1. **Default:** one of `rigor-reviewer-grok` (`thinking: max`),
-   `rigor-reviewer-opus` (`thinking: high`), or `rigor-reviewer`
-   (`thinking: medium`) — whichever is available and not rate-limited.
-2. **Advanced / high-risk engine:** `rigor-reviewer` (Fable) **or** both
-   Grok + Opus (`Approved` from each).
-
-On Claude quota pressure: prefer Grok (or skip Opus/Fable) rather than stalling.
-claude-bridge does not expose a pollable usage-% API; fall back on live
-rate-limit / 429 failures.
+1. **Default:** `rigor-reviewer-grok` (`thinking: max`) — one `Approved` suffices.
+2. **Complex implementation:** also `rigor-reviewer-opus` (`thinking: high`);
+   both must `Approved`.
+3. **Complex design:** `rigor-reviewer` (Fable:medium) — reserve for
+   architecture / API / inference-shape work; do not use on routine tidies.
+4. No pollable claude-bridge usage % — do not stall waiting for one.
 
 ## Hard constraints (always)
 
@@ -40,7 +34,7 @@ rate-limit / 429 failures.
 
 - Draft PR URL / diff
 - Issue Acceptance (architect contract)
-- Optional prior gate-pass summaries
+- Optional prior gate-pass summaries / complexity hint
 
 ## Output
 

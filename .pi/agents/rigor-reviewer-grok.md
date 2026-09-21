@@ -1,7 +1,7 @@
 ---
 name: rigor-reviewer-grok
 description: >-
-  Rigor adversarial reviewer (Grok:max) — optional Grok:max adversarial reviewer (solo or with Opus); returns Approved or Needs fix
+  Rigor adversarial reviewer (Grok:max) — default Grok:max adversarial reviewer; Opus added when complex; returns Approved or Needs fix
 advertise: true
 aliases: reviewer-grok
 acceptanceRole: read-only
@@ -25,9 +25,9 @@ Stay **read-focused**. Use bash only for inspection (`git diff`, `git log`,
 
 ## Gate position
 
-Budget-aware pick: orchestrator may use **this agent alone** as the Approved
-reviewer, or pair with Opus on the advanced Grok+Opus path. Not a mandatory
-three-way unanimous vote.
+**Default Approved reviewer.** Orchestrator always prefers this agent (Grok:max)
+for ordinary changes. Complex implementation may add Opus afterward; complex
+design may use Fable instead of burning it here.
 
 Your `Needs fix` blocks advancement for this pass.
 

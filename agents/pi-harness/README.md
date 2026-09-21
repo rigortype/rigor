@@ -37,7 +37,7 @@ slash prompts as `/architect`, `/lane`, `/reviewer`, `/docs`,
 | --- | --- | --- | --- |
 | `architect` | Opus / Grok | `rigor-architect` | Direction, contracts, planning |
 | `lane` | DeepSeek Flash | `rigor-lane` | Worktree imitation; push head SHA and stop |
-| `reviewer` | one of Grok:max / Opus:high / Fable:medium | `rigor-reviewer-grok` / `-opus` / `rigor-reviewer` | Budget-aware adversarial Approved (advanced: Fable or Grok+Opus) |
+| `reviewer` | default Grok:max; +Opus if complex; Fable for design | `rigor-reviewer-grok` / `-opus` / `rigor-reviewer` | Adversarial Approved with Fable reserved |
 | `docs` | Gemini Flash | `rigor-docs` | JA publish + EN docs finish; docs-only |
 | `orchestrator` | Opus / Grok-class | `rigor-orchestrator` | Issue selection, CI watch, merge judgment |
 | queue (release) | Opus / claude-bridge opus / Grok | `rigor-queue-release` | Interactive pre-clear before a cut (`/queue-release`) |
@@ -65,7 +65,7 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 | --- | --- | --- |
 | architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
 | lane | `opencode-go/deepseek-v4.1-flash` | `opencode-go/*deepseek*flash*`, `opencode/*deepseek*flash*`, `*deepseek*flash*` |
-| reviewer (pick one) | Grok:max / Opus:high / Fable:medium | `xai/grok-4.6`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` |
+| reviewer | default Grok:max; +Opus if complex; Fable reserved | `xai/grok-4.6`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
 
 If no provider is configured, the script **exits with `pi auth` / `/login`
@@ -143,10 +143,9 @@ subagent({
   `.pi/subagents/` runtime state). Isolation is rejected for a dirty tree.
 - Do **not** auto-merge worktree patches into master without a human.
 - Lane model default is `opencode-go/deepseek-v4.1-flash` with `thinking: high`.
-  Approved: pick one available reviewer (Grok:max / Opus:high / Fable:medium);
-  advanced engine → Fable alone or Grok+Opus. No pollable claude-bridge usage %
-  — fall back on 429 / rate_limit. Pin ids with `MODEL=` / launch `model:` /
-  `subagents.agentOverrides` if needed.
+  Approved: default Grok:max; add Opus:high when complex; reserve Fable:medium
+  for complex design. No live Claude usage poll. Pin ids with `MODEL=` /
+  launch `model:` / `subagents.agentOverrides` if needed.
 - **Survey:** a managed worktree of *rigor* does **not** satisfy exclusivity of
   `~/repo/ruby/rigor-survey/<project>` — still assign disjoint survey checkouts.
 
@@ -246,11 +245,11 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 | --- | --- | --- | --- | --- |
 | `architect` / orchestrator queue parent | Opus / Grok | `claude-bridge/claude-opus-5` | Sets direction, contracts, merge judgment; cheap models thrash policy (ADR-115) | DeepSeek / Gemini as architect |
 | `rigor-lane` / `/lane` | DeepSeek Flash | `opencode-go/deepseek-v4.1-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
-| `rigor-reviewer-{grok,opus,}` (pick) | Grok / Opus / Fable | `xai/grok-4.6:max`, `claude-bridge/claude-opus-5:high`, `claude-bridge/claude-fable-5:medium` | Budget-aware Approved; advanced = Fable or Grok+Opus | Gemini for engine review; mandatory unanimous three-way |
+| `rigor-reviewer-grok` (+`-opus` / Fable) | Grok / Opus / Fable | `xai/grok-4.6:max` default; Opus:high if complex; Fable:medium for design | Complexity-routed Approved; Fable reserved | Gemini for engine review; burning Fable on tidies |
 | `rigor-docs` / `/docs` | Gemini Flash | `antigravity/gemini-3.8-flash` | JA/EN docs quality on Google AI Pro; docs-only | Engine edits |
 | queue release/survey parent | Opus-class | same as architect | Ranking + spawn decisions are policy | Letting Flash rank the backlog alone |
 
-**Subagent fan-out rule:** parent (queue) stays Opus-class; children inherit the agent file `model:` (`rigor-lane` → DeepSeek Flash `thinking: high`; reviewers → one of Grok:max / Opus:high / Fable:medium (advanced: Fable or Grok+Opus); `rigor-docs` → Antigravity Gemini). Override with launch `model:` only when the user asks.
+**Subagent fan-out rule:** parent (queue) stays Opus-class; children inherit the agent file `model:` (`rigor-lane` → DeepSeek Flash `thinking: high`; reviewers → Grok:max default; +Opus if complex; Fable reserved for design; `rigor-docs` → Antigravity Gemini). Override with launch `model:` only when the user asks.
 
 **Override:** `MODEL=… ./agents/pi-harness/scripts/run-role.sh <role>` or `subagents.agentOverrides` in Pi settings.
 

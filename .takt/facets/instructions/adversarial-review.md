@@ -1,9 +1,9 @@
 Adversarially review the draft PR diff against the issue Acceptance.
 
-**Band selection (orchestrator / this step's host):** not a unanimous three-way
-vote. Pick **one** available band — Grok:max, Opus:high, or Fable:medium —
-preferring carefulness that is not rate-limited. For advanced / high-risk
-engine changes, use **Fable alone** or **Grok then Opus** (both must Approve).
+**Band selection:** default **Grok:max**. If the change is judged complex
+(implementation-heavy / subtle contracts), also run **Opus:high** (both must
+Approve). Reserve **Fable:medium** for complex design / architecture — do not
+spend it on routine tidies. No live Claude usage poll.
 
 For this tidy/engine follow-up class:
 - Verify each Acceptance bullet is actually met in the diff.

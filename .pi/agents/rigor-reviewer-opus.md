@@ -1,7 +1,7 @@
 ---
 name: rigor-reviewer-opus
 description: >-
-  Rigor adversarial reviewer (Opus:high) — optional Opus:high adversarial reviewer (solo or with Grok); returns Approved or Needs fix
+  Rigor adversarial reviewer (Opus:high) — Opus:high add-on when implementation is judged complex; returns Approved or Needs fix
 advertise: true
 aliases: reviewer-opus
 acceptanceRole: read-only
@@ -25,9 +25,8 @@ Stay **read-focused**. Use bash only for inspection (`git diff`, `git log`,
 
 ## Gate position
 
-Budget-aware pick: orchestrator may use **this agent alone**, or pair with Grok
-on the advanced Grok+Opus path (do not rubber-stamp a prior Grok Approved).
-Not a mandatory three-way unanimous vote.
+**Add-on for complex implementation** after Grok:max. Do not rubber-stamp a
+prior Grok `Approved`. Fable stays reserved for complex design.
 
 Your `Needs fix` blocks advancement for this pass.
 

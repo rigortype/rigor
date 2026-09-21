@@ -4233,7 +4233,10 @@ module Rigor
             if bare_module_function?(stmt)
               module_function_on = true
             else
-              record_module_function_names(stmt, owner_prefix, body, accumulator)
+              # `:unnameable` — the named defs the call copies live on the metaclass,
+              # which this table cannot name either.
+              record_module_function_names(stmt, owner_prefix, body, accumulator) unless
+                defs_singleton == :unnameable
             end
             next
           end
@@ -4687,6 +4690,10 @@ module Rigor
           record_data_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
           return if walk_data_layout_meta_new?(node, qualified_prefix, accumulator,
                                                self_base, singleton_cref)
+        when Prism::CallNode
+          return if walk_member_layout_eval_call?(node, qualified_prefix, accumulator,
+                                                  self_base, singleton_cref,
+                                                  :walk_data_member_layouts)
         end
 
         node.rigor_each_child do |child|
@@ -4784,6 +4791,10 @@ module Rigor
           record_struct_member_layout(accumulator, child_prefix, meta_new_rvalue(node)) if child_prefix
           return if walk_struct_layout_meta_new?(node, qualified_prefix, accumulator,
                                                  self_base, singleton_cref)
+        when Prism::CallNode
+          return if walk_member_layout_eval_call?(node, qualified_prefix, accumulator,
+                                                  self_base, singleton_cref,
+                                                  :walk_struct_member_layouts)
         end
 
         node.rigor_each_child do |child|
@@ -4812,6 +4823,28 @@ module Rigor
         true
       end
 
+      # The eval-family arm shared by the two member-layout walks: the call's receiver and
+      # arguments keep the enclosing context while the block body's `self` is the receiver —
+      # a named receiver re-anchors `self::` headers to a real class even under `class <<`;
+      # a bare/`self` receiver keeps the enclosing (possibly unnameable) self.
+      def walk_member_layout_eval_call?(node, qualified_prefix, accumulator, self_base,
+                                        singleton_cref, walk)
+        return false unless receiver_eval_call?(node)
+
+        [node.receiver, *node.arguments&.arguments.to_a].compact.each do |part|
+          send(walk, part, qualified_prefix, accumulator,
+               self_base: self_base, singleton_cref: singleton_cref)
+        end
+        unnameable = unnameable_eval_self?(false, self_base, qualified_prefix, singleton_cref)
+        eval_self = eval_receiver_prefix(node, self_base || qualified_prefix, qualified_prefix,
+                                         unnameable_self: unnameable) || []
+        if (body = node.block.body)
+          send(walk, body, qualified_prefix, accumulator,
+               self_base: eval_self, singleton_cref: singleton_cref)
+        end
+        true
+      end
+
       # The `class <<` arm shared by the two member-layout walks: the expression evaluates in
       # the enclosing cref while the body's cref is the unnameable singleton class.
       def walk_singleton_member_layouts(node, qualified_prefix, accumulator, walk, self_base,
@@ -4820,8 +4853,9 @@ module Rigor
              self_base: self_base, singleton_cref: singleton_cref)
         return unless node.body
 
+        # `self` below `class <<` is the singleton class — `self::` headers decline.
         send(walk, node.body, qualified_prefix, accumulator,
-             self_base: nil, singleton_cref: true)
+             self_base: EMPTY_PREFIX, singleton_cref: true)
       end
 
       # Records `qualified -> { members:, keyword_init: }` when `expr` is a `Struct.new(*Symbol [, keyword_init:

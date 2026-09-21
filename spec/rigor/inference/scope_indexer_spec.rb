@@ -2547,6 +2547,37 @@ Unrelated
       expect(ranges.map(&:last).uniq).to eq([nil])
     end
 
+    it "does not copy a `module_function`-named def onto `S` inside `class <<` + `instance_eval`" do
+      # `module_function :meta` retro-marks the sibling `def meta` — that def binds on the
+      # metaclass, so the singleton-defs table must not file it under `S`.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval do
+              def meta; end
+              module_function :meta
+            end
+          end
+        end
+      RUBY
+      expect(defs.fetch("S", {})).to be_empty
+    end
+
+    it "records a `self::`-anchored Data/Struct layout through an eval below `class <<`" do
+      data = described_class.build_data_member_layouts(parse(<<~RUBY))
+        class X; end
+        class S
+          class << self
+            X.class_eval do
+              class self::D < Data.define(:a)
+              end
+            end
+          end
+        end
+      RUBY
+      expect(data["X::D"]).to eq([:a])
+    end
+
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
       # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
       # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL

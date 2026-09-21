@@ -6,7 +6,7 @@ description: >-
 advertise: true
 aliases: lane, rigor-worker
 acceptanceRole: writer
-model: deepseek/deepseek-flash
+model: opencode-go/deepseek-v4-flash
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
@@ -31,7 +31,7 @@ Expect a `LaneInput` (or equivalent) covering:
 
 - `issue`, `acceptance`, `touch`, `must_not`
 - worktree / branch assignment when not using managed worktrees
-- `model_band: deepseek-flash-class` (do not self-promote to Opus/Grok)
+- `model_band: deepseek-flash-class` → registry id `opencode-go/deepseek-v4-flash` (do not self-promote to Opus/Grok)
 
 If the task is incomplete or acceptance is uncheckable, escalate via
 `contact_supervisor` with `reason: "need_decision"` (or report `Blocked — need human`).

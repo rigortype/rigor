@@ -64,7 +64,7 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
 | architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
-| lane | `deepseek/deepseek-flash` | `deepseek/*flash*` |
+| lane | `opencode-go/deepseek-v4-flash` | `opencode/*deepseek*flash*`, `*deepseek*flash*` |
 | reviewer | `anthropic/claude-fable-5` | `*fable*`, then Opus/Grok-class |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
 
@@ -142,7 +142,7 @@ subagent({
 - Source checkout must be **clean** before managed worktree fanout (excluding
   `.pi/subagents/` runtime state). Isolation is rejected for a dirty tree.
 - Do **not** auto-merge worktree patches into master without a human.
-- Lane model default is `deepseek/deepseek-flash`; reviewer prefers
+- Lane model default is `opencode-go/deepseek-v4-flash`; reviewer prefers
   `claude-bridge/claude-fable-5`. If those ids do not resolve for your
   providers, pin with `MODEL=` on `run-role.sh`, pass `model:` on the
   `subagent` / child launch, or set `subagents.agentOverrides` in Pi settings.
@@ -224,7 +224,7 @@ agents/pi-harness/
 | --- | --- | --- |
 | [`pi-claude-bridge`](https://github.com/elidickinson/pi-claude-bridge) | Claude Code login (`claude` CLI) + `~/.pi/agent/claude-bridge.json` `"plan": "max"` | architect / orchestrator / reviewer (Opus, Fable) |
 | [`pi-antigravity`](https://pi.dev/packages/pi-antigravity) | `/login antigravity` (Google OAuth) | docs (Gemini Flash); optional Flash research |
-| OpenCode / API keys | provider-specific | lane DeepSeek Flash; fallbacks |
+| OpenCode Go | OpenCode Go subscription / auth | lane Flash-class (`opencode-go/deepseek-v4-flash`) |
 
 Install (global, once per machine):
 
@@ -244,7 +244,7 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 | Role / agent | Band | Prefer | Criterion (why this band) | Never |
 | --- | --- | --- | --- | --- |
 | `architect` / orchestrator queue parent | Opus / Grok | `claude-bridge/claude-opus-5` | Sets direction, contracts, merge judgment; cheap models thrash policy (ADR-115) | DeepSeek / Gemini as architect |
-| `rigor-lane` / `/lane` | DeepSeek Flash | `deepseek/deepseek-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
+| `rigor-lane` / `/lane` | DeepSeek Flash | `opencode-go/deepseek-v4-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
 | `rigor-reviewer` / `/reviewer` | Fable (else Opus) | `claude-bridge/claude-fable-5` | Adversarial engine review; wrong-answer shapes | Gemini for engine review |
 | `rigor-docs` / `/docs` | Gemini Flash | `antigravity/gemini-3.8-flash` | JA/EN docs quality on Google AI Pro; docs-only | Engine edits |
 | queue release/survey parent | Opus-class | same as architect | Ranking + spawn decisions are policy | Letting Flash rank the backlog alone |

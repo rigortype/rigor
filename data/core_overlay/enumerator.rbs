@@ -1,0 +1,84 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Enumerator::Lazy's redefined enumerable methods ---
+#
+# Issue #1121. `Enumerator::Lazy` is not merely an `Enumerator`: CRuby
+# redefines most of `Enumerable` on it so that the call CHAINS another lazy
+# enumerator instead of forcing the source (`enumerator.c`'s lazy method
+# table: `collect` / `map`, `find_all` / `select` / `filter`, `reject`,
+# `grep`, `grep_v`, `flat_map` / `collect_concat`, `take`, `take_while`,
+# `drop`, `drop_while`, `uniq`, `zip`, `filter_map`). Upstream `ruby/rbs`
+# declares none of them on `Enumerator::Lazy` — its whole body is `force`
+# plus `compact` and `eager` — so dispatch walks up to `Enumerable` and
+# adopts THAT class's eager return type:
+#
+#   [1, 2, 3].lazy.map { |x| x * 2 }   # Enumerable#map -> Array[U], not Lazy
+#
+# The receiver class is lost, and with it every terminal method only a lazy
+# enumerator answers: `…map { … }.force` / `.eager` report
+# `call.undefined-method` on correct code, on 124 `.lazy` sites in one
+# survey corpus (gitlab services and graphql, rails actiontext, sidekiq,
+# rubocop).
+#
+# The entries below mirror each upstream `Enumerable` declaration the lazy
+# method replaces, with the return rewritten to `Enumerator::Lazy`. Two
+# deliberate exclusions:
+#
+# * The single type argument spelling (`Enumerator::Lazy[U]`, not
+#   `[U, Return]`) mirrors upstream's own `Enumerable#lazy:
+#   () -> Enumerator::Lazy[Elem]` — the trailing `Return` parameter is
+#   defaulted (`void`), and Rigor binds the supplied prefix (see
+#   `docs/internal-spec/inference-engine.md` § generic dispatch).
+# * The no-block arms of the block-taking methods are NOT carried over.
+#   CRuby RAISES for a blockless `lazy.map` / `select` / `reject` /
+#   `find_all` / `take_while` ("tried to call lazy map without a block"), so
+#   the inherited `Enumerable` arm is a wrong answer for a lazy receiver
+#   rather than a harmless fallback.
+#
+# `zip` is left to `Enumerable` for now: its lazy form yields
+# `[elem, other_elem]` pairs through `_Each`, and the pair shape upstream
+# declares for the eager form is not what the lazy chain hands downstream.
+# `compact`, `eager` and `force` are upstream already and MUST NOT be
+# duplicated here — a second declaration of a method `rbs` core already
+# declares in this class is a `DuplicatedMethodDefinitionError`, which
+# degrades the whole class to `Dynamic[top]`. (`eager` in particular is
+# declared by rbs 4.x only; a `| ...` overload continuation that would
+# declare it on the 3.10 line as well raises `InvalidOverloadMethodError`
+# there, for the same whole-class cost, so `.eager` stays the 3.10 line's
+# own gap.)
+class Enumerator::Lazy[out E, out R = void]
+  def collect: [U] () { (E) -> U } -> Enumerator::Lazy[U]
+
+  def map: [U] () { (E) -> U } -> Enumerator::Lazy[U]
+
+  def find_all: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def select: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def filter: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def reject: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def filter_map: [U] () { (E) -> (nil | false | U) } -> Enumerator::Lazy[U]
+
+  def flat_map: [U] () { (E) -> (Array[U] | U) } -> Enumerator::Lazy[U]
+
+  def collect_concat: [U] () { (E) -> (Array[U] | U) } -> Enumerator::Lazy[U]
+
+  def take: (Integer n) -> Enumerator::Lazy[E]
+
+  def take_while: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def drop: (Integer n) -> Enumerator::Lazy[E]
+
+  def drop_while: () { (E) -> boolish } -> Enumerator::Lazy[E]
+
+  def uniq: () -> Enumerator::Lazy[E]
+          | () { (E item) -> untyped } -> Enumerator::Lazy[E]
+
+  def grep: (untyped pattern) -> Enumerator::Lazy[E]
+          | [U] (untyped pattern) { (E) -> U } -> Enumerator::Lazy[U]
+
+  def grep_v: (untyped pattern) -> Enumerator::Lazy[E]
+            | [U] (untyped pattern) { (E) -> U } -> Enumerator::Lazy[U]
+end

@@ -351,6 +351,37 @@ RSpec.describe Rigor::Environment::RbsLoader do
       end
     end
 
+    # Issue #1121 — CRuby redefines most of `Enumerable` on `Enumerator::Lazy` so the call chains another
+    # lazy enumerator, but upstream `ruby/rbs` declares none of them on the class: dispatch walked up to
+    # `Enumerable` and adopted its EAGER return type, losing the receiver class and reporting
+    # `call.undefined-method` for the terminal `force` / `eager` on correct code. See
+    # data/core_overlay/enumerator.rbs.
+    it "resolves the lazy-chaining methods the overlay reopens on Enumerator::Lazy" do
+      %i[
+        map collect select filter find_all reject filter_map flat_map collect_concat
+        take take_while drop drop_while uniq grep grep_v
+      ].each do |name|
+        method = loader.instance_method(class_name: "Enumerator::Lazy", method_name: name)
+        expect(method).not_to be_nil, "expected the overlay to declare Enumerator::Lazy##{name}"
+        # The declaration must be ON the class, not the `Enumerable` one it replaces: an inherited answer
+        # is the eager `Array[U]` this overlay exists to override.
+        expect(method.defs.map { |definition| definition.defined_in.to_s }.uniq).to eq(["::Enumerator::Lazy"]),
+                                                                                    "Enumerator::Lazy##{name}"
+      end
+    end
+
+    # A second declaration of a method `rbs` core already declares on this class is a
+    # `DuplicatedMethodDefinitionError`, which degrades the whole class to `Dynamic[top]`. `eager` is
+    # deliberately NOT in this list: core declares it only on the 4.x rbs line, and a `| ...` overload
+    # continuation with no base declaration raises `InvalidOverloadMethodError` on 3.10 — the failure mode
+    # that costs the whole class. Both the pinned 4.x line and the compat matrix's 3.10 leg declare
+    # `compact` and `force`.
+    it "leaves the upstream Enumerator::Lazy declarations to rbs core" do
+      %i[compact force].each do |name|
+        expect(loader.instance_method(class_name: "Enumerator::Lazy", method_name: name)).not_to be_nil
+      end
+    end
+
     # `Psych.parse` (= `YAML.parse`) and the two-arg `CSV::MalformedCSVError.new(message, line)` are real
     # stdlib API the pinned `rbs` gem omits; the overlay restores them so GitLab's `YAML.parse(...)` and
     # `raise CSV::MalformedCSVError.new(msg, line)` don't false-fire undefined-method / wrong-arity. See

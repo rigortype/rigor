@@ -45,7 +45,8 @@ module Rigor
     # sig-gen gap: #1149 — sig-gen skips the `||` fallback reader (untyped return); the row is hand-written.
     def parameter_envelopes_of: (String class_name) -> Hash[untyped, untyped]
     def discovered_superclasses: () -> Hash[String, String]
-    # sig-gen gap: #1097 — the per-file deferred-range table's row shape is hand-written.
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the per-file
+    # deferred-range table's row shape is hand-written.
     def discovered_deferred_ranges: () -> Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
     def discovered_includes: () -> Hash[String, Array[String]]
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the table shape is hand-written.
@@ -102,7 +103,7 @@ module Rigor
       attr_reader data_member_layouts: Hash[String, Array[Symbol]]
       attr_reader struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
-      # sig-gen gap: #1097 — `Data.define` members carry no type, as for every other row in this class.
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
       attr_reader run_generation: Object?
 
@@ -187,10 +188,11 @@ module Rigor
     def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([untyped, String] | [nil, nil])
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def user_singleton_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
-    # sig-gen gap: #1097 — both predicates take the `Prism::CallNode` being dispatched (untyped, like
-    # `type_of`'s node), which sig-gen cannot infer.
+    # sig-gen gap: #1167 — the predicate forwards its untyped `Prism::CallNode` into the range scan,
+    # which reads `call_node.location` off it: a `Dynamic` receiver answers `Dynamic`, not `bool`, so
+    # sig-gen skips the method (and `def_shadows_call?` above it) as an untyped return.
     def singleton_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
-    # sig-gen gap: #1097 — as above: the call-site `Prism::CallNode` parameter is untyped.
+    # sig-gen gap: #1167 — the instance-side twin: the same untyped `call_node`, the same untyped-return skip.
     def instance_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
     def top_level_def_for: (String | Symbol method_name) -> untyped?
     def bindable_top_level_def_for: (String | Symbol method_name) -> untyped?

@@ -21,3 +21,4 @@
 - 1155  # sig-gen skips a memoized `||=` reader (the slot read cannot prove the memoized value)
 - 1156  # sig-gen pins an ivar seed literal in a record assembled after the ivars are written
 - 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`
+- 1167  # sig-gen skips a predicate whose body reads an attribute off its untyped node parameter (Dynamic receiver)

@@ -2221,7 +2221,7 @@ module Rigor
       # output and the plugin diagnostics are then built from that single walk's results.
       def rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
         root = parse_result.value
-        node_collectors = CheckRules.build_node_collectors(path, index)
+        node_collectors = CheckRules.build_node_collectors(path, index, root)
         node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
         diagnostics = CheckRules.diagnose(
           path: path,

@@ -1,6 +1,6 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Accepted — fully landed (WD1–WD6), 2026-06-03.** Rejected alternative A is partially
+Status: **Accepted — fully landed (WD1–WD7), 2026-06-03.** WD7 and the `rbs_complete_extends:` half of WD4 landed with #1097. Rejected alternative A is partially
 superseded by [ADR-114](114-core-stdlib-ancestor-dispatch.md) (2026-09-20), which narrows it to the
 gem case and keeps this ADR's allow-list as the bypass of its declines.
 Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
@@ -163,6 +163,16 @@ RBS omits.
   `Plugin::Base` contract. Listing a class is a claim of completeness:
   pairing it with `open_receivers:` (as rigor-graphql does) keeps genuinely
   absent methods diagnostic-free while declared signatures still type-check.
+  **#1097** adds the extend-edge twin, `rbs_complete_extends:`: `extend M`
+  lifts M's *instance* surface onto the class object's singleton, so a
+  singleton-lookup miss walks discovered `extend` edges (plus RBS
+  `singleton_extended_modules` on superclasses). rigor-sorbet is the first
+  consumer (`T::Sig`, `T::Helpers`, `T::Generic`). The same completeness
+  claim applies. A nearer `extend` whose module actually defines the method
+  owns the call — including a nested project module such as
+  `Outer::CustomSig` — and stops the whole walk; later extends and RBS
+  superclasses are not searched. That matches `MacroBlockSelfType`'s owner
+  walk so DeclBuilder binding and RBS dispatch cannot disagree.
 
 - **WD5 — Measurement gate before flag-on.** Because precision and
   `undefined-method`-firing are coupled (Context), the change ships behind a
@@ -191,6 +201,21 @@ RBS omits.
   not a `# rigor:disable`, so the narrow is real). Teeth verified: an injected
   `manifest.bogus` in a plugin makes `make check-plugins` exit non-zero with
   `call.undefined-method`.
+
+- **WD7 — Execution-order shadowing for the extend bridge (#1097).** The
+  cheaper always-shadow rule (`def self.sig` anywhere on the class hides
+  `T::Sig#sig`) is wrong in both directions: a `sig { }` written *before*
+  `def self.sig` in the same body still runs through `extend T::Sig`, and a
+  `sig` nested inside a later `def` runs after every class-body def has
+  taken effect. `discovered_deferred_ranges` (incremental snapshot schema
+  24, then 25 once rows gained an owner column) records def / block /
+  lambda spans so `Scope#*_def_shadows_call?` can order a call against the
+  earliest same-owner def. Conservatism points at shadow (opaque) whenever
+  order cannot be proved — cross-file, nil call node, unindexed file,
+  conditional defs — never at a DeclBuilder binding that would invent a
+  diagnostic on a project method. The table is why the extend bridge is
+  not a plugin-only recogniser: the same ordering is load-bearing for any
+  future `rbs_complete_extends:` consumer.
 
 ## Rejected / deferred alternatives
 
@@ -241,6 +266,8 @@ RBS omits.
   override rules gain a second, RBS-ancestor-vs-Ruby-override surface to act on
   (a possible follow-up; not in v1 scope).
 - **ADR-37 / ADR-40** — the declarative manifest route WD4 defers to.
+- **#1097 / `rbs_complete_extends:`** — WD4's extend-edge twin and WD7's
+  deferred-range shadowing; specified in `docs/internal-spec/plugin.md`.
 - **[ADR-114](114-core-stdlib-ancestor-dispatch.md)** (core / stdlib ancestor
   dispatch) — partially supersedes rejected alternative A above, and demotes
   `ALLOWED_RBS_COMPLETE_ANCESTORS` from "the only way in" to "the bypass of the

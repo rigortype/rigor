@@ -779,7 +779,8 @@ module Rigor
               return nil if scope.singleton_def_shadows_call?(current, method_name, call_node)
 
               resolved = rbs_complete_extended_module_for(current, extends, environment, scope,
-                                                          registry, method_name)
+                                                          registry, method_name, call_node)
+              return nil if resolved.equal?(EXTEND_OWNER_STOP)
               return resolved if resolved
 
               raw = supers[current]
@@ -788,33 +789,40 @@ module Rigor
             nil
           end
 
-          # One walk hop of `allowed_rbs_complete_extended_module`: the first allow-listed module
-          # `current` extends that actually DEFINES `method_name`, or nil. Each `extend` edge binds
-          # to the first resolution candidate that exists at runtime — a project class owns the
-          # edge (the source-extend fold already contributed its singleton defs) and an RBS-known
-          # name that is not allow-listed, or that lacks the method, is still the module Ruby would
-          # call through, so neither falls through to a later lexical fallback. An allow-listed
-          # module that simply does not declare the method yields to the NEXT extended module —
-          # Ruby's singleton ancestry searches every extended module in turn.
+          # One walk hop of `allowed_rbs_complete_extended_module`. Each `extend` edge binds to the
+          # first resolution candidate that exists at runtime. If that owner DEFINES `method_name`:
+          # an allow-listed RBS module is the answer; a project class or a non-allow-listed RBS name
+          # owns the call, so the hop returns {EXTEND_OWNER_STOP} and the outer walk must not search
+          # later extends or superclasses (a nested `Outer::CustomSig` would otherwise fall through
+          # to `T::Sig` and type the call as `nil`). An owner that does not define the method yields
+          # to the next extended module — Ruby's singleton ancestry searches every extend in turn.
           def rbs_complete_extended_module_for(current, extends, environment, scope, registry,
-                                               method_name)
+                                               method_name, call_node)
             each_extended_module_name(current, extends, environment) do |mod_name|
-              scope.ancestor_name_candidates(current, mod_name).each do |candidate|
-                project_owned = scope.known_user_class?(candidate)
-                rbs_known = !project_owned &&
-                            Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
-                next unless project_owned || rbs_known
-
-                if rbs_known && registry.rbs_complete_extends?(candidate) &&
-                   lookup_method_on(environment, candidate, :instance, method_name)
-                  return candidate
-                end
-
-                break
+              owner = scope.ancestor_name_candidates(current, mod_name).find do |candidate|
+                scope.known_user_class?(candidate) ||
+                  Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
               end
+              next if owner.nil?
+              next unless extend_owner_defines?(owner, method_name, call_node, scope, environment)
+
+              project_owned = scope.known_user_class?(owner)
+              return owner if !project_owned && registry.rbs_complete_extends?(owner)
+
+              return EXTEND_OWNER_STOP
             end
             nil
           end
+
+          def extend_owner_defines?(owner, method_name, call_node, scope, environment)
+            return true if scope.instance_def_shadows_call?(owner, method_name, call_node)
+
+            !lookup_method_on(environment, owner, :instance, method_name).nil?
+          end
+
+          # Sentinel: a nearer `extend` answers `method_name`, so the allow-list must not continue.
+          EXTEND_OWNER_STOP = :__rbs_complete_extends_stop__
+          private_constant :EXTEND_OWNER_STOP
 
           # The module names `current` extends, source table first (`discovered_extends`, stored in
           # singleton-ancestor search order — nearest edge first) then the RBS side

@@ -5510,7 +5510,7 @@ module Rigor
       def fold_extends_into_singleton_tables(extends, def_nodes, singleton_def_nodes, methods)
         extends.each do |class_name, mods|
           mods.each do |mod_name|
-            source_defs = def_nodes[mod_name]
+            source_defs = extend_source_defs(def_nodes, class_name, mod_name)
             next if source_defs.nil?
 
             # An inner table inherited unchanged from a frozen seed must be thawed before the fold writes.
@@ -5522,6 +5522,23 @@ module Rigor
             end
           end
         end
+      end
+
+      # `extend CustomSig` inside `module Outer; class F` stores the as-written name, while
+      # `def_nodes` keys the module's defs as `Outer::CustomSig`. Walk the enclosing namespaces
+      # innermost-first so the fold finds the same module Ruby constant-lookup would.
+      def extend_source_defs(def_nodes, class_name, mod_name)
+        found = def_nodes[mod_name]
+        return found if found
+        return nil if mod_name.nil? || mod_name.start_with?("::")
+
+        parts = class_name.to_s.split("::")
+        while parts.size > 1
+          parts.pop
+          found = def_nodes["#{parts.join('::')}::#{mod_name}"]
+          return found if found
+        end
+        nil
       end
 
       VISIBILITY_MODIFIERS = %i[public private protected].freeze

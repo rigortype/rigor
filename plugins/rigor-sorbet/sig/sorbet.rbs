@@ -81,7 +81,7 @@ class T::Private::Methods::DeclBuilder
   def on_failure: (*untyped args) -> self
   def abstract: () -> self
   def final: () -> self
-  def override: (?allow_incompatible: bool) -> self
+  def override: (?allow_incompatible: bool | Symbol) -> self
   def overridable: () -> self
   def type_parameters: (*untyped names) -> self
 end

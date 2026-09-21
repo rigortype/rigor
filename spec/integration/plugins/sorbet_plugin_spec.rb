@@ -1144,6 +1144,37 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
     end
 
+    it "does not type a nested CustomSig#sig through T::Sig's nil return" do
+      # `Outer::CustomSig` is the nearer extend; the as-written name is `CustomSig`, so a fold
+      # keyed on the written spelling misses the defs. The bridge must stop the whole walk
+      # rather than falling through to `T::Sig#sig -> nil`.
+      source = <<~RUBY
+        #{SIG_STUB}
+        module Outer
+          module CustomSig
+            def sig(&blk)
+              "hello"
+            end
+          end
+          class F
+            extend T::Sig
+            extend CustomSig
+            result = sig { void }
+            result.upcase
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/upcase/)
+      )
+    end
+
     it "still binds DeclBuilder when a nearer extended module does not define `sig`" do
       source = <<~RUBY
         module Plain

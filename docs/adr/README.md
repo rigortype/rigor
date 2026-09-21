@@ -57,7 +57,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-40 | [`config_schema` declared defaults (`{kind:, default:}`)](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
 | ADR-41 | [Inference budget design (wiring, on-hit policy, measurement-gated defaults)](41-inference-budget-design.md) | Proposed (Layer 1 doc/spec hygiene landed; Layer 2 budget wiring demand-deferred) |
 | ADR-42 | [Plugin-contributed binary-operator return types (coerce-direction)](42-plugin-binary-operator-return-types.md) | Proposed (low priority, demand-gated; self/left-operand case already works via dynamic_return) |
-| ADR-43 | [RBS-complete ancestor resolution (allow-list inherited-method dispatch)](43-rbs-complete-ancestor-resolution.md) | Accepted (fully landed, WD1–WD6; make check-plugins gate wired into verify + CI) |
+| ADR-43 | [RBS-complete ancestor resolution (allow-list inherited-method dispatch)](43-rbs-complete-ancestor-resolution.md) | Accepted (fully landed, WD1–WD7; `rbs_complete_extends:` + deferred-range shadowing in #1097) |
 | ADR-44 | [Per-dispatch / per-narrow allocation churn (Scope, CallContext)](44-dispatch-allocation-churn.md) | Accepted (body-scope collapse + allocation hygiene landed; mutable pooling rejected; field-regrouping downgraded) |
 | ADR-45 | [Unchanged-project fast path (run-result cache)](45-unchanged-project-fast-path.md) | Accepted (record-and-validate run cache landed; naive pre-analysis fingerprint rejected as unsound) |
 | ADR-46 | [Incremental analysis via a cross-file dependency graph](46-incremental-dependency-graph.md) | Accepted (slices 1–4 landed incl. file add/remove; --incremental gated by --verify-incremental in CI) |

@@ -71,7 +71,7 @@ module Rigor
           # may vanish inside the brackets) may be either form, so both readings join — the
           # union is a superset of the truth either way.
           case index_store_form(arg_types)
-          when :splice then collection_element_types(arg_types.last)
+          when :splice then splice_stored_elements(arg_types.last)
           when :either then [arg_types.last] + collection_element_types(arg_types.last)
           else [arg_types.last]
           end
@@ -296,7 +296,7 @@ module Rigor
         leading = arg_types[0...-1]
         return single_index_form(leading.first) if leading.size == 1
 
-        definite = leading.reject { |t| t.is_a?(Type::Dynamic) }
+        definite = leading.grep_v(Type::Dynamic)
         return :splice if definite.size >= 2
         return :either if definite.empty?
 
@@ -304,13 +304,59 @@ module Rigor
       end
 
       # The one-index question: a Range carrier is a splice, a definite scalar an element store,
-      # and anything between (`Dynamic`, a `Range | Integer` union) may be either.
+      # and anything between (`Dynamic`, a `Range | Integer` union, an `Object`/`top` index that
+      # may still hold a Range at runtime) may be either.
       def single_index_form(index_type)
         members = union_members(index_type)
         return :splice if members.all? { |m| range_index?(m) }
-        return :element if members.none? { |m| range_index?(m) || m.is_a?(Type::Dynamic) }
+        return :element if members.none? { |m| could_be_range?(m) }
 
         :either
+      end
+
+      # True when the index position MAY hold a Range at runtime: a definite Range carrier
+      # (`Constant[0..1]` accepts only its own value, so acceptance alone cannot see it),
+      # `Dynamic`, a carrier the engine cannot answer for, and every type `Nominal[Range]` is
+      # passable to — `Object`, `BasicObject`, `Enumerable`, `top`, `Difference`/`Refined` over
+      # those. A member whose value set is provably disjoint (`Integer`, `non-empty-string`, a
+      # non-Range `Constant`) declines, leaving the store a definite element write.
+      def could_be_range?(member)
+        return true if range_index?(member)
+        return true unless member.respond_to?(:accepts)
+
+        !member.accepts(Type::Combinator.nominal_of("Range")).no?
+      end
+
+      # Element types a splice RHS adds to the receiver. Ruby splices an Array RHS
+      # (`a[0, 1] = [1, 2]` puts `Integer`s in), stores a NON-Array RHS as one element
+      # (`a[0, 1] = "x"` stores the String), and treats a nil RHS as a deletion that adds
+      # nothing. A union RHS reads member-wise; `Dynamic`/`top` land as themselves, which
+      # already covers whichever form the value takes.
+      def splice_stored_elements(value_type)
+        union_members(value_type).flat_map do |member|
+          next [] if nil_store?(member)
+          next collection_element_types(member) if array_carrier?(member)
+
+          [member]
+        end
+      end
+
+      # True when the RHS member is a nil carrier — `a[i, n] = nil` deletes rather than storing.
+      def nil_store?(member)
+        (member.is_a?(Type::Constant) && member.value.nil?) ||
+          (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
+      end
+
+      # True when the RHS member is statically an Array value whose elements the splice inserts —
+      # a `Tuple`, `Nominal[Array]` or a refinement over either. `Constant` never wraps an Array
+      # (it carries scalar literals only), so it needs no arm here.
+      def array_carrier?(member)
+        case member
+        when Type::Tuple then true
+        when Type::Nominal then member.class_name == "Array"
+        when Type::Difference, Type::Refined then array_carrier?(member.base)
+        else false
+        end
       end
 
       # True when an index position holds a Range carrier — a static `Constant<Range>` (`0..1`),
@@ -330,11 +376,11 @@ module Rigor
       # `Tuple` lists them, a `Nominal[Array, [E]]` has one element param, a bare `Array` /
       # anything else yields none.
       #
-      # A `Difference` reads through to its base: `non-empty-array[T]` holds `T`s, and the seams
-      # that read a seed from BEFORE the arity-forget ran (see {#join_array_content}) meet the
-      # refinement carrier itself where they used to meet the base the widening had left. Declining
-      # it there would hand the continuation the widened base ALONE, with every appended arm missing
-      # — a wrong type, not a wide one.
+      # A `Difference`/`Refined` reads through to its base: `non-empty-array[T]` holds `T`s, and
+      # the seams that read a seed from BEFORE the arity-forget ran (see {#join_array_content})
+      # meet the refinement carrier itself where they used to meet the base the widening had left.
+      # Declining it there would hand the continuation the widened base ALONE, with every appended
+      # arm missing — a wrong type, not a wide one.
       def collection_element_types(type)
         case type
         when Type::Tuple
@@ -345,7 +391,7 @@ module Rigor
           # A loop's single-pass join can union the widened collection with its un-widened literal
           # seed (`Array[0] | [0]`); pull element evidence from every Array-ish member.
           type.members.flat_map { |m| collection_element_types(m) }
-        when Type::Difference
+        when Type::Difference, Type::Refined
           collection_element_types(type.base)
         else
           []

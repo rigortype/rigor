@@ -1,5 +1,6 @@
 ---
 locals:
+  broad_index: Array[Array[Integer] | Dynamic[top] | Integer]
   built: Array[Dynamic[top] | String]
   compound: Array[Dynamic[top] | Integer]
   csv_options: Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
@@ -22,7 +23,9 @@ locals:
   slotted: Array[Dynamic[top] | Integer]
   sorted: Array[1 | 2]
   spliced: Array[Dynamic[top] | Integer]
+  spliced_nil: Array[Dynamic[top]]
   spliced_range: Array[Dynamic[top] | Integer]
+  spliced_scalar: Array[Dynamic[top] | String]
   stack: Array[Dynamic[top] | Integer]
   unshifted: Array[1 | 2 | Dynamic[top] | Integer]
   untouched: "[1, 2]"
@@ -40,22 +43,26 @@ assertions:
   '11': Array[Array[Integer] | Dynamic[top] | Integer]
   '12': Array[Array[Integer] | Dynamic[top] | Integer]
   '13': Array[Dynamic[top] | Integer]
-  '14': Array[Dynamic[top] | Integer]
-  '15': Array[Dynamic[top] | String]
-  '16': Array[Dynamic[top] | Integer]
-  '17': Array[1 | 2 | Dynamic[top]]
-  '18': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
-  '19': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
-  '20': Array[Dynamic[top] | Integer | String]
-  '21': Array[Dynamic[top] | Integer | String]
-  '22': Array[Dynamic[top] | Integer | String]
-  '23': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
+  '14': Array[Dynamic[top] | String]
+  '15': Dynamic[top] | String
+  '16': Array[Dynamic[top]]
+  '17': Array[Array[Integer] | Dynamic[top] | Integer]
+  '18': Array[Dynamic[top] | Integer]
+  '19': Array[Dynamic[top] | String]
+  '20': Array[Dynamic[top] | Integer]
+  '21': Array[1 | 2 | Dynamic[top]]
+  '22': Hash[Dynamic[top] | Symbol, Dynamic[top] | FalseClass]
+  '23': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '24': Array[Dynamic[top] | Integer | String]
+  '25': Array[Dynamic[top] | Integer | String]
+  '26': Array[Dynamic[top] | Integer | String]
+  '27': Hash[Dynamic[top] | String, Array[Dynamic[top]] | Dynamic[top] | Hash[Dynamic[top],
     Dynamic[top]] | String]
-  '24': Array[:multi | Dynamic[top] | Symbol]
-  '25': Integer
-  '26': Array[1 | 2 | 3]
-  '27': Array[1 | 2]
-  '28': Array[1 | 2]
-  '29': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
-  '30': Array[1 | 2 | Dynamic[top] | Integer]
-  '31': "[1, 2]"
+  '28': Array[:multi | Dynamic[top] | Symbol]
+  '29': Integer
+  '30': Array[1 | 2 | 3]
+  '31': Array[1 | 2]
+  '32': Array[1 | 2]
+  '33': non-empty-array[1 | 2 | Dynamic[top] | Integer | String]
+  '34': Array[1 | 2 | Dynamic[top] | Integer]
+  '35': "[1, 2]"

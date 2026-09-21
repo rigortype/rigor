@@ -151,8 +151,8 @@ RSpec.describe Rigor::Inference::ContentJoin do
     end
 
     # Issue #1140 — the splice forms store the value's ELEMENTS, so a two-index
-    # `arr[i, n] = other` reads `other` through `collection_element_types` exactly
-    # as `concat`/`replace` do.
+    # `arr[i, n] = other` reads `other`'s collection element types exactly as
+    # `concat`/`replace` do.
     it "flat_maps a two-index []= splice's value through collection_element_types" do
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, array_arg])
@@ -188,9 +188,56 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result).to contain_exactly(array_arg, str_type)
     end
 
-    it "contributes no element evidence for a splice of a non-collection value" do
+    # `a[i, n] = "x"` does not splice a String — Ruby stores the non-Array RHS itself
+    # as one element, so the receiver's element set must keep it.
+    it "stores a non-collection splice RHS itself as one element" do
       result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, str_type])
-      expect(result).to eq([])
+      expect(result).to eq([str_type])
+    end
+
+    it "contributes no element evidence for a nil splice RHS, which deletes" do
+      nil_constant = Rigor::Type::Combinator.constant_of(nil)
+      expect(described_class.send(:array_added_elements, :[]=, [int_type, int_type, nil_constant]))
+        .to eq([])
+      nil_nominal = Rigor::Type::Combinator.nominal_of("NilClass")
+      expect(described_class.send(:array_added_elements, :[]=, [int_type, int_type, nil_nominal]))
+        .to eq([])
+    end
+
+    it "reads a union splice RHS member-wise" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [int_type])
+      union_arg = Rigor::Type::Combinator.union(str_type, array_arg)
+      result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, union_arg])
+      expect(result).to contain_exactly(str_type, int_type)
+    end
+
+    # An index typed `Object`/`top`/`Enumerable` may still BE a Range at runtime, so the
+    # store may be a splice — both readings must join. `Comparable`/`Integer` and other
+    # classes disjoint from Range remain definite element stores.
+    it "joins both readings when the index type is broad enough to hold a Range" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      [
+        Rigor::Type::Combinator.nominal_of("Object"),
+        Rigor::Type::Combinator.nominal_of("BasicObject"),
+        Rigor::Type::Combinator.nominal_of("Enumerable"),
+        Rigor::Type::Combinator.top
+      ].each do |index|
+        result = described_class.send(:array_added_elements, :[]=, [index, array_arg])
+        expect(result).to contain_exactly(array_arg, str_type)
+      end
+    end
+
+    it "stays an element store when the index is provably disjoint from Range" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      [
+        int_type,
+        str_type,
+        Rigor::Type::Combinator.nominal_of("Comparable"),
+        Rigor::Type::Combinator.constant_of(0)
+      ].each do |index|
+        result = described_class.send(:array_added_elements, :[]=, [index, array_arg])
+        expect(result).to eq([array_arg])
+      end
     end
 
     # A splat inside the brackets types as `Dynamic[top]` but can vanish at runtime, so

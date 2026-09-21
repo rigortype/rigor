@@ -84,6 +84,25 @@ def two_index_splat(xs)
   a
 end
 
+# A NON-Array splice RHS does not splice — Ruby stores the value itself
+# as one element (`a[0, 1] = "x"` leaves the String inside). A nil RHS is
+# the deletion form and contributes no element evidence at all.
+spliced_scalar = []
+spliced_scalar[0, 1] = "x"
+assert_type("Array[Dynamic[top] | String]", spliced_scalar)
+assert_type("Dynamic[top] | String", spliced_scalar.last)
+
+spliced_nil = []
+spliced_nil[0, 1] = nil
+assert_type("Array[Dynamic[top]]", spliced_nil)
+
+# An index typed broadly enough to hold a Range at runtime may splice, so
+# the element parameter covers BOTH readings — the value as one element
+# and the value's own elements.
+broad_index = []
+broad_index[Object.new] = [1, 2]
+assert_type("Array[Array[Integer] | Dynamic[top] | Integer]", broad_index)
+
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.
 # This seam sees one store, and the widening is a one-way door, so the

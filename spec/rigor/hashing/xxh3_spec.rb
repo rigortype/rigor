@@ -101,18 +101,8 @@ RSpec.describe Rigor::Hashing::XXH3 do
     end
   end
 
-  describe "throughput" do
-    # Anchors hash declaration spans and the file hash covers a whole file, so the digest only needs
-    # to stay far from the lens's per-file analysis cost. Measured on a generated 500-line Ruby file
-    # (~24.7 KB): ~15.6 MB/s (~634 full-file digests/s) — far above the 1 MB/s floor asserted here.
-    it "digests a 500-line Ruby file well above 1 MB/s" do
-      src = (1..500).map { |i| "def method_#{i}(arg)\n  arg * #{i} + compute_#{i}\nend\n" }.join
-      iterations = 200
-      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      iterations.times { described_class.digest64(src) }
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-      bytes_per_second = src.bytesize * iterations / elapsed
-      expect(bytes_per_second).to be > 1_000_000
-    end
-  end
+  # Throughput is recorded, not gated: the unit suite carries no rate thresholds. Anchors hash
+  # declaration spans and the file hash covers a whole file, so the digest only needs to stay far from
+  # the lens's per-file analysis cost. Measured without YJIT on a generated 500-line Ruby file
+  # (~24.7 KB): ~15.6 MB/s (~634 full-file digests/s).
 end

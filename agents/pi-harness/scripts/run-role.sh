@@ -33,7 +33,8 @@ Model defaults (patterns; first match from `pi --list-models` wins):
     patterns: claude-bridge/*fable*  anthropic/*fable*  *fable*  *opus*  grok*
     preferred: claude-bridge/claude-fable-5 (Fable); else Opus/Grok-class
   docs
-    patterns: google/gemini*flash*  *gemini*flash*  gemini-flash-latest
+    patterns: antigravity/gemini*flash*  opencode/gemini*flash*  google/gemini*flash*  *gemini*flash*
+    preferred ids: antigravity/gemini-3.8-flash
 
 If no provider is authenticated / no pattern matches, the script exits with
 `pi auth` / `pi --list-models` guidance instead of falling back to a random
@@ -119,17 +120,22 @@ case "$ROLE" in
     CYCLE="claude-bridge/*fable*,*fable*,claude-bridge/*opus*,*opus*,grok*,anthropic/claude-fable*,anthropic/claude-opus*,xai/grok*"
     ;;
   docs)
-    PREFERRED="google/gemini-3.8-flash"
+    # Prefer Google AI Pro via pi-antigravity (subscription), then OpenCode Gemini, then google API.
+    PREFERRED="antigravity/gemini-3.8-flash"
     PATTERNS=(
+      "antigravity/gemini-3.8-flash"
+      "antigravity/gemini-3.7-flash"
+      "antigravity/gemini*flash"
+      "opencode/gemini-3.8-flash"
+      "opencode/gemini*flash"
       "google/gemini-3.8-flash"
       "google/gemini-flash-latest"
       "google/gemini-3.5-flash"
-      "google/gemini-2.5-flash"
       "gemini-flash-latest"
       "gemini*flash"
       "gemini"
     )
-    CYCLE="google/gemini*flash*,gemini*flash*,gemini-flash-latest"
+    CYCLE="antigravity/gemini*flash*,opencode/gemini*flash*,google/gemini*flash*,gemini*flash*"
     ;;
 esac
 
@@ -184,7 +190,7 @@ list_model_ids() {
     BEGIN { IGNORECASE = 1 }
     /^[[:space:]]*$/ { next }
     $1 == "provider" && $2 == "model" { next }
-    /No models available|Use \/login|Models:|available models/ { next }
+    /No models available|No models matching|Use \/login|Models:|available models/ { next }
     {
       for (i = 1; i <= NF; i++) {
         if ($i ~ /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:*-]+$/) {
@@ -213,7 +219,7 @@ resolve_model() {
     return 1
   fi
 
-  if echo "$list" | grep -qiE 'No models available|Use /login'; then
+  if echo "$list" | grep -qiE 'No models available|No models matching|Use /login'; then
     echo "error: no models available (providers not configured)" >&2
     auth_help
     return 1
@@ -236,7 +242,7 @@ resolve_model() {
       return 0
     fi
     searched="$("$PI_BIN" --list-models "$pat" 2>/dev/null || true)"
-    if echo "$searched" | grep -qiE 'No models available|Use /login'; then
+    if echo "$searched" | grep -qiE 'No models available|No models matching|Use /login'; then
       continue
     fi
     candidate="$(echo "$searched" | list_model_ids | grep -iE "^${ere}$" | head -1 || true)"

@@ -133,14 +133,16 @@ assert_type("Array[Dynamic[top] | Integer]", and_splice)
 # A multi-index `||=` addresses a splice REGION, not the slot its first
 # index names — `a[0, 1] ||= []` splices nothing in, so `a[0]` keeps the
 # honest element type instead of a recorded non-nil claim. The single-
-# index form still records its narrowing.
+# index form still records its narrowing — and the stored value is the
+# `||=` result `a[0] || :x`, which keeps a truthy-arm the untyped slot
+# read cannot rule out beside the rvalue.
 splice_or = []
 splice_or[0, 1] ||= []
 assert_type("Dynamic[top]", splice_or[0])
 
 single_or = []
 single_or[0] ||= :x
-assert_type(":x", single_or[0])
+assert_type(":x | Dynamic[top]", single_or[0])
 
 # --- An EMPTY seed has no element evidence to contradict, so the stored
 # value is admitted as itself — but the parameter still does not CLOSE.

@@ -413,7 +413,7 @@ module Rigor
 
         # A `nil` index marks a splat for the Array splice classifier; the pair seam reads
         # `arg_types.first` as the KEY, where the splat's expansion is an unknown key rather
-        # than absent arity — it degrades to `Dynamic[top]`, not `nil` (issue #1140).
+        # than absent arity — it degrades to untyped, not `nil` (issue #1140).
         added = value_pin_widened([arg_types.first || Type::Combinator.untyped, arg_types.last])
         return widened unless added.size == 2
 

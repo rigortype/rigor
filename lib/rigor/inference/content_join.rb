@@ -310,14 +310,28 @@ module Rigor
       end
 
       # The one-index question: a Range carrier is a splice, a definite scalar an element store,
-      # and anything between (`Dynamic`, a `Range | Integer` union, an `Object`/`top` index that
-      # may still hold a Range at runtime) may be either.
+      # and anything between — a union straddling both, a broad index that may still hold a
+      # Range at runtime — may be either.
       def single_index_form(index_type)
         members = union_members(index_type)
-        return :splice if members.all? { |m| range_index?(m) }
+        return :splice if members.all? { |m| definite_range?(m) }
         return :element if members.none? { |m| could_be_range?(m) }
 
         :either
+      end
+
+      # True when the index position PROVABLY holds a Range: a Range carrier {#range_index?}
+      # recognizes, or a member acceptance proves a subtype of `Range` — a loaded
+      # `class MyRange < Range` answers `yes` there where the name check cannot see it. An
+      # unresolvable subclass answers `maybe`, which correctly declines here and still reaches
+      # {#could_be_range?}'s `either` reading. A gradual member accepts in BOTH directions
+      # (`Range` accepts it optimistically), so it must be excluded before asking — an untyped
+      # index may hold a scalar just as well and stays `either`.
+      def definite_range?(member)
+        return true if range_index?(member)
+        return false if member.is_a?(Type::Dynamic) || member.is_a?(Type::Top)
+
+        member.respond_to?(:accepts) && RANGE_INDEX_PROBE.accepts(member).yes?
       end
 
       # True when the index position MAY hold a Range at runtime: a definite Range carrier
@@ -395,9 +409,9 @@ module Rigor
       # `Tuple` lists them, a `Nominal[Array, [E]]` has one element param, a bare `Array` /
       # anything else yields none.
       #
-      # A `Difference`/`Refined` reads through to its base: `non-empty-array[T]` holds `T`s, and
-      # the seams that read a seed from BEFORE the arity-forget ran (see {#join_array_content})
-      # meet the refinement carrier itself where they used to meet the base the widening had left.
+      # A `Difference` reads through to its base: `non-empty-array[T]` holds `T`s, and the seams
+      # that read a seed from BEFORE the arity-forget ran (see {#join_array_content}) meet the
+      # refinement carrier itself where they used to meet the base the widening had left.
       # Declining it there would hand the continuation the widened base ALONE, with every appended
       # arm missing — a wrong type, not a wide one.
       def collection_element_types(type)
@@ -410,7 +424,7 @@ module Rigor
           # A loop's single-pass join can union the widened collection with its un-widened literal
           # seed (`Array[0] | [0]`); pull element evidence from every Array-ish member.
           type.members.flat_map { |m| collection_element_types(m) }
-        when Type::Difference, Type::Refined
+        when Type::Difference
           collection_element_types(type.base)
         else
           []

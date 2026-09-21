@@ -59,7 +59,7 @@ assertions:
   '20': Array[Dynamic[top] | Integer]
   '21': Array[Dynamic[top] | Integer]
   '22': Dynamic[top]
-  '23': ":x"
+  '23': ":x | Dynamic[top]"
   '24': Array[Dynamic[top] | Integer]
   '25': Array[Dynamic[top] | String]
   '26': Array[Dynamic[top] | Integer]

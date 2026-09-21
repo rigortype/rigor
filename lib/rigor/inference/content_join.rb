@@ -50,11 +50,6 @@ module Rigor
       RANGE_INDEX_PROBE = Type::Combinator.nominal_of("Range")
       private_constant :RANGE_INDEX_PROBE
 
-      # Classes whose instances can never define `to_ary`: Ruby forbids subclassing the
-      # immediate-value classes, so a `Nominal` member of one is always stored as itself.
-      NON_COERCIBLE_CLASSES = %w[NilClass TrueClass FalseClass Integer Float Symbol].freeze
-      private_constant :NON_COERCIBLE_CLASSES
-
       module_function
 
       # The element types a single content-mutator call introduces into an Array, given the
@@ -326,15 +321,17 @@ module Rigor
 
       # True when the index position MAY hold a Range at runtime: a definite Range carrier
       # (`Constant[0..1]` accepts only its own value, so acceptance alone cannot see it),
-      # `Dynamic`, a carrier the engine cannot answer for, and every type `Nominal[Range]` is
-      # passable to — `Object`, `BasicObject`, `Enumerable`, `top`, `Difference`/`Refined` over
-      # those. A member whose value set is provably disjoint (`Integer`, `non-empty-string`, a
-      # non-Range `Constant`) declines, leaving the store a definite element write.
+      # `Dynamic`, a carrier the engine cannot answer for, and every type related to
+      # `Nominal[Range]` in EITHER direction — `Object`/`Enumerable`/`top` above it, a
+      # project `class MyRange < Range` below it (an unresolvable class name answers `maybe`,
+      # never `no`, so subclass-ness cannot be ruled out). A member whose value set is
+      # provably disjoint (`Integer`, `non-empty-string`, a non-Range `Constant`) declines,
+      # leaving the store a definite element write.
       def could_be_range?(member)
         return true if range_index?(member)
         return true unless member.respond_to?(:accepts)
 
-        !member.accepts(RANGE_INDEX_PROBE).no?
+        !member.accepts(RANGE_INDEX_PROBE).no? || !RANGE_INDEX_PROBE.accepts(member).no?
       end
 
       # Element types a splice RHS adds to the receiver, read member-wise. Ruby splices an
@@ -343,11 +340,14 @@ module Rigor
       # NON-Array RHS as one element UNLESS the value coerces through `to_ary`, in which case
       # the returned array's elements splice instead (`a[0, 1] = obj` where `obj.to_ary`
       # returns `["x"]` stores `"x"`). `nil` is no exception — `a[i, n] = nil` stores a single
-      # nil. A `Nominal` member may at runtime be a subclass that DOES define `to_ary`, and
-      # nothing here can resolve that, so it contributes itself plus `Dynamic[top]` for whatever
-      # a coercion would have put in. Literals provably cannot coerce — a `Constant` is the
-      # exact scalar value, a `HashShape` an exact Hash, an `IntegerRange`/`FloatRange` a raw
-      # number — so they contribute themselves alone.
+      # nil.
+      #
+      # Every member that is not a literal Array carries a `Dynamic[top]` arm beside itself:
+      # nothing here can prove the member's class does not define `to_ary` — a `Nominal` may be
+      # a subclass that declares one, and the project may reopen even a non-subclassable core
+      # class (ADR-17's patched-methods tier resolves exactly those). A `Tuple` is the one
+      # exact carrier: a literal Array's `to_ary` is the builtin self-return, the same
+      # builtin-semantics line the rest of this method rests on.
       def splice_stored_elements(value_type)
         union_members(value_type).flat_map do |member|
           base = member
@@ -358,14 +358,10 @@ module Rigor
             base.elements
           when Type::Nominal
             if base.class_name == "Array"
-              base.type_args.empty? ? [Type::Combinator.untyped] : base.type_args
-            elsif NON_COERCIBLE_CLASSES.include?(base.class_name)
-              [member]
+              base.type_args + [Type::Combinator.untyped]
             else
               [member, Type::Combinator.untyped]
             end
-          when Type::Constant, Type::HashShape, Type::IntegerRange, Type::FloatRange
-            [member]
           else
             [member, Type::Combinator.untyped]
           end

@@ -1161,6 +1161,7 @@ RSpec.describe "plugins/rigor-sorbet" do
             extend CustomSig
             result = sig { void }
             result.upcase
+            result.definitely_not_on_string
           end
         end
       RUBY
@@ -1172,6 +1173,9 @@ RSpec.describe "plugins/rigor-sorbet" do
       )
       expect(offenders.map(&:message)).not_to include(
         a_string_matching(/upcase/)
+      )
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/definitely_not_on_string.*hello/)
       )
     end
 

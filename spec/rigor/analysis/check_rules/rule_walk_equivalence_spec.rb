@@ -408,10 +408,9 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
   # compare the full serialised diagnostic list.
   describe "main pass on the shared walk vs the inline oracle" do
     def main_pass_walk(path, root, scope_index)
-      node_diagnostics = ->(node) { Rigor::Analysis::CheckRules.main_pass_node_diagnostics(path, node, scope_index) }
-      collector = Rigor::Analysis::CheckRules::MainPassCollector.new(node_diagnostics)
-      described_class.run(root, [collector])
-      collector.results.map(&:to_h)
+      collectors = Rigor::Analysis::CheckRules.build_node_collectors(path, scope_index, root)
+      described_class.run(root, [collectors[:main_pass]])
+      collectors[:main_pass].results.map(&:to_h)
     end
 
     # ADR-53 B4 — drive the main pass through the converged {Plugin::NodeRuleWalk} traversal (no plugins, so only the
@@ -419,8 +418,8 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
     # walk must reproduce the inline oracle byte-for-byte too — this is the converged-walk coverage for the fifth
     # (main-pass) collector.
     def main_pass_converged_walk(path, root, scope_index)
-      node_diagnostics = ->(node) { Rigor::Analysis::CheckRules.main_pass_node_diagnostics(path, node, scope_index) }
-      collector = Rigor::Analysis::CheckRules::MainPassCollector.new(node_diagnostics)
+      collectors = Rigor::Analysis::CheckRules.build_node_collectors(path, scope_index, root)
+      collector = collectors[:main_pass]
       driver = described_class::CollectorDriver.new([collector])
       walk = Rigor::Plugin::NodeRuleWalk.new([])
       walk.diagnostics_for_file(path: "(spec)", scope: Rigor::Scope.empty, root: root, collector_driver: driver)

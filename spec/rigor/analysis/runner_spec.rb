@@ -1306,6 +1306,24 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    it "stays silent for a genuinely undefined name inside a receiver-eval block" do
+      Dir.mktmpdir("rigor-adr34-eval-undef-") do |tmpdir|
+        main = write_main(tmpdir, <<~RUBY)
+          class Target
+          end
+
+          Target.class_eval do
+            def uses_missing = genuinely_undefined_inside
+          end
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main])
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
+        end
+      end
+    end
+
     it "stays silent for unresolved implicit-self calls INSIDE a class body (ADR-24 WD4 stays closed)" do
       Dir.mktmpdir("rigor-adr34-classbody-") do |tmpdir|
         main = write_main(tmpdir, <<~RUBY)

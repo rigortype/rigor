@@ -136,10 +136,10 @@ module Rigor
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by
       # {MainPassCollector} on the shared {RuleWalk}. Returns the
       # diagnostics for one node, in the same emission order as before.
-      def main_pass_node_diagnostics(path, node, scope_index, root = nil)
+      def main_pass_node_diagnostics(path, node, scope_index, eval_ranges = nil)
         case node
         when Prism::CallNode
-          call_node_diagnostics(path, node, scope_index, root)
+          call_node_diagnostics(path, node, scope_index, eval_ranges)
         when Prism::DefNode
           [
             return_type_mismatch_diagnostic(path, node, scope_index),
@@ -162,8 +162,10 @@ module Rigor
       # `node_collectors:`. The main pass needs `path` because its per-node
       # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
       def build_node_collectors(path, scope_index, root = nil)
+        eval_ranges = receiver_eval_block_ranges(root)
+        main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges) }
         {
-          main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index, root) }),
+          main_pass: MainPassCollector.new(main_pass),
           void_value_use: VoidValueUseCollector.new(scope_index),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
@@ -240,8 +242,9 @@ module Rigor
       # produces them on the shared walk.
       def main_pass_oracle(path, root, scope_index)
         diagnostics = []
+        eval_ranges = receiver_eval_block_ranges(root)
         Source::NodeWalker.each(root) do |node|
-          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, root))
+          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges))
         end
         diagnostics
       end
@@ -261,10 +264,10 @@ module Rigor
         shadow_verify_node_collectors(path, root, scope_index, collectors)
       end
 
-      def call_node_diagnostics(path, node, scope_index, root = nil)
+      def call_node_diagnostics(path, node, scope_index, eval_ranges = nil)
         [
           undefined_method_diagnostic(path, node, scope_index),
-          unresolved_toplevel_diagnostic(path, node, scope_index, root),
+          unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
           wrong_arity_diagnostic(path, node, scope_index),
           argument_type_diagnostic(path, node, scope_index),
           nil_receiver_diagnostic(path, node, scope_index),
@@ -944,22 +947,22 @@ module Rigor
         # Authored severity is `:warning`; the severity profile
         # remaps it (`strict` → `:error`, `balanced` →
         # `:warning`, `lenient` → `:off` / suppressed).
-        def unresolved_toplevel_diagnostic(path, call_node, scope_index, root = nil)
+        def unresolved_toplevel_diagnostic(path, call_node, scope_index, eval_ranges = nil)
           return nil unless call_node.receiver.nil?
 
           scope = scope_index[call_node]
           return nil if scope.nil?
           return nil unless scope.toplevel?
-          # `Target.class_eval { def added = 1; def use_added = added }` files the defs on Target
-          # but leaves the eval body with a nil `self_type`, so `toplevel?` still holds. The sibling
-          # call is not a toplevel helper — declining here also covers the pre-existing class-body
-          # method called from an eval def. ADR-5: do not invent a warning on correct monkey-patches.
-          return nil if call_inside_receiver_eval_block?(root, call_node)
 
           name = call_node.name
           return nil if scope.top_level_def_for(name)
           return nil if source_declared_method?(scope, "Object", name, :instance)
           return nil if Rigor::Reflection.instance_method_definition("Object", name, scope: scope)
+          # `Target.class_eval { def added = 1; def use_added = added }` files the defs on Target
+          # but leaves the eval body with a nil `self_type`, so `toplevel?` still holds. An eval
+          # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
+          # undefined name inside the block. Ranges are computed once per file.
+          return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
         end
@@ -971,11 +974,13 @@ module Rigor
           class_eval module_eval class_exec module_exec instance_eval instance_exec
         ].freeze
         private_constant :RECEIVER_EVAL_CALL_NAMES
+        EMPTY_EVAL_RANGES = [].freeze
+        private_constant :EMPTY_EVAL_RANGES
 
-        def call_inside_receiver_eval_block?(root, call_node)
-          return false if root.nil?
+        def receiver_eval_block_ranges(root)
+          return EMPTY_EVAL_RANGES if root.nil?
 
-          loc = call_node.location
+          ranges = []
           Source::NodeWalker.each(root) do |node|
             next unless node.is_a?(Prism::CallNode)
             next unless RECEIVER_EVAL_CALL_NAMES.include?(node.name)
@@ -983,10 +988,19 @@ module Rigor
             block = node.block
             next unless block.is_a?(Prism::BlockNode)
 
-            bloc = block.location
-            return true if loc.start_offset >= bloc.start_offset && loc.end_offset <= bloc.end_offset
+            loc = block.location
+            ranges << [loc.start_offset, loc.end_offset]
           end
-          false
+          ranges
+        end
+
+        def call_inside_receiver_eval_ranges?(eval_ranges, call_node)
+          return false if eval_ranges.nil? || eval_ranges.empty?
+
+          loc = call_node.location
+          eval_ranges.any? do |start_offset, end_offset|
+            loc.start_offset >= start_offset && loc.end_offset <= end_offset
+          end
         end
 
         def build_unresolved_toplevel_diagnostic(path, call_node)

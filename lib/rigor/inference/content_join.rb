@@ -356,11 +356,23 @@ module Rigor
       # satisfies the annotation and still splices at runtime.
       def could_be_range?(member)
         return true if range_index?(member)
-        return true unless member.respond_to?(:accepts)
-        return true unless member.accepts(RANGE_INDEX_PROBE).no? &&
-                           RANGE_INDEX_PROBE.accepts(member).no?
 
-        !OBJECT_INDEX_PROBE.accepts(member).yes?
+        case member
+        when Type::Intersection
+          # An intersected value sits in EVERY member's value set, so it can be a Range only
+          # when every member allows one — `String & Comparable` cannot be (a String never
+          # is), `Object & Comparable` can (`MyRange < Range; include Comparable` satisfies
+          # both). Asked member-wise because the `Object` probe below answers yes when ANY
+          # intersected member accepts it.
+          member.members.all? { |part| could_be_range?(part) }
+        when Type::Maybe then could_be_range?(member.value_type)
+        else
+          return true unless member.respond_to?(:accepts)
+          return true unless member.accepts(RANGE_INDEX_PROBE).no? &&
+                             RANGE_INDEX_PROBE.accepts(member).no?
+
+          !OBJECT_INDEX_PROBE.accepts(member).yes?
+        end
       end
 
       # Element types a splice RHS adds to the receiver, read member-wise. Ruby splices an

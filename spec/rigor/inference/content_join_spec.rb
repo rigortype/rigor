@@ -292,6 +292,36 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result).to contain_exactly(array_arg, str_type)
     end
 
+    it "judges an intersection index member-wise, not by any one member's Object probe" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      comparable = Rigor::Type::Combinator.nominal_of("Comparable")
+
+      open = described_class.send(
+        :array_added_elements, :[]=,
+        [Rigor::Type::Combinator.intersection(
+          Rigor::Type::Combinator.nominal_of("Object"), comparable
+        ), array_arg]
+      )
+      expect(open).to contain_exactly(array_arg, str_type)
+
+      closed = described_class.send(
+        :array_added_elements, :[]=,
+        [Rigor::Type::Combinator.intersection(
+          Rigor::Type::Combinator.nominal_of("Integer"), comparable
+        ), array_arg]
+      )
+      expect(closed).to eq([array_arg])
+    end
+
+    it "unwraps a Maybe index to its value's store form" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(
+        :array_added_elements, :[]=,
+        [Rigor::Type::Combinator.maybe_of(int_type), array_arg]
+      )
+      expect(result).to eq([array_arg])
+    end
+
     # A splat inside the brackets is marked `nil` — it can vanish at runtime, so
     # `a[0, *xs] = v` is a scalar store when `xs` is empty — both readings must join.
     # An ordinary untyped argument is still a provable index: `a[i, n] = v` splices at

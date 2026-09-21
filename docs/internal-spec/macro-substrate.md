@@ -126,11 +126,17 @@ rules (consistent with the rest of the plugin-contract carriers):
   in every consumer walk — methods, singleton defs, visibilities,
   deferred ranges, includes, and extends alike — and a bare or
   `self` receiver under `class << <non-self>` names nothing.
-  `instance_eval`/`instance_exec` rebind `self` to the receiver
-  exactly like `class_eval` for the `self`-anchored facts these
-  tables read (`X.instance_eval { extend M }` extends `X`), while
-  `def` inside keeps the lexical definee — which is why the
-  def-owning walks never treat them as eval blocks — and a
+  `instance_eval`/`instance_exec` split further: they rebind `self`
+  to the receiver exactly like `class_eval` for the `self`-anchored
+  facts these tables read (`X.instance_eval { extend M }` extends
+  `X`, and `X.instance_eval { include M }` records the include edge
+  the receiver-as-module call really sends), but the default
+  definee inside is the receiver's SINGLETON — `X.instance_eval {
+  def m }` installs `X.m`, and a keyword `alias`/`undef` binds
+  singleton-side the same way — while `define_method`, `attr_*`,
+  `alias_method`, and visibility calls stay receiver-as-module on
+  the instance surface. The def-owning walks carry that as a
+  separate `defs_singleton` flag so only the keyword forms move; a
   `define_method` body or an unnamed `Class.new { … }`-family block
   walks ownerless. Meta-new
   blocks do the opposite: `K = Class.new { extend M }` extends `K`,

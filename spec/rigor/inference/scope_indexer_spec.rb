@@ -2335,6 +2335,96 @@ Unrelated
       expect(singleton_defs).not_to have_key("M")
     end
 
+    it "files `def` inside `instance_eval`/`instance_exec` on the receiver's singleton" do
+      # MRI: `X.instance_eval { def m }` defines X.m — the default definee is the receiver's
+      # singleton, unlike `class_eval` where defs land on the instance surface. Nested evals
+      # and `class << self` keep the same binding; nothing leaks to the lexical `M`.
+      source = <<~RUBY
+        class X; end
+        class Y; end
+        module M
+          X.instance_eval do
+            def m; end
+            def self.s; end
+            class << self
+              def deep; end
+            end
+          end
+          Y.instance_exec { def n; end }
+        end
+      RUBY
+      program = parse(source)
+      table = methods_for(source)
+      expect(table["X"]).to include(m: :singleton, s: :singleton, deep: :singleton)
+      expect(table["Y"]).to include(n: :singleton)
+      expect(table).not_to have_key("M")
+
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(program)
+      expect(singleton_defs.fetch("X")).to include(:m, :s, :deep)
+      expect(singleton_defs.fetch("Y")).to have_key(:n)
+      expect(singleton_defs).not_to have_key("M")
+    end
+
+    it "keeps receiver-as-module calls inside `instance_eval` on the instance surface" do
+      # `attr_reader`, `define_method` and `alias_method` send a message TO the receiver —
+      # they act on X's instance surface even though `def` moves to the singleton.
+      source = <<~RUBY
+        class X
+          def base; end
+        end
+        module M
+          X.instance_eval do
+            attr_reader :a
+            define_method(:dm) { }
+            alias_method :copy, :base
+            private :a
+          end
+        end
+      RUBY
+      expect(methods_for(source)["X"]).to include(a: :instance, dm: :instance, copy: :instance)
+      visibilities = described_class.build_discovered_method_visibilities(parse(source))
+      expect(visibilities.fetch("X")).to include(a: :private)
+    end
+
+    it "does not record a keyword `alias` inside `instance_eval` as an instance alias" do
+      # The `alias` keyword binds on the receiver's singleton like `def`; only
+      # `alias_method` — a call on the receiver-as-module — is an instance alias.
+      aliases = described_class.send(:collect_class_alias_map, parse(<<~RUBY), [], {})
+        class X; end
+        module M
+          X.instance_eval do
+            alias kw base
+            alias_method :mc, :base
+          end
+        end
+      RUBY
+      expect(aliases.fetch("X", {})).to include(mc: :base)
+      expect(aliases.fetch("X", {})).not_to have_key(:kw)
+    end
+
+    it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
+      # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
+      # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL
+      # class C — never to K or X.
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class X; end
+        class C
+          K = Class.new do
+            def a = (@@va = 1)
+          end
+          X.class_eval do
+            def b = (@@vb = 2)
+          end
+          X.instance_eval do
+            def c = (@@vc = 3)
+          end
+        end
+      RUBY
+      expect(cvars.fetch("C")).to include(:@@va, :@@vb, :@@vc)
+      expect(cvars).not_to have_key("K")
+      expect(cvars).not_to have_key("X")
+    end
+
     it "resolves a `self` / bare / `self::` eval receiver against the ENCLOSING eval's self" do
       # Inside `Y.class_eval` self IS Y — a nested `self.class_eval`, bare `class_eval`, or
       # `self::X.class_eval` re-opens Y (or Y::X), never the lexical `module M`.

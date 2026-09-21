@@ -38,17 +38,31 @@ Load and follow:
 
 ## Output
 
-Exactly one verdict:
+Exactly one verdict, plus final-approval artifacts when judging for Approve:
 
 ```text
 ReviewOutput:
   verdict:         "Approved" | "Needs fix"
   checklist:       [finding, ...]   # required when Needs fix
+  pr_body_draft:   |                # required when this is the final approval pass
+    ## Summary
+    …
+    ## Test plan
+    …
+  pr_comment_drafts:                # required on final approval pass (may be [])
+    - where: "PR conversation" | "file:path:line"
+      body:  "…"
 ```
 
 Prefer a concrete counterexample when behaviour is claimed.
 
+**Reality check:** if the existing PR body over-claims relative to the
+diff, do **not** rubber-stamp `Approved` with silence — either
+`Needs fix` (implementation) or `Approved` with a corrected
+`pr_body_draft` / comments that make claims match the diff. Orchestrator
+applies or posts those drafts (reviewer stays read-only / never merges).
+
 ## Finish phrases (exact)
 
-- `Approved`
+- `Approved` (must include `pr_body_draft` + `pr_comment_drafts` on final pass)
 - `Needs fix` (include actionable checklist)

@@ -45,6 +45,13 @@ Read-only unless a later fix step is entered. Never merge.
   step can act on)
 - Prefer a concrete counterexample over trusting green CI alone when
   behaviour is claimed
+- **On final approval review** (the pass that may produce `Approved`):
+  also emit (1) a **PR body revision draft** that matches the actual
+  diff (title/summary/test plan / Fixes vs Refs), and (2) **suggested
+  PR comments** for gaps the body cannot cover (behaviour caveats,
+  non-goals, follow-ups). Do not Approve if the current PR text claims
+  something the diff does not deliver — either `Needs fix` or rewrite
+  the body draft so claims match reality.
 
 ## Non-goals
 

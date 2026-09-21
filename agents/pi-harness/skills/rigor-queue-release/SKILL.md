@@ -119,6 +119,9 @@ After CI is green on a draft PR:
 3. **Complex design:** spawn `rigor-reviewer` (Fable:medium) — reserve for
    architecture / API / inference-shape; do not use on routine tidies.
 4. No pollable claude-bridge usage % — do not wait for one.
+5. On `Approved`, require `pr_body_draft` + `pr_comment_drafts` from the
+   final reviewer. Apply / post them (or hand to human) before treating the
+   PR as merge-ready — Approved without matching PR text is incomplete.
 
 Never merge from this queue skill; human or a later ship step owns merge.
 

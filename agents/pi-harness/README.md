@@ -144,7 +144,8 @@ subagent({
 - Do **not** auto-merge worktree patches into master without a human.
 - Lane model default is `opencode-go/deepseek-v4.1-flash` with `thinking: high`.
   Approved: default Grok:max; add Opus:high when complex; reserve Fable:medium
-  for complex design. No live Claude usage poll. Pin ids with `MODEL=` /
+  for complex design. Final Approve must include a PR body revision draft and
+  suggested PR comments so claims match the diff. No live Claude usage poll. Pin ids with `MODEL=` /
   launch `model:` / `subagents.agentOverrides` if needed.
 - **Survey:** a managed worktree of *rigor* does **not** satisfy exclusivity of
   `~/repo/ruby/rigor-survey/<project>` — still assign disjoint survey checkouts.

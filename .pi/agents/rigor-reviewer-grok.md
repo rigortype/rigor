@@ -45,6 +45,22 @@ End with exactly one verdict:
 Prefer counterexamples and evidence over trusting green CI alone when behaviour
 is claimed.
 
+
+## Final approval artifacts (required when ending with `Approved`)
+
+Also output:
+
+1. **PR body revision draft** — rewrite Summary / Test plan / issue links
+   (`Fixes` vs `Refs`) so every claim matches the actual diff. Call out
+   dropped scope explicitly.
+2. **Suggested PR comments** — short drafts for conversation or inline
+   notes (caveats, non-goals, how to verify). Use `[]` only if the revised
+   body already covers everything.
+
+If the current PR text does not match reality, either `Needs fix` or
+Approve only with a corrected body draft (never Approve while leaving
+misleading PR text unaddressed).
+
 ## Review shape
 
 ```
@@ -52,6 +68,8 @@ is claimed.
 - Correct: …
 - Finding: P0/P1/P2, location, evidence, smallest fix
 - Verdict: Approved | Needs fix
+- PR body draft: …
+- PR comment drafts: […]
 ```
 
 Cite paths and line numbers. Do not invent issues you cannot justify from the

@@ -123,7 +123,7 @@ v1 succeeds when this path works **once**:
    those contracts.
 3. Each lane **pushes its head SHA and stops** (no CI watcher).
 4. `orchestrator` (or external poll + resume) owns CI.
-5. An adversarial reviewer judges the result: **default Grok:max**; add **Opus:high** when implementation is judged complex; **reserve Fable:medium** for complex design. Any `Needs fix` → fix loop.
+5. An adversarial reviewer judges the result: **default Grok:max**; add **Opus:high** when implementation is judged complex; **reserve Fable:medium** for complex design. Final `Approved` must include a **PR body revision draft** and **suggested PR comments** aligned with the diff (claims must match reality). Any `Needs fix` → fix loop.
 
 Survey (B) and docs (C) wait until that path has landed once. Stubs in
 `agents/pi-harness/` are not the acceptance proof; the end-to-end run is.

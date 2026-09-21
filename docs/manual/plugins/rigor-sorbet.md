@@ -49,9 +49,24 @@ into Rigor's type model. It does **not** run Sorbet's checker,
 ship `sorbet-runtime`, or enforce Sorbet's runtime guarantees.
 When an RBS sig and a Sorbet sig disagree, RBS wins (the Sorbet
 sig may refine but not contradict it). Forms outside the
-translation table (`T.proc`, `T.self_type`, `T::Struct` /
-`T::Enum` subclasses, …) degrade to `Dynamic[top]`. Chapter 10
-documents the full vocabulary and these edges.
+translation table (`T.proc`, `T.self_type`, …) degrade to
+`Dynamic[top]`. Chapter 10 documents the full vocabulary and
+these edges.
+
+The plugin also types the annotation DSL's own expressions
+(`sig`, `params`, `returns`, `void`, `abstract`, `override`,
+`type_member`, `T::Array[...]`, `T::Helpers`/`T::Generic` macros,
+`T::Struct`/`T::Enum` class bodies — `sig` on a plain
+`T::Struct` subclass still needs the subclass's own `extend T::Sig`,
+matching the runtime) through a bundled
+`sorbet-runtime` RBS surface — so the sig DSL no longer reads as
+`Dynamic[top]` on a Sorbet codebase. What it does not model:
+`T::Struct` does not synthesise `prop`-declared readers (a
+`Doc#name` accessor still reads opaque), `include T::Props` does
+not confer the `ClassMethods` surface (only the `< T::Struct`
+subclass path does), and the deeper type-member machinery
+(`T.attached_class` variance, `type_member` bounds) is not
+propagated into call sites.
 
 ## Plugin internals
 

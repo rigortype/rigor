@@ -134,7 +134,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
 
   describe "#discover / #discover_from_bundles / #build_discovery" do
     # rubocop:disable-next RSpec/ExampleLength
-    it "builds every Discovery slot from the matching def_index key, without transposing any of the 19 slots" do
+    it "builds every Discovery slot from the matching def_index key, without transposing any of the 20 slots" do
       index = {
         classes: :classes_marker,
         def_index: {
@@ -157,7 +157,8 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
           methods: :methods_marker,
           parameter_envelopes: :parameter_envelopes_marker,
           data_member_layouts: :data_member_layouts_marker,
-          struct_member_layouts: :struct_member_layouts_marker
+          struct_member_layouts: :struct_member_layouts_marker,
+          deferred_ranges: :deferred_ranges_marker
         }
       }
       pre_passes = build_pre_passes
@@ -183,6 +184,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       expect(discovery.discovered_parameter_envelopes).to eq(:parameter_envelopes_marker)
       expect(discovery.data_member_layouts).to eq(:data_member_layouts_marker)
       expect(discovery.struct_member_layouts).to eq(:struct_member_layouts_marker)
+      expect(discovery.discovered_deferred_ranges).to eq(:deferred_ranges_marker)
     end
 
     it "#discover walks the real project once and returns a Discovery whose class table finds a cross-file class" do

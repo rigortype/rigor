@@ -327,6 +327,50 @@ diagnostic.
 slice 2); the substrate is shared with PHPStan-style
 Type-Specifying Extensions for any future plugin.
 
+## Annotation DSL surface (issue #1097)
+
+Beyond *reading* sigs for its own catalog, the plugin types the annotation
+DSL's expressions themselves via the bundled [`sig/sorbet.rbs`](sig/sorbet.rbs).
+sorbet-runtime ships RBI, not RBS, so without it every `sig`, `params`,
+`returns`, `T.nilable`, `T::Array[...]` call site read as `Dynamic[top]`.
+
+- `sig { ... }` resolves through `extend T::Sig` — the manifest's
+  `rbs_complete_extends:` allow-list (`T::Sig`, `T::Helpers`, `T::Generic`)
+  lets the dispatcher bridge an `extend M` edge onto `M`'s bundled RBS
+  instance surface. `sig` returns `nil`, matching `declare_sig`'s runtime
+  return.
+- The sig *block* binds `self` to `T::Private::Methods::DeclBuilder`
+  (`block_as_methods:`), matching the runtime's `DeclBuilder#instance_eval`,
+  so `params` / `returns` / `void` / `checked` / `abstract` / `override` /
+  `overridable` / `final` / `bind` / `on_failure` / `type_parameters` chain
+  through the declared builder surface. The builder is deliberately NOT an
+  open receiver — `sig { typo }` stays a `call.undefined-method` diagnostic.
+- `T::Sig::WithoutRuntime.sig { ... }` resolves as a module-singleton call
+  with the same block binding.
+- The `T::X[...]` constructors (`T::Array`, `T::Hash`, `T::Set`,
+  `T::Enumerable`, `T::Enumerator`, `T::Range`, `T::Class`) return their
+  `T::Types::TypedX` carriers; the type-expression functions (`T.nilable`,
+  `T.untyped`, `T.any`, `T.all`, `T.class_of`, `T.type_parameter`, …) return
+  `T::Types::Base` carriers.
+- `T::Struct` / `T::InexactStruct` / `T::ImmutableStruct` / `T::Enum` are
+  `rbs_complete_ancestors:` — `class Doc < T::Struct` resolves `prop`,
+  `const`, and `from_hash` through the superclass bridge (the bundled
+  signature declares the same `extend T::Props::*::ClassMethods` edges the
+  runtime installs via `mixes_in_class_methods`). `sig` inside a
+  `T::Struct` subclass still requires the subclass's own `extend T::Sig` —
+  the runtime does not install it — while `T::ImmutableStruct` and
+  `T::Enum` carry the edge themselves.
+- `extend T::Helpers` resolves `abstract!` / `interface!` / `final!` /
+  `sealed!` / `requires_ancestor` / `mixes_in_class_methods`; `extend
+  T::Generic` resolves `type_member` / `type_template` /
+  `has_attached_class!`.
+
+The value-side assertions (`T.let`, `T.cast`, `T.must`, `T.bind`,
+`T.assert_type!`, `T.reveal_type`, `T.absurd`, `T.unsafe`) stay owned by the
+plugin's recognisers — their static return is the *asserted* type, which RBS
+cannot express. A call the recogniser declines degrades through `T`'s
+`open_receivers:` entry to opaque rather than to a wrong reading.
+
 ## Type vocabulary (slices 1 + 3)
 
 | Sorbet form              | Rigor representation                     |
@@ -378,6 +422,8 @@ plugins/rigor-sorbet/
 │           ├── assertion_recognizer.rb ← T.let / T.cast / T.must / T.unsafe
 │           ├── absurd_recognizer.rb   ← T.absurd exhaustiveness composition
 │           └── sigil_detector.rb      ← `# typed: ignore` / false / true / strict / strong
+├── sig/
+│   └── sorbet.rbs                   ← bundled DSL surface (issue #1097)
 └── demo/
     ├── .rigor.yml
     ├── .gitignore
@@ -399,6 +445,11 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface                                    | Used for |
 | ------------------------------------------ | -------- |
 | `manifest(...)` + `config_schema`          | declares the optional `paths:` config knob |
+| `signature_paths:`                         | merges `sig/sorbet.rbs` into the RBS environment |
+| `rbs_complete_extends:`                    | bridges `extend T::Sig` / `T::Helpers` / `T::Generic` edges to the bundled instance surfaces |
+| `rbs_complete_ancestors:`                  | bridges `T::Struct` / `T::Enum` subclass calls to the bundled singleton surfaces |
+| `block_as_methods:`                        | binds `sig { ... }` block self to `T::Private::Methods::DeclBuilder` |
+| `open_receivers:`                          | keeps unmodelled `T.*` / `T::Private::*` calls opaque rather than `undefined-method` |
 | `Plugin::Base#io_boundary` (`read_file`)   | reads project source AND `sorbet/rbi/**/*.rbi` under the trusted scope |
 | `Plugin::Base#dynamic_return` / `#narrowing_facts` | contributes the parsed return type / `T.bind` narrowing facts at every call site |
 | `Plugin::Base#diagnostics_for_file`        | emits `plugin.sorbet.parse-error` for malformed sig blocks |

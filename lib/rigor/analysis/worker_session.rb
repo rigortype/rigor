@@ -220,23 +220,24 @@ module Rigor
           return parse_diagnostics(path, parse_result)
         end
 
-        Effects::Collector.record_root(parse_result.value)
+        root = parse_result.value
+        Effects::Collector.record_root(root)
         scope = @template_units.seed(
           seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path
         )
-        index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
+        index = Inference::ScopeIndexer.index(root, default_scope: scope)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
-        node_collectors = CheckRules.build_node_collectors(path, index)
-        node_results = node_rule_results_by_plugin(path, parse_result.value, scope, node_collectors, index)
+        node_collectors = CheckRules.build_node_collectors(path, index, root)
+        node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
         diagnostics = CheckRules.diagnose(
           path: path,
-          root: parse_result.value,
+          root: root,
           scope_index: index,
           comments: parse_result.comments,
           disabled_rules: @configuration.disabled_rules,
           node_collectors: node_collectors
         )
-        diagnostics += plugin_emitted_diagnostics(path, parse_result.value, scope, node_results)
+        diagnostics += plugin_emitted_diagnostics(path, root, scope, node_results)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]

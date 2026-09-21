@@ -2173,9 +2173,1439 @@ Unrelated
       expect(last_statement_type(source).describe).to eq(":own")
     end
 
+    it "gives the FIRST argument of one `extend A, B` call precedence (#1097)" do
+      # `extend A, B` makes A the nearer singleton ancestor — `extend_features` prepends each
+      # argument in turn, so the table must keep call order within a single statement.
+      source = <<~RUBY
+        module Farther
+          def label
+            :farther
+          end
+        end
+        module Nearer
+          def label
+            :nearer
+          end
+        end
+        module Registry
+          extend Nearer, Farther
+        end
+        Registry.label
+      RUBY
+      expect(last_statement_type(source).describe).to eq(":nearer")
+    end
+
+    it "gives a LATER `extend` statement precedence over an earlier one (#1097)" do
+      # `extend A; extend B` puts B nearer — each statement prepends its own argument list.
+      source = <<~RUBY
+        module Earlier
+          def label
+            :earlier
+          end
+        end
+        module Later
+          def label
+            :later
+          end
+        end
+        module Registry
+          extend Earlier
+          extend Later
+        end
+        Registry.label
+      RUBY
+      expect(last_statement_type(source).describe).to eq(":later")
+    end
+
+    it "folds `include` inside `class << self`'s eval block — the singleton's own body (#1097)" do
+      # `class_eval` with no receiver inside `class << self` runs the block as the SINGLETON
+      # class's body, so `include Tools` lands on C's singleton ancestry exactly like a literal
+      # `include` there — C.label resolves.
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "class C\n  class << self\n    class_eval { include Tools }\n  end\nend\n" \
+               "C.label\n"
+      expect(last_statement_type(source).describe).to eq('"tool"')
+    end
+
+    it "does not fold `extend` inside `class << self`'s eval block — it lands on the metaclass" do
+      # `extend` inside the singleton's eval body extends the singleton's OWN singleton (the
+      # metaclass squared) — `C.label` does not resolve, so no edge may be recorded.
+      source = "module Tools\n  def label\n    \"tool\"\n  end\nend\n" \
+               "class C\n  class << self\n    class_eval { extend Tools }\n  end\nend\n" \
+               "C.label\n"
+      expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    it "folds `module_function()` — empty parens are the bare toggle (#1097)" do
+      source = "module Util\n  module_function()\n  def message(text)\n    text\n  end\nend\n" \
+               "Util.message(:hi)\n"
+      expect(last_statement_type(source).describe).to eq(":hi")
+    end
+
     it "contributes nothing for an extend target with no discovered defs (control)" do
       source = "module Registry\n  extend SomeGemModule\nend\nRegistry.helper\n"
       expect(last_statement_type(source).describe(:short)).to eq("Dynamic[top]")
+    end
+  end
+
+  # #1097 — inside a `*_eval` / `*_exec` block, `Module.nesting` stays LEXICAL while `def`
+  # binds to the receiver: the discovery walks carry both contexts — declarations and
+  # constant writes file under the enclosing namespace, def-ish leaves under the receiver.
+  describe "eval-block dual context (#1097)" do
+    def methods_for(source)
+      described_class.build_methods_and_def_nodes(parse(source)).first
+    end
+
+    it "files a `class` declaration inside an eval block under the LEXICAL namespace" do
+      # `X.class_eval { class Inner }` inside `module M` opens `M::Inner` — `Module.nesting`
+      # does not change in an eval block — so `def h` inside belongs to `M::Inner`, not `X::Inner`.
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            class Inner
+              def h; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::Inner" => { h: :instance })
+      expect(table).not_to have_key("X::Inner")
+    end
+
+    it "files a meta-new constant write inside an eval block under the lexical namespace" do
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            K = Class.new do
+              def h; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::K" => { h: :instance })
+      expect(table).not_to have_key("X::K")
+    end
+
+    it "records `class << self` inside an eval block on the RECEIVER's singleton" do
+      # self inside `X.class_eval` is X, so `class << self` opens X's singleton — `def m` is X.m.
+      table = methods_for(<<~RUBY)
+        class X; end
+        module M
+          X.class_eval do
+            class << self
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("X" => { m: :singleton })
+      expect(table).not_to have_key("M")
+    end
+
+    it "gives a def inside an eval-nested declaration the LEXICAL owner in deferred ranges" do
+      ranges = described_class.build_deferred_ranges(parse(<<~RUBY))
+        class X; end
+        module M
+          X.class_eval do
+            class Inner
+              def h; end
+            end
+          end
+        end
+      RUBY
+      h_rows = ranges.select { |row| row[2] == :h }
+      expect(h_rows.map(&:last)).to eq(["M::Inner"])
+    end
+
+    it "attributes `def self.x` inside an eval block to the receiver in every table" do
+      source = <<~RUBY
+        class X; end
+        module M
+          X.class_eval do
+            def self.g; end
+          end
+        end
+      RUBY
+      program = parse(source)
+      expect(methods_for(source)).to include("X" => { g: :singleton })
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(program)
+      expect(singleton_defs.fetch("X")).to have_key(:g)
+      expect(singleton_defs).not_to have_key("M")
+    end
+
+    it "files `def` inside `instance_eval`/`instance_exec` on the receiver's singleton" do
+      # MRI: `X.instance_eval { def m }` defines X.m — the default definee is the receiver's
+      # singleton, unlike `class_eval` where defs land on the instance surface. Nested evals
+      # and `class << self` keep the same binding; nothing leaks to the lexical `M`.
+      source = <<~RUBY
+        class X; end
+        class Y; end
+        module M
+          X.instance_eval do
+            def m; end
+            def self.s; end
+            class << self
+              def deep; end
+            end
+          end
+          Y.instance_exec { def n; end }
+        end
+      RUBY
+      program = parse(source)
+      table = methods_for(source)
+      expect(table["X"]).to include(m: :singleton, s: :singleton, deep: :singleton)
+      expect(table["Y"]).to include(n: :singleton)
+      expect(table).not_to have_key("M")
+
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(program)
+      expect(singleton_defs.fetch("X")).to include(:m, :s, :deep)
+      expect(singleton_defs.fetch("Y")).to have_key(:n)
+      expect(singleton_defs).not_to have_key("M")
+    end
+
+    it "keeps receiver-as-module calls inside `instance_eval` on the instance surface" do
+      # `attr_reader`, `define_method` and `alias_method` send a message TO the receiver —
+      # they act on X's instance surface even though `def` moves to the singleton.
+      source = <<~RUBY
+        class X
+          def base; end
+        end
+        module M
+          X.instance_eval do
+            attr_reader :a
+            define_method(:dm) { }
+            alias_method :copy, :base
+            private :a
+          end
+        end
+      RUBY
+      expect(methods_for(source)["X"]).to include(a: :instance, dm: :instance, copy: :instance)
+      visibilities = described_class.build_discovered_method_visibilities(parse(source))
+      expect(visibilities.fetch("X")).to include(a: :private)
+    end
+
+    it "does not record a keyword `alias` inside `instance_eval` as an instance alias" do
+      # The `alias` keyword binds on the receiver's singleton like `def`; only
+      # `alias_method` — a call on the receiver-as-module — is an instance alias.
+      aliases = described_class.send(:collect_class_alias_map, parse(<<~RUBY), [], {})
+        class X; end
+        module M
+          X.instance_eval do
+            alias kw base
+            alias_method :mc, :base
+          end
+        end
+      RUBY
+      expect(aliases.fetch("X", {})).to include(mc: :base)
+      expect(aliases.fetch("X", {})).not_to have_key(:kw)
+    end
+
+    it "declines `def` inside `class <<` + `instance_eval` — the unnameable metaclass" do
+      # MRI: `class << S; instance_eval` re-evaluates the SAME singleton self, so a `def`
+      # binds on the singleton's own singleton — `#<Class:#<Class:S>>` — which nothing
+      # names, while `define_method` stays on the singleton's instance surface (`S.dm`).
+      table = methods_for(<<~RUBY)
+        class S
+          class << self
+            instance_eval { def meta; end }
+            instance_eval { define_method(:dm) {} }
+          end
+        end
+      RUBY
+      expect(table.fetch("S", {})).to include(dm: :singleton)
+      expect(table.fetch("S", {})).not_to have_key(:meta)
+      singleton_defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval { def meta; end }
+          end
+        end
+      RUBY
+      expect(singleton_defs.fetch("S", {})).not_to have_key(:meta)
+    end
+
+    it "keeps `include` but declines `extend` inside `class <<` + `instance_eval`" do
+      # `include` mixes into `#<Class:S>` — S's singleton-ancestor edge, like `class_eval`
+      # there. `extend` targets `#<Class:#<Class:S>>`, which nothing names.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module M2; end
+        module M3; end
+        class S
+          class << self
+            instance_eval { include M2 }
+            instance_eval { extend M3 }
+          end
+        end
+      RUBY
+      expect(extends["S"]).to eq(["M2"])
+      expect(extends).not_to have_key("M3")
+    end
+
+    it "does not file a `def` under an unnameable cref at `<toplevel>`" do
+      # `class << obj` opens a singleton nothing names; a `def` or a `class self::Q` inside
+      # belongs to `#<Class:obj>`-side objects — recording them under `<toplevel>` would let
+      # an implicit-self call resolve a method Ruby never installed there.
+      _methods, def_nodes = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class C2
+          class << obj
+            def s1; end
+            class self::Q
+              def m2; end
+            end
+          end
+        end
+      RUBY
+      expect(def_nodes.fetch("<toplevel>", {})).to be_empty
+      expect(def_nodes.fetch("C2", {})).to be_empty
+    end
+
+    it "declines a container-wrapped `def` inside `class <<` + `instance_eval`" do
+      # The `if` keeps the def off the eval body's statement list — it must not slip
+      # past the `:unnameable` gate through the generic singleton-defs descent.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval { if true; def meta; end; end }
+            instance_eval { begin; def meta2; end; end }
+          end
+        end
+      RUBY
+      expect(defs.fetch("S", {})).to be_empty
+    end
+
+    it "resolves `self::` receivers against a named eval receiver below `class <<`" do
+      # `X.class_eval` rebinds `self` to X even under a singleton cref — a `self::`
+      # receiver or header anchors on X, not on the singleton that names nothing.
+      table = methods_for(<<~RUBY)
+        class X
+          class Y; end
+        end
+        class S
+          class << self
+            X.class_eval do
+              self::Y.class_eval do
+                class self::D < Object
+                  def m; end
+                end
+              end
+            end
+          end
+        end
+      RUBY
+      expect(table).to have_key("X::Y::D")
+    end
+
+    it "threads `self::`-anchored nestings through an eval below `class <<`" do
+      nestings = described_class.build_def_nestings(parse(<<~RUBY))
+        class X
+          class Y; end
+        end
+        class S
+          class << self
+            X.class_eval do
+              self::Y.class_eval do
+                class self::D
+                  def m; Inner; end
+                end
+              end
+            end
+          end
+        end
+      RUBY
+      expect(nestings.values).to include(["X::Y::D", "S"])
+    end
+
+    it "does not file a named visibility call inside `class <<` as instance-side" do
+      # `private :x` inside `class <<` (or a receiver-eval body on a singleton self)
+      # marks the SINGLETON method — the instance-visibility table cannot express it.
+      visibilities = described_class.build_discovered_method_visibilities(parse(<<~RUBY))
+        class S
+          def x; end
+          class << self
+            def x; end
+            private :x
+            instance_eval { private :x }
+          end
+        end
+      RUBY
+      expect(visibilities["S"]).to eq({ x: :public })
+    end
+
+    it "files `module_function` rows ownerless inside `class <<` + `instance_eval`" do
+      ranges = described_class.build_deferred_ranges(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval do
+              module_function :meta
+              module_function def mf; end
+            end
+          end
+        end
+      RUBY
+      expect(ranges.map(&:last).uniq).to eq([nil])
+    end
+
+    it "does not copy a `module_function`-named def onto `S` inside `class <<` + `instance_eval`" do
+      # `module_function :meta` retro-marks the sibling `def meta` — that def binds on the
+      # metaclass, so the singleton-defs table must not file it under `S`.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval do
+              def meta; end
+              module_function :meta
+            end
+          end
+        end
+      RUBY
+      expect(defs.fetch("S", {})).to be_empty
+    end
+
+    it "records a `self::`-anchored Data/Struct layout through an eval below `class <<`" do
+      data = described_class.build_data_member_layouts(parse(<<~RUBY))
+        class X; end
+        class S
+          class << self
+            X.class_eval do
+              class self::D < Data.define(:a)
+              end
+            end
+          end
+        end
+      RUBY
+      expect(data["X::D"]).to eq([:a])
+    end
+
+    it "resolves an eval receiver through the file's own nesting declarations" do
+      # MRI: `X` inside `class S` names `S::X` whenever the scope declares it —
+      # `Module.nesting` order, innermost first — so the eval body's facts file
+      # under `S::X`, not the same-named top-level class.
+      methods, = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          class X; end
+          class T
+            X.class_eval { def m; end }
+          end
+          X.class_eval { def n; end }
+        end
+      RUBY
+      expect(methods.fetch("S::X")).to include(m: :instance, n: :instance)
+      expect(methods.fetch("X", {})).to be_empty
+    end
+
+    it "keeps an unshadowed or rooted eval receiver as written" do
+      # `S::X` is undeclared here: `X` falls through to the top-level name, and
+      # `::X` names the top level outright — no lexical walk reaches `S::X`.
+      methods, = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          X.class_eval { def m; end }
+          ::X.class_eval { def r; end }
+        end
+      RUBY
+      expect(methods.fetch("X")).to include(m: :instance, r: :instance)
+      expect(methods).not_to have_key("S::X")
+    end
+
+    it "resolves a `class <<` operand through the file's nesting declarations" do
+      # `class << X` inside `class S` opens the singleton of `S::X` when that
+      # constant exists — the operand follows the same lexical lookup an
+      # eval-family receiver does.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          class X; end
+          class << X
+            def sm; end
+          end
+        end
+      RUBY
+      expect(defs.fetch("S::X", {})).to have_key(:sm)
+      expect(defs.fetch("X", {})).to be_empty
+    end
+
+    it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
+      # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
+      # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL
+      # class C — never to K or X.
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class X; end
+        class C
+          K = Class.new do
+            def a = (@@va = 1)
+          end
+          X.class_eval do
+            def b = (@@vb = 2)
+          end
+          X.instance_eval do
+            def c = (@@vc = 3)
+          end
+        end
+      RUBY
+      expect(cvars.fetch("C")).to include(:@@va, :@@vb, :@@vc)
+      expect(cvars).not_to have_key("K")
+      expect(cvars).not_to have_key("X")
+    end
+
+    it "resolves a `self` / bare / `self::` eval receiver against the ENCLOSING eval's self" do
+      # Inside `Y.class_eval` self IS Y — a nested `self.class_eval`, bare `class_eval`, or
+      # `self::X.class_eval` re-opens Y (or Y::X), never the lexical `module M`.
+      table = methods_for(<<~RUBY)
+        class Y; end
+        module M
+          Y.class_eval do
+            self.class_eval { def h1; end }
+            class_eval { def h2; end }
+            self::X.class_eval { def h3; end }
+            self::F::G.class_eval { def h4; end }
+          end
+        end
+      RUBY
+      expect(table).to include(
+        "Y" => { h1: :instance, h2: :instance },
+        "Y::X" => { h3: :instance },
+        "Y::F::G" => { h4: :instance }
+      )
+      expect(table).not_to have_key("M")
+      expect(table).not_to have_key("M::X")
+    end
+
+    it "resolves a constant eval receiver through the write site's LEXICAL nesting, not the eval self" do
+      # `Y` inside `M::Y.class_eval` at top level is the TOP-LEVEL `Y` — constant
+      # lookup in an eval body stays lexical, and a class is never a member of its own
+      # constant table.
+      table = methods_for(<<~RUBY)
+        module M
+          class Y; end
+        end
+        class Y; end
+        M::Y.class_eval do
+          Y.class_eval { def m; end }
+        end
+      RUBY
+      expect(table).to include("Y" => { m: :instance })
+      expect(table.fetch("M::Y", {})).not_to have_key(:m)
+    end
+
+    it "resolves a constant eval receiver through nesting inside a foreign eval body" do
+      # `Y` written in `M::Y`'s body resolves via `Module.nesting` to `M::Y`, even
+      # though the enclosing eval's self is `Z`.
+      table = methods_for(<<~RUBY)
+        class Z; end
+        module M
+          class Y
+            Z.class_eval do
+              Y.class_eval { def m; end }
+            end
+          end
+        end
+      RUBY
+      expect(table).to include("M::Y" => { m: :instance })
+      expect(table).not_to have_key("Y")
+    end
+
+    it "opens a `class <<` operand through the lexical nesting inside an eval body" do
+      # `class << Y` inside `M::Y.class_eval` at top level opens the TOP-LEVEL `Y`'s
+      # singleton — the same lexical resolution an eval receiver gets.
+      table = methods_for(<<~RUBY)
+        module M
+          class Y; end
+        end
+        class Y; end
+        M::Y.class_eval do
+          class << Y
+            def s; end
+          end
+        end
+      RUBY
+      expect(table).to include("Y" => { s: :singleton })
+      expect(table.fetch("M::Y", {})).not_to have_key(:s)
+    end
+
+    it "declines a `self::` eval receiver inside a `class <<` body" do
+      # Inside `class << self` self is the singleton — `self::X` raises NameError at
+      # runtime unless the constant lives on that singleton — so the receiver declines
+      # rather than filing the block under a class it never opened.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            class << self
+              self::X.class_eval { include T }
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Y::X")
+      expect(table).not_to have_key("M::X")
+    end
+
+    it "keys a `self::` receiver under `Object` as the bare top-level name" do
+      table = methods_for(<<~RUBY)
+        Object.class_eval do
+          self::X.class_eval { def m; end }
+        end
+      RUBY
+      expect(table).to include("X" => { m: :instance })
+      expect(table).not_to have_key("Object::X")
+    end
+
+    it "declines `self::` and bare constant writes inside a `class <<` body" do
+      # Both forms write the singleton's own constant table — `#<Class:Y>::X` — a name
+      # nothing else can produce, so neither files under `Y` nor retracts `X`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class Y
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      expect(writes).to be_empty
+    end
+
+    it "declines `self::` constant writes inside `class <<` in the typed table" do
+      program = parse(<<~RUBY)
+        class Y
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.in_source_constants).not_to have_key("Y::X")
+      expect(scope.in_source_constants).not_to have_key("Y::W")
+    end
+
+    it "files defs inside `class << <non-constant>` under no class rather than the enclosing one" do
+      # `class << obj` opens `obj`'s singleton — `def h` binds `obj.h`, never `Y#h`.
+      table = methods_for(<<~RUBY)
+        class Y
+          class << obj
+            def h; end
+          end
+        end
+      RUBY
+      expect(table.fetch("Y", {})).not_to have_key(:h)
+    end
+
+    it "declines a `self::` eval receiver inside `class << <non-constant>`" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class Y
+          class << obj
+            self::X.class_eval { include T }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Y::X")
+    end
+
+    it "declines bare writes inside eval/meta blocks under `class <<` — cref never rebinds" do
+      # `Module.nesting` stays lexical through every block: the write lands on
+      # `#<Class:C>::X`, a name nothing else can produce, in each form.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class Foo; end
+        class C
+          class << self
+            Foo.class_eval { X = 1 }
+            obj.instance_eval { Y = 1 }
+            K = Class.new { Z = 1 }
+          end
+        end
+      RUBY
+      expect(writes.keys).to be_empty
+    end
+
+    it "declines `self::` writes inside a meta-new block under `class <<`" do
+      # `K` itself is unnameable, so the block's anonymous class is too — `self::Y`
+      # there cannot be spelled `C::K::Y`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            K = Class.new { self::Y = 1 }
+          end
+        end
+      RUBY
+      expect(writes.keys).to be_empty
+    end
+
+    it "files defs inside an eval-nested `self::` receiver under `class <<` nowhere" do
+      # `self::X` reads the singleton's constant table — NameError unless `X` lives
+      # there — never `C`, so `def h` must not land on `C`.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            self::X.class_eval { def h; end }
+          end
+        end
+      RUBY
+      expect(table.fetch("C", {})).not_to have_key(:h)
+    end
+
+    it "files a `class` declaration inside `class <<` nowhere — the pushed cref is the singleton's" do
+      # `class D` under `class <<` reopens `#<Class:C>::D`; `class ::T` re-anchors
+      # at the top level and stays nameable.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            class D
+              def m; end
+            end
+            class ::T
+              def n; end
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::D")
+      expect(table.fetch("T", {})).to have_key(:n)
+    end
+
+    it "files a `class` declaration inside `class << Foo` nowhere — the pushed cref is Foo's singleton's" do
+      table = methods_for(<<~RUBY)
+        class Foo; end
+        class C
+          class << Foo
+            class D
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("Foo::D")
+      expect(table).not_to have_key("C::D")
+    end
+
+    it "files a `class` declaration inside an eval block under `class <<` nowhere" do
+      # `Foo.class_eval { class D }` — nesting stays `[#<Class:C>, C]` — opens
+      # `#<Class:C>::D`, not `Foo::D` or `C::D`.
+      table = methods_for(<<~RUBY)
+        class Foo; end
+        class C
+          class << self
+            Foo.class_eval { class D; def m; end }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::D")
+      expect(table).not_to have_key("Foo::D")
+    end
+
+    it "declines `self::` and bare constant writes inside `class <<` in the typed table" do
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            self::X = 1
+            W = 2
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.in_source_constants).not_to have_key("C::X")
+      expect(scope.in_source_constants).not_to have_key("C::W")
+    end
+
+    it "attributes `extend` inside a nested `self.class_eval` block to the enclosing receiver" do
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            self.class_eval { extend T }
+          end
+        end
+      RUBY
+      expect(table).to include("Y" => ["T"])
+      expect(table).not_to have_key("M")
+    end
+
+    it "attributes `include` inside a `self::`-receiver eval block to the resolved owner" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        module M
+          Y.class_eval do
+            self::X.class_eval { include T }
+          end
+        end
+      RUBY
+      expect(table).to include("Y::X" => ["T"])
+      expect(table).not_to have_key("M")
+    end
+
+    it "declines a `self::` eval receiver nested in a bare eval under `class <<`" do
+      # The bare `class_eval` keeps the singleton's body — `self::X` inside still
+      # raises NameError at runtime — so the inner receiver declines rather than
+      # re-anchoring to `C`.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            class_eval { self::X.class_eval { extend T } }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C::X")
+      expect(table).not_to have_key("X")
+    end
+
+    it "declines a `self::` eval receiver inside a `class` declaration under `class <<`" do
+      # `class D` opens `#<Class:C>::D` — `self` inside is that unnameable class, so
+      # `self::X` there cannot be spelled `C::D::X`.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            class D
+              self::X.class_eval { include T }
+            end
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("X")
+      expect(table).not_to have_key("C::D::X")
+      expect(table).not_to have_key("D::X")
+    end
+
+    it "declines a `self::` eval receiver inside an opaque eval body" do
+      # `obj.instance_eval`'s self is the receiver object — `self::X` resolves on its
+      # singleton, a table nothing names — never `C::X`.
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          obj.instance_eval { self::X.class_eval { include T } }
+        end
+      RUBY
+      expect(table).not_to have_key("C::X")
+      expect(table).not_to have_key("X")
+    end
+
+    it "declines a bare eval receiver under `class << <non-self>`" do
+      # `class << Foo`'s `class_eval` runs the block on `#<Class:Foo>` — `extend` lands
+      # on its own singleton, a surface nothing names — never `C`'s.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class Foo; end
+        class C
+          class << Foo
+            class_eval { extend T }
+            class_eval { module_function }
+          end
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+      expect(table).not_to have_key("Foo")
+    end
+
+    it "attributes `extend` inside a meta-new block to the block's class" do
+      # `K = Class.new { extend M }` extends `K` — the enclosing class's singleton is
+      # untouched.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          K = Class.new { extend T }
+        end
+      RUBY
+      expect(table).to include("C::K" => ["T"])
+      expect(table).not_to have_key("C")
+    end
+
+    it "attributes `include` inside a meta-new block to the block's class" do
+      table = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          K = Class.new { include T }
+        end
+      RUBY
+      expect(table).to include("C::K" => ["T"])
+      expect(table).not_to have_key("C")
+    end
+
+    it "declines meta-new mixin calls under `class <<`" do
+      # `K` lands on the singleton's constant table — unnameable — so the block's
+      # class owns nothing the tables can key.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            K = Class.new { extend T }
+          end
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class C
+          class << self
+            K = Class.new { include T }
+          end
+        end
+      RUBY
+      expect(extends).not_to have_key("C::K")
+      expect(extends).not_to have_key("C")
+      expect(includes).not_to have_key("C::K")
+      expect(includes).not_to have_key("C")
+    end
+
+    it "files `class D` under `class <<` nowhere in the superclass and def-nesting tables" do
+      # `#<Class:C>::D`'s ancestry and the defs' `Module.nesting` would publish a `C::D`
+      # rung MRI never creates.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class D < Base
+              def m; end
+            end
+          end
+        end
+      RUBY
+      supers, header_nestings = described_class.build_superclass_tables(program)
+      expect(supers).not_to have_key("C::D")
+      expect(header_nestings).not_to have_key("C::D")
+      nestings = described_class.build_def_nestings(program)
+      def_node = program.statements.body.first.body.body.first.body.body.first.body.body.first
+      expect(nestings[def_node]).to eq(["C"])
+    end
+
+    it "files meta-new member layouts under `class <<` nowhere" do
+      data = described_class.build_data_member_layouts(parse(<<~RUBY))
+        class C
+          class << self
+            K = Data.define(:x)
+            class D < Data.define(:y); end
+          end
+        end
+      RUBY
+      struct = described_class.build_struct_member_layouts(parse(<<~RUBY))
+        class C
+          class << self
+            K = Struct.new(:x)
+            class D < Struct.new(:y); end
+          end
+        end
+      RUBY
+      expect(data).not_to have_key("C::K")
+      expect(data).not_to have_key("C::D")
+      expect(struct).not_to have_key("C::K")
+      expect(struct).not_to have_key("C::D")
+    end
+
+    it "files `class D` method defs under `class <<` nowhere in the class-def table" do
+      defs = described_class.collect_class_method_defs(parse(<<~RUBY))
+        class C
+          class << self
+            class D
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(defs).not_to have_key("C::D")
+    end
+
+    it "names the owner of a `self::X.class_eval` block from the enclosing namespace" do
+      # `self::X` inside `module M` resolves to `M::X` — the eval block's defs land there.
+      table = methods_for(<<~RUBY)
+        module M
+          self::X.class_eval do
+            def h; end
+          end
+        end
+      RUBY
+      expect(table).to include("M::X" => { h: :instance })
+      expect(table).not_to have_key("M")
+    end
+
+    it "attributes a bare `private` toggle inside an eval block to the receiver's table" do
+      table = described_class.build_discovered_method_visibilities(parse(<<~RUBY))
+        class X; end
+        module M
+          X.class_eval do
+            private
+            def f; end
+          end
+        end
+      RUBY
+      expect(table).to include("X" => { f: :private })
+      expect(table).not_to have_key("M")
+    end
+
+    it "declines `class D` under `class <<` in the per-file declaration tables" do
+      # `class D` opens `#<Class:C>::D` — a real class nothing can name — so neither the
+      # identity table nor `discovered_classes` may publish `C::D` (a `known_namespace?`
+      # hit there would cross-contaminate every `D`-family resolution in the project).
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class D
+            end
+            class ::T
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.discovered_classes).not_to have_key("C::D")
+      expect(scope.discovered_classes).to have_key("T")
+      d_class = program.statements.body.first.body.body.first.body.body.first
+      expect(idx[program].declared_types).not_to have_key(d_class.constant_path)
+    end
+
+    it "declines `class D` under `class <<` in the cross-file discovery tables" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "class C\n  class << self\n    class D; end\n    class ::T; end\n  end\nend\n")
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).not_to have_key("C::D")
+        expect(discovered).to have_key("T")
+
+        combined = described_class.discovered_project_index_incremental([a], seed_bundles: {})
+        expect(combined.fetch(:def_index)[:class_sources]).not_to have_key("C::D")
+      end
+    end
+
+    it "declines `K = Class.new` under `class <<` in the discovery tables" do
+      # The write lands on the singleton's constant table — `#<Class:C>::K` names nothing.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            K = Class.new { def m; end }
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program.statements.body.first].discovered_classes).not_to have_key("C::K")
+    end
+
+    it "keeps the `class <<` expression in the enclosing cref" do
+      # `class << (class D; self; end)` — the expression declares `C::D` in the
+      # enclosing namespace before the singleton body opens.
+      table = methods_for(<<~RUBY)
+        class C
+          class << (class D
+                      def m; end
+                      self
+                    end)
+          end
+        end
+      RUBY
+      expect(table).to include("C::D" => { m: :instance })
+    end
+
+    it "files `def` inside `class << self` nested in `class <<` nowhere" do
+      # `self` inside `class << self` IS the singleton — `class << self` there opens
+      # `#<Class:#<Class:C>>`, a surface nothing names — not `C.m`.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            class << self
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table.fetch("C", {})).not_to have_key(:m)
+    end
+
+    it "declines `extend` inside `instance_eval` on an unnameable receiver" do
+      # `obj.instance_eval { extend T }` extends obj's singleton — never `C`'s.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          obj.instance_eval { extend T }
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+    end
+
+    it "attributes mixin calls inside `instance_eval` on a named receiver" do
+      # `X.instance_eval { extend T }` extends `X` — the receiver resolution is the
+      # eval walk's; only `def` rebinding differs.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          X.instance_eval { extend T }
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          X.instance_eval { include T }
+        end
+      RUBY
+      expect(extends).to include("X" => ["T"])
+      expect(extends).not_to have_key("C")
+      expect(includes).to include("X" => ["T"])
+      expect(includes).not_to have_key("C")
+    end
+
+    it "declines `extend` inside a `define_method` body and an unnamed `Class.new` block" do
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          define_method(:m) { extend T }
+          x = Class.new { extend T }
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+    end
+
+    it "walks a meta-new call's arguments in the enclosing context" do
+      # `Class.new(X.class_eval { extend T })` — the eval inside the ARGUMENT still
+      # extends X; only the block is the new class's body.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          K = Class.new(X.class_eval { extend T }) { def m; end }
+        end
+      RUBY
+      expect(table).to include("X" => ["T"])
+    end
+
+    it "keys a path write inside `class D` under `class <<` as written, never `C::D`-qualified" do
+      # `Foo::BAR` inside `#<Class:C>::D` resolves `Foo` through `[C, Object]` — the census
+      # keys the write AS WRITTEN; what it must never fabricate is a `C::D::Foo::BAR` rung.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            class D
+              Foo::BAR = 1
+            end
+          end
+        end
+      RUBY
+      expect(writes.keys).to include("Foo::BAR")
+      expect(writes.keys).not_to include("C::D::Foo::BAR")
+    end
+
+    it "keeps a ROOTED meta-new class's whole body nameable under `class <<`" do
+      # `::K` lands at the top level — the block is `K`'s ordinary class body: member,
+      # mixin, visibility, `def`, and `self::V` facts all file under `K`.
+      source = <<~RUBY
+        module I; end
+        module E; end
+        class C
+          class << self
+            ::K = Struct.new(:x) do
+              include I
+              extend E
+              private
+              def m = x
+              self::V = 1
+            end.freeze
+          end
+        end
+      RUBY
+      methods, def_nodes = described_class.build_methods_and_def_nodes(parse(source))
+      expect(methods.fetch("K", {})).to include(m: :instance, x: :instance)
+      expect(def_nodes.fetch("K", {})).to have_key(:m)
+      expect(described_class.build_discovered_includes(parse(source))).to include("K" => ["I"])
+      expect(described_class.build_discovered_extends(parse(source))).to include("K" => ["E"])
+      visibility = described_class.build_discovered_method_visibilities(parse(source))
+      expect(visibility.fetch("K", {})).to include(m: :private)
+      struct = described_class.build_struct_member_layouts(parse(source))
+      expect(struct.fetch("K", {}).fetch(:members, [])).to include(:x)
+    end
+
+    it "keys `self::V` inside a rooted meta-new block under the class it names" do
+      # `self` inside `::K = Struct.new do … end` is `K` — `self::V` writes `K::V`.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            ::K = Struct.new(:x) do
+              self::V = 1
+            end.freeze
+          end
+        end
+      RUBY
+      expect(writes.keys).to include("K::V")
+    end
+
+    it "discovers `::K = Class.new` under `class <<` in both discovery tables" do
+      # `resolve_meta_factory_call` only unwraps to a Data/Struct factory — a bare
+      # `Class.new` is recognised by `meta_new_constant_rvalue?` directly, and a
+      # `::`-rooted write stays nameable below the singleton.
+      source = "class C\n  class << self\n    ::K = Class.new { def m = 1 }\n  end\nend\n"
+      idx = described_class.index(parse(source), default_scope: default_scope)
+      expect(idx[parse(source).statements.body.first].discovered_classes).to have_key("K")
+
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, source)
+        expect(described_class.discovered_classes_for_paths([a])).to have_key("K")
+      end
+    end
+
+    it "keeps explicit-base meta-new writes nameable under `class <<`" do
+      # `C::K2` and `Foo::F` resolve their base lexically — the write lands on the
+      # spelled path, not the singleton's table.
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, <<~RUBY)
+          class Foo; end
+          class C
+            class << self
+              ::K = Class.new
+              C::K2 = Class.new
+              Foo::F = Class.new
+              K3 = Class.new
+            end
+          end
+        RUBY
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).to have_key("K")
+        expect(discovered).to have_key("C::C::K2") # compact-header approximation, same as outside
+        expect(discovered).to have_key("C::Foo::F")
+        expect(discovered).not_to have_key("C::K3")
+      end
+    end
+
+    it "keeps explicit-base class headers nameable under `class <<`" do
+      # `class C::CD` resolves `C` lexically — nameable under the same compact-header
+      # approximation the non-singleton walk uses; `class self::D` lands on the
+      # singleton and stays unnameable.
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, <<~RUBY)
+          class C
+            class << self
+              class C::CD; end
+              class self::SD; end
+              class Bare; end
+            end
+          end
+        RUBY
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).to have_key("C::C::CD")
+        expect(discovered).not_to have_key("C::SD")
+        expect(discovered).not_to have_key("C::Bare")
+      end
+    end
+
+    it "declines `self::`-anchored meta-new writes under `class <<`" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "class C\n  class << self\n    self::K = Class.new\n  end\nend\n")
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).not_to have_key("C::K")
+        expect(discovered).not_to have_key("K")
+      end
+    end
+
+    it "records aliases inside a rooted declaration under `class <<`" do
+      # `class ::K` re-anchors — `alias copied original` inside belongs to `K`.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class ::K
+              def original = :ok
+              alias copied original
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      def_node = idx[program].user_def_for("K", :copied)
+      expect(def_node).to be_a(Prism::DefNode)
+      expect(def_node.name).to eq(:original)
+    end
+
+    it "does not record singleton-body aliases under the enclosing class" do
+      # `alias` directly under `class <<` binds on `#<Class:C>` — the map files nothing.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            def original = :ok
+            alias copied original
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+    end
+
+    it "keeps meta-new block declarations under the enclosing cref — self rebinds, nesting does not" do
+      # `Module.nesting` inside `Class.new { }` stays lexical: `class Inner` below
+      # `class <<` lands on `#<Class:C>` (unnameable), `class C::CD` re-anchors at
+      # the compact-header name, and `def`/`include` attribute to the class the
+      # write names. `class self::SX` resolves `self` to the class the write
+      # names — `K::SX` — even below an unnameable cref, because a `self::` header
+      # anchors on the rebound self, not the lexical prefix.
+      program = parse(<<~RUBY)
+        module I; end
+        class C
+          class << self
+            ::K = Class.new do
+              include I
+              def m; end
+              class Inner; def n; end; end
+              class C::CD; def p; end; end
+              class self::SX; def q; end; end
+            end
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods.keys).to contain_exactly("K", "C::C::CD", "K::SX")
+      expect(methods["K"].keys).to eq([:m])
+      expect(methods["K::SX"].keys).to eq([:q])
+
+      includes = described_class.build_discovered_includes(program)
+      expect(includes).to eq("K" => ["I"])
+
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body[1]
+      expect(idx[klass].discovered_classes).to have_key("K")
+      expect(idx[klass].discovered_classes).not_to have_key("K::Inner")
+      expect(idx[klass].discovered_classes).not_to have_key("C::Inner")
+    end
+
+    it "records meta-new block defs and aliases under the class the write names" do
+      # `def`/`alias` inside `::K = Class.new` below `class <<` bind on K — self is
+      # the named class even though the cref stays the singleton's.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            ::K = Class.new do
+              def original = :ok
+              alias copied original
+              def m; @x = 1; end
+            end
+          end
+        end
+      RUBY
+      defs = described_class.collect_class_method_defs(program)
+      expect(defs.keys).to eq(["K"])
+
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("K", :copied)).not_to be_nil
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+    end
+
+    it "keeps an unnameable meta-new block's defs ownerless under `class <<`" do
+      # `K = Class.new` names nothing below the singleton — `def m` belongs to the
+      # anonymous class and files nowhere.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            K = Class.new { def m = 1 }
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods).to be_empty
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+    end
+
+    it "anchors self:: declarations and writes inside a meta-new block on the rebound self" do
+      # `self` inside `K = Class.new { }` is K itself, so `class self::SX` and
+      # `self::W = Class.new` name `C::K::SX` and `C::K::W` — the lexical prefix
+      # would fabricate `C::SX`/`C::W`, and declining loses real classes.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            class self::SX; def q; end; end
+            self::W = Class.new { def w; end }
+            def m; end
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods["C::K::SX"]&.keys).to eq([:q])
+      expect(methods["C::K::W"]&.keys).to eq([:w])
+      expect(methods).not_to have_key("C::SX")
+      expect(methods).not_to have_key("C::W")
+
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body.first
+      expect(idx[klass].discovered_classes).to have_key("C::K::SX")
+      expect(idx[klass].discovered_classes).to have_key("C::K::W")
+    end
+
+    it "attributes `class <<` inside a meta-new block to the written class's singleton" do
+      # `class << self` inside `K = Class.new` opens `#<Class:K>` — its defs are
+      # K's singleton methods, not instance defs of K or C.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            class << self
+              def s = 1
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].singleton_def_for("C::K", :s)).to be_a(Prism::DefNode)
+      expect(idx[program].user_def_for("C::K", :s)).to be_nil
+      expect(idx[program].user_def_for("C", :s)).to be_nil
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+    end
+
+    it "keeps anonymous factory blocks inside a meta-new body off the enclosing class" do
+      # A bare `Class.new { }` inside `K = Class.new` is a second unnameable
+      # class — its defs bind nowhere nameable, not on C and not on K.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            Class.new { def anon = 1 }
+            Class.new do
+              def original = :ok
+              alias copied original
+            end
+          end
+        end
+      RUBY
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("C", :anon)).to be_nil
+      expect(idx[program].user_def_for("C::K", :anon)).to be_nil
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+      expect(idx[program].user_def_for("C::K", :copied)).to be_nil
+    end
+
+    it "records or-write and path-write meta-new mixin owners" do
+      # `K ||= Class.new` and `Holder::K = Class.new` name their class when the
+      # rvalue runs, so `include` inside mixes into that class — defs land there
+      # too, so the mixin tables must not split the attribution.
+      program = parse(<<~RUBY)
+        module I; end
+        module J; end
+        class C
+          K ||= Class.new { include I; def k = 1 }
+          Holder::M = Class.new { include J; def m = 2 }
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(program)
+      expect(includes).to eq("C::K" => ["I"], "C::Holder::M" => ["J"])
+
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods["C::K"]&.keys).to eq([:k])
+      expect(methods["C::Holder::M"]&.keys).to eq([:m])
+    end
+
+    it "declines a dynamic-base path write's meta-new block rather than guessing" do
+      # `var::K = Class.new` writes whatever `var` holds — no source spelling
+      # reaches the class — so its defs and the write itself file nowhere rather
+      # than fabricating `C::K`.
+      program = parse(<<~RUBY)
+        class C
+          var = something
+          var::K = Class.new { def leak = 1 }
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods).to be_empty
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body.first
+      expect(idx[klass].discovered_classes).not_to have_key("C::K")
     end
   end
 

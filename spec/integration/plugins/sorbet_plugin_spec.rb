@@ -553,6 +553,738 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # Issue #1097 — the annotation DSL EXPRESSIONS themselves type: `sig` resolves through
+  # `extend T::Sig` (manifest `rbs_complete_extends:`), the sig block's self binds to
+  # `T::Private::Methods::DeclBuilder` (`block_as_methods:`), the `T::X[...]` constructors and
+  # `T.*` functions answer through the bundled `sig/sorbet.rbs`, and the `T::Struct`/`T::Enum`
+  # families carry their macros through the `rbs_complete_ancestors` superclass bridge.
+  describe "annotation DSL surface (issue #1097)" do
+    it "resolves `sig` through `extend T::Sig` so a chained call reports NilClass" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          result = sig { returns(Integer) }
+          result.upcase
+          def run; 1; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      # `sig` typed to nil (declare_sig's real return) — `result.upcase` proves the call site is
+      # not `Dynamic[top]`, which would silence the check entirely.
+      expect(offenders.map(&:message)).to include(a_string_matching(/upcase.*for nil/))
+    end
+
+    it "does not bind DeclBuilder when the class overrides `sig` with `def self.sig`" do
+      # A class's own singleton method precedes every `extend` in the singleton ancestry, so
+      # F's `sig` runs and `class_exec`s the block on F — DeclBuilder is not the block's self.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder for a sig call deferred inside a method body when T::Sig owns it" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.target = m
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_terminus.*DeclBuilder/))
+    end
+
+    it "does not bind DeclBuilder for a deferred sig call when `def self.sig` follows `m`" do
+      # `sig` inside `def self.m` runs when `m` is called — after the class body finished installing
+      # `F.sig` — so the later `def self.sig` owns the call even though it lexically follows `m`.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+          def self.target = m
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows when the FIRST of two same-line `def self.sig`s precedes the call" do
+      # The site table is first-wins but the def-node table is later-wins: ordering must come from the
+      # earliest same-name def range, or the second def's offset would read this as unshadowed.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.sig(&blk) = class_exec(&blk); sig { params(x: Integer).bogus_terminus }; def self.sig(&blk) = class_exec(&blk)
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows a sig call inside a `define_singleton_method` block" do
+      # The block body runs when `m` is invoked — after `def self.sig` installed — so F's own `sig`
+      # owns the call even though the block lexically precedes the def.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          define_singleton_method(:m) { sig { params(x: Integer).bogus_terminus } }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows a sig call inside an OVERWRITTEN method's dead body" do
+      # `def self.m` is redefined below, so the def-node table keeps only the later body — but the
+      # dead body's `sig` is still a deferred call, and the ranges table retains every def.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.m; end
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows a sig call inside a `module_function def` body" do
+      # `module_function def m` wraps its DefNode in a call — the walk must still descend so the
+      # body's `sig` reads as deferred and the later `def self.sig` shadows it.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          module_function def helper
+            sig { params(x: Integer).bogus_terminus }
+          end
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "orders against F's OWN def, not another class's earlier `def self.sig`" do
+      # A's def precedes the call in the file but belongs to a different owner — at runtime F's `sig`
+      # call resolves through `extend T::Sig` because F's own def has not run yet.
+      source = <<~RUBY
+        class A
+          def self.sig(&blk) = class_exec(&blk)
+        end
+
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "shadows when a `module_function` toggle hides inside a nested `if`" do
+      # `module_function` inside a container still flips the module's mode when it runs — a later
+      # `def sig` is a module function, so M.sig exists by the time the `sig` call evaluates.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          if true
+            module_function
+          end
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "shadows via `module_function :sig` — the retro-install happens at the call" do
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          def sig(&blk) = class_exec(&blk)
+          module_function :sig
+          sig { params(x: Integer).bogus_terminus }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "does not let a def nested inside another def order an eager call" do
+      # `def self.sig` inside `def self.m` only installs when `m` is invoked — it never runs during
+      # the class body, so the eager `sig` call resolves through `T::Sig`.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          def self.m
+            def self.sig(&blk) = class_exec(&blk)
+          end
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "orders an `F.class_eval`-installed `def self.sig` against the call" do
+      # The eval block runs in place as F's class body, so the def inside it installs F.sig —
+      # a nameable receiver gives the row its owner and the eager call orders against it. (This
+      # shape also passes via the `exists` fallback; the discriminating case is the NEXT spec,
+      # where the call precedes the eval call and only an ordered row answers correctly.)
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          F.class_eval { def self.sig(&blk) = class_exec(&blk) }
+          sig { params(x: Integer).bogus_terminus }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when the `class_eval`-installed `def self.sig` follows the call" do
+      # `class_eval`'s block runs eagerly during the class body — but the call BEFORE it resolves
+      # through `extend T::Sig` because the def has not executed yet. Without a named owner the
+      # eval-installed def could never order and the answer would fall back to `exists` —
+      # over-shadowing a call that really binds DeclBuilder.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          class_eval { def self.sig(&blk) = class_exec(&blk) }
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let `module_function` inside an `END` block mark earlier defs" do
+      # `END` runs at interpreter exit — its `module_function` can never flip `def sig` during the
+      # module body, so `sig` still binds T::Sig's DeclBuilder.
+      source = <<~RUBY
+        module M
+          extend T::Sig
+          END { module_function }
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let a foreign `class_eval`-installed `def self.sig` shadow M's call" do
+      # `Other.class_eval` installs `Other.sig` — the def-site tables must attribute the def to
+      # the eval RECEIVER, or the phantom `M.sig` entry makes `exists` shadow a call that resolves
+      # through `extend T::Sig` at runtime.
+      source = <<~RUBY
+        module Other; end
+
+        module M
+          extend T::Sig
+          Other.class_eval { def self.sig(&blk) = class_exec(&blk) }
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not let `module_function` inside a foreign `class_eval` block mark M's defs" do
+      # `Other.class_eval` rebinds self — the `module_function` inside toggles Other, not M —
+      # so `def sig` stays an instance method and the call binds DeclBuilder.
+      source = <<~RUBY
+        module Other; end
+
+        module M
+          extend T::Sig
+          Other.class_eval { module_function }
+          def sig(&blk) = class_exec(&blk)
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "orders a `sig` call eagerly inside a `class_eval` block" do
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          class_eval { sig { params(x: Integer).bogus_terminus } }
+          def self.sig(&blk) = class_exec(&blk)
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when `def self.sig` follows the call on the SAME line" do
+      # Statement order within a line is execution order — `sig {}; def self.sig` resolves through
+      # `T::Sig` at runtime. Ordering by def-site line alone would treat the def as shadowing.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }; def self.sig(&blk) = class_exec(&blk)
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "still binds DeclBuilder when `def self.sig` is defined AFTER the sig call" do
+      # `def` takes effect at execution: a `sig { ... }` call that precedes the later override
+      # still resolves through `extend T::Sig` at runtime, so the block binding must not be
+      # suppressed by a def the discovery table already knows about.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+          def self.sig(&blk)
+            class_exec(&blk)
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "still resolves `sig` when the class is also declared in project RBS" do
+      # `class F` in `sig/` makes F RBS-known, but its RBS need not repeat the source
+      # `extend T::Sig` — the bridge still honours the source edge.
+      source = <<~RUBY
+        class F
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+      sig = "class F\n  def unrelated: () -> void\nend\n"
+
+      result = run_plugin(source: source, files: { "sig/f.rbs" => sig },
+                          signature_paths: ["sig"])
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "binds the sig block's self to DeclBuilder so unknown builder verbs still warn" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "types `params`/`returns`/`void`/`checked`/`override`/`abstract` builder chains" do
+      source = <<~RUBY
+        class Worker
+          extend T::Sig
+          sig { abstract.params(x: Integer).returns(String) }
+          def run(x); x.to_s; end
+          sig { override.void.checked(:never) }
+          def stop; nil; end
+          sig { overridable.returns(Integer) }
+          def retries; 0; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `T::Sig::WithoutRuntime.sig` as a module-singleton call" do
+      source = <<~RUBY
+        class Worker
+          T::Sig::WithoutRuntime.sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "types the `T::Array[...]` / `T::Hash[...]` constructors" do
+      source = <<~RUBY
+        T::Array[Integer].bogus_constructor_call
+        T::Hash[Symbol, Integer].bogus_constructor_call
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_constructor_call.*TypedArray/))
+      expect(offenders.map(&:message)).to include(a_string_matching(/bogus_constructor_call.*TypedHash/))
+    end
+
+    it "resolves `T::Helpers` / `T::Generic` macros through `extend`" do
+      source = <<~RUBY
+        class Base
+          extend T::Helpers
+          extend T::Generic
+          abstract!
+          interface!
+          Elem = type_member
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `prop` / `const` on a `T::Struct` subclass" do
+      source = <<~RUBY
+        class Doc < T::Struct
+          prop :name, String
+          const :ttl, Integer
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "binds the sig block to DeclBuilder on a `T::ImmutableStruct` subclass (RBS-side extend edge)" do
+      # `T::ImmutableStruct` is the only `T::Struct`-family class that `extend`s `T::Sig` at
+      # runtime (`struct.rb`) — the match comes from that bundled-RBS edge, surfaced via
+      # `singleton_extended_modules`.
+      source = <<~RUBY
+        class Doc < T::ImmutableStruct
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not bind `sig` on a plain `T::Struct` subclass (runtime has no extend T::Sig)" do
+      # `T::InexactStruct`/`T::Struct` carry no `extend T::Sig` — `sig` inside the body raises at
+      # runtime, so the block must NOT bind DeclBuilder (an invented edge would silently resolve
+      # a call that cannot run).
+      source = <<~RUBY
+        class Doc < T::Struct
+          sig { params(x: Integer).bogus_terminus }
+          def run(x); x; end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "continues past an allow-listed extend module that lacks the method" do
+      # `extend T::Helpers` then `extend T::Generic`: `type_member` lives on T::Generic. The
+      # bridge must search every extended module (not stop at the first allow-listed one), so the
+      # call resolves to `T::Types::TypeMember` and `bogus` reports against it.
+      source = <<~RUBY
+        class Node
+          extend T::Helpers
+          extend T::Generic
+          type_member.bogus
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus.*TypeMember/)
+      )
+    end
+
+    it "does not bind DeclBuilder when a nearer extended module defines `sig`" do
+      # `extend T::Sig; extend CustomSig` — the later extend is nearer, so `CustomSig#sig`
+      # answers the call at runtime and picks the block's self. Narrowing to DeclBuilder would
+      # misread a perfectly ordinary custom DSL method.
+      source = <<~RUBY
+        module CustomSig
+          def sig(&blk)
+            nil
+          end
+        end
+        class F
+          extend T::Sig
+          extend CustomSig
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "does not type a nested CustomSig#sig through T::Sig's nil return" do
+      # Nested `CustomSig` owns the call; the as-written fold key would miss it and fall through to nil.
+      source = <<~RUBY
+        #{SIG_STUB}
+        module Outer
+          module CustomSig
+            def sig(&blk) = "hello"
+          end
+          class F
+            extend T::Sig
+            extend CustomSig
+            result = sig { void }
+            result.upcase
+            result.definitely_not_on_string
+          end
+        end
+      RUBY
+
+      messages = run_plugin(source: source).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+      expect(messages).not_to include(a_string_matching(/DeclBuilder/), a_string_matching(/upcase/))
+      expect(messages).to include(a_string_matching(/definitely_not_on_string.*hello/))
+    end
+
+    it "still binds DeclBuilder when a nearer extended module does not define `sig`" do
+      source = <<~RUBY
+        module Plain
+          def helper
+            :ok
+          end
+        end
+        class F
+          extend T::Sig
+          extend Plain
+          sig { params(x: Integer).bogus_terminus }
+          def m(x); end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(
+        a_string_matching(/bogus_terminus.*DeclBuilder/)
+      )
+    end
+
+    it "does not fall through to the global `T::Sig` when a project module owns the extend edge" do
+      # `Outer::T::Sig` is a project-defined module — `extend T::Sig` inside `Outer` binds it at
+      # runtime, so `sig` must NOT resolve through the plugin's global `T::Sig` declaration.
+      source = <<~RUBY
+        module Outer
+          module T
+            module Sig
+            end
+          end
+          class F
+            extend T::Sig
+            sig { bogus_terminus }
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).not_to include(
+        a_string_matching(/DeclBuilder/)
+      )
+    end
+
+    it "keeps a zero-arg `prop` silent on a `T::Struct` subclass (signature-reading rules stay off)" do
+      # The superclass bridge is a signature LOOKUP only — the subclass stays outside RBS, so
+      # `call.wrong-arity` does not fire on its calls (the ADR-43 contract; see plugin.md). This
+      # example pins that deliberately-lenient reading for the Struct family.
+      source = <<~RUBY
+        class Doc < T::Struct
+          prop
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select do |d|
+        %w[call.undefined-method call.wrong-arity].include?(d.rule)
+      end
+      expect(offenders).to be_empty
+    end
+
+    it "resolves `enums` and the `new` calls inside its block on a `T::Enum` subclass" do
+      source = <<~RUBY
+        class Suit < T::Enum
+          enums do
+            Spades = new(true)
+            Hearts = new(false)
+          end
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+
+    it "accepts both `T.type_alias` forms — positional type and block" do
+      # Runtime signature is `type_alias(type=nil, &blk)` — the positional form is the legacy
+      # migration path and must not report `call.wrong-arity`.
+      source = <<~RUBY
+        A = T.type_alias(String)
+        B = T.type_alias { Integer }
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select do |d|
+        %w[call.wrong-arity call.undefined-method].include?(d.rule)
+      end
+      expect(offenders).to be_empty
+    end
+
+    it "adopts the asserted type for `T.let` / `T.cast` (recognizer path stays authoritative)" do
+      source = <<~RUBY
+        # typed: true
+        x = T.let("hi", String)
+        x.no_such_string_method
+        y = T.cast(1, Integer)
+        y.no_such_int_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_string_method.*for String/))
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_int_method.*for Integer/))
+    end
+
+    it "keeps an undeclared `T.*` call opaque instead of firing undefined-method" do
+      source = <<~RUBY
+        T.this_does_not_exist(1)
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders).to be_empty
+    end
+  end
+
   describe "mixin chain resolution (ADR-11 slice 8)" do
     # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs declared on a `Generated*` module up to the host
     # class via the recorded `include` / `extend` chain.

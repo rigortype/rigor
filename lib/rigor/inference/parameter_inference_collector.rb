@@ -265,7 +265,7 @@ module Rigor
         method_visibilities: :discovered_method_visibilities,
         methods: :discovered_methods,
         data_member_layouts: :data_member_layouts,
-        struct_member_layouts: :struct_member_layouts
+        struct_member_layouts: :struct_member_layouts, deferred_ranges: :discovered_deferred_ranges
       }.freeze
       private_constant :DISCOVERY_FIELD
 

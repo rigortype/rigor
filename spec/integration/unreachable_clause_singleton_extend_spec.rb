@@ -360,6 +360,37 @@ RSpec.describe "a class object's own extend record on the positive edge (#898)" 
           end
         RUBY
       end
+
+      it "keeps a later file's reopening nearer in the merged extend table (#1097)" do
+        # `discovered_extends` stores singleton-ancestor search order, so the cross-file merge must
+        # prepend each later contribution: `b.rb` reopens `C` after `a.rb`, making `B` the nearer
+        # ancestor — `C.label` resolves `B#label`, and `c.rb` (which declares no `extend` of its own)
+        # reads that same merged order through the project fold.
+        result = run_files(
+          "a.rb" => <<~RUBY,
+            module A
+              def label = :a
+            end
+
+            class C
+              extend A
+            end
+          RUBY
+          "b.rb" => <<~RUBY,
+            module B
+              def label = :b
+            end
+
+            class C
+              extend B
+            end
+          RUBY
+          "c.rb" => <<~RUBY
+            Rigor.dump_type(C.label)
+          RUBY
+        )
+        expect(dumps_for(result)).to eq(["dump_type: :b"])
+      end
     end
   end
 end

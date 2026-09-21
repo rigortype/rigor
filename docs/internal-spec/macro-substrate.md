@@ -56,7 +56,123 @@ rules (consistent with the rest of the plugin-contract carriers):
 - **`receiver_constraint` matching.** Every tier carries a
   `receiver_constraint`; the entry fires when the call's lexical
   receiver class **equals or inherits from** that fully-qualified name,
-  matched through `Environment#class_ordering`.
+  matched through `Environment#class_ordering`. For `Singleton[X]`
+  receivers (class-level DSL calls) the match also consults the
+  `extend` edge: an entry fires when the module that would answer the
+  call on `X`'s singleton — walked through `extend` edges in
+  singleton-ancestor search order (`scope.discovered_extends` stores
+  nearest-first), then up the discovered superclass chain, including
+  RBS-declared `extend`s surfaced by
+  `Environment#singleton_extended_modules` — resolves to the
+  constraint and actually defines `method_name`. The class's own
+  singleton defs precede every `extend` edge — but only once they have
+  RUN: `sig { ... }; def self.sig` still binds `T::Sig`, because the
+  `def` has not executed at call time. `Scope#singleton_def_shadows_call?`
+  decides this from `discovered_deferred_ranges`, the per-file def /
+  block / lambda body-range table: a call contained in any such range
+  is deferred to invocation time and is shadowed iff a same-name def of
+  the same owner is known at all — either already discovered, or
+  recorded by a row the site table missed — while an eager
+  class-body call is shadowed only by a same-name, same-owner def whose
+  start offset precedes it (byte offsets, so same-line defs order
+  correctly; the earliest matching def decides, so a later redefinition
+  cannot resurrect the bridge; rows carry the qualified owner, so
+  another class's `def self.sig` cannot order `F`'s call). Defs nested
+  inside a deferred range — a `def` inside a method body or block —
+  install at invocation time and are excluded from ordering, while
+  `module_function` rows model the mode toggle and the `module_function
+  :x` retro-install at the call site. Eagerly-evaluated bodies are not
+  ranges: `Const = Class.new do … end` and `class_eval`-family blocks
+  run during the enclosing body — the eval block's defs belong to
+  the receiver's surface, so a nameable receiver supplies their
+  owner (the def-site, method, visibility, and extends tables
+  attribute eval-block bodies to the same receiver). The split is
+  two-context, though — `Module.nesting` does not change in an
+  eval block, so a `class` / `module` / constant write inside one
+  still files under the lexical namespace while `def`s bind to the
+  receiver. Inside an eval body `self` is the receiver too, so a
+  nested `self.class_eval`, bare `class_eval`, or `self::X.class_eval`
+  resolves against the enclosing receiver — `Y.class_eval {
+  self::X.class_eval { def h; end } }` installs `Y::X#h`, never
+  `M::X#h` under the lexical `module M` — while a CONSTANT receiver
+  resolves through `Module.nesting` exactly as a read does —
+  `Y.class_eval` inside `M::Y.class_eval` at top level opens the
+  top-level `Y`, not `M::Y` again — so the first `<rung>::X` the
+  FILE'S OWN declarations contain wins, innermost first
+  (`X.class_eval` inside `class S` names `S::X` when the file
+  declares `S::X`, whether the call sits under `class <<` or not),
+  and only a shadow no rung declares — typically one defined in
+  another file — still files as written. Inside a
+  `class <<` body `self` is the singleton — `self::X` reads and
+  `self::X` / bare constant writes land on its constant table, which
+  the tables cannot name, so both decline. The same unnameable cref
+  governs declarations: `class D` inside `class <<` opens
+  `#<singleton>::D`, so every discovery walk — methods, singleton
+  defs, visibilities, includes/extends, superclasses, def nestings,
+  ivars, member layouts — files its facts under no class rather than
+  a fabricated `C::D`, the declaration/discovery producers
+  (`discovered_classes`, `class_sources`, `declared_types`,
+  `local_constant_names`) register no `C::D`/`C::K` either — a name
+  `known_namespace?` would otherwise cross-contaminate every
+  `D`-family resolution with. Only a bare header or write (and a
+  `self::` base) is unnameable there: every explicit-base path —
+  `::T`, `C::D`, `Foo::Bar`, `::K =`, `C::K =` — resolves its base
+  lexically and re-anchors under the same compact-header
+  approximation the non-singleton walk uses. The `class <<` EXPRESSION is the exception that proves
+  the boundary: it evaluates in the enclosing context before the
+  singleton opens, so `class << (class D; self; end)` still declares
+  `C::D`, and `class << self` INSIDE a singleton body opens the
+  singleton's own singleton (`#<Class:#<Class:C>>`), which nothing
+  names. Eval
+  and meta blocks keep that cref while rebinding `self`
+  (`Foo.class_eval { X = 1 }` under `class <<` still writes the
+  singleton's table), so a `self::`-anchored eval receiver declines
+  in every consumer walk — methods, singleton defs, visibilities,
+  deferred ranges, includes, and extends alike — and a bare or
+  `self` receiver under `class << <non-self>` names nothing.
+  `instance_eval`/`instance_exec` split further: they rebind `self`
+  to the receiver exactly like `class_eval` for the `self`-anchored
+  facts these tables read (`X.instance_eval { extend M }` extends
+  `X`, and `X.instance_eval { include M }` records the include edge
+  the receiver-as-module call really sends), but the default
+  definee inside is the receiver's SINGLETON — `X.instance_eval {
+  def m }` installs `X.m`, and a keyword `alias`/`undef` binds
+  singleton-side the same way — while `define_method`, `attr_*`,
+  `alias_method`, and visibility calls stay receiver-as-module on
+  the instance surface. The def-owning walks carry that as a
+  separate `defs_singleton` flag so only the keyword forms move; a
+  `define_method` body or an unnamed `Class.new { … }`-family block
+  walks ownerless. Inside an already-singleton body the split
+  inverts: a bare or `self` `instance_eval` re-evaluates the SAME
+  singleton self, so calls land on the singleton's instance surface
+  exactly like `class_eval`'s there (`class << S; instance_eval {
+  define_method(:m) }` installs `S.m`, and `include`/`extend`
+  produce the same singleton-ancestor edge), while `def`/`alias`
+  bind on the singleton's OWN singleton — `#<Class:#<Class:S>>` —
+  which nothing names; the walks mark that definee `:unnameable`
+  and decline the leaves rather than filing them under `S`. Meta-new
+  blocks do the opposite: `K = Class.new { extend M }` extends `K`,
+  so the mixin tables attribute the block to the nameable `K` and
+  decline only when `K` itself is unnameable, with the factory call's
+  receiver and arguments still evaluated in the enclosing context
+  (`K = Class.new(X.class_eval { extend M })` extends `X`). The
+  meta-new block is still only a `self` rebind, though —
+  `Module.nesting` stays lexical inside it — so `def`, `alias`,
+  mixin, and `self::`-anchored facts attribute to the class the write
+  names while a nested `class` / `module` declaration keeps the
+  ENCLOSING cref (`class Inner` inside `C`'s `K = Class.new { … }`
+  opens `C::Inner`, never `K::Inner`; under `class <<` it lands on
+  the singleton's table and declines like any other declaration
+  there). A cross-file def and a file the index
+  never saw both count as shadowed — the conservative direction, since
+  binding `DeclBuilder` where a project method owns the call would
+  invent diagnostics. That is how `class
+  F; extend T::Sig; sig { ... }; end` and `class Doc <
+  T::ImmutableStruct; sig { ... }; end` both reach the `sig` entry
+  (#1097) — while a nearer `extend` whose module defines the same name
+  (`extend T::Sig; extend CustomSig`), or the class's own already-run
+  `def self.sig`, owns the call and the binding declines, since that
+  custom method picks the block's self at runtime.
 
 ## Tier A — `BlockAsMethod` (`block_as_methods:`)
 

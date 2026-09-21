@@ -47,6 +47,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         :unrelated
       end
     end
+    allow(env).to receive(:singleton_extended_modules).and_return([])
     env
   end
 
@@ -203,6 +204,153 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           receiver_type: Rigor::Type::Singleton.new("API")
         )
         expect(result).to eq(Rigor::Type::Nominal.new("Grape::Validations::ParamsScope"))
+      end
+    end
+
+    describe "extend-edge matching (#1097)" do
+      # `class F; extend T::Sig; sig { ... }; end` — F does not INHERIT from `T::Sig`; the DSL
+      # verb reaches the class object through the `extend` edge. The matcher therefore consults
+      # `scope.discovered_extends` (source-side) and `Environment#singleton_extended_modules`
+      # (RBS-side, e.g. `T::Struct`'s own `extend T::Sig`) alongside the inheritance walk.
+      def sorbet_plugin_class
+        Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "sorbetfixture",
+            version: "0.1.0",
+            block_as_methods: [
+              Rigor::Plugin::Macro::BlockAsMethod.new(
+                receiver_constraint: "T::Sig",
+                method_names: %i[sig],
+                self_type: "T::Private::Methods::DeclBuilder"
+              )
+            ]
+          )
+        end
+      end
+
+      def sorbet_registry
+        Rigor::Plugin::Registry.new(plugins: [sorbet_plugin_class.new(services: services)])
+      end
+
+      # `extends:` lists are in singleton-ancestor search order (nearest edge first), matching what
+      # `record_extend_targets` stores. `known:` names the classes that exist in the fake universe —
+      # an extend edge binds the first existing candidate — and `defines:` the instance methods each
+      # module actually declares, which is what decides the call's owner.
+      def sorbet_scope(env, supers:, extends:, known: %w[T::Sig],
+                       defines: { "T::Sig" => [:sig] }, singleton_defines: {})
+        scope = instance_double(
+          Rigor::Scope,
+          environment: env,
+          discovered_superclasses: supers,
+          discovered_extends: extends
+        )
+        allow(scope).to receive(:ancestor_name_candidates) do |_subclass, raw|
+          [raw.to_s.sub(/\A::/, "")]
+        end
+        allow(scope).to receive(:known_user_class?) { |name| known.include?(name) }
+        allow(scope).to receive(:singleton_def_shadows_call?) do |klass, meth, _node|
+          (singleton_defines[klass] || []).include?(meth)
+        end
+        allow(scope).to receive(:instance_def_shadows_call?) do |klass, meth, _node|
+          (defines[klass] || []).include?(meth)
+        end
+        scope
+      end
+
+      def sorbet_env(rbs_extends: {})
+        env = instance_double(Rigor::Environment, plugin_registry: sorbet_registry)
+        allow(env).to receive(:nominal_for_name) { |name| Rigor::Type::Nominal.new(name) }
+        allow(env).to receive(:class_ordering) { |lhs, rhs| lhs == rhs ? :equal : :unknown }
+        allow(env).to receive(:singleton_extended_modules) { |name| rbs_extends.fetch(name, []) }
+        allow(env).to receive(:rbs_loader).and_return(nil)
+        env
+      end
+
+      let(:sig_call) { Prism.parse("sig { returns(Integer) }").value.statements.body.first }
+
+      it "matches a Singleton receiver whose class `extend`s the constraint module" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["T::Sig"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "matches through an RBS-side `extend` edge on a discovered superclass" do
+        # `class Doc < T::Struct` — Doc's own source has no `extend`, but T::Struct's bundled
+        # RBS declares `extend T::Sig`, which `singleton_extended_modules` reports.
+        env = sorbet_env(rbs_extends: { "T::Struct" => ["T::Sig", "T::Props::ClassMethods"] })
+        scope = sorbet_scope(env, supers: { "Doc" => "T::Struct" }, extends: {})
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Doc")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "does not match when the class extends an unrelated module" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["Other::DSL"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "does not match when a nearer extended module owns the call" do
+        # `extend T::Sig; extend CustomSig` — stored search order puts CustomSig first; it defines
+        # `sig`, so its `sig` runs and picks the block self — not DeclBuilder.
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["CustomSig", "T::Sig"] },
+               known: %w[T::Sig CustomSig], defines: { "CustomSig" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "matches when a nearer extended module does not define the method" do
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["Plain", "T::Sig"] },
+               known: %w[T::Sig Plain], defines: { "T::Sig" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to eq(Rigor::Type::Nominal.new("T::Private::Methods::DeclBuilder"))
+      end
+
+      it "does not match when the class defines its own singleton method" do
+        # `def self.sig` on the class precedes every `extend` in the singleton ancestry — the
+        # custom method answers and picks the block's self.
+        env = sorbet_env
+        scope = sorbet_scope(
+          env, supers: {}, extends: { "Fetcher" => ["T::Sig"] },
+               singleton_defines: { "Fetcher" => [:sig] }
+        )
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Singleton.new("Fetcher")
+        )
+        expect(result).to be_nil
+      end
+
+      it "does not match a Nominal receiver through the extends edge" do
+        env = sorbet_env
+        scope = sorbet_scope(env, supers: {}, extends: { "Fetcher" => ["T::Sig"] })
+        result = described_class.narrow_self_type_for(
+          scope: scope, call_node: sig_call,
+          receiver_type: Rigor::Type::Nominal.new("Fetcher")
+        )
+        expect(result).to be_nil
       end
     end
 

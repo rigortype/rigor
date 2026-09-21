@@ -58,7 +58,7 @@ module Rigor
           :discovered_superclasses, :discovered_header_nestings, :discovered_includes,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes,
-          :data_member_layouts, :struct_member_layouts
+          :data_member_layouts, :struct_member_layouts, :discovered_deferred_ranges
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -178,7 +178,10 @@ module Rigor
             discovered_methods: def_index.fetch(:methods),
             discovered_parameter_envelopes: def_index.fetch(:parameter_envelopes),
             data_member_layouts: def_index.fetch(:data_member_layouts),
-            struct_member_layouts: def_index.fetch(:struct_member_layouts)
+            struct_member_layouts: def_index.fetch(:struct_member_layouts),
+            # Issue #1097 — per-file def / block / lambda body ranges, the execution-timing table the
+            # `*_def_shadows_call?` predicates order `sig`-shadowing defs against.
+            discovered_deferred_ranges: def_index.fetch(:deferred_ranges)
           )
         end
 

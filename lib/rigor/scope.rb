@@ -49,6 +49,11 @@ module Rigor
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
     def discovered_parameter_envelopes = @discovery.discovered_parameter_envelopes
     def discovered_superclasses = @discovery.discovered_superclasses
+
+    # Issue #1097 — `{file path => [[start_offset, end_offset, name, kind, owner], ...]}`, the def /
+    # block / lambda body ranges {singleton_def_shadows_call?} / {instance_def_shadows_call?} order a
+    # project-defined override against.
+    def discovered_deferred_ranges = @discovery.discovered_deferred_ranges
     def discovered_includes = @discovery.discovered_includes
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
@@ -779,6 +784,86 @@ module Rigor
       record_cross_file_method(class_name, method_name, site, singleton: true) if Analysis::DependencyRecorder.active?
       site
     end
+
+    # Issue #1097 — whether `class_name`'s own singleton `def method_name` has RUN by the time `call_node`
+    # executes. Such a def precedes every `extend` in the singleton ancestry, so once it exists it owns the
+    # call — but `sig { ... }` written BEFORE `def self.sig` in the same body still resolves through the
+    # already-extended module, because `def` takes effect at execution. The site table stores
+    # `"path:line"`: ordering applies only to calls executed eagerly in the same file's class body — a
+    # call inside a def body runs at invocation time, and a def in another file can never be ordered
+    # against the call site, so both conservatively count as shadowing. A nil `call_node`
+    # (position-less dispatch probes) does the same.
+    def singleton_def_shadows_call?(class_name, method_name, call_node)
+      def_shadows_call?(user_singleton_def_site_for(class_name, method_name), class_name, method_name,
+                        :singleton, call_node)
+    end
+
+    # The instance-side twin of {#singleton_def_shadows_call?}: whether `class_name`'s `def method_name`
+    # has run by call time — for `extend M` edges, where M's instance surface is what answers.
+    def instance_def_shadows_call?(class_name, method_name, call_node)
+      def_shadows_call?(user_def_site_for(class_name, method_name), class_name, method_name, :instance,
+                        call_node)
+    end
+
+    # Shared ordering half of the two `*_def_shadows_call?` predicates, over this file's
+    # `discovered_deferred_ranges` (issue #1097). `exists` — a recorded `"path:line"` site or the
+    # method-existence table — says a def of `method_name`/`kind` on `class_name` is known at all; a
+    # discovered def with no site (an `attr_*` sibling, a bundle seed that predates the table) counts
+    # through `discovered_method?`. The ranges then answer the timing questions, and can supply defs
+    # the site table missed (a `module_function`-installed `sig` never enters the singleton-def
+    # table). A foreign-file site cannot be ordered against the call — shadowing. A nil `call_node`
+    # (position-less dispatch probes) or a file the index never saw falls back to `exists`.
+    def def_shadows_call?(site, class_name, method_name, kind, call_node)
+      exists = !site.nil? || discovered_method?(class_name, method_name, kind)
+      return exists if call_node.nil?
+
+      path = source_path
+      return exists unless path
+
+      if site
+        site_path, = site.rpartition(":")
+        return true unless site_path == path
+      end
+
+      ranges = @discovery.discovered_deferred_ranges[path]
+      return exists if ranges.nil?
+
+      deferred_ranges_shadow_call?(ranges, method_name.to_sym, kind, class_name.to_s,
+                                   call_node.location, exists)
+    end
+    private :def_shadows_call?
+
+    # The range scan behind {#def_shadows_call?}. A call CONTAINED in any def / block / lambda /
+    # `END` range is deferred — it runs at invocation time — so it is shadowed iff a matching def is
+    # known (`exists`, or a row the site table missed). An EAGER call is shadowed iff the earliest
+    # same-name, same-kind (`:both` matches either), same-OWNER row starts before it: owner scoping
+    # keeps `class A`'s defs from ordering `class F`'s calls, and earliest-of keeps
+    # `def self.sig; sig {}; def self.sig` honest where the def-node table is later-wins. With no
+    # matching row the answer is `exists` — "a def exists but cannot be ordered" stays conservative,
+    # "no def at all" stays permissive.
+    def deferred_ranges_shadow_call?(ranges, method_name, kind, class_name, call_loc, exists)
+      contained = false
+      matching = false
+      earliest = nil
+      ranges.each do |(start, finish, name, def_kind, owner)|
+        contained ||= start <= call_loc.start_offset && call_loc.end_offset <= finish
+        next unless deferred_row_orders_call?(name, def_kind, owner, method_name, kind, class_name)
+
+        matching = true
+        earliest = start if earliest.nil? || start < earliest
+      end
+      return exists || matching if contained
+
+      earliest.nil? ? exists : earliest <= call_loc.start_offset
+    end
+    private :deferred_ranges_shadow_call?
+
+    # Whether a range row can order the call: same method name, same qualified owner, and a def kind
+    # that answers this predicate's side (`:both` — `module_function` — matches either).
+    def deferred_row_orders_call?(name, def_kind, owner, method_name, kind, class_name)
+      name == method_name && owner == class_name && (def_kind == kind || def_kind == :both)
+    end
+    private :deferred_row_orders_call?
 
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —

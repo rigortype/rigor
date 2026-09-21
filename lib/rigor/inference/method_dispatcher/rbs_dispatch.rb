@@ -269,7 +269,8 @@ module Rigor
             return nil unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope,
+                                              call_node: call_node)
             return nil unless method_definition
             return nil if public_only && method_private?(method_definition)
             # Issue #823 — a declaration that states the member's presence and parameters but not its
@@ -428,7 +429,7 @@ module Rigor
               method_definition.accessibility == :private
           end
 
-          def lookup_method(environment, class_name, kind, method_name, scope = nil)
+          def lookup_method(environment, class_name, kind, method_name, scope = nil, call_node: nil)
             direct = lookup_method_on(environment, class_name, kind, method_name)
             return direct if direct
 
@@ -440,6 +441,16 @@ module Rigor
             # positive on `< ActionController::Base`).
             ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
             return lookup_method_on(environment, ancestor, kind, method_name) if ancestor
+
+            # `extend M` in a class/module body lifts M's INSTANCE surface onto the extending object's
+            # singleton — `class F; extend T::Sig; sig { ... }; end` resolves `sig` through
+            # `T::Sig#sig`. Same contract as the superclass bridge: only allow-listed (manifest
+            # `rbs_complete_extends:`) modules qualify, so open hierarchies stay on Dynamic.
+            if kind == :singleton
+              mod = allowed_rbs_complete_extended_module(environment, class_name, method_name, scope,
+                                                         call_node)
+              return lookup_method_on(environment, mod, :instance, method_name) if mod
+            end
 
             # Issue #527 slice 1 — the same shape, one RBS ancestry wider: a Ruby-source subclass of a
             # CORE or STDLIB class (`class SubHash < Hash`, `< StandardError`, `< ::StringScanner`)
@@ -734,6 +745,92 @@ module Rigor
                 queue << candidate if supers.key?(candidate)
               end
             end
+          end
+
+          # The extend-edge twin of `allowed_rbs_complete_ancestor` (manifest `rbs_complete_extends:`).
+          # `extend M` lifts M's INSTANCE surface onto the extending class object's singleton, so a
+          # singleton call on a Ruby-source class can resolve through a module the class — or one of
+          # its discovered superclasses — extends. Returns the first resolved candidate name that a
+          # loaded plugin allow-lists, or nil. Same guards as the superclass bridge, minus the
+          # RBS-known receiver exit: the direct lookup has already missed by the time this runs, and
+          # a class that is BOTH source-defined and RBS-known (`class F` in `sig/` plus `extend T::Sig`
+          # in the body) still carries the source edge — the runtime ancestry contains the module
+          # either way, so withholding the bridge would leave a real `sig` opaque. A nearer source
+          # `def self.x` still shadows any bridged module method.
+          def allowed_rbs_complete_extended_module(environment, class_name, method_name, scope,
+                                                   call_node = nil)
+            return nil if scope.nil?
+
+            registry = environment&.plugin_registry
+            return nil if registry.nil?
+
+            supers = scope.discovered_superclasses
+            extends = scope.discovered_extends
+            queue = [class_name.to_s]
+            seen = {}
+            until queue.empty?
+              current = queue.shift
+              next if current.nil? || seen[current]
+
+              seen[current] = true
+              # The class's own `def self.x` sits ahead of every `extend` — once it has run.
+              # `singleton_def_shadows_call?` orders the def against the call site, so a `def self.sig`
+              # written AFTER this `sig {}` does not suppress the bridge.
+              return nil if scope.singleton_def_shadows_call?(current, method_name, call_node)
+
+              resolved = rbs_complete_extended_module_for(current, extends, environment, scope,
+                                                          registry, method_name, call_node)
+              return nil if resolved.equal?(EXTEND_OWNER_STOP)
+              return resolved if resolved
+
+              raw = supers[current]
+              scope.ancestor_name_candidates(current, raw).each { |c| queue << c } if raw
+            end
+            nil
+          end
+
+          # One walk hop of `allowed_rbs_complete_extended_module`. Each `extend` edge binds to the
+          # first resolution candidate that exists at runtime. If that owner DEFINES `method_name`:
+          # an allow-listed RBS module is the answer; a project class or a non-allow-listed RBS name
+          # owns the call, so the hop returns {EXTEND_OWNER_STOP} and the outer walk must not search
+          # later extends or superclasses (a nested `Outer::CustomSig` would otherwise fall through
+          # to `T::Sig` and type the call as `nil`). An owner that does not define the method yields
+          # to the next extended module — Ruby's singleton ancestry searches every extend in turn.
+          def rbs_complete_extended_module_for(current, extends, environment, scope, registry,
+                                               method_name, call_node)
+            each_extended_module_name(current, extends, environment) do |mod_name|
+              owner = scope.ancestor_name_candidates(current, mod_name).find do |candidate|
+                scope.known_user_class?(candidate) ||
+                  Rigor::Reflection.rbs_class_known?(candidate, environment: environment)
+              end
+              next if owner.nil?
+              next unless extend_owner_defines?(owner, method_name, call_node, scope, environment)
+
+              project_owned = scope.known_user_class?(owner)
+              return owner if !project_owned && registry.rbs_complete_extends?(owner)
+
+              return EXTEND_OWNER_STOP
+            end
+            nil
+          end
+
+          def extend_owner_defines?(owner, method_name, call_node, scope, environment)
+            return true if scope.instance_def_shadows_call?(owner, method_name, call_node)
+
+            !lookup_method_on(environment, owner, :instance, method_name).nil?
+          end
+
+          # Sentinel: a nearer `extend` answers `method_name`, so the allow-list must not continue.
+          EXTEND_OWNER_STOP = :__rbs_complete_extends_stop__
+          private_constant :EXTEND_OWNER_STOP
+
+          # The module names `current` extends, source table first (`discovered_extends`, stored in
+          # singleton-ancestor search order — nearest edge first) then the RBS side
+          # (`singleton_extended_modules`, already qualified) — an RBS superclass like `T::Struct`
+          # declares `extend T::Props::ClassMethods` in signature, and a source subclass inherits it.
+          def each_extended_module_name(current, extends, environment, &)
+            (extends[current] || []).each(&)
+            (environment&.singleton_extended_modules(current) || []).each(&)
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the

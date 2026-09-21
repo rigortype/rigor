@@ -25,13 +25,13 @@ Environment:
 
 Model defaults (patterns; first match from `pi --list-models` wins):
   architect / orchestrator
-    patterns: anthropic/*opus*  xai/grok*  *opus*  grok*
-    preferred ids: anthropic/claude-opus-5 , xai/grok-4.5
+    patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
+    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.5
   lane
     patterns: deepseek/deepseek-flash  deepseek/*flash*  *deepseek*flash*
   reviewer
-    patterns: anthropic/*fable*  *fable*  anthropic/*opus*  xai/grok*
-    preferred: anthropic/claude-fable-5 (Fable); else Opus/Grok-class
+    patterns: claude-bridge/*fable*  anthropic/*fable*  *fable*  *opus*  grok*
+    preferred: claude-bridge/claude-fable-5 (Fable); else Opus/Grok-class
   docs
     patterns: google/gemini*flash*  *gemini*flash*  gemini-flash-latest
 
@@ -78,8 +78,11 @@ declare -a PATTERNS=()
 PREFERRED=""
 case "$ROLE" in
   architect|orchestrator)
-    PREFERRED="anthropic/claude-opus-5"
+    # Prefer Claude Max via pi-claude-bridge (subscription), then API Anthropic, then Grok.
+    PREFERRED="claude-bridge/claude-opus-5"
     PATTERNS=(
+      "claude-bridge/claude-opus-5"
+      "claude-bridge/claude-opus"
       "anthropic/claude-opus-5"
       "anthropic/claude-opus"
       "xai/grok-4.5"
@@ -87,7 +90,7 @@ case "$ROLE" in
       "opus"
       "grok"
     )
-    CYCLE="*opus*,grok*,anthropic/claude-opus*,xai/grok*"
+    CYCLE="claude-bridge/*opus*,*opus*,grok*,anthropic/claude-opus*,xai/grok*"
     ;;
   lane)
     PREFERRED="deepseek/deepseek-flash"
@@ -100,17 +103,20 @@ case "$ROLE" in
     CYCLE="deepseek/*flash*,deepseek-flash,*deepseek*flash*"
     ;;
   reviewer)
-    PREFERRED="anthropic/claude-fable-5"
+    PREFERRED="claude-bridge/claude-fable-5"
     PATTERNS=(
+      "claude-bridge/claude-fable-5"
+      "claude-bridge/claude-fable"
       "anthropic/claude-fable-5"
       "anthropic/claude-fable"
       "fable"
+      "claude-bridge/claude-opus-5"
       "anthropic/claude-opus-5"
       "anthropic/claude-opus"
       "xai/grok"
       "opus"
     )
-    CYCLE="*fable*,*opus*,grok*,anthropic/claude-fable*,anthropic/claude-opus*,xai/grok*"
+    CYCLE="claude-bridge/*fable*,*fable*,claude-bridge/*opus*,*opus*,grok*,anthropic/claude-fable*,anthropic/claude-opus*,xai/grok*"
     ;;
   docs)
     PREFERRED="google/gemini-3.8-flash"
@@ -150,7 +156,7 @@ Inspect what pi can see:
 
 Override explicitly when you know an id:
 
-  MODEL=anthropic/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
+  MODEL=claude-bridge/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
 
 This harness refuses to silently fall back to an unbound default (e.g. google).
 HELP
@@ -171,17 +177,23 @@ glob_to_ere() {
   printf '%s' "$out"
 }
 
-# Pick first whitespace-delimited token that looks like a model id.
-first_model_token() {
+# pi --list-models prints two columns: provider  model  …
+# Emit provider/model ids (and pass through already-slashed tokens).
+list_model_ids() {
   awk '
+    BEGIN { IGNORECASE = 1 }
     /^[[:space:]]*$/ { next }
+    $1 == "provider" && $2 == "model" { next }
     /No models available|Use \/login|Models:|available models/ { next }
     {
       for (i = 1; i <= NF; i++) {
-        if ($i ~ /[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:*-]+/ || $i ~ /^(claude|grok|gemini|deepseek)-/) {
+        if ($i ~ /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:*-]+$/) {
           print $i
-          exit
+          next
         }
+      }
+      if (NF >= 2 && $1 ~ /^[a-zA-Z0-9_.-]+$/ && $2 ~ /^[a-zA-Z0-9_.:*-]+$/) {
+        print $1 "/" $2
       }
     }
   '
@@ -207,10 +219,18 @@ resolve_model() {
     return 1
   fi
 
-  local pat ere candidate searched
+  local ids pat ere candidate searched
+  ids="$(echo "$list" | list_model_ids)"
+
+  # Exact preferred id first when present.
+  if [[ -n "$PREFERRED" ]] && echo "$ids" | grep -Fxq "$PREFERRED"; then
+    echo "$PREFERRED"
+    return 0
+  fi
+
   for pat in "${PATTERNS[@]}"; do
     ere="$(glob_to_ere "$pat")"
-    candidate="$(echo "$list" | grep -iE "$ere" | first_model_token || true)"
+    candidate="$(echo "$ids" | grep -iE "^${ere}$" | head -1 || true)"
     if [[ -n "$candidate" ]]; then
       echo "$candidate"
       return 0
@@ -219,7 +239,10 @@ resolve_model() {
     if echo "$searched" | grep -qiE 'No models available|Use /login'; then
       continue
     fi
-    candidate="$(echo "$searched" | first_model_token || true)"
+    candidate="$(echo "$searched" | list_model_ids | grep -iE "^${ere}$" | head -1 || true)"
+    if [[ -z "$candidate" ]]; then
+      candidate="$(echo "$searched" | list_model_ids | head -1 || true)"
+    fi
     if [[ -n "$candidate" ]]; then
       echo "$candidate"
       return 0

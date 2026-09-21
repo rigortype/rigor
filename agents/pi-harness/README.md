@@ -50,7 +50,7 @@ sets `--model` and scopes Ctrl+P via `--models`:
 ```bash
 ./agents/pi-harness/scripts/run-role.sh architect
 ISSUE=123 ./agents/pi-harness/scripts/run-role.sh lane
-MODEL=anthropic/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
+MODEL=claude-bridge/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
 DRY_RUN=1 ./agents/pi-harness/scripts/run-role.sh architect   # print argv only
 PRINT=1 ./agents/pi-harness/scripts/run-role.sh architect -nt "…"  # pi -p
 ```
@@ -59,16 +59,33 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
-| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
+| architect / orchestrator | `claude-bridge/claude-opus-5` | `anthropic/claude-opus-5`, `xai/grok-4.5`, `*opus*`, `grok*` |
 | lane | `deepseek/deepseek-flash` | `deepseek/*flash*` |
-| reviewer | `anthropic/claude-fable-5` | `*fable*`, then Opus/Grok-class |
+| reviewer | `claude-bridge/claude-fable-5` | `anthropic/*fable*`, then Opus/Grok-class |
 | docs | `google/gemini-3.8-flash` | `gemini-flash-latest`, `*gemini*flash*` |
+
+### Claude Max via [pi-claude-bridge](https://github.com/elidickinson/pi-claude-bridge)
+
+Rigor’s Claude Max subscription is preferred over Anthropic API keys for
+architect / reviewer / orchestrator:
+
+```bash
+# once per machine (global; not in this repo)
+pi install npm:pi-claude-bridge
+# ~/.pi/agent/claude-bridge.json — Max plan
+# { "provider": { "plan": "max" } }
+pi --list-models claude-bridge   # should list opus/fable/…
+```
+
+Requires `claude` CLI logged in. Models appear as `claude-bridge/claude-opus-5`
+etc. Do **not** leave `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` exported when
+using the bridge (they override the Claude Code child).
 
 If no provider is configured, the script **exits with `pi auth` / `/login`
 guidance** instead of silently using an unbound default.
 
-Auth cheatsheet: `ANTHROPIC_API_KEY` / Claude subscription, `XAI_API_KEY`,
-`DEEPSEEK_API_KEY`, `GEMINI_API_KEY`. Inspect: `pi --list-models`.
+Auth cheatsheet: Claude Max via bridge (preferred), else `ANTHROPIC_API_KEY`,
+`XAI_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`. Inspect: `pi --list-models`.
 
 ## v1 path (architect → lane)
 

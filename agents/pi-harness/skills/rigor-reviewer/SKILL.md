@@ -2,10 +2,9 @@
 name: rigor-reviewer
 description: >-
   Adversarial review of a Rigor draft PR against architect Acceptance.
-  Part of the triple Approved gate (Grok:max, Opus:high, Fable:medium).
-  Construct wrong-answer shapes; prefer counterexamples over green CI alone.
-  Read-only unless a separate fix step is entered. Never merge. Finish Approved
-  or Needs fix.
+  Orchestrator picks one available band (Grok:max / Opus:high / Fable:medium);
+  advanced engine work uses Fable alone or Grok+Opus. Never merge. Finish
+  Approved or Needs fix.
 ---
 
 # Rigor reviewer (ADR-115)
@@ -15,15 +14,19 @@ Load and follow:
 - Role: [`../../roles/reviewer.md`](../../roles/reviewer.md)
 - Contracts: [`../../contracts/README.md`](../../contracts/README.md)
 
-## Triple Approved gate
+## Approved gate (budget-aware)
 
-Orchestrators must run **all three** passes before treating a change as Approved:
+**Not unanimous.** Orchestrator selects reviewer(s):
 
-1. `rigor-reviewer-grok` — `xai/grok-4.6` + `thinking: max`
-2. `rigor-reviewer-opus` — `claude-bridge/claude-opus-5` + `thinking: high`
-3. `rigor-reviewer` — `claude-bridge/claude-fable-5` + `thinking: medium`
+1. **Default:** one of `rigor-reviewer-grok` (`thinking: max`),
+   `rigor-reviewer-opus` (`thinking: high`), or `rigor-reviewer`
+   (`thinking: medium`) — whichever is available and not rate-limited.
+2. **Advanced / high-risk engine:** `rigor-reviewer` (Fable) **or** both
+   Grok + Opus (`Approved` from each).
 
-Unanimous `Approved` only. Any `Needs fix` blocks and feeds the fix loop.
+On Claude quota pressure: prefer Grok (or skip Opus/Fable) rather than stalling.
+claude-bridge does not expose a pollable usage-% API; fall back on live
+rate-limit / 429 failures.
 
 ## Hard constraints (always)
 

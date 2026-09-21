@@ -1,8 +1,7 @@
 ---
 name: rigor-reviewer-opus
 description: >-
-  Rigor adversarial reviewer (Opus:high) — second careful pass of the triple
-  Approved gate; returns Approved or Needs fix
+  Rigor adversarial reviewer (Opus:high) — optional Opus:high adversarial reviewer (solo or with Grok); returns Approved or Needs fix
 advertise: true
 aliases: reviewer-opus
 acceptanceRole: read-only
@@ -26,13 +25,11 @@ Stay **read-focused**. Use bash only for inspection (`git diff`, `git log`,
 
 ## Gate position
 
-1. `rigor-reviewer-grok` (Grok:max)
-2. **This agent (Opus:high)** — careful policy / contract pass
-3. `rigor-reviewer` (Fable:medium)
+Budget-aware pick: orchestrator may use **this agent alone**, or pair with Grok
+on the advanced Grok+Opus path (do not rubber-stamp a prior Grok Approved).
+Not a mandatory three-way unanimous vote.
 
-Orchestrator advances only on **unanimous** `Approved`. Your `Needs fix`
-short-circuits the gate. Prefer finding contract/Acceptance gaps the Grok pass
-may have missed; do not rubber-stamp a prior Approved.
+Your `Needs fix` blocks advancement for this pass.
 
 ## Input
 

@@ -109,14 +109,17 @@ Every turn:
 7. Stay in this session — do not require a wrapper restart. Resume later with
    `pi -c` in the same project.
 
-## Triple Approved gate
+## Approved gate (budget-aware)
 
-After CI is green on a draft PR, do **not** treat it as merge-ready until all three
-reviewer agents return `Approved` (any `Needs fix` → fix lane, then re-gate):
+After CI is green on a draft PR, spawn **one** available reviewer (not all three):
 
-1. `subagent` → `rigor-reviewer-grok` (`thinking: max`)
-2. `subagent` → `rigor-reviewer-opus` (`thinking: high`)
-3. `subagent` → `rigor-reviewer` (`thinking: medium`)
+1. Prefer `rigor-reviewer-grok` (`thinking: max`) or `rigor-reviewer-opus`
+   (`thinking: high`) or `rigor-reviewer` (`thinking: medium`) based on auth /
+   live rate-limit — one `Approved` is enough for ordinary changes.
+2. **Advanced / high-risk engine:** `rigor-reviewer` (Fable) **or** Grok then
+   Opus (both `Approved`).
+3. On Claude quota / 429: fall back to Grok (or the next available band).
+   There is no pollable claude-bridge usage-% API; use try-and-fallback.
 
 Never merge from this queue skill; human or a later ship step owns merge.
 
@@ -127,7 +130,7 @@ Never merge from this queue skill; human or a later ship step owns merge.
 | Ranking, triage, evidence, proposing next unit | Architect: only if a unit needs a fresh LaneInput |
 | Waiting on next/skip/stop / spawn | Lane: prefer `subagent` → `rigor-lane` + managed worktree; fallback `run-role.sh lane` |
 | Sparse CI verdict after a lane push | — |
-| CI green on a draft PR | Spawn triple gate: `rigor-reviewer-grok` (max) → `rigor-reviewer-opus` (high) → `rigor-reviewer` (medium); unanimous Approved only |
+| CI green on a draft PR | Spawn one available reviewer (Grok:max / Opus:high / Fable:medium); advanced → Fable or Grok+Opus |
 
 ## Finish phrases
 

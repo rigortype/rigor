@@ -2,10 +2,11 @@
 
 module Rigor
   module Hashing
-    # Pure-Ruby XXH3-64 (seed 0, default secret) — the content hash behind the `rigor lens` anchors of
-    # ADR-113 WD6. A port of the upstream xxHash scalar path (`xxhash.h`'s `XXH3_64bits` with
-    # `XXH3_kSecret`), pinned by the upstream sanity-check vectors and cross-checked against lisplens's
-    # `xxhash-rust` output; see `spec/rigor/hashing/xxh3_spec.rb`.
+    # Pure-Ruby XXH3-64 (seed 0, default secret) — the content hash for the `rigor lens` anchors of
+    # ADR-113 WD6, landed ahead of `rigor lens` itself (#1083). A port of the upstream xxHash scalar
+    # path (`xxhash.h`'s `XXH3_64bits` with `XXH3_kSecret`), pinned by the upstream sanity-check
+    # vectors and cross-checked against lisplens's `xxhash-rust` output; see
+    # `spec/rigor/hashing/xxh3_spec.rb`.
     #
     # Pure Ruby per ADR-31: a native `xxhash` gem is a supply-chain addition to hash a few hundred
     # bytes per call. Only the seedless/default-secret variant is implemented — the `rigor lens`

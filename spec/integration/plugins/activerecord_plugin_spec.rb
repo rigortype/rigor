@@ -2484,6 +2484,114 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(undefined).to be_empty
       end
     end
+
+    describe "enum-backed column readers (#1089)" do
+      # An enum-backed column reads as its KEY (`"active"`), not its SQL storage type (`0`): Rails returns
+      # the configured key as a String from the reader regardless of the column's type. The fixture carries
+      # BOTH an integer-backed (`status` on `t.integer`) and a string-backed (`visibility` on `t.string`)
+      # enum. The writer / `where(status:)` side is out of scope from the issue and untouched here.
+      # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+      ENUM_READER_SCHEMA = <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "posts", force: :cascade do |t|
+            t.integer "status", default: 0
+            t.string "visibility", default: "public"
+          end
+        end
+      SCHEMA
+
+      ENUM_READER_MODELS = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/post.rb" => <<~RUBY
+          class Post < ApplicationRecord
+            enum status: { active: 0, archived: 1 }
+            enum :visibility, [:public, :unlisted, :private]
+          end
+        RUBY
+      }.freeze
+      # rubocop:enable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
+
+      it "narrows a written-receiver read to the enum key union, not the storage type" do
+        _result, index = run_ar_with_index("x = 1\n", models: ENUM_READER_MODELS, schema: ENUM_READER_SCHEMA)
+
+        status = column_contribution(index: index, source: "post.status", receiver_class: "Post")
+        expect(status).to eq(
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of("active"),
+            Rigor::Type::Combinator.constant_of("archived")
+          )
+        )
+
+        visibility = column_contribution(index: index, source: "post.visibility", receiver_class: "Post")
+        expect(visibility).to eq(
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of("public"),
+            Rigor::Type::Combinator.constant_of("unlisted"),
+            Rigor::Type::Combinator.constant_of("private")
+          )
+        )
+      end
+
+      it "draws no diagnostic on `user.status.upcase` for either enum backend" do
+        result = run_ar(
+          "post = Post.find(1)\npost.status.upcase\npost.visibility.upcase\n",
+          schema: ENUM_READER_SCHEMA, models: ENUM_READER_MODELS
+        )
+        fired = result.diagnostics.select do |d|
+          d.path.end_with?("demo.rb") && %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+        end
+        expect(fired).to be_empty
+      end
+
+      it "types `user.status + 1` as String, not Integer (the storage narrowing must not survive)" do
+        # The issue's other half: with the old storage-type narrowing, `user.status + 1` typed Integer and
+        # passed `check` silently while failing at runtime. Post-fix the key union dispatches `+` to
+        # `String#+`, so the expression types String — the reader no longer claims `Integer`.
+        #
+        # `call.argument-type-mismatch` is deliberately NIL-ONLY across the engine (coerce-safety;
+        # spec/rigor/analysis/check_rules/nil_argument_mismatch_spec.rb — a non-nil receiver may be valid
+        # via coerce, so the rule is restricted to nil arguments), so `user.status + 1` itself cannot fire
+        # a check diagnostic on any String-family receiver — nor did `Integer + 1` before the fix (same
+        # nil-only rule). #1089's observable contract is the TYPE: the written-receiver read is a String
+        # key, never the storage Integer.
+        result = run_ar(
+          "post = Post.find(1)\nRigor.dump_type(post.status + 1)\n",
+          schema: ENUM_READER_SCHEMA, models: ENUM_READER_MODELS
+        )
+        dumped = result.diagnostics
+                       .select { |d| d.qualified_rule == "dump.type" }
+                       .map { |d| d.message.sub("dump_type: ", "") }
+        expect(dumped).to eq(["String"])
+      end
+
+      it "keeps the `column?` predicate at bool for an enum column" do
+        _result, index = run_ar_with_index("x = 1\n", models: ENUM_READER_MODELS, schema: ENUM_READER_SCHEMA)
+        type = column_contribution(index: index, source: "post.status?", receiver_class: "Post")
+        expect(type).to eq(bool_union)
+      end
+
+      it "keeps the implicit-self enum reader at Dynamic[top] (#963's measured lane)" do
+        # The bare, receiver-less read inside the model's own `def` must stay the #963 answer — `untyped`
+        # (`Dynamic[top]`) — even though the written-receiver read now narrows to the key union. The 57
+        # measured mastodon false positives came from narrowing THAT spelling (`.compact` on a guard fold,
+        # always-truthy predicates), not from the reader's existence.
+        _result, index = run_ar_with_index("x = 1\n", models: ENUM_READER_MODELS, schema: ENUM_READER_SCHEMA)
+        plugin = Rigor::Plugin::Activerecord.allocate
+        plugin.instance_variable_set(:@model_index, index)
+
+        call_node = Prism.parse("status").value.statements.body.first
+        scope = Object.new
+        scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.nominal_of("Post") }
+        scope.define_singleton_method(:environment) { nil }
+        scope.define_singleton_method(:discovered_method_through_ancestors?) { |_c, _m, _k| false }
+        type = plugin.dynamic_return_type(
+          call_node: call_node, scope: scope,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+
+        expect(type).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
   end
 
   describe "declarations inside a `with_options` block" do

@@ -1,12 +1,11 @@
 ---
 name: rigor-queue-survey
 description: >-
-  Interactive continuable rigor-survey coverage queue. Use when the user asks
-  to collect coverage holes and work them sequentially (e.g. 「rigor-survey
-  カバレッジの穴を収集して順次着手して」, "survey coverage queue", "fill survey
-  holes"). Prefer filing/linking Issues, propose exactly one unit per turn,
-  wait for next/do #N/skip/stop. Survey targets under measurement need disjoint
-  checkouts — never share a measuring target across agents.
+  Collect rigor-survey coverage holes and work them sequentially in an
+  interactive pi session (/queue-survey). USE FOR: 「カバレッジの穴を収集」,
+  「順次着手」, survey coverage queue, fill survey holes, rigor-survey gaps.
+  DO NOT USE FOR: parallel measurement on a shared survey checkout, release
+  pre-clear (use rigor-queue-release), or cutting a gem release.
 ---
 
 # Rigor queue — survey coverage

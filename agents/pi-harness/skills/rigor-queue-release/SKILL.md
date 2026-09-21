@@ -1,13 +1,12 @@
 ---
 name: rigor-queue-release
 description: >-
-  Interactive continuable release pre-clear queue for Rigor. Use when the user
-  asks to clear tasks before a cut (e.g. 「vX.Y.Z リリース前に対処した方がいいタスクを解消して」,
-  "release pre-clear", "before v1.2.3 merge these blockers"). Rank Issues by
-  merge value, propose exactly one unit per turn, wait for next/do #N/skip/stop.
-  Target version wording is context only — never seal changelog, bump VERSION,
-  open release/x.y.z, or run /rigor-release-prep unless the user explicitly
-  invoked release-prep.
+  Rank and clear merge-worthy Issues before a Rigor cut, one unit per turn,
+  in an interactive pi session (/queue-release). USE FOR: 「リリース前に対処」,
+  "before vX.Y.Z", release pre-clear, merge blockers before cut, next/skip/stop
+  queue. DO NOT USE FOR: cutting a release, /rigor-release-prep, VERSION bump,
+  sealing CHANGELOG, opening release/x.y.z, one-shot architect→lane, or survey
+  coverage holes (use rigor-queue-survey).
 ---
 
 # Rigor queue — release pre-clear

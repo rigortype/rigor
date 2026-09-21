@@ -64,6 +64,12 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.12.0, 2026-09-19 (#1089) — a written-receiver read of an enum-backed column returns the enum's
+        # KEY type (the key String constants, or `String` for an empty key list) instead of the column's
+        # SQL storage type. No producer payload changed shape, but the version is the cache key a project
+        # sees and this changes which calls the plugin claims at the written-receiver spelling — a warm
+        # run must not serve the pre-change stream (the same call the 0.11.0 bump records).
+        #
         # 0.11.0, 2026-09-17 (#963 item 2) — an implicit-self read of a column / association / `column?`
         # predicate inside the model's own `def` is answered `untyped` instead of reaching no path, so the
         # engine's own-method veto sees the member and a same-named top-level `def` stops binding ahead of
@@ -107,7 +113,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.11.0",
+        version: "0.12.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -697,10 +703,37 @@ module Rigor
         return nil if column.nil?
         return bool_type if predicate
 
+        # #1089 — an enum-backed column reads as its KEY (`"active"`), not its SQL storage type
+        # (`Integer` for a `t.integer :status` column). Rails returns the configured key as a String from
+        # the reader (`user.status # => "active"`), so typing it by `column.ruby_type` makes a correct
+        # `user.status.upcase` fire `call.undefined-method` on Integer and lets a wrong `user.status + 1`
+        # pass. The writer / `where(status:)` side is out of scope and untouched — it accepts both keys
+        # and values.
+        return enum_key_type(entry, column_name) if entry.enum?(column_name)
+
         inner = ruby_type_to_type(column.ruby_type)
         return Rigor::Type::Combinator.untyped if inner.nil?
 
         column.array? ? Rigor::Type::Combinator.nominal_of("Array", type_args: [inner]) : inner
+      end
+
+      # The KEY type of an enum-backed column. {ModelIndex} only records an enum when every key is a
+      # static Symbol literal — `parse_enum_call` declines a non-literal values expression outright — so
+      # a column in `entry.enums` carries a COMPLETE key set by construction, and the union of the key
+      # String constants is exact for the declared enum rather than the wider `String`. The empty-list
+      # guard (`enum :status, []` parses) falls back to `String`.
+      #
+      # Nullability follows `#column_return_type`'s other-column convention: non-nullable, so
+      # `user.status.upcase` does not light up `possible-nil-receiver` — Rails code calls enum readers
+      # directly as a matter of course, and the same under-report-the-nil trade the parent doc makes
+      # applies.
+      def enum_key_type(entry, column_name)
+        keys = entry.enum_values(column_name)
+        return Rigor::Type::Combinator.nominal_of("String") if keys.empty?
+
+        Rigor::Type::Combinator.union(
+          *keys.map { |key| Rigor::Type::Combinator.constant_of(key.to_s) }
+        )
       end
 
       # Maps a `SchemaTable::Column#ruby_type` string to a Rigor type. `"Object"` (json / jsonb / a

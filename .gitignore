@@ -30,3 +30,9 @@
 !/.claude/
 /.claude/*
 !/.claude/skills/
+
+# TAKT local trial artifacts
+.takt/runs/
+.takt/tasks/
+.takt/tasks.yaml
+.takt/events/

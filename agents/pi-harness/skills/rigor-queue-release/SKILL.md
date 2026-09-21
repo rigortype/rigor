@@ -76,7 +76,7 @@ Every turn:
    })
    ```
 
-   Optional: pass `model: "deepseek/deepseek-flash"` (or another resolved id)
+   Optional: pass `model: "opencode-go/deepseek-v4.1-flash"` (or another resolved Flash-class id)
    on the outer call / child if the agent frontmatter model does not resolve
    for the user's providers. Pin via `MODEL=` / `subagents.agentOverrides`
    when unsure.
@@ -109,6 +109,35 @@ Every turn:
 7. Stay in this session — do not require a wrapper restart. Resume later with
    `pi -c` in the same project.
 
+
+## Shared lane traps (feed into LaneInput / spawn)
+
+From `docs/notes/20260921-queue-release-lane-experience.md` (when on branch):
+
+- Pin Flash registry id on spawn (`opencode-go/deepseek-v4.1-flash` or current).
+- Child ~30m is enough for code, **not** for dual-project corpus `check` twice —
+  tell lanes to skip full corpus; collect counts in PR body / residual, or run
+  measurement out-of-band.
+- Remind `--body-file` for any `gh pr/issue create` (parent and children).
+- Worktree bundle: main `vendor/bundle` via untracked `.bundle/config`.
+- Prefer change-named PR branches; changelog after PR number.
+
+## Approved gate
+
+After CI is green on a draft PR:
+
+1. **Default:** spawn `rigor-reviewer-grok` (`thinking: max`). One `Approved` is enough.
+2. **Complex implementation:** also spawn `rigor-reviewer-opus` (`thinking: high`);
+   both must `Approved`.
+3. **Complex design:** spawn `rigor-reviewer` (Fable:medium) — reserve for
+   architecture / API / inference-shape; do not use on routine tidies.
+4. No pollable claude-bridge usage % — do not wait for one.
+5. On `Approved`, require `pr_body_draft` + `pr_comment_drafts` from the
+   final reviewer. Apply / post them (or hand to human) before treating the
+   PR as merge-ready — Approved without matching PR text is incomplete.
+
+Never merge from this queue skill; human or a later ship step owns merge.
+
 ## When to call architect / lane vs stay here
 
 | Stay in this session | Hand off |
@@ -116,6 +145,7 @@ Every turn:
 | Ranking, triage, evidence, proposing next unit | Architect: only if a unit needs a fresh LaneInput |
 | Waiting on next/skip/stop / spawn | Lane: prefer `subagent` → `rigor-lane` + managed worktree; fallback `run-role.sh lane` |
 | Sparse CI verdict after a lane push | — |
+| CI green on a draft PR | Default `rigor-reviewer-grok`; +Opus if complex; Fable only for complex design |
 
 ## Finish phrases
 

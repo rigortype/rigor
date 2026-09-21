@@ -155,6 +155,7 @@ comparison) appears nowhere else in this index.
 | 2026-07-19 | [Website showcase — "this gets a type?!" inference examples (core + plugins)](20260719-website-showcase-inference-examples.md) |
 | 2026-09-08 | [PR #788 was merged under a stop instruction — Draft-discipline postmortem](20260908-pr-788-draft-discipline-postmortem.md) |
 | 2026-09-09 | [ADR corpus audit — buried work, implementation drift, and obsolescence](20260909-adr-corpus-audit.md) |
+| 2026-09-21 | [v0.4.0 pre-clear batch — four lane implementation notes (#1011, #1130, #1071, #1089)](20260921-queue-release-lane-experience.md) |
 
 ## Adding a note
 

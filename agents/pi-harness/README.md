@@ -37,7 +37,7 @@ slash prompts as `/architect`, `/lane`, `/reviewer`, `/docs`,
 | --- | --- | --- | --- |
 | `architect` | Opus / Grok | `rigor-architect` | Direction, contracts, planning |
 | `lane` | DeepSeek Flash | `rigor-lane` | Worktree imitation; push head SHA and stop |
-| `reviewer` | Fable (or Opus/Grok-class) | `rigor-reviewer` | Adversarial review of engine changes |
+| `reviewer` | default Grok:max; +Opus if complex; Fable for design | `rigor-reviewer-grok` / `-opus` / `rigor-reviewer` | Adversarial Approved with Fable reserved |
 | `docs` | Gemini Flash | `rigor-docs` | JA publish + EN docs finish; docs-only |
 | `orchestrator` | Opus / Grok-class | `rigor-orchestrator` | Issue selection, CI watch, merge judgment |
 | queue (release) | Opus / claude-bridge opus / Grok | `rigor-queue-release` | Interactive pre-clear before a cut (`/queue-release`) |
@@ -63,9 +63,9 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
-| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
-| lane | `deepseek/deepseek-flash` | `deepseek/*flash*` |
-| reviewer | `anthropic/claude-fable-5` | `*fable*`, then Opus/Grok-class |
+| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.7`, `xai/grok-4.6`, `*opus*`, `grok*` |
+| lane | `opencode-go/deepseek-v4.1-flash` | `opencode-go/*deepseek*flash*`, `opencode/*deepseek*flash*`, `*deepseek*flash*` |
+| reviewer | default Grok:max; +Opus if complex; Fable reserved | `xai/grok-4.7`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
 
 If no provider is configured, the script **exits with `pi auth` / `/login`
@@ -108,7 +108,7 @@ that session and drive the turn protocol with `next` / `do #N` / `skip` / `stop`
 
 Requires project package `npm:pi-subagents` in [`.pi/settings.json`](../../.pi/settings.json)
 alongside `../agents/pi-harness`. Custom agents live in
-[`.pi/agents/`](../../.pi/agents/) (`rigor-lane.md`, `rigor-reviewer.md`).
+[`.pi/agents/`](../../.pi/agents/) (`rigor-lane.md`, `rigor-reviewer-grok.md`, `rigor-reviewer-opus.md`, `rigor-reviewer.md`).
 
 After ranking in a `/queue-release` or `/queue-survey` session, say `spawn` /
 `spawn N` / `全部やれ` / `parallel` (or `next` / `do #N` for one unit) and the
@@ -142,10 +142,11 @@ subagent({
 - Source checkout must be **clean** before managed worktree fanout (excluding
   `.pi/subagents/` runtime state). Isolation is rejected for a dirty tree.
 - Do **not** auto-merge worktree patches into master without a human.
-- Lane model default is `deepseek/deepseek-flash`; reviewer prefers
-  `claude-bridge/claude-fable-5`. If those ids do not resolve for your
-  providers, pin with `MODEL=` on `run-role.sh`, pass `model:` on the
-  `subagent` / child launch, or set `subagents.agentOverrides` in Pi settings.
+- Lane model default is `opencode-go/deepseek-v4.1-flash` with `thinking: high`.
+  Approved: default Grok:max; add Opus:high when complex; reserve Fable:medium
+  for complex design. Final Approve must include a PR body revision draft and
+  suggested PR comments so claims match the diff. No live Claude usage poll. Pin ids with `MODEL=` /
+  launch `model:` / `subagents.agentOverrides` if needed.
 - **Survey:** a managed worktree of *rigor* does **not** satisfy exclusivity of
   `~/repo/ruby/rigor-survey/<project>` — still assign disjoint survey checkouts.
 
@@ -213,7 +214,7 @@ agents/pi-harness/
   scripts/run-queue.sh  # optional; prefer pi → /queue-…
 
 .pi/settings.json       # packages: ../agents/pi-harness, npm:pi-subagents
-.pi/agents/*.md         # project subagents (rigor-lane, rigor-reviewer)
+.pi/agents/*.md         # project subagents (rigor-lane, rigor-reviewer{-grok,-opus})
 ```
 
 
@@ -222,9 +223,9 @@ agents/pi-harness/
 
 | Provider package | Auth | Used for |
 | --- | --- | --- |
-| [`pi-claude-bridge`](https://github.com/elidickinson/pi-claude-bridge) | Claude Code login (`claude` CLI) + `~/.pi/agent/claude-bridge.json` `"plan": "max"` | architect / orchestrator / reviewer (Opus, Fable) |
+| [`pi-claude-bridge`](https://github.com/elidickinson/pi-claude-bridge) | Claude Code login (`claude` CLI) + `~/.pi/agent/claude-bridge.json` `"plan": "max"` | architect / orchestrator / Opus+Fable review passes |
 | [`pi-antigravity`](https://pi.dev/packages/pi-antigravity) | `/login antigravity` (Google OAuth) | docs (Gemini Flash); optional Flash research |
-| OpenCode / API keys | provider-specific | lane DeepSeek Flash; fallbacks |
+| OpenCode Go | OpenCode Go subscription / auth | lane Flash-class (`opencode-go/deepseek-v4.1-flash`) |
 
 Install (global, once per machine):
 
@@ -244,12 +245,12 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 | Role / agent | Band | Prefer | Criterion (why this band) | Never |
 | --- | --- | --- | --- | --- |
 | `architect` / orchestrator queue parent | Opus / Grok | `claude-bridge/claude-opus-5` | Sets direction, contracts, merge judgment; cheap models thrash policy (ADR-115) | DeepSeek / Gemini as architect |
-| `rigor-lane` / `/lane` | DeepSeek Flash | `deepseek/deepseek-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
-| `rigor-reviewer` / `/reviewer` | Fable (else Opus) | `claude-bridge/claude-fable-5` | Adversarial engine review; wrong-answer shapes | Gemini for engine review |
+| `rigor-lane` / `/lane` | DeepSeek Flash | `opencode-go/deepseek-v4.1-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
+| `rigor-reviewer-grok` (+`-opus` / Fable) | Grok / Opus / Fable | `xai/grok-4.7:max` default; Opus:high if complex; Fable:medium for design | Complexity-routed Approved; Fable reserved | Gemini for engine review; burning Fable on tidies |
 | `rigor-docs` / `/docs` | Gemini Flash | `antigravity/gemini-3.8-flash` | JA/EN docs quality on Google AI Pro; docs-only | Engine edits |
 | queue release/survey parent | Opus-class | same as architect | Ranking + spawn decisions are policy | Letting Flash rank the backlog alone |
 
-**Subagent fan-out rule:** parent (queue) stays Opus-class; children inherit the agent file `model:` (`rigor-lane` → DeepSeek, `rigor-reviewer` → Fable, `rigor-docs` → Antigravity Gemini). Override with launch `model:` only when the user asks.
+**Subagent fan-out rule:** parent (queue) stays Opus-class; children inherit the agent file `model:` (`rigor-lane` → DeepSeek Flash `thinking: high`; reviewers → Grok:max default; +Opus if complex; Fable reserved for design; `rigor-docs` → Antigravity Gemini). Override with launch `model:` only when the user asks.
 
 **Override:** `MODEL=… ./agents/pi-harness/scripts/run-role.sh <role>` or `subagents.agentOverrides` in Pi settings.
 
@@ -258,6 +259,10 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 - No full in-tree orchestrator yet; **takt is optional**.
 - No parallel full-suite `make verify` on the host.
 - Lanes do not own long-lived CI watchers / sleep loops.
+- Lane preflight (bundle path, `--body-file`, change-named branch, no in-session
+  full corpus): see `skills/rigor-lane/SKILL.md` and
+  `scripts/worktree-bundle-config.sh`. Batch write-up:
+  `docs/notes/20260921-queue-release-lane-experience.md`.
 - Issues remain the backlog (ADR-98).
 - Docs (C) flow waits until architect→lane works once; survey queue is available via `/queue-survey`.
 - mise stays runtimes-only (ADR-115 WD5).

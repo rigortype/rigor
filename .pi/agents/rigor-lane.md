@@ -6,8 +6,8 @@ description: >-
 advertise: true
 aliases: lane, rigor-worker
 acceptanceRole: writer
-model: deepseek/deepseek-flash
-thinking: medium
+model: opencode-go/deepseek-v4.1-flash
+thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
@@ -31,10 +31,21 @@ Expect a `LaneInput` (or equivalent) covering:
 
 - `issue`, `acceptance`, `touch`, `must_not`
 - worktree / branch assignment when not using managed worktrees
-- `model_band: deepseek-flash-class` (do not self-promote to Opus/Grok)
+- `model_band: deepseek-flash-class` → registry id `opencode-go/deepseek-v4.1-flash` (do not self-promote to Opus/Grok)
 
 If the task is incomplete or acceptance is uncheckable, escalate via
 `contact_supervisor` with `reason: "need_decision"` (or report `Blocked — need human`).
+
+
+## Preflight (v0.4.0 batch lessons)
+
+1. Bundle: untracked `.bundle/config` with `BUNDLE_PATH` → main checkout `vendor/bundle`.
+2. Branch: create `<change-slug>-<issue>` locally before push (not `pi-subagents/…`).
+3. `gh` bodies: `--body-file` only (no backtick heredocs).
+4. Read `gh issue view N --comments` before trusting LaneInput known-causes.
+5. No full mastodon/redmine corpus loops here — escalate / note residual; parent owns budget.
+6. Changelog fragment after the PR number exists.
+7. Escalate contradictions; do not silent-extend scope.
 
 ## Output
 

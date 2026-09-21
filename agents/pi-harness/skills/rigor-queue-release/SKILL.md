@@ -76,7 +76,7 @@ Every turn:
    })
    ```
 
-   Optional: pass `model: "opencode/deepseek-v4.1-flash"` (or another resolved Flash-class id)
+   Optional: pass `model: "opencode-go/deepseek-v4.1-flash"` (or another resolved Flash-class id)
    on the outer call / child if the agent frontmatter model does not resolve
    for the user's providers. Pin via `MODEL=` / `subagents.agentOverrides`
    when unsure.

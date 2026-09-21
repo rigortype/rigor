@@ -28,8 +28,8 @@ Model defaults (patterns; first match from `pi --list-models` wins):
     patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
     preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.5
   lane
-    patterns: opencode/deepseek-v4.1-flash  opencode/*deepseek*flash*  opencode-go/*deepseek*flash*  *deepseek*flash*
-    preferred ids: opencode/deepseek-v4.1-flash
+    patterns: opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
+    preferred ids: opencode-go/deepseek-v4.1-flash
   reviewer
     patterns: claude-bridge/*fable*  anthropic/*fable*  *fable*  *opus*  grok*
     preferred: claude-bridge/claude-fable-5 (Fable); else Opus/Grok-class
@@ -95,21 +95,21 @@ case "$ROLE" in
     CYCLE="claude-bridge/*opus*,*opus*,grok*,anthropic/claude-opus*,xai/grok*"
     ;;
   lane)
-    # OpenCode Flash-class (registry). Prefer latest v4.1; deepseek/deepseek-flash is not listed.
-    PREFERRED="opencode/deepseek-v4.1-flash"
+    # OpenCode Go Flash-class (subscription). Prefer latest v4.1; deepseek/deepseek-flash is not listed.
+    PREFERRED="opencode-go/deepseek-v4.1-flash"
     PATTERNS=(
-      "opencode/deepseek-v4.1-flash"
-      "opencode/deepseek-v4-flash"
       "opencode-go/deepseek-v4.1-flash"
       "opencode-go/deepseek-v4-flash"
-      "opencode/*deepseek*flash*"
+      "opencode/deepseek-v4.1-flash"
+      "opencode/deepseek-v4-flash"
       "opencode-go/*deepseek*flash*"
+      "opencode/*deepseek*flash*"
       "deepseek-v4.1-flash"
       "deepseek-v4-flash"
       "deepseek/*flash*"
       "deepseek-flash"
     )
-    CYCLE="opencode/*deepseek*flash*,opencode-go/*deepseek*flash*,*deepseek*flash*"
+    CYCLE="opencode-go/*deepseek*flash*,opencode/*deepseek*flash*,*deepseek*flash*"
     ;;
   reviewer)
     PREFERRED="claude-bridge/claude-fable-5"

@@ -633,9 +633,9 @@ module Rigor
                                  method_assign_effects, singleton_cref)
           return
         when Prism::SingletonClassNode
-          # The cref inside a `class <<` body is an unnameable singleton class — the
-          # marker lifts only at a `::`-rooted class/module header.
-          singleton_cref = true
+          return walk_singleton_class_ivars(node, qualified_prefix, default_scope, accumulator,
+                                            mutated_ivars, read_before_write, init_writes,
+                                            method_assign_effects, singleton_cref)
         when Prism::DefNode
           collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator,
                                   mutated_ivars, read_before_write, init_writes, method_assign_effects)
@@ -654,6 +654,22 @@ module Rigor
                            mutated_ivars, read_before_write, init_writes, method_assign_effects,
                            singleton_cref: singleton_cref)
         end
+      end
+
+      # The `class <<` arm of {#walk_class_ivars}: the expression evaluates in the enclosing
+      # cref — `class << (class D; self; end)` still names `C::D` — while the body's cref is
+      # the unnameable singleton class; the marker lifts only at a `::`-rooted header.
+      def walk_singleton_class_ivars(node, qualified_prefix, default_scope, accumulator, # rubocop:disable Metrics/ParameterLists
+                                     mutated_ivars, read_before_write, init_writes,
+                                     method_assign_effects, singleton_cref)
+        walk_class_ivars(node.expression, qualified_prefix, default_scope, accumulator,
+                         mutated_ivars, read_before_write, init_writes, method_assign_effects,
+                         singleton_cref: singleton_cref)
+        return unless node.body
+
+        walk_class_ivars(node.body, qualified_prefix, default_scope, accumulator,
+                         mutated_ivars, read_before_write, init_writes, method_assign_effects,
+                         singleton_cref: true)
       end
 
       # The declaration arm of {#walk_class_ivars}. Class-body level `@x = nil` writes don't
@@ -1128,13 +1144,20 @@ module Rigor
           end
           return acc
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          return collect_singleton_method_defs(root, prefix, acc, singleton_cref)
         when Prism::DefNode
           (acc[prefix.join("::")] ||= {})[root.name] = root unless prefix.empty? || root.receiver
           return acc
         end
 
         root.rigor_each_child { |c| collect_class_method_defs(c, prefix, acc, singleton_cref: singleton_cref) }
+        acc
+      end
+
+      def collect_singleton_method_defs(root, prefix, acc, singleton_cref)
+        collect_class_method_defs(root.expression, prefix, acc, singleton_cref: singleton_cref)
+        collect_class_method_defs(root.body, prefix, acc, singleton_cref: true) if root.body
         acc
       end
 
@@ -1448,9 +1471,15 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          # The cref inside a `class <<` body is an unnameable singleton class — the
-          # marker lifts only at a `::`-rooted class/module header.
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is the
+          # unnameable singleton class — the marker lifts only at a `::`-rooted header.
+          walk_class_cvars(node.expression, qualified_prefix, default_scope, accumulator,
+                           singleton_cref: singleton_cref)
+          if node.body
+            walk_class_cvars(node.body, qualified_prefix, default_scope, accumulator,
+                             singleton_cref: true)
+          end
+          return
         when Prism::DefNode
           collect_def_cvar_writes(node, qualified_prefix, default_scope, accumulator)
           return
@@ -1565,9 +1594,10 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          # The cref inside a `class <<` body is an unnameable singleton class — the
-          # marker lifts only at a `::`-rooted class/module header.
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is the
+          # unnameable singleton class — the marker lifts only at a `::`-rooted header.
+          return walk_singleton_literal_mutations(node, qualified_prefix, census, nesting,
+                                                  singleton_cref)
         else
           record_literal_receiver_mutation(node, qualified_prefix, nesting, census)
         end
@@ -1576,6 +1606,15 @@ module Rigor
           walk_literal_receiver_mutations(child, qualified_prefix, census, nesting,
                                           singleton_cref: singleton_cref)
         end
+      end
+
+      def walk_singleton_literal_mutations(node, qualified_prefix, census, nesting, singleton_cref)
+        walk_literal_receiver_mutations(node.expression, qualified_prefix, census, nesting,
+                                        singleton_cref: singleton_cref)
+        return unless node.body
+
+        walk_literal_receiver_mutations(node.body, qualified_prefix, census, nesting,
+                                        singleton_cref: true)
       end
 
       # Two parameters because the two arms key on two DIFFERENT TABLES, not because the values differ:
@@ -1789,7 +1828,8 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          return walk_singleton_published_ivars(node, qualified_prefix, scope, table, singleton_cref)
         when Prism::DefNode
           # A `def self.…` body writes the singleton's ivars, which take no instance seed at all.
           return unless node.receiver.nil?
@@ -1801,6 +1841,15 @@ module Rigor
           walk_published_constant_ivars(child, qualified_prefix, scope, table,
                                         singleton_cref: singleton_cref)
         end
+      end
+
+      def walk_singleton_published_ivars(node, qualified_prefix, scope, table, singleton_cref)
+        walk_published_constant_ivars(node.expression, qualified_prefix, scope, table,
+                                      singleton_cref: singleton_cref)
+        return unless node.body
+
+        walk_published_constant_ivars(node.body, qualified_prefix, scope, table,
+                                      singleton_cref: true)
       end
 
       # The class-ivar accumulator (already seeded when this runs) is the pre-gate: an ivar whose seed is not
@@ -1828,13 +1877,20 @@ module Rigor
       SELF_REBINDING_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec].freeze
       private_constant :SELF_REBINDING_EVAL_CALLS
 
-      # …and the ones whose block `self` this walk cannot name. An `instance_eval` / `instance_exec` body
-      # evaluates on the RECEIVER OBJECT, which is a class or module only when the receiver happens to be one
-      # (`Klass.instance_eval { self::BAR = 1 }` defines `Klass::BAR`; `obj.instance_eval` raises `TypeError`),
-      # and a `define_method` body on the receiver at call time. A syntactic walk cannot tell those apart, so
-      # the write is declined — gradual for the legal case, and no guess for the rest.
-      OPAQUE_SELF_BLOCK_CALLS = %i[instance_eval instance_exec define_method].freeze
+      # …and the one whose block `self` this walk cannot name even when the receiver names a
+      # class: a `define_method` body runs on the receiver's INSTANCE at call time, an object
+      # nothing in the source names, so a `self::` write inside it is declined — gradual for
+      # the case where the instance is a class or module, and no guess for the rest.
+      OPAQUE_SELF_BLOCK_CALLS = %i[define_method].freeze
       private_constant :OPAQUE_SELF_BLOCK_CALLS
+
+      # `instance_eval` / `instance_exec` rebind `self` to the receiver exactly as `class_eval`
+      # does — `X.instance_eval { self::BAR = 1 }` writes `X::BAR` — but unlike `class_eval`
+      # they do NOT move the default definee: `def` inside still targets the lexical cref, so
+      # the def-owning walks must not treat them as eval blocks. The write census and mixin
+      # scans read only `self`-anchored facts, where the receiver semantics are identical.
+      RECEIVER_EVAL_CALLS = (SELF_REBINDING_EVAL_CALLS + %i[instance_eval instance_exec]).freeze
+      private_constant :RECEIVER_EVAL_CALLS
 
       # The sentinel for "`self` was rebound to something no class/module name reaches". A `self::BAR = …`
       # under it is DECLINED — the same answer a dynamic base takes, for the same reason.
@@ -1854,20 +1910,8 @@ module Rigor
           return walk_singleton_class_writes(node, qualified_prefix, default_scope, accumulator,
                                              self_owner, singleton_cref)
         when Prism::ClassNode, Prism::ModuleNode
-          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-          if child_prefix
-            # Under an unnameable cref the declaration pushes `#<singleton>::Name` — still
-            # unnameable — so the body keeps the OPAQUE self and the cref flag; only a
-            # `::`-rooted header re-anchors at a nameable cref.
-            child_cref = singleton_cref && !Source::ConstantPath.rooted?(node.constant_path)
-            child_self = child_cref ? OPAQUE_SELF : nil
-            if node.body
-              walk_constant_writes(node.body, child_prefix,
-                                   scope_entering_declaration(default_scope, node.constant_path),
-                                   accumulator, child_self, singleton_cref: child_cref)
-            end
-            return
-          end
+          return if walk_typed_declaration?(node, qualified_prefix, default_scope, accumulator,
+                                            singleton_cref)
         when Prism::ConstantWriteNode
           # A bare write under an unnameable cref — anywhere lexically below `class <<`,
           # including inside an eval or `Class.new` block, since `Module.nesting` never
@@ -1900,6 +1944,27 @@ module Rigor
 
         walk_constant_writes(node.body, qualified_prefix, default_scope, accumulator,
                              OPAQUE_SELF, singleton_cref: true)
+      end
+
+      # The class/module arm of {#walk_constant_writes}. Under an unnameable cref a
+      # non-rooted declaration pushes `#<singleton>::Name` — still unnameable — so the body
+      # keeps the OPAQUE self, the cref flag, and the ENCLOSING prefix: `child_prefix`'s
+      # `C::D` would seed `C::D::Foo` write candidates no program can produce, and the only
+      # nameable rungs below are the enclosing ones. A `::`-rooted header re-anchors at a
+      # nameable cref. Returns whether the declaration's body was walked.
+      def walk_typed_declaration?(node, qualified_prefix, default_scope, accumulator, singleton_cref)
+        child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+        return false unless child_prefix && node.body
+
+        child_cref = singleton_cref && !Source::ConstantPath.rooted?(node.constant_path)
+        child_scope = if child_cref
+                        default_scope
+                      else
+                        scope_entering_declaration(default_scope, node.constant_path)
+                      end
+        walk_constant_writes(node.body, child_cref ? qualified_prefix : child_prefix, child_scope,
+                             accumulator, child_cref ? OPAQUE_SELF : nil, singleton_cref: child_cref)
+        true
       end
 
       # The self a `self::`-anchored eval receiver resolves against, given the enclosing
@@ -1968,7 +2033,7 @@ module Rigor
         return nil unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
         return OPAQUE_SELF if OPAQUE_SELF_BLOCK_CALLS.include?(node.name)
         return meta_owner || OPAQUE_SELF if meta_new_constant_rvalue?(node)
-        return nil unless SELF_REBINDING_EVAL_CALLS.include?(node.name)
+        return nil unless RECEIVER_EVAL_CALLS.include?(node.name)
 
         eval_receiver_self(node.receiver, qualified_prefix, default_scope, self_prefix)
       end
@@ -2303,7 +2368,8 @@ module Rigor
           # prefix. `class << <non-constant>` opens a singleton the walk cannot name —
           # its body walks ownerless, keeping the singleton marker so `self::` receivers
           # still decline. The lexical cref below is unnameable in every case.
-          singleton_prefix = singleton_class_prefix(node, owner_prefix, qualified_prefix) || []
+          singleton_prefix = singleton_body_prefix(node, in_singleton_class, owner_prefix,
+                                                   qualified_prefix)
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref)
@@ -2460,6 +2526,16 @@ module Rigor
                                        source_path, nil, singleton_cref: singleton_cref)
           end
         end
+      end
+
+      # The prefix a `class <<` body's defs record under: the singleton of the class the
+      # expression names, or {EMPTY_PREFIX} when nothing names it — including `class << self`
+      # INSIDE a singleton body, where `self` is the singleton class and `class << self`
+      # opens the singleton's OWN singleton (`#<Class:#<Class:C>>`), which nothing names.
+      def singleton_body_prefix(node, in_singleton_class, self_prefix, lexical_prefix)
+        return EMPTY_PREFIX if in_singleton_class && node.expression.is_a?(Prism::SelfNode)
+
+        singleton_class_prefix(node, self_prefix, lexical_prefix) || EMPTY_PREFIX
       end
 
       # Resolves a `class << X` body's qualified prefix.
@@ -2922,8 +2998,8 @@ module Rigor
           # under an empty prefix so defs record a nil owner and never join another class's ordering
           # scan (containment still answers). Inside an eval body `class << self` opens the
           # RECEIVER's singleton, so the owner override supplies the base.
-          prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
-                                          qualified_prefix) || []
+          prefix = singleton_body_prefix(node, in_singleton_class,
+                                         def_owner_prefix || qualified_prefix, qualified_prefix)
           if node.body
             walk_deferred_body(node.body, prefix, true, inside_deferred, ranges,
                                nil, singleton_cref: true)
@@ -3213,7 +3289,7 @@ module Rigor
       # `module_function` toggle threads correctly across the body's *sibling* statements (a child-by-child recursion
       # would reset it). At the top level / inside an arbitrary node there is no `module_function` state to carry, so
       # descent is a plain per-child walk.
-      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator, # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator, # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
                                    def_owner_prefix = nil, singleton_cref: false)
         return unless node.is_a?(Prism::Node)
         if node.is_a?(Prism::CallNode) && eval_block_call?(node)
@@ -3238,8 +3314,9 @@ module Rigor
         when Prism::SingletonClassNode
           # `class << <non-constant>` opens a singleton the walk cannot name — its body
           # walks ownerless, keeping the singleton marker so `self::` receivers still decline.
-          singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
-                                                    qualified_prefix) || []
+          singleton_prefix = singleton_body_prefix(node, in_singleton_class,
+                                                   def_owner_prefix || qualified_prefix,
+                                                   qualified_prefix)
           walk_singleton_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                    accumulator, def_owner_prefix, singleton_cref: singleton_cref)
           if node.body
@@ -3367,7 +3444,10 @@ module Rigor
           end
           return
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          walk_def_nestings(node.expression, nesting, accumulator, singleton_cref: singleton_cref)
+          walk_def_nestings(node.body, nesting, accumulator, singleton_cref: true) if node.body
+          return
         when Prism::DefNode
           accumulator[node] = nesting unless nesting.nil?
           return
@@ -3520,13 +3600,25 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          return walk_singleton_superclasses(node, qualified_prefix, accumulator, source_path,
+                                             nesting, singleton_cref)
         end
 
         node.rigor_each_child do |child|
           walk_class_superclasses(child, qualified_prefix, accumulator, source_path, nesting,
                                   singleton_cref: singleton_cref)
         end
+      end
+
+      def walk_singleton_superclasses(node, qualified_prefix, accumulator, source_path, nesting,
+                                      singleton_cref)
+        walk_class_superclasses(node.expression, qualified_prefix, accumulator, source_path,
+                                nesting, singleton_cref: singleton_cref)
+        return unless node.body
+
+        walk_class_superclasses(node.body, qualified_prefix, accumulator, source_path,
+                                nesting, singleton_cref: true)
       end
 
       # One declaration's two ancestry facts: the as-written superclass name (classes only), and the
@@ -3750,7 +3842,9 @@ module Rigor
           return walk_layout_declaration(node, qualified_prefix, accumulator, singleton_cref,
                                          :data)
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          return walk_singleton_member_layouts(node, qualified_prefix, accumulator,
+                                               :walk_data_member_layouts, singleton_cref)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           # A meta-new constant write under an unnameable cref lands on the singleton's own
@@ -3815,7 +3909,9 @@ module Rigor
           return walk_layout_declaration(node, qualified_prefix, accumulator, singleton_cref,
                                          :struct)
         when Prism::SingletonClassNode
-          singleton_cref = true
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          return walk_singleton_member_layouts(node, qualified_prefix, accumulator,
+                                               :walk_struct_member_layouts, singleton_cref)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           # A meta-new constant write under an unnameable cref lands on the singleton's own
@@ -3828,6 +3924,15 @@ module Rigor
           walk_struct_member_layouts(child, qualified_prefix, accumulator,
                                      singleton_cref: singleton_cref)
         end
+      end
+
+      # The `class <<` arm shared by the two member-layout walks: the expression evaluates in
+      # the enclosing cref while the body's cref is the unnameable singleton class.
+      def walk_singleton_member_layouts(node, qualified_prefix, accumulator, walk, singleton_cref)
+        send(walk, node.expression, qualified_prefix, accumulator, singleton_cref: singleton_cref)
+        return unless node.body
+
+        send(walk, node.body, qualified_prefix, accumulator, singleton_cref: true)
       end
 
       # Records `qualified -> { members:, keyword_init: }` when `expr` is a `Struct.new(*Symbol [, keyword_init:
@@ -3898,13 +4003,15 @@ module Rigor
           # singleton body record nothing, which is what `extends` is for — and since #915 the extend walk
           # does take them, so the form is recorded rather than dropped. `self` inside is
           # the singleton — a `self::` receiver below raises NameError at runtime, so it
-          # declines rather than resolving against the enclosing class.
-          current_class = nil
-          singleton_self = true
-          singleton_cref = true
+          # declines rather than resolving against the enclosing class. The `class <<`
+          # EXPRESSION itself evaluates in the enclosing context, so it walks without
+          # either marker.
+          return walk_singleton_class_includes(node, qualified_prefix, current_class, accumulator,
+                                               singleton_self, singleton_cref)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
-          return if walk_includes_meta_new?(node, qualified_prefix, accumulator, singleton_cref)
+          return if walk_includes_meta_new?(node, qualified_prefix, current_class, accumulator,
+                                            singleton_self, singleton_cref)
         when Prism::CallNode
           record_mixin_call(node, current_class, accumulator)
           return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator,
@@ -3917,16 +4024,43 @@ module Rigor
         end
       end
 
+      # The `class <<` arm of {#walk_class_includes}: the expression evaluates in the enclosing
+      # context while the body is the singleton's — ownerless here (`extends` owns its mixins),
+      # with `self` unnameable and an unnameable cref.
+      def walk_singleton_class_includes(node, qualified_prefix, current_class, accumulator,
+                                        singleton_self, singleton_cref)
+        walk_class_includes(node.expression, qualified_prefix, current_class, accumulator,
+                            singleton_self: singleton_self, singleton_cref: singleton_cref)
+        return unless node.body
+
+        walk_class_includes(node.body, qualified_prefix, nil, accumulator,
+                            singleton_self: true, singleton_cref: true)
+      end
+
       # `K = Class.new { include T }` mixes T into the block's class — the nameable `K`, or
       # ownerless when the write lands on an unnameable cref. Returns whether a meta-new block
       # body was found (the write's other children are left to the caller).
-      def walk_includes_meta_new?(node, qualified_prefix, accumulator, singleton_cref)
-        body = meta_new_block_body(node)
-        return false unless body
+      def walk_includes_meta_new?(node, qualified_prefix, current_class, accumulator, singleton_self,
+                                  singleton_cref)
+        call = meta_new_block_call(node)
+        return false unless call
 
         meta_owner = singleton_cref ? nil : meta_new_block_owner(node, qualified_prefix)
-        walk_class_includes(body, qualified_prefix, meta_owner, accumulator,
-                            singleton_cref: singleton_cref)
+        # The factory call's receiver and arguments evaluate in the ENCLOSING context —
+        # `K = Class.new(X.class_eval { include T })` still mixes T into X — while the
+        # block is the class body of the class the write names.
+        if call.receiver
+          walk_class_includes(call.receiver, qualified_prefix, current_class, accumulator,
+                              singleton_self: singleton_self, singleton_cref: singleton_cref)
+        end
+        call.arguments&.arguments&.each do |arg|
+          walk_class_includes(arg, qualified_prefix, current_class, accumulator,
+                              singleton_self: singleton_self, singleton_cref: singleton_cref)
+        end
+        if (body = call.block&.body)
+          walk_class_includes(body, qualified_prefix, meta_owner, accumulator,
+                              singleton_cref: singleton_cref)
+        end
         true
       end
 
@@ -4009,22 +4143,22 @@ module Rigor
           # `self` form is followed: `class << obj` names something this walk cannot resolve to a class.
           # Nested declarations inside the body take the `ClassNode` branch above and reset the flag with
           # their own owner, so the marker cannot leak past the singleton body it belongs to.
-          in_singleton = node.expression.is_a?(Prism::SelfNode)
-          current_class = nil unless in_singleton
-          # `self` inside is the singleton — a `self::` receiver below raises NameError at
-          # runtime, so it declines rather than resolving against the enclosing class. The
-          # lexical cref below is unnameable in every case.
-          singleton_self = true
-          singleton_cref = true
+          return walk_extends_singleton_class(node, qualified_prefix, current_class, accumulator,
+                                              in_singleton, singleton_self, singleton_cref)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
-          return if walk_extends_meta_new?(node, qualified_prefix, accumulator, singleton_cref)
+          return if walk_extends_meta_new?(node, qualified_prefix, current_class, accumulator,
+                                           in_singleton, singleton_self, singleton_cref)
         when Prism::CallNode
           record_extend_call(node, current_class, accumulator, in_singleton: in_singleton)
           if eval_block_call?(node)
             return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
                                           in_singleton: in_singleton, singleton_self: singleton_self,
                                           singleton_cref: singleton_cref)
+          end
+          if node.block.is_a?(Prism::BlockNode)
+            return walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                           in_singleton, singleton_self, singleton_cref)
           end
         end
 
@@ -4033,6 +4167,27 @@ module Rigor
                              in_singleton: in_singleton, singleton_self: singleton_self,
                              singleton_cref: singleton_cref)
         end
+      end
+
+      # The `class <<` arm of {#walk_class_extends}: the expression evaluates in the enclosing
+      # context while the body is the singleton's — `class << self` keeps the enclosing owner
+      # (its `include` is the singleton ancestor #915 folds), other operands walk ownerless.
+      # `self` inside is the singleton — `self::` receivers decline — and the lexical cref
+      # below is unnameable in every case.
+      def walk_extends_singleton_class(node, qualified_prefix, current_class, accumulator,
+                                       in_singleton, singleton_self, singleton_cref)
+        walk_class_extends(node.expression, qualified_prefix, current_class, accumulator,
+                           in_singleton: in_singleton, singleton_self: singleton_self,
+                           singleton_cref: singleton_cref)
+        return unless node.body
+
+        # `class << self` keeps the owner only at the FIRST level — nested inside a
+        # singleton body, `self` IS the singleton and `class << self` opens the
+        # singleton's own singleton (`#<Class:#<Class:C>>`), which nothing names.
+        opens_self = node.expression.is_a?(Prism::SelfNode) && !in_singleton
+        walk_class_extends(node.body, qualified_prefix, opens_self ? current_class : nil,
+                           accumulator, in_singleton: opens_self,
+                                        singleton_self: true, singleton_cref: true)
       end
 
       # The declaration arm of {#walk_class_extends}: under an unnameable cref a non-rooted
@@ -4048,16 +4203,71 @@ module Rigor
                            singleton_cref: child_cref)
       end
 
+      # The block-carrying calls of {#walk_class_extends} beyond `class_eval`-family eval:
+      # `X.instance_eval { extend M }` extends X — the receiver resolution is the eval walk's
+      # (only `def` rebinding differs, and defs are not this table's facts) — while a
+      # `define_method` body or an unnamed `Class.new { … }`-family block runs on an object
+      # nothing names, so its `extend` walks ownerless.
+      def walk_extends_block_call(node, qualified_prefix, current_class, accumulator,
+                                  in_singleton, singleton_self, singleton_cref)
+        if %i[instance_eval instance_exec].include?(node.name)
+          return walk_eval_extends_call(node, qualified_prefix, current_class, accumulator,
+                                        in_singleton: in_singleton, singleton_self: singleton_self,
+                                        singleton_cref: singleton_cref)
+        end
+        return unless node.name == :define_method || meta_new_constant_rvalue?(node)
+
+        walk_extends_opaque_block(node, qualified_prefix, current_class, accumulator,
+                                  in_singleton, singleton_self, singleton_cref)
+      end
+
+      # A block whose `self` is an object this walk cannot name — a `define_method` body (its
+      # self is the receiver's instance at call time) or an unnamed `Class.new { … }`-family
+      # block — walks ownerless with an unnameable self, while the call's receiver and
+      # arguments stay in the enclosing context.
+      def walk_extends_opaque_block(node, qualified_prefix, current_class, accumulator,
+                                    in_singleton, singleton_self, singleton_cref)
+        if node.receiver
+          walk_class_extends(node.receiver, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton, singleton_self: singleton_self,
+                             singleton_cref: singleton_cref)
+        end
+        node.arguments&.arguments&.each do |arg|
+          walk_class_extends(arg, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton, singleton_self: singleton_self,
+                             singleton_cref: singleton_cref)
+        end
+        node.block.rigor_each_child do |child|
+          walk_class_extends(child, qualified_prefix, nil, accumulator,
+                             singleton_self: true, singleton_cref: singleton_cref)
+        end
+      end
+
       # `K = Class.new { extend M }` extends the block's class — the nameable `K`, or ownerless
       # when the write lands on an unnameable cref — never the enclosing one. Returns whether a
       # meta-new block body was found (the write's other children are left to the caller).
-      def walk_extends_meta_new?(node, qualified_prefix, accumulator, singleton_cref)
-        body = meta_new_block_body(node)
-        return false unless body
+      def walk_extends_meta_new?(node, qualified_prefix, current_class, accumulator, in_singleton,
+                                 singleton_self, singleton_cref)
+        call = meta_new_block_call(node)
+        return false unless call
 
         meta_owner = singleton_cref ? nil : meta_new_block_owner(node, qualified_prefix)
-        walk_class_extends(body, qualified_prefix, meta_owner, accumulator,
-                           singleton_cref: singleton_cref)
+        # The factory call's receiver and arguments evaluate in the ENCLOSING context;
+        # the block is the class body of the class the write names.
+        if call.receiver
+          walk_class_extends(call.receiver, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton, singleton_self: singleton_self,
+                             singleton_cref: singleton_cref)
+        end
+        call.arguments&.arguments&.each do |arg|
+          walk_class_extends(arg, qualified_prefix, current_class, accumulator,
+                             in_singleton: in_singleton, singleton_self: singleton_self,
+                             singleton_cref: singleton_cref)
+        end
+        if (body = call.block&.body)
+          walk_class_extends(body, qualified_prefix, meta_owner, accumulator,
+                             singleton_cref: singleton_cref)
+        end
         true
       end
 
@@ -4257,8 +4467,9 @@ module Rigor
       # The lexical cref below is unnameable in every case.
       def walk_visibility_singleton_class(node, qualified_prefix, in_singleton_class, current_visibility,
                                           accumulator, def_owner_prefix, singleton_cref)
-        singleton_prefix = singleton_class_prefix(node, def_owner_prefix || qualified_prefix,
-                                                  qualified_prefix) || []
+        singleton_prefix = singleton_body_prefix(node, in_singleton_class,
+                                                 def_owner_prefix || qualified_prefix,
+                                                 qualified_prefix)
         walk_method_visibilities(node.expression, qualified_prefix, in_singleton_class,
                                  current_visibility, accumulator, def_owner_prefix,
                                  singleton_cref: singleton_cref)
@@ -4526,6 +4737,10 @@ module Rigor
             return accumulator
           end
         when Prism::SingletonClassNode
+          # The body is a singleton context this map does not read, but the `class <<`
+          # expression evaluates in the enclosing context — `class << (class D; self; end)`
+          # still declares `C::D`.
+          collect_class_alias_map(node.expression, qualified_prefix, accumulator)
           return accumulator
         when Prism::AliasMethodNode
           record_alias_map_entry(node, qualified_prefix, accumulator)
@@ -5457,7 +5672,10 @@ module Rigor
         return unless child_prefix && node.body
 
         child_cref = singleton_cref && !Source::ConstantPath.rooted?(node.constant_path)
-        walk_constant_write_census(node.body, child_prefix, tables,
+        # The body keeps the enclosing prefix, not `child_prefix`: `#<singleton>::D` is a
+        # real cref rung, but the only NAMEABLE rungs below it are the enclosing ones —
+        # `Foo::BAR` inside resolves through `C::Foo`/`::Foo`, never a spelled `C::D::Foo`.
+        walk_constant_write_census(node.body, child_cref ? qualified_prefix : child_prefix, tables,
                                    child_cref ? OPAQUE_SELF : nil, singleton_cref: child_cref)
       end
 
@@ -5737,23 +5955,52 @@ module Rigor
 
       # Cross-file counterpart of `record_declarations` — registers every `class` / `module` declaration under its
       # qualified name and descends into the body (so `module Foo; class Bar` registers both `Foo` and `Foo::Bar`).
-      def collect_class_decls(node, qualified_prefix, accumulator, compacts = nil)
+      def collect_class_decls(node, qualified_prefix, accumulator, compacts = nil, singleton_cref: false)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-          if child_prefix
-            full = child_prefix.join("::")
-            accumulator[full] = Type::Combinator.singleton_of(full)
-            record_compact_header(compacts, qualified_prefix, node.constant_path, full) if compacts
-            return collect_class_decls(node.body, child_prefix, accumulator, compacts) if node.body
+          return if collect_decl_body?(node, qualified_prefix, accumulator, compacts, singleton_cref)
+        when Prism::SingletonClassNode
+          # The expression evaluates in the ENCLOSING cref — `class << (class D; self; end)`
+          # still names `C::D` — while the body's cref is the unnameable singleton.
+          collect_class_decls(node.expression, qualified_prefix, accumulator, compacts,
+                              singleton_cref: singleton_cref)
+          if node.body
+            collect_class_decls(node.body, qualified_prefix, accumulator, compacts,
+                                singleton_cref: true)
           end
+          return
         when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode
-          record_class_new_constant_decl(node, qualified_prefix, accumulator)
+          # `K = Class.new` under an unnameable cref lands on the singleton's own table.
+          record_class_new_constant_decl(node, qualified_prefix, accumulator) unless singleton_cref
         end
 
-        node.rigor_each_child { |child| collect_class_decls(child, qualified_prefix, accumulator, compacts) }
+        node.rigor_each_child do |child|
+          collect_class_decls(child, qualified_prefix, accumulator, compacts,
+                              singleton_cref: singleton_cref)
+        end
+      end
+
+      # The class/module arm of {#collect_class_decls}. Under an unnameable cref a non-rooted
+      # header opens `#<singleton>::Name` — a real class nothing can name — so it is declined
+      # rather than published as `C::Name`; the body still walks (rooted headers below it
+      # re-anchor). Returns whether the declaration was consumed.
+      def collect_decl_body?(node, qualified_prefix, accumulator, compacts, singleton_cref)
+        child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
+        return false unless child_prefix
+
+        child_cref = singleton_cref && !Source::ConstantPath.rooted?(node.constant_path)
+        unless child_cref
+          full = child_prefix.join("::")
+          accumulator[full] = Type::Combinator.singleton_of(full)
+          record_compact_header(compacts, qualified_prefix, node.constant_path, full) if compacts
+        end
+        return true unless node.body
+
+        collect_class_decls(node.body, child_cref ? [] : child_prefix, accumulator, compacts,
+                            singleton_cref: child_cref)
+        true
       end
 
       # Issue [#722](https://github.com/rigortype/rigor/issues/722) residue 2 — records what a COMPACT header
@@ -6085,25 +6332,50 @@ module Rigor
         discovered.merge(additions)
       end
 
-      def record_declarations(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES)
+      def record_declarations(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES,
+                              singleton_cref: false)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ModuleNode, Prism::ClassNode
-          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames)
+          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames,
+                                            singleton_cref: singleton_cref)
+        when Prism::SingletonClassNode
+          # The expression evaluates in the enclosing cref; the body's cref is unnameable.
+          record_declarations(node.expression, qualified_prefix, identity_table, discovered, renames,
+                              singleton_cref: singleton_cref)
+          if node.body
+            record_declarations(node.body, qualified_prefix, identity_table, discovered, renames,
+                                singleton_cref: true)
+          end
+          return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
-          return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
+          return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered,
+                                              singleton_cref: singleton_cref)
         end
 
         node.rigor_each_child do |child|
-          record_declarations(child, qualified_prefix, identity_table, discovered, renames)
+          record_declarations(child, qualified_prefix, identity_table, discovered, renames,
+                              singleton_cref: singleton_cref)
         end
       end
 
-      def record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES)
+      def record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES,
+                                  singleton_cref: false)
         child_prefix = Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
         return false unless child_prefix
+
+        if singleton_cref && !Source::ConstantPath.rooted?(node.constant_path)
+          # `class D` below `class <<` opens `#<singleton>::D` — a real class nothing can
+          # name — so nothing is registered; the body still walks so rooted headers
+          # below it re-anchor at a nameable cref.
+          if node.body
+            record_declarations(node.body, [], identity_table, discovered, renames,
+                                singleton_cref: true)
+          end
+          return true
+        end
 
         # Issue #722 residue 2 — the per-file twin of the fold's re-anchoring. The file's own declaration
         # table merges OVER the project seed, so without this a compact header would re-publish the key the
@@ -6133,18 +6405,30 @@ module Rigor
       #
       # The block body, if present, is recursed into so any nested class/module declarations in the override block (rare
       # but legal) still feed the discovered table.
-      def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
+      def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered, singleton_cref: false)
         rvalue = meta_new_rvalue(node)
         factory_call = rvalue && resolve_meta_factory_call(rvalue)
         return false unless factory_call
 
         child_prefix = meta_new_child_prefix(node, qualified_prefix)
         return false if child_prefix.nil?
+        # A non-rooted write below `class <<` lands on the singleton's own constant table —
+        # `#<singleton>::K` names nothing — so the discovered-class entry is declined.
+        # A `::`-rooted path write re-anchors at the top level and stays nameable.
+        return false if singleton_cref && !meta_new_write_rooted?(node)
 
         full = child_prefix.join("::")
         discovered[full] = Type::Combinator.singleton_of(full)
-        record_declarations(node.value, qualified_prefix, identity_table, discovered)
+        record_declarations(node.value, qualified_prefix, identity_table, discovered,
+                            singleton_cref: singleton_cref)
         true
+      end
+
+      # Whether a meta-new constant write's target is `::`-rooted — the only spelling that
+      # still names its class when the write sits below an unnameable singleton cref.
+      def meta_new_write_rooted?(node)
+        (node.is_a?(Prism::ConstantPathWriteNode) || node.is_a?(Prism::ConstantPathOrWriteNode)) &&
+          Source::ConstantPath.rooted?(node.target)
       end
 
       # Recognises `Data.define(*Symbol)` and `Data.define(*Symbol) do ... end` at constant-write rvalue position. The

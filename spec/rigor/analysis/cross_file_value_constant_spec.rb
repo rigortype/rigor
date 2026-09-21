@@ -742,8 +742,18 @@ RSpec.describe "cross-file value constants" do
         .to eq(["Dynamic[top]", ":kept"])
     end
 
-    it "still retracts for an `instance_eval` block, whose `self` is an object" do
+    it "keys `self::X` inside a NAMED receiver's `instance_eval` under it — `Other::X`, sparing `X`" do
+      # `instance_eval` rebinds `self` to the receiver exactly like `class_eval` for the
+      # `self`-anchored facts this census reads, so `Other.instance_eval { self::X = 7 }`
+      # writes `Other::X` — provably not the top-level `X` the sibling publishes.
       expect(dumps(sibling.merge("b.rb" => "class Other\nend\nOther.instance_eval { self::X = 7 }\n")))
+        .to eq(["5", ":kept"])
+    end
+
+    it "still retracts for an `instance_eval` receiver no name reaches" do
+      # `t.instance_eval`'s self is whatever `t` holds — `Object` included — so the
+      # `self::X` write could still be the top-level `X`, and the retraction stays.
+      expect(dumps(sibling.merge("b.rb" => "t = Other\nt.instance_eval { self::X = 7 }\n")))
         .to eq(["Dynamic[top]", ":kept"])
     end
 

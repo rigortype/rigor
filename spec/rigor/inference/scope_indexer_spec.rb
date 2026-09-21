@@ -2818,6 +2818,158 @@ Unrelated
       expect(table).to include("X" => { f: :private })
       expect(table).not_to have_key("M")
     end
+
+    it "declines `class D` under `class <<` in the per-file declaration tables" do
+      # `class D` opens `#<Class:C>::D` — a real class nothing can name — so neither the
+      # identity table nor `discovered_classes` may publish `C::D` (a `known_namespace?`
+      # hit there would cross-contaminate every `D`-family resolution in the project).
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            class D
+            end
+            class ::T
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+      expect(scope.discovered_classes).not_to have_key("C::D")
+      expect(scope.discovered_classes).to have_key("T")
+      d_class = program.statements.body.first.body.body.first.body.body.first
+      expect(idx[program].declared_types).not_to have_key(d_class.constant_path)
+    end
+
+    it "declines `class D` under `class <<` in the cross-file discovery tables" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "class C\n  class << self\n    class D; end\n    class ::T; end\n  end\nend\n")
+        discovered = described_class.discovered_classes_for_paths([a])
+        expect(discovered).not_to have_key("C::D")
+        expect(discovered).to have_key("T")
+
+        combined = described_class.discovered_project_index_incremental([a], seed_bundles: {})
+        expect(combined.fetch(:def_index)[:class_sources]).not_to have_key("C::D")
+      end
+    end
+
+    it "declines `K = Class.new` under `class <<` in the discovery tables" do
+      # The write lands on the singleton's constant table — `#<Class:C>::K` names nothing.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            K = Class.new { def m; end }
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program.statements.body.first].discovered_classes).not_to have_key("C::K")
+    end
+
+    it "keeps the `class <<` expression in the enclosing cref" do
+      # `class << (class D; self; end)` — the expression declares `C::D` in the
+      # enclosing namespace before the singleton body opens.
+      table = methods_for(<<~RUBY)
+        class C
+          class << (class D
+                      def m; end
+                      self
+                    end)
+          end
+        end
+      RUBY
+      expect(table).to include("C::D" => { m: :instance })
+    end
+
+    it "files `def` inside `class << self` nested in `class <<` nowhere" do
+      # `self` inside `class << self` IS the singleton — `class << self` there opens
+      # `#<Class:#<Class:C>>`, a surface nothing names — not `C.m`.
+      table = methods_for(<<~RUBY)
+        class C
+          class << self
+            class << self
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(table.fetch("C", {})).not_to have_key(:m)
+    end
+
+    it "declines `extend` inside `instance_eval` on an unnameable receiver" do
+      # `obj.instance_eval { extend T }` extends obj's singleton — never `C`'s.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          obj.instance_eval { extend T }
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+    end
+
+    it "attributes mixin calls inside `instance_eval` on a named receiver" do
+      # `X.instance_eval { extend T }` extends `X` — the receiver resolution is the
+      # eval walk's; only `def` rebinding differs.
+      extends = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          X.instance_eval { extend T }
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          X.instance_eval { include T }
+        end
+      RUBY
+      expect(extends).to include("X" => ["T"])
+      expect(extends).not_to have_key("C")
+      expect(includes).to include("X" => ["T"])
+      expect(includes).not_to have_key("C")
+    end
+
+    it "declines `extend` inside a `define_method` body and an unnamed `Class.new` block" do
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class C
+          define_method(:m) { extend T }
+          x = Class.new { extend T }
+        end
+      RUBY
+      expect(table).not_to have_key("C")
+    end
+
+    it "walks a meta-new call's arguments in the enclosing context" do
+      # `Class.new(X.class_eval { extend T })` — the eval inside the ARGUMENT still
+      # extends X; only the block is the new class's body.
+      table = described_class.build_discovered_extends(parse(<<~RUBY))
+        module T; end
+        class X; end
+        class C
+          K = Class.new(X.class_eval { extend T }) { def m; end }
+        end
+      RUBY
+      expect(table).to include("X" => ["T"])
+    end
+
+    it "keys a path write inside `class D` under `class <<` as written, never `C::D`-qualified" do
+      # `Foo::BAR` inside `#<Class:C>::D` resolves `Foo` through `[C, Object]` — the census
+      # keys the write AS WRITTEN; what it must never fabricate is a `C::D::Foo::BAR` rung.
+      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
+        class C
+          class << self
+            class D
+              Foo::BAR = 1
+            end
+          end
+        end
+      RUBY
+      expect(writes.keys).to include("Foo::BAR")
+      expect(writes.keys).not_to include("C::D::Foo::BAR")
+    end
   end
 
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the

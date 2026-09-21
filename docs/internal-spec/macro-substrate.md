@@ -106,16 +106,35 @@ rules (consistent with the rest of the plugin-contract carriers):
   `#<singleton>::D`, so every discovery walk — methods, singleton
   defs, visibilities, includes/extends, superclasses, def nestings,
   ivars, member layouts — files its facts under no class rather than
-  a fabricated `C::D`, and only a `::`-rooted header re-anchors. Eval
+  a fabricated `C::D`, the declaration/discovery producers
+  (`discovered_classes`, `class_sources`, `declared_types`,
+  `local_constant_names`) register no `C::D`/`C::K` either — a name
+  `known_namespace?` would otherwise cross-contaminate every
+  `D`-family resolution with — and only a `::`-rooted header
+  re-anchors. The `class <<` EXPRESSION is the exception that proves
+  the boundary: it evaluates in the enclosing context before the
+  singleton opens, so `class << (class D; self; end)` still declares
+  `C::D`, and `class << self` INSIDE a singleton body opens the
+  singleton's own singleton (`#<Class:#<Class:C>>`), which nothing
+  names. Eval
   and meta blocks keep that cref while rebinding `self`
   (`Foo.class_eval { X = 1 }` under `class <<` still writes the
   singleton's table), so a `self::`-anchored eval receiver declines
   in every consumer walk — methods, singleton defs, visibilities,
   deferred ranges, includes, and extends alike — and a bare or
-  `self` receiver under `class << <non-self>` names nothing. Meta-new
+  `self` receiver under `class << <non-self>` names nothing.
+  `instance_eval`/`instance_exec` rebind `self` to the receiver
+  exactly like `class_eval` for the `self`-anchored facts these
+  tables read (`X.instance_eval { extend M }` extends `X`), while
+  `def` inside keeps the lexical definee — which is why the
+  def-owning walks never treat them as eval blocks — and a
+  `define_method` body or an unnamed `Class.new { … }`-family block
+  walks ownerless. Meta-new
   blocks do the opposite: `K = Class.new { extend M }` extends `K`,
   so the mixin tables attribute the block to the nameable `K` and
-  decline only when `K` itself is unnameable. A cross-file def and a file the index
+  decline only when `K` itself is unnameable, with the factory call's
+  receiver and arguments still evaluated in the enclosing context
+  (`K = Class.new(X.class_eval { extend M })` extends `X`). A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

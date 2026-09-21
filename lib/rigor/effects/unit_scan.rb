@@ -68,7 +68,10 @@ module Rigor
       # The one block a response may be recorded through: `respond_to`'s own. It is the format dispatcher
       # rather than a conditional, and it always runs — but its ARMS do not, so `f.html { … }` is an
       # ordinary branching block and a `render json:` in the `f.json` arm no longer stands the `f.html`
-      # arm's implicit render down.
+      # arm's implicit render down (#1048). The dispatcher's other half is the per-arm conventional edge
+      # (#1071): each `format.<fmt>` arm the body spells renders `<action>.<fmt>` where the arm's block
+      # does not answer on every path of its own body, exactly as an uninstrumented action renders
+      # `<action>.html`. The arms are read off the same syntax that marks the block transparent.
       DISPATCH_SELECTORS = %i[respond_to respond_with].to_set.freeze
 
       # Selectors a per-class POSTURE default must never answer for, because a more specific reading of
@@ -183,6 +186,23 @@ module Rigor
         @responded = false
         @conditional = 0
         @transparent_blocks = Set.new.compare_by_identity
+        # #1071 — a `respond_to` dispatcher's format arms, read for the per-arm conventional edge that
+        # replaced the single `html` unit edge. Each arm is one `format.<fmt>` call made on the
+        # dispatcher's block parameter, and an arm's own block is a branch the scan walks with the same
+        # {@conditional} bit scoped to it: a `responds:` row fired at the arm's top level stands THAT
+        # arm's conventional template down, exactly as a unit-level response stands the implicit render
+        # down. `@arms_by_block` maps an arm block node to its arm so the walk can open the scope;
+        # `@arm_stack` holds the open ones with the depth their body's top level sits at;
+        # `@block_stack` is every open block node, so an arm call is recognised by its enclosing block
+        # being one of {@transparent_blocks}; `@dispatch_top_level` remembers whether a dispatcher was
+        # spelled at the unit's top level, which is what lets the unit rule stand down for the standard
+        # responder while an action whose `respond_to` is inside a branch still keeps its plain implicit
+        # render.
+        @format_arms = []
+        @arms_by_block = {}.compare_by_identity
+        @arm_stack = []
+        @block_stack = []
+        @dispatch_top_level = false
         # #391 — set only where a site could not carry the bit on an edge; see {#record_edge}.
         @unclaimed = false
       end
@@ -213,6 +233,14 @@ module Rigor
         [summary, @edges]
       end
 
+      # One `format.<fmt>` arm of a `respond_to` dispatcher (#1071): the format it spells, and whether a
+      # plugin `responds:` row fired unconditionally in the arm's own block. `responded` is mutated by the
+      # walk (a Struct, unlike the Data rows the rules produce) and `conventional?` is the any/all
+      # exclusion — those two arms serve every format and can name no single template.
+      FormatArm = Struct.new(:format, :responded, keyword_init: true) do
+        def conventional? = format != "any" && format != "all"
+      end
+
       private
 
       def add(origin, labels)
@@ -236,11 +264,26 @@ module Rigor
         return if unit_boundary?(node)
 
         visit(node)
-        return node.rigor_each_child { |child| walk(child) } unless branching?(node)
+        return walk_children(node) unless branching?(node)
 
         @conditional += 1
-        node.rigor_each_child { |child| walk(child) }
+        arm = enter_arm_block(node)
+        walk_children(node)
+        @arm_stack.pop if arm
         @conditional -= 1
+      end
+
+      # The children, with the block stack maintained: an arm call is recognised by its innermost
+      # enclosing block being one of the dispatcher's transparent ones, so every `BlockNode` the walk
+      # descends into has to be on the stack while its body runs (#1071).
+      def walk_children(node)
+        if node.is_a?(Prism::BlockNode)
+          @block_stack.push(node)
+          node.rigor_each_child { |child| walk(child) }
+          @block_stack.pop
+        else
+          node.rigor_each_child { |child| walk(child) }
+        end
       end
 
       # Whether the walk is entering a construct whose body may not run. A `BlockNode` answers from the
@@ -323,6 +366,7 @@ module Rigor
 
       def visit_call(node)
         mark_transparent_block(node)
+        record_format_arm(node)
         record = @calls[node]
         attribute(node, record)
         plugin = attribute_plugin(node, record)
@@ -339,12 +383,60 @@ module Rigor
 
       # `respond_to do |format| … end` — the block that is a dispatcher rather than a branch. Marked by
       # identity, because a `BlockNode` cannot name the call it belongs to and two structurally equal
-      # blocks in one body are two blocks.
+      # blocks in one body are two blocks (#1048). A dispatcher spelled at the unit's top level is also
+      # remembered (#1071): its arms answer for the whole body, so the conventional `<action>.html` unit
+      # edge stands down; a dispatcher inside a branch does not cover the fall-through path.
       def mark_transparent_block(node)
         return unless node.receiver.nil? && DISPATCH_SELECTORS.include?(node.name)
 
         block = node.block
         @transparent_blocks << block if block.is_a?(Prism::BlockNode)
+        @dispatch_top_level ||= true if @conditional.zero?
+      end
+
+      # #1071 — one `format.<fmt>` arm of the enclosing `respond_to`, when the formatter is the block's
+      # own parameter: the edge its arm answers for is the conventional `<action>.<fmt>` template, and the
+      # walk needs the arm registered and its block (if any) mapped before it descends into that block's
+      # body. A call made on anything else in the block is not an arm; a formatter nobody assigned a
+      # parameter is a dispatcher whose arms cannot be read, and the unit rule simply keeps its old
+      # single answer.
+      def record_format_arm(node)
+        enclosing = @block_stack.last
+        return unless enclosing.is_a?(Prism::BlockNode) && @transparent_blocks.include?(enclosing)
+
+        parameter = block_parameter(enclosing)
+        return if parameter.nil?
+        return unless node.receiver.is_a?(Prism::LocalVariableReadNode) && node.receiver.name.to_s == parameter
+
+        arm = FormatArm.new(format: node.name.to_s)
+        @format_arms << arm
+        block = node.block
+        @arms_by_block[block] = arm if block.is_a?(Prism::BlockNode)
+      end
+
+      # The name of a dispatcher block's first required parameter — `|format|` in the ordinary shape. A
+      # `respond_to` whose block spells no parameter (or a splat, or a destructure) has no formatter the
+      # walk can name arms on.
+      def block_parameter(block)
+        params = block.parameters
+        return nil unless params.is_a?(Prism::BlockParametersNode)
+
+        required = params.parameters&.requireds
+        return nil if required.nil? || required.empty?
+
+        first = required.first
+        first.name.to_s if first.respond_to?(:name)
+      end
+
+      # Opens an arm scope for the walk: the arm's own block is a branch like any other, and its body's
+      # top level sits at the current {@conditional} depth — the value a `responds:` row must fire at for
+      # the ARM to count as answered outright.
+      def enter_arm_block(node)
+        arm = @arms_by_block[node]
+        return nil unless arm
+
+        @arm_stack << [arm, @conditional]
+        arm
       end
 
       # The **plugin stratum** (#387; ADR-103 WD6 / WD10): what the plugin that models a framework says
@@ -368,6 +460,7 @@ module Rigor
         return nil if row.nil?
 
         @responded = true if row.responds && @conditional.zero?
+        mark_arm_responded(row)
         edged = callee_edge_taken?(node, row)
         labels = row.narrow ? Narrowing.apply(row.narrow, node) : row.labels
         # A `narrow:` that narrowed to nothing says the call does nothing, and a call that does nothing
@@ -379,6 +472,19 @@ module Rigor
         add_declared(Origin.plugin(row.key), labels) unless labels.nil? || labels.empty?
         record_plugin_taints(row, edged)
         row
+      end
+
+      # The `responds:` bit scoped to an OPEN format arm (#1071): a row fired at the arm's body top
+      # level, so the arm never falls through to its conventional `<action>.<fmt>` template. A deeper
+      # response does not stand the arm's own fall-through down, exactly as a conditional response does
+      # not stand a unit's implicit render down.
+      def mark_arm_responded(row)
+        return unless row.responds
+
+        arm, depth = @arm_stack.last
+        return if arm.nil?
+
+        arm.responded = true if @conditional == depth
       end
 
       # A row may discharge AND still taint: `render` states exactly what the CONTROLLER does and says
@@ -424,6 +530,13 @@ module Rigor
       # `protected` member (Rails' `action_methods` is public only) and a `def` nested inside another
       # method. A project with `app/views/users/card.html.erb` and a `private def card` would otherwise
       # hand that template's `io.db.write` to the helper.
+      #
+      # #1071 widens the answer per `respond_to` arm: a unit that spelled a dispatcher renders one
+      # conventional `<action>.<fmt>` template per arm rather than one `<action>.html`, so the row is
+      # applied once per arm the walk read, each answered outright (a `responds:` row at the arm's own
+      # top level) or degenerate (`any` / `all`) standing its arm's edge down. The `<action>.html`
+      # answer survives only for a dispatcher the walk could not name arms on, or one nested under a
+      # branch — the plain fall-through still exists on the path that skips it.
       def apply_unit_callees
         return if @responded || @singleton || @non_public
         return if @owner_class.nil? || @method_name.nil?
@@ -434,13 +547,34 @@ module Rigor
         rows.each do |row|
           next unless @plugin_facts.descends_from?(@owner_class, row.receiver)
 
-          callee = CalleeRule.unit(row.callee, owner_class: @owner_class, unit_key: @method_name)
-          next if callee.nil?
-
-          @edges << FileCollection::Edge.new(
-            receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false
-          )
+          apply_unit_callee_row(row)
         end
+      end
+
+      # One unit callee row across the unit's format arms: nil targets the plain `<action>.html` implicit
+      # render, and one application per arm reaches that arm's own `<action>.<fmt>` convention (#1071) —
+      # an arm that answered outright, or one serving every format (`any` / `all`), names nothing.
+      def apply_unit_callee_row(row)
+        return apply_unit_callee(row, nil) if @format_arms.empty?
+
+        apply_unit_callee(row, nil) unless @dispatch_top_level
+        @format_arms.each { |arm| apply_unit_callee(row, arm) }
+      end
+
+      # Applies one unit callee row's rule for one target format.
+      # @return the {Callee} the edge was recorded for, or nil when the arm (or the format) names nothing
+      def apply_unit_callee(row, arm)
+        return nil if arm && !arm.conventional?
+        return nil if arm&.responded
+
+        format = arm&.format
+        callee = CalleeRule.unit(row.callee, owner_class: @owner_class, unit_key: @method_name, format: format)
+        return nil if callee.nil?
+
+        @edges << FileCollection::Edge.new(
+          receiver_class: callee.receiver, kind: :singleton, selector: callee.selector, self_call: false
+        )
+        callee
       end
 
       def plugin_row(node, record)

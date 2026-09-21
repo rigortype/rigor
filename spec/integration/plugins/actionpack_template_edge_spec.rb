@@ -112,6 +112,38 @@ TEMPLATE_EDGE_CONTROLLER = <<~RUBY
       end
     end
 
+    def js_arm
+      respond_to do |format|
+        format.js
+      end
+    end
+
+    def js_arm_with_block
+      respond_to do |format|
+        format.js { @users = [] }
+      end
+    end
+
+    def js_arm_answered
+      respond_to do |format|
+        format.js { render :show }
+      end
+    end
+
+    def any_plus_js_arms
+      respond_to do |format|
+        format.any
+        format.js
+      end
+    end
+
+    def any_all_arms
+      respond_to do |format|
+        format.any
+        format.all { head :ok }
+      end
+    end
+
     def json_suffix
       render "show.json"
     end
@@ -187,6 +219,10 @@ TEMPLATE_EDGE_JSON_ERB = <<~ERB
   <%= @user.name %>
 ERB
 
+TEMPLATE_EDGE_JS_ERB = <<~ERB
+  <p><% @user.touch %></p>
+ERB
+
 # `{relative path => source}`. Every action that must KEEP an implicit-render edge gets a template
 # doing `@user.touch`, so the assertion is a label arriving rather than a key existing.
 TEMPLATE_EDGE_FILES = {
@@ -201,6 +237,9 @@ TEMPLATE_EDGE_FILES = {
   %w[maybe rescued bare_html_arm in_transaction stored_lambda reopened listed also_listed
      dispatched klass_helper]
     .to_h { |action| ["app/views/users/#{action}.html.erb", TEMPLATE_EDGE_MAYBE_ERB] }
+).merge(
+  %w[js_arm js_arm_with_block any_plus_js_arms]
+    .to_h { |action| ["app/views/users/#{action}.js.erb", TEMPLATE_EDGE_JS_ERB] }
 ).freeze
 
 RSpec.describe "plugins/rigor-actionpack — the controller → template effect edge (#1048)" do
@@ -324,17 +363,78 @@ RSpec.describe "plugins/rigor-actionpack — the controller → template effect 
       end
     end
 
-    it "over-approximates a response inside a format arm, which costs labels and never a taint" do
+    it "stands a format arm's own conventional template down when the arm answers outright (#1071)" do
       in_project do |runner, _result|
-        # `format.html { render :show }` really does answer, but an arm is a block the body may not run,
-        # so the conventional `users/dispatched` edge is emitted beside the one the `render` names. That
-        # is the accepted direction: an edge contributes labels and never a taint, while the other way
-        # round loses the template of an action that DID take the implicit render — and leaves it
-        # reading exhaustive.
+        # The 2026-09-19 ruling: inside `respond_to`, each arm edges to the conventional `<action>.<fmt>`
+        # template UNLESS the arm responds unconditionally at the top level of its own block.
+        # `format.html { render :show }` answers for every html request, so `dispatched.html.erb` never
+        # runs — the edge the `render :show` names is the whole of the truth, and the pre-#1071
+        # behaviour of emitting `view:users/dispatched.html` beside it was the accepted over-approximation
+        # that the ruling overturned. An edge contributes labels and never a taint.
         entry = unit(runner, "UsersController#dispatched")
 
         expect(entry.edges).to include("view:users/show.html")
-        expect(entry.edges).to include("view:users/dispatched.html")
+        expect(entry.edges).not_to include("view:users/dispatched.html")
+      end
+    end
+
+    it "edges a bare `format.js` arm to the conventional js template (#1071)" do
+      in_project do |runner, _result|
+        # The issue's opening shape: `respond_to { |format| format.js }` reaches `<action>.js`, which is
+        # what the pre-change `html`-only unit edge never stated. The js template writes here, and the
+        # action must inherit the write.
+        entry = unit(runner, "UsersController#js_arm")
+
+        expect(entry.edges).to include("view:users/js_arm.js")
+        expect(entry.declared.to_a).to include("io.db.write")
+      end
+    end
+
+    it "keeps the conventional edge for an arm block that does not respond (#1071)" do
+      in_project do |runner, _result|
+        # `format.js { @users = [] }` never answers, so the js request falls through to `default_render`
+        # and `<action>.js` still runs. One arm's block is not an answer; a first draft of the ruling
+        # dropped the conventional edge for every arm with a block, and review overturned it.
+        entry = unit(runner, "UsersController#js_arm_with_block")
+
+        expect(entry.edges).to include("view:users/js_arm_with_block.js")
+        expect(entry.declared.to_a).to include("io.db.write")
+      end
+    end
+
+    it "names the render, not the convention, for an arm that answers outright (#1071)" do
+      in_project do |runner, _result|
+        # `format.js { render :show }` answers on every js request, so `js_arm_answered.js` never runs;
+        # the site edge the `render` names is the arm's only conventional statement.
+        entry = unit(runner, "UsersController#js_arm_answered")
+
+        expect(entry.edges).to include("view:users/show.html")
+        expect(entry.edges).not_to include("view:users/js_arm_answered.js")
+        expect(entry.edges).not_to include("view:users/js_arm_answered.html")
+      end
+    end
+
+    it "gives `any` no conventional edge beside a real arm's (#1071)" do
+      in_project do |runner, _result|
+        # `format.any` serves every format the request already carries, so no single template can be its
+        # conventional answer — while the `js` arm's `<action>.js` still fires, and the html unit edge no
+        # longer stands in for the dispatcher.
+        entry = unit(runner, "UsersController#any_plus_js_arms")
+
+        expect(entry.edges).to include("view:users/any_plus_js_arms.js")
+        expect(entry.edges).not_to include("view:users/any_plus_js_arms.html")
+      end
+    end
+
+    it "gives `any` and `all` no conventional edges at all (#1071)" do
+      in_project do |runner, _result|
+        # Both arms degenerate: `any` and `all` answer every format, so the unit has no conventional
+        # template to name — and the removed `html` unit edge is exactly the guess this issue cuts.
+        entry = unit(runner, "UsersController#any_all_arms")
+
+        expect(entry.edges).not_to include("view:users/any_all_arms.html")
+        expect(entry.edges).not_to include("view:users/any_all_arms.js")
+        expect(entry.edges).not_to include("view:users/any_all_arms.any")
       end
     end
 

@@ -3082,11 +3082,7 @@ module Rigor
         # through the write site's nesting, never through the eval-derived self —
         # `class << Y` inside `M::Y.class_eval` at top level opens the TOP-LEVEL `Y`'s
         # singleton.
-        if !lexical_prefix.empty? && lexical_prefix.last == rendered
-          lexical_prefix
-        else
-          rendered.split("::")
-        end
+        eval_constant_receiver_prefix(node, node.expression, rendered, lexical_prefix)
       end
 
       # The constant a `class << X` operand names, or nil when the operand is not constant-shaped. Both the
@@ -3855,11 +3851,217 @@ module Rigor
         rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
         return nil unless rendered
 
-        if !lexical_prefix.empty? && lexical_prefix.last == rendered
-          lexical_prefix
-        else
-          rendered.split("::")
+        eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix)
+      end
+
+      # The tail of {#eval_receiver_prefix} once the receiver renders a static
+      # constant name — also the `class << Y` operand's resolution
+      # ({#singleton_class_prefix}), which follows the same lexical rule.
+      #
+      # A `::`-rooted receiver names the top level — `::B` inside `class A::B`
+      # is still `B`, so the root check precedes both the self-reopen shortcut
+      # and the lexical walk ({Source::ConstantPath}'s contract: callers doing
+      # Ruby's lexical constant lookup MUST consult `rooted?` out of band). An
+      # unqualified (or partially-qualified) receiver then resolves through
+      # `Module.nesting` — `X` inside `class S` names `S::X` whenever that
+      # constant exists — so the first `<nesting entry>::X` the file declares
+      # wins, innermost first, and the as-written name stands when no rung
+      # declares it: the same `<entry>::<first segment>` walk
+      # {resolved_write_namespace} performs for a `Foo::BAR = …` namespace,
+      # against the same segment-approximation {lexical_nesting_for_prefix}
+      # gives when no scope carries the real chain. A `S::X` declared only in
+      # ANOTHER file still resolves as-written — the set
+      # {#eval_file_declared_names} consults is the defining file's own answer,
+      # matching the `in_source_constants` limitation {resolved_write_namespace}
+      # documents.
+      def eval_constant_receiver_prefix(node, path_node, rendered, lexical_prefix)
+        # `class << ::X = expr` spells its root on the write's target, not the
+        # write node itself.
+        path_node = path_node.target if path_node.is_a?(Prism::ConstantPathWriteNode)
+        return rendered.split("::") if Source::ConstantPath.rooted?(path_node)
+        return rendered.split("::") if lexical_prefix.empty?
+        return lexical_prefix if lexical_prefix.last == rendered
+
+        segments = rendered.split("::")
+        declared = eval_file_declared_names(node)
+        lexical_nesting_for_prefix(lexical_prefix).each do |entry|
+          candidate = "#{entry}::#{segments.first}"
+          return candidate.split("::") + segments[1..] if declared.include?(candidate)
         end
+        segments
+      end
+
+      # The file's declared-constant oracle {eval_constant_receiver_prefix}
+      # consults: every class/module declaration plus constant write the file
+      # contains, expanded to every enclosing prefix (declaring `S::A::B`
+      # proves `S::A` exists). Memoized on the `Prism::Source` every node's
+      # location shares — threading the set through the dozen eval-consuming
+      # walks would dwarf the resolution it feeds, so the one re-parse this
+      # needs happens once per file. The memo lives in an ivar ON the source
+      # (rather than a WeakMap keyed on it): the entry's lifetime is the
+      # parse's own, nothing mutable sits in a constant, and a worker parsing
+      # the same text gets its own source and its own set.
+      def eval_file_declared_names(node)
+        source = node.location.send(:source)
+        source.instance_variable_get(:@rigor_declared_names) ||
+          source.instance_variable_set(:@rigor_declared_names, begin
+            names = Set.new
+            collect_declared_constant_names(Prism.parse(source.source).value, [], names)
+            names.freeze
+          end)
+      end
+
+      # The walk behind {eval_file_declared_names}: every qualified constant
+      # name a declaration introduces, `class`/`module`/`class <<` bodies and
+      # `Const = …` writes alike. Deliberately NOT {collect_class_decls} —
+      # that walk resolves eval receivers through {eval_receiver_prefix},
+      # which consults this oracle and would reenter it mid-build; this one
+      # never asks the question it feeds. `def` bodies cannot contain constant
+      # declarations (a `class`/`X =` inside one is a SyntaxError), so they
+      # are skipped outright. Under an unnameable cref (`class <<`, an
+      # anonymous factory block) bare and `self::` declarations name nothing —
+      # the same refusal the discovery walks make — while explicit-base paths
+      # still re-anchor lexically.
+      def collect_declared_constant_names(node, qualified_prefix, names, unnameable_cref: false)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          return collect_declared_class_decl(node, qualified_prefix, names, unnameable_cref)
+        when Prism::SingletonClassNode
+          collect_declared_constant_names(node.expression, qualified_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+          return collect_declared_constant_names(node.body, qualified_prefix, names,
+                                                 unnameable_cref: true)
+        when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantAndWriteNode, Prism::ConstantOperatorWriteNode
+          return collect_declared_bare_write(node, qualified_prefix, names, unnameable_cref)
+        when Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode,
+             Prism::ConstantPathAndWriteNode, Prism::ConstantPathOperatorWriteNode
+          return collect_declared_path_write(node, qualified_prefix, names, unnameable_cref)
+        when Prism::ConstantTargetNode
+          add_declared_name(names, (qualified_prefix + [node.name.to_s]).join("::")) unless unnameable_cref
+          return
+        when Prism::DefNode
+          return
+        when Prism::CallNode
+          return if collect_declared_anonymous_factory?(node, qualified_prefix, names,
+                                                        unnameable_cref)
+        end
+        node.compact_child_nodes.each do |child|
+          collect_declared_constant_names(child, qualified_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+        end
+      end
+
+      # The `class`/`module` arm of {collect_declared_constant_names}: the
+      # header's own qualified name plus the body under it.
+      def collect_declared_class_decl(node, qualified_prefix, names, unnameable_cref)
+        prefix = declared_constant_path_prefix(node.constant_path, qualified_prefix,
+                                               unnameable_cref)
+        add_declared_name(names, prefix.join("::")) if prefix
+        if node.is_a?(Prism::ClassNode)
+          collect_declared_constant_names(node.superclass, qualified_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+        end
+        collect_declared_constant_names(node.body, prefix || qualified_prefix, names,
+                                        unnameable_cref: unnameable_cref)
+      end
+
+      # The bare `CONST =` arm of {collect_declared_constant_names}: the write
+      # lands on the enclosing cref, so an unnameable one declines the name.
+      def collect_declared_bare_write(node, qualified_prefix, names, unnameable_cref)
+        prefix = qualified_prefix + [node.name.to_s]
+        add_declared_name(names, prefix.join("::")) unless unnameable_cref
+        collect_rvalue_declared_names(node.value, prefix, qualified_prefix, names,
+                                      unnameable_cref)
+      end
+
+      # The `Path::CONST =` arm of {collect_declared_constant_names}.
+      def collect_declared_path_write(node, qualified_prefix, names, unnameable_cref)
+        prefix = declared_constant_write_prefix(node.target, qualified_prefix,
+                                                unnameable_cref)
+        add_declared_name(names, prefix.join("::")) if prefix
+        collect_rvalue_declared_names(node.value, prefix || qualified_prefix,
+                                      qualified_prefix, names, unnameable_cref)
+      end
+
+      # The unnamed-factory arm of {collect_declared_constant_names}: a
+      # `Class.new`/`Module.new`/`Data.define`/`Struct.new` block's cref is the
+      # anonymous class — declarations inside name nothing these tables carry.
+      # (An eval-family block is NOT special here: `Module.nesting` does not
+      # change, so `class Y` inside `X.class_eval` still declares under the
+      # lexical prefix — the generic child walk covers it.)
+      def collect_declared_anonymous_factory?(node, qualified_prefix, names, unnameable_cref)
+        return false unless meta_new_constant_rvalue?(node) && node.block
+
+        node.compact_child_nodes.each do |child|
+          next if child.equal?(node.block)
+
+          collect_declared_constant_names(child, qualified_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+        end
+        collect_declared_constant_names(node.block, qualified_prefix, names,
+                                        unnameable_cref: true)
+        true
+      end
+
+      # The rvalue half of {collect_declared_constant_names}'s write arm: a
+      # `Const = <factory> do … end` block's cref is the new class, so the block
+      # declares under the WRITTEN prefix; the call's other children and any
+      # non-factory rvalue keep the enclosing context.
+      def collect_rvalue_declared_names(value, written_prefix, qualified_prefix, names,
+                                        unnameable_cref)
+        if value.is_a?(Prism::CallNode) && meta_new_constant_rvalue?(value) && value.block
+          value.compact_child_nodes.each do |child|
+            next if child.equal?(value.block)
+
+            collect_declared_constant_names(child, qualified_prefix, names,
+                                            unnameable_cref: unnameable_cref)
+          end
+          collect_declared_constant_names(value.block, written_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+        else
+          collect_declared_constant_names(value, qualified_prefix, names,
+                                          unnameable_cref: unnameable_cref)
+        end
+      end
+
+      # The qualified prefix a `class`/`module` header declares: a `::`-rooted
+      # path re-anchors at the top level; a bare or `self::` path under an
+      # unnameable cref names nothing; every explicit base re-anchors
+      # lexically — the same split {declaration_prefix} gives the discovery
+      # walks.
+      def declared_constant_path_prefix(path, qualified_prefix, unnameable_cref)
+        return Source::ConstantPath.qualified_name_or_nil(path)&.split("::") if Source::ConstantPath.rooted?(path)
+        return nil if unnameable_cref &&
+                      (path.is_a?(Prism::ConstantReadNode) || self_anchored_tail(path))
+
+        Source::ConstantPath.declaration_prefix(qualified_prefix, path)
+      end
+
+      # The qualified name a `Path::CONST =` write declares — the write walk's
+      # own convention: `::`-rooted and `self::`-anchored paths resolve first,
+      # every other base files AS WRITTEN (`S2::C = 2` inside `class S` keys
+      # `S2::C`, matching {constant_path_write_key}'s as-written fallback
+      # rather than the header rule's lexical re-anchor).
+      def declared_constant_write_prefix(path, qualified_prefix, unnameable_cref)
+        return Source::ConstantPath.qualified_name_or_nil(path)&.split("::") if Source::ConstantPath.rooted?(path)
+
+        if (tail = self_anchored_tail(path))
+          return nil if unnameable_cref
+
+          return qualified_prefix + tail
+        end
+        Source::ConstantPath.qualified_name_or_nil(path)&.split("::")
+      end
+
+      # Every enclosing prefix of a declared name joins the oracle — a file
+      # that declares `S::A::B` necessarily has `S` and `S::A` to declare it
+      # under, so `A::B.class_eval` inside `class S` resolves `S::A::B`.
+      def add_declared_name(names, qualified_name)
+        segments = qualified_name.split("::")
+        segments.each_index { |i| names << segments.first(i + 1).join("::") }
       end
 
       # The constant segments under a `self::`-anchored path — `self::A::B` → `["A", "B"]` —

@@ -95,10 +95,14 @@ rules (consistent with the rest of the plugin-contract carriers):
   resolves against the enclosing receiver — `Y.class_eval {
   self::X.class_eval { def h; end } }` installs `Y::X#h`, never
   `M::X#h` under the lexical `module M` — while a CONSTANT receiver
-  resolves against the write site's innermost lexical rung
-  (`Y.class_eval` inside `M::Y.class_eval` at top level opens the
-  top-level `Y`, not `M::Y` again; a receiver that would resolve
-  through a middle nesting rung still files as written). Inside a
+  resolves through `Module.nesting` exactly as a read does —
+  `Y.class_eval` inside `M::Y.class_eval` at top level opens the
+  top-level `Y`, not `M::Y` again — so the first `<rung>::X` the
+  FILE'S OWN declarations contain wins, innermost first
+  (`X.class_eval` inside `class S` names `S::X` when the file
+  declares `S::X`, whether the call sits under `class <<` or not),
+  and only a shadow no rung declares — typically one defined in
+  another file — still files as written. Inside a
   `class <<` body `self` is the singleton — `self::X` reads and
   `self::X` / bare constant writes land on its constant table, which
   the tables cannot name, so both decline. The same unnameable cref

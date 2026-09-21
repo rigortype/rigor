@@ -2578,6 +2578,55 @@ Unrelated
       expect(data["X::D"]).to eq([:a])
     end
 
+    it "resolves an eval receiver through the file's own nesting declarations" do
+      # MRI: `X` inside `class S` names `S::X` whenever the scope declares it —
+      # `Module.nesting` order, innermost first — so the eval body's facts file
+      # under `S::X`, not the same-named top-level class.
+      methods, = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          class X; end
+          class T
+            X.class_eval { def m; end }
+          end
+          X.class_eval { def n; end }
+        end
+      RUBY
+      expect(methods.fetch("S::X")).to include(m: :instance, n: :instance)
+      expect(methods.fetch("X", {})).to be_empty
+    end
+
+    it "keeps an unshadowed or rooted eval receiver as written" do
+      # `S::X` is undeclared here: `X` falls through to the top-level name, and
+      # `::X` names the top level outright — no lexical walk reaches `S::X`.
+      methods, = described_class.build_methods_and_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          X.class_eval { def m; end }
+          ::X.class_eval { def r; end }
+        end
+      RUBY
+      expect(methods.fetch("X")).to include(m: :instance, r: :instance)
+      expect(methods).not_to have_key("S::X")
+    end
+
+    it "resolves a `class <<` operand through the file's nesting declarations" do
+      # `class << X` inside `class S` opens the singleton of `S::X` when that
+      # constant exists — the operand follows the same lexical lookup an
+      # eval-family receiver does.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class X; end
+        class S
+          class X; end
+          class << X
+            def sm; end
+          end
+        end
+      RUBY
+      expect(defs.fetch("S::X", {})).to have_key(:sm)
+      expect(defs.fetch("X", {})).to be_empty
+    end
+
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
       # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
       # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL

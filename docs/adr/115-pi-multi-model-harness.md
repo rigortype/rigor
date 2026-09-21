@@ -2,8 +2,12 @@
 
 Status: **Proposed, 2026-09-21.** Records the standing shape for a
 pi.dev-based, role-bound multi-model harness aimed at Rigor’s own
-development flows (and later Steins). No package has landed; this ADR
-is the decision, not the implementation.
+development flows (and later Steins). Thin stubs under
+`agents/pi-harness/` land with this amendment; the decision stays
+Proposed until the parallel acceptance path (WD6) works once.
+
+Grounding: [`docs/notes/20260921-takt-trial-setup.md`](../notes/20260921-takt-trial-setup.md)
+(TAKT trial setup + outcome on #1090 / PR #1144).
 
 ## Context
 
@@ -32,6 +36,30 @@ Three Rigor-owned flows are in view (v1 prioritises A; B and C follow):
 - **B. Survey → issues** — parallel corpus/`rigor-survey` probes →
   synthesis → issue filing.
 - **C. Docs** — JA site publish and EN docs finish (docs-only).
+
+### pi vs takt
+
+**pi** is the package surface for role×model binding and parallel lane
+contracts (this ADR). **takt** is an optional orchestrator for long
+quality-stable loops (plan → implement → draft PR → CI → adversarial →
+fix). They are complementary: pi owns the role contracts; takt (or a
+later in-tree orchestrator) may drive the long loop that consumes them.
+v1 does not require takt; a thin architect→lane path on pi skills is
+enough to prove WD6.
+
+### Trial findings (2026-09-21)
+
+An attended TAKT run of `rigor-ready-for-agent` on #1090 produced draft
+PR #1144 after human intervention. Two recurring bottlenecks:
+
+1. **Non-interactive git push / PR create** often need human approval in
+   the agent session — the ship step cannot be assumed unattended.
+2. **CI waiting inside the agent session** stalls when sleep/monitor
+   tools are refused. **External poll + resume** works until an
+   orchestrator can wait without per-poll tool approval.
+
+These harden WD4 (lanes do not own long CI watchers) and point CI
+ownership at the orchestrator / external poller, not the lane.
 
 ## Decision
 
@@ -86,6 +114,20 @@ does not duplicate that catalogue.
 mise remains runtimes and package managers only. Machine bootstrap /
 dotfile ownership is out of scope here.
 
+### WD6 — Parallel readiness (v1 acceptance)
+
+v1 succeeds when this path works **once**:
+
+1. `architect` fixes contracts for a scoped change.
+2. **N** disjoint worktree lanes (DeepSeek Flash-class) implement under
+   those contracts.
+3. Each lane **pushes its head SHA and stops** (no CI watcher).
+4. `orchestrator` (or external poll + resume) owns CI.
+5. A **separate** adversarial `reviewer` judges the result.
+
+Survey (B) and docs (C) wait until that path has landed once. Stubs in
+`agents/pi-harness/` are not the acceptance proof; the end-to-end run is.
+
 ## Rejected / deferred alternatives
 
 | Alternative | Why not (for v1) |
@@ -96,24 +138,35 @@ dotfile ownership is out of scope here.
 | Gemini for engine adversarial review | Wrong failure mode; Gemini is docs-tier (WD2). |
 | Put the harness in mise bootstrap / self-saving dotfiles | Conflicts with mise-as-runtimes scope (WD5). |
 | External-OSS contribution in the same v1 package | Different pain; deferred (WD1). |
+| Require takt as the only v1 orchestrator | takt is optional; pi contracts must stand alone (pi vs takt). |
+| Lane-owned long CI sleep loops | Trial finding: agent-session waits stall on tool approval; orchestrator / external poll owns CI (WD4, WD6). |
 
 ## Consequences
 
 **Positive.** Clear place to put role contracts; subscription capacity
 (Claude / Grok / OpenCode / Gemini) maps to jobs; Steins can reuse the
-extracted core later.
+extracted core later. TAKT trial bottlenecks (push approval, CI wait)
+are now explicit acceptance constraints rather than folklore.
 
 **Negative.** Until extract, Rigor carries another in-tree agent
 artefact; role bindings need occasional retuning as models change.
+Human-in-the-loop for push/PR remains until sessions can ship
+non-interactively.
 
-**Carry-over.** Implement the thin package; wire one architect→lane
-path end-to-end; only then survey (B) and docs (C). Re-evaluate extract
-triggers: Steins wants the same four shared roles, or a second consumer
-appears.
+**Carry-over.** Wire one architect→lane path end-to-end (WD6); only then
+survey (B) and docs (C). Re-evaluate extract triggers: Steins wants the
+same four shared roles, or a second consumer appears. Revisit in-session
+CI waiting once an orchestrator can poll without per-tick approval.
 
 ## Relationship to other ADRs
 
 - [ADR-98](98-development-flow-document-roles.md) — Issues remain the
   backlog; this harness consumes that backlog, it does not replace it.
 - Agent operating detail continues to live under `docs/agents/`
-  (contribution-flow, measurement), not in this ADR.
+  ([`contribution-flow.md`](../agents/contribution-flow.md),
+  measurement), not in this ADR.
+- Trial note:
+  [`docs/notes/20260921-takt-trial-setup.md`](../notes/20260921-takt-trial-setup.md)
+  — setup + outcome on #1090 via PR #1144 (human push, external CI poll,
+  resume). takt workflow facets under `.takt/` are a complementary
+  long-loop experiment, not a substitute for the pi role package.

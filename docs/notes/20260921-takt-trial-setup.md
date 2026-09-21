@@ -38,3 +38,18 @@ Evaluation axes (unchanged):
 3. Multi-provider mixing (claude / pi / opencode)
 
 Do not commit `.takt/runs/`, `.takt/tasks/`, or credentials.
+
+## Trial outcome
+
+`rigor-ready-for-agent` completed on #1090 via draft PR #1144 after
+**human push + external CI poll + resume** (not unattended end-to-end).
+
+Bottlenecks observed inside the Claude / agent session:
+
+1. Non-interactive `git push` / `gh pr create` often need human approval.
+2. In-session CI waiting stalls when sleep/monitor is refused — external
+   poll + resume works until an orchestrator can wait without per-poll
+   tool approval.
+
+These findings feed [ADR-115](../adr/115-pi-multi-model-harness.md)
+(pi vs takt complementarity, WD4/WD6, Consequences).

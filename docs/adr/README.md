@@ -129,7 +129,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
 | ADR-113 | [`rigor lens`: a declaration map with type provenance, for agents and tools](113-rigor-lens.md) | Accepted (nothing implemented yet) |
 | ADR-114 | [Inherited dispatch into core and stdlib RBS](114-core-stdlib-ancestor-dispatch.md) | Accepted (#527 slice 1 landed: instance-side superclass walk; slices 2/3/5/6 out of scope, partially supersedes ADR-43's rejected alternative A) |
-| ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (shape only; no package landed) |
+| ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (thin `agents/pi-harness/` stubs; WD6 parallel path unproven) |
 
 ## Adding a New ADR
 

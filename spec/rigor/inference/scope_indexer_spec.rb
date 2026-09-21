@@ -2461,6 +2461,92 @@ Unrelated
       expect(def_nodes.fetch("C2", {})).to be_empty
     end
 
+    it "declines a container-wrapped `def` inside `class <<` + `instance_eval`" do
+      # The `if` keeps the def off the eval body's statement list — it must not slip
+      # past the `:unnameable` gate through the generic singleton-defs descent.
+      defs = described_class.build_discovered_singleton_def_nodes(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval { if true; def meta; end; end }
+            instance_eval { begin; def meta2; end; end }
+          end
+        end
+      RUBY
+      expect(defs.fetch("S", {})).to be_empty
+    end
+
+    it "resolves `self::` receivers against a named eval receiver below `class <<`" do
+      # `X.class_eval` rebinds `self` to X even under a singleton cref — a `self::`
+      # receiver or header anchors on X, not on the singleton that names nothing.
+      table = methods_for(<<~RUBY)
+        class X
+          class Y; end
+        end
+        class S
+          class << self
+            X.class_eval do
+              self::Y.class_eval do
+                class self::D < Object
+                  def m; end
+                end
+              end
+            end
+          end
+        end
+      RUBY
+      expect(table).to have_key("X::Y::D")
+    end
+
+    it "threads `self::`-anchored nestings through an eval below `class <<`" do
+      nestings = described_class.build_def_nestings(parse(<<~RUBY))
+        class X
+          class Y; end
+        end
+        class S
+          class << self
+            X.class_eval do
+              self::Y.class_eval do
+                class self::D
+                  def m; Inner; end
+                end
+              end
+            end
+          end
+        end
+      RUBY
+      expect(nestings.values).to include(["X::Y::D", "S"])
+    end
+
+    it "does not file a named visibility call inside `class <<` as instance-side" do
+      # `private :x` inside `class <<` (or a receiver-eval body on a singleton self)
+      # marks the SINGLETON method — the instance-visibility table cannot express it.
+      visibilities = described_class.build_discovered_method_visibilities(parse(<<~RUBY))
+        class S
+          def x; end
+          class << self
+            def x; end
+            private :x
+            instance_eval { private :x }
+          end
+        end
+      RUBY
+      expect(visibilities["S"]).to eq({ x: :public })
+    end
+
+    it "files `module_function` rows ownerless inside `class <<` + `instance_eval`" do
+      ranges = described_class.build_deferred_ranges(parse(<<~RUBY))
+        class S
+          class << self
+            instance_eval do
+              module_function :meta
+              module_function def mf; end
+            end
+          end
+        end
+      RUBY
+      expect(ranges.map(&:last).uniq).to eq([nil])
+    end
+
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do
       # MRI: `Module.nesting` is unchanged by `self` rebinding, so `@@x` inside a method
       # defined in `K = Class.new { }` or `X.class_eval { }` belongs to the LEXICAL

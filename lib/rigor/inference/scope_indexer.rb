@@ -1354,7 +1354,7 @@ module Rigor
                                                        defs_singleton: defs_singleton)
         end
         self_prefix = def_owner || prefix
-        unnameable = unnameable_eval_self?(singleton_cref, def_owner, prefix, singleton_cref)
+        unnameable = unnameable_eval_self?(false, def_owner, prefix, singleton_cref)
         eval_prefix = eval_receiver_prefix(root, self_prefix, prefix,
                                            unnameable_self: unnameable) || []
         if (body = root.block.body)
@@ -1700,8 +1700,10 @@ module Rigor
           walk_class_cvars(node.expression, qualified_prefix, default_scope, accumulator,
                            def_owner: def_owner, singleton_cref: singleton_cref)
           if node.body
+            # `self` below `class <<` is the singleton class — `self::`-anchored receivers
+            # decline; `@@x` keeps the lexical cref either way, so the body walks ownerless.
             walk_class_cvars(node.body, qualified_prefix, default_scope, accumulator,
-                             def_owner: def_owner, singleton_cref: true)
+                             def_owner: [], singleton_cref: true)
           end
           return
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
@@ -2001,8 +2003,10 @@ module Rigor
                                         def_owner: def_owner, singleton_cref: singleton_cref)
         return unless node.body
 
+        # `def` below `class <<` is a singleton method — `self` is the singleton class, so
+        # `self::`-anchored receivers and writes decline; the body walks ownerless.
         walk_literal_receiver_mutations(node.body, qualified_prefix, census, nesting,
-                                        def_owner: def_owner, singleton_cref: true)
+                                        def_owner: [], singleton_cref: true)
       end
 
       # Two parameters because the two arms key on two DIFFERENT TABLES, not because the values differ:
@@ -3281,7 +3285,7 @@ module Rigor
         return nil unless receiver_eval_call?(node)
 
         self_prefix = self_owner || qualified_prefix
-        unnameable = unnameable_eval_self?(singleton_cref, self_owner, qualified_prefix,
+        unnameable = unnameable_eval_self?(false, self_owner, qualified_prefix,
                                            singleton_cref)
         eval_prefix = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                            unnameable_self: unnameable) || []
@@ -3688,7 +3692,10 @@ module Rigor
         owner_prefix = def_owner_prefix || qualified_prefix
         mf_offsets = []
         unless inside_deferred
-          collect_module_function_state(body, owner_prefix, in_singleton_class, mf_offsets,
+          # `module_function` under an unnameable definee (`class <<` + `instance_eval`)
+          # toggles the metaclass — its rows must not name the enclosing class.
+          prescan_owner = defs_singleton == :unnameable ? EMPTY_PREFIX : owner_prefix
+          collect_module_function_state(body, prescan_owner, in_singleton_class, mf_offsets,
                                         ranges)
         end
         statements_of(body).each do |stmt|
@@ -3988,8 +3995,12 @@ module Rigor
           return if walk_singleton_meta_new?(node, qualified_prefix, accumulator, def_owner_prefix,
                                              singleton_cref)
         when Prism::DefNode
-          record_singleton_def_node(node, def_owner_prefix || qualified_prefix,
-                                    in_singleton_class || defs_singleton, false, accumulator)
+          # `:unnameable` is the `class <<` + `instance_eval` definee — the singleton's own
+          # singleton — which this table cannot name either.
+          unless defs_singleton == :unnameable
+            record_singleton_def_node(node, def_owner_prefix || qualified_prefix,
+                                      in_singleton_class || defs_singleton, false, accumulator)
+          end
           return
         end
 
@@ -4192,7 +4203,7 @@ module Rigor
         end
         lexical = nesting_lexical_prefix(nesting)
         self_prefix = self_base || lexical
-        unnameable = unnameable_eval_self?(singleton_cref, self_base, lexical, singleton_cref)
+        unnameable = unnameable_eval_self?(false, self_base, lexical, singleton_cref)
         eval_self = eval_receiver_prefix(node, self_prefix, lexical,
                                          unnameable_self: unnameable) || []
         if (body = node.block.body)
@@ -4432,8 +4443,9 @@ module Rigor
                                 nesting, self_base: self_base, singleton_cref: singleton_cref)
         return unless node.body
 
+        # `self` below `class <<` is the singleton class — `self::` headers decline.
         walk_class_superclasses(node.body, qualified_prefix, accumulator, source_path,
-                                nesting, self_base: nil, singleton_cref: true)
+                                nesting, self_base: EMPTY_PREFIX, singleton_cref: true)
       end
 
       # One declaration's two ancestry facts: the as-written superclass name (classes only), and the
@@ -5359,7 +5371,14 @@ module Rigor
                                                                   defs_singleton: defs_singleton)
             return current_visibility
           end
-          updated = apply_visibility_call(node, owner_prefix, current_visibility, accumulator)
+          # The visibility table is instance-side only — `private :x` inside `class <<`
+          # (or a receiver-eval body that re-evaluates a singleton self) marks the
+          # SINGLETON method, which this table cannot express.
+          updated = if in_singleton_class
+                      current_visibility
+                    else
+                      apply_visibility_call(node, owner_prefix, current_visibility, accumulator)
+                    end
           return updated unless updated.equal?(current_visibility)
         end
 
@@ -5730,8 +5749,8 @@ module Rigor
         if meta_new_constant_rvalue?(node)
           block_owner = []
         elsif receiver_eval_call?(node)
-          self_prefix = singleton_cref ? [] : (leaf_owner || qualified_prefix)
-          unnameable = unnameable_eval_self?(singleton_cref, leaf_owner, qualified_prefix,
+          self_prefix = leaf_owner || qualified_prefix
+          unnameable = unnameable_eval_self?(false, leaf_owner, qualified_prefix,
                                              singleton_cref)
           block_owner = eval_receiver_prefix(node, self_prefix, qualified_prefix,
                                              unnameable_self: unnameable) || []
@@ -5815,7 +5834,9 @@ module Rigor
         collect_class_alias_map(node.expression, qualified_prefix, accumulator, leaf_owner,
                                 singleton_cref: singleton_cref)
         if node.body
-          collect_class_alias_map(node.body, qualified_prefix, accumulator,
+          # `self` below `class <<` is the singleton class — `self::`-anchored receivers
+          # decline; a named eval receiver still re-anchors to a real class.
+          collect_class_alias_map(node.body, qualified_prefix, accumulator, [],
                                   singleton_cref: true)
         end
         accumulator
@@ -7092,7 +7113,7 @@ module Rigor
           collect_class_decls(part, qualified_prefix, accumulator, compacts, self_prefix,
                               singleton_cref: singleton_cref)
         end
-        unnameable = unnameable_eval_self?(singleton_cref, self_prefix, qualified_prefix, singleton_cref)
+        unnameable = unnameable_eval_self?(false, self_prefix, qualified_prefix, singleton_cref)
         eval_self = eval_receiver_prefix(node, self_prefix || qualified_prefix, qualified_prefix,
                                          unnameable_self: unnameable) || []
         if (body = node.block.body)

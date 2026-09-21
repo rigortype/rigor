@@ -2310,8 +2310,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   describe "case/in pattern variable binding" do
-    # Like rescue, captured pattern variables are only bound on the matched branch; nil-injection produces `MatchType |
-    # nil` in the post-scope. We verify the match-type component is present.
+    # Issue #1122 — a pattern binds its names against the SUBJECT's type. A `case/in` with no `else` cannot fall
+    # through (an unmatched subject raises `NoMatchingPatternError`), so the post-scope carries the matched type
+    # itself rather than the `MatchType | nil` the shared `else` arm would inject.
+    def pattern_types(type)
+      type.is_a?(Rigor::Type::Union) ? type.members : [type]
+    end
+
     it "binds a capture variable to the matched class type" do
       _, post = evaluate(<<~RUBY)
         case value
@@ -2319,8 +2324,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           n
         end
       RUBY
-      nominal_members = post.local(:n).members.grep(Rigor::Type::Nominal)
-      expect(nominal_members.map(&:class_name)).to contain_exactly("Integer")
+      expect(post.local(:n)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
     it "handles a bare local variable target (captures subject type)" do
@@ -2331,7 +2335,55 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           n
         end
       RUBY
-      expect(post.local(:n).members).to include(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:n)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "reads a tuple subject element-wise" do
+      _, post = evaluate(<<~RUBY)
+        case [1, "a"]
+        in [i, s]
+          [i, s]
+        end
+      RUBY
+      expect(post.local(:i)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:s)).to eq(Rigor::Type::Combinator.constant_of("a"))
+    end
+
+    it "binds `T` per slot for an `Array[T]` subject" do
+      _, post = evaluate(<<~RUBY)
+        case ARGV
+        in [first, second]
+          [first, second]
+        end
+      RUBY
+      expect(post.local(:first)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      expect(post.local(:second)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "distributes a union subject over the pattern, dropping a member that cannot match" do
+      _, post = evaluate(<<~RUBY)
+        maybe = flag ? [1, "a"] : nil
+        case maybe
+        in [i, s]
+          [i, s]
+        end
+      RUBY
+      expect(post.local(:i)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:s)).to eq(Rigor::Type::Combinator.constant_of("a"))
+    end
+
+    it "binds a capture over a pattern to the whole subject as well as the pattern's own names" do
+      _, post = evaluate(<<~RUBY)
+        case [1, "a"]
+        in [x, y] => whole
+          [whole]
+        end
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:whole)).to eq(Rigor::Type::Combinator.tuple_of(
+                                         Rigor::Type::Combinator.constant_of(1),
+                                         Rigor::Type::Combinator.constant_of("a")
+                                       ))
     end
 
     it "extracts bindings from an array pattern" do
@@ -2341,70 +2393,117 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           [a, b]
         end
       RUBY
-      nominal_a = post.local(:a).members.grep(Rigor::Type::Nominal)
-      nominal_b = post.local(:b).members.grep(Rigor::Type::Nominal)
+      nominal_a = pattern_types(post.local(:a)).grep(Rigor::Type::Nominal)
+      nominal_b = pattern_types(post.local(:b)).grep(Rigor::Type::Nominal)
       expect(nominal_a.map(&:class_name)).to contain_exactly("Integer")
       expect(nominal_b.map(&:class_name)).to contain_exactly("String")
     end
 
-    it "binds the splat variable in an array pattern to Array[untyped]" do
+    it "binds the splat variable in an array pattern to the tuple's middle elements" do
       _, post = evaluate(<<~RUBY)
-        case value
+        case [1, "a", 3]
         in [Integer => first, *rest]
           rest
         end
       RUBY
-      nominal_first = post.local(:first).members.grep(Rigor::Type::Nominal)
+      nominal_first = pattern_types(post.local(:first)).grep(Rigor::Type::Nominal)
       expect(nominal_first.map(&:class_name)).to contain_exactly("Integer")
-      rest_nominal = post.local(:rest).members.grep(Rigor::Type::Nominal)
-      expect(rest_nominal.map(&:class_name)).to contain_exactly("Array")
+      expect(post.local(:rest)).to eq(Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of("a"),
+                                                                       Rigor::Type::Combinator.constant_of(3)))
     end
 
-    it "binds find-pattern *pre / *post splats to Array[untyped]" do
+    it "binds a find pattern's requireds to the union of their candidate positions" do
       _, post = evaluate(<<~RUBY)
-        case value
+        case [1, "a", 3]
+        in [*, middle, *]
+          middle
+        end
+      RUBY
+      expect(pattern_types(post.local(:middle))).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of("a"),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+    end
+
+    it "binds find-pattern *pre / *post splats to Array of the element union" do
+      _, post = evaluate(<<~RUBY)
+        case [1, "a", 3]
         in [*pre, Integer, *post]
           [pre, post]
         end
       RUBY
       %i[pre post].each do |name|
-        nominal = post.local(name).members.grep(Rigor::Type::Nominal)
-        expect(nominal.map(&:class_name)).to contain_exactly("Array")
+        expect(post.local(name)).to eq(
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of(1),
+            Rigor::Type::Combinator.constant_of("a"),
+            Rigor::Type::Combinator.constant_of(3)
+          )])
+        )
       end
     end
 
-    it "binds the **rest splat in a hash pattern to Hash[Symbol, untyped]" do
+    it "binds the **rest splat in a hash pattern to Hash[Symbol, value]" do
       _, post = evaluate(<<~RUBY)
-        case value
-        in { x:, **rest }
+        case { name: "x", age: 1 }
+        in { name:, **rest }
           rest
         end
       RUBY
-      nominal = post.local(:rest).members.grep(Rigor::Type::Nominal)
-      expect(nominal.map(&:class_name)).to contain_exactly("Hash")
+      expect(post.local(:rest)).to eq(
+        Rigor::Type::Combinator.nominal_of("Hash", type_args: [
+                                             Rigor::Type::Combinator.nominal_of("Symbol"),
+                                             Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of("x"), Rigor::Type::Combinator.constant_of(1))
+                                           ])
+      )
     end
 
     it "extracts bindings from a hash pattern" do
       _, post = evaluate(<<~RUBY)
-        case value
+        case { name: "x", age: 1 }
         in { name: String => n, age: Integer => a }
           [n, a]
         end
       RUBY
-      nominal_n = post.local(:n).members.grep(Rigor::Type::Nominal)
-      nominal_a = post.local(:a).members.grep(Rigor::Type::Nominal)
+      nominal_n = pattern_types(post.local(:n)).grep(Rigor::Type::Nominal)
+      nominal_a = pattern_types(post.local(:a)).grep(Rigor::Type::Nominal)
       expect(nominal_n.map(&:class_name)).to contain_exactly("String")
       expect(nominal_a.map(&:class_name)).to contain_exactly("Integer")
     end
 
-    it "handles hash shorthand pattern {key:}" do
+    it "reads a hash pattern's values out of a hash shape subject" do
       _, post = evaluate(<<~RUBY)
-        case value
+        case { name: "x" }
         in { name: }
           name
         end
       RUBY
-      expect(post.local(:name)).not_to be_nil
+      expect(post.local(:name)).to eq(Rigor::Type::Combinator.constant_of("x"))
+    end
+
+    it "keeps the Dynamic[top] floor for a subject nothing can decompose" do
+      _, post = evaluate(<<~RUBY)
+        case "not a pair"
+        in [a, b]
+          [a, b]
+        end
+      RUBY
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.untyped)
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "binds the one-line `=>` and `in` forms" do
+      _, post = evaluate(<<~RUBY)
+        [1, "a"] => [required_x, required_y]
+        if [1, "a"] in [predicate_x, predicate_y]
+          nil
+        end
+      RUBY
+      expect(post.local(:required_x)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:required_y)).to eq(Rigor::Type::Combinator.constant_of("a"))
+      expect(post.local(:predicate_x)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:predicate_y)).to eq(Rigor::Type::Combinator.constant_of("a"))
     end
 
     it "binds an alternation+capture target to the union of the alternates" do
@@ -2414,7 +2513,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           x
         end
       RUBY
-      nominal_members = post.local(:x).members.grep(Rigor::Type::Nominal)
+      nominal_members = pattern_types(post.local(:x)).grep(Rigor::Type::Nominal)
       expect(nominal_members.map(&:class_name)).to contain_exactly("Integer", "String")
     end
 
@@ -2425,8 +2524,37 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           i
         end
       RUBY
-      nominal_members = post.local(:i).members.grep(Rigor::Type::Nominal)
+      nominal_members = pattern_types(post.local(:i)).grep(Rigor::Type::Nominal)
       expect(nominal_members.map(&:class_name)).to contain_exactly("Integer", "String")
+    end
+
+    # Issue #1122 — an unmatched `case/in` with no `else` raises `NoMatchingPatternError`, so a name a clause
+    # bound is bound on every path that reaches the continuation. A `case/when` really does fall through as
+    # `nil`, and a `case/in` WITH an `else` can be reached without any pattern matching.
+    it "keeps a `case/when` fall-through nil arm" do
+      _, post = evaluate(<<~RUBY)
+        case flag
+        when 1
+          x = 1
+        end
+      RUBY
+      expect(pattern_types(post.local(:x))).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)
+      )
+    end
+
+    it "nil-injects a pattern binding across an `else` clause" do
+      _, post = evaluate(<<~RUBY)
+        case [1, "a"]
+        in [i, s]
+          [i, s]
+        else
+          nil
+        end
+      RUBY
+      expect(pattern_types(post.local(:i))).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)
+      )
     end
   end
 

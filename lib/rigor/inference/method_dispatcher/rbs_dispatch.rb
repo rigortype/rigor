@@ -1145,14 +1145,20 @@ module Rigor
               kind: kind,
               args: args,
               type_vars: type_vars,
-              environment: environment
+              environment: environment,
+              receiver: receiver,
+              receiver_args: receiver_args,
+              method_name: method_name
             )
           rescue StandardError
             []
           end
 
+          # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
-                                        environment: nil)
+                                        environment: nil, receiver: nil, receiver_args: [],
+                                        method_name: nil)
+            # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
@@ -1160,10 +1166,24 @@ module Rigor
               else                 instance_type
               end
 
+            # Issue #1130 — a block parameter that receives `self` (`Object#tap` yields it) must see the
+            # receiver's type arguments through the SAME {SelfSubstitute} verdict the return path applies
+            # (#1092), so `ints.tap { |a| }` binds `a` to `Array[Integer]` rather than the raw `Array`.
+            # The block path reuses only the keep-vs-degrade verdict, NOT the return path's value-pin
+            # widening: the block parameter is a destructure source, so the receiver's OWN type arguments
+            # (pinned constants included — `[1, 2].tap { |a, b| }` auto-splats the element union
+            # `1 | 2` per slot, the parity an explicit `a, b = [1, 2]` gets) are the substitution the
+            # binder should see. A verdict decline (an element-changing mutator like `map!`) keeps the
+            # raw nominal, so that receiver's block parameter still arrives without its type arguments.
+            substitute = SelfSubstitute.for(receiver, receiver_args, method_name, args, nil)
+            self_type = Type::Combinator.nominal_of(class_name, type_args: receiver_args) if substitute
+
             method_type = OverloadSelector.select(
               method_definition,
               arg_types: args,
-              self_type: self_type,
+              # Overload selection reads a `Dynamic` self's static facet, mirroring the return path;
+              # the substitution verdict here is built from the receiver's type arguments alone.
+              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: true,

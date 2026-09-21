@@ -3116,6 +3116,78 @@ Unrelated
       idx = described_class.index(program, default_scope: default_scope)
       expect(idx[program].user_def_for("C", :copied)).to be_nil
     end
+
+    it "keeps meta-new block declarations under the enclosing cref — self rebinds, nesting does not" do
+      # `Module.nesting` inside `Class.new { }` stays lexical: `class Inner` below
+      # `class <<` lands on `#<Class:C>` (unnameable), `class C::CD` re-anchors at
+      # the compact-header name, and `def`/`include` attribute to the class the
+      # write names. `class self::SX` resolves `self` to the anonymous class —
+      # nameable as `K::SX` at runtime, declined here consistently by every table
+      # because a `self::` header below an unnameable cref is the declined form.
+      program = parse(<<~RUBY)
+        module I; end
+        class C
+          class << self
+            ::K = Class.new do
+              include I
+              def m; end
+              class Inner; def n; end; end
+              class C::CD; def p; end; end
+              class self::SX; def q; end; end
+            end
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods.keys).to contain_exactly("K", "C::C::CD")
+      expect(methods["K"].keys).to eq([:m])
+
+      includes = described_class.build_discovered_includes(program)
+      expect(includes).to eq("K" => ["I"])
+
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body[1]
+      expect(idx[klass].discovered_classes).to have_key("K")
+      expect(idx[klass].discovered_classes).not_to have_key("K::Inner")
+      expect(idx[klass].discovered_classes).not_to have_key("C::Inner")
+    end
+
+    it "records meta-new block defs and aliases under the class the write names" do
+      # `def`/`alias` inside `::K = Class.new` below `class <<` bind on K — self is
+      # the named class even though the cref stays the singleton's.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            ::K = Class.new do
+              def original = :ok
+              alias copied original
+              def m; @x = 1; end
+            end
+          end
+        end
+      RUBY
+      defs = described_class.collect_class_method_defs(program)
+      expect(defs.keys).to eq(["K"])
+
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("K", :copied)).not_to be_nil
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+    end
+
+    it "keeps an unnameable meta-new block's defs ownerless under `class <<`" do
+      # `K = Class.new` names nothing below the singleton — `def m` belongs to the
+      # anonymous class and files nowhere.
+      program = parse(<<~RUBY)
+        class C
+          class << self
+            K = Class.new { def m = 1 }
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods).to be_empty
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+    end
   end
 
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the

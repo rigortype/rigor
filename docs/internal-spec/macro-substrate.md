@@ -137,7 +137,15 @@ rules (consistent with the rest of the plugin-contract carriers):
   so the mixin tables attribute the block to the nameable `K` and
   decline only when `K` itself is unnameable, with the factory call's
   receiver and arguments still evaluated in the enclosing context
-  (`K = Class.new(X.class_eval { extend M })` extends `X`). A cross-file def and a file the index
+  (`K = Class.new(X.class_eval { extend M })` extends `X`). The
+  meta-new block is still only a `self` rebind, though —
+  `Module.nesting` stays lexical inside it — so `def`, `alias`,
+  mixin, and `self::`-anchored facts attribute to the class the write
+  names while a nested `class` / `module` declaration keeps the
+  ENCLOSING cref (`class Inner` inside `C`'s `K = Class.new { … }`
+  opens `C::Inner`, never `K::Inner`; under `class <<` it lands on
+  the singleton's table and declines like any other declaration
+  there). A cross-file def and a file the index
   never saw both count as shadowed — the conservative direction, since
   binding `DeclBuilder` where a project method owns the call would
   invent diagnostics. That is how `class

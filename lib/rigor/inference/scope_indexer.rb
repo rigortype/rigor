@@ -1129,35 +1129,77 @@ module Rigor
       # Collects `{class_name => {method_name => DefNode}}` for every instance-method def in the program. Singleton defs
       # (`def self.x`) are excluded — the ctor-call crediting only follows instance-method calls on `self`. Last def
       # wins on redefinition.
-      def collect_class_method_defs(root, prefix = [], acc = {}, singleton_cref: false)
+      # `def_owner` is the meta-new override described on {#walk_methods_and_def_nodes}: inside a
+      # `K = Class.new { … }` block `self` is the class the write names, so `def` leaves record under
+      # it while `Module.nesting` — and therefore `prefix` — stays lexical. `[]` marks the anonymous
+      # block of an unnameable write; nil (the default) leaves defs under the lexical prefix.
+      def collect_class_method_defs(root, prefix = [], acc = {}, def_owner: nil, singleton_cref: false)
         return acc unless root.is_a?(Prism::Node)
 
         case root
         when Prism::ClassNode, Prism::ModuleNode
-          child = Source::ConstantPath.declaration_prefix(prefix, root.constant_path)
-          if child && root.body
-            # Under an unnameable cref a bare/`self::` header opens `#<singleton>::Name` —
-            # ownerless; nameable headers re-anchor at a real cref.
-            child_cref = singleton_cref && !decl_nameable_under_cref?(root)
-            collect_class_method_defs(root.body, child_cref ? [] : child, acc,
-                                      singleton_cref: child_cref)
-          end
-          return acc
+          return collect_decl_method_defs(root, prefix, acc, singleton_cref)
         when Prism::SingletonClassNode
           # The expression evaluates in the enclosing cref; the body's cref is unnameable.
-          return collect_singleton_method_defs(root, prefix, acc, singleton_cref)
+          return collect_singleton_method_defs(root, prefix, acc, def_owner, singleton_cref)
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
+          return acc if collect_meta_new_method_defs?(root, prefix, acc, def_owner, singleton_cref)
         when Prism::DefNode
-          (acc[prefix.join("::")] ||= {})[root.name] = root unless prefix.empty? || root.receiver
+          rec_prefix = def_owner || prefix
+          (acc[rec_prefix.join("::")] ||= {})[root.name] = root unless rec_prefix.empty? || root.receiver
           return acc
         end
 
-        root.rigor_each_child { |c| collect_class_method_defs(c, prefix, acc, singleton_cref: singleton_cref) }
+        root.rigor_each_child do |c|
+          collect_class_method_defs(c, prefix, acc, def_owner: def_owner, singleton_cref: singleton_cref)
+        end
         acc
       end
 
-      def collect_singleton_method_defs(root, prefix, acc, singleton_cref)
-        collect_class_method_defs(root.expression, prefix, acc, singleton_cref: singleton_cref)
-        collect_class_method_defs(root.body, prefix, acc, singleton_cref: true) if root.body
+      # The meta-new arm of {#collect_class_method_defs}: the write's receiver and arguments
+      # evaluate in the enclosing context; the block's defs belong to the class the write
+      # names, its declarations to the enclosing cref.
+      def collect_meta_new_method_defs?(root, prefix, acc, enclosing_owner, singleton_cref)
+        call = meta_new_block_call(root)
+        return false unless call
+
+        child_prefix = meta_new_child_prefix(root, prefix)
+        meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(root)
+        [call.receiver, *call.arguments&.arguments.to_a].compact.each do |part|
+          collect_class_method_defs(part, prefix, acc, def_owner: enclosing_owner,
+                                                       singleton_cref: singleton_cref)
+        end
+        if (body = meta_new_block_body(root))
+          collect_class_method_defs(body, prefix, acc,
+                                    def_owner: meta_ownerless ? [] : child_prefix,
+                                    singleton_cref: singleton_cref)
+        end
+        true
+      end
+
+      # The class/module arm of {#collect_class_method_defs}: defs inside the body belong to
+      # the declared class — `def_owner` clears — while an unnameable header below an
+      # unnameable cref walks the body ownerless.
+      def collect_decl_method_defs(root, prefix, acc, singleton_cref)
+        child = Source::ConstantPath.declaration_prefix(prefix, root.constant_path)
+        if child && root.body
+          # Under an unnameable cref a bare/`self::` header opens `#<singleton>::Name` —
+          # ownerless; nameable headers re-anchor at a real cref.
+          child_cref = singleton_cref && !decl_nameable_under_cref?(root)
+          collect_class_method_defs(root.body, child_cref ? [] : child, acc,
+                                    singleton_cref: child_cref)
+        end
+        acc
+      end
+
+      def collect_singleton_method_defs(root, prefix, acc, def_owner, singleton_cref)
+        collect_class_method_defs(root.expression, prefix, acc, def_owner: def_owner,
+                                                                singleton_cref: singleton_cref)
+        if root.body
+          collect_class_method_defs(root.body, prefix, acc, def_owner: def_owner,
+                                                            singleton_cref: true)
+        end
         acc
       end
 
@@ -2382,17 +2424,16 @@ module Rigor
              Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
-            if singleton_cref && !meta_new_path_target_nameable?(node)
-              # `K = Class.new` names nothing under an unnameable cref — the block's class
-              # stays anonymous, so its members walk ownerless. A path write (`::K`,
-              # `C::K`) resolves its base lexically and keeps the name.
-              walk_methods_and_def_nodes(meta_new_block_body(node), [], false, methods_acc,
-                                         def_nodes_acc, source_path, nil, singleton_cref: true)
-            else
-              record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc)
-              walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc,
-                                         source_path)
-            end
+            # A meta-new block rebinds only `self` — `Module.nesting` stays lexical — so
+            # declarations inside keep the ENCLOSING prefix and cref, while `def`-family
+            # leaves record under the class the write names. An unnameable write (bare
+            # `K =` under `class <<`) gives an empty owner prefix: the block's class is
+            # anonymous and its defs belong to no nameable class.
+            meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(node)
+            record_meta_new_facts(meta_new_rvalue(node), child_prefix, methods_acc) unless meta_ownerless
+            walk_methods_and_def_nodes(meta_new_block_body(node), qualified_prefix, false, methods_acc,
+                                       def_nodes_acc, source_path, meta_ownerless ? [] : child_prefix,
+                                       singleton_cref: singleton_cref)
             # No anonymous registration here: the constant IS the name, and `StatementEvaluator#eval_constant_write`
             # enters the body under it (#590) by asking THIS recognition (`meta_new_block_body`), so the two passes
             # agree on the constant name alone.
@@ -3044,7 +3085,6 @@ module Rigor
         # unnameable cref a bare write names nothing, so the block's class walks ownerless; a
         # path write keeps the lexically-resolved name.
         meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(node)
-        prefix = meta_ownerless ? [] : child_prefix
         if call.receiver
           walk_deferred_ranges(call.receiver, qualified_prefix, in_singleton_class, inside_deferred,
                                mf_offsets, ranges, def_owner_prefix, singleton_cref: singleton_cref)
@@ -3053,8 +3093,8 @@ module Rigor
           walk_deferred_ranges(arg, qualified_prefix, in_singleton_class, inside_deferred, mf_offsets,
                                ranges, def_owner_prefix, singleton_cref: singleton_cref)
         end
-        walk_deferred_body(meta_new_block_body(node), prefix, false, inside_deferred, ranges, nil,
-                           singleton_cref: meta_ownerless)
+        walk_deferred_body(meta_new_block_body(node), qualified_prefix, false, inside_deferred, ranges,
+                           meta_ownerless ? [] : child_prefix, singleton_cref: singleton_cref)
       end
 
       # Body-level entry for a class / module / `class <<` / meta-`new` / eval-block body: prescans
@@ -3350,8 +3390,8 @@ module Rigor
         return false unless child_prefix
 
         meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(node)
-        walk_singleton_body(meta_new_block_body(node), meta_ownerless ? [] : child_prefix,
-                            false, accumulator, nil, singleton_cref: meta_ownerless)
+        walk_singleton_body(meta_new_block_body(node), qualified_prefix, false, accumulator,
+                            meta_ownerless ? [] : child_prefix, singleton_cref: singleton_cref)
         true
       end
 
@@ -4066,7 +4106,10 @@ module Rigor
           else
             meta_new_block_owner(node, qualified_prefix)
           end
-        body_cref = singleton_cref && meta_owner.nil?
+        # The block rebinds only `self` — `Module.nesting` stays lexical — so the cref
+        # flag passes through unchanged: a nested `class Inner` under `class <<` still
+        # lands on the singleton's table, while mixin leaves attribute to `meta_owner`.
+        body_cref = singleton_cref
         # The factory call's receiver and arguments evaluate in the ENCLOSING context —
         # `K = Class.new(X.class_eval { include T })` still mixes T into X — while the
         # block is the class body of the class the write names.
@@ -4278,7 +4321,9 @@ module Rigor
           else
             meta_new_block_owner(node, qualified_prefix)
           end
-        body_cref = singleton_cref && meta_owner.nil?
+        # The block rebinds only `self` — `Module.nesting` stays lexical — so the cref
+        # flag passes through unchanged, matching the includes twin.
+        body_cref = singleton_cref
         # The factory call's receiver and arguments evaluate in the ENCLOSING context;
         # the block is the class body of the class the write names.
         if call.receiver
@@ -4452,11 +4497,10 @@ module Rigor
              Prism::ConstantPathOrWriteNode
           child_prefix = meta_new_body_prefix(node, qualified_prefix)
           if child_prefix
-            # `K = Class.new` names nothing under an unnameable cref — the meta body
-            # walks ownerless; a path write keeps the lexically-resolved name.
             meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(node)
-            walk_method_visibilities(meta_new_block_body(node), meta_ownerless ? [] : child_prefix,
-                                     false, :public, accumulator, nil, singleton_cref: meta_ownerless)
+            walk_method_visibilities(meta_new_block_body(node), qualified_prefix, false, :public,
+                                     accumulator, meta_ownerless ? [] : child_prefix,
+                                     singleton_cref: singleton_cref)
             return current_visibility
           end
         when Prism::DefNode
@@ -4753,8 +4797,11 @@ module Rigor
       end
 
       # Builds a map `{class_name => {new_name_sym => old_name_sym}}` by walking the tree for `AliasMethodNode` nodes
-      # inside class bodies.
-      def collect_class_alias_map(node, qualified_prefix, accumulator, singleton_cref: false)
+      # inside class bodies. `leaf_owner` is the meta-new override: inside `K = Class.new { … }` the
+      # block's aliases bind on the class the write names — it overrides `qualified_prefix`, which
+      # keeps naming the enclosing lexical cref for declarations.
+      def collect_class_alias_map(node, qualified_prefix, accumulator, leaf_owner = nil,
+                                  singleton_cref: false)
         return accumulator unless node.is_a?(Prism::Node)
 
         case node
@@ -4762,26 +4809,64 @@ module Rigor
           return collect_alias_map_declaration(node, qualified_prefix, accumulator, singleton_cref)
         when Prism::SingletonClassNode
           return collect_alias_map_singleton(node, qualified_prefix, accumulator, singleton_cref)
-        when Prism::AliasMethodNode
-          # Inside a `class <<` body the alias binds on the singleton — the map files
-          # nothing; a re-anchored declaration below it clears the flag again.
-          record_alias_map_entry(node, qualified_prefix, accumulator) unless singleton_cref
-          return accumulator
-        when Prism::CallNode
-          # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
-          # `t` alias was the corpus case). Recorded, then the walk continues: unlike AliasMethodNode a
-          # call's children can carry further class bodies (`Class.new do … end`).
-          names = alias_method_call_names(node)
-          if names && !qualified_prefix.empty? && !singleton_cref
-            (accumulator[qualified_prefix.join("::")] ||= {})[names.first] =
-              names.last
-          end
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
+             Prism::ConstantPathOrWriteNode
+          return accumulator if collect_alias_map_meta_new?(node, qualified_prefix, accumulator,
+                                                            singleton_cref)
+        when Prism::AliasMethodNode, Prism::CallNode
+          return accumulator if record_alias_leaf?(node, qualified_prefix, accumulator,
+                                                   leaf_owner, singleton_cref)
         end
 
         node.rigor_each_child do |child|
-          collect_class_alias_map(child, qualified_prefix, accumulator, singleton_cref: singleton_cref)
+          collect_class_alias_map(child, qualified_prefix, accumulator, leaf_owner,
+                                  singleton_cref: singleton_cref)
         end
         accumulator
+      end
+
+      # The alias-leaf arm of {#collect_class_alias_map}: inside a `class <<` body the alias binds
+      # on the singleton — the map files nothing; a re-anchored declaration below it clears the
+      # flag again, and a meta-new block's `leaf_owner` re-anchors it onto the named class.
+      # Returns true when the leaf was consumed (AliasMethodNode always; a recognised
+      # `alias_method` call), false when the node is an ordinary call to keep walking.
+      def record_alias_leaf?(node, qualified_prefix, accumulator, leaf_owner, singleton_cref)
+        rec_prefix = leaf_owner || qualified_prefix
+        if node.is_a?(Prism::AliasMethodNode)
+          record_alias_map_entry(node, rec_prefix, accumulator) unless singleton_cref && leaf_owner.nil?
+          return true
+        end
+        return false unless node.is_a?(Prism::CallNode)
+
+        # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
+        # `t` alias was the corpus case). Unlike AliasMethodNode a call's children can carry further
+        # class bodies (`Class.new do … end`), so the walk continues below it either way.
+        names = alias_method_call_names(node)
+        if names && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
+          (accumulator[rec_prefix.join("::")] ||= {})[names.first] = names.last
+        end
+        false
+      end
+
+      # The meta-new arm of {#collect_class_alias_map}: the write's receiver and arguments keep
+      # the enclosing context; the block's aliases bind on the class the write names, or file
+      # nothing when the write is unnameable below an unnameable cref.
+      def collect_alias_map_meta_new?(node, qualified_prefix, accumulator, singleton_cref)
+        call = meta_new_block_call(node)
+        return false unless call
+
+        child_prefix = meta_new_child_prefix(node, qualified_prefix)
+        meta_ownerless = singleton_cref && !meta_new_path_target_nameable?(node)
+        [call.receiver, *call.arguments&.arguments.to_a].compact.each do |part|
+          collect_class_alias_map(part, qualified_prefix, accumulator, nil,
+                                  singleton_cref: singleton_cref)
+        end
+        if (body = meta_new_block_body(node))
+          collect_class_alias_map(body, qualified_prefix, accumulator,
+                                  meta_ownerless ? nil : child_prefix,
+                                  singleton_cref: singleton_cref)
+        end
+        true
       end
 
       # `[new_name, old_name]` for an implicit-self `alias_method` call with two literal symbol /

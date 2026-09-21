@@ -24,9 +24,10 @@ Environment:
   PI_BIN        Path to pi (default: pi on PATH)
 
 Model defaults (patterns; first match from `pi --list-models` wins):
+  reviewer (rigor-reviewer-grok agent): xai/grok-4.6 — use xai/grok-4.7 only for deep RCA
   architect / orchestrator
     patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
-    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.7
+    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.7 (deep RCA; review default is 4.6)
   lane
     patterns: opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
     preferred ids: opencode-go/deepseek-v4.1-flash

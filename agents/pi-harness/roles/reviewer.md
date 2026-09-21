@@ -4,7 +4,8 @@ Model bands for the **Approved** gate (no live Claude usage poll):
 
 | Band | Prefer | Thinking | When |
 | --- | --- | --- | --- |
-| Grok | `xai/grok-4.7` | `max` | **Default** adversarial pass |
+| Grok | `xai/grok-4.6` | `max` | **Default** adversarial pass (PR review / scoped judgment) |
+| Grok 4.7 | `xai/grok-4.7` | `max` | **Deep RCA / long investigation only** — not default review |
 | Opus | `claude-bridge/claude-opus-5` | `high` | Added when the change is judged complex |
 | Fable | `claude-bridge/claude-fable-5` | `medium` | **Reserved** for complex design / architecture-shaped review |
 
@@ -12,8 +13,9 @@ Agents: `rigor-reviewer-grok`, `rigor-reviewer-opus`, `rigor-reviewer`.
 
 ## Selection rule (orchestrator)
 
-1. **Default:** always run `rigor-reviewer-grok` (Grok:max). One `Approved` is
-   enough for ordinary / tidy / local fixes.
+1. **Default:** always run `rigor-reviewer-grok` on **`xai/grok-4.6:max`**. One
+   `Approved` is enough for ordinary / tidy / local fixes. Do **not** default
+   review to 4.7 (over-scope tax on merge-quality reviews).
 2. **Complex (implementation-heavy, multi-file engine, subtle contracts):**
    after Grok, also run `rigor-reviewer-opus` (Opus:high). Both must `Approved`
    (either `Needs fix` → fix loop).
@@ -21,7 +23,10 @@ Agents: `rigor-reviewer-grok`, `rigor-reviewer-opus`, `rigor-reviewer`.
    changes, ADR-level judgment): use `rigor-reviewer` (Fable:medium) — alone or
    after Grok — and **do not** spend Fable on routine tidies. Prefer keeping
    Fable budget for these cases.
-4. On Grok auth / provider failure: fall back to Opus, then Fable only if the
+4. **Deep root-cause / long investigation** (not ordinary PR review): pin
+   `MODEL=xai/grok-4.7` or spawn with `model: xai/grok-4.7` — keep 4.6 as the
+   review default.
+5. On Grok auth / provider failure: fall back to Opus, then Fable only if the
    change is design-complex; otherwise surface `Blocked — need human`.
 
 ## Persona

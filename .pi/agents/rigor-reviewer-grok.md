@@ -1,11 +1,11 @@
 ---
 name: rigor-reviewer-grok
 description: >-
-  Rigor adversarial reviewer (Grok:max) — default Grok:max adversarial reviewer; Opus added when complex; returns Approved or Needs fix
+  Rigor adversarial reviewer (Grok:max) — default Grok 4.6:max adversarial reviewer (use 4.7 for deep RCA); Opus added when complex; returns Approved or Needs fix
 advertise: true
 aliases: reviewer-grok
 acceptanceRole: read-only
-model: xai/grok-4.7
+model: xai/grok-4.6
 thinking: max
 systemPromptMode: replace
 inheritProjectContext: true
@@ -25,9 +25,10 @@ Stay **read-focused**. Use bash only for inspection (`git diff`, `git log`,
 
 ## Gate position
 
-**Default Approved reviewer.** Orchestrator always prefers this agent (Grok:max)
-for ordinary changes. Complex implementation may add Opus afterward; complex
-design may use Fable instead of burning it here.
+**Default Approved reviewer on `xai/grok-4.6`.** Prefer 4.6 for PR review /
+scoped patch judgment (less over-scope). Use `xai/grok-4.7` only when the
+orchestrator routes a **deep root-cause / multi-hour investigation**. Complex
+implementation may add Opus afterward; complex design may use Fable instead.
 
 Your `Needs fix` blocks advancement for this pass.
 

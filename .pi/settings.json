@@ -1,5 +1,6 @@
 {
   "packages": [
-    "../agents/pi-harness"
+    "../agents/pi-harness",
+    "npm:pi-subagents"
   ]
 }

@@ -34,3 +34,17 @@ after gates. You do not replace ADR-98’s backlog; you consume it.
 
 Until an orchestrator can wait without per-poll tool approval, **external
 poll + resume** is an acceptable stand-in (ADR-115 trial finding).
+
+## Interactive queue modes
+
+Two resume-friendly, in-session queues (skills + slash prompts; stay in `pi`):
+
+- **Release pre-clear** — `/queue-release` / `rigor-queue-release`
+  Clear merge-valuable Issues before a cut. Target `vX.Y.Z` is context only;
+  never run `/rigor-release-prep` unless the user explicitly invoked it.
+- **Survey coverage** — `/queue-survey` / `rigor-queue-survey`
+  Collect rigor-survey holes → Issues → sequential着手. Measuring targets need
+  **disjoint** checkouts.
+
+Turn protocol lives in the skills. Resume with `pi -c` in the same project
+session. Optional: `scripts/run-queue.sh` binds a dedicated `--session-id`.

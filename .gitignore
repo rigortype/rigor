@@ -37,6 +37,8 @@
 .takt/tasks.yaml
 .takt/events/
 
-# pi project-local install artifacts (keep .pi/settings.json tracked)
+# pi project-local install artifacts (keep .pi/settings.json + .pi/agents tracked)
 .pi/*
 !.pi/settings.json
+!.pi/agents/
+!.pi/agents/**

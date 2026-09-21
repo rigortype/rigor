@@ -2,10 +2,11 @@
 
 module Rigor
   module Hashing
-    # Pure-Ruby XXH3-64 (seed 0, default secret) — the content hash behind the `rigor lens` anchors of
-    # ADR-113 WD6. A port of the upstream xxHash scalar path (`xxhash.h`'s `XXH3_64bits` with
-    # `XXH3_kSecret`), pinned by the upstream sanity-check vectors and cross-checked against lisplens's
-    # `xxhash-rust` output; see `spec/rigor/hashing/xxh3_spec.rb`.
+    # Pure-Ruby XXH3-64 (seed 0, default secret) — the content hash for the `rigor lens` anchors of
+    # ADR-113 WD6, landed ahead of `rigor lens` itself (#1083). A port of the upstream xxHash scalar
+    # path (`xxhash.h`'s `XXH3_64bits` with `XXH3_kSecret`), pinned by the upstream sanity-check
+    # vectors and cross-checked against lisplens's `xxhash-rust` output; see
+    # `spec/rigor/hashing/xxh3_spec.rb`.
     #
     # Pure Ruby per ADR-31: a native `xxhash` gem is a supply-chain addition to hash a few hundred
     # bytes per call. Only the seedless/default-secret variant is implemented — the `rigor lens`
@@ -57,13 +58,13 @@ module Rigor
       # XXH3_INIT_ACC
       INIT_ACC = [PRIME32_3, PRIME64_1, PRIME64_2, PRIME64_3, PRIME64_4, PRIME32_2, PRIME64_5, PRIME32_1].freeze
 
-      private_constant :MASK32, :PRIME32_1, :PRIME32_2, :PRIME32_3, :PRIME64_1, :PRIME64_2, :PRIME64_3,
+      private_constant :MASK64, :MASK32, :PRIME32_1, :PRIME32_2, :PRIME32_3, :PRIME64_1, :PRIME64_2, :PRIME64_3,
                        :PRIME64_4, :PRIME64_5, :PRIME_MX1, :PRIME_MX2, :STRIPE_LEN, :SECRET_CONSUME_RATE,
                        :ACC_NB, :MIDSIZE_MAX, :SECRET_SIZE_MIN, :MIDSIZE_STARTOFFSET, :MIDSIZE_LASTOFFSET,
                        :SECRET_LASTACC_START, :SECRET_MERGEACCS_START, :SECRET, :INIT_ACC
 
       class << self
-        # XXH3_64bits of `bytes` (a String, hashed as raw bytes) as an Integer in `0..2**64-1`.
+        # XXH3_64bits of `bytes`, hashed as raw bytes — the string's encoding is ignored.
         def digest64(bytes)
           len = bytes.bytesize
           if len <= 16 then len_0to16(bytes, len)

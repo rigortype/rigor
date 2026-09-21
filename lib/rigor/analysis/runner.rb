@@ -409,6 +409,9 @@ module Rigor
         # Issue #682 — the `Module.nesting` each class / module declaration HEADER is written in.
         @project_discovered_header_nestings = {}.freeze
         @project_discovered_includes = {}.freeze
+        # Issue #1123 — the instance-side prepend table (`prepend M`, and `Recv.prepend(M)`), in
+        # instance-ancestor SEARCH order.
+        @project_discovered_prepends = {}.freeze
         # Issue #898 — the singleton-side twin of the include table (`extend M` / `extend self`).
         @project_discovered_extends = {}.freeze
         @project_discovered_deferred_ranges = {}.freeze
@@ -1456,8 +1459,7 @@ module Rigor
         @project_discovered_singleton_def_sources = discovery.discovered_singleton_def_sources
         @project_discovered_superclasses = discovery.discovered_superclasses
         @project_discovered_header_nestings = discovery.discovered_header_nestings
-        @project_discovered_includes = discovery.discovered_includes
-        @project_discovered_extends = discovery.discovered_extends
+        apply_discovery_mixin_tables(discovery)
         @project_discovered_deferred_ranges = discovery.discovered_deferred_ranges
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
@@ -1469,6 +1471,15 @@ module Rigor
         @project_discovered_parameter_envelopes = discovery.discovered_parameter_envelopes
         @project_data_member_layouts = discovery.data_member_layouts
         @project_struct_member_layouts = discovery.struct_member_layouts
+      end
+
+      # The three mixin tables the discovery pass carries — the ADR-24 `include` map, its issue #1123
+      # `prepend` twin, and the #898 `extend` table. Extracted to keep {#apply_discovery_result} under its
+      # ABC budget.
+      def apply_discovery_mixin_tables(discovery)
+        @project_discovered_includes = discovery.discovered_includes
+        @project_discovered_prepends = discovery.discovered_prepends
+        @project_discovered_extends = discovery.discovered_extends
       end
 
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
@@ -1986,11 +1997,13 @@ module Rigor
         tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
       end
 
-      # The two mixin tables: the ADR-24 instance-side `include` / `prepend` map and its #898 singleton-side
-      # `extend` twin. Paired here because they are read as one picture of a class's ancestry, and split out
-      # of {#project_scope_seed_tables} to keep it under the complexity budget.
+      # The three mixin tables: the ADR-24 instance-side `include` map, its issue #1123 `prepend` twin
+      # (which carries the instance-ancestor order the include table's set-shaped value cannot), and the
+      # #898 singleton-side `extend` table. Grouped here because they are read as one picture of a class's
+      # ancestry, and split out of {#project_scope_seed_tables} to keep it under the complexity budget.
       def seed_mixin_tables(tables)
         tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
+        tables[:discovered_prepends] = @project_discovered_prepends unless @project_discovered_prepends.empty?
         tables[:discovered_extends] = @project_discovered_extends unless @project_discovered_extends.empty?
       end
 

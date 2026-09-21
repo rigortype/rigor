@@ -3769,4 +3769,93 @@ end
       expect(result[:constants]).to eq(Set["Admin::Table::ROWS", "Table::ROWS"])
     end
   end
+
+  # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
+  # instance-ancestor SEARCH order. It is the half of the mixin picture the include table cannot carry (that
+  # one is a set in call order, and every other consumer reads it that way), and
+  # `Scope#user_def_through_ancestors` searches it ahead of the class's own `def`s.
+  describe ".build_discovered_prepends" do
+    it "records an in-body `prepend` in both tables, keeping call order in the include one" do
+      program = parse(<<~RUBY)
+        module T; end
+        class C
+          prepend T
+        end
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
+      expect(described_class.build_discovered_includes(program)).to eq("C" => ["T"])
+    end
+
+    it "orders two statements nearest-first, and one statement's arguments in call order" do
+      # `prepend A; prepend B` searches B first; `prepend A, B` makes A the nearer of the two. The include
+      # table keeps call order for both — its own contract, which this table must not move.
+      program = parse(<<~RUBY)
+        module A; end
+        module B; end
+        class Two
+          prepend A
+          prepend B
+        end
+        class One
+          prepend A, B
+        end
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to eq("Two" => %w[B A], "One" => %w[A B])
+      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[A B], "One" => %w[A B])
+    end
+
+    it "records the `Recv.prepend(Mod)` call form under the receiver in both tables" do
+      program = parse(<<~RUBY)
+        module T; end
+        class C; end
+        C.prepend(T)
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
+      # The call form is the same ancestry edge as the declaration form, so the set-shaped include table
+      # carries it too — otherwise the two spellings of one edge would answer differently for arity,
+      # visibility and undefined-method suppression.
+      expect(described_class.build_discovered_includes(program)).to eq("C" => ["T"])
+    end
+
+    it "leaves the `Recv.include(Mod)` call form unrecorded" do
+      # Deliberately out of scope: no ordering question is open for it, and recording it would change what
+      # every consumer says about the class (see the walk's comment).
+      program = parse(<<~RUBY)
+        module T; end
+        class C; end
+        C.include(T)
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to be_empty
+      expect(described_class.build_discovered_includes(program)).to be_empty
+    end
+
+    it "resolves an unqualified call-form receiver through the nesting the file declares" do
+      program = parse(<<~RUBY)
+        module Api
+          module T; end
+          class C; end
+          C.prepend(T)
+        end
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to eq("Api::C" => ["T"])
+    end
+
+    it "declines a call-form receiver that names no static class" do
+      program = parse(<<~RUBY)
+        module T; end
+        klass = Class.new
+        klass.prepend(T)
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to be_empty
+    end
+
+    it "records a `prepend` written inside an eval block against the block's receiver" do
+      program = parse(<<~RUBY)
+        module T; end
+        class C; end
+        C.instance_eval { prepend T }
+      RUBY
+      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
+    end
+  end
 end

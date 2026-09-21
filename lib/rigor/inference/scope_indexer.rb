@@ -200,9 +200,7 @@ module Rigor
         def_nodes, def_nestings = merge_def_node_tables(default_scope, root, file_def_nodes)
         singleton_def_nodes = merge_singleton_def_nodes(default_scope, root)
         superclasses, header_nestings = merge_ancestry_tables(default_scope, root)
-        includes = default_scope.discovered_includes.merge(
-          build_discovered_includes(root)
-        ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
+        includes, prepends = merge_mixin_tables(default_scope, root)
         # ADR-35 — per-file visibilities merged OVER the cross-file seed (the current file is authoritative for its own
         # classes; sibling-file ancestors are preserved from the project seed).
         method_visibilities = default_scope.discovered_method_visibilities.merge(
@@ -230,6 +228,7 @@ module Rigor
             discovered_superclasses: superclasses,
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
+            discovered_prepends: prepends,
             discovered_extends: extends,
             discovered_method_visibilities: method_visibilities,
             discovered_parameter_envelopes: merge_envelope_seed(default_scope, file_envelopes),
@@ -246,6 +245,23 @@ module Rigor
         default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+      end
+
+      # Issue #1123 — the two instance-side mixin tables, from ONE descent of this file. Each merges over
+      # the cross-file seed per class, with the file under analysis as the later-loading contribution for a
+      # reopened class: its `prepend`s are therefore NEARER than the seed's (the {#accumulate_extend_lists}
+      # convention, which exists for the same ordering reason) while its `include`s append, that table
+      # keeping call order.
+      def merge_mixin_tables(default_scope, root)
+        file = mixin_tables(root)
+        [
+          default_scope.discovered_includes.merge(file[:includes]) do |_class, cross_file, per_file|
+            (cross_file + per_file).uniq
+          end,
+          default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
+            (per_file + cross_file).uniq
+          end
+        ]
       end
 
       # The `extend`-edge half of {#merge_project_method_indexes}: merges this file's `extend`s over the
@@ -5092,14 +5108,48 @@ module Rigor
       MIXIN_CALL_NAMES = %i[include prepend].freeze
 
       # ADR-24 slice 2 — per-class/module table mapping a fully qualified user class or module to the list of module
-      # names it `include`s / `prepend`s, AS WRITTEN at the mixin call (`include Foo` / `include Foo::Bar`). Only
-      # constant arguments are recorded; dynamic mixins (`include some_method`) produce no entry. `prepend` is bucketed
-      # with `include` — both contribute instance methods to the ancestor chain. `extend` is NOT tracked (it adds
-      # singleton methods; ADR-24 slice 2 resolves the instance-side chain).
+      # names it `include`s, AS WRITTEN at the mixin call (`include Foo` / `include Foo::Bar`). Only constant arguments
+      # are recorded; dynamic mixins (`include some_method`) produce no entry. `prepend` is bucketed with `include` here
+      # — both contribute instance methods to the ancestor chain — and, since issue #1123, ALSO recorded in its own
+      # {#build_discovered_prepends} table, which is what tells the two apart at `def`-priority level. `extend` is NOT
+      # tracked (it adds singleton methods; ADR-24 slice 2 resolves the instance-side chain).
       def build_discovered_includes(root)
+        mixin_tables(root).fetch(:includes)
+      end
+
+      # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`,
+      # stored in instance-ancestor SEARCH order: a later `prepend` statement puts its module NEARER than
+      # an earlier one (`prepend A; prepend B` searches B before A) while the arguments of ONE
+      # `prepend A, B` keep call order — exactly the convention {#record_extend_targets} documents for
+      # `extend`, and the order `Scope#user_def_through_ancestors`'s prepend wedge consumes. Ruby inserts a
+      # prepended module, and its own ancestry, immediately BEFORE the class that prepends it, so these
+      # names outrank the class's own `def`s; without the kind recorded separately from {#build_discovered_includes}
+      # there was nothing to order on and `prepend` was silently an `include`.
+      def build_discovered_prepends(root)
+        mixin_tables(root).fetch(:prepends)
+      end
+
+      # One descent, both instance-side mixin tables: the walk classifies each mixin call it sees, so the
+      # two tables cost one walk rather than two. Each value is frozen and de-duplicated per class, as the
+      # single-table builder always did.
+      def mixin_tables(root)
         accumulator = {}
         walk_class_includes(root, [], nil, accumulator)
-        accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
+        {
+          includes: freeze_mixin_lists(accumulator, :include),
+          prepends: freeze_mixin_lists(accumulator, :prepend)
+        }
+      end
+
+      # The `{include: [...], prepend: [...]}`-valued accumulator {#mixin_tables} fills is keyed by class
+      # first and kind second, because one walk feeds both tables; this projects one kind out of it. A class
+      # with no names of that kind is DROPPED rather than stored as an empty list, which is the shape the
+      # single-table builder always had (consumers take the absence of an entry as "mixes nothing in").
+      def freeze_mixin_lists(accumulator, kind)
+        accumulator.each_with_object({}) do |(class_name, kinds), out|
+          names = (kinds[kind] || []).uniq.freeze
+          out[class_name] = names unless names.empty?
+        end.freeze
       end
 
       def walk_class_includes(node, qualified_prefix, current_class, accumulator,
@@ -5127,7 +5177,7 @@ module Rigor
           return if walk_includes_meta_new?(node, qualified_prefix, current_class, accumulator,
                                             singleton_self, singleton_cref)
         when Prism::CallNode
-          record_mixin_call(node, current_class, accumulator)
+          record_mixin_call(node, qualified_prefix, current_class, accumulator)
           return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator,
                                           singleton_self, singleton_cref)
         end
@@ -5237,14 +5287,62 @@ module Rigor
         end
       end
 
-      def record_mixin_call(node, current_class, accumulator)
-        return unless current_class && node.receiver.nil?
-        return unless MIXIN_CALL_NAMES.include?(node.name)
+      # A receiverless `include Foo` / `prepend Foo` written in a declaration body contributes both tables;
+      # the receiver form (`Base.prepend(Loud)`, issue #1123) does too — a call form puts the module in the
+      # class's instance ancestry exactly as the declaration form does, so `discovered_includes` must carry
+      # it or the set-shaped consumers (arity, visibility, undefined-method suppression) would answer
+      # differently for the two spellings of one edge.
+      def record_mixin_call(node, qualified_prefix, current_class, accumulator)
+        return unless mixin_call_recorded?(node, current_class)
 
-        node.arguments&.arguments&.each do |arg|
-          mod = Source::ConstantPath.qualified_name(arg)
-          (accumulator[current_class] ||= []) << mod if mod
-        end
+        targets = node.arguments&.arguments&.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
+        return if targets.nil? || targets.empty?
+
+        owner = node.receiver.nil? ? current_class : prepend_call_receiver(node, qualified_prefix)
+        return if owner.nil?
+
+        write_mixin_targets(accumulator, owner, targets, prepend: node.name == :prepend)
+      end
+
+      # Issue #1123 — one class's contribution to the two tables. A prepended module lands in BOTH: the
+      # include list is the SET of modules a class carries (arity, visibility, reflection and constant-scope
+      # consumers read it that way), while the prepend table adds the ORDER and the KIND. `prepend` is stored
+      # in instance-ancestor SEARCH order — the nearest statement's module first — while `include` keeps call
+      # order, each table's own contract for its consumers.
+      def write_mixin_targets(accumulator, owner, targets, prepend:)
+        bucket = accumulator[owner] ||= {}
+        (bucket[:include] ||= []).concat(targets)
+        (bucket[:prepend] ||= []).unshift(*targets) if prepend
+      end
+
+      # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
+      # enclosing declaration to file the edge under, and the RECEIVER form is recorded for `prepend` only
+      # — `Base.include(Loud)` is deliberately still unrecorded. Nothing needs it (this issue orders
+      # `prepend`, and the receiver form of `include` has no ordering question to answer) while recording
+      # it would widen what every consumer says about a class, which is scope this change does not own.
+      def mixin_call_recorded?(node, current_class)
+        return false unless MIXIN_CALL_NAMES.include?(node.name)
+        return !current_class.nil? if node.receiver.nil?
+
+        node.name == :prepend
+      end
+
+      # Issue #1123 — the class a `Recv.prepend(M)` call form targets, as the qualified name the prepend
+      # table is keyed by, or nil when the receiver names no static class. The receiver is a constant READ
+      # at the call site, so it resolves in the `Module.nesting` the call is written in — the same rule (and
+      # the same helper) `class_eval` receivers follow: `::B` names the top level wherever it is written, an
+      # unqualified `X` is `<nesting entry>::X` for the innermost entry the FILE declares, and the
+      # as-written name stands when no rung declares it. A receiver that names no project class keys a table
+      # entry nothing reads, which is the same silence as not recording it at all.
+      def prepend_call_receiver(node, lexical_prefix)
+        receiver = node.receiver
+        return nil if receiver.is_a?(Prism::SelfNode)
+
+        rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
+        return nil if rendered.nil?
+        return rendered if Source::ConstantPath.rooted?(receiver) || lexical_prefix.empty?
+
+        eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::")
       end
 
       # Issue #526 — `extend M` / `extend self` / bare `module_function`, the singleton-side siblings of
@@ -6625,14 +6723,26 @@ module Rigor
         # Issue #682 — a pre-#682 seed bundle carries no header nestings; the SCHEMA bump makes such a blob a
         # cold rebuild, but default so any in-flight fold stays total and simply peels for those classes.
         merge_header_nestings(acc[:header_nestings], file_index[:header_nestings] || {})
-        accumulate_module_lists(acc[:includes], file_index[:includes])
-        accumulate_module_lists(acc[:extends], file_index[:extends] || {})
+        fold_mixin_lists(acc, file_index)
         file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
         # Issue #722 residue 2 — a pre-#722 seed bundle carries no candidates; the SCHEMA bump makes such a
         # blob a cold rebuild, but default so any in-flight fold stays total.
         acc[:compact_headers].merge!(file_index[:compact_headers] || {})
         acc[:data_member_layouts].merge!(file_index[:data_member_layouts])
         acc[:struct_member_layouts].merge!(file_index[:struct_member_layouts])
+      end
+
+      # The three module-list tables of one file, each folded under its own table's contract: `includes`
+      # appends (call order) while `prepends` and `extends` fold nearest-first (the instance- and
+      # singleton-ancestor search order their consumers read). Split out of {#fold_ancestry_tables} to hold
+      # its ABC budget.
+      def fold_mixin_lists(acc, file_index)
+        accumulate_module_lists(acc[:includes], file_index[:includes])
+        # Issue #1123 — a pre-#1123 seed bundle carries no prepends; the SCHEMA bump makes such a blob a
+        # cold rebuild, but default so any in-flight fold stays total. An absent table only means the walk
+        # resolves the class as it did before the ordering fix, which is this table's empty state.
+        accumulate_prepend_lists(acc[:prepends], file_index[:prepends] || {})
+        accumulate_module_lists(acc[:extends], file_index[:extends] || {})
       end
 
       # Shared accumulate-and-dedupe fold for the class -> module-name-list tables (includes / extends).
@@ -6645,6 +6755,15 @@ module Rigor
       # contributes NEARER entries for a reopened class — prepend, matching the per-statement
       # convention. `includes` stays append because its table keeps call order instead.
       def accumulate_extend_lists(target, additions)
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
+      end
+
+      # Issue #1123 — the same near-side accumulation for the prepends table, which stores
+      # instance-ancestor search order for the same reason the extends table stores singleton-ancestor
+      # order ({#record_mixin_call}): a file scanned later contributes NEARER prepends for a reopened
+      # class. Shared with {#accumulate_extend_lists}' shape deliberately — the two tables answer the
+      # `prepend` question on the two sides of the class object, and both fold nearest-first.
+      def accumulate_prepend_lists(target, additions)
         additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
       end
 
@@ -6674,6 +6793,10 @@ module Rigor
           # warm incremental file resolves its ancestor names the way a cold walk of it does.
           header_nestings: file_index[:header_nestings],
           includes: file_index[:includes],
+          # Issue #1123 — plain `{class name => Array[String]}` data in instance-ancestor search order, so
+          # the bundle stays Marshal-clean and a warm incremental file orders its prepends the way a cold
+          # walk of it does.
+          prepends: file_index[:prepends],
           method_visibilities: file_index[:method_visibilities],
           methods: file_index[:methods],
           # Issue #992 — plain `{class name => {[kind, name] => [min, max, required_keywords] | :opaque}}`
@@ -6708,6 +6831,9 @@ module Rigor
           superclasses: bundle[:superclasses],
           header_nestings: bundle[:header_nestings] || {},
           includes: bundle[:includes],
+          # Issue #1123 — a pre-#1123 bundle lacks the key; the SCHEMA bump loads it as a clean cold
+          # rebuild, but default to `{}` so any in-flight fold stays total.
+          prepends: bundle[:prepends] || {},
           # #526 — pre-extends bundles lack the key; default `{}` keeps the fold total.
           extends: bundle[:extends] || {},
           method_visibilities: bundle[:method_visibilities],
@@ -6753,7 +6879,8 @@ module Rigor
       def new_def_index_accumulator
         { def_nodes: {}, def_nestings: {}.compare_by_identity,
           singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
-          superclasses: {}, header_nestings: {}, includes: {}, extends: {}, method_visibilities: {}, methods: {},
+          superclasses: {}, header_nestings: {}, includes: {}, prepends: {}, extends: {}, method_visibilities: {},
+          methods: {},
           deferred_ranges: {},
           parameter_envelopes: {}, class_sources: {},
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
@@ -6780,7 +6907,7 @@ module Rigor
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
         acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
-        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes method_visibilities
+        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends method_visibilities
            methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
           acc[key].each_value(&:freeze)
         end
@@ -6824,15 +6951,28 @@ module Rigor
         merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
                               build_discovered_singleton_def_nodes(root))
         superclasses, header_nestings = build_superclass_tables(root, path)
-        includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)
         merge_header_nestings(acc[:header_nestings], header_nestings)
-        accumulate_module_lists(acc[:includes], includes)
-        accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
-        record_file_positions(acc, path, root, superclasses, includes, file_def_nodes)
+        ancestry_keys = fold_file_mixin_tables(acc, root)
+        record_file_positions(acc, path, root, superclasses, ancestry_keys, file_def_nodes)
         merge_constant_literal_tables(acc, root, path)
         merge_class_keyed_index_tables(acc, root, file_methods)
         merge_member_layout_tables(acc, root)
+      end
+
+      # Issue #1123 — this file's three instance- / singleton-side module lists, folded into the
+      # accumulator, plus the class keys its ancestry edges are attributed to: a prepend table can name a
+      # class this file never DECLARES (`Base.prepend(Loud)` written beside `Base`'s body), and that call IS
+      # an ancestry edge of `Base`, so ADR-46 must attribute the class to this file or a reader of `Base`
+      # would not depend on the file whose edit moves `Base`'s MRO. The include LISTS themselves are
+      # unchanged — only the key set the attribution reads widens. Split out of
+      # {#accumulate_project_index} to hold its ABC budget.
+      def fold_file_mixin_tables(acc, root)
+        mixin = mixin_tables(root)
+        accumulate_module_lists(acc[:includes], mixin[:includes])
+        accumulate_prepend_lists(acc[:prepends], mixin[:prepends])
+        accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
+        mixin[:includes].merge(mixin[:prepends]) { |_cn, included_mods, _prepends| included_mods }
       end
 
       # Issue #644 — folds one file's publication census into the cross-file accumulator, keyed by
@@ -7597,7 +7737,7 @@ module Rigor
       # passes so those see the settled keys.
       def apply_compact_header_renames!(acc, renames)
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources superclasses
-           includes extends method_visibilities methods class_sources data_member_layouts
+           includes prepends extends method_visibilities methods class_sources data_member_layouts
            struct_member_layouts constant_writes].each do |key|
           acc[key] = rekey_class_table(acc[key], renames)
         end

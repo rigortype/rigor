@@ -270,6 +270,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     # stripping that table is discriminating like every other. No top-level `Nest` is declared, so the
     # header is a CANDIDATE the whole-project adjudication declines: the recorded keys stay put and the
     # rest of this fixture's expectations are untouched.
+    #
+    # Issue #1123 — the `prepend` is what keeps the `prepends` table non-empty, for the same reason: an
+    # empty table on both sides of the comparison would let stripping it pass vacuously.
     def discrimination_fixture_source
       <<~RUBY
         class Parent
@@ -277,6 +280,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
         class Child < Parent
           include Enumerable
+          prepend Comparable
           extend Comparable
           CONST = 42
           def foo = 1

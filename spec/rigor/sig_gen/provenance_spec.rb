@@ -120,6 +120,18 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `false | true | Dynamic[top]` return, both fold `bool` instead of `untyped`. Each method's inferred
 # return reaches the `bool` its declaration states, so both rows leave `unrenderable` for parameter
 # intent (`scope.rbs` -1, `source.rbs` -1).
+#
+# 665 since #1123, all three rows in `sig/rigor/scope.rbs` (109 -> 112). Two are the readers of the new
+# instance-side prepend table, in exactly the shape every other discovery table carries them:
+# `Scope#discovered_prepends` (`sig.skipped.untyped-return` — an endless-def reader over a
+# `Data.define` member, like its `discovered_includes` / `discovered_extends` siblings) and the
+# `DiscoveryIndex#discovered_prepends` `Data` member itself (`synthetic_source`, like every member row of
+# that class). The third is `Scope#user_def_through_ancestors`, which the change gives a second return
+# path — the prepend wedge — reached through two private recursive helpers, so `sig-gen` widens the
+# pair's owner to `untyped` and the declaration `[untyped, String] | [nil, nil]` reads as
+# `declared_divergent` even though the walk still only ever answers a resolved class name or `[nil, nil]`.
+# Narrowing that back is engine work on the inference of a recursive private helper's array element type,
+# not a contract change here; the declaration is left as the true one. `scope.rbs` 109 -> 112.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -154,7 +166,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 109,
+  "sig/rigor/scope.rbs" => 112,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 8,
   "sig/rigor/testing.rbs" => 4,

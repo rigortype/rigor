@@ -53,7 +53,12 @@ module Rigor
       # interface a `conforms-to` names) invalidates the warm entry. A pre-9 entry carries no signature-root
       # row and would validate fresh across exactly that edit — the #577 reasoning, one slot over — so cached
       # entries must read as misses once and rebuild carrying the rows.
-      SCHEMA_VERSION = 9
+      # v10: #1123 — the def-index seed bundles gain the `:prepends` table, the instance-ancestor-ORDER half
+      # of the `include` table (`prepend M`, and `Recv.prepend(M)`), which `Scope#user_def_through_ancestors`
+      # searches ahead of a class's own `def`s. A pre-10 bundle would silently contribute no prepends for an
+      # unchanged file, so that file's consumers would keep answering with the pre-fix MRO — cached bundles
+      # must read as misses once and rebuild carrying the slot.
+      SCHEMA_VERSION = 10
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

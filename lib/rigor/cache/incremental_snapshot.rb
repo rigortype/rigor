@@ -119,7 +119,12 @@ module Rigor
       # owner-scoped ordering. A 24 bundle folds as "owner = nil", which the predicate reads as
       # "cannot order", under-shadowing `module_function` defs whose only table evidence is the row
       # itself.
-      SCHEMA = 25
+      # 26: issue #1123 gives each seed bundle a `prepends` table — the instance-ancestor ORDER of a
+      # class's `prepend`ed modules, which `Scope#user_def_through_ancestors` searches ahead of the
+      # class's own `def`s. A pre-26 bundle would fold as "prepends nothing": the warm run would answer
+      # the pre-fix MRO where a cold run answers the prepended module, exactly the `--verify-incremental`
+      # divergence 14 was bumped for (and a silently WRONG dispatch answer, not a withheld check).
+      SCHEMA = 26
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

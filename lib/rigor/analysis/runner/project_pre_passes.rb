@@ -56,6 +56,7 @@ module Rigor
           :discovered_classes, :discovered_def_nodes, :discovered_def_nestings,
           :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
           :discovered_superclasses, :discovered_header_nestings, :discovered_includes,
+          :discovered_prepends,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes,
           :data_member_layouts, :struct_member_layouts, :discovered_deferred_ranges
@@ -166,6 +167,10 @@ module Rigor
             # the cref Ruby resolves it in rather than by peeling the subclass's own qualified name.
             discovered_header_nestings: def_index.fetch(:header_nestings),
             discovered_includes: def_index.fetch(:includes),
+            # Issue #1123 — the instance-side prepend table, kept beside the include one so
+            # `Scope#user_def_through_ancestors` can search a prepended module ahead of the class's own
+            # `def`s from a sibling file the way it does within the declaring one.
+            discovered_prepends: def_index.fetch(:prepends),
             # Issue #898 — the singleton-side mixin table, kept beside the instance-side one so a class
             # object's `extend`s reach `Narrowing` from a sibling file the way its `include`s already do.
             discovered_extends: def_index.fetch(:extends),

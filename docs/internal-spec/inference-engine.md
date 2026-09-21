@@ -642,6 +642,48 @@ The third constructor keyword on `StatementEvaluator` is the hook the ScopeIndex
 - When `def_node.receiver` is a `Prism::SelfNode` OR `singleton:` is `true`, the binder MUST consult `RbsLoader#singleton_method` (the immediate enclosing lexical scope is a singleton class). Otherwise it MUST consult `RbsLoader#instance_method`. The translator's `self_type:` and `instance_type:` keywords MUST be set to `(Singleton[C], Nominal[C])` for the singleton route and `(Nominal[C], Nominal[C])` for the instance route.
 - **Path-scoped protocol contracts — the *provide* side (ADR-28).** When the binder runs with a non-`nil` source path and a loaded plugin contributes a `Plugin::ProtocolContract` (via `Environment#plugin_registry.contracts_for_path`) whose `path_glob` matches the file, whose `method_name` matches the `def`, and whose `singleton` flag matches the def's singleton-ness, the binder MUST replace each contracted positional slot's binding with the contract's declared parameter type. The type name resolves through `Environment#nominal_for_name` **lazily, at binding time**; an unresolvable name (the protocol's RBS not loaded) MUST fall through to whatever the prior tiers bound — fail-soft, never raising. This is how a path-conventional method (a `lib/controller/**/*.rb` action whose `request` parameter is implicitly a `Rack::Request`) is analysed with its protocol type even though no RBS or argument annotates it. The companion **check** side — confirming the method exists and its inferred return conforms to `return_type_name` — is not an engine rule but the contributing plugin's own `#diagnostics_for_file` responsibility; the value-object shape is in [`plugin.md`](plugin.md#rigorpluginmanifest) (`protocol_contracts:`).
 
+### Call-Site Argument Shapes (issue [#1125](https://github.com/rigortype/rigor/issues/1125))
+
+The binder above is the RBS-driven one. The **call-site** binder is `ExpressionTyper#call_arg_types`, which types a
+call's argument list for inter-procedural return inference and for every dispatch tier; `#bind_params_from_call_types`
+then binds a user `def`'s parameters from that list. Two call shapes it used to decline now carry types. Both are
+precision-only: a parameter type derived from a call site is a LOWER BOUND, so no negative rule reads it and a wrong
+binding cannot manufacture a diagnostic inside the callee's body.
+
+- A keyword-hash argument built ENTIRELY from a double splat (`f(**h)`) whose value's type is a CLOSED `HashShape`
+  with Symbol keys MUST be typed at the call site as that shape, so `f(**h)` binds the callee's named keyword
+  parameters by name exactly as the literal form `f(a: 1, b: 2)` does. The shape MUST be carried in the argument list
+  itself rather than passed alongside it, because the ADR-84 return memo keys on `(def_node, receiver, arg_types)`.
+- Every other keyword-hash argument MUST keep its own pre-existing type, and so keep the pre-#1125 answer: a MIXED hash
+  (`f(a: 1, **h)` — the literal pairs and the splatted shape are not merged), an OPEN shape (unknown extras make every
+  missing-keyword answer a guess rather than a read), a shape with a non-Symbol key (Ruby itself rejects those as
+  keywords), a shapeless `Hash[Symbol, V]`, and any other value. The binder then declines the call, which answers
+  `Dynamic[top]` exactly as before.
+- A named `**rest` parameter MUST bind the CLOSED `HashShape` of the pairs no named keyword parameter consumed, with
+  each pair's value type. With no keyword shape, an OPEN shape, or no pair left over it MUST keep `Dynamic[top]`: the
+  last case is what leaves the literal form's existing binding untouched (`def target(a:, b:, **rest)` called
+  `target(a: 1, b: 2)` still binds `rest` to `Dynamic[top]`), while a caller that leaves keys over — the only shape
+  where the parameter holds something to report — gets them typed.
+- `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
+  required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
+- A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so
+  the callee's parameters bind from the forwarding method's own call site. The frame's list is installed per
+  user-method inference frame and is the callee's call-site `arg_types` — which is what keeps the return memo's key
+  complete for a forwarding def — and it MUST be restored on exit like the yield value beside it. `...` is therefore
+  threaded ACROSS a chain, not one level: each frame installs its own list, so `forward -> middle -> target`
+  re-expands at every hop, bounded by the ordinary recursion guard / return memo.
+- The forwarded list MUST exclude the positionals the forwarding method's own named parameters consumed
+  (`def forward(a, ...) = target(a, ...)` re-supplies the tail, not `a`) and MUST keep a trailing keyword shape, which
+  `takes_keywords?` reads as the keyword tail rather than as a positional. A call that does not even satisfy the
+  forwarding method's own required positionals MUST decline: it raises at runtime and its body is not worth
+  re-typing.
+- `target(*args)` and `target(a, &blk)` MUST stay declined, and the decline is recorded here rather than left
+  implicit. A `Prism::SplatNode` argument types as `Dynamic[top]`, so the callee's required positionals cannot be
+  counted; expanding a `Tuple`-typed rest into positional slots is a positional-correspondence slice of its own. A
+  `&blk` parameter is bound `Dynamic[top]` by design, and the frame's `yield` type names the frame's own block rather
+  than a `&blk` local's Proc. Block forwarding through `...` is declined with them: the forwarding call node carries
+  no `Prism::BlockNode`, so the callee sees no block.
+
 ### Multi-Target Binder (Slice 5 phase 2 sub-phase 2)
 
 `Rigor::Inference::MultiTargetBinder` is the canonical surface for decomposing a tuple- or array-shaped right-hand side type against a Prism multi-target tree. It is a pure module-function module (no state) and MUST satisfy:

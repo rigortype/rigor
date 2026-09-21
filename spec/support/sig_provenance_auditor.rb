@@ -14,7 +14,7 @@
 # - anything else hand-written is a gap `sig-gen` could not close, and by ADR-14's contradiction
 #   rule the gap is the more valuable signal, so it is RECORDED rather than assumed.
 #
-# == The marker
+# == The markers
 #
 # A recorded gap is a line in the member's own RBS comment:
 #
@@ -26,8 +26,19 @@
 # namespace `Rigor::RbsExtended` owns and ADR-20 / ADR-103 keep extending, carries no version
 # token, is read by no engine path, and reads as prose. RBS binds it to the member
 # (`RBS::AST::Members::MethodDefinition#comment`), so the marker is read off the AST rather than by
-# scanning lines. The number must be a filed issue: it is the pointer to the engine work that would
-# let the generator answer, and a placeholder points at nothing, so `#TBD` is not a marker.
+# scanning lines. The number must be a filed issue that tracks the ENGINE GAP: it is the pointer to
+# the work that would let the generator answer, and a placeholder points at nothing, so `#TBD` is
+# not a marker. Which numbers a marker may cite is the committed allow-list
+# `spec/rigor/sig_gen/gap_issues.yml` (the 2026-09-19 ruling on #1011): the gate checks it offline,
+# and closing a gap issue means removing it from the list, which forces the markers to move.
+#
+# A deliberately hand-written row — no engine work would ever let sig-gen answer it, e.g. a hook
+# contract widened over code in a plugin gem sig-gen never sees — carries the other marker instead:
+#
+#     # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never sees.
+#     def template_units_for_file: (path: untyped) -> Array[untyped]
+#
+# Either marker marks the row: it is counted as recorded rather than residue.
 #
 # == What the classifier can and cannot see
 #
@@ -97,16 +108,19 @@ class SigProvenanceAuditor
              RUNTIME_DEFINED, NO_SOURCE].freeze
 
   MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+)\b/
+  # A deliberately hand-written row: no engine work would ever let sig-gen answer it, so it gets
+  # its own marker rather than a gap pointer with an issue number on the allow-list (#1011).
+  AUTHORED_PATTERN = /\bauthored:\s*(?<reason>.*)$/
 
   Declaration = Struct.new(:path, :line, :class_name, :method_name, :kind, :typed_params, :return_rbs,
-                           :marker, keyword_init: true) do
+                           :marker, :authored_reason, keyword_init: true) do
     def to_s
       "#{path}:#{line}: #{class_name}##{method_name}"
     end
   end
 
   Row = Struct.new(:declaration, :classification, :detail, keyword_init: true) do
-    def marked? = !declaration.marker.nil?
+    def marked? = !declaration.marker.nil? || !declaration.authored_reason.nil?
 
     def residue? = RESIDUE.include?(classification) && !marked?
 
@@ -285,7 +299,8 @@ class SigProvenanceAuditor
     def declaration(member, path, class_name, method_name, kind, typed_params: false, return_rbs: nil)
       Declaration.new(path: path, line: member.location&.start_line, class_name: class_name,
                       method_name: method_name, kind: kind, typed_params: typed_params,
-                      return_rbs: return_rbs, marker: marker_for(member))
+                      return_rbs: return_rbs, marker: marker_for(member),
+                      authored_reason: authored_for(member))
     end
 
     # A member with no name of its own (`include`, `alias`, an instance-variable declaration) is
@@ -300,6 +315,12 @@ class SigProvenanceAuditor
       text = member.respond_to?(:comment) ? member.comment&.string : nil
       match = text && MARKER_PATTERN.match(text)
       match && match[:issue]
+    end
+
+    def authored_for(member)
+      text = member.respond_to?(:comment) ? member.comment&.string : nil
+      match = text && AUTHORED_PATTERN.match(text)
+      match && match[:reason]&.strip
     end
 
     def typed_params?(overloads)

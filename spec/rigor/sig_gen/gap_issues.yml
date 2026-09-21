@@ -1,0 +1,23 @@
+# ADR-107 gate G3 (#825, repointed by #1011) — the gap issues a `# sig-gen gap: #NNN` marker in
+# `sig/` may cite. The allow-list IS the reviewed artefact: the gate checks it offline, so closing
+# a gap issue means REMOVING it here, which makes the gate fail until the markers that cite it
+# move. Per the 2026-09-19 ruling on #1011: one issue per real engine cause, and a marker points
+# at the issue that tracks the engine gap, never at the feature issue that added a row.
+#
+# These are the ONLY issue numbers a `# sig-gen gap:` marker may cite. Add a number only when a
+# marker must cite it AND it tracks engine work that would let `rigor sig-gen` produce the row's
+# type. A deliberately hand-written row — no engine work would ever let the generator answer it —
+# carries an `# authored: <reason>` marker instead and cites nothing.
+- 160   # attr_reader from the loader's readers — the open umbrella (environment.rbs)
+- 1007  # sig-gen infers `nil` for a method whose real value is an opaque instance_exec'd plugin block
+- 1008  # a Hash mutated by a called method keeps its empty-seed shape
+- 1148  # sig-gen skips a reader written as an endless def (untyped return)
+- 1149  # sig-gen types a `tbl[key] || FROZEN_EMPTY` fallback arm untyped
+- 1150  # sig-gen assigns no type to a `Data.define` member read
+- 1151  # sig-gen types an `attr_reader` over a frozen Set literal untyped
+- 1152  # sig-gen types `Set#include?` over a tuple key untyped
+- 1153  # sig-gen proposes `Array[untyped] | []` off an empty-table early return
+- 1154  # sig-gen types an `attr_reader` over an ivar assigned from an `initialize` parameter untyped
+- 1155  # sig-gen skips a memoized `||=` reader (the slot read cannot prove the memoized value)
+- 1156  # sig-gen pins an ivar seed literal in a record assembled after the ivars are written
+- 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`

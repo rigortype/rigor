@@ -78,6 +78,8 @@ PATTERNS=(
   "*claude-bridge*opus*"
   "anthropic/claude-opus-5"
   "anthropic/claude-opus"
+  "xai/grok-4.7"
+  "xai/grok-4.6"
   "xai/grok-4.5"
   "xai/grok"
   "opus"

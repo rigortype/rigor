@@ -4,7 +4,7 @@ Model bands for the **Approved** gate (no live Claude usage poll):
 
 | Band | Prefer | Thinking | When |
 | --- | --- | --- | --- |
-| Grok | `xai/grok-4.6` | `max` | **Default** adversarial pass |
+| Grok | `xai/grok-4.7` | `max` | **Default** adversarial pass |
 | Opus | `claude-bridge/claude-opus-5` | `high` | Added when the change is judged complex |
 | Fable | `claude-bridge/claude-fable-5` | `medium` | **Reserved** for complex design / architecture-shaped review |
 

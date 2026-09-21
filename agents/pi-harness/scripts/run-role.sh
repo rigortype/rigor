@@ -26,7 +26,7 @@ Environment:
 Model defaults (patterns; first match from `pi --list-models` wins):
   architect / orchestrator
     patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
-    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.5
+    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.7
   lane
     patterns: opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
     preferred ids: opencode-go/deepseek-v4.1-flash
@@ -87,6 +87,8 @@ case "$ROLE" in
       "claude-bridge/claude-opus"
       "anthropic/claude-opus-5"
       "anthropic/claude-opus"
+      "xai/grok-4.7"
+      "xai/grok-4.6"
       "xai/grok-4.5"
       "xai/grok"
       "opus"

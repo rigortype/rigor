@@ -63,9 +63,9 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
-| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.5`, `*opus*`, `grok*` |
+| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.7`, `xai/grok-4.6`, `*opus*`, `grok*` |
 | lane | `opencode-go/deepseek-v4.1-flash` | `opencode-go/*deepseek*flash*`, `opencode/*deepseek*flash*`, `*deepseek*flash*` |
-| reviewer | default Grok:max; +Opus if complex; Fable reserved | `xai/grok-4.6`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` |
+| reviewer | default Grok:max; +Opus if complex; Fable reserved | `xai/grok-4.7`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
 
 If no provider is configured, the script **exits with `pi auth` / `/login`
@@ -246,7 +246,7 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 | --- | --- | --- | --- | --- |
 | `architect` / orchestrator queue parent | Opus / Grok | `claude-bridge/claude-opus-5` | Sets direction, contracts, merge judgment; cheap models thrash policy (ADR-115) | DeepSeek / Gemini as architect |
 | `rigor-lane` / `/lane` | DeepSeek Flash | `opencode-go/deepseek-v4.1-flash` | Parallel imitation under fixed LaneInput; failure is local | Self-promoting to Opus mid-lane |
-| `rigor-reviewer-grok` (+`-opus` / Fable) | Grok / Opus / Fable | `xai/grok-4.6:max` default; Opus:high if complex; Fable:medium for design | Complexity-routed Approved; Fable reserved | Gemini for engine review; burning Fable on tidies |
+| `rigor-reviewer-grok` (+`-opus` / Fable) | Grok / Opus / Fable | `xai/grok-4.7:max` default; Opus:high if complex; Fable:medium for design | Complexity-routed Approved; Fable reserved | Gemini for engine review; burning Fable on tidies |
 | `rigor-docs` / `/docs` | Gemini Flash | `antigravity/gemini-3.8-flash` | JA/EN docs quality on Google AI Pro; docs-only | Engine edits |
 | queue release/survey parent | Opus-class | same as architect | Ranking + spawn decisions are policy | Letting Flash rank the backlog alone |
 

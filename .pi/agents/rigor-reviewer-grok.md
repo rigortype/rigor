@@ -5,7 +5,7 @@ description: >-
 advertise: true
 aliases: reviewer-grok
 acceptanceRole: read-only
-model: xai/grok-4.6
+model: xai/grok-4.7
 thinking: max
 systemPromptMode: replace
 inheritProjectContext: true

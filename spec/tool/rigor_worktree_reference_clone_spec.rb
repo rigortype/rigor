@@ -67,10 +67,19 @@ module RigorWorktreeReferenceClone
   # `commit.gpgsign` or `core.hooksPath` would otherwise fail `build_source` and
   # turn this into a red suite on their machine while the script under test is
   # fine. `Bundler.with_unbundled_env` covers Bundler's variables, not git's.
+  #
+  # Auto-maintenance is off for the same reason: `git commit` starts it DETACHED, so it can still
+  # hold `.git/objects/maintenance.lock` when a copy walks the tree, and `cp_r` fails with ENOENT
+  # on the lock that vanished between listing and `lstat` (CI run 35578869346).
   HERMETIC_GIT_ENV = {
     "GIT_CONFIG_GLOBAL" => File::NULL,
     "GIT_CONFIG_SYSTEM" => File::NULL,
-    "GIT_CONFIG_NOSYSTEM" => "1"
+    "GIT_CONFIG_NOSYSTEM" => "1",
+    "GIT_CONFIG_COUNT" => "2",
+    "GIT_CONFIG_KEY_0" => "maintenance.auto",
+    "GIT_CONFIG_VALUE_0" => "false",
+    "GIT_CONFIG_KEY_1" => "gc.auto",
+    "GIT_CONFIG_VALUE_1" => "0"
   }.freeze
 
   def git(dir, *args)

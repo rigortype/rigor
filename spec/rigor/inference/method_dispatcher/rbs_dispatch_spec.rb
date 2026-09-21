@@ -517,4 +517,84 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       expect(result).to be_nil
     end
   end
+
+  # Issue #1130 — the block-param probe must apply the SAME {SelfSubstitute} keep-vs-degrade verdict the
+  # return path applies (#1092), so a `-> self`-ish block parameter (`tap` yields `self`) arrives with the
+  # receiver's type arguments. The block path reuses only the verdict, not the return path's value-pin
+  # widening: the block parameter is a destructure source, so pinned element constants stay (`[1, 2].tap`
+  # yields `Array[1 | 2]`, and `|a, b|` binds the element union per slot), and a mutator the verdict
+  # declines keeps the raw nominal.
+  describe ".block_param_types" do
+    let(:integer_nominal) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+    def probe(receiver, method_name, args = [], env = environment)
+      described_class.block_param_types(cc(
+                                          receiver: receiver,
+                                          method_name: method_name,
+                                          args: args,
+                                          environment: env
+                                        ))
+    end
+
+    it "binds tap's `self` block parameter with the receiver's type arguments" do
+      ints = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+      expect(probe(ints, :tap)).to eq([ints])
+    end
+
+    it "keeps the literal-tuple receiver's pinned element union (`[1, 2].tap` yields `Array[1 | 2]`)" do
+      one = Rigor::Type::Combinator.constant_of(1)
+      two = Rigor::Type::Combinator.constant_of(2)
+      yielded = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.union(one, two)])
+      expect(probe(Rigor::Type::Combinator.tuple_of(one, two), :tap)).to eq([yielded])
+      expect(yielded.describe(:short)).to eq("Array[1 | 2]")
+    end
+
+    it "keeps the projected nominal for a HashShape receiver on a non-mutator" do
+      shape = Rigor::Type::Combinator.hash_shape_of({ a: integer_nominal })
+      yielded = Rigor::Type::Combinator.nominal_of(
+        "Hash",
+        type_args: [
+          Rigor::Type::Combinator.constant_of(:a),
+          integer_nominal
+        ]
+      )
+      expect(probe(shape, :tap)).to eq([yielded])
+    end
+
+    it "declines the substitution for a mutator the verdict does not keep" do
+      box = Rigor::Type::Combinator.nominal_of("SubBox", type_args: [integer_nominal])
+      env = sub_box_environment
+      # `pure` is `{ (self) -> void } -> self`: the block parameter sees the Box[Integer] substitution.
+      expect(probe(box, :pure, [], env)).to eq([box])
+      # `rewrite!` is an element-changing mutator; SelfSubstitute declines, so the block parameter stays
+      # the raw nominal.
+      expect(probe(box, :rewrite!, [], env))
+        .to eq([Rigor::Type::Combinator.nominal_of("SubBox")])
+    end
+
+    it "loads a user class with the standard environment when no custom sig is needed" do
+      raw_array = Rigor::Type::Combinator.nominal_of("Array")
+      expect(probe(raw_array, :tap)).to eq([raw_array])
+    end
+
+    it "leaves the element type on a mutator's own block parameter (type-variable path, unchanged)" do
+      ints = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+      expect(probe(ints, :map!)).to eq([integer_nominal])
+    end
+  end
+
+  # `SubBox[A]` — the minimal class surface for the mutator-decline assertion: a `-> self`-yielding
+  # non-mutator (`pure`) and one that can rewrite the element (`rewrite!`).
+  def sub_box_environment
+    @sub_box_environment ||= begin
+      dir = SpecTmpdir.suite_lifetime("rigor-subbox-sig")
+      File.write(File.join(dir, "sub_box.rbs"), <<~RBS)
+        class SubBox[A]
+          def pure: () { (self) -> void } -> self
+          def rewrite!: () { (self) -> void } -> self
+        end
+      RBS
+      Rigor::Environment.for_project(root: dir, signature_paths: [dir])
+    end
+  end
 end

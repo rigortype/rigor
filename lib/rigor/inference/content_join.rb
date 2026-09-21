@@ -45,6 +45,16 @@ module Rigor
       # block body for, and the gate the straight-line path types its arguments behind.
       CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
 
+      # The probe {#could_be_range?} passes to `accepts` — interned because the question is asked
+      # once per `[]=` index member.
+      RANGE_INDEX_PROBE = Type::Combinator.nominal_of("Range")
+      private_constant :RANGE_INDEX_PROBE
+
+      # Classes whose instances can never define `to_ary`: Ruby forbids subclassing the
+      # immediate-value classes, so a `Nominal` member of one is always stored as itself.
+      NON_COERCIBLE_CLASSES = %w[NilClass TrueClass FalseClass Integer Float Symbol].freeze
+      private_constant :NON_COERCIBLE_CLASSES
+
       module_function
 
       # The element types a single content-mutator call introduces into an Array, given the
@@ -72,7 +82,7 @@ module Rigor
           # union is a superset of the truth either way.
           case index_store_form(arg_types)
           when :splice then splice_stored_elements(arg_types.last)
-          when :either then [arg_types.last] + collection_element_types(arg_types.last)
+          when :either then [arg_types.last] + splice_stored_elements(arg_types.last)
           else [arg_types.last]
           end
         when :fill
@@ -324,38 +334,41 @@ module Rigor
         return true if range_index?(member)
         return true unless member.respond_to?(:accepts)
 
-        !member.accepts(Type::Combinator.nominal_of("Range")).no?
+        !member.accepts(RANGE_INDEX_PROBE).no?
       end
 
-      # Element types a splice RHS adds to the receiver. Ruby splices an Array RHS
-      # (`a[0, 1] = [1, 2]` puts `Integer`s in), stores a NON-Array RHS as one element
-      # (`a[0, 1] = "x"` stores the String), and treats a nil RHS as a deletion that adds
-      # nothing. A union RHS reads member-wise; `Dynamic`/`top` land as themselves, which
-      # already covers whichever form the value takes.
+      # Element types a splice RHS adds to the receiver, read member-wise. Ruby splices an
+      # Array RHS (`a[0, 1] = [1, 2]` puts `Integer`s in — a bare `Nominal[Array]` splices
+      # elements the signature left untyped, which are unknown rather than none), and stores a
+      # NON-Array RHS as one element UNLESS the value coerces through `to_ary`, in which case
+      # the returned array's elements splice instead (`a[0, 1] = obj` where `obj.to_ary`
+      # returns `["x"]` stores `"x"`). `nil` is no exception — `a[i, n] = nil` stores a single
+      # nil. A `Nominal` member may at runtime be a subclass that DOES define `to_ary`, and
+      # nothing here can resolve that, so it contributes itself plus `Dynamic[top]` for whatever
+      # a coercion would have put in. Literals provably cannot coerce — a `Constant` is the
+      # exact scalar value, a `HashShape` an exact Hash, an `IntegerRange`/`FloatRange` a raw
+      # number — so they contribute themselves alone.
       def splice_stored_elements(value_type)
         union_members(value_type).flat_map do |member|
-          next [] if nil_store?(member)
-          next collection_element_types(member) if array_carrier?(member)
+          base = member
+          base = base.base while base.is_a?(Type::Difference) || base.is_a?(Type::Refined)
 
-          [member]
-        end
-      end
-
-      # True when the RHS member is a nil carrier — `a[i, n] = nil` deletes rather than storing.
-      def nil_store?(member)
-        (member.is_a?(Type::Constant) && member.value.nil?) ||
-          (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
-      end
-
-      # True when the RHS member is statically an Array value whose elements the splice inserts —
-      # a `Tuple`, `Nominal[Array]` or a refinement over either. `Constant` never wraps an Array
-      # (it carries scalar literals only), so it needs no arm here.
-      def array_carrier?(member)
-        case member
-        when Type::Tuple then true
-        when Type::Nominal then member.class_name == "Array"
-        when Type::Difference, Type::Refined then array_carrier?(member.base)
-        else false
+          case base
+          when Type::Tuple
+            base.elements
+          when Type::Nominal
+            if base.class_name == "Array"
+              base.type_args.empty? ? [Type::Combinator.untyped] : base.type_args
+            elsif NON_COERCIBLE_CLASSES.include?(base.class_name)
+              [member]
+            else
+              [member, Type::Combinator.untyped]
+            end
+          when Type::Constant, Type::HashShape, Type::IntegerRange, Type::FloatRange
+            [member]
+          else
+            [member, Type::Combinator.untyped]
+          end
         end
       end
 

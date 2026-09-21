@@ -189,26 +189,41 @@ RSpec.describe Rigor::Inference::ContentJoin do
     end
 
     # `a[i, n] = "x"` does not splice a String — Ruby stores the non-Array RHS itself
-    # as one element, so the receiver's element set must keep it.
-    it "stores a non-collection splice RHS itself as one element" do
+    # as one element, so the receiver's element set must keep it. The `Dynamic[top]`
+    # arm covers the `to_ary` coercion a subclass could still perform.
+    it "stores a non-collection splice RHS itself, covering a possible to_ary coercion" do
       result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, str_type])
-      expect(result).to eq([str_type])
+      expect(result).to contain_exactly(str_type, Rigor::Type::Combinator.untyped)
     end
 
-    it "contributes no element evidence for a nil splice RHS, which deletes" do
+    it "stores a literal scalar splice RHS exactly, with no coercion arm" do
+      lit = Rigor::Type::Combinator.constant_of("x")
+      result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, lit])
+      expect(result).to eq([lit])
+    end
+
+    # `a[i, n] = nil` is NOT a deletion — it stores a single nil (assigning `[]` is
+    # the deletion form). Both nil carriers therefore contribute themselves.
+    it "stores a nil splice RHS as one element" do
       nil_constant = Rigor::Type::Combinator.constant_of(nil)
       expect(described_class.send(:array_added_elements, :[]=, [int_type, int_type, nil_constant]))
-        .to eq([])
+        .to eq([nil_constant])
       nil_nominal = Rigor::Type::Combinator.nominal_of("NilClass")
       expect(described_class.send(:array_added_elements, :[]=, [int_type, int_type, nil_nominal]))
-        .to eq([])
+        .to eq([nil_nominal])
+    end
+
+    it "contributes untyped elements for a bare Array splice RHS" do
+      bare_array = Rigor::Type::Combinator.nominal_of("Array")
+      result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, bare_array])
+      expect(result).to eq([Rigor::Type::Combinator.untyped])
     end
 
     it "reads a union splice RHS member-wise" do
       array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [int_type])
       union_arg = Rigor::Type::Combinator.union(str_type, array_arg)
       result = described_class.send(:array_added_elements, :[]=, [int_type, int_type, union_arg])
-      expect(result).to contain_exactly(str_type, int_type)
+      expect(result).to contain_exactly(str_type, int_type, Rigor::Type::Combinator.untyped)
     end
 
     # An index typed `Object`/`top`/`Enumerable` may still BE a Range at runtime, so the

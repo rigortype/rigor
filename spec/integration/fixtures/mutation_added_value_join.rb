@@ -85,8 +85,10 @@ def two_index_splat(xs)
 end
 
 # A NON-Array splice RHS does not splice — Ruby stores the value itself
-# as one element (`a[0, 1] = "x"` leaves the String inside). A nil RHS is
-# the deletion form and contributes no element evidence at all.
+# as one element (`a[0, 1] = "x"` leaves the String inside; `a[0, 1] = nil`
+# leaves a nil — assigning `[]` is the deletion form). A nominal member
+# could still be a `to_ary`-defining subclass at runtime, so the union
+# keeps a gradual arm for whatever a coercion would have put in.
 spliced_scalar = []
 spliced_scalar[0, 1] = "x"
 assert_type("Array[Dynamic[top] | String]", spliced_scalar)
@@ -94,7 +96,7 @@ assert_type("Dynamic[top] | String", spliced_scalar.last)
 
 spliced_nil = []
 spliced_nil[0, 1] = nil
-assert_type("Array[Dynamic[top]]", spliced_nil)
+assert_type("Array[Dynamic[top]?]", spliced_nil)
 
 # An index typed broadly enough to hold a Range at runtime may splice, so
 # the element parameter covers BOTH readings — the value as one element

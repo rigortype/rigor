@@ -23,7 +23,7 @@ locals:
   slotted: Array[Dynamic[top] | Integer]
   sorted: Array[1 | 2]
   spliced: Array[Dynamic[top] | Integer]
-  spliced_nil: Array[Dynamic[top]]
+  spliced_nil: Array[Dynamic[top]?]
   spliced_range: Array[Dynamic[top] | Integer]
   spliced_scalar: Array[Dynamic[top] | String]
   stack: Array[Dynamic[top] | Integer]
@@ -45,7 +45,7 @@ assertions:
   '13': Array[Dynamic[top] | Integer]
   '14': Array[Dynamic[top] | String]
   '15': Dynamic[top] | String
-  '16': Array[Dynamic[top]]
+  '16': Array[Dynamic[top]?]
   '17': Array[Array[Integer] | Dynamic[top] | Integer]
   '18': Array[Dynamic[top] | Integer]
   '19': Array[Dynamic[top] | String]

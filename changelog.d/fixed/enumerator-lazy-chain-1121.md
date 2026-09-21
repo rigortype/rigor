@@ -1,0 +1,1 @@
+- **[engine]** An `Enumerator::Lazy` chain keeps its class and its element type through the first chained call, so `.force` / `.eager` / `.first(n)` stop reporting an undefined method on correct `lazy.map { … }` / `lazy.select { … }` / `lazy.take(n)` code, and `.to_a` still ends the chain as an Array. ([#1163](https://github.com/rigortype/rigor/pull/1163))

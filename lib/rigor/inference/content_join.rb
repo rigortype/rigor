@@ -45,11 +45,12 @@ module Rigor
       # block body for, and the gate the straight-line path types its arguments behind.
       CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
 
-      # The probe {#could_be_range?} passes to `accepts` — interned because the question is asked
-      # once per `[]=` index member.
+      # The probes {#could_be_range?} passes to `accepts` — interned because the questions are
+      # asked once per `[]=` index member.
       RANGE_INDEX_PROBE = Type::Combinator.nominal_of("Range")
+      OBJECT_INDEX_PROBE = Type::Combinator.nominal_of("Object")
       ARRAY_PROBE = Type::Combinator.nominal_of("Array")
-      private_constant :RANGE_INDEX_PROBE, :ARRAY_PROBE
+      private_constant :RANGE_INDEX_PROBE, :OBJECT_INDEX_PROBE, :ARRAY_PROBE
 
       module_function
 
@@ -345,14 +346,21 @@ module Rigor
       # `Dynamic`, a carrier the engine cannot answer for, and every type related to
       # `Nominal[Range]` in EITHER direction — `Object`/`Enumerable`/`top` above it, a
       # project `class MyRange < Range` below it (an unresolvable class name answers `maybe`,
-      # never `no`, so subclass-ness cannot be ruled out). A member whose value set is
-      # provably disjoint (`Integer`, `non-empty-string`, a non-Range `Constant`) declines,
-      # leaving the store a definite element write.
+      # never `no`, so subclass-ness cannot be ruled out).
+      #
+      # `no` in both directions is a real disjointness only when the member's values are
+      # provably `Object` instances — a fixed-class value set that single inheritance keeps
+      # from ever being a Range (`Integer`, a non-Range `Constant`, a `Tuple`). A MODULE
+      # member fails that probe (`Comparable`'s ancestors exclude `Object` — a module has no
+      # superclass chain), and rightly so: `class MyRange < Range; include Comparable; end`
+      # satisfies the annotation and still splices at runtime.
       def could_be_range?(member)
         return true if range_index?(member)
         return true unless member.respond_to?(:accepts)
+        return true unless member.accepts(RANGE_INDEX_PROBE).no? &&
+                           RANGE_INDEX_PROBE.accepts(member).no?
 
-        !member.accepts(RANGE_INDEX_PROBE).no? || !RANGE_INDEX_PROBE.accepts(member).no?
+        !OBJECT_INDEX_PROBE.accepts(member).yes?
       end
 
       # Element types a splice RHS adds to the receiver, read member-wise. Ruby splices an

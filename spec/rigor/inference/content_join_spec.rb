@@ -274,12 +274,22 @@ RSpec.describe Rigor::Inference::ContentJoin do
       [
         int_type,
         str_type,
-        Rigor::Type::Combinator.nominal_of("Comparable"),
         Rigor::Type::Combinator.constant_of(0)
       ].each do |index|
         result = described_class.send(:array_added_elements, :[]=, [index, array_arg])
         expect(result).to eq([array_arg])
       end
+    end
+
+    it "reads either store form when the index is a module a Range subclass could satisfy" do
+      # `class MyRange < Range; include Comparable; end` makes a Comparable-typed index a real
+      # Range at runtime — a module member cannot be proven disjoint by nominal acceptance.
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      result = described_class.send(
+        :array_added_elements, :[]=,
+        [Rigor::Type::Combinator.nominal_of("Comparable"), array_arg]
+      )
+      expect(result).to contain_exactly(array_arg, str_type)
     end
 
     # A splat inside the brackets is marked `nil` — it can vanish at runtime, so

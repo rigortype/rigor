@@ -1,0 +1,35 @@
+{
+  "name": "rigor-pi-harness",
+  "version": "0.1.0",
+  "description": "Role-bound multi-model pi harness for Rigor (ADR-115): architect, lane, reviewer, docs, orchestrator",
+  "private": true,
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rigortype/rigor.git",
+    "directory": "agents/pi-harness"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "rigor",
+    "adr-115"
+  ],
+  "files": [
+    "skills",
+    "prompts",
+    "scripts",
+    "roles",
+    "contracts",
+    "README.md"
+  ],
+  "pi": {
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  }
+}

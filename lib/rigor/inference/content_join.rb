@@ -326,12 +326,18 @@ module Rigor
       # unresolvable subclass answers `maybe`, which correctly declines here and still reaches
       # {#could_be_range?}'s `either` reading. A gradual member accepts in BOTH directions
       # (`Range` accepts it optimistically), so it must be excluded before asking — an untyped
-      # index may hold a scalar just as well and stays `either`.
+      # index may hold a scalar just as well and stays `either`. The exclusion reads through a
+      # `Difference` / `Refined` to its base: acceptance projects the wrapper onto the base too,
+      # so a `non-nil` or refined `Dynamic` answers `yes` there exactly like the bare gradual
+      # while still being free to hold a scalar at runtime.
       def definite_range?(member)
         return true if range_index?(member)
-        return false if member.is_a?(Type::Dynamic) || member.is_a?(Type::Top)
 
-        member.respond_to?(:accepts) && RANGE_INDEX_PROBE.accepts(member).yes?
+        case member
+        when Type::Dynamic, Type::Top then false
+        when Type::Difference, Type::Refined then definite_range?(member.base)
+        else member.respond_to?(:accepts) && RANGE_INDEX_PROBE.accepts(member).yes?
+        end
       end
 
       # True when the index position MAY hold a Range at runtime: a definite Range carrier

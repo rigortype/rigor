@@ -188,6 +188,20 @@ RSpec.describe Rigor::Inference::ContentJoin do
       expect(result).to contain_exactly(array_arg, str_type)
     end
 
+    # A `Difference` / `Refined` wrapper does not make a gradual index provable —
+    # acceptance projects onto the gradual base and answers `yes`, but the index
+    # may still hold a scalar at runtime, so both readings join.
+    it "joins both readings when a wrapped gradual index may hold a scalar" do
+      array_arg = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
+      [
+        Rigor::Type::Combinator.difference(Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.nominal_of("NilClass")),
+        Rigor::Type::Combinator.refined(Rigor::Type::Combinator.untyped, :unknown)
+      ].each do |index|
+        result = described_class.send(:array_added_elements, :[]=, [index, array_arg])
+        expect(result).to contain_exactly(array_arg, str_type)
+      end
+    end
+
     # `a[i, n] = "x"` does not splice a String — Ruby stores the non-Array RHS itself
     # as one element, so the receiver's element set must keep it. The `Dynamic[top]`
     # arm covers the `to_ary` coercion a subclass could still perform.

@@ -3121,9 +3121,9 @@ Unrelated
       # `Module.nesting` inside `Class.new { }` stays lexical: `class Inner` below
       # `class <<` lands on `#<Class:C>` (unnameable), `class C::CD` re-anchors at
       # the compact-header name, and `def`/`include` attribute to the class the
-      # write names. `class self::SX` resolves `self` to the anonymous class —
-      # nameable as `K::SX` at runtime, declined here consistently by every table
-      # because a `self::` header below an unnameable cref is the declined form.
+      # write names. `class self::SX` resolves `self` to the class the write
+      # names — `K::SX` — even below an unnameable cref, because a `self::` header
+      # anchors on the rebound self, not the lexical prefix.
       program = parse(<<~RUBY)
         module I; end
         class C
@@ -3139,8 +3139,9 @@ Unrelated
         end
       RUBY
       methods, = described_class.build_methods_and_def_nodes(program)
-      expect(methods.keys).to contain_exactly("K", "C::C::CD")
+      expect(methods.keys).to contain_exactly("K", "C::C::CD", "K::SX")
       expect(methods["K"].keys).to eq([:m])
+      expect(methods["K::SX"].keys).to eq([:q])
 
       includes = described_class.build_discovered_includes(program)
       expect(includes).to eq("K" => ["I"])
@@ -3187,6 +3188,109 @@ Unrelated
       methods, = described_class.build_methods_and_def_nodes(program)
       expect(methods).to be_empty
       expect(described_class.collect_class_method_defs(program)).to be_empty
+    end
+
+    it "anchors self:: declarations and writes inside a meta-new block on the rebound self" do
+      # `self` inside `K = Class.new { }` is K itself, so `class self::SX` and
+      # `self::W = Class.new` name `C::K::SX` and `C::K::W` — the lexical prefix
+      # would fabricate `C::SX`/`C::W`, and declining loses real classes.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            class self::SX; def q; end; end
+            self::W = Class.new { def w; end }
+            def m; end
+          end
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods["C::K::SX"]&.keys).to eq([:q])
+      expect(methods["C::K::W"]&.keys).to eq([:w])
+      expect(methods).not_to have_key("C::SX")
+      expect(methods).not_to have_key("C::W")
+
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body.first
+      expect(idx[klass].discovered_classes).to have_key("C::K::SX")
+      expect(idx[klass].discovered_classes).to have_key("C::K::W")
+    end
+
+    it "attributes `class <<` inside a meta-new block to the written class's singleton" do
+      # `class << self` inside `K = Class.new` opens `#<Class:K>` — its defs are
+      # K's singleton methods, not instance defs of K or C.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            class << self
+              def s = 1
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].singleton_def_for("C::K", :s)).to be_a(Prism::DefNode)
+      expect(idx[program].user_def_for("C::K", :s)).to be_nil
+      expect(idx[program].user_def_for("C", :s)).to be_nil
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+    end
+
+    it "keeps anonymous factory blocks inside a meta-new body off the enclosing class" do
+      # A bare `Class.new { }` inside `K = Class.new` is a second unnameable
+      # class — its defs bind nowhere nameable, not on C and not on K.
+      program = parse(<<~RUBY)
+        class C
+          K = Class.new do
+            Class.new { def anon = 1 }
+            Class.new do
+              def original = :ok
+              alias copied original
+            end
+          end
+        end
+      RUBY
+      expect(described_class.collect_class_method_defs(program)).to be_empty
+      idx = described_class.index(program, default_scope: default_scope)
+      expect(idx[program].user_def_for("C", :anon)).to be_nil
+      expect(idx[program].user_def_for("C::K", :anon)).to be_nil
+      expect(idx[program].user_def_for("C", :copied)).to be_nil
+      expect(idx[program].user_def_for("C::K", :copied)).to be_nil
+    end
+
+    it "records or-write and path-write meta-new mixin owners" do
+      # `K ||= Class.new` and `Holder::K = Class.new` name their class when the
+      # rvalue runs, so `include` inside mixes into that class — defs land there
+      # too, so the mixin tables must not split the attribution.
+      program = parse(<<~RUBY)
+        module I; end
+        module J; end
+        class C
+          K ||= Class.new { include I; def k = 1 }
+          Holder::M = Class.new { include J; def m = 2 }
+        end
+      RUBY
+      includes = described_class.build_discovered_includes(program)
+      expect(includes).to eq("C::K" => ["I"], "C::Holder::M" => ["J"])
+
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods["C::K"]&.keys).to eq([:k])
+      expect(methods["C::Holder::M"]&.keys).to eq([:m])
+    end
+
+    it "declines a dynamic-base path write's meta-new block rather than guessing" do
+      # `var::K = Class.new` writes whatever `var` holds — no source spelling
+      # reaches the class — so its defs and the write itself file nowhere rather
+      # than fabricating `C::K`.
+      program = parse(<<~RUBY)
+        class C
+          var = something
+          var::K = Class.new { def leak = 1 }
+        end
+      RUBY
+      methods, = described_class.build_methods_and_def_nodes(program)
+      expect(methods).to be_empty
+      idx = described_class.index(program, default_scope: default_scope)
+      klass = program.statements.body.first
+      expect(idx[klass].discovered_classes).not_to have_key("C::K")
     end
   end
 

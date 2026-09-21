@@ -792,7 +792,7 @@ Slice 6 phase 1 + phase 2 binds local-variable narrowing for truthiness, `nil?`,
 
 The `0.1.x` cycle also added two `Scope`-carried refinement maps for collection-element and receiver-chain precision (originally tracked under ROADMAP "Future cycles"). They are immutable, thread through derived scopes, and invalidate on receiver rebind like ordinary locals:
 
-- `Scope#indexed_narrowing(receiver_kind, receiver_name, key)` / `#with_indexed_narrowing(...)` — records the element type after a `receiver[key] ||= default` when the receiver is a local/ivar and `key` is a literal Symbol/String/Integer.
+- `Scope#indexed_narrowing(receiver_kind, receiver_name, key)` / `#with_indexed_narrowing(...)` — records the element type after a `receiver[key] ||= default` when the receiver is a local/ivar and `key` is a literal Symbol/String/Integer. The record is only made for a SINGLE-index `||=`; a multi-index form (`a[0, 1] ||= v`) addresses a splice region rather than the slot its first index names, so keying the `||` result on that index would claim a non-nil `a[0]` for `a[0, 1] ||= []`, which splices nothing in and leaves `a[0]` nil at runtime (issue #1140).
 - `Scope#method_chain_narrowing(receiver_kind, receiver_name, method_name)` / `#with_method_chain_narrowing(...)` — records the narrowed type of a stable single-hop, no-argument method chain (e.g. `x.last` after `if x.last.is_a?(Array)`).
 
 These boundaries MUST NOT silently degrade Slice 6 phase 1 callers: predicates that fall outside the recognised catalogue MUST observe the entry scope on both edges, preserving the Slice 3 phase 2 behaviour.

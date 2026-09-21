@@ -603,7 +603,12 @@ module Rigor
         current_type = scope.type_of(node, tracer: tracer)
         result_type = Type::Combinator.union(Narrowing.narrow_truthy(current_type), rhs_type)
 
-        key_node = first_index_argument(node)
+        # A narrowing is keyed on ONE literal slot — `a[k]` — but a multi-index `||=` reads and
+        # stores a splice REGION (`a[0, 1] ||= v`), so keying the result on the first index would
+        # record `a[0]`'s type as the region answer: `a[0, 1] ||= []` would claim `a[0]` non-nil
+        # where the store splices nothing and `a[0]` stays nil at runtime. Decline the record for
+        # any form but the single-index one.
+        key_node = single_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
         # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
         # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
@@ -687,12 +692,15 @@ module Rigor
         content_arg_types(call_node, scope)
       end
 
-      def first_index_argument(node)
+      # The index node of an index-write when it holds exactly one index argument — the only form
+      # whose stored value lands on a nameable slot (`a[k]`). Multi-index forms address a splice
+      # region and answer `nil`.
+      def single_index_argument(node)
         args = node.arguments
         return nil if args.nil?
 
         list = args.respond_to?(:arguments) ? args.arguments : args
-        list.first
+        list.size == 1 ? list.first : nil
       end
 
       def dispatch_operator(current, rhs, operator)

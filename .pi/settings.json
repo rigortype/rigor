@@ -1,0 +1,5 @@
+{
+  "packages": [
+    "../agents/pi-harness"
+  ]
+}

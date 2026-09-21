@@ -1,0 +1,101 @@
+name: rigor-ready-for-agent
+description: >
+  Rigor ready-for-agent trial workflow (ADR-115): plan → implement →
+  draft PR → CI watch → adversarial review → fix loop. Encodes the
+  long quality-stable loop that plain `pure` omits.
+max_steps: 40
+initial_step: plan
+
+personas:
+  architect: ../facets/personas/architect.md
+  lane: ../facets/personas/lane.md
+  shipper: ../facets/personas/shipper.md
+  ci-watcher: ../facets/personas/ci-watcher.md
+  adversary: ../facets/personas/adversary.md
+
+policies:
+  rigor-lane: ../facets/policies/rigor-lane.md
+
+instructions:
+  plan: ../facets/instructions/plan.md
+  develop: ../facets/instructions/develop.md
+  ship-draft-pr: ../facets/instructions/ship-draft-pr.md
+  watch-ci: ../facets/instructions/watch-ci.md
+  adversarial-review: ../facets/instructions/adversarial-review.md
+  fix-from-review: ../facets/instructions/fix-from-review.md
+
+steps:
+  - name: plan
+    persona: architect
+    policy: rigor-lane
+    instruction: plan
+    edit: false
+    rules:
+      - condition: Plan ready
+        next: develop
+      - condition: Blocked — need human
+        next: ABORT
+
+  - name: develop
+    persona: lane
+    policy: rigor-lane
+    instruction: develop
+    edit: true
+    required_permission_mode: edit
+    rules:
+      - condition: Implementation ready to ship
+        next: ship
+      - condition: Blocked — need human
+        next: ABORT
+
+  - name: ship
+    persona: shipper
+    policy: rigor-lane
+    instruction: ship-draft-pr
+    edit: true
+    required_permission_mode: edit
+    allow_git_commit: true
+    rules:
+      - condition: Draft PR opened
+        next: watch_ci
+      - condition: Draft PR already exists
+        next: watch_ci
+      - condition: Ship blocked
+        next: ABORT
+
+  - name: watch_ci
+    persona: ci-watcher
+    policy: rigor-lane
+    instruction: watch-ci
+    edit: false
+    rules:
+      - condition: CI green
+        next: adversarial_review
+      - condition: CI red
+        next: fix
+      - condition: CI stalled
+        next: ABORT
+
+  - name: adversarial_review
+    persona: adversary
+    policy: rigor-lane
+    instruction: adversarial-review
+    edit: false
+    rules:
+      - condition: Approved
+        next: COMPLETE
+      - condition: Needs fix
+        next: fix
+
+  - name: fix
+    persona: lane
+    policy: rigor-lane
+    instruction: fix-from-review
+    edit: true
+    required_permission_mode: edit
+    allow_git_commit: true
+    rules:
+      - condition: Fixes pushed
+        next: watch_ci
+      - condition: Blocked — need human
+        next: ABORT

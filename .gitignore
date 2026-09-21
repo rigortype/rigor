@@ -30,3 +30,13 @@
 !/.claude/
 /.claude/*
 !/.claude/skills/
+
+# TAKT local trial artifacts
+.takt/runs/
+.takt/tasks/
+.takt/tasks.yaml
+.takt/events/
+
+# pi project-local install artifacts (keep .pi/settings.json tracked)
+.pi/*
+!.pi/settings.json

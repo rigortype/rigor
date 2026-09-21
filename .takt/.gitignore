@@ -1,0 +1,13 @@
+# Keep workflow definitions; ignore run artifacts
+*
+!workflows/
+!workflows/**
+!facets/
+!facets/**
+!README.md
+!.gitignore
+runs/
+tasks/
+tasks.yaml
+events/
+exec/

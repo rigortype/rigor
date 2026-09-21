@@ -188,6 +188,14 @@ or_written = {}
 or_written[:a] ||= 1
 assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", or_written)
 
+# A splat in a hash `[]=`'s key position is an unknown KEY, not unknown
+# arity — the pair must still join, with the key degrading to
+# `Dynamic[top]` rather than the store being dropped wholesale.
+splat_key = { a: 1 }
+splat_args = [:b]
+splat_key[*splat_args] = 2
+assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", splat_key)
+
 # --- mail's `Message#to_yaml`, the shape that pinned the open-parameter
 # rule down. Several straight-line stores into a hash seeded `{}`, then
 # an Array stored under one key and appended to through the READ. Only

@@ -2817,7 +2817,9 @@ module Rigor
         args = content_arg_types(node, block_entry)
         return [] if args.size < 2
 
-        [[args.first, args.last]]
+        # A splat index marker (`nil`) means unknown arity only to the Array classifier;
+        # read as a key it is an unknown value — degrade to `Dynamic[top]` (issue #1140).
+        [[args.first || Type::Combinator.untyped, args.last]]
       end
 
       # Type of the index expression of an index-write node (`h[k] ||= v`).

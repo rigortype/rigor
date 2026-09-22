@@ -12,17 +12,19 @@ which is `untyped` by necessity.
 
 ## The question
 
-All 86 `-> untyped` / `-> untyped?` method returns under `sig/` were listed and each was checked
+Every method declaration under `sig/` whose return is `untyped` or `untyped?` was listed and checked
 against every call site in `lib/`, `spec/`, `plugins/`, `examples/`, `exe/`, and `apps/`:
 
 ```sh
-grep -rn -- '-> untyped' sig/
+# 79 at 02f3e27c (pre-#1169); 77 at 75c5ae91. A raw `grep -- '-> untyped'` says 86: the extra
+# seven are one comment and six proc / block types in parameter position, not method returns.
+git grep -E '^ *def [^#]*-> untyped\??$' <sha> -- sig/ | wc -l
 grep -rn --include='*.rb' -E "(^|[^a-zA-Z0-9_])<method>\b" lib/ exe/ plugins/ spec/ | grep -v 'def '
 ```
 
 Two methods had (a) every call site discarding the result and (b) a result that is a
 last-expression artefact rather than a documented value: `Rigor::Plugin.unregister!` (returns
-whatever `Mutex#synchronize` leaves — the emptied registry `Hash` or `Hash#delete`'s result) and
+whatever `Mutex#synchronize` leaves — the cleared gem-registrations `Hash` or `Hash#delete`'s result) and
 `Rigor::Plugin::Base.node_file_context` (returns the assigned `Proc`). Both became `-> void`.
 
 Everything else returns a value some caller consumes. So the void question closed at two. The
@@ -43,17 +45,21 @@ consistent with every type in both directions:
 consistent(untyped, T)   consistent(T, untyped)
 ```
 
-Consistency is not subtyping. `untyped <: T` and `T <: untyped` are both admitted not because
-`untyped` sits at the top or the bottom of the lattice, but because the relation is *lenient*:
-the checker agrees to stop asking. Rigor's internal form makes this visible — `untyped` is
-`Dynamic[top]`, a wrapper that records "this crossed an unchecked boundary" around a static facet
-that happens to be `top`.
+Consistency is not subtyping. Assignment in either direction between `untyped` and `T` is admitted
+not because `untyped` sits at the top or the bottom of the lattice, but because the *consistency*
+relation is lenient: the checker agrees to stop asking. The subtyping judgement is a different
+relation and does not become lenient — `relations-and-certainty.md` has `Dynamic[T]` witness
+subtyping through its static facet, so `Dynamic[top] <: String` is simply false, and what lets a
+dynamic value flow into a `String` slot is `consistent(Dynamic[top], String)`, not a subtype edge.
+Rigor's internal form makes this visible — `untyped` is `Dynamic[top]`, a wrapper that records
+"this crossed an unchecked boundary" around a static facet that happens to be `top`.
 
 As a return contract, therefore, `-> untyped` says: **"a value comes back, and the checker will
 not object to anything you do with it."** It is always *sound* — every Ruby value inhabits it —
 but it is the weakest honest claim, and it is a *permission*: `x = m(); x.call` type-checks.
 
-The RBS 3.0 rename from `any` to `untyped` was precisely about this. `any` reads as an existential
+RBS's own early rename from `any` to `untyped` (pre-1.0; `references/rbs/docs/syntax.md` still
+records `any` as the former spelling) was precisely about this. `any` reads as an existential
 ("some type"); `untyped` reads as a checker state ("not checked"). Rigor's rbs 4.2 no longer
 accepts `any` at all — `RBS::Parser` reads it as a type-alias reference and `rbs validate` fails
 with `NoTypeFoundError` — so the question "should this be `any` instead?" has no answer other than
@@ -94,11 +100,13 @@ ADR-100's `void_origins` table records, at the point where `void → top` widens
 was born from an author's `-> void`, and `static.value-use.void` fires when that provenance
 reaches a value position (assignment RHS, call receiver, call argument).
 
-Formally this is a **linear/affine-style use restriction layered on `top`**, not a type. It
-constrains how many times the result may be *consumed* (zero), not what it is. That is why it is
-the correct spelling for `unregister!` and `node_file_context`: the truthful set-theoretic claim
-about their return is "anything" (the `Hash`, the `Proc`, whatever `delete` gave back), and the
-truthful *contract* claim is "and do not read it."
+Formally this is a **use-count restriction layered on `top`**, carried in a side-table rather
+than in the type: it constrains how many times the result may be *consumed* (zero), not what it
+is. (It is not linear or affine typing — those permit exactly one or at most one use; `void`
+permits none — and ADR-100 deliberately made it a side-table rather than a carrier type.) That is
+why it is the correct spelling for `unregister!` and `node_file_context`: the truthful
+set-theoretic claim about their return is "anything" (the gem-registrations `Hash`, the `Proc`,
+whatever `delete` gave back), and the truthful *contract* claim is "and do not read it."
 
 It also explains why `-> nil` was the wrong alternative. `nil` is a singleton value type; `-> nil`
 is a positive claim that the body produces `nil`. For `dynamic_return` and `narrowing_facts`,
@@ -145,7 +153,12 @@ This is ordinary parametric polymorphism: the return type is *determined by* an 
 type variable expresses a dependency `untyped` throws away. Under `-> untyped`,
 `x = dump_type(some_string); x.upcase` leaves `x` as `Dynamic[top]` and the downstream chain
 untyped; under `[A] … -> A`, `x` keeps `String`. The fixture helpers that exist to *probe* types
-are exactly where losing the type is costly.
+are exactly where losing the type is costly. [#1171](https://github.com/rigortype/rigor/pull/1171)
+landed this; its review measured the binding directly (`compose_arg_type_vars` in
+`rbs_dispatch.rb` binds `A` to the argument type verbatim, an unbound `A` translates back to
+`Dynamic[top]`, and a `bot` argument yields `bot`) and found one reach limit: the binding needs a
+scoped dispatch, so a bare `dump_type(x)` after `include Rigor::Testing` in a discovered-only
+class still takes the ancestor fallback and answers `Dynamic[top]`, as it did before.
 
 The other members of this class are returns whose classes are already nameable in `sig/` or in
 bundled RBS, and where the implementation comments name the type outright:
@@ -153,7 +166,8 @@ bundled RBS, and where the implementation comments name the type outright:
 | Method | Currently | Implementation says |
 | --- | --- | --- |
 | `Reflection.instance_method_definition` / `singleton_method_definition` | `untyped` | `RBS::Definition::Method` or nil |
-| `Reflection.instance_definition` / `singleton_definition` (and `Environment` twins) | `untyped?` | `RBS::Definition` or nil |
+| `Reflection.instance_definition` / `singleton_definition` | `untyped` | `RBS::Definition` or nil |
+| `Environment#instance_definition` / `singleton_definition` | `untyped?` | `RBS::Definition` or nil |
 | `Scope#user_def_for` / `singleton_def_for` / `top_level_def_for` / `bindable_top_level_def_for` | `untyped?` | `Prism::DefNode` or nil |
 | `Source::NodeLocator.at_position` / `at_offset` (class and instance) | `untyped?` | `Prism::Node` or nil |
 | `Plugin::Registry#find` | `untyped` | `Plugin::Base` or nil |

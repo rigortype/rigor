@@ -834,17 +834,26 @@ module Rigor
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the
-          # receiver's `type_args`. Returns an empty hash when either side is empty or when arities
-          # disagree -- in both cases free variables in the method's return type degrade to `Dynamic[Top]`
-          # per the translator's contract.
+          # receiver's `type_args`. Returns an empty hash when either side is empty or when the receiver
+          # carries MORE arguments than the class declares -- in every such case free variables in the
+          # method's return type degrade to `Dynamic[Top]` per the translator's contract.
+          #
+          # Issue #1121 -- FEWER arguments than parameters is not a disagreement, it is the partial
+          # application RBS itself licenses for a class whose trailing parameters declare a default:
+          # `Enumerator::Lazy[out E, out R = void]` is spelled `Enumerator::Lazy[Elem]` by the very
+          # signature that hands one back (`Enumerable#lazy: () -> Enumerator::Lazy[Elem]`). Withholding
+          # the whole map there dropped the element binding on every lazy-enumerator receiver, so the
+          # block parameter of `lazy.map { |x| … }` was `Dynamic[top]` and the chain could not recover the
+          # element type. The supplied prefix MUST bind in declaration order and the omitted trailing names
+          # stay unbound (`Dynamic[top]`), exactly as any other free variable does.
           def build_type_vars(environment, class_name, receiver_args)
             return NO_TYPE_VARS if receiver_args.empty?
 
             param_names = Rigor::Reflection.class_type_param_names(class_name, environment: environment)
             return NO_TYPE_VARS if param_names.empty?
-            return NO_TYPE_VARS if param_names.size != receiver_args.size
+            return NO_TYPE_VARS if receiver_args.size > param_names.size
 
-            param_names.zip(receiver_args).to_h
+            param_names.first(receiver_args.size).zip(receiver_args).to_h
           end
 
           # The shared empty substitution map: most receivers carry no type arguments, and the translator

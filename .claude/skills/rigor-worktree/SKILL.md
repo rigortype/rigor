@@ -43,7 +43,7 @@ exclude because a symlink named `vendor` does not match that pattern.)
 The main clone must have a populated `vendor/bundle` first — the script
 refuses otherwise. Run `make setup` there once if needed.
 
-## The two worktree-only gotchas the script can't hide
+## The worktree-only gotchas the script can't hide
 
 **`references/` submodules are NOT populated in a worktree.** A worktree
 shares `.git`, but submodule working trees are per-checkout, so every
@@ -77,6 +77,18 @@ Verify a reference-reading gate actually **executed** (not `pending` /
   clone*. Adding a checkout in a worktree is fine; removing a
   registration is never fine. Repair:
   `git submodule update --init --filter=blob:none references/<name>`.
+
+**Push with an explicit refspec, never `-u`.** A worktree branch
+created from `master` can carry `branch.<name>.merge = refs/heads/master`
+(autoSetupMerge), and this environment sets `push.default = tracking` —
+so `git push -u origin <branch>` resolves the destination through the
+upstream config and lands the branch's commits on **remote `master`**
+directly, bypassing the PR flow. Always push as
+`git push origin <branch>:refs/heads/<branch>` (which also makes the
+`->` mapping visible in the output — read it). If it ever happens,
+restore with
+`git push --force-with-lease=refs/heads/master:<pushed-sha> origin <prev-sha>:refs/heads/master`
+before anyone fetches.
 
 ## `--with-tools`
 

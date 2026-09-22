@@ -45,6 +45,10 @@ All merged, CI green, adversarial review (Fable/Grok) Approved:
 - [#1186](https://github.com/rigortype/rigor/pull/1186) → `1b867b76` — #1181 slice 3:
   `Plugin::ProtocolContract` (+`ParamType` Data member, marked #1150) unblocking
   `Manifest`/`Base#protocol_contracts` and new `Registry#protocol_contracts`/`contracts_for_path`.
+- [#1187](https://github.com/rigortype/rigor/pull/1187) → `4d06efee` — #1181 slice 4:
+  `Analysis::ProjectScan` (Data.define) unblocking `Runner#prepare_project_scan` + the `prebuilt:`
+  kwarg; 3 members stay `untyped` (SyntheticMethodIndex / ProjectPatchedMethods / TemplateUnits
+  unsigned).
 
 Earlier `queue-release` merges (`#1158`–`#1162`, `79fa99cf`/`9fd4b6d4`/`19c2af59`) are all landed;
 no open PRs at handoff time.
@@ -56,10 +60,10 @@ Nothing new. Long-standing `ready-for-human` backlog is unchanged (`gh issue lis
 ## What is worth picking up next
 
 - **#1181** — Class B sig-coverage backlog (landed: Baseline #1184, AdditionalInitializer #1185,
-  ProtocolContract #1186). Remaining: `Effects::*` (`EffectTable`, `FileCollection`, `PluginFacts`,
-  `Envelope`, `EnvelopeIndex` — unblocks 4 Runner readers + 2 RbsExtended readers),
-  `Analysis::ProjectScan`, `Plugin::Macro::*`, `HktRegistry::*`, `Environment::Reflection` +
-  reporter duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types. Process:
+  ProtocolContract #1186, ProjectScan #1187). Remaining: `Effects::*` (`EffectTable`,
+  `FileCollection`, `PluginFacts`, `Envelope`, `EnvelopeIndex` — unblocks 4 Runner readers + 2
+  RbsExtended readers), `Plugin::Macro::*`, `HktRegistry::*`, `Environment::Reflection` + reporter
+  duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types. Process:
   `rigor sig-gen --print` provenance first per `docs/agents/type-authoring.md`.
 - **#1177** — `OptimisticOrigin` lost across method boundary (needs-triage; a
   `rigor-wt/optimistic-origin-nil-predicate` directory exists on disk but is NOT a registered

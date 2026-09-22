@@ -185,6 +185,8 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
+  # New file (#1181 slice): the `alias eql? ==` row has no sig-gen shape — the sole residue.
+  "sig/rigor/plugin/additional_initializer.rbs" => 1,
   "sig/rigor/plugin/base.rbs" => 22,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
@@ -193,8 +195,13 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
   "sig/rigor/plugin/loader.rbs" => 2,
-  "sig/rigor/plugin/manifest.rbs" => 23,
-  "sig/rigor/plugin/registry.rbs" => 9,
+  # -1 (#1181 slice): `additional_initializers` tightened to
+  # `Array[Plugin::AdditionalInitializer]` and marked under #1154.
+  "sig/rigor/plugin/manifest.rbs" => 22,
+  # +1 (#1181 slice): the newly declared `additional_initializers` reader is unmarked residue —
+  # `compile_aggregates` builds the ivar with `flat_map`, not from an `initialize` parameter, so no
+  # gap issue covers it.
+  "sig/rigor/plugin/registry.rbs" => 10,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,

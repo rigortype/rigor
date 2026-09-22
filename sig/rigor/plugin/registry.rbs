@@ -15,4 +15,10 @@ class Rigor::Plugin::Registry
   def type_node_resolvers: () -> Array[untyped]
   def rbs_complete_ancestors: () -> Array[String]
   def rbs_complete_ancestor?: (untyped class_name) -> bool
+
+  # Newly declared — the attr_reader was absent from the sig. `compile_aggregates` builds the ivar
+  # with `flat_map` over the manifests (not from an `initialize` parameter, so this is unmarked
+  # residue like the `rbs_complete_ancestors` sibling rather than a #1154 row); the element type is
+  # `AdditionalInitializer`, enforced per manifest by `validate_additional_initializers!`.
+  attr_reader additional_initializers: Array[Rigor::Plugin::AdditionalInitializer]
 end

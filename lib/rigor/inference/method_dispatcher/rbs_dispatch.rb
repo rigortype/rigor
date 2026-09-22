@@ -433,6 +433,14 @@ module Rigor
             direct = lookup_method_on(environment, class_name, kind, method_name)
             return direct if direct
 
+            # Issue #1173 — the include-edge sibling of the superclass bridges below: a discovered
+            # class's `include M` where M is RBS-known resolves M's declaration here. It runs BEFORE
+            # them because an include edge precedes the superclass edge in the MRO (`Sub < Hash` with
+            # `include M` chains `Sub → M → Hash`): when both a nearer mixin and a bridged ancestor
+            # declare the name, the mixin is the method that runs. See {#included_module_method}.
+            included = included_module_method(environment, class_name, kind, method_name, scope)
+            return included if included
+
             # ADR-43 — scoped inherited-method resolution. The direct lookup misses when `class_name` is a
             # Ruby-source subclass absent from RBS (so no ancestor walk runs). If its discovered
             # superclass chain reaches an allow-listed RBS-complete ancestor, resolve the method there so
@@ -541,6 +549,77 @@ module Rigor
             answer = compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
             memo[key] = answer if memo
             answer
+          end
+
+          # Issue #1173 — the include-edge sibling of {#core_stdlib_ancestor_method}: a discovered
+          # class's `include M` where M is RBS-known (a project `sig/`, bundled core / stdlib, or a
+          # shipped gem signature) resolves M's declaration here. Ruby inserts an included module into
+          # the ancestor chain outright, so adopting its declaration is the dispatch the runtime
+          # performs — unlike the superclass arm there is no "which classes may be read as complete"
+          # question, only the usual shadow guards: a project `def` on the receiver or a nearer
+          # ancestor, an outside-the-body `include` / `class_eval` mark (#992), or an ADR-17 `pre_eval:`
+          # patch each mean the declaration found is not the method that runs.
+          #
+          # The walk reuses {ExternalAncestorResolution} with `mixins: true` — an include edge precedes
+          # the superclass edge at each BFS node, matching the MRO — and the answer is adopted ONLY
+          # when the resolved owner is an RBS module (`environment.rbs_module?`). A superclass-owned
+          # answer keeps declining: a non-core ancestor class is the gap #527's superclass slice
+          # deferred, and the walk's ordering already gave every include edge its chance first.
+          #
+          # `kind` is `:instance` only: an `include`d module's `def self.x` is not callable on the
+          # includer (the singleton side is a separate #527 item). `self` needs no help here —
+          # `dispatch_one` keys `self` / `instance` on the RECEIVER's class name, so a `-> self`
+          # module method answers the includer, matching CRuby.
+          def included_module_method(environment, class_name, kind, method_name, scope)
+            return nil if scope.nil? || kind != :instance
+            return nil if environment.nil?
+
+            memo = mixin_ancestor_memo(environment, scope)
+            key = [class_name.to_s, method_name.to_sym]
+            return memo[key] if memo&.key?(key)
+
+            answer = compute_included_module_method(environment, class_name, method_name, scope)
+            memo[key] = answer if memo
+            answer
+          end
+
+          # The declines are conjunctive and ordered as {compute_core_stdlib_ancestor_method}'s are:
+          # the two walks that read the project's tables run LAST, only once an RBS declaration is
+          # actually in hand, because they read `Scope#superclass_of` / `#includes_of` and would file a
+          # file-granular ancestry edge for every call site otherwise.
+          def compute_included_module_method(environment, class_name, method_name, scope)
+            return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
+            return nil if environment.plugin_registry&.open_receiver?(class_name)
+
+            definition, owner = Inference::ExternalAncestorResolution.resolve(
+              class_name, method_name, :instance,
+              scope: scope, environment: environment, record_dependencies: false, mixins: true
+            )
+            return nil if definition.nil?
+            return nil unless environment.rbs_module?(owner)
+            return nil if returns_the_walked_ancestry?(definition, owner, environment)
+            return nil if dynamic_surface_through_ancestors?(scope, class_name)
+            return nil if project_patched_through_ancestors?(environment, scope, class_name, owner, method_name)
+            return nil if source_declares_through_ancestors?(scope, class_name, method_name)
+
+            definition
+          end
+
+          # The same one-slot memo shape as {#core_stdlib_memo}; see there for why it is one slot keyed
+          # on the discovery index's identity, and why a recording run bypasses it.
+          MIXIN_ANCESTOR_MEMO_KEY = :__rigor_mixin_ancestor_dispatch__
+          private_constant :MIXIN_ANCESTOR_MEMO_KEY
+
+          def mixin_ancestor_memo(environment, scope)
+            return nil if Rigor::Analysis::DependencyRecorder.active?
+
+            discovery = scope.discovery
+            slot = Thread.current[MIXIN_ANCESTOR_MEMO_KEY]
+            unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
+              slot = [discovery, environment, {}]
+              Thread.current[MIXIN_ANCESTOR_MEMO_KEY] = slot
+            end
+            slot[2]
           end
 
           # The declines are conjunctive, so their ORDER is free — and it is chosen so the two that walk

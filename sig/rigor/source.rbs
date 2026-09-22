@@ -4,11 +4,11 @@ module Rigor
       class OutOfRangeError < StandardError
       end
 
-      def self.at_position: (source: String, root: untyped, line: Integer, column: Integer) -> untyped?
-      def self.at_offset: (root: untyped, offset: Integer) -> untyped?
+      def self.at_position: (source: String, root: untyped, line: Integer, column: Integer) -> ::Prism::Node?
+      def self.at_offset: (root: untyped, offset: Integer) -> ::Prism::Node?
       def initialize: (source: String, root: untyped) -> void
-      def at_position: (line: Integer, column: Integer) -> untyped?
-      def at_offset: (Integer offset) -> untyped?
+      def at_position: (line: Integer, column: Integer) -> ::Prism::Node?
+      def at_offset: (Integer offset) -> ::Prism::Node?
     end
 
     module Literals

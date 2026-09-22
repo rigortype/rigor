@@ -11,8 +11,14 @@ module Rigor
     # sig-gen gap: #656 — sig-gen skips the method (untyped return), so the resolved-name-or-decline is hand-written.
     def self?.resolve_constant_path_name: (String | Symbol name, Scope scope) { (String candidate) -> boolish } -> String?
     def self?.lexical_nesting_chain: (Scope scope) -> Array[String]
-    def self?.instance_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
-    def self?.singleton_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
+    def self?.instance_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> ::RBS::Definition::Method?
+    def self?.singleton_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> ::RBS::Definition::Method?
+    # `::RBS::Definition?` is the honest return, but naming it exposes an engine gap (#1172): the
+    # definition's `methods` reader is `Hash[Symbol, Method]`, and a dynamic-key `Hash#[]` read is
+    # deliberately nil-free but marked `OptimisticOrigin` (internal-spec/inference-engine.md § the
+    # optimistic read). `.nil?` on that node dispatches to `Kernel#nil?: () -> false` without consulting
+    # the mark, so `!definition.methods[:m].nil?` folds constant and three live guards in `lib/` report
+    # `flow.always-truthy-condition`. Kept `untyped` until the mark reaches the predicate.
     def self?.instance_definition: (String | Symbol class_name, ?scope: Scope) -> untyped
     def self?.singleton_definition: (String | Symbol class_name, ?scope: Scope) -> untyped
     def self?.class_type_param_names: (String | Symbol class_name, ?scope: Scope) -> Array[Symbol]

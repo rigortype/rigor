@@ -120,6 +120,14 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `false | true | Dynamic[top]` return, both fold `bool` instead of `untyped`. Each method's inferred
 # return reaches the `bool` its declaration states, so both rows leave `unrenderable` for parameter
 # intent (`scope.rbs` -1, `source.rbs` -1).
+# 658 since the named-return sig pass. Naming `Prism::Node?` on the four `NodeLocator` readers matches
+# what sig-gen already proved, so `source.rbs` -4 (unrenderable → parameter intent); `Scope#top_level_def_for`
+# now declared `Prism::DefNode?` lets sig-gen prove `#bindable_top_level_def_for`, `scope.rbs` -1, and
+# `#user_def_through_ancestors` / `#singleton_def_through_ancestors` are re-declared to the
+# `[Prism::DefNode, String] | [nil, nil]` sig-gen now proves through them. `skip_reason_catalog.rbs` +1:
+# `Entry#to_h` declared `Hash[String, String]` reads as divergent from the inferred
+# `Hash[String, "sig_skip_reason" | String]` because a literal is not absorbed into its nominal in the
+# rendered comparison — a normalization gap, not a wrong declaration.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -154,9 +162,9 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 109,
-  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
-  "sig/rigor/source.rbs" => 8,
+  "sig/rigor/scope.rbs" => 108,
+  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 9,
+  "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
   "sig/rigor/type.rbs" => 211

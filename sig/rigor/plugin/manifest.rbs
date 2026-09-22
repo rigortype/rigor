@@ -22,7 +22,7 @@ class Rigor::Plugin::Manifest
   # `Array[String]` (the same gap every other reader in this block carries).
   def template_globs: () -> Array[String]
   def produces: () -> untyped
-  def consumes: () -> untyped
+  def consumes: () -> Array[Rigor::Plugin::Manifest::Consumption]
   def owns_receivers: () -> untyped
   def open_receivers: () -> untyped
   def rbs_complete_ancestors: () -> untyped

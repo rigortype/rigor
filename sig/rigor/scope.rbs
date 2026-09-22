@@ -172,8 +172,8 @@ module Rigor
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
-    def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
-    def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([untyped, String] | [nil, nil])
+    def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> ::Prism::DefNode?
+    def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
     def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool
     def external_ancestor_name_candidates: (String | Symbol class_name, ?name_memo: Hash[untyped, untyped]) -> Array[Array[String]]
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
@@ -186,8 +186,8 @@ module Rigor
 
     # Issue #530 — public so the external-gem ancestry probe asks the same question the walk does.
     def known_user_class?: (String | Symbol name) -> bool
-    def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
-    def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([untyped, String] | [nil, nil])
+    def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> ::Prism::DefNode?
+    def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def user_singleton_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     # sig-gen gap: #1097 — both predicates take the `Prism::CallNode` being dispatched (untyped, like
@@ -195,8 +195,8 @@ module Rigor
     def singleton_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
     # sig-gen gap: #1097 — as above: the call-site `Prism::CallNode` parameter is untyped.
     def instance_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
-    def top_level_def_for: (String | Symbol method_name) -> untyped?
-    def bindable_top_level_def_for: (String | Symbol method_name) -> untyped?
+    def top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
+    def bindable_top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
     def toplevel?: () -> bool
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?
     def superclass_of: (String | Symbol class_name) -> String?

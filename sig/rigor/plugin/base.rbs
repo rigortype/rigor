@@ -20,7 +20,7 @@ class Rigor::Plugin::Base
   def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> Class
   def self.node_rules: () -> Array[untyped]
 
-  def self.node_file_context: () { (untyped root, untyped scope) -> untyped } -> untyped
+  def self.node_file_context: () { (untyped root, untyped scope) -> untyped } -> void
   def self.node_file_context_block: () -> untyped
 
   def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(untyped path) -> Array[untyped])?) { (untyped call_node, untyped scope) -> untyped } -> nil

@@ -198,7 +198,10 @@ SIG_PROVENANCE_RESIDUE = {
   # -1 (#1181 slice): `additional_initializers` tightened to
   # `Array[Plugin::AdditionalInitializer]` and marked under #1154.
   "sig/rigor/plugin/manifest.rbs" => 22,
-  "sig/rigor/plugin/registry.rbs" => 9,
+  # +1 (#1181 slice): the newly declared `additional_initializers` reader is unmarked residue —
+  # `compile_aggregates` builds the ivar with `flat_map`, not from an `initialize` parameter, so no
+  # gap issue covers it.
+  "sig/rigor/plugin/registry.rbs" => 10,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,

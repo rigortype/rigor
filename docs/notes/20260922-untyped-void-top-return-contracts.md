@@ -276,11 +276,13 @@ param would hide `diag.qualified_rule` behind an unsigned member. All member row
 
 `Plugin::AdditionalInitializer` followed: a small validated value class whose three
 `attr_reader`s are the #1154 shape (ivar assigned from an `initialize` parameter, normalized by
-`map(&:to_sym)` / `.dup.freeze`), so `Manifest#additional_initializers`,
-`Registry#additional_initializers` (newly declared — it was absent from the sig entirely), and the
-manifest kwarg tightened to `Array[AdditionalInitializer]`. The one residue left is the
-`alias eql? ==` row — sig-gen has no alias synthesis, so it sits unmarked under the file's pin of
-one. `Manifest#initialize`'s `additional_initializers:` kwarg names the element type its
+`map(&:to_sym)` / `.dup.freeze`), so `Manifest#additional_initializers` and the manifest kwarg
+tightened to `Array[AdditionalInitializer]`. `Registry#additional_initializers` was absent from the
+sig entirely and is newly declared the same way — but as *unmarked* residue: `compile_aggregates`
+builds the ivar with `flat_map` over the manifests, not from an `initialize` parameter, so #1154
+does not cover it (the `rbs_complete_ancestors` sibling is likewise unmarked). The other residue is
+the `alias eql? ==` row — sig-gen has no alias synthesis, so it sits unmarked under the new file's
+pin of one. `Manifest#initialize`'s `additional_initializers:` kwarg names the element type its
 validator enforces.
 
 ## Two incidental findings

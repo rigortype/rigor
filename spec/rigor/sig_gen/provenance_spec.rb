@@ -142,6 +142,18 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `Entry#to_h` declared `Hash[String, String]` reads as divergent from the inferred
 # `Hash[String, "sig_skip_reason" | String]` because a literal is not absorbed into its nominal in the
 # rendered comparison — a normalization gap, not a wrong declaration.
+#
+# 661 since #1123, all three rows in `sig/rigor/scope.rbs` (108 -> 111). Two are the readers of the new
+# instance-side prepend table, in exactly the shape every other discovery table carries them:
+# `Scope#discovered_prepends` (`sig.skipped.untyped-return` — an endless-def reader over a
+# `Data.define` member, like its `discovered_includes` sibling) and the `DiscoveryIndex#discovered_prepends`
+# `Data` member itself (`synthetic_source`, like every member row of that class). The third is
+# `Scope#user_def_through_ancestors`, which the change gives a second return path — the prepend wedge —
+# reached through two private recursive helpers, so `sig-gen` no longer proves the
+# `[Prism::DefNode, String] | [nil, nil]` the named-return pass declared and the row reads as
+# `declared_divergent`, even though the walk still only ever answers a resolved def or `[nil, nil]`.
+# Narrowing that back is engine work on a recursive private helper's array element type, not a
+# contract change here; the declaration is left as the true one.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -176,7 +188,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 108,
+  "sig/rigor/scope.rbs" => 111,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 9,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

@@ -99,6 +99,7 @@ module Rigor
         tables = { discovered_classes: index.fetch(:classes) }
         %i[
           def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
+          prepends
           method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
           deferred_ranges
         ].each do |slot|

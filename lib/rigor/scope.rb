@@ -55,6 +55,10 @@ module Rigor
     # project-defined override against.
     def discovered_deferred_ranges = @discovery.discovered_deferred_ranges
     def discovered_includes = @discovery.discovered_includes
+    # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
+    # instance-ancestor search order (nearest prepend first). Feeds {#prepends_of}, the one table that tells
+    # a `prepend` from an `include` at `def`-priority level.
+    def discovered_prepends = @discovery.discovered_prepends
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
     # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
@@ -910,6 +914,32 @@ module Rigor
       @discovery.discovered_includes[class_name.to_s] || []
     end
 
+    # Issue #1123 — the modules `class_name` `prepend`s, in instance-ancestor SEARCH order: the nearest
+    # prepend first, so `prepend A; prepend B` answers `["B", "A"]` and `prepend A, B` keeps `["A", "B"]`
+    # (each Ruby statement's argument list lands as one unit, ahead of the earlier statements'). Read by
+    # {#user_def_through_ancestors}'s prepend wedge — Ruby inserts a prepended module, and its own ancestry,
+    # IMMEDIATELY BEFORE the class that prepends it, so these names are searched ahead of the class's own
+    # `def`s. Empty for a class the project never prepends, which is the behaviour every class had before
+    # `prepend` was ordered at all.
+    #
+    # The same names ALSO appear in {#includes_of} — that table answers "which modules does this class
+    # carry", which is what the arity, visibility, reflection and constant-scope consumers ask, and a
+    # prepended module does contribute instance methods. This table adds the ORDER and the KIND; it never
+    # removes a name from the other one.
+    #
+    # The class dependency is recorded only on a HIT, as {#data_member_layout} does: the wedge asks this
+    # for every class the walk visits, so recording on a miss would give a caller file an ancestry edge on
+    # a class that prepends nothing — an edge where ADR-46 slice 4 keeps method-body reads at
+    # symbol granularity.
+    def prepends_of(class_name)
+      names = @discovery.discovered_prepends[class_name.to_s]
+      return EMPTY_MIXIN_NAMES if names.nil?
+
+      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
+      names
+    end
+    private :prepends_of
+
     # Issue #898 — the module names `extend`ed onto `class_name`'s SINGLETON, as written, gathered up the
     # as-written superclass chain because a singleton class inherits its superclass's singleton class
     # (`class Base; extend Comparable; end; class Widget < Base; end` leaves `Widget.is_a?(Comparable)`
@@ -954,6 +984,14 @@ module Rigor
     # `name_memo` is a CACHE, not semantics: the per-edge as-written-name resolutions, so a caller resolving
     # many methods against one class pays each ancestor edge once. Omit it and the walk is identical, just
     # uncached.
+    #
+    # Issue #1123 — a prepended module is searched through {#prepends_of} AHEAD of the class's own `def`s
+    # ({#prepend_wedge_names}), because Ruby inserts it, and its own ancestry, immediately before the class
+    # that prepends it: `class Base; def speak = "base"; end; Base.prepend(Loud)` answers `Loud#speak`, and
+    # the `super` in that body then reaches `Base#speak`. `include` is untouched — an included module still
+    # sits AFTER the class in this walk, and `includes_of` still feeds the mixin step in call order. The
+    # wedge is searched at EVERY node, not just the entry class: a prepend on an ancestor (`class Sub <
+    # Base` where `Base` prepends a module) wins for the subclass too, exactly as Ruby dispatches it.
     def user_def_through_ancestors(class_name, method_name, name_memo: {})
       queue = [class_name.to_s]
       seen = {}
@@ -966,6 +1004,9 @@ module Rigor
         visited += 1
         return ancestor_walk_gave_up if visited > ANCESTOR_WALK_LIMIT
 
+        wedge_hit = search_prepend_wedge(current, method_name, name_memo, seen)
+        return wedge_hit if wedge_hit
+
         found = user_def_for(current, method_name)
         return [found, current] if found
 
@@ -973,6 +1014,63 @@ module Rigor
       end
       [nil, nil]
     end
+
+    # Issue #1123 — the `[def_node, owner]` pair a class's prepend wedge answers `method_name` with, or nil
+    # when nothing in the wedge defines it and the walk should ask the class's own `def`s next.
+    #
+    # Every name the wedge takes is marked on `seen`, the SAME set the walk's breadth-first step uses: a
+    # prepended module also sits in `includes_of`, so the mixin step would otherwise re-ask a name the wedge
+    # already answered — and, more importantly, marking it there keeps a `prepend` graph that loops back on
+    # the walk (a prepended module reached again from somewhere else) from being expanded twice.
+    def search_prepend_wedge(class_name, method_name, name_memo, seen)
+      prepend_wedge_names(class_name, name_memo).each do |name|
+        next if seen[name]
+
+        seen[name] = true
+        found = user_def_for(name, method_name)
+        return [found, name] if found
+      end
+      nil
+    end
+
+    # Issue #1123 — the qualified names the instance MRO searches ahead of `class_name`'s own definitions,
+    # in the order it searches them: for each of `class_name`'s prepends, nearest first, that module's own
+    # prepend wedge, then the module itself, then its includes and superclass.
+    #
+    # A prepended module's own ancestry is part of the wedge because Ruby inserts the whole sub-chain with
+    # it — `module Loud; include Loud::Prefix; end` prepended into `Base` puts `Loud::Prefix` ahead of
+    # `Base`, so the wedge has to reach it. `seen` is shared across one wedge computation and guards a cyclic
+    # `prepend`/`include` graph (and the overlap with `includes_of`, which carries the prepend names too);
+    # the walk's own set is applied by {#search_prepend_wedge}, and each name is expanded at most once.
+    def prepend_wedge_names(class_name, name_memo, seen = {})
+      out = []
+      prepends_of(class_name).each do |raw|
+        resolved = resolve_ancestor_class_name(class_name, raw, name_memo)
+        next if resolved.nil? || seen[resolved]
+
+        seen[resolved] = true
+        out.concat(subchain_names(resolved, name_memo, seen))
+      end
+      out
+    end
+
+    # Issue #1123 — appends `node`'s own instance search order to `out`: its prepend wedge, the node
+    # itself, then its includes and superclass, each expanded the same way. The include half keeps
+    # `includes_of`'s call order, which is that table's contract — the ORDER inside a prepended module's
+    # own include list is not re-derived here.
+    def subchain_names(node, name_memo, seen)
+      out = prepend_wedge_names(node, name_memo, seen)
+      out << node
+      (includes_of(node) + [superclass_of(node)].compact).each do |raw|
+        resolved = resolve_ancestor_class_name(node, raw, name_memo)
+        next if resolved.nil? || seen[resolved]
+
+        seen[resolved] = true
+        out.concat(subchain_names(resolved, name_memo, seen))
+      end
+      out
+    end
+    private :search_prepend_wedge, :prepend_wedge_names, :subchain_names
 
     # Issue #731 — the singleton-side twin of {#user_def_through_ancestors}: resolves `method_name` against
     # `class_name`'s own `def self.` / `class << self` bodies, then up the SUPERCLASS chain. Returns
@@ -1063,6 +1161,12 @@ module Rigor
 
     EMPTY_HEADER_NESTING = [].freeze
     private_constant :EMPTY_HEADER_NESTING
+
+    # The answer for a class that prepends nothing — the common case, so the wedge does not allocate a
+    # fresh empty list per visited node. Shared and frozen, and never handed to a caller that could
+    # mutate it ({#prepends_of} is private to this walk).
+    EMPTY_MIXIN_NAMES = [].freeze
+    private_constant :EMPTY_MIXIN_NAMES
 
     def ancestor_walk_gave_up
       Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)

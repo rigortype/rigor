@@ -154,6 +154,12 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `declared_divergent`, even though the walk still only ever answers a resolved def or `[nil, nil]`.
 # Narrowing that back is engine work on a recursive private helper's array element type, not a
 # contract change here; the declaration is left as the true one.
+#
+# 659 since #1172's fix. The declared `::RBS::Definition?` on `Environment#instance_definition` /
+# `#singleton_definition` — deferred at the named-return pass because the fold gap made the honest
+# declaration fire `flow.always-truthy-condition` on three live `lib/` guards — matches what sig-gen
+# already proved, so both rows leave residue for generated-equivalent (`environment.rbs` -2). The
+# `Reflection` pair were already non-residue as `untyped`.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -171,7 +177,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
-  "sig/rigor/environment.rbs" => 41,
+  "sig/rigor/environment.rbs" => 39,
   "sig/rigor/inference.rbs" => 86,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,

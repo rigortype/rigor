@@ -67,10 +67,9 @@ module Rigor
       def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath], ?cache_store: untyped?) -> void
       def class_known?: (String | Symbol name) -> bool
       def rbs_module?: (String | Symbol name) -> bool
-      # `untyped?` rather than `::RBS::Definition?` for the reason given on `Reflection.instance_definition`.
-      def instance_definition: (String | Symbol class_name) -> untyped?
+      def instance_definition: (String | Symbol class_name) -> ::RBS::Definition?
       def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> ::RBS::Definition::Method?
-      def singleton_definition: (String | Symbol class_name) -> untyped?
+      def singleton_definition: (String | Symbol class_name) -> ::RBS::Definition?
       def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> ::RBS::Definition::Method?
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def project_declared_classes: () -> Set[String]

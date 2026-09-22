@@ -28,6 +28,7 @@ require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "optimistic_origin"
 require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "struct_fold_safety"
@@ -1540,9 +1541,30 @@ module Rigor
         if exactly_once_block_never_completes?(node, receiver_override)
           return arms.empty? ? Type::Combinator.bot : Type::Combinator.union(*arms)
         end
-        return result if arms.empty?
 
-        Type::Combinator.union(result, *arms)
+        combined = arms.empty? ? result : Type::Combinator.union(result, *arms)
+        widen_optimistic_predicate_constant(node, combined)
+      end
+
+      # Issue #1172 — the nil-collapsing predicates (`nil?`, `!`, `x == nil`, …) answer a `Constant` that
+      # encodes the receiver's nil-freeness. When that nil-freeness is only *optimistic* — an
+      # `%a{implicitly-returns-nil}` read `RbsDispatch` deliberately reads past — the constant is a bet,
+      # not a fact, and unlike the in-scope `OptimisticOrigin` mark a folded `Constant[false]` survives
+      # into the enclosing method's return summary. A caller's `helper(...) ? a : b` then sees a
+      # proof-shaped constant and reports `flow.always-truthy-condition` on a live guard (the mark cannot
+      # follow a value across the method boundary, so {OptimisticOrigin.resolve} at the call site finds
+      # nothing). Widen the predicate's constant answer to `bool` when the call derives a mark: the three
+      # certainty consumers already decline on the mark inside this scope, and the widened return keeps
+      # the same judgment from leaking out as a folded return type. The carrier's own type is unchanged —
+      # `h[k]` still reads nil-free, per the spec's MUST NOT.
+      def widen_optimistic_predicate_constant(node, type)
+        return type unless type.is_a?(Type::Constant) && [true, false].include?(type.value)
+        # The carrier read itself keeps its declared answer even when that is a literal `true` /
+        # `false` — the mark says its nil-freeness is a bet, not that the value's class widened.
+        return type if scope.optimistic_origins[node]
+        return type if OptimisticOrigin.resolve(node, scope).nil?
+
+        Type::Combinator.union(Type::Combinator.constant_of(true), Type::Combinator.constant_of(false))
       end
 
       def loop_completion_type(node, result)

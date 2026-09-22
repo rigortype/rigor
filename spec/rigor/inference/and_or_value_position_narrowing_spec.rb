@@ -153,12 +153,13 @@ RSpec.describe "and/or narrowing across positions" do
     end
 
     it "types the issue #313 composed nil guard identically, without concluding on the right operand's behalf" do
-      # `x.nil? || y.nil?` over two optimistic lookups: the left operand folds to an unmarked-looking `false`, so
-      # the short-circuit is not what is under test (a falsey left runs the right operand anyway). What is pinned is
-      # that both positions agree, and `optimistic_origin_spec.rb` / the runner's always-truthy specs pin that no
-      # consumer reads this `false` as proof.
-      expect_positions("missable.nil? || table[key].nil?", "false")
-      expect_positions("!missable.nil? && !table[key].nil?", "true")
+      # `x.nil? || y.nil?` over two optimistic lookups: each operand's `.nil?` answers `bool` since #1172
+      # (the folded `Constant` is a bet, not a fact, and must not leak into a return summary), so the
+      # short-circuit is not what is under test. What is pinned is that both positions agree, and
+      # `optimistic_origin_spec.rb` / the runner's always-truthy specs pin that no consumer reads the
+      # carrier's nil-freeness as proof.
+      expect_positions("missable.nil? || table[key].nil?", "bool")
+      expect_positions("!missable.nil? && !table[key].nil?", "bool")
     end
 
     it "keeps both arms of a conditional guarded by the composed #313 guard, in every position" do

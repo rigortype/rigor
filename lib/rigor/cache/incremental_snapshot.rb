@@ -124,7 +124,13 @@ module Rigor
       # class's own `def`s. A pre-26 bundle would fold as "prepends nothing": the warm run would answer
       # the pre-fix MRO where a cold run answers the prepended module, exactly the `--verify-incremental`
       # divergence 14 was bumped for (and a silently WRONG dispatch answer, not a withheld check).
-      SCHEMA = 26
+      # 27: issue #1173 re-MEANs each seed bundle's `includes` VALUES without changing their shape: the
+      # lists now store instance-ancestor SEARCH order (nearest first, prepends ahead of includes)
+      # instead of call order — the same flip 17 made for def-row `nesting`. A pre-27 blob deserialises
+      # cleanly and would serve the old call order on a warm run while a cold run searches nearer-first:
+      # `include A; include B` would resolve A's methods where a cold run resolves B's — the
+      # `--verify-incremental` divergence 14 was bumped for.
+      SCHEMA = 27
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

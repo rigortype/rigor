@@ -30,6 +30,19 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
     analyzed(source, prelude: prelude).diagnostics.map { |d| d.qualified_rule.to_s }
   end
 
+  # Two RBS modules that both declare `probe` with distinguishable return types, for the
+  # include-ordering pins below.
+  def two_probe_mods
+    { "mods.rbs" => <<~RBS }
+      module A
+        def probe: () -> Integer
+      end
+      module B
+        def probe: () -> String
+      end
+    RBS
+  end
+
   describe "the included declaration answers" do
     # `clamp(1, 2)` selects `[A] (A, A) -> self | A`: `A` binds to the union of both argument
     # positions (`1 | 2`) and `self` substitutes the receiver — the exact set of inhabitants the
@@ -98,6 +111,33 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
         end
       RUBY
     end
+
+    # `include A; include B` chains `Pair → B → A` — the LAST include sits nearer — so when both
+    # RBS modules declare the name, B's declaration is the method that runs. Pinned against the
+    # pre-#1173 `includes_of` call order, which would have adopted A's.
+    it "prefers the LAST include when two RBS modules both declare — MRO order" do
+      expect(dumps(<<~RUBY, sig: two_probe_mods)).to eq(["String"])
+        class Pair
+          include A
+          include B
+
+          def go = dump_type(probe)
+        end
+      RUBY
+    end
+
+    # The other half of Ruby's include rule: one statement's argument list lands in WRITTEN order
+    # (`include A, B` chains `Pair → A → B`), so A's declaration wins here where the two-statement
+    # form above answered B's.
+    it "keeps one statement's arguments in written order — `include A, B`" do
+      expect(dumps(<<~RUBY, sig: two_probe_mods)).to eq(["Integer"])
+        class Pair
+          include A, B
+
+          def go = dump_type(probe)
+        end
+      RUBY
+    end
   end
 
   describe "the declines" do
@@ -119,8 +159,8 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
         end
 
         class Counted
-          include M
           include Comparable
+          include M
           def <=>(other) = 0
 
           def probe = dump_type(clamp(1, 2))
@@ -141,6 +181,59 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
         end
         Counted.include(Comparable)
       RUBY
+    end
+
+    # The same mark on a SOURCE MODULE inside the chain: `Widen.include(Extra)` outside `Widen`'s
+    # body records ENVELOPE_DYNAMIC_MARK on `Widen`, and `Widen` sits between `Counted` and
+    # `Comparable` in the MRO — so the arm declines rather than adopt a declaration a dynamically
+    # widened nearer ancestor may contradict.
+    it "declines when a nearer source module in the chain is dynamically widened" do
+      expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+        module Extra; end
+        module Widen; end
+        Widen.include(Extra)
+
+        class Counted
+          include Comparable
+          include Widen
+          def <=>(other) = 0
+
+          def probe = dump_type(clamp(1, 2))
+        end
+      RUBY
+    end
+
+    # ADR-17 through an include edge: the `pre_eval:` patch reopens `M`, which sits nearer than
+    # `Comparable`, so the declaration the walk found is not the method that runs.
+    it "declines when a pre_eval patch redefines the name on a source module in the chain" do
+      result = analyze(
+        files: {
+          "app.rb" => <<~RUBY,
+            require "rigor/testing"
+            include Rigor::Testing
+
+            module M; end
+
+            class Counted
+              include Comparable
+              include M
+              def <=>(other) = 0
+
+              def probe = dump_type(clamp(1, 2))
+            end
+          RUBY
+          "patch.rb" => <<~RUBY
+            module M
+              def clamp(a, b) = 42
+            end
+          RUBY
+        },
+        config: { "paths" => %w[app.rb], "pre_eval" => %w[patch.rb] }
+      )
+      types = result.diagnostics.filter_map do |d|
+        d.message.delete_prefix("dump_type: ") if d.message.start_with?("dump_type")
+      end
+      expect(types).to eq(["Dynamic[top]"])
     end
 
     # The superclass edge stays declined through this arm: `Prism::Visitor` is a gem RBS *class*,

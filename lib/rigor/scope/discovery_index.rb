@@ -158,12 +158,11 @@ module Rigor
         discovered_includes: EMPTY_TABLE,
         # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`,
         # stored in instance-ancestor SEARCH order (nearest prepend first), the `discovered_extends`
-        # convention. The instance-side twin `discovered_includes` holds the same names in call order,
-        # because that table answers a different question ("which modules does this class carry") and every
-        # other consumer reads it as a SET — `Scope#user_def_through_ancestors` is the one reader that needs
-        # the kind, and it reads it from here, so `prepend` cannot be told apart from `include` at the
-        # `def`-priority level without this table. An absent entry means "prepends nothing", which is the
-        # un-preprended behaviour every scope had before it existed.
+        # convention. The instance-side twin `discovered_includes` holds the same names — prepends
+        # included — in that order too since #1173: prepends ahead of includes, each nearest-first. The
+        # kind still cannot be told apart there, so `Scope#user_def_through_ancestors` reads the wedge
+        # from here. An absent entry means "prepends nothing", which is the un-preprended behaviour
+        # every scope had before it existed.
         discovered_prepends: EMPTY_TABLE,
         # Issue #898 — the singleton-side twin of `discovered_includes`: `{qualified class or module name =>
         # [module names it `extend`s, as written]}`, built by the same `ScopeIndexer` walk that #526 already

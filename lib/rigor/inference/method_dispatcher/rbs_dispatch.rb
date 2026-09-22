@@ -802,13 +802,28 @@ module Rigor
             slot[2]
           end
 
-          # BFS over the scope's as-written superclass table, yielding every resolved ancestor name.
-          # The table stores names AS WRITTEN — `"::API::Base"`, bare `"Base"` — so each hop resolves
-          # through the nesting-aware `ancestor_name_candidates` rather than a raw lookup. Deliberately
+          # BFS over the scope's as-written ancestry tables — include edges first, then the
+          # superclass, matching the MRO — yielding every ancestor-name candidate. The tables store
+          # names AS WRITTEN — `"::API::Base"`, bare `"Base"` — so each hop resolves through the
+          # nesting-aware `ancestor_name_candidates` rather than a raw lookup. Deliberately
           # NOT `external_ancestor_name_candidates`: that walk records `ancestry_sources` edges via
           # `record_class_dependency`, which would mislabel a dispatch lookup as an ancestry edge.
+          #
+          # Issue #1173 — the walk follows include edges too, because a shadow guard that reads only
+          # the superclass chain misses the nearer half of the ancestry: `class C < Base; include M;
+          # end` chains `C → M → Base`, and a `def`, an outside-the-body mark, or a `pre_eval:` patch
+          # on a source `M` all outrank `Base`'s declaration. A candidate that names a project class /
+          # module continues the walk ({Scope#known_user_class?} — a module that defines nothing and
+          # mixes nothing in still gates what the arm may adopt); an RBS-known or unresolved one is
+          # yielded for the caller's guards but its ancestry is the RBS side's business. The include
+          # table is read RAW (`scope.discovered_includes`), the same reason the superclass table is:
+          # `Scope#includes_of` files `record_class_dependency` on every read — a miss included —
+          # and this walk runs for every unresolved call on a project class (`Widget.new`), so the
+          # reader would turn each one into an ancestry edge ADR-46 slice 4 keeps at symbol
+          # granularity (`dependency_recorder_spec`).
           def each_source_ancestor_candidate(scope, class_name)
             supers = scope.discovered_superclasses
+            includes = scope.discovered_includes
             queue = [class_name.to_s]
             seen = {}
             until queue.empty?
@@ -816,12 +831,11 @@ module Rigor
               next if current.nil? || seen[current]
 
               seen[current] = true
-              raw = supers[current]
-              next if raw.nil?
-
-              scope.ancestor_name_candidates(current, raw).each do |candidate|
-                yield candidate
-                queue << candidate if supers.key?(candidate)
+              ((includes[current] || []) + [supers[current]].compact).each do |raw|
+                scope.ancestor_name_candidates(current, raw).each do |candidate|
+                  yield candidate
+                  queue << candidate if scope.known_user_class?(candidate)
+                end
               end
             end
           end

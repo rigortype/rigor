@@ -249,14 +249,14 @@ module Rigor
 
       # Issue #1123 — the two instance-side mixin tables, from ONE descent of this file. Each merges over
       # the cross-file seed per class, with the file under analysis as the later-loading contribution for a
-      # reopened class: its `prepend`s are therefore NEARER than the seed's (the {#accumulate_extend_lists}
-      # convention, which exists for the same ordering reason) while its `include`s append, that table
-      # keeping call order.
+      # reopened class: its `prepend`s and — since #1173, when the include table switched to the same
+      # instance-ancestor search order — its `include`s are therefore NEARER than the seed's (the
+      # {#accumulate_extend_lists} convention, which exists for the same ordering reason).
       def merge_mixin_tables(default_scope, root)
         file = mixin_tables(root)
         [
           default_scope.discovered_includes.merge(file[:includes]) do |_class, cross_file, per_file|
-            (cross_file + per_file).uniq
+            (per_file + cross_file).uniq
           end,
           default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq
@@ -5108,9 +5108,11 @@ module Rigor
       MIXIN_CALL_NAMES = %i[include prepend].freeze
 
       # ADR-24 slice 2 — per-class/module table mapping a fully qualified user class or module to the list of module
-      # names it `include`s, AS WRITTEN at the mixin call (`include Foo` / `include Foo::Bar`). Only constant arguments
-      # are recorded; dynamic mixins (`include some_method`) produce no entry. `prepend` is bucketed with `include` here
-      # — both contribute instance methods to the ancestor chain — and, since issue #1123, ALSO recorded in its own
+      # names it `include`s / `prepend`s, AS WRITTEN at the mixin call (`include Foo` / `include Foo::Bar`). Only
+      # constant arguments are recorded; dynamic mixins (`include some_method`) produce no entry. The names are
+      # spelled as written but ordered in instance-ancestor SEARCH order since #1173: prepended modules first
+      # (Ruby puts them ahead of the class itself), then includes nearest-first (`include A; include B` searches
+      # B first; `include A, B` keeps `["A", "B"]`). `prepend` is ALSO recorded in its own
       # {#build_discovered_prepends} table, which is what tells the two apart at `def`-priority level. `extend` is NOT
       # tracked (it adds singleton methods; ADR-24 slice 2 resolves the instance-side chain).
       def build_discovered_includes(root)
@@ -5145,11 +5147,26 @@ module Rigor
       # first and kind second, because one walk feeds both tables; this projects one kind out of it. A class
       # with no names of that kind is DROPPED rather than stored as an empty list, which is the shape the
       # single-table builder always had (consumers take the absence of an entry as "mixes nothing in").
+      #
+      # Issue #1173 — the `:include` projection prepends the `:prepend` names: a prepended module sits
+      # ahead of the class ITSELF in the runtime ancestry, and therefore ahead of every include, so the
+      # instance-ancestor search order this table now keeps is `prepends ++ includes`. Both buckets
+      # already store nearest-first (see {#write_mixin_targets}), so the concat preserves MRO.
       def freeze_mixin_lists(accumulator, kind)
         accumulator.each_with_object({}) do |(class_name, kinds), out|
-          names = (kinds[kind] || []).uniq.freeze
+          names = mixin_names_for(kinds, kind).uniq.freeze
           out[class_name] = names unless names.empty?
         end.freeze
+      end
+
+      # One bucket's frozen list: `:include` is every instance-side mixin in search order (prepends
+      # first), `:prepend` the wedge table alone.
+      def mixin_names_for(kinds, kind)
+        if kind == :include
+          (kinds[:prepend] || []) + (kinds[:include] || [])
+        else
+          kinds[kind] || []
+        end
       end
 
       def walk_class_includes(node, qualified_prefix, current_class, accumulator,
@@ -5306,13 +5323,25 @@ module Rigor
 
       # Issue #1123 — one class's contribution to the two tables. A prepended module lands in BOTH: the
       # include list is the SET of modules a class carries (arity, visibility, reflection and constant-scope
-      # consumers read it that way), while the prepend table adds the ORDER and the KIND. `prepend` is stored
-      # in instance-ancestor SEARCH order — the nearest statement's module first — while `include` keeps call
-      # order, each table's own contract for its consumers.
+      # consumers read it that way), while the prepend table adds the ORDER and the KIND.
+      #
+      # Issue #1173 — `include` now stores instance-ancestor SEARCH order too, the same convention
+      # `prepend` already keeps: each statement's argument list lands as one unit (`include A, B` keeps
+      # `["A", "B"]`, the order Ruby searches them) AHEAD of the earlier statements' (`include A;
+      # include B` searches B first). Call order was never a semantic — it is where this list happened
+      # to be written — and every order-sensitive consumer (the BFS mixin step, the external-ancestor
+      # walk, override visibility) reads nearer-first. A re-`include` of an already-carried name is a
+      # runtime no-op (`Module#append_features` is skipped when the module is already an ancestor), so
+      # a present target does not re-position itself. The prepend names still join the include list at
+      # freeze time — ahead of every include, where Ruby puts them.
       def write_mixin_targets(accumulator, owner, targets, prepend:)
         bucket = accumulator[owner] ||= {}
-        (bucket[:include] ||= []).concat(targets)
-        (bucket[:prepend] ||= []).unshift(*targets) if prepend
+        if prepend
+          (bucket[:prepend] ||= []).unshift(*targets)
+        else
+          list = (bucket[:include] ||= [])
+          list.unshift(*targets.reject { |target| list.include?(target) })
+        end
       end
 
       # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
@@ -6732,29 +6761,32 @@ module Rigor
         acc[:struct_member_layouts].merge!(file_index[:struct_member_layouts])
       end
 
-      # The three module-list tables of one file, each folded under its own table's contract: `includes`
-      # appends (call order) while `prepends` and `extends` fold nearest-first (the instance- and
-      # singleton-ancestor search order their consumers read). Split out of {#fold_ancestry_tables} to hold
-      # its ABC budget.
+      # The three module-list tables of one file, each folded under its own table's contract: all three
+      # now fold nearest-first — `includes` since #1173 (the instance-ancestor search order its consumers
+      # read), `prepends` and `extends` since their ordering fixes. Split out of {#fold_ancestry_tables}
+      # to hold its ABC budget.
       def fold_mixin_lists(acc, file_index)
-        accumulate_module_lists(acc[:includes], file_index[:includes])
+        accumulate_include_lists(acc[:includes], file_index[:includes])
         # Issue #1123 — a pre-#1123 seed bundle carries no prepends; the SCHEMA bump makes such a blob a
         # cold rebuild, but default so any in-flight fold stays total. An absent table only means the walk
         # resolves the class as it did before the ordering fix, which is this table's empty state.
         accumulate_prepend_lists(acc[:prepends], file_index[:prepends] || {})
-        accumulate_module_lists(acc[:extends], file_index[:extends] || {})
+        accumulate_extend_lists(acc[:extends], file_index[:extends] || {})
       end
 
-      # Shared accumulate-and-dedupe fold for the class -> module-name-list tables (includes / extends).
-      def accumulate_module_lists(target, additions)
-        additions.each { |cn, mods| target[cn] = ((target[cn] || []) + mods).uniq }
-      end
-
-      # The `extends` half cannot share {#accumulate_module_lists}: that table stores
-      # singleton-ancestor search order ({#record_extend_targets}), so a file scanned later
-      # contributes NEARER entries for a reopened class — prepend, matching the per-statement
-      # convention. `includes` stays append because its table keeps call order instead.
+      # The `extends` half stores singleton-ancestor search order ({#record_extend_targets}), so a file
+      # scanned later contributes NEARER entries for a reopened class — prepend, matching the
+      # per-statement convention. `includes` shares the shape since #1173, when its table switched to
+      # instance-ancestor search order too ({#write_mixin_targets}).
       def accumulate_extend_lists(target, additions)
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
+      end
+
+      # Issue #1173 — the same near-side accumulation for the includes table, which now stores
+      # instance-ancestor search order for the same reason the extends table stores singleton-ancestor
+      # order: a file scanned later contributes NEARER includes for a reopened class. Shared with
+      # {#accumulate_extend_lists}' shape deliberately.
+      def accumulate_include_lists(target, additions)
         additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
       end
 
@@ -6792,6 +6824,9 @@ module Rigor
           # Issue #682 — plain `{class name => Array[String]}` data, so the bundle stays Marshal-clean and a
           # warm incremental file resolves its ancestor names the way a cold walk of it does.
           header_nestings: file_index[:header_nestings],
+          # Issue #1173 — plain `{class name => Array[String]}` data in instance-ancestor search order
+          # (prepends first, then nearest-first includes), so the bundle stays Marshal-clean and a warm
+          # incremental file orders its mixins the way a cold walk of it does.
           includes: file_index[:includes],
           # Issue #1123 — plain `{class name => Array[String]}` data in instance-ancestor search order, so
           # the bundle stays Marshal-clean and a warm incremental file orders its prepends the way a cold
@@ -6969,7 +7004,7 @@ module Rigor
       # {#accumulate_project_index} to hold its ABC budget.
       def fold_file_mixin_tables(acc, root)
         mixin = mixin_tables(root)
-        accumulate_module_lists(acc[:includes], mixin[:includes])
+        accumulate_include_lists(acc[:includes], mixin[:includes])
         accumulate_prepend_lists(acc[:prepends], mixin[:prepends])
         accumulate_extend_lists(acc[:extends], build_discovered_extends(root))
         mixin[:includes].merge(mixin[:prepends]) { |_cn, included_mods, _prepends| included_mods }

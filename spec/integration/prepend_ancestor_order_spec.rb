@@ -9,9 +9,9 @@
 #
 # The fix is the instance-side ordering in `Scope#user_def_through_ancestors`: a prepend wedge
 # (`Scope#prepends_of`, fed by `ScopeIndexer`'s new prepend table) is searched ahead of the class's own defs.
-# `include` ordering is deliberately UNTOUCHED — an included module still sits after the class, and
-# `include M1; include M2` still answers M1's definition (a pre-existing divergence from Ruby's
-# later-include-wins, out of this issue's scope and asserted here as the control).
+# Issue #1173 later gave `include` the same treatment: the include table stores instance-ancestor search
+# order, so `include M1; include M2` answers M2's definition the way CRuby does — the control below now
+# asserts the CORRECT runtime order rather than the pre-#1173 divergence.
 #
 # Every expectation below is the answer CRuby gives for the same source.
 
@@ -201,8 +201,8 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
     RUBY
   end
 
-  it "leaves two includes answering in call order (include control, unchanged)" do
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: \"m1\""])
+  it "answers the LAST include's def when two modules both define it (include control, #1173)" do
+    expect(dumps_for(<<~RUBY)).to eq(["dump_type: \"m2\""])
       module M1
         def speak = "m1"
       end

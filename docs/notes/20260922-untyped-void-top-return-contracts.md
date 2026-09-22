@@ -231,7 +231,11 @@ Recorded here so the next sweep does not rediscover them:
 - `sig/rigor/sig_gen/skip_reason_catalog.rbs` references `::Rigor::SigGen` without a declaration;
   `rbs validate` over `sig/` and `make steep-check` both fail on it at `master`. The Rigor loader
   quarantines it, so the self-check stays green.
-- Local `make check` reports `flow.always-truthy-condition` at `lib/rigor/effects/unit_scan.rb:560`
-  on this host while CI's Self-check jobs pass on the same tree; it reproduces on clean `master`.
+- `flow.always-truthy-condition` fires at `lib/rigor/effects/unit_scan.rb:560` on clean `master`.
+  It is **not** local-only: CI Self-check logs show the same warning, but those jobs run
+  `rigor check --format json lib` without the Makefile's `--fail-on=warning`, so warnings do not
+  fail CI. Root cause: `gather_ivar_writes` does not seed compound ivar writes (`@x ||= v`), so
+  `@dispatch_top_level` is inferred as `Constant[false]` — the `||=` seeding shape ADR-58 § WD5
+  deferred. Tracked in the deferred-work issue; fix deferred pending the ADR-58 reopen corpus gate.
 
 [#392]: https://github.com/rigortype/rigor/issues/392

@@ -22,6 +22,9 @@ module Rigor
     # 4. `Rigor::Inference::ScopeIndexer`'s class-ivar pre-pass, for the ivar targets of `@a, @b = rhs`
     #    (issue #1110), which records {Result#ivars} and drops the marks, as it does for `@x = xs.first`,
     #    with `soften_slots: false` (see {.bind_marked}).
+    # 5. `Rigor::Inference::StatementEvaluator`'s `case/in` pattern binding (issue #1122), through
+    #    {.decompose_slots}: a pattern binds its names against the same carriers, minus the two
+    #    statement-only properties that method documents.
     #
     # Both Prism nodes share the same `lefts` / `rest` (a `Prism::SplatNode`) / `rights` triple,
     # so the binder treats them uniformly. The binder is pure: it MUST NOT mutate its inputs and
@@ -137,6 +140,29 @@ module Rigor
         split_result(bindings, marked)
       end
 
+      # The per-slot types of a positional pattern (`in [i, s]`, `in [*pre, m, *post]`), sharing
+      # every carrier rule {.bind_marked} applies to a multi-write target except two statement-only
+      # properties (issue #1122):
+      #
+      # - the multi-assign `[rhs]` wrap is NOT applied. `a, b = 1` binds `a` to `1` because Ruby wraps
+      #   a right-hand side with no implicit `to_ary`; an array pattern instead matches through the
+      #   subject's `deconstruct` / `to_ary`, and a subject with neither raises
+      #   `NoMatchingPatternError` — no body is reached, so binding `1` there would type dead code.
+      # - no optimistic mark is reported. The ADR-101 short-array bet exists because a SHORT
+      #   right-hand side pads the fixed slots with `nil`; a pattern that matched has every fixed slot
+      #   it named, so there is nothing to bet on and `Result#optimistic` has no counterpart here.
+      #
+      # A `Type::Union` is the caller's to distribute: a pattern matches SOME member, and only the
+      # caller can tell which members can match it at all. Returns `[fronts, rest_type, backs]`, with
+      # every carrier no rule decomposes answering `Dynamic[Top]` per slot — the floor.
+      def decompose_slots(rhs_type, front_count:, back_count:, rest_present:, scope: nil, soften_slots: true)
+        fronts, rest_type, backs, = decompose(
+          rhs_type, front_count, back_count, rest_present: rest_present,
+                                             context: [scope, soften_slots], wrap_single: false
+        )
+        [fronts, rest_type, backs]
+      end
+
       # The `T` of an `Array[T]` carrier the binder may decompose, or nil. Declines raw `Array`
       # and an untyped / top element, which bind `Dynamic[Top]` per slot as before, and every
       # `Dynamic` wrapper: `Dynamic[Array[T]]` is gradual, and projecting its static facet would
@@ -242,13 +268,13 @@ module Rigor
         # array of length `front_count`/`back_count`, `rest_type` either a `Rigor::Type` (when
         # `rest_present:` is true) or `nil`, and `optimistic` true when the fixed slots are the
         # short-array bet rather than known elements.
-        def decompose(rhs_type, front_count, back_count, rest_present:, context:)
+        def decompose(rhs_type, front_count, back_count, rest_present:, context:, wrap_single: true)
           scope, soften = context
           if rhs_type.is_a?(Type::Tuple)
             [*decompose_tuple(rhs_type, front_count, back_count, rest_present: rest_present, soften: soften), false]
           elsif (element = array_element_type(rhs_type))
             [*decompose_array(element, front_count, back_count, rest_present: rest_present), true]
-          elsif wraps_as_single_element?(rhs_type, scope)
+          elsif wrap_single && wraps_as_single_element?(rhs_type, scope)
             wrapped = Type::Combinator.tuple_of(rhs_type)
             [*decompose_tuple(wrapped, front_count, back_count, rest_present: rest_present, soften: soften), false]
           else

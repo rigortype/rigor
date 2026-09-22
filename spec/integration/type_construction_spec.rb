@@ -2064,6 +2064,28 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/pattern_binding.rb — `case/in` pattern bindings read the subject (issue #1122)" do
+      let(:harness) { harness_for("pattern_binding") }
+
+      # The fixture is self-asserting: every `assert_type` in it names the type the pattern should bind
+      # (tuple slots, `Array[T]` elements, find-pattern candidate unions, hash values, `Struct` / `Data` /
+      # project `deconstruct` / `deconstruct_keys` projections, and the `Dynamic[top]` floor).
+      it "self-asserts every pattern binding the fixture documents" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Issue #1122 acceptance — no diagnostic on correct code inside a `case/in` body. The fixture carries
+      # calls on every bound name (`assert_type` reaches them), so a binding that reported a name as nil-able,
+      # or as a type the pattern never established, would surface here. The flat fixture's own unresolved
+      # `assert_type` (a `rigor/testing` helper the flat harness has no `pre_eval:` for) is the one diagnostic
+      # every `assert_type` fixture in this file carries.
+      it "draws no other diagnostic on the correct code it carries" do
+        others = harness.diagnostics.reject { |d| d.rule == "call.unresolved-toplevel" }
+        expect(others.map { |d| "#{d.rule} #{d.line}: #{d.message}" }).to be_empty
+      end
+    end
+
     describe "fixtures/reduce_symbol.rb — Symbol-form reduce / inject return types" do
       let(:harness) { harness_for("reduce_symbol") }
 

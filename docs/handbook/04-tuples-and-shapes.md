@@ -184,23 +184,25 @@ final = { **defaults, **overrides }
 ## Pattern matching destructuring
 
 `case x in [a, b, c]` narrows `a` / `b` / `c` per-position
-exactly like multiple-assignment:
+exactly like multiple-assignment: the pattern binds against the
+subject's type, so a tuple subject hands each slot its element and
+an `Array[T]` subject hands each slot `T`.
 
 ```ruby
 case [10, 20, 30]
 in [first, _, third]
-  assert_type("Dynamic[top]", first)   # pattern bindings are not constant-folded
-  assert_type("Dynamic[top]", third)
+  assert_type("10", first)
+  assert_type("30", third)
 end
 ```
 
-Hash patterns work the same way:
+Hash patterns read the subject's own `deconstruct_keys` projection:
 
 ```ruby
 case { name: "Alice", age: 30 }
 in { name:, age: }
-  assert_type("Dynamic[top]", name)   # pattern bindings are not constant-folded
-  assert_type("Dynamic[top]", age)
+  assert_type("\"Alice\"", name)
+  assert_type("30", age)
 end
 ```
 

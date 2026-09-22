@@ -12,9 +12,9 @@ module Rigor
       attr_reader services: untyped
       attr_reader requirer: ^(String) -> untyped
 
-      def self.load: (configuration: Configuration, services: untyped, ?requirer: ^(String) -> untyped) -> untyped
-      def initialize: (services: untyped, ?requirer: ^(String) -> untyped) -> void
-      def load: (Array[String | Hash[untyped, untyped]] entries) -> untyped
+      def self.load: (configuration: Configuration, services: untyped, ?requirer: ^(String) -> untyped, ?feature_resolver: untyped) -> Registry
+      def initialize: (services: untyped, ?requirer: ^(String) -> untyped, ?feature_resolver: untyped) -> void
+      def load: (Array[String | Hash[untyped, untyped]] entries) -> Registry
     end
   end
 end

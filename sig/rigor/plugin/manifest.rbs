@@ -9,8 +9,9 @@ class Rigor::Plugin::Manifest
   # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
   # them keeps the contract surface resolvable so ADR-43 ancestor
   # resolution does not surface a false `call.undefined-method` on a
-  # real reader. Identity fields are typed; the structured slots stay
-  # `untyped` per the sparse `sig/` tree.
+  # real reader. Slots whose element classes are sig-covered carry the
+  # validated element type (the `validate_*!` constructors prove it);
+  # the rest stay `untyped` per the sparse `sig/` tree.
   def id: () -> String
   def version: () -> String
   def description: () -> String?
@@ -21,21 +22,22 @@ class Rigor::Plugin::Manifest
   # manifest validates but does not type, so inference reaches `untyped` where the contract is
   # `Array[String]` (the same gap every other reader in this block carries).
   def template_globs: () -> Array[String]
-  def produces: () -> untyped
+  def produces: () -> Array[Symbol | String]
   def consumes: () -> Array[Rigor::Plugin::Manifest::Consumption]
-  def owns_receivers: () -> untyped
-  def open_receivers: () -> untyped
-  def rbs_complete_ancestors: () -> untyped
-  def type_node_resolvers: () -> untyped
+  def owns_receivers: () -> Array[String]
+  def open_receivers: () -> Array[String]
+  def rbs_complete_ancestors: () -> Array[String]
+  def type_node_resolvers: () -> Array[Rigor::Plugin::TypeNodeResolver]
   def block_as_methods: () -> untyped
   def heredoc_templates: () -> untyped
   def nested_class_templates: () -> untyped
   def trait_registries: () -> untyped
   def hkt_registrations: () -> untyped
   def hkt_definitions: () -> untyped
-  def signature_paths: () -> untyped
+  def signature_paths: () -> Array[String]
   def protocol_contracts: () -> untyped
-  def source_rbs_synthesizer: () -> untyped
+  # ADR-32 WD4 — a `(String path) -> String?` callable or nil.
+  def source_rbs_synthesizer: () -> (^(String) -> String?)?
   def additional_initializers: () -> untyped
 
   def validate_config: (untyped) -> Array[String]

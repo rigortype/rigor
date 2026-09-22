@@ -57,5 +57,23 @@ RSpec.describe Rigor::Testing do
         Rigor.dump_type(asserted)
       RUBY
     end
+
+    # Issue #1173 — the documented shape: `include Rigor::Testing` on a discovered-only class, bare
+    # calls. The call resolves through the included-module arm of `RbsDispatch#lookup_method` and the
+    # argument-position binding applies because that path carries the scope the old analysis assumed
+    # was absent.
+    it "carries the argument type through a bare call on a discovered-only includer" do
+      expect(dump_types(<<~RUBY)).to eq(['dump_type: "hello"', 'dump_type: "hello"'])
+        require "rigor/testing"
+        class Fixture
+          include Rigor::Testing
+
+          def go
+            kept = dump_type("hello")
+            dump_type(kept)
+          end
+        end
+      RUBY
+    end
   end
 end

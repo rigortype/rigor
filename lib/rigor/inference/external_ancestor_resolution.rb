@@ -136,14 +136,22 @@ module Rigor
       def compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
         kind = :instance
         own = method_definition(class_name, method_name, kind, scope: scope, environment: environment)
-        if declared_before_object?(own, class_name, scope: scope, environment: environment)
-          return [own, class_name.to_s].freeze
+        if own
+          own_ancestors = instance_ancestor_names(class_name, scope: scope, environment: environment)
+          if declared_before_object?(own, class_name, scope: scope, environment: environment) ||
+             owned_within_candidate_chain?(own, own_ancestors)
+            return [own, class_name.to_s].freeze
+          end
         end
 
         groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
-        groups.each do |candidates|
+        farther_ancestors = {}
+        groups.each_with_index do |candidates, index|
           answer = first_known_candidate_answer(candidates, method_name, kind, scope, environment)
-          return answer if answer
+          next if answer.nil?
+          next if resited_member?(answer, groups, index, farther_ancestors, scope, environment)
+
+          return answer
         end
         nil
       end
@@ -154,16 +162,84 @@ module Rigor
       # ends this group rather than falling through to a less-qualified spelling of the same name.
       def first_known_candidate_answer(candidates, method_name, kind, scope, environment)
         candidates.each do |candidate|
-          next if instance_ancestor_names(candidate, scope: scope, environment: environment).empty?
+          ancestors = instance_ancestor_names(candidate, scope: scope, environment: environment)
+          next if ancestors.empty?
 
-          definition = method_definition(candidate, method_name, kind, scope: scope, environment: environment)
-          return nil unless declared_before_object?(definition, candidate, scope: scope, environment: environment)
+          definition = method_definition(candidate, method_name, kind, scope: scope,
+                                                                       environment: environment)
+          return nil unless declared_before_object?(definition, candidate,
+                                                    scope: scope, environment: environment) ||
+                            owned_within_candidate_chain?(definition, ancestors)
 
           return [definition, candidate].freeze
         end
         nil
       end
       private_class_method :first_known_candidate_answer
+
+      # The module-candidate half of the answering test (#1173 review). A module's RBS ancestry is
+      # `[itself, its own includes…]` and never reaches `Object`, so {declared_before_object?} — whose
+      # cut-off exists to keep an Object- / Kernel-owned declaration from outranking a top-level `def`
+      # — always answers false for it: the cut-off has nothing to cut. What decides instead is that
+      # the declaration came from the candidate's OWN chain: when the candidate sits in the receiver's
+      # MRO, Ruby dispatches the name through exactly those ancestors, so a `defined_in` anywhere in
+      # the list is the method that runs. Without this, a nearer RBS module that inherits the name
+      # from its own RBS `include` read as a dead group and a FARTHER ancestor's declaration was
+      # adopted in its place — `class C; include A; include B` where `B`'s RBS includes `N` answering
+      # A's declaration rather than N's. The gate keeps the Object cut-off's reach: a chain that DOES
+      # contain `Object` (every ordinary class candidate) is untouched.
+      def owned_within_candidate_chain?(definition, ancestors)
+        return false if ancestors.include?(OBJECT_OWNER)
+        return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+        owner = definition.defined_in
+        !owner.nil? && ancestors.include?(owner.to_s.delete_prefix("::"))
+      end
+      private_class_method :owned_within_candidate_chain?
+
+      # The re-siting guard (#1173 review, second pass). Ruby's `include` is a no-op for a module
+      # already in the ancestry, so a member's real position is set by the EARLIEST source statement
+      # that pulled it in — which is the FARTHEST group in this search-order walk that carries it.
+      # Adopting group `index`'s answer claims the owner (and the declaration's `defined_in`) sit
+      # inside this group's segment; when either name also appears in a farther group's RBS chain,
+      # the runtime actually sites it there and everything between can shadow it —
+      # `class C < Array; include M` where `M`'s RBS includes `Enumerable` must not adopt
+      # `Enumerable#first` through `M` while `Array#first` intervenes. Skipping the answer is not a
+      # decline of the method: the farther group that truly carries the member resolves it at its
+      # real position (or nothing does, and the honest `Dynamic[top]` stands).
+      #
+      # `farther_ancestors` memoizes each farther group's resolved ancestor list — the first
+      # candidate spelling the RBS environment knows, the same spelling rule
+      # {first_known_candidate_answer} applies. A group whose names all stay project- or
+      # unresolved-side has no visible chain to compare. The deferral can trade precision for
+      # safety: when the farther carrier resolves the member without type-argument bindings the
+      # answer degrades to `Dynamic[top]` where the skipped group carried one — the intended
+      # direction, and in the pinned shapes the runtime-correct answer anyway.
+      def resited_member?(answer, groups, index, farther_ancestors, scope, environment)
+        definition, owner = answer
+        members = [owner.to_s.delete_prefix("::")]
+        defined_in = definition.defined_in if definition.respond_to?(:defined_in)
+        members << defined_in.to_s.delete_prefix("::") if defined_in
+
+        ((index + 1)...groups.size).any? do |j|
+          ancestors = farther_ancestors.fetch(j) do
+            farther_ancestors[j] = resolved_group_ancestors(groups[j], scope, environment)
+          end
+          ancestors&.any? { |name| members.include?(name) }
+        end
+      end
+      private_class_method :resited_member?
+
+      # The ancestor list of the first candidate spelling the RBS environment knows — nil when no
+      # spelling resolves, which is what the walk emitted the group for in the first place.
+      def resolved_group_ancestors(candidates, scope, environment)
+        candidates.each do |candidate|
+          ancestors = instance_ancestor_names(candidate, scope: scope, environment: environment)
+          return ancestors unless ancestors.empty?
+        end
+        nil
+      end
+      private_class_method :resolved_group_ancestors
 
       # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
       # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency

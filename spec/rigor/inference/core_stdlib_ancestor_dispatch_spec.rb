@@ -247,10 +247,11 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
       RUBY
     end
 
-    # Slice 2's territory: `include Enumerable` / `include Comparable` on a source class. This slice
-    # walks the SUPERCLASS chain only, so the include stays opaque and the slices stay attributable.
-    it "does not follow an include into a core module" do
-      expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
+    # The include edge is this slice's complement, not its job: `include Comparable` resolves
+    # through the #1173 mixin arm ({included_module_dispatch_spec.rb}), not through this one —
+    # whose walk still passes `mixins: false`.
+    it "leaves an included module's method to the mixin arm" do
+      expect(dumps(<<~RUBY)).to eq(["1 | 2 | Counted"])
         class Counted
           include Comparable
           def <=>(other) = 0

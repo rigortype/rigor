@@ -905,10 +905,15 @@ module Rigor
     end
 
     # ADR-24 slice 2 — per-class/module table mapping a fully qualified user class or module to the list of
-    # module names it `include`s / `prepend`s, AS WRITTEN at the mixin call. Populated by `ScopeIndexer` (per-file
+    # module names it `include`s / `prepend`s, in instance-ancestor SEARCH order: prepended modules first
+    # (Ruby inserts them ahead of the class itself), then included modules nearest-first — `include A;
+    # include B` searches B before A, while `include A, B` keeps `["A", "B"]` (each statement's argument
+    # list lands as one unit, ahead of the earlier statements'). Populated by `ScopeIndexer` (per-file
     # plus the cross-file pre-pass) and consumed by `ExpressionTyper#resolve_user_def_through_ancestors` so an
-    # implicit-self call resolves against an included module's `def`s, not just the superclass chain. As-written
-    # names are resolved to qualified classes at walk time.
+    # implicit-self call resolves against an included module's `def`s, not just the superclass chain.
+    # As-written names are resolved to qualified classes at walk time. Issue #1173 — the list was call
+    # order until then, a divergence from Ruby's later-include-wins the order-sensitive consumers (the
+    # BFS mixin step, the external-ancestor walk, override visibility) silently absorbed.
     def includes_of(class_name)
       record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
       @discovery.discovered_includes[class_name.to_s] || []
@@ -988,8 +993,9 @@ module Rigor
     # Issue #1123 — a prepended module is searched through {#prepends_of} AHEAD of the class's own `def`s
     # ({#prepend_wedge_names}), because Ruby inserts it, and its own ancestry, immediately before the class
     # that prepends it: `class Base; def speak = "base"; end; Base.prepend(Loud)` answers `Loud#speak`, and
-    # the `super` in that body then reaches `Base#speak`. `include` is untouched — an included module still
-    # sits AFTER the class in this walk, and `includes_of` still feeds the mixin step in call order. The
+    # the `super` in that body then reaches `Base#speak`. An included module still
+    # sits AFTER the class in this walk, but — since #1173 — `includes_of` feeds the mixin step in
+    # instance-ancestor search order, so `include A; include B` searches B first the way CRuby does. The
     # wedge is searched at EVERY node, not just the entry class: a prepend on an ancestor (`class Sub <
     # Base` where `Base` prepends a module) wins for the subclass too, exactly as Ruby dispatches it.
     def user_def_through_ancestors(class_name, method_name, name_memo: {})
@@ -1055,9 +1061,9 @@ module Rigor
     end
 
     # Issue #1123 — appends `node`'s own instance search order to `out`: its prepend wedge, the node
-    # itself, then its includes and superclass, each expanded the same way. The include half keeps
-    # `includes_of`'s call order, which is that table's contract — the ORDER inside a prepended module's
-    # own include list is not re-derived here.
+    # itself, then its includes and superclass, each expanded the same way. Since #1173 the include
+    # half is `includes_of`'s search order — the ORDER inside a prepended module's own include list is
+    # not re-derived here, only read.
     def subchain_names(node, name_memo, seen)
       out = prepend_wedge_names(node, name_memo, seen)
       out << node
@@ -1104,7 +1110,10 @@ module Rigor
 
     # Issue #633 — the ancestors a project class reaches that the project itself does NOT declare: the
     # `< StandardError` / `< Array` superclasses and the `include Comparable` mixins the two walks above
-    # deliberately drop, gathered breadth-first over the project ancestry so an inherited edge counts too.
+    # deliberately drop, gathered depth-first over the project ancestry (an included module's own
+    # sub-chain precedes the includer's superclass edge) so an inherited edge counts too — and, since
+    # #1173, so the groups arrive in instance-ancestor search order for the caller that adopts the
+    # FIRST answering one.
     #
     # Each entry is the CANDIDATE LIST for one as-written name ({#ancestor_name_candidates}: the nesting
     # spellings first, the bare name last), not a resolved class — resolving it means asking the RBS
@@ -1117,38 +1126,41 @@ module Rigor
     # it, the same way {#singleton_def_through_ancestors} narrows {#enqueue_ancestors}.
     def external_ancestor_name_candidates(class_name, name_memo: {}, mixins: true)
       groups = []
-      queue = [class_name.to_s]
-      seen = {}
-      visited = 0
-      until queue.empty?
-        current = queue.shift
-        next if current.nil? || seen[current]
-
-        seen[current] = true
-        visited += 1
-        if visited > ANCESTOR_WALK_LIMIT
-          # Issue #527 — the give-up is a budget event, not an answer. Consumers read the groups as
-          # "the ancestors this class reaches", so a truncated list must be visible in `--stats`
-          # alongside the other walks' exhaustions rather than silently short.
-          Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
-          break
-        end
-
-        collect_external_ancestors(current, queue, groups, name_memo, mixins: mixins)
-      end
+      collect_external_ancestors(class_name.to_s, groups, name_memo, mixins, {}, [0])
       groups
     end
 
     # One node of {#external_ancestor_name_candidates}: the project-declared ancestors continue the walk,
     # everything else is reported as a candidate list.
-    def collect_external_ancestors(current, queue, groups, name_memo, mixins: true)
+    #
+    # Issue #1173 — the walk is depth-first pre-order, not breadth-first: a resolved ancestor's own
+    # edges are followed BEFORE the next sibling edge, because Ruby inserts an included module's whole
+    # sub-chain ahead of the includer's superclass (`class C < Hash; include M` where `M` itself
+    # includes `Widen` chains `C → M → Widen → Hash`; BFS would report `Hash` ahead of `Widen`). Each
+    # node's edges still go includes-then-superclass, and `includes_of` is already search order, so the
+    # emitted groups arrive in MRO order — which the #1173 include arm depends on when two ancestors
+    # both declare the name.
+    def collect_external_ancestors(current, groups, name_memo, mixins, seen, visited)
+      return if current.nil? || seen[current]
+
+      seen[current] = true
+      visited[0] += 1
+      if visited[0] > ANCESTOR_WALK_LIMIT
+        # Issue #527 — the give-up is a budget event, not an answer. Consumers read the groups as
+        # "the ancestors this class reaches", so a truncated list must be visible in `--stats`
+        # alongside the other walks' exhaustions rather than silently short. Hit once: every node
+        # visited past the limit returns here too, and only the first should count.
+        Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT) if visited[0] == ANCESTOR_WALK_LIMIT + 1
+        return
+      end
+
       raw_names = mixins ? includes_of(current).dup : []
       raw_super = superclass_of(current)
       raw_names << raw_super if raw_super
       raw_names.each do |raw|
         resolved = resolve_ancestor_class_name(current, raw, name_memo)
         if resolved
-          queue.push(resolved)
+          collect_external_ancestors(resolved, groups, name_memo, mixins, seen, visited)
         else
           groups << ancestor_name_candidates(current, raw)
         end

@@ -3771,11 +3771,12 @@ end
   end
 
   # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
-  # instance-ancestor SEARCH order. It is the half of the mixin picture the include table cannot carry (that
-  # one is a set in call order, and every other consumer reads it that way), and
+  # instance-ancestor SEARCH order. It adds the prepend ORDER and KIND the include table cannot carry
+  # (that one keeps every mixin in search order since #1173 — prepends ahead of includes — but is read
+  # as a set by the arity / visibility / reflection consumers), and
   # `Scope#user_def_through_ancestors` searches it ahead of the class's own `def`s.
   describe ".build_discovered_prepends" do
-    it "records an in-body `prepend` in both tables, keeping call order in the include one" do
+    it "records an in-body `prepend` in both tables" do
       program = parse(<<~RUBY)
         module T; end
         class C
@@ -3787,8 +3788,9 @@ end
     end
 
     it "orders two statements nearest-first, and one statement's arguments in call order" do
-      # `prepend A; prepend B` searches B first; `prepend A, B` makes A the nearer of the two. The include
-      # table keeps call order for both — its own contract, which this table must not move.
+      # `prepend A; prepend B` searches B first; `prepend A, B` makes A the nearer of the two. Since
+      # #1173 the include table keeps the same search order — prepends sort ahead of includes there,
+      # matching where Ruby puts them (before the class itself).
       program = parse(<<~RUBY)
         module A; end
         module B; end
@@ -3801,7 +3803,43 @@ end
         end
       RUBY
       expect(described_class.build_discovered_prepends(program)).to eq("Two" => %w[B A], "One" => %w[A B])
-      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[A B], "One" => %w[A B])
+      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[B A], "One" => %w[A B])
+    end
+
+    it "orders `include` statements nearest-first, and one statement's arguments in written order" do
+      # #1173 — `include A; include B` searches B first (Ruby's later-include-wins); `include A, B`
+      # keeps `["A", "B"]` because one statement's argument list lands as a unit ahead of the earlier
+      # statements'. The pre-#1173 call-order list answered `["A", "B"]` for both.
+      program = parse(<<~RUBY)
+        module A; end
+        module B; end
+        class Two
+          include A
+          include B
+        end
+        class One
+          include A, B
+        end
+      RUBY
+      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[B A], "One" => %w[A B])
+    end
+
+    it "orders a mix of prepend and include the way the runtime ancestry does" do
+      # `prepend` lands before the class itself, `include` after it, so both spellings and both
+      # statement orders search the prepended module first.
+      program = parse(<<~RUBY)
+        module I; end
+        module P; end
+        class A
+          include I
+          prepend P
+        end
+        class B
+          prepend P
+          include I
+        end
+      RUBY
+      expect(described_class.build_discovered_includes(program)).to eq("A" => %w[P I], "B" => %w[P I])
     end
 
     it "records the `Recv.prepend(Mod)` call form under the receiver in both tables" do

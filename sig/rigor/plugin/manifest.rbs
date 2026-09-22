@@ -22,7 +22,7 @@ class Rigor::Plugin::Manifest
   # manifest validates but does not type, so inference reaches `untyped` where the contract is
   # `Array[String]` (the same gap every other reader in this block carries).
   def template_globs: () -> Array[String]
-  def produces: () -> Array[Symbol | String]
+  def produces: () -> Array[Symbol]
   def consumes: () -> Array[Rigor::Plugin::Manifest::Consumption]
   def owns_receivers: () -> Array[String]
   def open_receivers: () -> Array[String]
@@ -36,8 +36,10 @@ class Rigor::Plugin::Manifest
   def hkt_definitions: () -> untyped
   def signature_paths: () -> Array[String]
   def protocol_contracts: () -> untyped
-  # ADR-32 WD4 — a `(String path) -> String?` callable or nil.
-  def source_rbs_synthesizer: () -> (^(String) -> String?)?
+  # ADR-32 WD6/WD12 — any object responding to `call`, and its result is a documented multi-shape
+  # outcome (`String` / nil / `[:error, msg]` / `[:ok, src, msgs]`), not `String?` — `untyped` is the
+  # honest claim until the outcome has a sig'd shape.
+  def source_rbs_synthesizer: () -> untyped
   def additional_initializers: () -> untyped
 
   def validate_config: (untyped) -> Array[String]

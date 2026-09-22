@@ -1138,8 +1138,8 @@ module Rigor
       # Walk an `IfNode` / `UnlessNode` so writes inside the THEN body that look like defensive ivar initialisation gain
       # a `nil` union in the seeded type. Without this, `@x = v unless @x` records `Constant[v]` for `@x`, then the
       # predicate folds to that same constant and `flow.always-truthy-condition` fires against a working program.
-      # Mirrors the existing skip for `@x ||= v` (`Prism::InstanceVariableOrWriteNode`, which the pre-pass does not seed
-      # at all).
+      # Mirrors the falsey-literal skip `record_ivar_or_write` makes for `@x ||= <falsey>` — a `||=` whose rvalue
+      # can only leave the ivar falsey contributes no useful precision either (#1175).
       #
       # Polarity-aware on purpose: only the THEN body picks up the guard. The ELSE branch of `if @x; ...; else; @x =
       # init; end` would otherwise be marked too — but that pattern (write @x in the else of `if @x`) is a separate
@@ -1645,9 +1645,9 @@ module Rigor
         # Constant, `union(rvalue, Constant[nil])` collapses (for `nil`) or doesn't widen the type's truthiness profile
         # (for `false`) — the predicate `unless @x` then folds to a single `Constant[nil]` / `Constant[false]` and the
         # `flow.always-truthy-condition` / `-always-falsey-` rule false-fires on the no-op-but-documented-default idiom.
-        # Skip the seed contribution for this write (matches the existing skip for `@x ||= v`, which the pre-pass also
-        # does not seed). Other writes to the same ivar still contribute; the falsey-default write carries no useful
-        # precision the predicate hasn't already given us. See tdiary-core HEAD `ee40c2b`
+        # Skip the seed contribution for this write — the sibling of `record_ivar_or_write`'s falsey-literal
+        # skip for `@x ||= <falsey>` (#1175). Other writes to the same ivar still contribute; the falsey-default
+        # write carries no useful precision the predicate hasn't already given us. See tdiary-core HEAD `ee40c2b`
         # `lib/tdiary/configuration.rb:157` for the worked site.
         return if guarded && falsey_constant?(rvalue_type)
 

@@ -393,8 +393,13 @@ guarded `@x = nil unless @x` skip makes), `&&=` contributes `v_type`
 (the write only runs on an already-truthy ivar, so it cannot be the
 first thing to give it a value), and `op=` contributes the widened
 operator-dispatch result against the accumulated seed (`Constant[0] +
-Constant[1]` must not pin the ivar to `Constant[1]`). The same corpus
-gate was re-run for this landing; see the PR for the numbers. CI's
+Constant[1]` must not pin the ivar to `Constant[1]`). The `&&=` arm
+has one acknowledged boundary: a class whose *only* write to an ivar
+is `@x &&= <truthy literal>` gets a purely-truthy seed for an ivar
+that is `nil` at runtime forever — degenerate code, and the corpus
+gate showed no firing, but the arm is unsound in isolation the same
+way the unseeded `||=` was. The same corpus gate was re-run for this
+landing; see the PR for the numbers. CI's
 Self-check invocations also gained `--fail-on=warning`, matching
 `make check` — the warning had printed green on every run since #1071
 because the job read the exit code and warnings did not move it.

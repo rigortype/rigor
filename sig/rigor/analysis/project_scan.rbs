@@ -1,0 +1,74 @@
+module Rigor
+  module Analysis
+    # Frozen snapshot of the project-wide pre-pass state the runner consumes — see
+    # lib/rigor/analysis/project_scan.rb for the full ownership/invalidation contract.
+    class ProjectScan < ::Data
+      # sig-gen gap: #1150 — `Data.define` member reads carry no type; `build_project_scan` fills
+      # this slot with the prepared `Plugin::Loader` result.
+      def plugin_registry: () -> Rigor::Plugin::Registry
+
+      # sig-gen gap: #1150 — as above (`DependencySourceInference::Builder.build` output, or
+      # `Index::EMPTY` when no dependencies are configured).
+      def dependency_source_index: () -> DependencySourceInference::Index
+
+      # `Inference::SyntheticMethodIndex` — the class is not yet declared under `sig/` (#1181
+      # backlog), so `untyped` is the honest member type for now.
+      def synthetic_method_index: () -> untyped
+
+      # `Inference::ProjectPatchedMethods` — unsigned like the slot above.
+      def project_patched_methods: () -> untyped
+
+      # sig-gen gap: #1150 — as above (`plugin_prepare_diagnostics` collects the
+      # `plugin_prepare_error_diagnostic` `Diagnostic`s, `[]` under pool mode).
+      def plugin_prepare_diagnostics: () -> Array[Analysis::Diagnostic]
+
+      # sig-gen gap: #1150 — as above. The pre-eval scanner deliberately emits a Hash shape (it
+      # must not depend on the analysis layer); the runner translates each row to a `Diagnostic`
+      # at the call site.
+      def pre_eval_diagnostics: () -> Array[{ path: String, line: Integer, column: Integer, severity: Symbol, rule: String, message: String }]
+
+      # `Analysis::TemplateUnits` — unsigned (#1181 backlog), kept `untyped`.
+      def template_units: () -> untyped
+
+      # sig-gen gap: #1150 — as above; constructor keywords mirror the member declarations.
+      def self.new: (
+        plugin_registry: Rigor::Plugin::Registry,
+        dependency_source_index: DependencySourceInference::Index,
+        synthetic_method_index: untyped,
+        project_patched_methods: untyped,
+        plugin_prepare_diagnostics: Array[Analysis::Diagnostic],
+        pre_eval_diagnostics: Array[{ path: String, line: Integer, column: Integer, severity: Symbol, rule: String, message: String }],
+        template_units: untyped
+      ) -> instance
+      | (
+        Rigor::Plugin::Registry plugin_registry,
+        DependencySourceInference::Index dependency_source_index,
+        untyped synthetic_method_index,
+        untyped project_patched_methods,
+        Array[Analysis::Diagnostic] plugin_prepare_diagnostics,
+        Array[{ path: String, line: Integer, column: Integer, severity: Symbol, rule: String, message: String }] pre_eval_diagnostics,
+        untyped template_units
+      ) -> instance
+
+      # sig-gen gap: #1150 — as above.
+      def self.[]: (
+        plugin_registry: Rigor::Plugin::Registry,
+        dependency_source_index: DependencySourceInference::Index,
+        synthetic_method_index: untyped,
+        project_patched_methods: untyped,
+        plugin_prepare_diagnostics: Array[Analysis::Diagnostic],
+        pre_eval_diagnostics: Array[{ path: String, line: Integer, column: Integer, severity: Symbol, rule: String, message: String }],
+        template_units: untyped
+      ) -> instance
+      | (
+        Rigor::Plugin::Registry plugin_registry,
+        DependencySourceInference::Index dependency_source_index,
+        untyped synthetic_method_index,
+        untyped project_patched_methods,
+        Array[Analysis::Diagnostic] plugin_prepare_diagnostics,
+        Array[{ path: String, line: Integer, column: Integer, severity: Symbol, rule: String, message: String }] pre_eval_diagnostics,
+        untyped template_units
+      ) -> instance
+    end
+  end
+end

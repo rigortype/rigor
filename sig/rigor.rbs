@@ -124,12 +124,12 @@ module Rigor
       attr_reader buffer: untyped
       attr_reader file_dependencies: Hash[String, untyped]
       attr_reader analyzed_files: Array[String]
-      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped, ?environment: untyped, ?record_dependencies: bool, ?analyze_only: untyped) -> void
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: Analysis::ProjectScan?, ?environment: untyped, ?record_dependencies: bool, ?analyze_only: untyped) -> void
       def run: (?Array[String] paths) -> Result
       def run_source: (source: String, ?path: String) -> Result
       def analysis_file_set: (?Array[String] paths) -> Array[String]
       def file_dependents: () -> Hash[String, untyped]
-      def prepare_project_scan: (?paths: Array[String]) -> untyped
+      def prepare_project_scan: (?paths: Array[String]) -> Analysis::ProjectScan
       # ADR-103 — the propagated effect graph and the merged per-file collections behind it. A report
       # surface: never a diagnostic, empty when the configuration carries no `effects:` block. Typed
       # `untyped` for the same reason `cache_store` is — `Rigor::Effects` is not sig-covered yet

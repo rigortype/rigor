@@ -245,8 +245,8 @@ blocked. The second batch tightens the ones that clear that bar:
 | `Runner#evaluate_return_types` | `Hash[[String, Symbol, bool], Array[String?]]` |
 
 What remains is genuinely Class B: `Runner#effect_table` / `#effect_collection` /
-`#effect_plugin_facts` / `#effect_collections_by_path` / `#prepare_project_scan` wait on `Effects::*`
-and `Analysis::ProjectScan` coverage; `Manifest#block_as_methods` / `#heredoc_templates` /
+`#effect_plugin_facts` / `#effect_collections_by_path` wait on `Effects::*`
+(`#prepare_project_scan` landed — see the fifth sweep); `Manifest#block_as_methods` / `#heredoc_templates` /
 `#nested_class_templates` / `#trait_registries` on `Plugin::Macro::*`; `#hkt_registrations` /
 `#hkt_definitions` on `Inference::HktRegistry::*` (`#protocol_contracts` landed — see the fourth
 sweep); `CheckRules.node_collector_driver` on
@@ -316,6 +316,28 @@ The provenance split, per the auditor:
 - `Plugin::Base#protocol_contracts` turned out `generated`: sig-gen already inferred
   `Array[ProtocolContract]` through `manifest.protocol_contracts` once the element class was
   declared.
+
+## Fifth sweep: `Analysis::ProjectScan`
+
+`ProjectScan` is a seven-member `Data.define` — the frozen pre-pass snapshot the LSP builds once per
+generation and hands back to `Runner.new(prebuilt:)`. Declaring it unblocks
+`Runner#prepare_project_scan -> Analysis::ProjectScan` and tightens the `prebuilt:` kwarg from
+`untyped` to `Analysis::ProjectScan?`. Only a partial typing is honest today:
+
+- Four members carry implementation-proven types under [#1150] markers (the `Data.define` member
+  gap): `plugin_registry` (`Plugin::Registry`), `dependency_source_index`
+  (`DependencySourceInference::Index`), `plugin_prepare_diagnostics`
+  (`Array[Analysis::Diagnostic]`), and `pre_eval_diagnostics` — the latter a *record* type, not
+  `Array[Diagnostic]`: the pre-eval scanner deliberately emits `{path:, line:, column:, severity:,
+  rule:, message:}` Hashes so it need not depend on the analysis layer; the runner adapts at the
+  call site.
+- Three members stay `untyped` as unmarked residue — their element classes
+  (`Inference::SyntheticMethodIndex`, `Inference::ProjectPatchedMethods`, `Analysis::TemplateUnits`)
+  are themselves unsigned #1181 backlog, and naming them would raise `RBS::UnknownTypeName`.
+  Declared `untyped` matches sig-gen's own output, so no gap marker applies. New-file pin: 3.
+- `Runner#prepare_project_scan` itself stays unrenderable residue in `sig/rigor.rbs` — the body
+  delegates through the untyped `@pre_passes` collaborator, so sig-gen cannot infer the return even
+  though the declaration is now precise. Same disposition as the file's other pinned rows.
 
 ## Two incidental findings
 

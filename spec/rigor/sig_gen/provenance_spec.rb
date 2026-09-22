@@ -174,6 +174,11 @@ SIG_PROVENANCE_RESIDUE = {
   # and `CheckRules.filter_suppressed` stop inferring the raw `Array`; both now classify as parameter
   # intent (their declared `Array[Fact]` / `Array[Diagnostic]` follows from the declared parameters).
   "sig/rigor/analysis/fact_store.rbs" => 15,
+  # New file (#1181 slice): the three members whose element classes are not sig-covered yet
+  # (`synthetic_method_index`, `project_patched_methods`, `template_units`) stay `untyped` — they are
+  # Data members sig-gen cannot infer, but the declared type is `untyped` anyway, so no gap marker
+  # applies; they pin as unmarked residue. The typed members and both constructors are #1150-marked.
+  "sig/rigor/analysis/project_scan.rbs" => 3,
   "sig/rigor/ast.rbs" => 1,
   "sig/rigor/cache.rbs" => 2,
   "sig/rigor/cli/diff_command.rbs" => 1,

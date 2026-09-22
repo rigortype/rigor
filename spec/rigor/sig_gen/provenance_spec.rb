@@ -187,7 +187,10 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin.rbs" => 3,
   # New file (#1181 slice): the `alias eql? ==` row has no sig-gen shape — the sole residue.
   "sig/rigor/plugin/additional_initializer.rbs" => 1,
-  "sig/rigor/plugin/base.rbs" => 22,
+  # -1 (#1181 slice): `protocol_contracts` tightened to `Array[ProtocolContract]` — sig-gen
+  # already inferred that exact type through `manifest.protocol_contracts`, so the row is
+  # generated-equivalent now.
+  "sig/rigor/plugin/base.rbs" => 21,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
   # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the
@@ -195,13 +198,18 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
   "sig/rigor/plugin/loader.rbs" => 2,
-  # -1 (#1181 slice): `additional_initializers` tightened to
-  # `Array[Plugin::AdditionalInitializer]` and marked under #1154.
-  "sig/rigor/plugin/manifest.rbs" => 22,
-  # +1 (#1181 slice): the newly declared `additional_initializers` reader is unmarked residue —
-  # `compile_aggregates` builds the ivar with `flat_map`, not from an `initialize` parameter, so no
-  # gap issue covers it.
-  "sig/rigor/plugin/registry.rbs" => 10,
+  # -2 (#1181 slices): `additional_initializers` and `protocol_contracts` tightened to
+  # `Array[Plugin::AdditionalInitializer]` / `Array[Plugin::ProtocolContract]` and marked #1154.
+  "sig/rigor/plugin/manifest.rbs" => 21,
+  # New file (#1181 slice): `to_h` is declared-divergent (sig-gen infers a string-literal-keyed
+  # union; `Hash[String, untyped]` matches the manifest `to_h` convention) and `eql?` is an alias
+  # row with no sig-gen shape.
+  "sig/rigor/plugin/protocol_contract.rbs" => 2,
+  # +3 (#1181 slices): `additional_initializers` and `protocol_contracts` readers are unmarked
+  # residue — `compile_aggregates` builds both ivars with `flat_map`, not from `initialize`
+  # parameters, so no gap issue covers them; `contracts_for_path` is declared-divergent
+  # (sig-gen infers the `path.nil?` `[]` arm separately).
+  "sig/rigor/plugin/registry.rbs" => 12,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,

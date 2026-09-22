@@ -1,0 +1,68 @@
+module Rigor
+  module Plugin
+    # ADR-28 declaration — "every instance/singleton method named `method_name` in a file matching
+    # `path_glob` carries the declared parameter + return-type protocol" (provide-and-check). See
+    # lib/rigor/plugin/protocol_contract.rb for the full contract.
+    class ProtocolContract
+      VALID_SEVERITIES: Array[Symbol]
+
+      # One positional-parameter provision: zero-based index + fully-qualified type name.
+      class ParamType < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type; `coerce_param_type` proves
+        # `index` is a non-negative Integer and `type_name` a non-empty String, so the member rows
+        # are hand-written.
+        def index: () -> Integer
+
+        # sig-gen gap: #1150 — as above.
+        def type_name: () -> String
+
+        # sig-gen gap: #1150 — as above.
+        def self.new: (index: Integer, type_name: String) -> instance | (Integer index, String type_name) -> instance
+
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (index: Integer, type_name: String) -> instance | (Integer index, String type_name) -> instance
+      end
+
+      # sig-gen gap: #1154 — `attr_reader` rows over ivars assigned in `initialize`; each is
+      # validated/normalized first (`dup.freeze`/`to_sym`/truthiness collapse/coerce), so the
+      # stored types are hand-written.
+      attr_reader path_glob: String
+
+      # sig-gen gap: #1154 — as above (`to_sym` normalizes the accepted Symbol|String).
+      attr_reader method_name: Symbol
+
+      # `singleton ? true : false` collapses any truthy input to bool — sig-gen already infers
+      # `false | true`, so this row is generated-equivalent rather than a #1154 gap.
+      attr_reader singleton: bool
+
+      # sig-gen gap: #1154 — as above (`coerce_param_types` guarantees `Array[ParamType]`).
+      attr_reader param_types: Array[ParamType]
+
+      # sig-gen gap: #1154 — as above (nil or a non-empty `dup.freeze`d String).
+      attr_reader return_type_name: String?
+
+      # sig-gen gap: #1154 — as above (`VALID_SEVERITIES.include?(to_sym)` bounds the stored value
+      # to the three declared literals).
+      attr_reader severity: :error | :warning | :info
+
+      # `method_name`/`severity` accept String too (both are `to_sym`'d); `param_types` entries are
+      # ParamType or a Hash with `index`/`type_name` keys (String or Symbol keys accepted by the
+      # coercion). `singleton` is documented Boolean; the impl collapses any truthy value.
+      def initialize: (path_glob: String, method_name: Symbol | String, ?return_type_name: String?, ?param_types: Array[ParamType | Hash[untyped, untyped]], ?singleton: bool, ?severity: Symbol | String) -> void
+
+      # Copy with `path_glob` replaced — plugin config-folding hook for the convention path.
+      def with_path_glob: (String glob) -> ProtocolContract
+
+      # Values are String/bool/nil or the per-param `Hash[String, Integer | String]` rows — kept
+      # `untyped` to match the manifest's `to_h` convention.
+      def to_h: () -> Hash[String, untyped]
+
+      def ==: (untyped other) -> bool
+
+      # `alias eql? ==` — no sig-gen shape for alias rows; unmarked residue.
+      def eql?: (untyped other) -> bool
+
+      def hash: () -> Integer
+    end
+  end
+end

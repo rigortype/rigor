@@ -29,4 +29,33 @@ RSpec.describe Rigor::Testing do
       expect(Rigor.assert_type("Constant[99]", 99)).to eq(99)
     end
   end
+
+  # The `sig/rigor/testing.rbs` contract: both helpers are `[A] (…, A value) -> A`, so a probed value
+  # keeps its type when the helper's own result is read again. Under the former `-> untyped` return the
+  # second read widened to `Dynamic[top]`.
+  describe "signature passthrough" do
+    def dump_types(source)
+      runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+      result = guarded_run_source(runner, source: source, path: "mem.rb")
+      result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+    end
+
+    it "carries the argument type through Rigor::Testing.dump_type and Rigor.dump_type" do
+      expect(dump_types(<<~RUBY)).to eq(['dump_type: "hello"', 'dump_type: "hello"', "dump_type: 42", "dump_type: 42"])
+        require "rigor/testing"
+        kept = Rigor::Testing.dump_type("hello")
+        Rigor::Testing.dump_type(kept)
+        n = Rigor.dump_type(42)
+        Rigor.dump_type(n)
+      RUBY
+    end
+
+    it "carries the argument type through assert_type" do
+      expect(dump_types(<<~RUBY)).to eq(['dump_type: "hello"'])
+        require "rigor/testing"
+        asserted = Rigor::Testing.assert_type('"hello"', "hello")
+        Rigor.dump_type(asserted)
+      RUBY
+    end
+  end
 end

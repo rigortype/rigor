@@ -1,9 +1,15 @@
 module Rigor
   module Testing
-    def self?.dump_type: (untyped value) -> untyped
-    def self?.assert_type: (String expected, untyped value) -> untyped
+    # Both helpers return `value` unchanged (lib/rigor/testing.rb); the type variable carries the
+    # argument's type through so a probed expression stays typed downstream instead of widening to
+    # `Dynamic[top]`. `A` binds only on a dispatch that carries a scope — a `Rigor.` /
+    # `Rigor::Testing.` receiver, or an including class that is RBS-known. A bare `dump_type(x)` after
+    # `include Rigor::Testing` in a discovered-only class still reaches the ancestor fallback without a
+    # scope and answers `Dynamic[top]`, as it did under `-> untyped` (#303 follow-up).
+    def self?.dump_type: [A] (A value) -> A
+    def self?.assert_type: [A] (String expected, A value) -> A
   end
 
-  def self.dump_type: (untyped value) -> untyped
-  def self.assert_type: (String expected, untyped value) -> untyped
+  def self.dump_type: [A] (A value) -> A
+  def self.assert_type: [A] (String expected, A value) -> A
 end

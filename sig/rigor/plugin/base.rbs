@@ -44,13 +44,13 @@ class Rigor::Plugin::Base
   def init: (untyped services) -> nil
   def prepare: (untyped services) -> nil
   def diagnostics_for_file: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
-  # sig-gen gap: #392 — the hook's contract is `Array[Rigor::Plugin::TemplateUnit]`, but the default body
-  # is a bare `[]` and every real return comes from a plugin gem sig-gen never sees, so inference proposes
-  # the empty literal rather than the declared element type.
+  # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never
+  # sees, so no engine work would let it answer; the declared `Array[Rigor::Plugin::TemplateUnit]`
+  # over a bare-`[]` default body is the author's contract.
   def template_units_for_file: (path: untyped, source: untyped) -> Array[untyped]
-  # sig-gen gap: #1082 — the hook's contract is `Array[{ name: String, kind: Symbol, type: Rigor::Type |
-  # nil }]`, but the default body is a bare `[]` and every real return comes from a plugin gem sig-gen
-  # never sees, so inference proposes the empty literal rather than the declared element type.
+  # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never
+  # sees, so no engine work would let it answer; the declared record contract over a bare-`[]`
+  # default body is the author's.
   def declared_members: (untyped class_name) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.

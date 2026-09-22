@@ -10,10 +10,17 @@
 # the body proves as a literal (#837): each says the return the author means is not the one the body
 # happens to expose, and no synthesis produces either, since a type built from a body is always the type
 # of the body's last expression. `spec/support/sig_provenance_auditor.rb` carries the classifier and the
-# marker convention:
+# marker convention. There are two markers, per the 2026-09-19 ruling on #1011:
 #
 #     # sig-gen gap: #825 — sig-gen types the body `untyped`, so the return is hand-written.
 #     def resolve: (String name) -> Type::t
+#
+# cites an allow-listed issue that tracks the ENGINE GAP (`spec/rigor/sig_gen/gap_issues.yml`); an
+# intentionally hand-written row — no engine work would ever answer it — carries
+#
+#     # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never sees.
+#
+# instead and cites nothing.
 #
 # == Three mechanisms, and why not one
 #
@@ -47,8 +54,15 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "yaml"
 
 SIG_PROVENANCE_ROOT = File.expand_path("../../..", __dir__)
+
+# The gap issues a `# sig-gen gap:` marker may cite (ADR-107 G3; ruling 2026-09-19 on #1011).
+# Committed and checked OFFLINE — this file is the reviewed artefact, so `make verify` never
+# touches the network. Closing a gap issue means removing it here, which fails the allow-list
+# example below until the markers that cite it move.
+GAP_ISSUE_ALLOW_LIST = YAML.safe_load_file(File.join(__dir__, "gap_issues.yml")).freeze
 
 # Computed once (a ~14 s generator pass) and shared read-only across the corpus examples.
 # `runtime: true` opts the #839 existence tiers in: the project index over `lib/`, then a require of
@@ -257,12 +271,24 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     end
 
     it "reads the gap marker off the member's RBS comment" do
-      rbs = "class Widget\n  # sig-gen gap: #837 — the wider declaration is deliberate.\n  " \
+      rbs = "class Widget\n  # sig-gen gap: #1155 — the wider declaration is deliberate.\n  " \
             "def n: () -> Numeric\nend\n"
       row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).to be_marked
-      expect(row.declaration.marker).to eq("837")
+      expect(row.declaration.marker).to eq("1155")
+    end
+
+    it "reads the authored marker off the member's RBS comment and counts the row as marked" do
+      # An intentionally hand-written row (no engine work would ever answer it) carries `# authored:`
+      # instead of a gap pointer; either marker records the row against the residue ratchet.
+      rbs = "class Widget\n  # authored: hook-contract widening — no engine work would answer it.\n  " \
+            "def n: () -> Numeric\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
+            .find { |r| r.declaration.method_name == "n" }
+      expect(row).to be_marked
+      expect(row.declaration.marker).to be_nil
+      expect(row.declaration.authored_reason).to include("hook-contract widening")
     end
 
     it "rejects #TBD — a placeholder points at no engine work, and every gap now has an issue" do
@@ -388,9 +414,28 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         "#{provenance_failure('unmarked tighter-return', unmarked)}\n\n" \
           "sig-gen proposes a narrower return than each declaration says. Per ADR-14 either apply " \
           "the tightening, or record why it stays with a marker in the member's RBS comment:\n  " \
-          "# sig-gen gap: #NNN — why sig-gen's proposal is not the contract\n" \
-          "#NNN must be a filed issue: it is the pointer to the engine work that would let the " \
-          "generator answer, so a placeholder does not count as a marker."
+          "# sig-gen gap: #NNN — why sig-gen's proposal is not the contract\n  " \
+          "# authored: hand-written by contract — no engine work would answer it\n" \
+          "#NNN must be an allow-listed gap issue (spec/rigor/sig_gen/gap_issues.yml): it is the " \
+          "pointer to the engine work that would let the generator answer, so a placeholder or a " \
+          "closed feature issue does not count as a marker."
+      }
+    end
+
+    it "cites a listed gap issue from every corpus marker (the allow-list is the reviewed artefact)" do
+      stray = SIG_PROVENANCE_ROWS.filter_map do |row|
+        next if row.declaration.marker.nil?
+
+        issue = row.declaration.marker.to_i
+        "#{row.declaration} cites ##{issue}" unless GAP_ISSUE_ALLOW_LIST.include?(issue)
+      end
+      expect(stray).to be_empty, lambda {
+        "#{stray.size} marker(s) cite an issue the allow-list does not carry:\n  #{stray.join("\n  ")}\n\n" \
+          "A `# sig-gen gap: #NNN` marker points at the issue that tracks the ENGINE GAP, never " \
+          "at the feature issue that added the row (ruling 2026-09-19 on #1011). " \
+          "`spec/rigor/sig_gen/gap_issues.yml` is the reviewed allow-list: add a number only when " \
+          "a marker must cite it, and remove a number when that gap issue closes, which forces " \
+          "the markers to move."
       }
     end
 
@@ -404,7 +449,8 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(drift).to be_empty, lambda {
         "#{drift.size} file(s) drifted from SIG_PROVENANCE_RESIDUE:\n#{drift.join("\n")}\n\n" \
           "A declaration that is neither generated-equivalent nor parameter intent is a gap " \
-          "sig-gen could not close (ADR-107 § Decision). Mark it — a marker subtracts from the " \
+          "sig-gen could not close (ADR-107 § Decision). Mark it — a `# sig-gen gap:` marker " \
+          "(or an `# authored:` marker for a deliberately hand-written row) subtracts from the " \
           "count — or move the pin in this file with the reason in the commit body. A count that " \
           "DROPPED is an engine fix: lower the pin in the same commit."
       }

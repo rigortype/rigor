@@ -21,9 +21,8 @@ module Rigor
     attr_reader source_path: String?
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
-    # sig-gen gap: #1011 — sig-gen skips the reader (sig.skipped.untyped-return), as for the
-    # `opaque_block_self` pair above; #1011 is the open decision about what these markers must cite,
-    # no issue tracking the untyped-return gap itself having been filed.
+    # sig-gen gap: #1154 — sig-gen skips the reader (sig.skipped.untyped-return): an `attr_reader`
+    # over an ivar assigned in `initialize` from a parameter, so inference reaches `untyped`.
     attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
 
@@ -41,21 +40,22 @@ module Rigor
     def discovered_def_sources: () -> Hash[String, Hash[Symbol, String]]
     def discovered_singleton_def_sources: () -> Hash[String, Hash[Symbol, String]]
     def discovered_method_visibilities: () -> Hash[String, Hash[Symbol, Symbol]]
-    # sig-gen gap: #992 — sig-gen skips an endless-def reader (untyped return); the row is hand-written.
+    # sig-gen gap: #1148 — sig-gen skips an endless-def reader (untyped return); the row is hand-written.
     def discovered_parameter_envelopes: () -> Hash[String, Hash[untyped, untyped]]
-    # sig-gen gap: #992 — sig-gen skips the `||` fallback reader (untyped return); the row is hand-written.
+    # sig-gen gap: #1149 — sig-gen skips the `||` fallback reader (untyped return); the row is hand-written.
     def parameter_envelopes_of: (String class_name) -> Hash[untyped, untyped]
     def discovered_superclasses: () -> Hash[String, String]
-    # sig-gen gap: #1097 — the per-file deferred-range table's row shape is hand-written.
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the per-file
+    # deferred-range table's row shape is hand-written.
     def discovered_deferred_ranges: () -> Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
     def discovered_includes: () -> Hash[String, Array[String]]
-    # sig-gen gap: #898 — sig-gen skips the endless-def reader (untyped return), so the table shape is hand-written.
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the table shape is hand-written.
     def discovered_extends: () -> Hash[String, Array[String]]
     def discovered_class_sources: () -> Hash[String, Set[String]]
     def constant_sources: () -> Hash[String, Set[String]]
     def published_constant_names: () -> Set[String]
     def local_constant_names: () -> Set[String]
-    # sig-gen gap: #667 — sig-gen types the `||` fallback `untyped`, so the element type is hand-written.
+    # sig-gen gap: #1149 — sig-gen types the `||` fallback `untyped`, so the element type is hand-written.
     def published_constant_ivars_for: (String class_name) -> Set[Symbol]
     def published_constant?: (String name) -> bool
     def record_constant_dependency: (String name) -> void
@@ -86,24 +86,24 @@ module Rigor
       attr_reader discovered_def_sources: Hash[String, Hash[Symbol, String]]
       attr_reader discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]]
       attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
-      # sig-gen gap: #992 — `Data.define` members carry no type, as for every other row in this class.
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]]
       attr_reader discovered_superclasses: Hash[String, String]
       attr_reader discovered_includes: Hash[String, Array[String]]
-      # sig-gen gap: #898 — `Data.define` members carry no type, as for every other row in this class.
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_extends: Hash[String, Array[String]]
       attr_reader discovered_class_sources: Hash[String, Set[String]]
       attr_reader constant_sources: Hash[String, Set[String]]
       attr_reader published_constant_names: Set[String]
       attr_reader local_constant_names: Set[String]
-      # sig-gen gap: #667 — `Data.define` members carry no type, so every row in this class is authored.
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so every row in this class is authored.
       attr_reader published_constant_alias_names: Set[String]
-      # sig-gen gap: #667 — as above.
+      # sig-gen gap: #1150 — as above.
       attr_reader published_constant_ivars: Hash[String, Set[Symbol]]
       attr_reader data_member_layouts: Hash[String, Array[Symbol]]
       attr_reader struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
-      # sig-gen gap: #1097 — `Data.define` members carry no type, as for every other row in this class.
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
       attr_reader run_generation: Object?
 
@@ -134,8 +134,7 @@ module Rigor
     def entering_opaque_block: () -> Scope
     def opaque_block_self?: () -> bool
     def with_singleton_class_body: (bool) -> Scope
-    # sig-gen gap: #1011 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); see the
-    # attribute above for why the pointer is the marker-convention issue.
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is hand-written.
     def singleton_class_body?: () -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope
     def local: (String | Symbol name) -> Type::t?
@@ -154,10 +153,10 @@ module Rigor
     def with_ivar_origin: (String | Symbol name, Symbol? cause) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope
-    # sig-gen gap: #667 — an `attr_reader` over a frozen Set literal types `untyped`, as the sibling
+    # sig-gen gap: #1151 — an `attr_reader` over a frozen Set literal types `untyped`, as the sibling
     # `declaration_sourced` row does.
     def published_constant_sourced: () -> Set[[Symbol, Symbol]]
-    # sig-gen gap: #667 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
+    # sig-gen gap: #1152 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
     def declaration_sourced: () -> Set[[Symbol, Symbol]]
@@ -179,9 +178,8 @@ module Rigor
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 
-    # sig-gen gap: #1011 — sig-gen skips the method (sig.skipped.untyped-return: every decline returns the
-    # frozen EMPTY_HEADER_NESTING constant); no engine issue tracks this gap yet, #1011 is the
-    # marker-convention issue. Row hand-written.
+    # sig-gen gap: #1148 — sig-gen skips the method (sig.skipped.untyped-return: every decline returns the
+    # frozen EMPTY_HEADER_NESTING constant); the row is hand-written.
     def ambiguous_ancestor_resolutions: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 
     # Issue #530 — public so the external-gem ancestry probe asks the same question the walk does.
@@ -190,10 +188,11 @@ module Rigor
     def singleton_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def user_singleton_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
-    # sig-gen gap: #1097 — both predicates take the `Prism::CallNode` being dispatched (untyped, like
-    # `type_of`'s node), which sig-gen cannot infer.
+    # sig-gen gap: #1167 — the predicate forwards its untyped `Prism::CallNode` into the range scan,
+    # which reads `call_node.location` off it: a `Dynamic` receiver answers `Dynamic`, not `bool`, so
+    # sig-gen skips the method (and `def_shadows_call?` above it) as an untyped return.
     def singleton_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
-    # sig-gen gap: #1097 — as above: the call-site `Prism::CallNode` parameter is untyped.
+    # sig-gen gap: #1167 — the instance-side twin: the same untyped `call_node`, the same untyped-return skip.
     def instance_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
     def top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
     def bindable_top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
@@ -203,7 +202,7 @@ module Rigor
     def data_member_layout: (String | Symbol class_name) -> Array[Symbol]?
     def struct_member_layout: (String | Symbol class_name) -> { members: Array[Symbol], keyword_init: bool }?
     def includes_of: (String | Symbol class_name) -> Array[String]
-    # sig-gen gap: #898 — sig-gen proposes `Array[untyped] | []` off the empty-table early return, so the
+    # sig-gen gap: #1153 — sig-gen proposes `Array[untyped] | []` off the empty-table early return, so the
     # element type is hand-written, matching {#includes_of}.
     def singleton_extends_of: (String | Symbol class_name) -> Array[String]
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?

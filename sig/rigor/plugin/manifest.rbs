@@ -3,7 +3,7 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?rbs_complete_ancestors: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped, ?effect_root: untyped, ?effect_labels: untyped, ?effect_attributions: untyped, ?effect_edges: untyped, ?effect_entry_points: untyped, ?effect_ancestry: untyped, ?template_globs: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?rbs_complete_ancestors: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: Array[Rigor::Plugin::AdditionalInitializer], ?effect_root: untyped, ?effect_labels: untyped, ?effect_attributions: untyped, ?effect_edges: untyped, ?effect_entry_points: untyped, ?effect_ancestry: untyped, ?template_globs: untyped) -> void
 
   # Public attribute readers (the full `attr_reader` surface). Plugins
   # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
@@ -40,7 +40,10 @@ class Rigor::Plugin::Manifest
   # outcome (`String` / nil / `[:error, msg]` / `[:ok, src, msgs]`), not `String?` — `untyped` is the
   # honest claim until the outcome has a sig'd shape.
   def source_rbs_synthesizer: () -> untyped
-  def additional_initializers: () -> untyped
+  # sig-gen gap: #1154 — `attr_reader` over an ivar assigned in `initialize` from a parameter;
+  # the validator (`validate_additional_initializers!`) requires every element
+  # `is_a?(AdditionalInitializer)`, so the element type is hand-written.
+  def additional_initializers: () -> Array[Rigor::Plugin::AdditionalInitializer]
 
   def validate_config: (untyped) -> Array[String]
   def to_h: () -> Hash[String, untyped]

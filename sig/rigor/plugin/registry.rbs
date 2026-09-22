@@ -15,4 +15,9 @@ class Rigor::Plugin::Registry
   def type_node_resolvers: () -> Array[untyped]
   def rbs_complete_ancestors: () -> Array[String]
   def rbs_complete_ancestor?: (untyped class_name) -> bool
+
+  # sig-gen gap: #1154 — `attr_reader` over an ivar `compile_aggregates` builds with `flat_map` —
+  # the element type (`AdditionalInitializer`, enforced per manifest by
+  # `validate_additional_initializers!`) is hand-written.
+  attr_reader additional_initializers: Array[Rigor::Plugin::AdditionalInitializer]
 end

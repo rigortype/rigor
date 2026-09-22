@@ -1,0 +1,36 @@
+module Rigor
+  module Plugin
+    # ADR-38 declaration — methods/def-blocks that establish ivar state like `initialize` does, so
+    # the read-before-write nil soundness gate does not widen their ivars. See
+    # lib/rigor/plugin/additional_initializer.rb for the full contract.
+    class AdditionalInitializer
+      # sig-gen gap: #1154 — `attr_reader` rows over ivars assigned from `initialize` parameters are
+      # skipped (untyped return); the constructor validates `receiver_constraint` is a non-empty
+      # String and normalizes both lists with `map(&:to_sym)`, so the stored types are hand-written.
+      attr_reader receiver_constraint: String
+
+      # sig-gen gap: #1154 — as above.
+      attr_reader methods: Array[Symbol]
+
+      # sig-gen gap: #1154 — as above.
+      attr_reader block_methods: Array[Symbol]
+
+      # The validators accept Symbol or non-empty String elements; `initialize` normalizes to
+      # Symbol before storing. At least one of `methods:`/`block_methods:` must be non-empty.
+      def initialize: (receiver_constraint: String, ?methods: Array[Symbol | String], ?block_methods: Array[Symbol | String]) -> void
+
+      def covers_method?: (Symbol method_name) -> bool
+
+      def covers_block_method?: (Symbol method_name) -> bool
+
+      def to_h: () -> Hash[String, String | Array[String]]
+
+      def ==: (untyped other) -> bool
+
+      # `alias eql? ==` — the alias row has no sig-gen shape, so it stays unmarked residue.
+      def eql?: (untyped other) -> bool
+
+      def hash: () -> Integer
+    end
+  end
+end

@@ -132,10 +132,16 @@ module Rigor
       def prepare_project_scan: (?paths: Array[String]) -> Analysis::ProjectScan
       # ADR-103 — the propagated effect graph and the merged per-file collections behind it. A report
       # surface: never a diagnostic, empty when the configuration carries no `effects:` block. Typed
-      # `untyped` for the same reason `cache_store` is — `Rigor::Effects` is not sig-covered yet
-      # (`spec/rigor/public_api_drift_spec.rb`), and a named reference would raise `RBS::UnknownTypeName`.
+      # `untyped` for the same reason `cache_store` is — `Effects::EffectTable` /
+      # `Effects::FileCollection` / `Effects::PluginFacts` are still unsigned (the bound side of the
+      # namespace is covered — `effect_envelopes` below is the proof), and a named reference would
+      # raise `RBS::UnknownTypeName`.
       def effect_table: () -> untyped
       def effect_collection: () -> untyped
+      # Newly declared — the public reader was absent from the sig. ADR-103 WD9 (#391): the resolved
+      # envelope index `rigor sig-gen`'s annotation emission consults, built on demand so a warm-cache
+      # run still serves the same strata.
+      def effect_envelopes: () -> Effects::EnvelopeIndex
       # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against.
       def effect_sources: () -> Hash[String, Array[String]]
       # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's
@@ -143,8 +149,8 @@ module Rigor
       def effect_plugin_facts: () -> untyped
       # The incremental session's read surface (ADR-46 / ADR-67 / ADR-103) — `IncrementalSession`
       # drives a live Runner through these between rechecks. The core-shaped tables carry their real
-      # key/value types; the `Effects::`-valued readers stay `untyped` until that namespace is
-      # sig-covered.
+      # key/value types; the collection-side `Effects::`-valued readers stay `untyped` until those
+      # classes are sig-covered.
       # sig-gen gap: #1008 — `result` is populated by `collect_return_summaries` mutating it by
       # reference from a sibling method; sig-gen folds only the `{}` seed and the empty-memo early
       # return, so it proposes the seed shape instead of the honest, usually-non-empty contract.

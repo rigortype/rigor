@@ -1,0 +1,24 @@
+module Rigor
+  module Effects
+    # The `Owner#selector` / `Owner.selector` key spelling (ADR-103 WD14). `key` parameters accept any
+    # object — every entry point `to_s`s its input — so they are `untyped` on purpose.
+    module MethodKey
+      TEMPLATE_UNIT_PREFIX: String
+
+      # `[owner, separator, selector]`, or nil when `key` is not a method key at all.
+      def self?.split: (untyped key) -> [String, String, String]?
+
+      def self?.valid?: (untyped key) -> bool
+
+      # The owner half of a method key, or nil.
+      def self?.owner: (untyped key) -> String?
+
+      # `view:`-prefixed template-unit keys are NOT method keys (#393).
+      def self?.template_unit?: (untyped key) -> bool
+
+      # The name an `effects.envelopes:` entry selects a key by — the owner class for a method key,
+      # the unit key itself for a template unit.
+      def self?.envelope_owner: (untyped key) -> String?
+    end
+  end
+end

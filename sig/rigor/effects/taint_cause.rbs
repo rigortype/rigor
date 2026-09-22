@@ -1,0 +1,12 @@
+module Rigor
+  module Effects
+    # The closed enum of reasons a summary is not exhaustive (ADR-103 WD14). A reporting vocabulary,
+    # never a diagnostic one.
+    module TaintCause
+      ALL: Array[String]
+
+      # `cause.to_s` is looked up, so any object is a fair question.
+      def self?.valid?: (untyped cause) -> bool
+    end
+  end
+end

@@ -1,0 +1,100 @@
+module Rigor
+  module Effects
+    # `effects.envelopes:` entries resolved against the label vocabulary — the configured stratum of
+    # the envelope precedence (ADR-103 WD1).
+    module ConfigEnvelopes
+      CONFIG_PATH: String
+
+      # One entry, resolved against the vocabulary. `bound` is `LabelSet::TOP` when some member of
+      # `effect:` is unrecognised — the fail-open rule.
+      class Entry < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type; `build` proves each of these.
+        def index: () -> Integer
+
+        # sig-gen gap: #1150 — as above (path glob, or nil when `namespace:` is set).
+        def match: () -> String?
+
+        # sig-gen gap: #1150 — as above (constant-path glob, or nil when `match:` is set).
+        def namespace: () -> String?
+
+        # sig-gen gap: #1150 — as above (`LabelSet::TOP` on an unrecognised label).
+        def bound: () -> LabelSet
+
+        # sig-gen gap: #1150 — as above (the `effect:` list exactly as written).
+        def labels: () -> Array[String]
+
+        # sig-gen gap: #1150 — as above (well-formed spellings the registry did not know).
+        def unknown_labels: () -> Array[String]
+
+        # sig-gen gap: #1150 — as above; keyword form mirrors the member declarations.
+        def self.new: (
+          index: Integer,
+          match: String?,
+          namespace: String?,
+          bound: LabelSet,
+          labels: Array[String],
+          unknown_labels: Array[String]
+        ) -> instance
+        | (
+          Integer index,
+          String? match,
+          String? namespace,
+          LabelSet bound,
+          Array[String] labels,
+          Array[String] unknown_labels
+        ) -> instance
+
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (
+          index: Integer,
+          match: String?,
+          namespace: String?,
+          bound: LabelSet,
+          labels: Array[String],
+          unknown_labels: Array[String]
+        ) -> instance
+        | (
+          Integer index,
+          String? match,
+          String? namespace,
+          LabelSet bound,
+          Array[String] labels,
+          Array[String] unknown_labels
+        ) -> instance
+
+        # `.rigor.yml effects.envelopes[N]` — the location spelling diagnostics name.
+        def location: () -> String
+
+        # The bound quoted back in the config's own spelling.
+        def spelling: () -> String
+
+        def top?: () -> bool
+      end
+
+      # `entries` are the shape-validated `Configuration#effects_envelopes` rows (String-keyed
+      # Hashes); `registry` is the `Effects::Registry` vocabulary — unsigned, so `untyped`.
+      def self?.build: (entries: Array[Hash[String, untyped]], registry: untyped) -> Array[Entry]
+
+      # One envelope per selected class, keyed by class name. `sources` is `Runner#effect_sources`'s
+      # shape; `project_root` is what those paths are relativised against.
+      def self?.for_classes: (
+        entries: Array[Entry],
+        class_names: Array[String],
+        ?sources: Hash[String, Array[String]],
+        ?project_root: String
+      ) -> Hash[String, Envelope]
+
+      # The {Envelope} one entry puts on one class.
+      def self?.envelope_for: (Entry entry, String class_name) -> Envelope
+
+      # Whether one entry selects a class — `paths` is `Array()`d, so `untyped` is honest.
+      def self?.selects?: (Entry entry, String class_name, untyped paths) -> bool
+
+      # `File.fnmatch?` with `FNM_PATHNAME` — the ADR-28 path-glob shape.
+      def self?.path_match?: (String glob, String path) -> bool
+
+      # Constant-path glob over the `::`-separated FQN; both arguments are `to_s`d.
+      def self?.namespace_match?: (untyped glob, untyped class_name) -> bool
+    end
+  end
+end

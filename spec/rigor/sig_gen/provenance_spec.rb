@@ -162,7 +162,10 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `Reflection` pair were already non-residue as `untyped`.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
-  "sig/rigor.rbs" => 50,
+  # +1 (#1181 slice): `effect_envelopes` is a newly-declared public reader that stays unrenderable
+  # residue — its body memoises through `effect_envelope_index(@run_environment)`, a private helper
+  # sig-gen cannot infer.
+  "sig/rigor.rbs" => 51,
   # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.
@@ -185,6 +188,17 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
+  # New files (#1181 slice): the bound side of `Effects::*`. Marked rows are #1150 Data members;
+  # unmarked residue is the ordinary unrenderable/declared-divergent mix (`label_set.rbs` also pins
+  # the `eql?` alias row, `origin.rbs`/`taint_cause.rbs` fully classify).
+  "sig/rigor/effects/config_envelopes.rbs" => 3,
+  "sig/rigor/effects/envelope.rbs" => 2,
+  "sig/rigor/effects/envelope_index.rbs" => 2,
+  "sig/rigor/effects/label.rbs" => 5,
+  "sig/rigor/effects/label_set.rbs" => 8,
+  "sig/rigor/effects/method_key.rbs" => 3,
+  "sig/rigor/effects/origin.rbs" => 0,
+  "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
   "sig/rigor/inference.rbs" => 85,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
@@ -215,7 +229,9 @@ SIG_PROVENANCE_RESIDUE = {
   # parameters, so no gap issue covers them; `contracts_for_path` is declared-divergent
   # (sig-gen infers the `path.nil?` `[]` arm separately).
   "sig/rigor/plugin/registry.rbs" => 12,
-  "sig/rigor/rbs_extended.rbs" => 23,
+  # -1 (#1181 slice): `read_effect_envelope` now returns `Effects::Envelope?`, which sig-gen proves
+  # through the `build_*_envelope` helpers — no longer residue.
+  "sig/rigor/rbs_extended.rbs" => 22,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 9,

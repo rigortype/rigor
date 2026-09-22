@@ -339,6 +339,27 @@ generation and hands back to `Runner.new(prebuilt:)`. Declaring it unblocks
   delegates through the untyped `@pre_passes` collaborator, so sig-gen cannot infer the return even
   though the declaration is now precise. Same disposition as the file's other pinned rows.
 
+## Sixth sweep: `Effects::*`, bound side
+
+`Effects::*` is the largest unsigned namespace, so it splits in two: this sweep lands the **bound
+side** — `Label`, `MethodKey`, `TaintCause`, `Origin`, `LabelSet`, `Envelope`, `ConfigEnvelopes`,
+`EnvelopeIndex` — and the collection side (`Summary`, `EffectTable`, `FileCollection`,
+`PluginFacts`, the four `Runner#effect_*` readers) remains for a follow-up. Landed here:
+
+- `Runner#effect_envelopes` — newly declared (the reader was absent from `sig/` entirely):
+  `Effects::EnvelopeIndex`. Unrenderable residue, memoised through a private helper sig-gen cannot
+  see.
+- `RbsExtended.read_effect_envelope` → `Effects::Envelope?`, which *left* residue entirely — sig-gen
+  proves the return through the `build_*_envelope` helpers.
+- `RbsExtended.read_flow_contribution` stays `untyped?` — a classification correction: it returns
+  `Rigor::FlowContribution`, not an `Effects` type, and that namespace is unsigned too. #1181's row
+  overstated what this slice would unblock.
+- `ConfigEnvelopes::Entry` gets typed member rows (`match:`/`namespace:` `String?`, `bound:
+  LabelSet`); `Envelope`'s `source` and `Origin`'s `source` are declared as their closed literal
+  unions rather than `Symbol`.
+- `EnvelopeIndex.build`'s `plugin_facts:` stays `untyped` pending the collection-side
+  `PluginFacts` declaration.
+
 ## Two incidental findings
 
 Recorded here so the next sweep does not rediscover them:

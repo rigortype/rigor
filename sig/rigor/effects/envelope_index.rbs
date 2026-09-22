@@ -1,0 +1,33 @@
+module Rigor
+  module Effects
+    # The envelopes a call site may import as a `≤` bound (ADR-103 WD6; #386) — per-method
+    # annotation, class-level annotation, `effects.envelopes:`, then the accepted signature stratum.
+    class EnvelopeIndex
+      # The index a run with no declaration of any kind uses — and the fail-soft answer for a build
+      # that raised.
+      def self.empty: () -> EnvelopeIndex
+
+      # Reads every stratum this index serves, once per process. `environment` supplies the accepted
+      # stratum through its RBS loader (nil drops it, fail-quiet); `plugin_facts` is the plugins'
+      # `Effects::PluginFacts` contributions — that class is still unsigned #1181 backlog, so the
+      # parameter is `untyped` for now.
+      def self.build: (configuration: Configuration, ?environment: Rigor::Environment?, ?plugin_facts: untyped) -> EnvelopeIndex
+
+      def initialize: (
+        ?method_envelopes: Hash[String, Envelope],
+        ?class_envelopes: Hash[String, Envelope],
+        ?config_entries: Array[ConfigEnvelopes::Entry],
+        ?accepted: Hash[String, Envelope]
+      ) -> void
+
+      # Whether no stratum has anything to say — the scan's fast path.
+      def empty?: () -> bool
+
+      # The envelope bounding `owner`'s `selector`, or nil — never a ⊤ envelope.
+      def []: (String? owner, bool singleton, untyped selector) -> Envelope?
+
+      # Whether ANY stratum carries an annotation for this key — ⊤ envelopes included (#391).
+      def annotated?: (String? owner, bool singleton, untyped selector) -> bool
+    end
+  end
+end

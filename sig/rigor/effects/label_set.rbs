@@ -1,0 +1,46 @@
+module Rigor
+  module Effects
+    # An immutable, sorted, de-duplicated set of effect labels (ADR-103 WD1) — the carrier of a
+    # summary lane and of an envelope's bound. `TOP` is the unbounded sentinel: it admits every
+    # label, absorbs every join, and answers `[]` from `to_a`.
+    class LabelSet
+      # `labels` is any enumerable of label Strings (`#to_a` is called on it); `top:` is internal —
+      # it exists to build {TOP} and is not part of the public surface.
+      def initialize: (?untyped labels, ?top: bool) -> void
+
+      TOP: LabelSet
+      EMPTY: LabelSet
+
+      def top?: () -> bool
+
+      # {TOP} is not empty: it records nothing because it stands for everything.
+      def empty?: () -> bool
+
+      # The members, sorted. {TOP} yields `[]` — consult {top?} first.
+      def to_a: () -> Array[String]
+
+      # Exact membership — `include?` is not subsumption ({admits?} is).
+      def include?: (untyped label) -> bool
+
+      # Whether some member subsumes `label`. {TOP} admits every well-formed label.
+      def admits?: (untyped label) -> bool
+
+      # Union — {TOP} absorbs. May return `self`/`other` without allocating.
+      def join: (LabelSet other) -> LabelSet
+
+      # The members `other` does not already admit — the declared lane's rendering rule.
+      def excluding_subsumed_by: (LabelSet other) -> LabelSet
+
+      # The envelope check, modulo policy discharge. {TOP} is bounded only by {TOP}.
+      def subsumed_by?: (LabelSet bound_set) -> bool
+
+      def ==: (untyped other) -> bool
+
+      # `alias eql? ==` — no sig-gen shape for alias rows; unmarked residue.
+      def eql?: (untyped other) -> bool
+
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+  end
+end

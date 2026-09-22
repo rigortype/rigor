@@ -211,7 +211,10 @@ module Rigor
       # `farther_ancestors` memoizes each farther group's resolved ancestor list — the first
       # candidate spelling the RBS environment knows, the same spelling rule
       # {first_known_candidate_answer} applies. A group whose names all stay project- or
-      # unresolved-side has no visible chain to compare.
+      # unresolved-side has no visible chain to compare. The deferral can trade precision for
+      # safety: when the farther carrier resolves the member without type-argument bindings the
+      # answer degrades to `Dynamic[top]` where the skipped group carried one — the intended
+      # direction, and in the pinned shapes the runtime-correct answer anyway.
       def resited_member?(answer, groups, index, farther_ancestors, scope, environment)
         definition, owner = answer
         members = [owner.to_s.delete_prefix("::")]

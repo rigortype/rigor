@@ -6,26 +6,88 @@ module Rigor
       class LoadError < ::StandardError
       end
 
+      # Tuple-shaped bucket key so rule-ID rows and message-pattern rows coexist: `message_regex` is
+      # `nil` for rule-ID rows and a `Regexp` for message-pattern rows; `rule` and `file` are always
+      # present (parse_row raises without them; the generator's group key carries both). `count`
+      # intentionally shadows `Struct#count` — PHPStan-compatible field name.
+      class Bucket < ::Struct[untyped]
+        # sig-gen gap: #1183 — Struct member types are not inferred from construction sites; every
+        # member row in this class (and the keyword ctor below) is hand-written.
+        def file: () -> String
+        # sig-gen gap: #1183 — as above.
+        def rule: () -> String
+        # sig-gen gap: #1183 — as above.
+        def message_regex: () -> Regexp?
+        # sig-gen gap: #1183 — as above.
+        def count: () -> Integer
+        # sig-gen gap: #1183 — as above.
+        def file=: (String) -> String
+        # sig-gen gap: #1183 — as above.
+        def rule=: (String) -> String
+        # sig-gen gap: #1183 — as above.
+        def message_regex=: (Regexp?) -> Regexp?
+        # sig-gen gap: #1183 — as above.
+        def count=: (Integer) -> Integer
+        # sig-gen gap: #1183 — as above.
+        def self.new: (?file: String, ?rule: String, ?message_regex: Regexp?, ?count: Integer) -> instance
+        # sig-gen gap: #1183 — as above.
+        def self.[]: (?file: String, ?rule: String, ?message_regex: Regexp?, ?count: Integer) -> instance
+      end
+
+      # One bucket's drift state for `audit`. `status` is the four-way verdict `status_for` returns;
+      # `delta` is `actual_count - bucket.count` (positive = over threshold).
+      class DriftRow < ::Struct[untyped]
+        # sig-gen gap: #1183 — Struct member types are not inferred from construction sites; as above.
+        def bucket: () -> Bucket
+        # sig-gen gap: #1183 — as above.
+        def actual_count: () -> Integer
+        # sig-gen gap: #1183 — as above.
+        def status: () -> (:within | :over | :cleared | :reducible)
+        def delta: () -> Integer
+        # sig-gen gap: #1183 — as above.
+        def bucket=: (Bucket) -> Bucket
+        # sig-gen gap: #1183 — as above.
+        def actual_count=: (Integer) -> Integer
+        # sig-gen gap: #1183 — as above.
+        def status=: (:within | :over | :cleared | :reducible) -> (:within | :over | :cleared | :reducible)
+        # sig-gen gap: #1183 — as above.
+        def self.new: (?bucket: Bucket, ?actual_count: Integer, ?status: :within | :over | :cleared | :reducible) -> instance
+        # sig-gen gap: #1183 — as above.
+        def self.[]: (?bucket: Bucket, ?actual_count: Integer, ?status: :within | :over | :cleared | :reducible) -> instance
+      end
+
       # Load a baseline file from disk.
       # Returns `nil` when `path` is nil (no baseline configured).
       # Raises {LoadError} on malformed or unsupported content.
       def self.load: (::String? path, ?project_root: ::String) -> Baseline?
 
       # Build a baseline from a current run's diagnostic stream.
-      def self.from_diagnostics: (untyped diagnostics, ?match_mode: :rule | :message) -> Baseline
+      def self.from_diagnostics: (untyped diagnostics, ?match_mode: :rule | :message, ?project_root: ::String | ::Pathname) -> Baseline
 
-      attr_reader buckets: untyped
+      # Always an Array of Bucket — `initialize` freezes what it is given and every caller hands it
+      # Bucket instances (parse_row rows, from_diagnostics groups, `without`'s reject, or `[]`).
+      # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter
+      # is skipped (untyped return); the element type is hand-written.
+      attr_reader buckets: Array[Bucket]
 
-      def initialize: (untyped buckets) -> void
+      # `project_root` is `Pathname.new`'d, so a `Pathname` is accepted as well as a `String`
+      # (`without` re-passes the stored Pathname).
+      def initialize: (Array[Bucket] buckets, ?project_root: ::String | ::Pathname) -> void
 
       # Apply the baseline filter. Returns [surfaced_diagnostics, silenced_count].
-      def filter: (untyped diagnostics) -> [untyped, ::Integer]
+      # `diagnostics` stays `untyped`: `Analysis::Diagnostic`'s sig is partial (no `qualified_rule`),
+      # so a tighter param would put `diag.qualified_rule` behind an unsigned member. The declared
+      # `[Array[untyped], Integer]` diverges from sig-gen's inference
+      # (`[Array[untyped], untyped] | [untyped, 0]` — the literal seed and the accumulated local are
+      # unproven); the `Integer` count is the author's intent.
+      def filter: (untyped diagnostics) -> [Array[untyped], ::Integer]
 
-      # Report bucket-level drift for each recorded baseline bucket.
-      def audit: (untyped diagnostics) -> untyped
+      # Report bucket-level drift for each recorded baseline bucket — one DriftRow per bucket, in
+      # baseline-file order.
+      def audit: (untyped diagnostics) -> Array[DriftRow]
 
       # Return a new Baseline with the given buckets removed.
-      def without: (untyped buckets_to_drop) -> Baseline
+      def without: (Array[Bucket] buckets_to_drop) -> Baseline
 
       # Serialise to a YAML string.
       def to_yaml: () -> ::String

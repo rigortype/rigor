@@ -266,6 +266,64 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
   end
 
+  # Issue #1172 — the derivation above lets the in-scope consumers decline, but it does not change the
+  # predicate call's *type*: `v.nil?` still answered `Constant[false]`. A type is what a method's return
+  # summary carries across the boundary, and the mark is not — so a helper ending in `!h[k].nil?`
+  # published `Constant[true]`, and the caller's `if helper(...)` reported `flow.always-truthy-condition`
+  # on a guard that is live at run time. The predicate's answer is `bool` when a mark derives, so nothing
+  # proof-shaped crosses the boundary.
+  describe "the predicate's own type answer does not fold on a marked carrier" do
+    it "answers `bool`, not `false`, for `.nil?` on an optimistically nil-free carrier" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        v.nil?
+      RUBY
+
+      expect(type.describe).to eq("bool")
+    end
+
+    it "answers `bool`, not `true`, for `!` applied to a marked carrier's `.nil?`" do
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        v = h[key]
+        !v.nil?
+      RUBY
+
+      expect(type.describe).to eq("bool")
+    end
+
+    it "does not let the fold reach a caller through a method's return summary" do
+      # `Scope#evaluate` alone does not run inter-procedural inference, so the boundary case needs the
+      # Runner: the helper's `!h[k].nil?` published `Constant[true]` before the fix, and the caller's
+      # `if duck?(...)` reported `flow.always-truthy-condition` on a guard a missing key makes live.
+      runner = Rigor::Analysis::Runner.new(
+        configuration: Rigor::Configuration.new("paths" => []),
+        cache_store: nil
+      )
+      diagnostics = guarded_run_source(runner, source: <<~RUBY, path: "mem.rb").diagnostics
+        TABLE = { a: 1, b: 2 }
+        def duck?(k)
+          !TABLE[k].nil?
+        end
+        if duck?(k)
+          puts "yes"
+        end
+      RUBY
+
+      expect(diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }).to be_empty
+    end
+
+    it "still folds `.nil?` on a proof-carrying carrier (the control)" do
+      type, = evaluate(<<~RUBY)
+        v = "abc".upcase
+        v.nil?
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(false))
+    end
+  end
+
   # The `&&` / `||` value-position gate, the second of the three consumers the spec binds. Its failure mode
   # is not a diagnostic but a discarded operand: `MAP[key] || key` is written because the lookup can miss.
   describe "the `&&` / `||` value-polarity gate" do

@@ -145,9 +145,13 @@ module Rigor
         end
 
         groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
-        groups.each do |candidates|
+        farther_ancestors = {}
+        groups.each_with_index do |candidates, index|
           answer = first_known_candidate_answer(candidates, method_name, kind, scope, environment)
-          return answer if answer
+          next if answer.nil?
+          next if resited_member?(answer, groups, index, farther_ancestors, scope, environment)
+
+          return answer
         end
         nil
       end
@@ -192,6 +196,47 @@ module Rigor
         !owner.nil? && ancestors.include?(owner.to_s.delete_prefix("::"))
       end
       private_class_method :owned_within_candidate_chain?
+
+      # The re-siting guard (#1173 review, second pass). Ruby's `include` is a no-op for a module
+      # already in the ancestry, so a member's real position is set by the EARLIEST source statement
+      # that pulled it in — which is the FARTHEST group in this search-order walk that carries it.
+      # Adopting group `index`'s answer claims the owner (and the declaration's `defined_in`) sit
+      # inside this group's segment; when either name also appears in a farther group's RBS chain,
+      # the runtime actually sites it there and everything between can shadow it —
+      # `class C < Array; include M` where `M`'s RBS includes `Enumerable` must not adopt
+      # `Enumerable#first` through `M` while `Array#first` intervenes. Skipping the answer is not a
+      # decline of the method: the farther group that truly carries the member resolves it at its
+      # real position (or nothing does, and the honest `Dynamic[top]` stands).
+      #
+      # `farther_ancestors` memoizes each farther group's resolved ancestor list — the first
+      # candidate spelling the RBS environment knows, the same spelling rule
+      # {first_known_candidate_answer} applies. A group whose names all stay project- or
+      # unresolved-side has no visible chain to compare.
+      def resited_member?(answer, groups, index, farther_ancestors, scope, environment)
+        definition, owner = answer
+        members = [owner.to_s.delete_prefix("::")]
+        defined_in = definition.defined_in if definition.respond_to?(:defined_in)
+        members << defined_in.to_s.delete_prefix("::") if defined_in
+
+        ((index + 1)...groups.size).any? do |j|
+          ancestors = farther_ancestors.fetch(j) do
+            farther_ancestors[j] = resolved_group_ancestors(groups[j], scope, environment)
+          end
+          ancestors&.any? { |name| members.include?(name) }
+        end
+      end
+      private_class_method :resited_member?
+
+      # The ancestor list of the first candidate spelling the RBS environment knows — nil when no
+      # spelling resolves, which is what the walk emitted the group for in the first place.
+      def resolved_group_ancestors(candidates, scope, environment)
+        candidates.each do |candidate|
+          ancestors = instance_ancestor_names(candidate, scope: scope, environment: environment)
+          return ancestors unless ancestors.empty?
+        end
+        nil
+      end
+      private_class_method :resolved_group_ancestors
 
       # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
       # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency

@@ -184,6 +184,49 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
         end
       RUBY
     end
+
+    # `include` is a no-op for a module already in the ancestry: `include B` pulls `N` in, so the
+    # later `include N` re-positions nothing and the chain is `Pair → B → N` — `B#probe` runs.
+    # The pre-guard walk searched the `N` group first (the later statement is nearer in the table)
+    # and answered `Integer`.
+    it "searches the carrying module's position when a later include is a runtime no-op" do
+      sig = { "mods.rbs" => <<~RBS }
+        module N
+          def probe: () -> Integer
+        end
+        module B
+          include N
+          def probe: () -> String
+        end
+      RBS
+      expect(dumps(<<~RUBY, sig: sig)).to eq(["String"])
+        class Pair
+          include B
+          include N
+
+          def go = dump_type(probe)
+        end
+      RUBY
+    end
+
+    # The same re-siting through the superclass edge: `Enumerable` is already in `C`'s ancestry
+    # via `Array`, so `include M` does not hoist it — `C → M → Array → Enumerable` and
+    # `Array#first` runs, not `Enumerable[String]#first`. The include arm defers to the
+    # superclass arm, which answers the plain `Array#first` shape.
+    it "does not adopt a resited chain member's declaration over the superclass's own" do
+      sig = { "mods.rbs" => <<~RBS }
+        module M
+          include Enumerable[String]
+        end
+      RBS
+      expect(dumps(<<~RUBY, sig: sig)).to eq(["Dynamic[top]"])
+        class C < Array
+          include M
+
+          def probe = dump_type(first)
+        end
+      RUBY
+    end
   end
 
   describe "the declines" do

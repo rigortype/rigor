@@ -38,6 +38,13 @@ All merged, CI green, adversarial review (Fable/Grok) Approved:
 - [#1180](https://github.com/rigortype/rigor/pull/1180) → `b0dd3cc3` — batch 2: Manifest/Runner/
   Loader/Narrowing/etc. tightened; `produces` is `Array[Symbol]` (post-`to_sym`),
   `source_rbs_synthesizer` deliberately stays `untyped` (multi-shape WD6/WD12 outcome).
+- [#1184](https://github.com/rigortype/rigor/pull/1184) → `41b652e3` — #1181 slice 1:
+  `Baseline::{Bucket,DriftRow}` declared (first `Struct.new` sigs; member rows marked #1183).
+- [#1185](https://github.com/rigortype/rigor/pull/1185) → `25300e01` — #1181 slice 2:
+  `Plugin::AdditionalInitializer` + `Manifest`/`Registry#additional_initializers`.
+- [#1186](https://github.com/rigortype/rigor/pull/1186) → `1b867b76` — #1181 slice 3:
+  `Plugin::ProtocolContract` (+`ParamType` Data member, marked #1150) unblocking
+  `Manifest`/`Base#protocol_contracts` and new `Registry#protocol_contracts`/`contracts_for_path`.
 
 Earlier `queue-release` merges (`#1158`–`#1162`, `79fa99cf`/`9fd4b6d4`/`19c2af59`) are all landed;
 no open PRs at handoff time.
@@ -48,12 +55,12 @@ Nothing new. Long-standing `ready-for-human` backlog is unchanged (`gh issue lis
 
 ## What is worth picking up next
 
-- **#1181** — Class B sig-coverage backlog: add `sig/` for `Effects::*`, `Analysis::ProjectScan`,
-  `Plugin::Macro::*`, `HktRegistry::*`, `ProtocolContract`, `AdditionalInitializer`,
-  `Environment::Reflection`, `RuleWalk::CollectorDriver`, `Baseline::{Bucket,DriftRow}`, `Cache::*`,
-  reporter duck types. Smallest slice first: `Baseline::{Bucket,DriftRow}` (two Structs, unblocks
-  `Baseline#audit → Array[DriftRow]`). Process: `rigor sig-gen --print` provenance first per
-  `docs/agents/type-authoring.md`.
+- **#1181** — Class B sig-coverage backlog (landed: Baseline #1184, AdditionalInitializer #1185,
+  ProtocolContract #1186). Remaining: `Effects::*` (`EffectTable`, `FileCollection`, `PluginFacts`,
+  `Envelope`, `EnvelopeIndex` — unblocks 4 Runner readers + 2 RbsExtended readers),
+  `Analysis::ProjectScan`, `Plugin::Macro::*`, `HktRegistry::*`, `Environment::Reflection` +
+  reporter duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types. Process:
+  `rigor sig-gen --print` provenance first per `docs/agents/type-authoring.md`.
 - **#1177** — `OptimisticOrigin` lost across method boundary (needs-triage; a
   `rigor-wt/optimistic-origin-nil-predicate` directory exists on disk but is NOT a registered
   worktree — verify before reusing).

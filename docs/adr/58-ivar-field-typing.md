@@ -382,6 +382,28 @@ adjudicated value) it is deferred. Reopen only if a corpus surfaces a
 memo-read shape the `union(v, nil)` seed provably improves without a new
 firing.
 
+**Status, 2026-09-23 — implemented (#1175).** The reopen clause
+fired on Rigor's own tree: `lib/rigor/effects/unit_scan.rb` writes
+`@dispatch_top_level ||= true` and reads `unless @dispatch_top_level` —
+a memo-read shape the unseeded `||=` folded to `Constant[false]` and
+false-fired `flow.always-truthy-condition`. The pre-pass now seeds all
+three compound forms: `||=` contributes `union(v_type, nil)` (skipped
+when `v` is a falsey literal, the same "no useful precision" call the
+guarded `@x = nil unless @x` skip makes), `&&=` contributes `v_type`
+(the write only runs on an already-truthy ivar, so it cannot be the
+first thing to give it a value), and `op=` contributes the widened
+operator-dispatch result against the accumulated seed (`Constant[0] +
+Constant[1]` must not pin the ivar to `Constant[1]`). The `&&=` arm
+has one acknowledged boundary: a class whose *only* write to an ivar
+is `@x &&= <truthy literal>` gets a purely-truthy seed for an ivar
+that is `nil` at runtime forever — degenerate code, and the corpus
+gate showed no firing, but the arm is unsound in isolation the same
+way the unseeded `||=` was. The same corpus gate was re-run for this
+landing; see the PR for the numbers. CI's
+Self-check invocations also gained `--fail-on=warning`, matching
+`make check` — the warning had printed green on every run since #1071
+because the job read the exit code and warnings did not move it.
+
 ## Rejected / deferred alternatives
 
 - **Cross-method ivar definite assignment as the headline fix.**

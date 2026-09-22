@@ -577,7 +577,10 @@ RSpec.describe "block-return scope threading", type: :runner do
 
     it "types textbringer's lsp request-id block" do
       # `lsp/client.rb:328` — the id is allocated inside the block and returned as the tail.
-      expect(dumped_type(<<~RUBY)).to eq("1")
+      # The answer is `Integer`, not `1`: #1175 seeds `@request_id += 1` into the class-ivar table,
+      # so the entry binding is `0 | Integer` rather than the pinned `Constant[0]` that folded the
+      # counter to its first-call value.
+      expect(dumped_type(<<~RUBY)).to eq("Integer")
         class Client
           def initialize
             @mutex = Mutex.new

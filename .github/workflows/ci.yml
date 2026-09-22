@@ -452,12 +452,18 @@ jobs:
       # the warm-vs-cold diff and a human-readable summary in the CI log.
       # continue-on-error keeps the job alive long enough to upload the
       # artifact even when errors are found; we re-raise at the end.
+      # `--fail-on=warning` matches `make check` (#812): a warning-severity
+      # self-finding must fail CI, not ride along — #1175 rode master for
+      # weeks because this run printed the warning but exited 0.
       - name: Run rigor self-check
         id: check
         continue-on-error: true
         run: |
-          bundle exec exe/rigor check --format json lib > rigor-raw.json
-          rigor_exit=$?
+          # `run:` executes under `bash -e`: without the `||` guard a failing
+          # check aborts the script before the jq print / artifact write, so
+          # the job would go red with no diagnostic output and no artifact.
+          rigor_exit=0
+          bundle exec exe/rigor check --format json --fail-on=warning lib > rigor-raw.json || rigor_exit=$?
           # Print human-readable diagnostic lines to the CI log.
           jq -r '.diagnostics[] |
             "\(.path):\(.line):\(.column): \(.severity): \(.message)"' \
@@ -633,7 +639,7 @@ jobs:
           bundler-cache: true
 
       - name: Run rigor self-check under the bleeding-edge overlay
-        run: bundle exec exe/rigor check --bleeding-edge lib
+        run: bundle exec exe/rigor check --bleeding-edge --fail-on=warning lib
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather

@@ -264,9 +264,10 @@ outcome a multi-shape contract (`String` / nil / `[:error, msg]` / `[:ok, src, m
 
 Recorded here so the next sweep does not rediscover them:
 
-- `sig/rigor/sig_gen/skip_reason_catalog.rbs` references `::Rigor::SigGen` without a declaration;
-  `rbs validate` over `sig/` and `make steep-check` both fail on it at `master`. The Rigor loader
-  quarantines it, so the self-check stays green.
+- `sig/rigor/sig_gen/skip_reason_catalog.rbs` used to reference `::Rigor::SigGen` without a
+  declaration; `rbs validate` over `sig/` and `make steep-check` both failed on it. Resolved by
+  [#1174](https://github.com/rigortype/rigor/pull/1174), which added the `module Rigor::SigGen; end`
+  shell the file now carries.
 - `flow.always-truthy-condition` fired at `lib/rigor/effects/unit_scan.rb:560` on clean `master` —
   visible in CI Self-check logs too, but those jobs ran `rigor check --format json lib` without the
   Makefile's `--fail-on=warning`, so the warning never failed CI. Root cause was

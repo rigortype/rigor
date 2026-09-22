@@ -120,7 +120,7 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `false | true | Dynamic[top]` return, both fold `bool` instead of `untyped`. Each method's inferred
 # return reaches the `bool` its declaration states, so both rows leave `unrenderable` for parameter
 # intent (`scope.rbs` -1, `source.rbs` -1).
-# 657 since the named-return sig pass. Naming `Prism::Node?` on the four `NodeLocator` readers matches
+# 658 since the named-return sig pass. Naming `Prism::Node?` on the four `NodeLocator` readers matches
 # what sig-gen already proved, so `source.rbs` -4 (unrenderable → parameter intent); `Scope#top_level_def_for`
 # now declared `Prism::DefNode?` lets sig-gen prove `#bindable_top_level_def_for`, `scope.rbs` -1, and
 # `#user_def_through_ancestors` / `#singleton_def_through_ancestors` are re-declared to the

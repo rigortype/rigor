@@ -315,6 +315,44 @@ module Rigor
         end
       end
 
+      # Issue #1125 — the argument types of the call currently being re-typed into the body being walked,
+      # or nil outside such a frame. A `f(...)` call inside `def m(...)` re-supplies exactly the arguments
+      # `m` itself was called with, so {#call_arg_types} expands the forwarding node to THIS list instead of
+      # the `Dynamic[top]` a bare `Prism::ForwardingArgumentsNode` types as.
+      #
+      # A thread-local for the same reason the yield value is (see {YIELD_VALUE_KEY}): `...` names the
+      # frame's caller, not a binding, and the body is walked through scopes the inference rebuilds freely.
+      # It is installed unconditionally — with nil — at every user-method inference frame, so a body reached
+      # without `...` cannot read its caller's argument list. Because each frame installs its OWN list, a
+      # chain `a(...) -> b(...) -> c(...)` threads through: `b`'s frame holds the types `a` expanded and
+      # `c`'s holds `b`'s. The list is the callee's call-site `arg_types`, which is what keeps the ADR-84
+      # return memo's `(def_node, receiver, arg_types)` key complete for a forwarding def.
+      FORWARDED_ARGS_KEY = :__rigor_forwarded_call_arg_types__
+      private_constant :FORWARDED_ARGS_KEY
+
+      def self.current_forwarded_arg_types
+        Thread.current[FORWARDED_ARGS_KEY]
+      end
+
+      # Runs `block` with `types` installed as the frame's forwarded argument list, restoring the previous
+      # frame on exit.
+      def self.with_forwarded_arg_types(types, &block)
+        previous = Thread.current[FORWARDED_ARGS_KEY]
+        Thread.current[FORWARDED_ARGS_KEY] = types
+        begin
+          block.call
+        ensure
+          Thread.current[FORWARDED_ARGS_KEY] = previous
+        end
+      end
+
+      # The two call-site channels a user-method body may read from its caller — the block a `yield`
+      # reaches ({#with_yield_value_type}) and the argument list `...` re-supplies
+      # ({#with_forwarded_arg_types}) — installed together, both even when nil, for exactly one frame.
+      def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
+        with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -2559,7 +2597,7 @@ module Rigor
         # below reads it back from here rather than taking a second parameter, so key and frame cannot
         # disagree). It is installed even when nil, which is what stops a blockless callee reached from
         # inside a yielding body from inheriting the outer caller's block.
-        ExpressionTyper.with_yield_value_type(yield_type) do
+        ExpressionTyper.with_call_site_frame(yield_type, forwarded_frame_types(def_node, arg_types)) do
           unless memo_candidate?(stack, plain_signature)
             trace_memo_refusal(stack, plain_signature)
             next compute_user_method_return(def_node, body_scope, stack, summaries,
@@ -2786,6 +2824,28 @@ module Rigor
           self_fold_safe: body_scope.struct_fold_safe?(:self)
         )
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
+      end
+
+      # Issue #1125 — the argument list a `def m(...)` body's `...` re-supplies, or nil for a def without the
+      # forwarding parameter (whose body cannot contain a `...` call at all) and for a call that does not even
+      # satisfy `m`'s own required positionals (that call raises at runtime; the body is not worth re-typing).
+      #
+      # Ruby allows `...` only beside leading positional parameters (`def m(a, ...)`, `def m(a = 1, ...)`) — a
+      # keyword / rest / block parameter next to it is a syntax error — so the tail is the call's own argument
+      # list MINUS the leading positionals those named parameters consume, keeping a trailing keyword shape
+      # (which `takes_keywords?` reads as the keyword tail rather than as a positional). The callee's own
+      # call-site `arg_types` are what remains.
+      def forwarded_frame_types(def_node, arg_types)
+        params = def_node.parameters
+        return nil unless params.is_a?(Prism::ParametersNode)
+        return nil unless params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+
+        positional = arg_types.dup
+        kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
+        return nil if positional.size < params.requireds.size
+
+        tail = positional[(params.requireds.size + params.optionals.size)..] || []
+        kw_shape ? tail + [kw_shape] : tail
       end
 
       # True when this frame's result is a candidate for the return memo: the one structural precondition,
@@ -3314,17 +3374,35 @@ module Rigor
         return nil if locals.nil?
 
         bind_keyword_params(params, kw_shape, locals)
-        locals[params.keyword_rest.name.to_sym] = dynamic_top if params.keyword_rest&.name
+        rest_name = keyword_rest_name(params)
+        locals[rest_name.to_sym] = keyword_rest_type(params, kw_shape) if rest_name
         locals[params.block.name.to_sym] = dynamic_top if params.block&.name
         locals
       end
 
-      # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence; `...`
-      # arrives as the keyword_rest slot. Both stay declined — correspondence, not width, is the issue.
+      # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence and stay
+      # declined — correspondence, not width, is the issue. Issue #1125: `def m(...)`'s forwarding slot is no
+      # longer a decline. Its NAMED parameters (a leading `def m(a, ...)` required) bind exactly as before;
+      # the forwarded tail is not a binding, so nothing is bound for it — the body's own `f(...)` reads the
+      # frame's argument list instead ({#forwarded_argument_types}).
       def bindable_param_shape?(params)
-        params.is_a?(Prism::ParametersNode) &&
-          params.posts.empty? &&
-          !params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+        params.is_a?(Prism::ParametersNode) && params.posts.empty?
+      end
+
+      # Whether the def's trailing slot is `...` rather than a named `*rest` / `**rest`. Such a def accepts
+      # an unbounded positional tail it does not name, so it behaves as a rest for the positional
+      # correspondence and binds no local.
+      def forwarding_params?(params)
+        params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+      end
+
+      # A `**rest` parameter's name, or nil when the slot is `def m(...)`'s forwarding parameter —
+      # `Prism::ForwardingParameterNode` carries no name at all.
+      def keyword_rest_name(params)
+        rest = params.keyword_rest
+        return nil unless rest.respond_to?(:name)
+
+        rest.name
       end
 
       def takes_keywords?(params)
@@ -3335,7 +3413,9 @@ module Rigor
         requireds = params.requireds
         optionals = params.optionals
         return nil if positional.size < requireds.size
-        return nil if params.rest.nil? && positional.size > requireds.size + optionals.size
+
+        extra = positional.size - requireds.size - optionals.size
+        return nil if extra.positive? && params.rest.nil? && !forwarding_params?(params)
 
         locals = {}
         requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
@@ -3377,6 +3457,23 @@ module Rigor
 
       def keyword_default_type(param)
         param.respond_to?(:value) && param.value ? literal_default_type(param.value) : dynamic_top
+      end
+
+      # Issue #1125 — `**rest` collects the keyword-shape entries no named keyword parameter consumed, as a
+      # closed `HashShape` of their value types. The pre-#1125 `Dynamic[top]` is kept whenever there is
+      # nothing left to collect: no keyword shape at all, an open shape (unknown extras — every remaining-key
+      # answer would be a guess), or a shape whose every pair a named parameter consumed. That last case is
+      # what leaves the literal form's existing binding untouched (`target(a: 1, b: 2)` against
+      # `def target(a:, b:, **rest)` still binds `rest` to `Dynamic[top]`), while a caller that DOES leave
+      # keys over — the only shape where the parameter holds something to report — gets them typed.
+      def keyword_rest_type(params, kw_shape)
+        return dynamic_top if kw_shape.nil? || kw_shape.open?
+
+        consumed = params.keywords.map { |param| param.name.to_s.delete_suffix(":").to_sym }
+        leftovers = kw_shape.pairs.except(*consumed)
+        return dynamic_top if leftovers.empty?
+
+        Type::Combinator.hash_shape_of(leftovers)
       end
 
       # A default expression contributes its type only when it is lexically scope-free — a scalar literal
@@ -3423,11 +3520,60 @@ module Rigor
         scope.environment.nominal_for_name("Object") || dynamic_top
       end
 
+      # Issue #1125 — two call-site argument shapes that used to reach every consumer (the parameter
+      # binder, RBS dispatch, the block-parameter reader) as an opaque `Dynamic[top]` / bare `Nominal[Hash]`
+      # now carry what the callee needs:
+      #
+      # - `f(...)` inside `def m(...)` re-supplies the arguments `m` was called with, read from the frame
+      #   {#infer_user_method_return} installed ({FORWARDED_ARGS_KEY}) — so it expands to a whole LIST, not
+      #   one type, which is why the map became a flat_map.
+      # - a keyword hash built ENTIRELY from a double splat (`f(**h)`) is the shape of `h`, so `f(**h)`
+      #   binds the same parameters the literal form `f(a: 1, b: 2)` does.
+      #
+      # Both are precision-only. A `...` outside a forwarding frame (unreachable in valid Ruby) and a double
+      # splat of anything but a Symbol-keyed closed `HashShape` — a shapeless `Hash[Symbol, V]`, an opaque
+      # value, a mixed hash — fall back to exactly the pre-#1125 answer.
       def call_arg_types(node)
         arguments_node = node.arguments
         return [] if arguments_node.nil?
 
-        arguments_node.arguments.map { |argument| type_of(argument) }
+        arguments_node.arguments.flat_map do |argument|
+          forwarded_argument_types(argument) || [call_arg_type(argument)]
+        end
+      end
+
+      # The frame's argument list when `argument` is `...`, else nil so the caller types it normally.
+      def forwarded_argument_types(argument)
+        return nil unless argument.is_a?(Prism::ForwardingArgumentsNode)
+
+        ExpressionTyper.current_forwarded_arg_types
+      end
+
+      # The type a single call argument contributes; a keyword-hash argument first offers the `HashShape` it
+      # stands for, and otherwise keeps its own type.
+      def call_arg_type(argument)
+        return type_of(argument) unless argument.is_a?(Prism::KeywordHashNode)
+
+        double_splat_hash_shape(argument) || type_of(argument)
+      end
+
+      # The `HashShape` a `f(**h)` keyword-hash argument stands for, or nil to keep the argument's own type.
+      # Declines a MIXED hash (`f(a: 1, **h)` — merging the literal pairs with the splatted shape is a second
+      # shape algebra this slice does not need), an OPEN shape (unknown extras make every missing-keyword
+      # answer a guess rather than a read), a shape with a non-Symbol key (Ruby itself rejects those as
+      # keywords), and a splat of anything that is not a shape at all.
+      def double_splat_hash_shape(node)
+        elements = node.elements
+        return nil unless elements.size == 1
+
+        splat = elements.first
+        return nil unless splat.is_a?(Prism::AssocSplatNode) && splat.value
+
+        type = type_of(splat.value)
+        return nil unless type.is_a?(Type::HashShape)
+        return nil unless type.closed? && type.pairs.each_key.all?(Symbol)
+
+        type
       end
 
       # When the call carries a `Prism::BlockNode`, build the block's entry scope (outer locals plus

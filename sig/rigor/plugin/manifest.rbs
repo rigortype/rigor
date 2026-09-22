@@ -17,12 +17,12 @@ class Rigor::Plugin::Manifest
   def config_schema: () -> untyped
   def config_defaults: () -> Hash[String, untyped]
   def target_gems: () -> Array[String]
-  # sig-gen gap: #392 — an `attr_reader` over an ivar assigned in `initialize` from a parameter the
+  # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter the
   # manifest validates but does not type, so inference reaches `untyped` where the contract is
   # `Array[String]` (the same gap every other reader in this block carries).
   def template_globs: () -> Array[String]
   def produces: () -> untyped
-  def consumes: () -> untyped
+  def consumes: () -> Array[Rigor::Plugin::Manifest::Consumption]
   def owns_receivers: () -> untyped
   def open_receivers: () -> untyped
   def rbs_complete_ancestors: () -> untyped

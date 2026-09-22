@@ -182,6 +182,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         type = dispatch(recv, :first)
         expect(type).to equal(Rigor::Type::Combinator.untyped)
       end
+
+      # Issue #1121 — FEWER arguments than the class declares is the partial application RBS licenses for a
+      # defaulted trailing parameter, not an arity disagreement. `Enumerable#lazy:
+      # () -> Enumerator::Lazy[Elem]` hands back exactly such a receiver (the class is
+      # `Enumerator::Lazy[out E, out R = void]`), and withholding the whole map left `Elem` unbound so every
+      # method reached through it degraded to `Dynamic[top]`.
+      def partial_lazy_receiver
+        Rigor::Type::Combinator.nominal_of(
+          "Enumerator::Lazy",
+          type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+        )
+      end
+
+      it "binds the supplied prefix of a partial application of a defaulted generic" do
+        # `Enumerable#to_a: () -> Array[Elem]`
+        expect(dispatch(partial_lazy_receiver, :to_a)).to eq(
+          Rigor::Type::Combinator.nominal_of(
+            "Array",
+            type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+          )
+        )
+      end
+
+      it "leaves the omitted trailing parameter unbound on a partial application" do
+        # `Enumerator::Lazy#eager: () -> Enumerator[E, R]` -- `R` is the parameter the receiver did not
+        # supply, so it degrades to `Dynamic[top]` like any other free variable.
+        expect(dispatch(partial_lazy_receiver, :eager).describe(:short))
+          .to eq("Enumerator[Integer, Dynamic[top]]")
+      end
     end
 
     describe "shape carriers (Slice 5 phase 1)" do

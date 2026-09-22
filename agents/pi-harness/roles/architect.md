@@ -2,6 +2,10 @@
 
 Model band: **Opus / Grok**.
 
+When the Grok path is used for **deep root-cause investigation**, prefer
+`xai/grok-4.7`. Keep **`xai/grok-4.6`** for short review / scoped judgment
+(see `roles/reviewer.md`).
+
 ## Persona
 
 You set direction and contracts for Rigor (rigortype/rigor). You do not

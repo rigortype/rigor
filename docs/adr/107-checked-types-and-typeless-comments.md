@@ -171,7 +171,12 @@ an agent it means "ask Rigor, do not read the neighbours."
   the category is 671 of 1,052 in-scope declarations, so the gate marks the 15 the generator actively
   contradicts and pins the rest per file rather than demanding 671 markers — and it inverted this
   ADR's own prediction: not one of the 15 is an inference incompleteness, and 12 are inference being
-  *more* precise than the declaration means to be.
+  *more* precise than the declaration means to be. Two markers exist (the 2026-09-19 ruling on
+  [#1011](https://github.com/rigortype/rigor/issues/1011)): `# sig-gen gap: #NNN` records a gap, with
+  `#NNN` an allow-listed issue that tracks the engine work that would let the generator answer, and
+  `# authored:` records a row deliberately hand-written by contract — a hook widening over code
+  `sig-gen` never sees — that no engine work would ever answer. Either counts as recorded; neither
+  may cite the feature issue that added the row.
 
 ### Comments carry prose
 
@@ -273,7 +278,7 @@ view costs a command and cannot be.
 | --- | --- | --- |
 | **G1** `spec/docs/type_shaped_comments_spec.rb` | no `[Type]` after a doc tag; an em dash after every tag's name token; every `@param` names a real parameter of the `def` below; no stale `Slice N will` forward references | lands with #822 |
 | **G2** [#812](https://github.com/rigortype/rigor/issues/812) — `make check` fails on a warning | `def.return-type-mismatch` is a **warning**, so `make check` exits 0 with a contradicted return type in the tree. Without G2 the declared-and-checked half of the invariant is theatre | `--fail-on=warning` in a sibling PR |
-| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a marker on every `tighter-return`, a per-file pin on the hand-authored residue, and ([#839](https://github.com/rigortype/rigor/issues/839)) a method that exists — proven by a `def`, by Rigor's own synthetic-shape recognition, or by reflection over the loaded tree | in force |
+| **G3** `spec/rigor/sig_gen/provenance_spec.rb` ([#825](https://github.com/rigortype/rigor/issues/825); markers repointed by [#1011](https://github.com/rigortype/rigor/issues/1011)) | every declaration is generated-equivalent, authored parameter intent, or a recorded gap: a `# sig-gen gap: #NNN` marker on every `tighter-return` whose number names an allow-listed, open issue tracking the ENGINE gap, or an `# authored:` marker for a row deliberately hand-written with no engine work behind it (`spec/rigor/sig_gen/gap_issues.yml` is the reviewed allow-list); a per-file pin on the hand-authored residue; and ([#839](https://github.com/rigortype/rigor/issues/839)) a method that exists — proven by a `def`, by Rigor's own synthetic-shape recognition, or by reflection over the loaded tree | in force |
 
 Already in force, and already serving the invariant: the precision gate
 (`rigor coverage --threshold 0.58 lib`) keeps inference the primary source rather than a fallback;

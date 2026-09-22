@@ -10,10 +10,17 @@
 # the body proves as a literal (#837): each says the return the author means is not the one the body
 # happens to expose, and no synthesis produces either, since a type built from a body is always the type
 # of the body's last expression. `spec/support/sig_provenance_auditor.rb` carries the classifier and the
-# marker convention:
+# marker convention. There are two markers, per the 2026-09-19 ruling on #1011:
 #
 #     # sig-gen gap: #825 — sig-gen types the body `untyped`, so the return is hand-written.
 #     def resolve: (String name) -> Type::t
+#
+# cites an allow-listed issue that tracks the ENGINE GAP (`spec/rigor/sig_gen/gap_issues.yml`); an
+# intentionally hand-written row — no engine work would ever answer it — carries
+#
+#     # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never sees.
+#
+# instead and cites nothing.
 #
 # == Three mechanisms, and why not one
 #
@@ -47,8 +54,15 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "yaml"
 
 SIG_PROVENANCE_ROOT = File.expand_path("../../..", __dir__)
+
+# The gap issues a `# sig-gen gap:` marker may cite (ADR-107 G3; ruling 2026-09-19 on #1011).
+# Committed and checked OFFLINE — this file is the reviewed artefact, so `make verify` never
+# touches the network. Closing a gap issue means removing it here, which fails the allow-list
+# example below until the markers that cite it move.
+GAP_ISSUE_ALLOW_LIST = YAML.safe_load_file(File.join(__dir__, "gap_issues.yml")).freeze
 
 # Computed once (a ~14 s generator pass) and shared read-only across the corpus examples.
 # `runtime: true` opts the #839 existence tiers in: the project index over `lib/`, then a require of
@@ -120,18 +134,26 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `false | true | Dynamic[top]` return, both fold `bool` instead of `untyped`. Each method's inferred
 # return reaches the `bool` its declaration states, so both rows leave `unrenderable` for parameter
 # intent (`scope.rbs` -1, `source.rbs` -1).
+# 658 since the named-return sig pass. Naming `Prism::Node?` on the four `NodeLocator` readers matches
+# what sig-gen already proved, so `source.rbs` -4 (unrenderable → parameter intent); `Scope#top_level_def_for`
+# now declared `Prism::DefNode?` lets sig-gen prove `#bindable_top_level_def_for`, `scope.rbs` -1, and
+# `#user_def_through_ancestors` / `#singleton_def_through_ancestors` are re-declared to the
+# `[Prism::DefNode, String] | [nil, nil]` sig-gen now proves through them. `skip_reason_catalog.rbs` +1:
+# `Entry#to_h` declared `Hash[String, String]` reads as divergent from the inferred
+# `Hash[String, "sig_skip_reason" | String]` because a literal is not absorbed into its nominal in the
+# rendered comparison — a normalization gap, not a wrong declaration.
 #
-# 665 since #1123, all three rows in `sig/rigor/scope.rbs` (109 -> 112). Two are the readers of the new
+# 661 since #1123, all three rows in `sig/rigor/scope.rbs` (108 -> 111). Two are the readers of the new
 # instance-side prepend table, in exactly the shape every other discovery table carries them:
 # `Scope#discovered_prepends` (`sig.skipped.untyped-return` — an endless-def reader over a
-# `Data.define` member, like its `discovered_includes` / `discovered_extends` siblings) and the
-# `DiscoveryIndex#discovered_prepends` `Data` member itself (`synthetic_source`, like every member row of
-# that class). The third is `Scope#user_def_through_ancestors`, which the change gives a second return
-# path — the prepend wedge — reached through two private recursive helpers, so `sig-gen` widens the
-# pair's owner to `untyped` and the declaration `[untyped, String] | [nil, nil]` reads as
-# `declared_divergent` even though the walk still only ever answers a resolved class name or `[nil, nil]`.
-# Narrowing that back is engine work on the inference of a recursive private helper's array element type,
-# not a contract change here; the declaration is left as the true one. `scope.rbs` 109 -> 112.
+# `Data.define` member, like its `discovered_includes` sibling) and the `DiscoveryIndex#discovered_prepends`
+# `Data` member itself (`synthetic_source`, like every member row of that class). The third is
+# `Scope#user_def_through_ancestors`, which the change gives a second return path — the prepend wedge —
+# reached through two private recursive helpers, so `sig-gen` no longer proves the
+# `[Prism::DefNode, String] | [nil, nil]` the named-return pass declared and the row reads as
+# `declared_divergent`, even though the walk still only ever answers a resolved def or `[nil, nil]`.
+# Narrowing that back is engine work on a recursive private helper's array element type, not a
+# contract change here; the declaration is left as the true one.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
@@ -166,9 +188,9 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 112,
-  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
-  "sig/rigor/source.rbs" => 8,
+  "sig/rigor/scope.rbs" => 111,
+  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 9,
+  "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
   "sig/rigor/type.rbs" => 211
@@ -261,12 +283,24 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     end
 
     it "reads the gap marker off the member's RBS comment" do
-      rbs = "class Widget\n  # sig-gen gap: #837 — the wider declaration is deliberate.\n  " \
+      rbs = "class Widget\n  # sig-gen gap: #1155 — the wider declaration is deliberate.\n  " \
             "def n: () -> Numeric\nend\n"
       row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).to be_marked
-      expect(row.declaration.marker).to eq("837")
+      expect(row.declaration.marker).to eq("1155")
+    end
+
+    it "reads the authored marker off the member's RBS comment and counts the row as marked" do
+      # An intentionally hand-written row (no engine work would ever answer it) carries `# authored:`
+      # instead of a gap pointer; either marker records the row against the residue ratchet.
+      rbs = "class Widget\n  # authored: hook-contract widening — no engine work would answer it.\n  " \
+            "def n: () -> Numeric\nend\n"
+      row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
+            .find { |r| r.declaration.method_name == "n" }
+      expect(row).to be_marked
+      expect(row.declaration.marker).to be_nil
+      expect(row.declaration.authored_reason).to include("hook-contract widening")
     end
 
     it "rejects #TBD — a placeholder points at no engine work, and every gap now has an issue" do
@@ -392,9 +426,28 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         "#{provenance_failure('unmarked tighter-return', unmarked)}\n\n" \
           "sig-gen proposes a narrower return than each declaration says. Per ADR-14 either apply " \
           "the tightening, or record why it stays with a marker in the member's RBS comment:\n  " \
-          "# sig-gen gap: #NNN — why sig-gen's proposal is not the contract\n" \
-          "#NNN must be a filed issue: it is the pointer to the engine work that would let the " \
-          "generator answer, so a placeholder does not count as a marker."
+          "# sig-gen gap: #NNN — why sig-gen's proposal is not the contract\n  " \
+          "# authored: hand-written by contract — no engine work would answer it\n" \
+          "#NNN must be an allow-listed gap issue (spec/rigor/sig_gen/gap_issues.yml): it is the " \
+          "pointer to the engine work that would let the generator answer, so a placeholder or a " \
+          "closed feature issue does not count as a marker."
+      }
+    end
+
+    it "cites a listed gap issue from every corpus marker (the allow-list is the reviewed artefact)" do
+      stray = SIG_PROVENANCE_ROWS.filter_map do |row|
+        next if row.declaration.marker.nil?
+
+        issue = row.declaration.marker.to_i
+        "#{row.declaration} cites ##{issue}" unless GAP_ISSUE_ALLOW_LIST.include?(issue)
+      end
+      expect(stray).to be_empty, lambda {
+        "#{stray.size} marker(s) cite an issue the allow-list does not carry:\n  #{stray.join("\n  ")}\n\n" \
+          "A `# sig-gen gap: #NNN` marker points at the issue that tracks the ENGINE GAP, never " \
+          "at the feature issue that added the row (ruling 2026-09-19 on #1011). " \
+          "`spec/rigor/sig_gen/gap_issues.yml` is the reviewed allow-list: add a number only when " \
+          "a marker must cite it, and remove a number when that gap issue closes, which forces " \
+          "the markers to move."
       }
     end
 
@@ -408,7 +461,8 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(drift).to be_empty, lambda {
         "#{drift.size} file(s) drifted from SIG_PROVENANCE_RESIDUE:\n#{drift.join("\n")}\n\n" \
           "A declaration that is neither generated-equivalent nor parameter intent is a gap " \
-          "sig-gen could not close (ADR-107 § Decision). Mark it — a marker subtracts from the " \
+          "sig-gen could not close (ADR-107 § Decision). Mark it — a `# sig-gen gap:` marker " \
+          "(or an `# authored:` marker for a deliberately hand-written row) subtracts from the " \
           "count — or move the pin in this file with the reason in the commit body. A count that " \
           "DROPPED is an engine fix: lower the pin in the same commit."
       }

@@ -429,14 +429,14 @@ module Rigor
       attr_reader trinary: Trinary
       attr_reader mode: accepts_mode
       attr_reader reasons: Array[String]
-      # sig-gen gap: #1140 — the memoized `||=` return is an honest union with an
+      # sig-gen gap: #1155 — the memoized `||=` return is an honest union with an
       #   untyped arm (the slot read cannot prove the memoized value), so sig-gen
       #   skips it (sig.skipped.untyped-return); the runtime result is always
       #   AcceptsResult and the row is hand-written.
       def self.yes: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
-      # sig-gen gap: #1140 — same memoized `||=` untyped-return gap as `self.yes`.
+      # sig-gen gap: #1155 — same memoized `||=` untyped-return gap as `self.yes`.
       def self.no: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
-      # sig-gen gap: #1140 — same memoized `||=` untyped-return gap as `self.yes`.
+      # sig-gen gap: #1155 — same memoized `||=` untyped-return gap as `self.yes`.
       def self.maybe: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
       def initialize: (Trinary trinary, ?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> void
       def yes?: () -> bool

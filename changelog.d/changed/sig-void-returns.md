@@ -1,0 +1,1 @@
+- **[plugins]** `Rigor::Plugin.unregister!` and `Rigor::Plugin::Base.node_file_context` now declare `-> void` — their return values were incidental (the emptied registry `Hash` or the removed plugin class, and the assigned `Proc`) and are no longer part of the callable contract. [#1169](https://github.com/rigortype/rigor/pull/1169)

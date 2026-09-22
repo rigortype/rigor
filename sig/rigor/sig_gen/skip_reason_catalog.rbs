@@ -1,11 +1,18 @@
+# `Rigor::SigGen` itself has no other declaration under `sig/`; without this shell `rbs validate`
+# rejects the two declarations below with `Could not find ::Rigor::SigGen`.
+module Rigor::SigGen
+end
+
+# Every entry is built from string literals in `SkipReasonCatalog::ENTRIES`, so the four readers
+# answer `String`.
 class Rigor::SigGen::SkipReasonCatalog::Entry < ::Data
-  def id: () -> untyped
-  def summary: () -> untyped
-  def explanation: () -> untyped
-  def next_step: () -> untyped
-  def self.new: (id: untyped, summary: untyped, explanation: untyped, next_step: untyped) -> instance | (untyped id, untyped summary, untyped explanation, untyped next_step) -> instance
-  def self.[]: (id: untyped, summary: untyped, explanation: untyped, next_step: untyped) -> instance | (untyped id, untyped summary, untyped explanation, untyped next_step) -> instance
-  def to_h: () -> Hash[String, untyped]
+  def id: () -> String
+  def summary: () -> String
+  def explanation: () -> String
+  def next_step: () -> String
+  def self.new: (id: String, summary: String, explanation: String, next_step: String) -> instance | (String id, String summary, String explanation, String next_step) -> instance
+  def self.[]: (id: String, summary: String, explanation: String, next_step: String) -> instance | (String id, String summary, String explanation, String next_step) -> instance
+  def to_h: () -> Hash[String, String]
 end
 
 module Rigor::SigGen::SkipReasonCatalog

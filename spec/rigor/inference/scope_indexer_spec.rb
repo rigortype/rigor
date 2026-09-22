@@ -1307,6 +1307,112 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).not_to be_nil
       end
 
+      # #1175 — compound ivar writes (`@x ||= v` / `@x &&= v` / `@x op= v`) contribute to the
+      # class-ivar seed. ADR-58 § WD5 deferred the `||=` seed with a reopen clause; Rigor's own
+      # `unit_scan.rb` surfaced the shape it was waiting on: `@dispatch_top_level ||= true` was
+      # invisible to the pre-pass, the ivar kept `Constant[false]` from `initialize`, and
+      # `unless @dispatch_top_level` folded always-falsey — a live
+      # `flow.always-truthy-condition` false positive.
+      describe "compound ivar writes (#1175)" do
+        def seed_members(program, klass, ivar)
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for(klass)[ivar]
+          return [] if type.nil?
+
+          type.is_a?(Rigor::Type::Union) ? type.members : [type]
+        end
+
+        it "seeds `@flag ||= true` alongside the initialize write so `unless @flag` stays live" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @flag = false
+                @depth = 0
+              end
+              def mark
+                @flag ||= true if @depth.zero?
+              end
+            end
+          RUBY
+          values = seed_members(program, "C", :@flag).grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include(true, false, nil)
+        end
+
+        it "seeds a `||=`-only ivar as the rvalue union nil — the memo idiom's pre-write state" do
+          program = parse(<<~RUBY)
+            class C
+              def memo
+                @m ||= []
+              end
+            end
+          RUBY
+          members = seed_members(program, "C", :@m)
+          expect(members.grep(Rigor::Type::Constant).map(&:value)).to include(nil)
+          expect(members.any?(Rigor::Type::Tuple)).to be(true)
+        end
+
+        it "skips `@x ||= <falsey literal>` — the write can only leave the ivar falsey" do
+          program = parse(<<~RUBY)
+            class C
+              def configure
+                @x ||= false
+                @y ||= nil
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          expect(idx[program].class_ivars_for("C")).not_to have_key(:@x)
+          expect(idx[program].class_ivars_for("C")).not_to have_key(:@y)
+        end
+
+        it "seeds `@x &&= v` as the rvalue — the write only runs on an already-truthy ivar" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @token = "init"
+              end
+              def refresh
+                @token &&= "refreshed"
+              end
+            end
+          RUBY
+          values = seed_members(program, "C", :@token).grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include("init", "refreshed")
+        end
+
+        it "seeds `@x += v` as the widened dispatch result, not a pinned literal" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @depth = 0
+              end
+              def enter
+                @depth += 1
+              end
+            end
+          RUBY
+          members = seed_members(program, "C", :@depth)
+          # `Constant[0] + Constant[1]` would fold to `Constant[1]`; the seed must carry the
+          # widened `Integer`, not pin the ivar to a literal.
+          expect(members.any? do |m|
+            m.is_a?(Rigor::Type::Nominal) && m.class_name == "Integer"
+          end).to be(true)
+        end
+
+        it "falls back to the widened rvalue when `op=` is the only write" do
+          program = parse(<<~RUBY)
+            class C
+              def enter
+                @depth += 1
+              end
+            end
+          RUBY
+          type = described_class.index(program, default_scope: default_scope)[program]
+                                .class_ivars_for("C")[:@depth]
+          expect(type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+        end
+      end
+
       describe "transient `@x = nil` dead-write elimination (C2)" do
         it "drops the transient nil when a later unconditional write overwrites it" do
           program = parse(<<~RUBY)

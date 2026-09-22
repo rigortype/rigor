@@ -1067,10 +1067,13 @@ module Rigor
                              mutated_ivars = nil, dead_writes = nil)
         return unless node.is_a?(Prism::Node)
 
-        if node.is_a?(Prism::InstanceVariableWriteNode) &&
-           !(dead_writes && dead_writes.include?(node.object_id))
-          record_ivar_write(node, scope, class_name, accumulator,
-                            guarded: guarded_ivars.include?(node.name))
+        if node.is_a?(Prism::InstanceVariableWriteNode)
+          unless dead_writes&.include?(node.object_id)
+            record_ivar_write(node, scope, class_name, accumulator,
+                              guarded: guarded_ivars.include?(node.name))
+          end
+        else
+          record_compound_ivar_write(node, scope, class_name, accumulator)
         end
 
         # N1 — parallel / multiple assignment (`old, @cb = @cb, block`, `@i, @o, @e, @thr = Open3.popen3(cmd)`). A
@@ -1650,6 +1653,68 @@ module Rigor
 
         rvalue_type = Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)) if guarded
         accumulate_ivar_type(accumulator, class_name, node.name, rvalue_type)
+      end
+
+      # #1175 — compound writes. ADR-58 § WD5 deferred seeding `||=` with a reopen clause ("a corpus
+      # surfaces a memo-read shape the `union(v, nil)` seed provably improves"); Rigor's own
+      # `unit_scan.rb` is that shape: `@dispatch_top_level ||= true` went unrecorded, so the ivar
+      # kept `Constant[false]` and `unless @dispatch_top_level` folded always-falsey.
+      def record_compound_ivar_write(node, scope, class_name, accumulator)
+        case node
+        when Prism::InstanceVariableOrWriteNode
+          record_ivar_or_write(node, scope, class_name, accumulator)
+        when Prism::InstanceVariableAndWriteNode
+          record_ivar_and_write(node, scope, class_name, accumulator)
+        when Prism::InstanceVariableOperatorWriteNode
+          record_ivar_operator_write(node, scope, class_name, accumulator)
+        end
+      end
+
+      # `@x ||= v` — the memo idiom. The stored value is the old truthy value or `v`, so the rvalue
+      # alone would be an honest contribution; the `nil` member stands in for the read-before-write
+      # state — a `||=`-only ivar is `nil` until the first call runs the write. (That same union is
+      # what the `guarded` flag adds to a plain write, and for the same reason: the flow-insensitive
+      # seed has to know the predicate does not fold.) A falsey literal rvalue is skipped outright —
+      # `@x ||= false` can only leave `@x` falsey, the same "no useful precision" call the guarded
+      # `@x = nil unless @x` skip makes.
+      def record_ivar_or_write(node, scope, class_name, accumulator)
+        rvalue_type = scope.type_of(node.value)
+        return if falsey_constant?(rvalue_type)
+
+        accumulate_ivar_type(accumulator, class_name, node.name,
+                             Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)))
+      end
+
+      # `@x &&= v` writes only when `@x` already holds a truthy value — the ivar was made truthy by an
+      # earlier write, so the rvalue is the contribution; no `nil` member (unlike `||=`, the write
+      # cannot be the first thing to give the ivar a value, and a spurious nil here would fire
+      # possible-nil at reads the pre-existing writes already typed).
+      def record_ivar_and_write(node, scope, class_name, accumulator)
+        accumulate_ivar_type(accumulator, class_name, node.name, scope.type_of(node.value))
+      end
+
+      # `@x op= v` stores `@x op v`. The receiver for the dispatch is the accumulator's current union
+      # for the ivar — an over-approximation of the live value, which is the right direction for a
+      # seed — widened off its value-pinned members first, or `Constant[0] + Constant[1]` would fold
+      # to a `Constant[1]` that pins the ivar to one literal. The result is widened for the same
+      # reason. When nothing else has written the ivar the receiver reads as `nil` — `nil + v` raises
+      # at runtime, so the seed is unconstrained there — or the dispatch fails (`bool + 1`); either
+      # way the fallback is the widened rvalue, which is the right answer for the dominant `+=` /
+      # `-=` / `|=` families and an under-report elsewhere rather than a folded wrong claim.
+      def record_ivar_operator_write(node, scope, class_name, accumulator)
+        rvalue_type = scope.type_of(node.value)
+        current = accumulator.dig(class_name, node.name)
+        result =
+          if current
+            MethodDispatcher.dispatch(
+              receiver_type: Type::Combinator.widen_value_pinned(current),
+              method_name: node.binary_operator.to_sym,
+              arg_types: [rvalue_type],
+              environment: scope.environment
+            )
+          end
+        result = Type::Combinator.widen_value_pinned(result || rvalue_type)
+        accumulate_ivar_type(accumulator, class_name, node.name, result)
       end
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and

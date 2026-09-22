@@ -138,6 +138,52 @@ RSpec.describe "a discovered class resolves calls into an included RBS module (#
         end
       RUBY
     end
+
+    # A nearer module whose declaration arrives through its OWN RBS `include`: `Pair → B → N → A`,
+    # so `N#probe` runs and A's declaration must not be adopted. `ExternalAncestorResolution`
+    # `defined_in`-checks each candidate against its own ancestor list — the module case needed
+    # that check to look past the `Object` cut-off, which a module's ancestry never reaches.
+    it "resolves through the nearer module's own RBS include chain" do
+      sig = { "mods.rbs" => <<~RBS }
+        module N
+          def probe: () -> Integer
+        end
+        module B
+          include N
+        end
+        module A
+          def probe: () -> String
+        end
+      RBS
+      expect(dumps(<<~RUBY, sig: sig)).to eq(["Integer"])
+        class Pair
+          include A
+          include B
+
+          def go = dump_type(probe)
+        end
+      RUBY
+    end
+
+    # The single-include variant of the same shape: `B` declares nothing itself but its RBS
+    # `include N` does, and N's declaration is unambiguously the method that runs.
+    it "resolves a method the included module itself inherits in RBS" do
+      sig = { "mods.rbs" => <<~RBS }
+        module N
+          def probe: () -> Integer
+        end
+        module B
+          include N
+        end
+      RBS
+      expect(dumps(<<~RUBY, sig: sig)).to eq(["Integer"])
+        class Pair
+          include B
+
+          def go = dump_type(probe)
+        end
+      RUBY
+    end
   end
 
   describe "the declines" do

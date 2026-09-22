@@ -136,8 +136,12 @@ module Rigor
       def compute(class_name, method_name, scope, environment, name_memo, record_dependencies, mixins)
         kind = :instance
         own = method_definition(class_name, method_name, kind, scope: scope, environment: environment)
-        if declared_before_object?(own, class_name, scope: scope, environment: environment)
-          return [own, class_name.to_s].freeze
+        if own
+          own_ancestors = instance_ancestor_names(class_name, scope: scope, environment: environment)
+          if declared_before_object?(own, class_name, scope: scope, environment: environment) ||
+             owned_within_candidate_chain?(own, own_ancestors)
+            return [own, class_name.to_s].freeze
+          end
         end
 
         groups = ancestor_candidate_groups(scope, class_name, name_memo, record_dependencies, mixins)
@@ -154,16 +158,40 @@ module Rigor
       # ends this group rather than falling through to a less-qualified spelling of the same name.
       def first_known_candidate_answer(candidates, method_name, kind, scope, environment)
         candidates.each do |candidate|
-          next if instance_ancestor_names(candidate, scope: scope, environment: environment).empty?
+          ancestors = instance_ancestor_names(candidate, scope: scope, environment: environment)
+          next if ancestors.empty?
 
-          definition = method_definition(candidate, method_name, kind, scope: scope, environment: environment)
-          return nil unless declared_before_object?(definition, candidate, scope: scope, environment: environment)
+          definition = method_definition(candidate, method_name, kind, scope: scope,
+                                                                       environment: environment)
+          return nil unless declared_before_object?(definition, candidate,
+                                                    scope: scope, environment: environment) ||
+                            owned_within_candidate_chain?(definition, ancestors)
 
           return [definition, candidate].freeze
         end
         nil
       end
       private_class_method :first_known_candidate_answer
+
+      # The module-candidate half of the answering test (#1173 review). A module's RBS ancestry is
+      # `[itself, its own includes…]` and never reaches `Object`, so {declared_before_object?} — whose
+      # cut-off exists to keep an Object- / Kernel-owned declaration from outranking a top-level `def`
+      # — always answers false for it: the cut-off has nothing to cut. What decides instead is that
+      # the declaration came from the candidate's OWN chain: when the candidate sits in the receiver's
+      # MRO, Ruby dispatches the name through exactly those ancestors, so a `defined_in` anywhere in
+      # the list is the method that runs. Without this, a nearer RBS module that inherits the name
+      # from its own RBS `include` read as a dead group and a FARTHER ancestor's declaration was
+      # adopted in its place — `class C; include A; include B` where `B`'s RBS includes `N` answering
+      # A's declaration rather than N's. The gate keeps the Object cut-off's reach: a chain that DOES
+      # contain `Object` (every ordinary class candidate) is untouched.
+      def owned_within_candidate_chain?(definition, ancestors)
+        return false if ancestors.include?(OBJECT_OWNER)
+        return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+        owner = definition.defined_in
+        !owner.nil? && ancestors.include?(owner.to_s.delete_prefix("::"))
+      end
+      private_class_method :owned_within_candidate_chain?
 
       # The walk, with its ADR-46 reads attached or detached. `withhold` returns `[result, read_set]`
       # and the read set is dropped: a caller that suppresses is saying these reads are not a dependency

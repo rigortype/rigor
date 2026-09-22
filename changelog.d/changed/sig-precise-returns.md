@@ -1,0 +1,1 @@
+- **[testing]** `Rigor::Testing.dump_type` / `assert_type` (and the `Rigor.` delegates) now declare a generic `[A] (…, A value) -> A` return instead of `-> untyped`, so a probed value keeps its type when the helper's result is read again rather than widening to `Dynamic[top]`. [#1171](https://github.com/rigortype/rigor/pull/1171)

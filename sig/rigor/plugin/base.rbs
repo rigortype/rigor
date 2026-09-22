@@ -72,7 +72,9 @@ class Rigor::Plugin::Base
   def run_disclosure_records: () -> Array[untyped]
   def manifest: () -> Rigor::Plugin::Manifest
   def signature_paths: () -> Array[String]
-  def protocol_contracts: () -> untyped
+  # Defaults to `manifest.protocol_contracts`; a plugin MAY override to fold per-project config in,
+  # but the contract (an Array of ProtocolContract) holds either way.
+  def protocol_contracts: () -> Array[Rigor::Plugin::ProtocolContract]
   def io_boundary: () -> Rigor::Plugin::IoBoundary
   def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> Proc
   def plugin_entry: () -> untyped

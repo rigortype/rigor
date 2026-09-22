@@ -21,4 +21,11 @@ class Rigor::Plugin::Registry
   # residue like the `rbs_complete_ancestors` sibling rather than a #1154 row); the element type is
   # `AdditionalInitializer`, enforced per manifest by `validate_additional_initializers!`.
   attr_reader additional_initializers: Array[Rigor::Plugin::AdditionalInitializer]
+
+  # Newly declared — same unmarked-residue shape as `additional_initializers` (a
+  # `compile_aggregates` flat_map ivar, not an initialize-parameter read).
+  attr_reader protocol_contracts: Array[Rigor::Plugin::ProtocolContract]
+
+  # The subset of `protocol_contracts` whose `path_glob` matches `path` (memoised per path).
+  def contracts_for_path: (untyped path) -> Array[Rigor::Plugin::ProtocolContract]
 end

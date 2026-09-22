@@ -248,9 +248,8 @@ What remains is genuinely Class B: `Runner#effect_table` / `#effect_collection` 
 `#effect_plugin_facts` / `#effect_collections_by_path` / `#prepare_project_scan` wait on `Effects::*`
 and `Analysis::ProjectScan` coverage; `Manifest#block_as_methods` / `#heredoc_templates` /
 `#nested_class_templates` / `#trait_registries` on `Plugin::Macro::*`; `#hkt_registrations` /
-`#hkt_definitions` on `Inference::HktRegistry::*`; `#protocol_contracts` (and
-`Plugin::Base#protocol_contracts`) on `Plugin::ProtocolContract`;
-`CheckRules.node_collector_driver` on
+`#hkt_definitions` on `Inference::HktRegistry::*` (`#protocol_contracts` landed — see the fourth
+sweep); `CheckRules.node_collector_driver` on
 `RuleWalk::CollectorDriver`; `Environment#reflection` and the
 three `*_reporter` readers on `Environment::Reflection` and the reporter duck types; and
 `RbsExtended.read_flow_contribution` / `read_effect_envelope` on `Effects::Envelope`. Class D from
@@ -285,6 +284,39 @@ the `alias eql? ==` row — sig-gen has no alias synthesis, so it sits unmarked 
 pin of one. `Manifest#initialize`'s `additional_initializers:` kwarg names the element type its
 validator enforces.
 
+## Fourth sweep: `Plugin::ProtocolContract`
+
+`ProtocolContract` is the ADR-28 value object behind the manifest's `protocol_contracts` field: a
+validated, frozen record (`path_glob`, `method_name`, `singleton`, `param_types`,
+`return_type_name`, `severity`) plus a `ParamType = Data.define(:index, :type_name)` member class.
+Declaring it unblocked `Manifest#protocol_contracts` (and its `initialize` kwarg),
+`Plugin::Base#protocol_contracts`, and two previously-undeclared `Registry` readers —
+`protocol_contracts` and `contracts_for_path`.
+
+The provenance split, per the auditor:
+
+- `ParamType` member readers and both constructors are marked under [#1150] — the `Data.define`
+  member gap (`coerce_param_type` proves `index` a non-negative Integer and `type_name` a
+  non-empty String). #1183 does *not* apply here: it covers `Struct.new` members, not `Data`.
+- The five `attr_reader`s over `initialize`-parameter ivars carry [#1154] markers — each is
+  normalized before storage (`dup.freeze`, `to_sym`, `coerce_param_types`), so the stored types are
+  hand-written. `severity` is declared as the literal union `:error | :warning | :info` that
+  `VALID_SEVERITIES` bounds it to. `singleton` needed no marker: sig-gen already infers
+  `false | true` from the `singleton ? true : false` collapse.
+- `initialize` accepts the documented coercion surface (`Symbol | String` for `method_name` and
+  `severity`, `ParamType | Hash` entries for `param_types`) and returns `void`;
+  `with_path_glob`, `==`, and `hash` are generated-equivalent.
+- Two unmarked residue rows: `to_h` is declared `Hash[String, untyped]` — sig-gen infers a
+  string-literal-seeded union (`"error" | "info" | "warning" | …`), and the looser declaration
+  matches the manifest's `to_h` convention; `eql?` is another no-shape alias row, same as
+  `AdditionalInitializer`. New file pin: 2.
+- `Registry#protocol_contracts` / `#contracts_for_path` are newly declared, both unmarked residue
+  for the same reason as `additional_initializers` — the ivar comes from `compile_aggregates`'
+  `flat_map`, and `contracts_for_path` is declared-divergent on the `path.nil?` early return.
+- `Plugin::Base#protocol_contracts` turned out `generated`: sig-gen already inferred
+  `Array[ProtocolContract]` through `manifest.protocol_contracts` once the element class was
+  declared.
+
 ## Two incidental findings
 
 Recorded here so the next sweep does not rediscover them:
@@ -303,4 +335,6 @@ Recorded here so the next sweep does not rediscover them:
   forms and CI self-check now runs with `--fail-on=warning`.
 
 [#392]: https://github.com/rigortype/rigor/issues/392
+[#1150]: https://github.com/rigortype/rigor/issues/1150
+[#1154]: https://github.com/rigortype/rigor/issues/1154
 [#1183]: https://github.com/rigortype/rigor/issues/1183

@@ -22,3 +22,4 @@
 - 1156  # sig-gen pins an ivar seed literal in a record assembled after the ivars are written
 - 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`
 - 1167  # sig-gen skips a predicate whose body reads an attribute off its untyped node parameter (Dynamic receiver)
+- 1183  # sig-gen emits Struct.new member readers/writers (and the keyword_init ctor) untyped

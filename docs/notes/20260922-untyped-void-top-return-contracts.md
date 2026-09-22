@@ -250,8 +250,8 @@ and `Analysis::ProjectScan` coverage; `Manifest#block_as_methods` / `#heredoc_te
 `#nested_class_templates` / `#trait_registries` on `Plugin::Macro::*`; `#hkt_registrations` /
 `#hkt_definitions` on `Inference::HktRegistry::*`; `#protocol_contracts` (and
 `Plugin::Base#protocol_contracts`) on `Plugin::ProtocolContract`; `#additional_initializers` on
-`Plugin::AdditionalInitializer`; `Analysis::Baseline#audit` on `Baseline::DriftRow`;
-`CheckRules.node_collector_driver` on `RuleWalk::CollectorDriver`; `Environment#reflection` and the
+`Plugin::AdditionalInitializer`; `CheckRules.node_collector_driver` on
+`RuleWalk::CollectorDriver`; `Environment#reflection` and the
 three `*_reporter` readers on `Environment::Reflection` and the reporter duck types; and
 `RbsExtended.read_flow_contribution` / `read_effect_envelope` on `Effects::Envelope`. Class D from
 the first sweep is unchanged — `RbsCacheProducer.fetch` is additionally subclass-polymorphic, so its
@@ -259,6 +259,20 @@ the first sweep is unchanged — `RbsCacheProducer.fetch` is additionally subcla
 joined it on review: the constructor only requires `respond_to?(:call)` and ADR-32 WD6/WD12 give the
 outcome a multi-shape contract (`String` / nil / `[:error, msg]` / `[:ok, src, msgs]`), so a
 `^(String) -> String?` declaration would have copied WD4's stale comment, not the real contract.
+
+## Third sweep: the first Class B landing
+
+`Analysis::Baseline` is the smallest unsigned namespace, so it went first. `Bucket` and `DriftRow`
+— the first `Struct.new` classes declared in `sig/` — carry typed member rows
+(`file`/`rule`/`message_regex`/`count`, `bucket`/`actual_count`/`status`, plus `delta`), which
+unblocked `Baseline#audit → Array[DriftRow]`, `attr_reader buckets → Array[Bucket]`, and the
+`initialize`/`without` parameters. `filter`'s declared `[Array[untyped], Integer]` stays
+`declared_divergent` residue: sig-gen infers `[Array[untyped], untyped] | [untyped, 0]` and the
+`Integer` count is author intent over a literal-seeded local. The `diagnostics` parameters stay
+`untyped` — `Analysis::Diagnostic`'s own sig is partial (no `qualified_rule` member), so a tighter
+param would hide `diag.qualified_rule` behind an unsigned member. All member rows are marked under
+[#1183] — sig-gen emits the Struct skeleton with `untyped` members, the `Struct` analogue of
+#1150's `Data.define` gap — and `buckets` under #1154.
 
 ## Two incidental findings
 
@@ -278,3 +292,4 @@ Recorded here so the next sweep does not rediscover them:
   forms and CI self-check now runs with `--fail-on=warning`.
 
 [#392]: https://github.com/rigortype/rigor/issues/392
+[#1183]: https://github.com/rigortype/rigor/issues/1183

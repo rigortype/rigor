@@ -163,7 +163,10 @@ SIG_PROVENANCE_LISTING_CAP = 200
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   "sig/rigor.rbs" => 50,
-  "sig/rigor/analysis/baseline.rbs" => 5,
+  # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
+  # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
+  # `[Array[untyped], Integer]` divergence as the sole unmarked row.
+  "sig/rigor/analysis/baseline.rbs" => 1,
   "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 1,
   "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 1,
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,

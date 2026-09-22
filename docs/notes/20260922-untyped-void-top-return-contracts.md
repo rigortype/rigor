@@ -224,6 +224,42 @@ every call site in the repo, so nothing downstream would tighten. `untyped` is t
   option for a return the author expects the caller to inspect; until it exists, `top` in a return
   position is theory without teeth.
 
+## Second sweep (2026-09-23)
+
+A pass over the residue left after the Class A landing found the split inside class B/C was
+coarser than reality: a reader whose contract is `Array[String]` does not need new `sig/` coverage
+at all — `String` is core — and only readers whose *element classes* are unsigned are genuinely
+blocked. The second batch tightens the ones that clear that bar:
+
+| Declaration | Now |
+| --- | --- |
+| `Environment#hkt_scan_failure` | `[String, String, String?, Symbol]?` (the tuple the comment documented) |
+| `Inference::Narrowing.analyse` | `[Scope, Scope]?` |
+| `Plugin::Loader.load` / `.load` | `Registry` (and the previously-undeclared `feature_resolver:` kwarg) |
+| `Manifest#produces` | `Array[Symbol]` (the reader, not the validator's input: `initialize` maps `to_sym`) |
+| `Manifest#owns_receivers` / `#open_receivers` / `#rbs_complete_ancestors` / `#signature_paths` | `Array[String]` (stored post-`to_s`) |
+| `Manifest#type_node_resolvers` | `Array[Plugin::TypeNodeResolver]` |
+| `Runner#effect_sources` | `Hash[String, Array[String]]` |
+| `Runner#return_summaries` | `Hash[[String, String], Hash[Symbol, untyped]]` |
+| `Runner#param_inferred_types` / `#collect_param_inference_table` | `Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]` |
+| `Runner#evaluate_return_types` | `Hash[[String, Symbol, bool], Array[String?]]` |
+
+What remains is genuinely Class B: `Runner#effect_table` / `#effect_collection` /
+`#effect_plugin_facts` / `#effect_collections_by_path` / `#prepare_project_scan` wait on `Effects::*`
+and `Analysis::ProjectScan` coverage; `Manifest#block_as_methods` / `#heredoc_templates` /
+`#nested_class_templates` / `#trait_registries` on `Plugin::Macro::*`; `#hkt_registrations` /
+`#hkt_definitions` on `Inference::HktRegistry::*`; `#protocol_contracts` (and
+`Plugin::Base#protocol_contracts`) on `Plugin::ProtocolContract`; `#additional_initializers` on
+`Plugin::AdditionalInitializer`; `Analysis::Baseline#audit` on `Baseline::DriftRow`;
+`CheckRules.node_collector_driver` on `RuleWalk::CollectorDriver`; `Environment#reflection` and the
+three `*_reporter` readers on `Environment::Reflection` and the reporter duck types; and
+`RbsExtended.read_flow_contribution` / `read_effect_envelope` on `Effects::Envelope`. Class D from
+the first sweep is unchanged — `RbsCacheProducer.fetch` is additionally subclass-polymorphic, so its
+`untyped` is honest for the same reason `read_fact`'s is, and `Manifest#source_rbs_synthesizer`
+joined it on review: the constructor only requires `respond_to?(:call)` and ADR-32 WD6/WD12 give the
+outcome a multi-shape contract (`String` / nil / `[:error, msg]` / `[:ok, src, msgs]`), so a
+`^(String) -> String?` declaration would have copied WD4's stale comment, not the real contract.
+
 ## Two incidental findings
 
 Recorded here so the next sweep does not rediscover them:
@@ -231,11 +267,13 @@ Recorded here so the next sweep does not rediscover them:
 - `sig/rigor/sig_gen/skip_reason_catalog.rbs` references `::Rigor::SigGen` without a declaration;
   `rbs validate` over `sig/` and `make steep-check` both fail on it at `master`. The Rigor loader
   quarantines it, so the self-check stays green.
-- `flow.always-truthy-condition` fires at `lib/rigor/effects/unit_scan.rb:560` on clean `master`.
-  It is **not** local-only: CI Self-check logs show the same warning, but those jobs run
-  `rigor check --format json lib` without the Makefile's `--fail-on=warning`, so warnings do not
-  fail CI. Root cause: `gather_ivar_writes` does not seed compound ivar writes (`@x ||= v`), so
-  `@dispatch_top_level` is inferred as `Constant[false]` — the `||=` seeding shape ADR-58 § WD5
-  deferred. Tracked in the deferred-work issue; fix deferred pending the ADR-58 reopen corpus gate.
+- `flow.always-truthy-condition` fired at `lib/rigor/effects/unit_scan.rb:560` on clean `master` —
+  visible in CI Self-check logs too, but those jobs ran `rigor check --format json lib` without the
+  Makefile's `--fail-on=warning`, so the warning never failed CI. Root cause was
+  `gather_ivar_writes` not seeding compound ivar writes (`@x ||= v`), so `@dispatch_top_level` stayed
+  `Constant[false]` — the `||=` seeding shape ADR-58 § WD5 deferred. Resolved by
+  [#1179](https://github.com/rigortype/rigor/pull/1179) (closing
+  [#1175](https://github.com/rigortype/rigor/issues/1175)): the pre-pass seeds all three compound
+  forms and CI self-check now runs with `--fail-on=warning`.
 
 [#392]: https://github.com/rigortype/rigor/issues/392

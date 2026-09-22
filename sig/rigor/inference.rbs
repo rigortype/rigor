@@ -113,7 +113,7 @@ module Rigor
       def self?.value_pattern_certainty: (Type::t subject_type, untyped pattern_value) -> (:yes | :no | :maybe)
       def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
       def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]
-      def self?.analyse: (untyped node, Scope scope) -> untyped
+      def self?.analyse: (untyped node, Scope scope) -> [Scope, Scope]?
       def self?.subclass_of?: (String rigor_class_name, String target_class_name, untyped context) -> bool
       def self?.class_ordering: (String lhs, String rhs, untyped context) -> Symbol
       def self?.trusted_equality_literal?: (untyped literal) -> bool

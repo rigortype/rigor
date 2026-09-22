@@ -136,23 +136,27 @@ module Rigor
       # (`spec/rigor/public_api_drift_spec.rb`), and a named reference would raise `RBS::UnknownTypeName`.
       def effect_table: () -> untyped
       def effect_collection: () -> untyped
-      # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against. Same
-      # `untyped` reasoning as its two siblings above.
-      def effect_sources: () -> untyped
+      # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against.
+      def effect_sources: () -> Hash[String, Array[String]]
       # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's
       # vocabulary is the one the collection window scanned under. Same `untyped` reasoning again.
       def effect_plugin_facts: () -> untyped
       # The incremental session's read surface (ADR-46 / ADR-67 / ADR-103) — `IncrementalSession`
-      # drives a live Runner through these between rechecks. Typed `untyped` like the cache / effects
-      # readers above until their namespaces are sig-covered.
+      # drives a live Runner through these between rechecks. The core-shaped tables carry their real
+      # key/value types; the `Effects::`-valued readers stay `untyped` until that namespace is
+      # sig-covered.
       # sig-gen gap: #1008 — `result` is populated by `collect_return_summaries` mutating it by
       # reference from a sibling method; sig-gen folds only the `{}` seed and the empty-memo early
       # return, so it proposes the seed shape instead of the honest, usually-non-empty contract.
-      def return_summaries: () -> untyped
-      def param_inferred_types: () -> untyped
+      # Keys are `[path, "Class#method"]` pairs; values are `{ keys:, returns:, effects: }` bundles.
+      def return_summaries: () -> Hash[[String, String], Hash[Symbol, untyped]]
+      # ADR-67 — `[class_name, method_name, kind] => { param_name => Type }`.
+      def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
       def effect_collections_by_path: () -> untyped
-      def collect_param_inference_table: (untyped files) -> untyped
-      def evaluate_return_types: (untyped paths, untyped specs) -> untyped
+      def collect_param_inference_table: (untyped files) -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
+      # `{ class_name:, method_name:, singleton: }` spec triple => the per-key return descriptors
+      # (`describe(:short)` strings; nil for a missing/bodyless def).
+      def evaluate_return_types: (untyped paths, untyped specs) -> Hash[[String, Symbol, bool], Array[String?]]
     end
   end
 

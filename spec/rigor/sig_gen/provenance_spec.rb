@@ -178,7 +178,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
   "sig/rigor/cli/type_scan_command.rbs" => 1,
   "sig/rigor/environment.rbs" => 39,
-  "sig/rigor/inference.rbs" => 86,
+  "sig/rigor/inference.rbs" => 85,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -189,7 +189,7 @@ SIG_PROVENANCE_RESIDUE = {
   # caller, so sig-gen generates what the two hand-written declarations say.
   "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
-  "sig/rigor/plugin/loader.rbs" => 4,
+  "sig/rigor/plugin/loader.rbs" => 2,
   "sig/rigor/plugin/manifest.rbs" => 23,
   "sig/rigor/plugin/registry.rbs" => 9,
   "sig/rigor/rbs_extended.rbs" => 23,

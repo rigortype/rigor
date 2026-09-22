@@ -1,0 +1,26 @@
+module Rigor
+  module Effects
+    # The effect-label grammar and segment-aware prefix subsumption (ADR-103 WD1). Every predicate is
+    # total — a malformed input is answered, never raised on — so the parameters are `untyped` on
+    # purpose.
+    module Label
+      PATTERN: Regexp
+
+      def self?.valid?: (untyped str) -> bool
+
+      # `[]` for a malformed label, the segments otherwise.
+      def self?.segments: (untyped label) -> Array[String]
+
+      def self?.subsumes?: (untyped bound, untyped label) -> bool
+
+      # One segment shallower; nil for a root and for a malformed label.
+      def self?.parent: (untyped label) -> String?
+
+      # Proper ancestors, outermost first; `[]` for a root and for a malformed label.
+      def self?.ancestors: (untyped label) -> Array[String]
+
+      # The outermost segment; nil for a malformed label.
+      def self?.root: (untyped label) -> String?
+    end
+  end
+end

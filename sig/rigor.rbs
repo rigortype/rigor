@@ -136,6 +136,10 @@ module Rigor
       # (`spec/rigor/public_api_drift_spec.rb`), and a named reference would raise `RBS::UnknownTypeName`.
       def effect_table: () -> untyped
       def effect_collection: () -> untyped
+      # Newly declared — the public reader was absent from the sig. ADR-103 WD9 (#391): the resolved
+      # envelope index `rigor sig-gen`'s annotation emission consults, built on demand so a warm-cache
+      # run still serves the same strata.
+      def effect_envelopes: () -> Effects::EnvelopeIndex
       # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against.
       def effect_sources: () -> Hash[String, Array[String]]
       # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's

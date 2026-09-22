@@ -1,0 +1,97 @@
+module Rigor
+  module Effects
+    # An author-declared upper bound on one method's effect labels (ADR-103 WD1). A `Data` record —
+    # see lib/rigor/effects/envelope.rb for the member semantics.
+    class Envelope < ::Data
+      # {#source} for a bound written in `.rigor.yml` rather than on a declaration.
+      CONFIG_SOURCE: :config_envelope
+
+      # sig-gen gap: #1150 — `Data.define` member reads carry no type; `build` proves each of these.
+      def owner_key: () -> String
+
+      # sig-gen gap: #1150 — as above; `LabelSet::TOP` means "no envelope" (the fail-open reading).
+      def bound: () -> LabelSet
+
+      # sig-gen gap: #1150 — as above; the four documented producers are the closed set.
+      def source: () -> (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope)
+
+      # sig-gen gap: #1150 — as above (`path:line`, the `.rigor.yml` key path, or nil).
+      def location: () -> String?
+
+      # sig-gen gap: #1150 — as above (the author's own annotation text, or nil).
+      def spelling: () -> String?
+
+      # sig-gen gap: #1150 — as above (sorted, de-duplicated by `build`; #384 reads them).
+      def unknown_labels: () -> Array[String]
+
+      # sig-gen gap: #1150 — as above (every token the tag listed, recognised or not).
+      def declared_labels: () -> Array[String]
+
+      # sig-gen gap: #1150 — as above; keyword form mirrors the member declarations.
+      def self.new: (
+        owner_key: String,
+        bound: LabelSet,
+        source: (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope),
+        location: String?,
+        spelling: String?,
+        unknown_labels: Array[String],
+        declared_labels: Array[String]
+      ) -> instance
+      | (
+        String owner_key,
+        LabelSet bound,
+        (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope) source,
+        String? location,
+        String? spelling,
+        Array[String] unknown_labels,
+        Array[String] declared_labels
+      ) -> instance
+
+      # sig-gen gap: #1150 — as above.
+      def self.[]: (
+        owner_key: String,
+        bound: LabelSet,
+        source: (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope),
+        location: String?,
+        spelling: String?,
+        unknown_labels: Array[String],
+        declared_labels: Array[String]
+      ) -> instance
+      | (
+        String owner_key,
+        LabelSet bound,
+        (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope) source,
+        String? location,
+        String? spelling,
+        Array[String] unknown_labels,
+        Array[String] declared_labels
+      ) -> instance
+
+      # Normalising constructor — sorts/dedupes `unknown_labels` and freezes `declared_labels`.
+      def self.build: (
+        owner_key: String,
+        bound: LabelSet,
+        source: (:pure_annotation | :effect_annotation | :class_annotation | :config_envelope),
+        ?location: String?,
+        ?spelling: String?,
+        ?unknown_labels: Array[String],
+        ?declared_labels: Array[String]
+      ) -> Envelope
+
+      # Whether this reads as ⊤ — no bound at all.
+      def top?: () -> bool
+
+      # `label` is `to_s`-compared through {LabelSet#admits?}; `mutate.local` always tolerates.
+      def tolerates?: (untyped label) -> bool
+
+      # The members of `label_set` this envelope does NOT admit, sorted.
+      def exceeded_by: (LabelSet label_set) -> Array[String]
+
+      # Whether the bound was written in `.rigor.yml`.
+      def config?: () -> bool
+
+      # The same bound on another method key — the class-level distribution seam.
+      def rebind: (String key) -> Envelope
+    end
+  end
+end

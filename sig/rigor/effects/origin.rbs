@@ -1,0 +1,50 @@
+module Rigor
+  module Effects
+    # Where one bundle of labels in a summary came from (ADR-103 WD14): a callee/construct `name`
+    # plus which `source` coloured it.
+    class Origin < ::Data
+      CONSTRUCT: :construct
+      CATALOGUE: :catalogue
+      ATTRIBUTION: :attribution
+      ENVELOPE: :envelope
+      PLUGIN: :plugin
+
+      # sig-gen gap: #1150 — `Data.define` member reads carry no type; every factory below proves
+      # `name` a `to_s`d String and `source` one of the five constants.
+      def name: () -> String
+
+      # sig-gen gap: #1150 — as above; the five source constants are the closed set.
+      def source: () -> (:construct | :catalogue | :attribution | :envelope | :plugin)
+
+      # sig-gen gap: #1150 — as above.
+      def self.new: (
+        name: String,
+        source: (:construct | :catalogue | :attribution | :envelope | :plugin)
+      ) -> instance
+      | (
+        String name,
+        (:construct | :catalogue | :attribution | :envelope | :plugin) source
+      ) -> instance
+
+      # sig-gen gap: #1150 — as above.
+      def self.[]: (
+        name: String,
+        source: (:construct | :catalogue | :attribution | :envelope | :plugin)
+      ) -> instance
+      | (
+        String name,
+        (:construct | :catalogue | :attribution | :envelope | :plugin) source
+      ) -> instance
+
+      # `name` is `to_s`d, so any object is acceptable — `untyped` is the honest parameter.
+      def self.construct: (untyped name) -> Origin
+      def self.catalogue: (untyped name) -> Origin
+      def self.attribution: (untyped name) -> Origin
+      def self.envelope: (untyped name) -> Origin
+      def self.plugin: (untyped name) -> Origin
+
+      # `"source:name"` — the rendering the report and the JSON payload key on.
+      def to_s: () -> String
+    end
+  end
+end

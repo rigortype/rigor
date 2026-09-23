@@ -35,7 +35,7 @@ The flow has six stages. The first four are mechanical; the last two are decisio
 
 ### Stage 0 — Run the scaffold script (recommended)
 
-`tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of stages 1–4 and 7. Run it once and the manual work that remains is just the per-class judgement calls — blocklist curation, fixture body, and the `[Unreleased]` bullet.
+`tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of stages 1–4 and 7. Run it once and the manual work that remains is just the per-class judgement calls — blocklist curation, fixture body, and the changelog fragment.
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command \
@@ -60,7 +60,7 @@ What you still do by hand (the script prints this checklist on exit):
 
 1. Read `data/builtins/ruby_core/<topic>.yml` and curate the blocklist in the loader file (Stage 5).
 2. Replace the placeholder `assert_type` lines in the fixture with the receiver-specific projections (Stage 7).
-3. Add a `[Unreleased]` bullet to `CHANGELOG.md` (Stage 9).
+3. Add a changelog fragment under `changelog.d/<section>/` (Stage 9).
 4. Run `make verify` and commit (Stage 8).
 
 Pass `--dry-run` to preview the planned edits without writing. Pass `--init-fn` / `--rbs` to override the defaults when the upstream layout differs (e.g. `Init_DateCore` instead of `Init_Date`, or a multi-class RBS).
@@ -198,7 +198,7 @@ Self-check on the project's own `lib` MUST stay clean. If your changes introduce
 
 ### Stage 9 — Document and changelog
 
-- Add a `### Added` entry to `CHANGELOG.md`'s `[Unreleased]` section describing the new topic in user-visible terms (which methods now fold, which refinements are now available through `RBS::Extended`).
+- Add a one-sentence fragment at `changelog.d/added/<branch-slug>.md` (`docs/agents/contribution-flow.md` § "Release Cadence") describing the new topic in user-visible terms (which methods now fold, which refinements are now available through `RBS::Extended`).
 - If the topic introduces a new refinement carrier or a new `RBS::Extended` directive, update `docs/type-specification/imported-built-in-types.md` and the matching ADR / spec doc.
 
 ## Decision Points (where the procedure is NOT mechanical)
@@ -255,22 +255,8 @@ Before declaring an import done:
 - [ ] `MethodDispatcher::ConstantFolding#catalog_for` routes the new receiver class.
 - [ ] At least one self-asserting fixture under `spec/integration/fixtures/`.
 - [ ] `make verify` and `bundle exec exe/rigor check lib exe bin` both clean.
-- [ ] `CHANGELOG.md` `[Unreleased]` records the user-visible additions.
+- [ ] A `changelog.d/` fragment records the user-visible additions.
 - [ ] If a new refinement / directive lands, the matching ADR / spec doc is updated.
-
-## Future Optimisation Surface
-
-The procedure above is correct but not yet optimal. Known optimisation candidates are tracked here so future passes have a single place to look. Items that landed in v0.0.4 (`Type::Refined`, the parameterised refinement parser, the `param:` / `assert:` directive routes, the predicate catalogue, the `each_with_index` Enumerable tier, the `tool/scaffold_builtin_catalog.rb` automation) have moved to `CHANGELOG.md`'s `[Unreleased]` section and out of this list.
-
-- **Composed predicate refinements** (e.g. `non-empty-lowercase-string` is already in via `Type::Intersection`). Further composites — `non-empty-hex-int-string`, locale-restricted variants — slot in as registry data plus per-`String` recognisers.
-- **C-body classifier upgrades.** Track indirect mutators (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so the blocklists shrink. Each new class import currently adds its own blocklist for the helpers the regex misses; long-term, the YAML's `:leaf` set should match a hand-curated set with high precision so blocklists become the exception.
-- **More Enumerable methods.** `#each_with_index` landed; `#each_with_object`, `#inject` / `#reduce` (memo-typed), `#group_by` / `#partition` (returning shaped containers), and IO line iteration are the natural follow-ups when a concrete slice needs them.
-- **Refinement negation in `assert:` / `predicate-if-*:`.** Refinement-form directives currently reject `~T` payloads. A future slice could land a difference-against-refinement algebra so `assert value is ~non-empty-string` means `Constant[""]`.
-- **Module imports** (`Comparable`, `Enumerable`). The scaffold script targets concrete classes today; modules need a slightly different topic shape (no `rb_c*` global, methods mixed into many classes). A `--module` mode or a sibling `tool/scaffold_builtin_module.rb` would close the gap.
-- **Cross-source consistency check.** A CI step that fails when the catalogue references a cfunc not present in any `c_index_paths` file or an RBS class not present in the matching `.rbs` would catch regressions when CRuby or RBS gem upgrades shift symbol names.
-- **Catalogue diff tooling.** A `make catalog-diff` that prints the (additions, removals, purity-changes) between two extractor runs so reviewers can audit a CRuby submodule bump in seconds.
-
-These are NOT prerequisites for landing a new class import; they are improvements that make the next import easier.
 
 ## RBS-overlay gotcha (cost a CI-only env collapse)
 

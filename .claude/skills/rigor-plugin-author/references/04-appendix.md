@@ -20,7 +20,7 @@ When authoring a Rails-side plugin (`rigor-rails-routes`, `rigor-actionpack`, `r
 - **Plugin source code never `require`s `rails` / `active_record` / `action_pack`.** It analyses Ruby source files, the same way the other examples do. Rigor stays decoupled from Rails.
 - **Per-plugin `demo/` directories are self-contained.** No shared Rails-app skeleton across plugins — each `demo/` is self-contained so it documents its plugin in isolation (and a third-party plugin copied out to its own repo carries its demo with it). Some duplication of Rails-shaped tree (e.g. `app/models/application_record.rb`) is accepted in exchange for that self-containment.
 - **Integration specs may exec real Rails to verify alignment.** Compare the plugin's parsed output against `rails routes -E` / `db:schema:dump` / similar real-Rails commands run against a small sample app in a tmpdir. The Rails sample app is a TEST-time tool, not a demo-time fixture.
-- **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](../../../../docs/design/20260508-rails-plugins-roadmap.md).** Tier 1 plugins are unblocked on the current API. Tier 2 needs the cross-plugin API ([ADR-9](../../../../docs/adr/9-cross-plugin-api.md)) and lands after that ships.
+- **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](../../../../docs/design/20260508-rails-plugins-roadmap.md).** Cross-plugin facts use the [ADR-9](../../../../docs/adr/9-cross-plugin-api.md) API below.
 
 ## Cross-plugin facts (ADR-9)
 
@@ -66,8 +66,8 @@ Read facts through `Plugin::Base#read_fact(plugin_id:, name:)` (ADR-60 WD4): it 
 
 When in doubt, read these in order:
 
-1. **[`plugins/README.md`](../../../../plugins/README.md)** — the production-plugin catalogue. Twenty-seven plugins targeting real gems / frameworks, with the cross-plugin fact-channel table (ADR-9) and the ADR-16 substrate-consumer table. Read this when placing a new production plugin alongside its peers (Rails ecosystem tier, dry-rb family, testing-and-matchers, …).
-2. **[`examples/README.md`](../../../../examples/README.md)** — the walkthrough catalogue. Five tutorial plugins over deliberately simplified virtual use cases (deprecations / lisp-eval / pattern / units / routes), one architectural surface per walkthrough. Read this to pick a structural template in Phase 2.
+1. **[`plugins/README.md`](../../../../plugins/README.md)** — the production-plugin catalogue of plugins targeting real gems / frameworks, with the cross-plugin fact-channel table (ADR-9) and the ADR-16 substrate-consumer table. Read this when placing a new production plugin alongside its peers (Rails ecosystem tier, dry-rb family, testing-and-matchers, …).
+2. **[`examples/README.md`](../../../../examples/README.md)** — the walkthrough catalogue: tutorial plugins over deliberately simplified virtual use cases, one architectural surface per walkthrough. Read this to pick a structural template in Phase 2.
 3. **[`docs/handbook/09-plugins.md`](../../../../docs/handbook/09-plugins.md)** — the user-facing one-pager. Names what plugins can and cannot do today.
 4. **[`docs/internal-spec/plugin.md`](../../../../docs/internal-spec/plugin.md)** — slice-1 normative surface (registration, manifest, services).
 5. **[`docs/internal-spec/plugin-trust.md`](../../../../docs/internal-spec/plugin-trust.md)** — slice-2 normative surface (`TrustPolicy`, `IoBoundary`).
@@ -87,9 +87,9 @@ Before declaring "the plugin is done":
 - [ ] Demo runs cleanly under `rigor check`; diagnostics match the README's "What the plugin recognises" section verbatim.
 - [ ] Integration spec at `spec/integration/plugins/<id>_plugin_spec.rb` (or `spec/integration/examples/<id>_plugin_spec.rb` for a walkthrough) passes; covers every diagnostic shape the plugin emits.
 - [ ] README follows the structure in Phase 7.
-- [ ] CHANGELOG entry under `## [Unreleased]` only.
+- [ ] Changelog fragment under `changelog.d/` (no direct `[Unreleased]` edit).
 - [ ] `make verify` clean.
 - [ ] `.rigor.yml` sets `cache.path: tmp/.rigor/cache` and the demo carries a `/tmp/`-only `.gitignore`.
 - [ ] `git status` shows no `.rigor/cache/` or `tmp/` directories.
-- [ ] One commit, message follows AGENTS.md style.
-- [ ] No `Rigor::VERSION` bump (per AGENTS.md § "Release Cadence").
+- [ ] One commit, message follows `docs/agents/contribution-flow.md` style.
+- [ ] No `Rigor::VERSION` bump (per `docs/agents/contribution-flow.md` § "Release Cadence").

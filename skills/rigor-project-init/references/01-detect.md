@@ -71,14 +71,13 @@ The directory should contain RBS gem subdirectories. Continue to
 Phase 2 — the collection will be auto-detected by Rigor at analysis
 time.
 
-**Note: RBS collision after install.** Some gems (e.g. `cgi`, `logger`,
-`base64`) were extracted from Ruby's stdlib into standalone gems from
-Ruby 3.3 onwards. When these appear in both `.gem_rbs_collection/` and
-Rigor's bundled stdlib, `rigor triage` may print a
-`RBS::DuplicatedDeclarationError`. If this happens, note the error and
-continue — plugin-based diagnostics are unaffected. File a Rigor issue
-at <https://github.com/rigortype/rigor/issues> so the engine can
-deduplicate stdlib gems from the collection automatically.
+**Note: RBS collision after install.** Rigor skips collection entries
+for gems it already loads from its bundled RBS — including gems
+extracted from Ruby's stdlib, such as `cgi` and `logger` — so the
+collection does not double-declare them. If `rigor triage` still prints
+an `RBS::DuplicatedDeclarationError`, note it and continue, and report
+it at <https://github.com/rigortype/rigor/issues> with the gem names the
+error mentions.
 
 ### Path scope
 
@@ -120,7 +119,7 @@ ActiveSupport monkey-patches the core classes (`3.days`,
 `rigor-activesupport-core-ext` bundle, every such call reports
 `call.undefined-method` — on a real Rails app this is the single
 largest diagnostic cluster (a measured Mastodon run: ~365 of 489
-diagnostics were exactly this). Phase 5's `rigor triage` flags it as
+diagnostics were exactly this). Phase 6's `rigor triage` flags it as
 hint `activesupport-core-ext`.
 
 `rigor-activesupport-core-ext` is a **plugin** (an RBS-bundle plugin

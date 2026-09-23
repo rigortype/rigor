@@ -39,10 +39,6 @@ header names). If `rigor` is not on `PATH`, this task needs it: run
 
 ## Phase 0 — When to use this skill
 
-Trigger when the user says "reduce the rigor baseline", "fix some
-baseline diagnostics", "what should I fix next in rigor?", or asks to
-work down the diagnostics a previous onboarding parenthesised.
-
 **Precondition: the project is in acknowledge mode.** This skill
 operates on a `.rigor-baseline.yml` that `.rigor.yml` /
 `.rigor.dist.yml` declares via `baseline:`. A strict-mode project

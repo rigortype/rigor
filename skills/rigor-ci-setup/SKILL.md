@@ -33,7 +33,6 @@ Rigor is installed:
 ```sh
 rigor skill --full rigor-ci-setup   # this skill's current workflow, in one call
 rigor docs ci                       # the manual's CI chapter — the actual templates
-rigor docs --list manual | grep ci-templates   # ready-to-copy template files
 ```
 
 If you already loaded this skill *via* `rigor skill` you have the current
@@ -63,7 +62,7 @@ these markers from the project root and let them drive the platform choice:
 | `bitbucket-pipelines.yml` / `azure-pipelines.yml` / `.drone.yml` | that platform (generic recipe) |
 | none of the above | no CI yet — **ask** the user which platform they use |
 
-Concretely (the agent has file tools — use them):
+Concretely:
 
 - List `.github/workflows/*.yml` and `.gitlab-ci.yml`. **If
   `.github/workflows/rigor.yml` already exists, read it** — this is an
@@ -110,10 +109,8 @@ this is the *decision*:
 ## Phase 2 — Apply the matching template
 
 Take the template for your (platform, surface) choice from `rigor docs ci`
-— or copy a ready file listed by `rigor docs --list manual | grep
-ci-templates` (GitHub annotations / SARIF / reviewdog, and GitLab). Copy it
-in, adjust nothing but the trigger unless asked, and pin the version next
-(Phase 3).
+(GitHub annotations / SARIF / reviewdog, and GitLab). Copy it in, adjust
+nothing but the trigger unless asked, and pin the version next (Phase 3).
 
 **reviewdog is platform-specific.** It reads Rigor's `checkstyle`
 (preferred — light, no code scanning) or `sarif`, but the `-reporter` must
@@ -144,14 +141,11 @@ The exact recipe (the `BUNDLE_GEMFILE` wiring, the Dependabot entry) is in
 - **Determinism.** Add `--no-cache` in CI if you want each run independent
   of any persisted `.rigor/cache`.
 - **Cache persistence (opposite trade).** When the Rigor job's runtime
-  matters, persist `.rigor/cache` with the CI's cache facility. Current
-  Rigor detects CI and validates the restored cache by content hash
-  automatically (`cache.validation: auto`); on versions before the
-  `auto` default, **also set `RIGOR_STRICT_VALIDATION=1` on the job** —
-  without it a fresh checkout's regenerated stat tuples make the plugin
-  watch-glob cache slots read as stale on every run. A self-hosted
-  runner that reuses its workspace opts back into the faster stat check
-  with `cache.validation: stat`. Snippets: `rigor docs ci`
+  matters, persist `.rigor/cache` with the CI's cache facility. Rigor
+  detects CI and validates the restored cache by content hash
+  automatically (`cache.validation: auto`). A self-hosted runner that
+  reuses its workspace opts back into the faster stat check with
+  `cache.validation: stat`. Snippets: `rigor docs ci`
   § "Persisting the analysis cache across runs".
 
 ## Verify
@@ -167,12 +161,12 @@ The exact recipe (the `BUNDLE_GEMFILE` wiring, the Dependabot entry) is in
 
 - Manual: `rigor`'s CI chapter — the authoritative templates, severity
   mapping, and pinning recipe, **offline and version-matched** with
-  `rigor docs ci` (ready files: `rigor docs --list manual | grep
-  ci-templates`). Web fallback, before Rigor is installed:
-  <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>.
-- [ADR-51](../../docs/adr/51-ci-diagnostic-output-formats.md)
+  `rigor docs ci`. Web fallback, before Rigor is installed:
+  <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>
+  (ready-to-copy files in `docs/manual/ci-templates/` beside it).
+- [ADR-51](https://github.com/rigortype/rigor/blob/master/docs/adr/51-ci-diagnostic-output-formats.md)
   — the output-format surface (the severity / identifier contract).
-- [ADR-27](../../docs/adr/27-tool-distribution-model.md)
+- [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)
   — why Rigor installs standalone and runs in its own job.
 - [reviewdog](https://github.com/reviewdog/reviewdog) /
   [action-setup](https://github.com/reviewdog/action-setup).

@@ -494,7 +494,7 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("\n---\nname: rigor-doctor\n")
       # The references are appended, each behind a labelled separator.
       expect(out).to include("references/01-checks.md")
-      expect(out).to include("# 01 — The four checks")
+      expect(out).to include("# 01 — The checks")
       # The separator names the shipping version so the reader can tell a stale vendored copy from the installed one.
       expect(out).to include("bundled with rigortype #{Rigor::VERSION}")
     end

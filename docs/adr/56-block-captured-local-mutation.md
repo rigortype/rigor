@@ -901,9 +901,9 @@ gradual arm.
 
 Three residues are recorded rather than fixed here. All are the same
 first-iteration pin reached through a binding this join does not own.
-The evidence still reads a captured local the body REBINDS at its
-pre-call binding (`total = 0; out = []; [1, 2].each { |x| total += x;
-out << total }` reads `Array[0]`), and slice A's rebind fixpoint reads
+The evidence read a captured local the body REBINDS at its pre-call
+binding (`total = 0; out = []; [1, 2].each { |x| total += x; out <<
+total }` read `Array[0]`; closed below), and slice A's rebind fixpoint reads
 a content-mutated capture at its pre-call contents (`last = nil; [1,
 2].each { |x| last = a.last; a << x }` leaves `last` at `0?` over `a =
 [0]`). And a collection the block changes only through a remover
@@ -921,6 +921,48 @@ though `maybe` can stay nil), WD2.11's rule meeting a case its
 reasoning did not cover; that is #1219, and the fixture's golden
 carries the flip comment.
 
+*(The first residue is closed, 2026-09-23.)* A store that reads a local
+the body rebinds is typed twice: once in the block-entry scope and once
+with that local at slice A's continuation binding, the pre-call value
+joined with every iteration's exit value. This is the move WD2.10 made
+for the per-element fold. The join takes each slot's union of the two
+(`StatementEvaluator#content_evidence_entries`), so `out` reads
+`Array[0 | Integer]`. `each_with_object_return` now runs after slice A
+in `eval_call`. Both seams read the binding from the scope slice A
+leaves, before any post-call narrowing, because a fact about the
+continuation is not a fact about each iteration.
+
+The block-entry typing stays in the union because a wider binding can
+type a store narrower. A call on a union drops a member the method is
+undefined on, but the same call on that member alone falls to
+`Dynamic[top]`. So wherever slice A's binding misses the value a store
+reads, the continuation typing alone folds a wrong constant where the
+block-entry typing was silent. With `state = nil` and `{ |s| state = s;
+out << state.length; state = :done }`, the continuation typing gives
+the store `4` under `nil | :done`, and the union keeps `4 |
+Dynamic[top]`. A `Dynamic` binding reaches the collection the same way
+when slice A floors the local itself (`s = s + x; parts << s`), and
+when the block is not proven non-escaping, so the local reads at the
+escaping-block floor.
+
+The binding covers only the value an iteration enters with and the one
+it leaves with, because a store is still typed at the block's entry and
+not at its own point in the body. These shapes stay pinned:
+
+- a read between two rebinds (`t = x; out << t; t = 0` reads `Array[0]`);
+- a block parameter or `;`-local that the body rebinds before a store
+  reads it (`|s| s += 1; out << s` reads the yielded element).
+
+A local that every iteration rebinds before the read keeps its dead
+pre-call arm: `flag = 0` then `{ flag = 1; seen << flag }` reads
+`Array[0 | 1]`. That is sound but imprecise. Under a `nil`
+pre-declaration an element call now reports
+`call.possible-nil-receiver`, where it used to report
+`call.undefined-method`. Typing each store at its own point in the body
+would close all of these. It would not close #1214: slice A drops the
+scope at `next`, so no binding holds a value that an iteration carries
+out only through `next`.
+
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
 captured reads, a parameter shadowing a mutated outer local, a nested
@@ -932,6 +974,13 @@ fire: the same counter storing a receiver-independent value, and `acc
 << 1` sharing a block with a self-reading store. The spec asserts the
 exact `flow.*` line set, so a seam that went gradual everywhere fails
 as loudly as the old pin did.
+The `block_content_rebound_capture` fixture gates the first residue's
+closure the same way. Its must-not-fire cases are the Array, Hash and
+`each_with_object` stores of a rebound local, the memo on an unproven
+receiver, and the read between two rebinds that the continuation typing
+alone would fold. It also asserts that a parameter still shadows the
+local it names, and pins the #1214 shape. Its control is a rebound local that only
+ever holds `0` or `1`, whose always-falsey must still fire.
 
 ### WD3 — One mechanism, shared
 

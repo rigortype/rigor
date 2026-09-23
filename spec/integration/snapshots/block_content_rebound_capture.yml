@@ -1,0 +1,23 @@
+---
+locals:
+  flag: 0 | 1
+  got: Array[1 | 2]
+  latest: Hash[:a | Symbol, 0 | Integer]
+  lengths: Array[4 | Dynamic[top]]
+  memo: Array[0 | Integer]
+  out: Array[0 | Integer]
+  run: Integer
+  seen: Array[0 | 1]
+  shadow: '"s"'
+  state: ":done?"
+  step: '0'
+  stepped: Array[0]
+  sum: Integer
+  total: Integer
+assertions:
+  '1': Array[0 | Integer]
+  '2': Hash[:a | Symbol, 0 | Integer]
+  '3': Array[0 | Integer]
+  '4': Array[0]
+  '5': Array[1 | 2]
+  '6': Array[0 | 1]

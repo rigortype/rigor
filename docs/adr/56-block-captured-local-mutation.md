@@ -186,7 +186,9 @@ slice-A/B `MutationWidening` carrier-widening helpers:
    *(Superseded by WD2.9: the seed is now read from the scope BEFORE
    `widen_after_block` runs, so an empty literal contributes no element
    and nothing is dropped — the same `Array[Integer]` by a route that
-   cannot mistake a declared `untyped` for the floor.)*
+   cannot mistake a declared `untyped` for the floor.)* *(Amended by
+   WD2.13: a store whose evidence reads a collection the join moves is
+   iterated to a fixpoint instead of typed once.)*
 
 2. **Loops** — `eval_loop` overlays `loop_content_writeback` on both the
    fast-path single-pass join and the slice-B fixpoint result; arguments
@@ -804,6 +806,132 @@ restoring the `nil` seed turns the idiom examples red; judging a union
 fill wholesale, or stopping the container walk at the outermost level,
 turns the container examples red. The literal-size tuple fold is
 untouched by all four.
+
+### WD2.13 — A store that reads its own collection is iterated, not typed once (2026-09-23)
+
+WD2.5 specified the block join "under the same `BodyFixpoint`
+cap/widen/floor discipline" as slices A and B, but the seam shipped as
+a single pass: it typed every store's evidence once, in the
+block-entry scope. There each content-mutated collection still holds
+its pre-call contents, so a store computed FROM that collection
+recorded the first iteration's value and the join closed over it:
+
+    h = { a: 0 }
+    [:a, :a, :a].each { |k| h[k] = h[k] + 1 }
+    puts "three" if h[:a] == 3   # always-falsey: h read Hash[:a | Symbol, 0 | 1]
+
+`a << a.last + x`, `a.push(a.size)`, `a[0] += 1`, `h.store(k,
+h.fetch(k) + 1)` and an `each_with_object` memo read back through its
+alias (`m[k] = m[k] + 1`) are the same defect. Each is wrong-precise,
+and the block path is where it costs most, because that join adds no
+gradual arm on purpose: WD2.5's "how much the joining path saw" rests
+on the body scan's evidence being complete, and it was complete in the
+set of stores while stale in their values.
+
+Two repairs were open. Giving every store whose evidence reads the
+mutated collection the one-store gradual floor is sound and cheap, but
+its `Dynamic` arm quiets every later read of the collection —
+`h[:a].upcase` goes silent — for a store whose value the engine can in
+fact bound. **Decision: iterate the evidence.** The block seam and
+`each_with_object` share one join
+(`StatementEvaluator#join_content_to_fixpoint`), which binds each name
+it joins to what that collection holds at ANY iteration's entry. The
+joined names are the block's captured content-mutated locals, and for
+`each_with_object` the memo as well; that seam keeps only the memo's
+carrier, so a memo store reading a captured collection the same block
+appends to (`buf << w; m << buf.length`) reads `String` and not the
+pre-call value. A name none of whose stores reads a mutated Array or
+Hash is FIXED: its evidence is the same on every iteration, so it is
+typed once and the name is bound to its own join plus the seed members
+that join refutes (its `nil`). A String is always fixed at `String`,
+since its join ignores what it stored. The remaining names MOVE, and
+`BodyFixpoint` iterates their evidence slots (an Array's element
+union, a Hash's key union and value union), each seeded `bot`. Each
+pass re-types the moving stores with every moving collection bound,
+like a fixed one, to its join over the evidence so far plus the seed
+members that join refutes, since a `nil` seed can still be `nil` on an
+iteration where another moving collection has already grown. The final
+pass value-pin widens the moving evidence, and a slot that still grows
+takes the one-unknown-store floor beside the seed's own arms. `h`
+reads `Hash[Symbol, 0 | Integer]`, and `nested << [nested.last]`
+floors to `Array[Dynamic[top] | []]`. The seed is never widened,
+because it is the zero-iteration contents. Neither is a fixed name's
+evidence, so `acc << 1` beside a self-reading store keeps `Array[1]`
+and the genuine fold it supports. This keeps to WD3 rather than adding
+a second mechanism: the moving evidence slots are simply the
+fixpoint's names.
+
+The fixed/moving split and the memo seam's captured names are the
+review's corrections of a first cut that iterated every name and gave
+the memo seam the memo alone. A String has no evidence slot, so it
+never counted as having moved and stayed at its seed on every pass:
+`buf << w; lens << buf.length` read `Array[0]` and folded `lens.last
+== 4` always-falsey. `BodyFixpoint` also widens every name on its
+final pass, so a store that read nothing lost its constants whenever
+it shared a block with one that needed the widening. Binding names in
+the evidence scope then exposed two routes that a continuation-only
+join never had to get right. First, the captured-mutation walk counts
+any receiver read at depth >= 1, so a block parameter mutated inside a
+nested block passed for the outer local it shadows, and binding it
+overwrote the parameter. Second, the join drops a seed's `nil`, so a
+fixed name bound to its join alone read `out << a.nil?; a ||= []; a <<
+v` as `Array[false]`. Both were new false positives against master,
+and both are why a fixed name keeps its seed and why the walk that
+finds captured names now compares a read's `depth` with the blocks and
+lambdas it is nested in, instead of testing `depth >= 1`, which is
+right only directly in the body. The same comparison exposed one more
+route, present on master too: a store nested in an inner block that
+binds its own parameter had its evidence typed in the seam's entry
+scope, where that name is the outer local it shadows, so `|inner|
+picks << inner.first` read an outer `inner = [0]`. Such a store's
+evidence is now typed with its inner blocks' names bound to
+`Dynamic[top]`. A moving name then kept its seed only on the first
+pass, which missed a `nil` that outlives another collection's growth;
+it now keeps it on every pass. Only the refuted members come back, not
+the whole seed: re-adding a seed's literal shape widened dispatch
+enough that `a = []; [1].each { a[0, 1] ||= [2] }` stopped converging
+and lost its `Array[2]`.
+
+A block with no moving name takes a single pass, so `acc = [];
+xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and
+the common block pays one walk over its mutators' arguments. The loop
+seam needed nothing: it types its evidence against `post_loop`, where
+the in-body straight-line join has already given the binding its
+gradual arm.
+
+Three residues are recorded rather than fixed here. All are the same
+first-iteration pin reached through a binding this join does not own.
+The evidence still reads a captured local the body REBINDS at its
+pre-call binding (`total = 0; out = []; [1, 2].each { |x| total += x;
+out << total }` reads `Array[0]`), and slice A's rebind fixpoint reads
+a content-mutated capture at its pre-call contents (`last = nil; [1,
+2].each { |x| last = a.last; a << x }` leaves `last` at `0?` over `a =
+[0]`). And a collection the block changes only through a remover
+(`a.shift; b << a.first`) or only through an alias is not a joined
+name at all, so a store reading it sees its pre-call contents; both
+routes predate this fixpoint. The final-pass widening is also trusted
+without a further pass, which is `BodyFixpoint`'s own shape and so
+slice A's too. A store whose value only changes class after the
+widened bound (`h[k] = h[k] == 10 ? :done : h[k] + 1` over eleven
+iterations) still reads `0 | Integer` without its `:done`. Re-checking
+the widened assumption belongs to `BodyFixpoint`, for every slice at
+once, and is #1220. Separately, the join still drops a seed's `nil`
+after a guarded mutation (`maybe << v if maybe` leaves `Array[…]`
+though `maybe` can stay nil), WD2.11's rule meeting a case its
+reasoning did not cover; that is #1219, and the fixture's golden
+carries the flip comment.
+
+Gate: the `block_content_self_read` fixture carries the six
+self-reading shapes, the String read and the two `each_with_object`
+captured reads, a parameter shadowing a mutated outer local, a nested
+block's own parameter read one level deeper, a lazily initialised
+capture, and a `nil` seed read by another moving store (must-not-fire,
+each pinned by `assert_type`), the structural floor, and the #586
+accumulator. It also has two controls whose always-falsey must still
+fire: the same counter storing a receiver-independent value, and `acc
+<< 1` sharing a block with a self-reading store. The spec asserts the
+exact `flow.*` line set, so a seam that went gradual everywhere fails
+as loudly as the old pin did.
 
 ### WD3 — One mechanism, shared
 

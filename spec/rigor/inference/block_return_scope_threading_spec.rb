@@ -1914,12 +1914,13 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
-    # The same suppression reaches every block-bearing call that is not one of the two folds above: the dispatcher's
-    # generic block-return pass types it tail-only too. Its answer is the per-name one the folds give a captured
+    # The same suppression types every other nested block tail-only too: the dispatcher's generic block-return pass,
+    # and the `inject` fold, which shares its body typing. The answer is the per-name one the folds give a captured
     # local — a name the prefix rebinds reads `Dynamic[top]`, one it only mutates in place reads its in-place
-    # widening — extended to the names nothing re-answers here: a block parameter, and any capture of a block the
-    # call runs once, which lays no captured binding at all. A name whose widening declines keeps its entry
-    # binding, because threading would have kept it too.
+    # widening — extended to every name no #587 (b) binding answers: a block parameter, and a capture of a block the
+    # call runs at most once, of an iterator that discards its block's value or that the catalogue does not know, or
+    # of the `inject` fold. A name whose widening declines keeps its entry binding, because threading would have kept
+    # it too, and so does an instance variable the prefix only rebinds while it is on its class-wide seed.
     describe "(2), nested: the generic block-return pass under the same suppression" do
       it "widens a parameter the body mutated in place under a HashShape map" do
         # Runtime `[[1], [1]]`; the pass read `a` at its entry `[]`.
@@ -2055,6 +2056,110 @@ RSpec.describe "block-return scope threading", type: :runner do
               end)
             end
           end
+        RUBY
+      end
+
+      it "widens an instance variable on its class-wide seed that the body mutates in place" do
+        # Runtime `"k1"`. `<<` is no write, so the seed `"k"` does not hold it.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def append(v)
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @out << w.to_s
+                  @out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "no longer reports the condition the stale class-wide seed folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def append(v)
+              m = Mutex.new
+              r = m.synchronize do
+                w = v
+                m.synchronize do
+                  @out << w.to_s
+                  @out
+                end
+              end
+              puts "unchanged" if r == "k"
+            end
+          end
+        RUBY
+      end
+
+      it "floors an instance variable on its class-wide seed that the body both rebinds and mutates" do
+        # The seed holds the rebind's `"a"` but not the append after it: runtime `"a1"`.
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def reset(v)
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @out = +"a"
+                  @out << w.to_s
+                  @out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "floors a captured local an iterator outside the catalogue runs" do
+        # Runtime `2`; no #587 (b) binding is laid for an iterator the catalogue does not know.
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          class Pair
+            def each_twice
+              yield
+              yield
+            end
+          end
+          m = Mutex.new
+          v = 1
+          tot = 0
+          dump_type(m.synchronize do
+            w = v
+            Pair.new.each_twice do
+              tot += w
+              tot
+            end
+          end)
+        RUBY
+      end
+
+      it "re-answers an accumulator the inject fold's block rebinds" do
+        # Runtime `6`. The fold types its block through the same pass, which read `acc` at the seed `0`.
+        expect(dumped_type(<<~RUBY)).to eq("0 | Dynamic[top]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2, 3].inject(0) do |acc, e|
+              acc += e + w - 1
+              acc
+            end
+          end)
         RUBY
       end
 

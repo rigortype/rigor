@@ -3932,10 +3932,19 @@ module Rigor
       # evaluating the prefix. The threading's other declines keep the plain tail-only answer: a body with no
       # prefix, or whose tail ignores it, is not stale, while a `rescue` body and a prefix that can `break`
       # ({JUMP_NODES}) are typed tail-only with or without the suppression, and neither path re-answers them.
+      #
+      # A failure in the re-answer falls back to the plain tail-only answer, for the reason
+      # {#threaded_block_body_type} gives: a raise reaching `block_return_type_for` would report "no block".
       def tail_only_block_body_type(body, block_scope, captured)
         return block_scope.type_of(body) unless block_body_threading_suppressed? && body.is_a?(Prism::StatementsNode)
 
-        prefix_answered_scope(body.body, block_scope, captured).type_of(body)
+        answered =
+          begin
+            prefix_answered_scope(body.body, block_scope, captured)
+          rescue StandardError
+            block_scope
+          end
+        answered.type_of(body)
       end
 
       # `block_scope` with every name the tail reads and the prefix changed ({#tail_dependent_body_names}) bound to
@@ -3950,17 +3959,17 @@ module Rigor
       #   the binding {#stored_capture_bindings} lays: `|_k, a| a << w; a` over `{ x: [], y: [] }` read `a` as its
       #   entry `[]` and the call as `Array[[]]`; it now reads `Array[Array[Dynamic[top]]]`.
       #
-      # That is a floor per NAME, not per block, so the structure around a floored name survives (`e = e.to_s;
-      # [e, w]` keeps its Tuple), and it is limited to the names tail-only answers stale. A name the entry scope
-      # does not bind — a body-local, or an instance variable, class variable or global nothing bound yet —
-      # already reads `Dynamic[top]`. An instance variable still on its ADR-58 class-wide seed is the union of
-      # every write in the class, this prefix's included, which is why {CapturedLocals.writes} does not take it
-      # either. A name whose widening declines keeps its entry binding, because the threaded body would have kept
-      # it as well: `s = String.new; … { s << "x"; s }` is `String` either way, and a precise nominal
-      # `Array[String]` is a claim the widening may not grow on either path. And a name the #587 (b) `captured`
-      # binding answers is left to it, as {#unanswered_tail_dependency?} leaves it: the per-element fold computes
-      # that binding before it suppresses the threading above its cap, so it can hold the fixpoint's converged
-      # `Integer` for `total += e; total`, which a floor here would throw away.
+      # That is a floor per NAME, not per block, so the structure around a floored name survives (`e = e.to_s; [e, w]`
+      # keeps its Tuple), and it is limited to the names tail-only answers stale. A name the entry scope does not bind —
+      # a body-local, or an instance variable, class variable or global nothing bound yet — already reads
+      # `Dynamic[top]`. An instance variable the prefix only rebinds keeps its ADR-58 class-wide seed, the union of
+      # every write in the class, this prefix's included ({#class_seeded_ivar?}); one it also mutates in place does not,
+      # since no write shows that. A name whose widening declines keeps its entry binding, because the threaded body
+      # would have kept it as well: `s = String.new; … { s << "x"; s }` is `String` either way, and a precise nominal
+      # `Array[String]` is a claim the widening may not grow on either path. And a name the #587 (b) `captured` binding
+      # answers is left to it, as {#unanswered_tail_dependency?} leaves it: the per-element fold computes that binding
+      # before it suppresses the threading above its cap, so it can hold the fixpoint's converged `Integer` for
+      # `total += e; total`, which a floor here would throw away.
       def prefix_answered_scope(statements, block_scope, captured)
         return block_scope if statements.size < 2
 
@@ -3977,11 +3986,22 @@ module Rigor
       def prefix_left_binding(block_scope, name, rebound, sites)
         entry = CapturedLocals.bound_type(block_scope, name)
         return nil if entry.nil?
-        return nil if CapturedLocals.ivar_name?(name) && block_scope.declaration_sourced?(:ivar, name)
-        return Type::Combinator.untyped if rebound.include?(name)
 
-        widened = UnknownStoreWidening.widen(entry, sites.fetch(name, NO_MUTATION_SITES))
+        mutations = sites.fetch(name, NO_MUTATION_SITES)
+        if rebound.include?(name)
+          return nil if mutations.empty? && class_seeded_ivar?(block_scope, name)
+
+          return Type::Combinator.untyped
+        end
+        widened = UnknownStoreWidening.widen(entry, mutations)
         widened == entry ? nil : widened
+      end
+
+      # An instance variable still on its ADR-58 class-wide seed: the union of every WRITE in the class. That covers
+      # a prefix that only rebinds it, never one that mutates it in place — `@out << w.to_s` is no write, so the
+      # seed `"k"` stays `"k"` while the object holds `"k1"`.
+      def class_seeded_ivar?(block_scope, name)
+        CapturedLocals.ivar_name?(name) && block_scope.declaration_sourced?(:ivar, name)
       end
 
       NO_MUTATION_SITES = [].freeze

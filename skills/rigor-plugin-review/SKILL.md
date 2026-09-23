@@ -150,7 +150,7 @@ step**:
 ### Phase 5 — Verify
 
 ```sh
-rigor check <plugin>/lib        # ADR-43 contract self-check — MUST be clean
+rigor check <plugin>/lib        # ADR-43 contract self-check — must be clean
 rigor plugins --strict          # the plugin still loads
 rigor plugins --capabilities    # node-rule types / dynamic_return receivers look right
 bundle exec rspec …             # the oracle spec, still green

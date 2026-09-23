@@ -1,4 +1,4 @@
-# Phases 6–10 — Integration spec, README, CHANGELOG, verify, commit
+# Phases 6–10 — Integration spec, README, changelog fragment, verify, commit
 
 Mirror one of the existing specs under [`spec/integration/plugins/`](../../../../spec/integration/plugins/) (for production plugins) or [`spec/integration/examples/`](../../../../spec/integration/examples/) (for walkthroughs). The shared boilerplate (`run_plugin`, `plugin_diagnostics`, requirer construction, tmpdir lifecycle) lives in [`spec/integration/support/plugin_helpers.rb`](../../../../spec/integration/support/plugin_helpers.rb) and is auto-included for every `*_plugin_spec.rb` file under either directory (the `define_derived_metadata` regex matches `/spec/integration/(plugins|examples)/.+_plugin_spec\.rb`). The spec only needs the per-plugin parts.
 
@@ -96,22 +96,14 @@ Use the README structure from `examples/rigor-routes/README.md` as the template.
 3. **Layout** — directory tree.
 4. **Running the demo** — `cd plugins/rigor-<id>/demo` + `RUBYLIB=...`.
 5. **Plugin authoring surface this exercises** — table of which surfaces (manifest / config_schema / IoBoundary / cache producer / Scope#type_of / etc.) the plugin touches.
-6. **Future direction** — boilerplate paragraph about plugin return-type contributions being queued for v0.1.x. Copy from another example's README and adapt.
-7. **License** — `MPL-2.0, matching the parent Rigor project.`
+6. **License** — `MPL-2.0, matching the parent Rigor project.`
 
-## Phase 8 — CHANGELOG entry
+## Phase 8 — Changelog fragment
 
-Per `AGENTS.md` § "Release Cadence", add the entry under `## [Unreleased]` only — do NOT bump `Rigor::VERSION`. The user drives the cut-over.
+Per `docs/agents/contribution-flow.md` § "Release Cadence", add a one-sentence fragment with the PR's full link at `changelog.d/added/<branch-slug>.md` — do NOT edit `[Unreleased]` or bump `Rigor::VERSION`. The user drives the cut-over.
 
 ```markdown
-### Added — plugin: `rigor-<id>`
-
-- **One-line description.** Two-to-three-sentence body describing the
-  user-facing diagnostics, the architecture facet, and how to run
-  the demo.
-- **Configuration.** What the user puts in `.rigor.yml`.
-- **Demo project** under `plugins/rigor-<id>/demo/` (or `examples/rigor-<id>/demo/` for a walkthrough).
-- **Integration spec** at `spec/integration/plugins/<id>_plugin_spec.rb` (or `spec/integration/examples/<id>_plugin_spec.rb` for a walkthrough) — N examples covering …
+- **[plugins/rigor-<id>]** <What users can now check, in one sentence>. ([#NNN](https://github.com/rigortype/rigor/pull/NNN))
 ```
 
 ## Phase 9 — Verify
@@ -127,7 +119,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command git dif
 
 - RSpec passing (the new integration spec adds N examples to the total).
 - RuboCop 0 offenses (the plugin's own source is excluded by `.rubocop.yml`'s `plugins/**/*` and `examples/**/*` rules, but the integration spec under `spec/integration/{plugins,examples}/` IS linted — keep it under the per-example length / multiple-expectations limits, or add inline `# rubocop:disable` with a reason).
-- `bundle exec exe/rigor check lib` reporting only the three documented pre-existing warnings (`Trinary#negate`, `IntegerRange#lower` / `#upper`).
+- `make check` and `make check-plugins` clean.
 
 ## Phase 10 — Commit
 

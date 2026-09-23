@@ -106,11 +106,12 @@ CLI tests for the end-to-end wiring.
 
 ## Version pinning — the pre-1.0 contract
 
-The plugin contract is **not frozen until `rigortype` v0.2.0** (see
+The plugin contract is **not frozen until `rigortype` v1.0.0** (see
 SKILL.md). Concretely:
 
-- Gemspec / Gemfile: `rigortype` `>= 0.1.0, < 0.2.0`. Never `>= 0.1`
-  alone — that floats across the contract-changing v0.2.0 boundary.
+- Gemspec / Gemfile: `rigortype` `~> X.Y.0` for the minor you tested
+  (`rigor --version`). Never an open `>=` range — that floats across
+  contract-changing minors.
 - Your plugin's own version is normal semver, independent of
   `rigortype`'s.
 - When you bump the `rigortype` pin to a new minor, **re-run the
@@ -119,9 +120,6 @@ SKILL.md). Concretely:
   fixture CLI tests are what catch a contract drift.
 - State the supported `rigortype` range in the README so users do
   not pair the plugin with an incompatible Rigor.
-
-When v0.2.0 lands, re-pin to the stable range and ordinary
-compatibility rules apply.
 
 ## README
 
@@ -151,13 +149,13 @@ wired and the fixture tests run.
 Either way, if the plugin uncovered a gap that *should* be core
 Rigor behaviour — or if you hit a plugin-contract rough edge — report
 it: <https://github.com/rigortype/rigor/issues>. External plugin
-authors are the main source of pre-v0.2.0 contract feedback.
+authors are the main source of contract feedback before v1.0.
 
 ## Output of this module — plugin shipped
 
 - A test suite: fast unit tests + fixture-driven `rigor check`
   tests, in RSpec or Minitest.
-- A `rigortype` pin tight to `< 0.2.0`.
+- A `rigortype` pin tight to the tested minor.
 - A README stating the compatibility range.
 - The plugin published as a gem, or committed project-private with
   CI wired.

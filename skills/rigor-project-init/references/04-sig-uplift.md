@@ -28,7 +28,8 @@ rigor sig-gen lib        # adjust path to match the paths: key
 Typical output at this point: most `new_method` candidates have
 literal or concrete return types (`"hello"`, `42`, `:done`, `nil`).
 Methods whose return type cannot be inferred show up with
-`skip_reason: :untyped_return` — these are the sig precision targets.
+`skip_reason: "sig.skipped.untyped-return"` — these are the sig
+precision targets.
 
 To get a breakdown in JSON:
 
@@ -63,7 +64,7 @@ head -40 sig/lib/your_class.rbs
 
 At this point, `attr_reader` and `attr_accessor` methods that rely on
 ivar types set from `initialize` parameters will likely still be
-absent (classified as `:untyped_return`). Step 5-c fixes that.
+absent (skipped as `sig.skipped.untyped-return`). Step 5-c fixes that.
 
 ## Step 5-c — Precision uplift with --params=observed
 
@@ -88,7 +89,8 @@ Person.new("Alice", 30)
 Person.new("Bob",   25)
 ```
 
-Without observations: `attr_reader :name` → skipped as `:untyped_return`
+Without observations: `attr_reader :name` → skipped as
+`sig.skipped.untyped-return`
 (the ivar's type is unknown because the blank inference scope never
 sees the parameter values).
 
@@ -129,9 +131,9 @@ there are a few options depending on the cause:
 | Pattern | Cause | Fix |
 |---|---|---|
 | `attr_reader :x` with `@x` never set in `initialize` | ivar set from a DB query, config read, or side effect | Add a hand-written sig: create (or edit) `sig/your_class.rbs` with `attr_reader x: String` |
-| Deep method chains on untyped receivers | Cascade from a gem with no RBS | `rbs collection install`; Phase 7 escalation path B |
+| Deep method chains on untyped receivers | Cascade from a gem with no RBS | `rbs collection install`; Phase 8 escalation path B |
 | Recursive or mutually recursive methods | Return type not inferrable without a base case | Add a `# @rbs return: YourType` inline annotation, or a hand-written sig |
-| Dynamic methods (`define_method`, DSL) | Metaprogramming Rigor cannot follow | Phase 7 escalation path A (project plugin) |
+| Dynamic methods (`define_method`, DSL) | Metaprogramming Rigor cannot follow | Phase 8 escalation path A (project plugin) |
 
 Do not spend long on residual `untyped` methods at this stage — a
 handful of `untyped` returns in `sig/` does not block adoption. The
@@ -140,12 +142,10 @@ reach perfect sig coverage.
 
 ## Step 5-e — Commit the sig/ directory
 
-Once you are satisfied with the initial sig quality:
-
-```sh
-git add sig/
-git commit -m "Add initial RBS sigs from rigor sig-gen (--params=observed)"
-```
+Once you are satisfied with the initial sig quality, recommend
+committing `sig/`: list it in the Final step's file inventory
+(`SKILL.md` § "Final step") rather than committing it here — the user
+confirms every commit.
 
 A committed `sig/` is a first-class project artefact: it improves
 inference quality on every subsequent run and is maintained alongside
@@ -164,8 +164,9 @@ the source (add new sig files when adding classes; update sigs with
 
 ## Output of this module
 
-A committed `sig/` directory with RBS skeletons for all statically
-inferrable methods. Remaining `:untyped_return` methods are noted for
+A `sig/` directory, ready to commit, with RBS skeletons for all
+statically inferrable methods. Remaining `sig.skipped.untyped-return`
+methods are noted for
 potential manual annotation; they do not block Phase 6.
 
 Proceed to Phase 6 ([`03-baseline-and-bugs.md`](03-baseline-and-bugs.md)).

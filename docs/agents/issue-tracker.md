@@ -5,7 +5,7 @@ operations; it infers the repo from the clone.
 
 **GitHub Issues is the backlog** ([ADR-98](../adr/98-development-flow-document-roles.md)): every
 mid/long-term work item lives here, not in a tracked markdown file. Release planning is the
-**Milestones** surface (`v0.3.0`, `v1.0.0`) — "what the next cut carries" is expressed by assigning
+**Milestones** surface (e.g. `v1.0.0`) — "what the next cut carries" is expressed by assigning
 issues to a milestone.
 
 ## Conventions

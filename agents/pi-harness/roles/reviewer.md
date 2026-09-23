@@ -1,6 +1,6 @@
 # Role: reviewer
 
-Model bands for the **Approved** gate (no live Claude usage poll):
+Model bands for the **Approved** gate:
 
 | Band | Prefer | Thinking | When |
 | --- | --- | --- | --- |

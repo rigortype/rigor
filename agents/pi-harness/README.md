@@ -63,7 +63,7 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 
 | Role | Preferred id | Fallback patterns |
 | --- | --- | --- |
-| architect / orchestrator | `anthropic/claude-opus-5` | `xai/grok-4.7` (deep RCA), `xai/grok-4.6`, `*opus*`, `grok*` |
+| architect / orchestrator | `claude-bridge/claude-opus-5` | `anthropic/claude-opus-5`, `xai/grok-4.7` (deep RCA), `xai/grok-4.6`, `*opus*`, `grok*` |
 | lane | `opencode-go/deepseek-v4.1-flash` | `opencode-go/*deepseek*flash*`, `opencode/*deepseek*flash*`, `*deepseek*flash*` |
 | reviewer | default Grok **4.6**:max; +Opus if complex; Fable reserved | `xai/grok-4.6`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-fable-5` (RCA: `xai/grok-4.7`) |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
@@ -145,7 +145,7 @@ subagent({
 - Lane model default is `opencode-go/deepseek-v4.1-flash` with `thinking: high`.
   Approved: default Grok 4.6:max; add Opus:high when complex; reserve Fable:medium
   for complex design. Final Approve must include a PR body revision draft and
-  suggested PR comments so claims match the diff. No live Claude usage poll. Pin ids with `MODEL=` /
+  suggested PR comments so claims match the diff. Pin ids with `MODEL=` /
   launch `model:` / `subagents.agentOverrides` if needed.
 - **Survey:** a managed worktree of *rigor* does **not** satisfy exclusivity of
   `~/repo/ruby/rigor-survey/<project>` — still assign disjoint survey checkouts.

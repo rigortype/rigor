@@ -719,6 +719,66 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       # loop.
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
+
+    # A `for` index that is an index target (`for h[:a] in xs`) stores each element through `[]=` on its receiver at
+    # the top of every iteration, so it widens the receiver exactly as the body store `h[:a] = x` of the same element
+    # does — otherwise the literal survives and a later `h[:a] == 0` folds on its stale `0`.
+    it "for-loop with an index-target index widens the receiver the way a body `[]=` store of the element does" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a] in [1, 2]; end")
+      _, body = evaluate("h = { a: 0 }\nfor x in [1, 2]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+      expect(index.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+    end
+
+    it "for-loop with an index-target index joins the element itself into a seed that admits it" do
+      # An empty literal carries no class set to contradict the stored `Integer`, so the join keeps it.
+      _, index = evaluate("h = {}\nfor h[:a] in [1, 2]; end")
+      _, body = evaluate("h = {}\nfor x in [1, 2]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+    end
+
+    # The store runs before the body, on every iteration, so the body reads the widened receiver too.
+    it "for-loop body reads the receiver an index-target index widened" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a] in [1, 2]\n  seen = h\nend")
+      _, body = evaluate("h = { a: 0 }\nfor x in [1, 2]\n  h[:a] = x\n  seen = h\nend")
+      expect(index.local(:seen)).to eq(body.local(:seen))
+      expect(index.local(:seen).members).not_to include(a_kind_of(Rigor::Type::HashShape))
+    end
+
+    it "for-loop with a multi-target index widens an index target's receiver with the slot it stores" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a], w in [[1, 2]]; end")
+      _, body = evaluate("h = { a: 0 }\nfor x, w in [[1, 2]]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+      expect(index.local(:w)).to eq(body.local(:w))
+    end
+
+    it "for-loop with an index-target index leaves a collection it does not name at its literal shape" do
+      _, single = evaluate("h = { a: 0 }\ng = {}\nfor g[:a] in [1, 2]; end")
+      _, multi = evaluate("h = { a: 0 }\ng = {}\nfor g[:a], w in [[1, 2]]; end")
+      expect(single.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(multi.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(single.local(:g)).not_to be_a(Rigor::Type::HashShape)
+      expect(multi.local(:g)).not_to be_a(Rigor::Type::HashShape)
+    end
+
+    # The store overwrites the slot a `receiver[key] ||= default` narrowed, so it drops that narrowing as the body
+    # store does — otherwise `h[:e]` keeps reading the `||=` default. A store into another slot keeps it.
+    it "for-loop with an index-target index drops the stored slot's `||=` narrowing and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, index = evaluate("#{seed}for h[:e] in [1, 2]; end\nv = h[:e]")
+      _, body = evaluate("#{seed}for x in [1, 2]; h[:e] = x; end\nv = h[:e]")
+      _, other = evaluate("#{seed}for h[:f] in [1, 2]; end\nv = h[:e]")
+      expect(index.local(:v)).to eq(body.local(:v))
+      expect(index.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    # `for *h[:a] in pairs` is `*h[:a] = element`: Prism gives the index as a bare `SplatNode`, not a multi-target.
+    it "for-loop with a bare splat index-target index widens the receiver" do
+      _, post = evaluate("h = { a: 0 }\ng = { a: 0 }\nfor *h[:a] in [[1, 2]]; end")
+      expect(post.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+      expect(post.local(:g)).to be_a(Rigor::Type::HashShape)
+    end
   end
 
   describe "and/or short-circuit" do
@@ -1418,6 +1478,92 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       _, post = evaluate("@x, b = [1, 2]")
       expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
       expect(post.local(:@x)).to be_nil
+    end
+
+    # An index target stores through `[]=` on its receiver, so it widens the receiver's literal shape and joins
+    # the slot's value exactly as the plain store of the same value does — otherwise `h[:a] == 0` after
+    # `h[:a], z = 1, 2` folds on the literal's stale `0`.
+    it "widens an index target's receiver the way a plain `[]=` store of the slot's value does" do
+      _, multi = evaluate("h = { a: 0 }\nh[:a], z = 1, 2")
+      _, plain = evaluate("h = { a: 0 }\nh[:a] = 1")
+      expect(multi.local(:h)).to be_a(Rigor::Type::Nominal)
+      expect(multi.local(:h)).to eq(plain.local(:h))
+      expect(multi.local(:z)).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "joins the slot's own value, not an untyped one, into a seed that admits it" do
+      # An empty literal carries no class set to contradict the stored `Integer`, so the join keeps it.
+      _, multi = evaluate("h = {}\nh[:a], z = 1, 2")
+      _, plain = evaluate("h = {}\nh[:a] = 1")
+      expect(multi.local(:h)).to eq(plain.local(:h))
+    end
+
+    it "widens an index target nested in a group and a splatted one with the value each slot stores" do
+      _, multi = evaluate("h = { a: 0 }\na = [0]\n(h[:a], q), *a[0] = [1, 2], 3, 4")
+      _, plain = evaluate("h = { a: 0 }\na = [0]\nh[:a] = 1\na[0] = [3, 4]")
+      expect(multi.local(:h)).to eq(plain.local(:h))
+      expect(multi.local(:a)).to eq(plain.local(:a))
+      expect(multi.local(:q)).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "widens an array slot target and a splice target as the plain stores do (issue #1168)" do
+      _, slot = evaluate("a = [1]\na[0], b = \"s\", 2")
+      _, plain_slot = evaluate("a = [1]\na[0] = \"s\"")
+      expect(slot.local(:a)).to be_a(Rigor::Type::Nominal)
+      expect(slot.local(:a)).to eq(plain_slot.local(:a))
+
+      _, splice = evaluate("a = []\na[0, 1], b = [2], 3")
+      _, plain_splice = evaluate("a = []\na[0, 1] = [2]")
+      expect(splice.local(:a)).to eq(plain_splice.local(:a))
+    end
+
+    it "widens after the bindings, so a target that rebinds the receiver to itself cannot restore the literal" do
+      # Ruby evaluates `h` (the receiver) before assigning any target, so the store lands on the object `h` is
+      # bound to afterwards. Widening before the bindings let `h`'s own binding bring `{ a: 0 }` back.
+      _, post = evaluate("h = { a: 0 }\nh, h[:a] = h, 1")
+      expect(post.local(:h)).to be_a(Rigor::Type::Nominal)
+    end
+
+    it "forgets the indexed narrowing its store overwrites, as a plain `[]=` store does" do
+      multi, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:a], y = 1, 2\nm[:a]")
+      plain, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:a] = 1\nm[:a]")
+      expect(multi).not_to eq(Rigor::Type::Combinator.constant_of("d"))
+      expect(multi).to eq(plain)
+    end
+
+    it "keeps a narrowing on a slot the store does not name" do
+      type, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:b], y = 1, 2\nm[:a]")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("d"))
+    end
+
+    it "keeps the narrowings a variable key leaves, as a plain `[]=` store does" do
+      multi, = evaluate("m = {}\nm[:a] ||= \"d\"\nk = [:a, :b].sample\nm[k], y = 1, 2\nm[:a]")
+      plain, = evaluate("m = {}\nm[:a] ||= \"d\"\nk = [:a, :b].sample\nm[k] = 1\nm[:a]")
+      expect(multi).to eq(plain)
+    end
+
+    it "softens a nil-bearing slot as a local in the same position is softened" do
+      # The stored value carries no optimistic mark, but the join's `Dynamic[top]` floor keeps any fold off the
+      # dropped `nil`; joining it would fire `possible-nil-receiver` on the correlated guard the fixture pins.
+      _, multi = evaluate("t = {}\nopt = [true, false].sample ? \"s\" : nil\nt[:a], d = [opt, 1]")
+      _, plain = evaluate("t = {}\nt[:a] = \"s\"")
+      expect(multi.local(:t)).to eq(plain.local(:t))
+    end
+
+    it "leaves a collection the index target does not name at its literal shape" do
+      _, post = evaluate("h = { a: 0 }\ng = {}\ng[:a], z = 1, 2")
+      expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(post.local(:g)).to be_a(Rigor::Type::Nominal)
+    end
+
+    it "drops the stored slot's `||=` narrowing as the plain `[]=` store does, and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, multi = evaluate("#{seed}h[:e], z = 1, 2\nv = h[:e]")
+      _, plain = evaluate("#{seed}h[:e] = 1\nv = h[:e]")
+      _, other = evaluate("#{seed}h[:f], z = 1, 2\nv = h[:e]")
+      expect(multi.local(:v)).to eq(plain.local(:v))
+      expect(multi.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
     end
   end
 
@@ -2306,6 +2452,38 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       nominal_members = post.local(:e).members.grep(Rigor::Type::Nominal)
       expect(nominal_members.map(&:class_name)).to contain_exactly("TypeError", "ArgumentError")
+    end
+
+    # A rescue reference that is an index target (`rescue => h[:e]`) stores the exception through `[]=` on its
+    # receiver, so it widens the receiver exactly as `rescue => e; h[:e] = e` does — otherwise the literal survives
+    # and a later `h[:e] == 0` folds on its stale `0`.
+    it "widens an index-target reference's receiver the way a `[]=` store of the exception does" do
+      _, index = evaluate("h = { e: 0 }\nbegin\n  risky\nrescue => h[:e]\nend")
+      _, plain = evaluate("h = { e: 0 }\nbegin\n  risky\nrescue => e\n  h[:e] = e\nend")
+      expect(index.local(:h)).to eq(plain.local(:h))
+      expect(index.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+    end
+
+    it "joins the rescued exception class into a seed that admits it" do
+      _, index = evaluate("h = {}\nbegin\n  risky\nrescue TypeError => h[:e]\nend")
+      _, plain = evaluate("h = {}\nbegin\n  risky\nrescue TypeError => e\n  h[:e] = e\nend")
+      expect(index.local(:h)).to eq(plain.local(:h))
+    end
+
+    it "leaves a collection an index-target reference does not name at its literal shape" do
+      _, post = evaluate("h = { e: 0 }\ng = {}\nbegin\n  risky\nrescue => g[:e]\nend")
+      expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(post.local(:g)).not_to be_a(Rigor::Type::HashShape)
+    end
+
+    it "drops the stored slot's `||=` narrowing as the arm's `[]=` store does, and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, index = evaluate("#{seed}begin\n  risky\nrescue => h[:e]\nend\nv = h[:e]")
+      _, plain = evaluate("#{seed}begin\n  risky\nrescue => e\n  h[:e] = e\nend\nv = h[:e]")
+      _, other = evaluate("#{seed}begin\n  risky\nrescue => h[:f]\nend\nv = h[:e]")
+      expect(index.local(:v)).to eq(plain.local(:v))
+      expect(index.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
     end
   end
 

@@ -5,7 +5,7 @@ prompt. Keep the adjudication and output-format sections verbatim — they are
 what makes the result citable.
 
 ```
-Search the repository at /Users/megurine/repo/ruby/rigor for any evaluation,
+Search the repository at {REPO_ROOT — the checkout you are working in} for any evaluation,
 comparison, measurement, or decision concerning {TOPIC}, so the findings can
 be cited with file:line accuracy.
 
@@ -13,7 +13,7 @@ Search these locations thoroughly:
 - docs/notes/ (survey/research notes; docs/notes/README.md is the index)
 - docs/adr/ (architecture decision records; docs/adr/README.md is the index)
 - docs/design/
-- docs/CHANGELOG-0.1.x.md and CHANGELOG.md  ← do not skip; per-feature
+- docs/CHANGELOG-*.md and CHANGELOG.md  ← do not skip; per-feature
   landing narratives often hold comparative evidence indexed nowhere else
 - docs/handbook/, docs/manual/, docs/type-specification/, docs/internal-spec/
 - README.md, AGENTS.md, CLAUDE.md

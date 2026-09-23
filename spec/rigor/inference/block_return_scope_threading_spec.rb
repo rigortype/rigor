@@ -514,18 +514,26 @@ RSpec.describe "block-return scope threading", type: :runner do
     # `it` reads are `Prism::ItLocalVariableReadNode`, which carries no `name`: neither the tail's read set nor the
     # receiver scan saw it, and the straight-line widening skipped it as a receiver, so the body typed from its
     # entry element while the `|a|` spelling above widened.
-    it "threads a mutated `it` parameter at every per-element position" do
-      # Runtime `[[1], [1]]`; the fold answered `[[], []]`.
-      type = dumped_type(<<~RUBY)
+    it "threads a mutated `it` parameter at every per-element position, as it threads `|a|`" do
+      # Runtime `[[1], [1]]`; the fold answered `[[], []]`. The joined `Integer` is the pushed evidence, which the
+      # widening reads only when it knows the receiver names a carrier it will grow.
+      expected = "[Array[Dynamic[top] | Integer], Array[Dynamic[top] | Integer]]"
+      expect(dumped_type(<<~RUBY)).to eq(expected)
         dump_type([[], []].map do
           it << 1
           it
         end)
       RUBY
-      expect(type).to match(/\A\[Array\[.*\], Array\[.*\]\]\z/)
+      expect(dumped_type(<<~RUBY)).to eq(expected)
+        dump_type([[], []].map do |a|
+          a << 1
+          a
+        end)
+      RUBY
     end
 
     it "leaves a tail that ignores the mutated `it` parameter unchanged" do
+      # A must-hold check rather than a control for the `it` naming: `b` is untouched on every path.
       expect(dumped_type(<<~RUBY)).to eq("[[], []]")
         b = []
         dump_type([[], []].map do
@@ -2808,6 +2816,22 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "leaves the body's `it` alone when only a nested block's own `it` is mutated" do
+        # Runtime `[[], []]`. The nested `each` block's `it` is that block's parameter, so the body's `it` is never
+        # mutated; filing both under `:it` floored the body's to `Dynamic[top]`. The `|a|` spelling never confused them.
+        expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              [[]].each { it << w }
+              it
+            end
+          end)
+        RUBY
+      end
+
       it "keeps a nominal String pre-state the append cannot move" do
         # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
         expect(dumped_type(<<~RUBY)).to eq("String")
@@ -3032,6 +3056,22 @@ RSpec.describe "block-return scope threading", type: :runner do
 
       it "widens a mutated `it` parameter" do
         expect(dumped_type("[+\"ab\"].each do\n  it << \"c\"\n  dump_type(it)\nend")).to eq("String")
+      end
+
+      # The widening joins the pushed value only when it knows the receiver names a carrier it will grow
+      # (`MutationWidening.joinable_receiver?`); a kind that check skipped widened to a bare `Array[Dynamic[top]]`.
+      it "joins the pushed value into a mutated global, class variable and `it` parameter" do
+        expect(dumped_type("$acc = []\n$acc << 1\ndump_type($acc)")).to eq("Array[Dynamic[top] | Integer]")
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top] | Integer]")
+          class Acc
+            def run
+              @@acc = []
+              @@acc << 1
+              dump_type(@@acc)
+            end
+          end
+        RUBY
+        expect(dumped_type("[[]].each do\n  it << 1\n  dump_type(it)\nend")).to eq("Array[Dynamic[top] | Integer]")
       end
     end
   end

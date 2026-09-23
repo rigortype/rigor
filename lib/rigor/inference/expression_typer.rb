@@ -4106,13 +4106,12 @@ module Rigor
         rebound = Set.new
         sites = {}
         statements[0...-1].each do |statement|
-          Source::NodeWalker.each(statement) do |node|
+          Source::NodeWalker.each_with_ancestors(statement) do |node, ancestors|
             rebound << node.name if VARIABLE_WRITE_NODES.include?(node.class)
             next unless in_place_mutation?(node)
 
-            ReceiverAlias.mutated_reads(node.receiver).each do |read|
-              (sites[ReceiverAlias.read_name(read)] ||= []) << node
-            end
+            nested = ancestors.any? { |ancestor| CLOSURE_NODES.include?(ancestor.class) }
+            each_mutated_name(node, nested) { |name| (sites[name] ||= []) << node }
           end
         end
         [rebound, sites]
@@ -4340,7 +4339,7 @@ module Rigor
       def prefix_written_names(statements)
         written = Set.new
         statements[0...-1].each do |statement|
-          return nil unless prefix_statement_jump_free?(statement, written, false)
+          return nil unless prefix_statement_jump_free?(statement, written, false, false)
         end
         return nil if written.empty?
 
@@ -4353,20 +4352,22 @@ module Rigor
       # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
       # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call or an
       # {INDEX_WRITE_NODES} store, through every variable its receiver can evaluate to) on the way down.
-      # `retargeted` is true once the descent has passed a boundary.
+      # `retargeted` is true once the descent has passed a boundary, and `nested` once it has passed a block or
+      # lambda ({CLOSURE_NODES}), whose `it` is not the body's.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
-      def prefix_statement_jump_free?(node, written, retargeted)
+      def prefix_statement_jump_free?(node, written, retargeted, nested)
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
-        collect_mutated_receivers(node, written) if in_place_mutation?(node)
+        each_mutated_name(node, nested) { |name| written << name } if in_place_mutation?(node)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
+        child_nested = nested || CLOSURE_NODES.include?(node.class)
         node.rigor_each_child do |child|
-          return false unless prefix_statement_jump_free?(child, written, child_retargeted)
+          return false unless prefix_statement_jump_free?(child, written, child_retargeted, child_nested)
         end
         true
       end
@@ -4385,12 +4386,22 @@ module Rigor
         INDEX_WRITE_NODES.include?(node.class)
       end
 
-      # The receiver's variables are {ReceiverAlias.mutated_reads}' — the answer the straight-line widening the
-      # threaded body runs reads too — so a global or class variable counts (`$g << w; $g`) as well as a local, an
-      # instance variable and the `it` parameter.
-      def collect_mutated_receivers(node, written)
-        ReceiverAlias.mutated_reads(node.receiver).each { |read| written << ReceiverAlias.read_name(read) }
+      # Yields the name of every variable the in-place mutation `node` changes: its receiver's
+      # {ReceiverAlias.mutated_reads}, the answer the straight-line widening the threaded body runs reads too, so a
+      # global or class variable counts (`$g << w; $g`) as well as a local, an instance variable and the `it`
+      # parameter. An `it` read `nested` under a block or lambda inside the prefix is that closure's own parameter,
+      # never the body's `it`, so it names nothing here: `[[]].each { it << w }; it` leaves the body's `it` as it was.
+      def each_mutated_name(node, nested)
+        ReceiverAlias.mutated_reads(node.receiver).each do |read|
+          next if nested && read.is_a?(Prism::ItLocalVariableReadNode)
+
+          yield ReceiverAlias.read_name(read)
+        end
       end
+
+      # The closures whose `it` is their own: a nested block or lambda always binds `it` to its own parameter.
+      CLOSURE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :CLOSURE_NODES
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
       # Tuple position, binds the block parameter to that element's type, and re-types the block body. The

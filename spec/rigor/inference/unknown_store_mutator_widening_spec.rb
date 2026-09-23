@@ -123,6 +123,42 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         end
       RUBY
     end
+
+    # The #1253 review's probe, through the `unless … empty?` narrowing. A rewrite cannot empty the receiver, so
+    # the witness stays and only the element goes; a reorder changes neither, so the binding must not move at all.
+    it "keeps the witness and replaces the element under `map!` and `collect!`" do
+      expect(dumped_types(<<~RUBY)).to eq(["non-empty-array[Dynamic[top]]"] * 2)
+        ys = ENV.keys
+        unless ys.empty?
+          ys.map!(&:to_sym)
+          dump_type(ys)
+        end
+        zs = ENV.keys
+        unless zs.empty?
+          zs.collect! { |z| z.to_sym }
+          dump_type(zs)
+        end
+      RUBY
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        ys = ENV.keys
+        unless ys.empty?
+          ys.map!(&:to_sym)
+          ys.first.to_proc
+        end
+      RUBY
+    end
+
+    it "leaves the refinement exactly as it was under `sort!` and `reverse!`" do
+      expect(dumped_types(<<~RUBY)).to eq(["non-empty-array[String]"] * 2)
+        ys = ENV.keys
+        unless ys.empty?
+          ys.sort!
+          dump_type(ys)
+          ys.reverse!
+          dump_type(ys)
+        end
+      RUBY
+    end
   end
 
   describe "the straight-line seam on a literal Hash" do

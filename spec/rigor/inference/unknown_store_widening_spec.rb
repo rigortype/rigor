@@ -93,10 +93,9 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.removes_empty_witness?).to be(true)
     end
 
-    # `map!` keeps the witness and joins nothing, so the straight-line widening answers the refinement itself and
-    # declines. The refinement is a carrier that seam already grows (issue #936), and the site rewrites every
-    # element, so the base takes the arm.
-    # The straight-line widening used to decline these (its answer was the pre-state); it rewrites them now.
+    # `map!` cannot empty the receiver but rewrites every element, so the straight-line widening keeps the witness
+    # and replaces the base's element (`RewriteMutation`). It used to decline these, answering the pre-state, and a
+    # declined site left the entry refinement's element standing over what the rewrite stored.
     describe "an empty-witness refinement under a rewrite" do
       let(:non_empty_strings) { Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String")) }
 

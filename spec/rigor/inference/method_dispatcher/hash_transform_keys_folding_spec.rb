@@ -60,9 +60,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
         .to eq(hash_of(union(nominal("String"), constant(:z), constant(:y)), union(constant(1), constant(2))))
     end
 
-    it "keeps the block's keys alone for an empty mapping" do
-      expect(dispatch(receiver: pair_shape, args: [shape({})], block_type: nominal("String")))
-        .to eq(hash_of(nominal("String"), union(constant(1), constant(2))))
+    it "reads a non-empty-hash mapping through its base" do
+      mapping = Rigor::Type::Combinator.non_empty_hash(nominal("Symbol"), nominal("String"))
+      expect(dispatch(receiver: pair_shape, args: [mapping], block_type: nominal("Integer")))
+        .to eq(hash_of(union(nominal("Integer"), nominal("String")), union(constant(1), constant(2))))
+    end
+
+    it "treats &nil as no block" do
+      node = call_node("h.transform_keys(m, &nil)")
+      expect(dispatch(receiver: pair_shape, args: [rename_a], block_type: untyped, call_node: node))
+        .to eq(hash_of(union(constant(:a), constant(:b), constant(:z)), union(constant(1), constant(2))))
     end
 
     describe "an argument it cannot read" do
@@ -75,6 +82,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
           result = dispatch(receiver: pair_shape, args: [mapping], block_type: nominal("String"))
           expect(result.type_args.first.members).to include(untyped), "for #{mapping.describe}"
           expect(result.type_args.last).to eq(union(constant(1), constant(2)))
+        end
+      end
+
+      # The engine records no aliasing, so `m = {}; m.tap { |x| x[:a] = :z }` still reads `{}`.
+      it "adds a Dynamic[top] key arm for an empty mapping, not a bot one" do
+        expect(dispatch(receiver: pair_shape, args: [shape({})], block_type: nominal("String")))
+          .to eq(hash_of(union(nominal("String"), untyped), union(constant(1), constant(2))))
+      end
+
+      # `{ **o, b: :y }` types as `Hash[:b, :y]`: the literal's type leaves the splatted entries out.
+      it "adds a Dynamic[top] key arm for a mapping literal with a **splat entry" do
+        ["h.transform_keys(**o, b: :y)", "h.transform_keys({ **o, b: :y })"].each do |source|
+          result = dispatch(receiver: pair_shape, args: [shape({ b: constant(:y) })], call_node: call_node(source))
+          expect(result).to eq(hash_of(union(constant(:a), constant(:b), constant(:y), untyped),
+                                       union(constant(1), constant(2)))), "for #{source}"
+        end
+        expect(dispatch(receiver: pair_shape, args: [shape({ b: constant(:y) })],
+                        call_node: call_node("h.transform_keys(b: :y)")))
+          .to eq(hash_of(union(constant(:a), constant(:b), constant(:y)), union(constant(1), constant(2))))
+      end
+
+      # A splat may expand to no argument (the block form) or to one mapping: `Dynamic[top]` covers both.
+      it "adds a Dynamic[top] key arm for an unknown argument count with a block" do
+        ["h.transform_keys(*xs) { |k| k.to_s }", "h.transform_keys(**o) { |k| k.to_s }"].each do |source|
+          result = dispatch(receiver: pair_shape, args: [], block_type: nominal("String"), call_node: call_node(source))
+          expect(result).to eq(hash_of(union(nominal("String"), untyped), union(constant(1), constant(2)))),
+                            "for #{source}"
         end
       end
 
@@ -114,11 +148,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
         expect(dispatch(receiver: pair_shape, args: [rename_a, rename_a])).to be_nil
       end
 
-      it "for a splat or forwarded argument list, but not for a plain one" do
+      # With no block, an argument list that may pass nothing may be the `Enumerator` form.
+      it "for an unknown argument count with no block, but not for a plain one" do
         forwarded = call_node("def f(...) = h.transform_keys(...)").body.body.first
-        expect(dispatch(receiver: pair_shape, args: [rename_a], call_node: call_node("h.transform_keys(*m)")))
-          .to be_nil
-        expect(dispatch(receiver: pair_shape, args: [rename_a], call_node: forwarded)).to be_nil
+        anonymous = call_node("def f(**) = h.transform_keys(**)").body.body.first
+        [call_node("h.transform_keys(*m)"), call_node("h.transform_keys(**o)"), forwarded, anonymous].each do |node|
+          expect(dispatch(receiver: pair_shape, args: [rename_a], call_node: node)).to be_nil, "for #{node.slice}"
+        end
         expect(dispatch(receiver: pair_shape, args: [rename_a], call_node: call_node("h.transform_keys(m)")))
           .not_to be_nil
       end

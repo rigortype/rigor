@@ -17,7 +17,9 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
     end
   end
 
-  # Every error-severity rule plus the always-truthy / always-falsey family.
+  # Every error-severity rule plus the always-truthy / always-falsey family. On rbs 3.10 the examples that pass
+  # a plain positional mapping also see `call.wrong-arity`: that line's declaration has no mapping overload, and
+  # the arity rule reads the declaration rather than the dispatcher's answer. CI runs this file on rbs 4.x only.
   def reported_rules(source)
     result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
     result.diagnostics.filter_map do |diagnostic|
@@ -45,9 +47,7 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
     end
 
     it "no longer folds a comparison with a renamed key always-falsey" do
-      # THE REPORTED HAZARD: `r.keys` read `:a | :b`, so `== :z` folded to false. rbs 3.10 still reports
-      # `call.wrong-arity` here: its declaration has no mapping overload, and the arity rule reads the declaration
-      # rather than the dispatcher's answer. CI runs this file on the rbs 4.x line only.
+      # THE REPORTED HAZARD: `r.keys` read `:a | :b`, so `== :z` folded to false.
       expect(reported_rules(<<~RUBY)).to be_empty
         r = { a: 1, b: 2 }.transform_keys({ a: :z }) { |k| k }
         puts "z first" if r.keys.first == :z
@@ -92,11 +92,46 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
       RUBY
     end
 
-    it "adds a Dynamic[top] key arm for a block it cannot type" do
+    it "keeps the mapping beside a block-pass it cannot read" do
       expect(dumped_types(<<~RUBY)).to eq(["Hash[:z | Dynamic[top], 1]"])
         def rename(blk)
           dump_type({ a: 1 }.transform_keys({ a: :z }, &blk))
         end
+      RUBY
+    end
+  end
+
+  # The blockless form answered `Hash[K | Dynamic[top], V]` before, so a mapping typed narrower than its
+  # runtime value is a new way for a comparison to fold. Each of these is correct code and reports nothing.
+  describe "a mapping typed narrower than its runtime value" do
+    it "does not trust a literal that leaves its **splat entries out" do
+      # Runtime `{ z: 1, y: 2, c: 3 }`; `{ **o, b: :y }` types as `Hash[:b, :y]`.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        H = { a: 1, b: 2, c: 3 }
+        o = { a: :z }
+        r = H.transform_keys(**o, b: :y)
+        puts "z" if r.keys.first == :z
+      RUBY
+    end
+
+    it "does not trust an empty mapping filled through an alias" do
+      # Runtime `{ z: 1, b: 2 }`; the engine records no aliasing, so `m` still reads `{}`.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        m = {}
+        m.tap { |x| x[:a] = :z }
+        r = { a: 1, b: 2 }.transform_keys(m)
+        puts "z" if r.keys.first == :z
+      RUBY
+    end
+  end
+
+  describe "a splatted argument with a block" do
+    it "adds a Dynamic[top] key arm instead of the block-only answer" do
+      # Runtime `{ z: 1, "b" => 2 }`; the RBS answer was `Hash["a" | "b", 1 | 2]`.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        xs = [{ a: :z }]
+        r = { a: 1, b: 2 }.transform_keys(*xs) { |k| k.to_s }
+        puts "z" if r.keys.first == :z
       RUBY
     end
   end

@@ -1051,6 +1051,22 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "floors a string refinement an escaping block mutates, directly or through a callee" do
+      # The escaping-block floor shares the straight-line callee floor's carrier test, which read only a plain
+      # `String`: both locals left `Thread.new` still `decimal-int-string`, although `"5x"` is not one.
+      expect(dumped_types(<<~RUBY)).to eq(%w[String String])
+        def app(x)
+          x << "y"
+        end
+        s = rand(10).to_s
+        Thread.new { s << "x" }
+        dump_type(s)
+        u = rand(10).to_s
+        Thread.new { app(u) }
+        dump_type(u)
+      RUBY
+    end
+
     it "keeps a captured array exact when the callee only reads it" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
         def peek(arr, x)

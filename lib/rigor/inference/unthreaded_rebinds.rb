@@ -28,22 +28,24 @@ module Rigor
     # - a multi-assign value and its local and instance-variable targets, and the LOCAL a `rescue => e`
     #   reference, a `for` index, a pattern capture or `=~`'s named captures binds — the evaluator binds no
     #   class variable or global through any of them, and no instance variable outside a multi-assign;
-    # - a nested block or lambda body, for a local only: the call's write-back fixpoint or escaping-block floor
-    #   covers captured locals, and nothing covers an instance variable, class variable or global there.
+    # - a nested block or lambda body, for a local or an instance variable: the call's write-back fixpoint, which
+    #   joins the block's `next` and `break` paths, or the escaping-block floor covers both, and nothing covers
+    #   a class variable or global there.
     #
     # Every other position is unthreaded: a call's receiver and arguments, an array or hash literal, an
     # interpolation, a `return` / `next` / `break` value, `rescue` modifier, `self.w =` (which rebinds `@w` with
     # no write node at all), a `def` or class body. The list is a whitelist, so a position the evaluator gains
     # later floors a name needlessly rather than letting a pin through.
     #
-    # A threaded rebind can still miss the exit binding when a jump leaves after it. The evaluator's exit scope
-    # is the fall-through path's, and a branch that ends in `next` is dropped from it — the rebind the branch made
-    # and the narrowing its guard applied both. So is a nested block's `next` / `break` from its own write-back,
-    # and a loop's `next` or `break` from the loop's own join. A rebind that textually precedes such a jump is therefore
-    # unthreaded too; the block body runs forward-only, so a rebind after every jump cannot be on a jump's path,
-    # and a jump that is its construct's final statement leaves with the exit scope itself. A rebind in an
-    # `ensure` runs after any jump in its `begin`, so under any jump it counts as preceding one. `redo` and
-    # `retry` re-enter code with the bindings they carry, and count as jumps.
+    # A threaded rebind can still miss the exit binding when a jump leaves after it. The fold's pass and a
+    # nested block's write-back join every block-level `next` (and the write-back every `break`) into the exit
+    # ({StatementEvaluator#evaluate_invocation}), but a `while` / `until` / `for` loop's continuation joins none
+    # of its `next` paths, and its `break` paths only for a local and not in every shape — the rebind such a
+    # branch made and the narrowing its guard applied drop out — and `redo` / `retry` re-enter code with
+    # bindings no join sees. A rebind that textually precedes such a jump is therefore unthreaded too; the body runs
+    # forward-only, so a rebind after every jump cannot be on a jump's path, and a jump that is its construct's
+    # final statement leaves with the exit scope itself. A rebind in an `ensure` runs after any jump in its
+    # `begin`, so under any such jump it counts as preceding one.
     module UnthreadedRebinds
       VARIABLE_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
       private_constant :VARIABLE_WRITE_NODES
@@ -93,13 +95,13 @@ module Rigor
       }.transform_values(&:freeze).freeze
       private_constant :THREADED_FIELDS
 
-      # The jumps that leave, or re-enter, an iteration of the construct they belong to. A `break` leaves the
-      # fold's call outright, so no later iteration reads what it carried; a nested block's or loop's `break`
-      # returns to this body, which then reads it. A `while` / `until` loop's continuation does not join the
-      # scope its `break` left with, so a loop's `break` counts as a nested block's does.
-      FOLD_JUMPS = Set[Prism::NextNode, Prism::RedoNode, Prism::RetryNode].freeze
-      NESTED_JUMPS = (FOLD_JUMPS | [Prism::BreakNode]).freeze
-      private_constant :FOLD_JUMPS, :NESTED_JUMPS
+      # The jumps whose path the exit binding misses, per construct. A block's `next` and `break` are joined
+      # ({StatementEvaluator#evaluate_invocation}, the write-back), and a `break` out of the fold's own call ends
+      # it, so no later iteration reads what it carried; `redo` and `retry` are joined nowhere. A loop joins
+      # none of its `next` paths and not every `break` path, so both count.
+      BLOCK_JUMPS = Set[Prism::RedoNode, Prism::RetryNode].freeze
+      LOOP_JUMPS = (BLOCK_JUMPS | [Prism::NextNode, Prism::BreakNode]).freeze
+      private_constant :BLOCK_JUMPS, :LOOP_JUMPS
 
       # The constructs that own the jumps inside them.
       JUMP_BOUNDARY_NODES = Set[
@@ -115,10 +117,11 @@ module Rigor
       private_constant :EMPTY
 
       # How a walk position reaches the exit scope: whether a local rebind there is threaded, whether an
-      # instance variable, class variable or global rebind is, the offset below which a rebind precedes a jump,
+      # instance variable's is, whether a class variable's or global's is, the offset below which a rebind
+      # precedes a jump,
       # whether the position binds targets only (`:multi_assign` under a multi-assign, `:capture` under any
       # other binding construct, false otherwise), and the locals a nested block shadows.
-      Position = Data.define(:local, :non_local, :horizon, :binding, :shadowed)
+      Position = Data.define(:local, :ivar, :other, :horizon, :binding, :shadowed)
       private_constant :Position
 
       module_function
@@ -131,9 +134,9 @@ module Rigor
 
         wanted = names.to_set
         found = Set.new
-        horizon = last_jump_offset(body, FOLD_JUMPS)
-        visit(body, Position.new(local: true, non_local: true, horizon: horizon, binding: false, shadowed: EMPTY),
-              wanted, found)
+        horizon = last_jump_offset(body, BLOCK_JUMPS)
+        start = Position.new(local: true, ivar: true, other: true, horizon: horizon, binding: false, shadowed: EMPTY)
+        visit(body, start, wanted, found)
         found
       end
 
@@ -183,7 +186,7 @@ module Rigor
         case mode
         when :binding then position.with(binding: parent.is_a?(Prism::MultiWriteNode) ? :multi_assign : :capture)
         when :ensure then position.with(horizon: position.horizon == NO_JUMP ? NO_JUMP : Float::INFINITY)
-        when :loop then extend_horizon(position, child, NESTED_JUMPS)
+        when :loop then extend_horizon(position, child, LOOP_JUMPS)
         when :nested then nested_block(child, position)
         when :lambda then nested_body(parent, child, position)
         else position
@@ -196,16 +199,16 @@ module Rigor
 
       # A call's block. A block-pass argument (`&blk`) carries no body the call's write-back reads.
       def nested_block(child, position)
-        return position.with(local: false, non_local: false) unless child.is_a?(Prism::BlockNode)
+        return position.with(local: false, ivar: false, other: false) unless child.is_a?(Prism::BlockNode)
 
         nested_body(child, child.body, position)
       end
 
-      # A block or lambda body: its parameters and block-locals shadow, its own jumps join the horizon, and only a
-      # local's rebind is still carried out.
+      # A block or lambda body: its parameters and block-locals shadow, its own jumps join the horizon, and a
+      # class variable's or global's rebind is no longer carried out.
       def nested_body(owner, body, position)
-        extend_horizon(position, body, NESTED_JUMPS).with(
-          non_local: false, shadowed: position.shadowed | CapturedLocals.introduced_locals(owner)
+        extend_horizon(position, body, BLOCK_JUMPS).with(
+          other: false, shadowed: position.shadowed | CapturedLocals.introduced_locals(owner)
         )
       end
 
@@ -223,9 +226,17 @@ module Rigor
 
         kind = CapturedLocals.variable_kind(name)
         return false if position.binding && !binding_target_threaded?(kind, position.binding)
-        return false unless kind == :local ? position.local : position.non_local
+        return false unless kind_threaded?(kind, position)
 
         node.location.start_offset >= position.horizon
+      end
+
+      def kind_threaded?(kind, position)
+        case kind
+        when :local then position.local
+        when :ivar then position.ivar
+        else position.other
+        end
       end
 
       # A binding construct's target reaches the exit scope only for the kinds the evaluator binds there: a

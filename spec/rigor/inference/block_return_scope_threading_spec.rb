@@ -31,6 +31,12 @@ RSpec.describe "block-return scope threading", type: :runner do
     result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
   end
 
+  # Every `call.undefined-method` diagnostic `source` produced — what a receiver a stale fold proved nil reports.
+  def undefined_method_rules(source)
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s == "call.undefined-method" }
+  end
+
   describe "the tail reads a name the body binds" do
     it "types a block-local tail through a generic block-return signature" do
       # The reported repro: `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the block's return type IS
@@ -762,6 +768,19 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "widens a captured array whose remover is written before its adder" do
+      # `[0, 1]` at runtime. The `pop` closed the literal to `Array[0]` before the `push` could add its
+      # gradual arm, so every position read `0?` and `r.last == 1` folded always-falsey.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top] | nil, 0 | Dynamic[top] | nil]")
+        stack = [0]
+        dump_type([1, 2].map do |x|
+          top = stack.pop
+          stack.push(x)
+          top
+        end)
+      RUBY
+    end
+
     it "widens the mutated local when the fold is nested inside a threaded body" do
       # The widening evaluates no body, so threading suppression is no reason to skip it.
       expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
@@ -1356,6 +1375,87 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
+    # The filter family's fall-through was not merely wider either: `BlockFolding` folds `select` / `reject` on
+    # a `Constant` block, and the entry-scope pin hands it one, so an undecided walk fell through to a
+    # provably-empty answer. The floor is an Array of the receiver's own elements.
+    describe "(1), filter family: select / filter / reject over a rebound-capture predicate" do
+      it "answers an Array of the elements where the entry-scope predicate emptied a select" do
+        # Runtime answer is `[2]`; the fall-through read `seen == 2` as `1 == 2` and answered `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[1 | 2]")
+          seen = 0
+          dump_type([1, 2].select do |e|
+            seen += 1
+            seen == 2
+          end)
+        RUBY
+      end
+
+      it "answers the same floor for filter" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[1 | 2]")
+          seen = 0
+          dump_type([1, 2].filter do |e|
+            seen += 1
+            seen == 2
+          end)
+        RUBY
+      end
+
+      it "answers the same floor for a reject the pin emptied" do
+        # Runtime answer is `[2]`; the pin read `seen == 1` as always true, so every element was rejected.
+        expect(dumped_type(<<~RUBY)).to eq("Array[1 | 2]")
+          seen = 0
+          dump_type([1, 2].reject do |e|
+            seen += 1
+            seen == 1
+          end)
+        RUBY
+      end
+
+      it "no longer reports the emptiness the pinned predicate folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          seen = 0
+          r = [1, 2].select do |e|
+            seen += 1
+            seen == 2
+          end
+          puts "none" if r.size == 0
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the emptied select" do
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          seen = 0
+          r = [1, 2].select do |e|
+            seen += 1
+            seen == 2
+          end
+          r.first + 1
+        RUBY
+      end
+
+      it "widens a range receiver's elements, which carry no pin the program wrote" do
+        # The RBS answer the floor replaces had no pin; keeping the enumerated `1 | 2 | 3 | 4` would leave an
+        # Array a later `<<` cannot widen.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+          i = rand(2)
+          dump_type((1..4).filter { |e| e.even? == (i > 0) })
+        RUBY
+      end
+
+      it "does not fold a comparison against a value appended to the range's floor" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          i = rand(2)
+          q = (1..4).filter { |e| e.even? == (i > 0) }
+          q << 9
+          puts "nine" if q.last == 9
+        RUBY
+      end
+
+      it "still folds select to the kept elements when the predicate decides" do
+        expect(dumped_type("dump_type([1, 2].select { |e| e > 1 })")).to eq("[2]")
+      end
+    end
+
     describe "(2) the content-mutation family above the per-element threading cap" do
       it "floors a position whose tail reads a parameter the body mutated in place" do
         # `[[]] * 9` is nine references to ONE array, which the nine `<<` leave holding nine `1`s; the walk
@@ -1461,6 +1561,354 @@ RSpec.describe "block-return scope threading", type: :runner do
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             q = e
             5
+          end)
+        RUBY
+      end
+    end
+
+    # The same pre-state at ANY arity. A fold nested inside a body another pass is evaluating whole runs under
+    # the suppression that keeps the threading from re-entering, so every position is typed tail-only exactly as
+    # it is above the cap — and the per-pair HashShape fold, which has no cap, reaches a pair the dependency scan
+    # can flag only this way. The outer body threads only when its own tail reads a name its prefix binds: most
+    # fixtures route the outer `w` into the inner block, one assigns the fold's result and reads it back
+    # (`y = fold; y`), and "threads the same body when the outer tail does not read its own prefix" does
+    # neither, to show the floor follows the suppression rather than the lexical nesting.
+    describe "(2), nested: the same family under block-body threading suppression" do
+      it "floors a Tuple position whose tail reads a parameter the body mutated in place" do
+        # Runtime `[[1], [1]]`; the nested walk answered two provably-empty `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "floors a HashShape value whose tail reads a parameter the body mutated in place" do
+        # THE REPORTED PROBE. Runtime `{ x: [1], y: [1] }`; the nested per-pair fold answered `{ x: [], y: [] }`.
+        expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale HashShape value" do
+        # THE HAZARD: `r[:x].first` read `[].first`, a provable nil, and `+` was reported on correct code.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << w
+              a
+            end
+          end
+          r[:x].first + 1
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale Tuple position" do
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end
+          r[0].first + 1
+        RUBY
+      end
+
+      it "still reports the nil receiver when the tail ignores its prefix" do
+        # The must-fire sibling: nothing mutates `a`, so the value really is `[]` and `.first` really is nil.
+        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              q = w
+              a
+            end
+          end
+          r[:x].first + 1
+        RUBY
+      end
+
+      it "floors a flat_map whose flattened positions were the pre-state" do
+        # Runtime `[1, 1]`; flattening two stale `[]` answered a provably-empty `[]`. The floored positions are no
+        # Tuple, so the assembler declines and the dispatcher answers.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].flat_map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "reads a captured local the body mutates in place through its in-place widening, not the floor" do
+        # Runtime `[[1, 1], [1, 1]]` — both positions are `out` itself. Before #1203 nothing re-answered a name
+        # the body never rebinds, so the floor took it; the in-place widening evaluates no body, so it holds
+        # under the suppression too, and the name counts as answered.
+        expect(dumped_type(<<~RUBY)).to eq("[Array[Dynamic[top]], Array[Dynamic[top]]]")
+          m = Mutex.new
+          v = 1
+          out = []
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              out << w
+              out
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a Tuple position whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("[5, 5]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              q = e + w
+              5
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a single-statement Tuple body exact" do
+        expect(dumped_type(<<~RUBY)).to eq("[2, 3]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map { |e| e + w }
+          end)
+        RUBY
+      end
+
+      it "keeps a HashShape value whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("{ x: 10, y: 20 }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: 1, y: 2 }.transform_values do |e|
+              q = w
+              e * 10
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a HashShape key fold whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { a: 1, b: 2 }.transform_keys do |k|
+              q = w
+              k.to_s
+            end
+          end)
+        RUBY
+      end
+
+      it "threads the same body when the outer tail does not read its own prefix" do
+        # The outer body is not threaded, so nothing suppresses the inner fold and every pair threads its own
+        # mutation — the same answer as with no outer block at all.
+        expect(dumped_type(<<~RUBY)).to eq("{ x: Array[Dynamic[top] | Integer], y: Array[Dynamic[top] | Integer] }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << v
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "floors the fold when the outer tail reads the local the fold's result was assigned to" do
+        # The most idiomatic trigger: `y = fold; y` threads the outer body although the fold reads no outer
+        # binding, so the fold is typed under the suppression all the same.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            y = { x: [], y: [] }.transform_values do |a|
+              a << v
+              a
+            end
+            y
+          end
+          r[:x].first + 1
+        RUBY
+      end
+
+      it "answers a key fold whose tail reads a rebound key parameter with the plain Hash floor" do
+        # Runtime `{ "a1" => 1, "b1" => 2 }`; the nested per-pair fold answered `{ a: 1, b: 2 }`. Declining would
+        # hand the keys to the dispatcher, whose block-return pass reads them tail-only as the same `:a | :b`.
+        expect(dumped_type(<<~RUBY)).to eq("Hash[Dynamic[top], 1 | 2]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { a: 1, b: 2 }.transform_keys do |k|
+              k = "\#{k}\#{w}"
+              k
+            end
+          end)
+        RUBY
+      end
+
+      it "answers an undecided key fold from the keys it typed instead of declining into a tail-only pass" do
+        # Runtime `{ "k1" => 1 }`. `buf` is answered by its in-place widening, so no floor fires, but the key is
+        # no single `Constant`; a decline handed it to the dispatcher, whose tail-only pass read `buf` as `"k"`.
+        expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1]")
+          m = Mutex.new
+          v = 1
+          buf = +"k"
+          dump_type(m.synchronize do
+            w = v
+            { a: 1 }.transform_keys do |k|
+              buf << w.to_s
+              buf
+            end
+          end)
+        RUBY
+      end
+
+      it "answers a key a rebound counter spells from the keys it typed too" do
+        # Runtime `{ "a1" => 1, "b2" => 2 }`; the dispatcher's tail-only pass read `i` as `0`.
+        expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1 | 2]")
+          m = Mutex.new
+          v = 1
+          i = 0
+          dump_type(m.synchronize do
+            w = v
+            { a: 1, b: 2 }.transform_keys do |k|
+              i += w
+              k.to_s + i.to_s
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps an empty shape's exact fold, since no pair is typed" do
+        expect(dumped_type(<<~RUBY)).to eq("{}")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            {}.transform_keys do |k|
+              k = "\#{k}\#{w}"
+              k
+            end
+          end)
+        RUBY
+      end
+
+      it "answers a nested select whose predicate read the pre-state with the filter floor" do
+        # Runtime `[[1], [1]]`; the tail-only predicate read `[].any?` and the fall-through answered `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[[]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].select do |a|
+              a << w
+              a.any?
+            end
+          end)
+        RUBY
+      end
+
+      it "reads an instance variable the body mutates in place through its in-place widening too" do
+        expect(dumped_type(<<~RUBY)).to eq("[Array[Dynamic[top]], Array[Dynamic[top]]]")
+          class Buffer
+            def run
+              m = Mutex.new
+              v = 1
+              @buf = []
+              dump_type(m.synchronize do
+                w = v
+                [1, 2].map do |e|
+                  @buf << w
+                  @buf
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "keeps the structure around a rebound captured local, which the suppression floors by name" do
+        expect(dumped_type(<<~RUBY)).to eq("[[Dynamic[top], 1], [Dynamic[top], 2]]")
+          m = Mutex.new
+          v = 1
+          total = 0
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              total += w
+              [total, e]
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps the structure around a body-local, which tail-only already reads as Dynamic[top]" do
+        # The body-local has no entry binding, so tail-only is sound for it; flooring the position would erase
+        # the `raw:` value it cannot affect.
+        expect(dumped_type(<<~RUBY)).to eq("[{ value: Dynamic[top], raw: 1 }, { value: Dynamic[top], raw: 2 }]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              x = e * w
+              { value: x, raw: e }
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a body that leaves through a `next` exact, since the join evaluates it whole" do
+        expect(dumped_type(<<~RUBY)).to eq("[Array[Dynamic[top] | Integer], Array[Dynamic[top] | Integer]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              w.nil? ? (next []) : a
+            end
           end)
         RUBY
       end
@@ -1787,29 +2235,45 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "floors a counter rebound on a branch a `next` leaves the iteration from" do
-      # Runtime `[0, 1]`. The branch ends in `next`, so its scope never reaches the pass's exit binding, and the
-      # `||=` kept that binding off the seed; the pin answered `[0, 0]`.
-      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+    it "keeps the joined binding of a counter rebound on a branch a `next` leaves from" do
+      # Runtime `[0, 1]`. The pass's exit joins the `next` path (`StatementEvaluator#evaluate_invocation`), so
+      # the scan leaves the rebind threaded and the fixpoint answers it; the pin answered `[0, 0]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
         seen = nil
         dump_type([1, 2].map { |e| seen ||= 0; if e == 1; seen += 1; next 0; end; seen })
       RUBY
     end
 
-    it "floors a local rebound ahead of a `next` whose guard narrows it" do
-      # Runtime `[0, 0, nil]`. The fall-through exit binds `last` narrowed away from nil, so the third position
-      # read `0 | 1 | 2` for a local that holds the nil a `next` left with.
-      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], 0 | Dynamic[top], Dynamic[top]]")
+    it "keeps the nil a `next` whose guard narrows a rebound local leaves with" do
+      # Runtime `[0, 0, nil]`. The fall-through alone binds `last` narrowed away from nil; the joined `next` path
+      # brings the nil back, so the third position no longer reads `0 | 1 | 2`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | 1 | 2 | nil, 0 | 1 | 2 | nil, 0 | 1 | 2 | nil]")
         last = 0
         dump_type([1, nil, 2].map { |e| r = last; last = e; next 0 if last.nil?; r })
       RUBY
     end
 
-    it "floors a local a nested block rebinds before its own `next`" do
-      # Runtime `[1, 2]`: the nested write-back drops the `next` branch exactly as the fold does.
-      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+    it "keeps the joined binding of a local a nested block rebinds before its own `next`" do
+      # Runtime `[1, 2]`: the nested write-back joins its `next` branch, so the rebind is threaded.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
         s = nil
         dump_type([1, 2].map { |e| s ||= 0; [1, 2].each { |x| if x == 1; s += 1; next; end }; s })
+      RUBY
+    end
+
+    it "floors a global a nested block rebinds" do
+      # The nested write-back covers locals and instance variables, not globals. Runtime `[1, 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+        $n = nil
+        dump_type([1, 2].map { |e| $n ||= 0; [1].each { $n += 1 }; $n })
+      RUBY
+    end
+
+    it "floors a local a `while` loop rebinds before its `next`" do
+      # The loop's continuation does not join its `next` path. Runtime `[1, 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+        s = nil
+        dump_type([1, 2].map { |e| s ||= 0; i = 0; while i < 1; i += 1; if i == 1; s += 1; next; end; end; s })
       RUBY
     end
 
@@ -1824,10 +2288,10 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "floors an instance variable a nested block rebinds" do
-      # A nested block's write-back covers captured locals only, so `@n += 1` inside it never reaches the exit
+    it "keeps the written-back binding of an instance variable a nested block rebinds" do
+      # A nested block's write-back carries its instance variables too, so `@n += 1` inside it reaches the exit
       # binding. Runtime `[1, 2]`; the pin answered `[0, 0]`.
-      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
         class Counter
           def run
             @n = nil

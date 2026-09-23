@@ -189,6 +189,26 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/for_rescue_index_target_widening.rb — `for h[k] in` and `rescue => h[k]` widen like `h[k] = v`" do
+    let(:harness) { harness_for("for_rescue_index_target_widening") }
+
+    # The must-not-fire / must-fire pair in one assertion: every stored-then-read condition folded to `true`
+    # on the stale literal before the fix, and the conditions on a hash nothing stores into must still fold.
+    it "silences the stale folds without silencing the genuine ones" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+
+    it "widens every stored-into receiver and leaves the untouched ones literal" do
+      %i[looped pair rescued].each do |name|
+        expect(harness.local(name).members).to include(a_kind_of(Rigor::Type::Nominal)), name.to_s
+      end
+      %i[kept_for kept_pair kept_rescue].each do |name|
+        expect(harness.local(name)).to be_a(Rigor::Type::HashShape), name.to_s
+      end
+    end
+  end
+
   # Issue #560 — the ADDED-value half of the mutation widening. PR #561 widened the value pinning a
   # slot-REWRITING mutator falsifies; this pins the join that covers what the mutation stored.
   describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
@@ -2049,6 +2069,50 @@ RSpec.describe "Rigor type construction (integration)" do
                         Rigor::Type::Combinator.union(constant(0), integer)]
           )
         )
+      end
+    end
+
+    # The slice-A rebind fixpoint re-ran the body with only the REBOUND locals moving, so a captured
+    # collection the body mutates in place re-entered every pass at its pre-call contents, and a
+    # rebind read from it (`last = a.last; a << x`) closed over the first iteration's answer.
+    describe "fixtures/block_rebind_reads_mutated_capture.rb — a rebind that reads a mutated capture" do
+      let(:harness) { harness_for("block_rebind_reads_mutated_capture") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # A slot rewriter closed the carrier without a gradual arm, so the String the body stored drew
+      # `undefined method 'upcase' for Integer` — an error, which the `flow.*` line set below cannot see.
+      it "reports no error on a value the body stored" do
+        expect(harness.errors.map(&:rule)).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion: every rebind that reads a mutated capture is
+      # true at runtime, and the paired control reading an UNMUTATED collection still folds.
+      it "silences the first-iteration folds without silencing the genuine one" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      end
+
+      # The widened binding evaluates no body, and a block that mutates nothing captured gets none: the
+      # accumulator archetype keeps the three passes it took before (the third is the final value-pin
+      # widen `0 | 1 | 2 | …` needs) and never reaches the widening.
+      it "costs a block that mutates nothing captured no extra body pass" do
+        passes = 0
+        allow(Rigor::Inference::BodyFixpoint).to receive(:converge).and_wrap_original do |original, **kwargs|
+          evaluate_body = kwargs.fetch(:evaluate_body)
+          original.call(**kwargs, evaluate_body: lambda { |bindings|
+            passes += 1
+            evaluate_body.call(bindings)
+          })
+        end
+        allow(Rigor::Inference::UnknownStoreWidening).to receive(:widen).and_call_original
+
+        Rigor::Scope.empty.evaluate(Prism.parse("sum = 0\n[1, 2].each { |x| sum += x }\n").value)
+        expect(passes).to eq(3)
+        expect(Rigor::Inference::UnknownStoreWidening).not_to have_received(:widen)
       end
     end
 

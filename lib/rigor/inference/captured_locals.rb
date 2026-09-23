@@ -23,10 +23,11 @@ module Rigor
     # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
     # variable.
     #
-    # The per-element fold also asks for the other bindings that outlive an iteration (`non_locals: true`):
-    # the instance variables, class variables and globals the body rebinds, and the instance variable behind an
-    # attribute setter it calls on `self`. Their names keep their sigil, so a map over every kind never collides,
-    # and {.bound_type} / {.bind} reach each name through its own kind of binding.
+    # All three also ask for the instance variables the body rebinds (`ivars: true`). The per-element fold asks
+    # for every other binding that outlives an iteration as well (`non_locals: true`): the class variables and
+    # globals the body rebinds, and the instance variable behind an attribute setter it calls on `self`. Names
+    # keep their sigil, so a map over every kind never collides, and {.bound_type} / {.bind} reach each name
+    # through its own kind of binding.
     #
     # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
     # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
@@ -92,35 +93,43 @@ module Rigor
       module_function
 
       # @param base_scope — the call-site scope the block closes over.
-      # @param non_locals — also collect, for the per-element fold, the other bindings the body rebinds that
-      #   outlive an iteration: instance variables, class variables and globals. None is captured — the block
-      #   shares the caller's `self`, its class and the process — but each outlives an iteration exactly as a
-      #   captured local does. Each counts on the same terms as a local (every write form, any depth, bound in
-      #   `base_scope`), except that an instance variable still on its class-wide binding does not: ADR-58's
-      #   declaration seed is the union of every write in the class, this body's included, so there is no
-      #   first-iteration pin in it to remove. A nested block that rebinds `self` (`o.instance_eval`) writes
-      #   another object's ivar, and a nested `def` runs only when called; both still count, because an
-      #   `instance_eval` without a receiver, or a call to that `def` inside the body, does write this one. An
-      #   attribute setter called on `self` (`self.w = v`) counts as a rebind of the instance variable it is
-      #   named after, `@w`: the `attr_writer` / `attr_accessor` convention stores there, and no write node
-      #   shows it. A hand-written setter storing elsewhere is not seen.
+      # @param ivars — also collect the instance variables the body rebinds. An ivar is not captured — the
+      #   block shares the caller's `self` — but it outlives an iteration, and the call, exactly as a captured
+      #   local does. It counts on the same terms as a local (every write form, any depth, bound in
+      #   `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration seed is
+      #   the union of every write in the class, this body's included, so nothing the body stores can move it,
+      #   and rebinding it would only drop the declaration mark that keeps its nil from being diagnostic fuel.
+      #   A nested block that rebinds `self` (`o.instance_eval`) writes another object's ivar, and a nested
+      #   `def` runs only when called; both still count, because an `instance_eval` without a receiver, or a
+      #   call to that `def` inside the body, does write this one.
+      # @param non_locals — the per-element fold's superset of `ivars`: the class variables and globals the body
+      #   rebinds count too, on the same terms, and so does an attribute setter called on `self` (`self.w = v`)
+      #   as a rebind of the instance variable it is named after, `@w`: the `attr_writer` / `attr_accessor`
+      #   convention stores there, and no write node shows it. A hand-written setter storing elsewhere is not
+      #   seen.
       # @return the captured names the body writes, each once, in first-write order.
-      def writes(block_node, base_scope, non_locals: false)
+      def writes(block_node, base_scope, ivars: false, non_locals: false)
         body = block_node.body
         return NO_NAMES if body.nil?
 
         introduced = nil
         names = nil
+        outliving = non_locals || ivars
         Source::NodeWalker.each(body) do |descendant|
           name =
             if LOCAL_WRITE_NODES.include?(descendant.class)
               captured_local_write(descendant, base_scope) { introduced ||= introduced_locals(block_node) }
-            elsif non_locals
-              non_local_write_name(descendant)&.then { |n| n if rebindable_non_local?(base_scope, n) }
+            elsif outliving
+              rebindable_outliving_write(descendant, base_scope, non_locals)
             end
           (names ||= []) << name if name
         end
         names ? names.uniq : NO_NAMES
+      end
+
+      def rebindable_outliving_write(node, base_scope, non_locals)
+        name = outliving_write_name(node, non_locals)
+        name if name && rebindable_non_local?(base_scope, name)
       end
 
       # The outer local a local-write node rebinds, or nil when the call site does not bind it or the block
@@ -130,6 +139,12 @@ module Rigor
         return nil unless base_scope.locals.key?(name)
 
         yield.include?(name) ? nil : name
+      end
+
+      # The non-local `node` rebinds under `non_locals:` — or, without it, the instance variable only.
+      def outliving_write_name(node, non_locals)
+        name = non_local_write_name(node)
+        non_locals || (name && ivar_name?(name) && NON_LOCAL_WRITE_NODES.include?(node.class)) ? name : nil
       end
 
       # The instance, class or global variable `node` rebinds, or nil when it rebinds none of them.
@@ -192,6 +207,8 @@ module Rigor
         end
       end
 
+      def ivar_name?(name) = variable_kind(name) == :ivar
+
       # Ruby spells a global with a leading `$`, a class variable with `@@`, an instance variable with a single
       # `@`, and a local with none of them.
       def variable_kind(name)
@@ -211,8 +228,8 @@ module Rigor
 
       # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
       # above) in source order. A site counts through every variable its receiver can evaluate to
-      # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
-      # excludes it.
+      # ({ReceiverAlias.candidates}), at any nesting depth as long as a local's read resolves past every nested
+      # block ({.outer_read?}), and a local is excluded on exactly the terms {.writes} excludes it.
       #
       # Under `non_locals: true` the instance variables, class variables and globals the body mutates in place
       # count too, on the terms {.writes} takes a rebound one ({.rebindable_non_local?}). Since the block-return
@@ -233,7 +250,7 @@ module Rigor
 
         introduced = nil
         sites = nil
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           receiver = mutated_receiver(descendant)
           next if receiver.nil?
 
@@ -241,6 +258,8 @@ module Rigor
             next unless content_target?(read, base_scope, non_locals)
 
             if read.is_a?(Prism::LocalVariableReadNode)
+              next unless outer_read?(read, ancestors)
+
               introduced ||= introduced_locals(block_node)
               next if introduced.include?(read.name)
             end
@@ -268,6 +287,14 @@ module Rigor
         return base_scope.locals.key?(read.name) if read.is_a?(Prism::LocalVariableReadNode)
 
         non_locals && rebindable_non_local?(base_scope, read.name)
+      end
+
+      # True when `read` reaches past every block nested between the body and the mutation site. A read Prism
+      # resolves inside a nested block's own scope (`[[9]].each { |a| a << x }`) names that block's parameter,
+      # not the outer local that happens to share its name.
+      def outer_read?(read, ancestors)
+        nesting = ancestors.count { |node| node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) }
+        read.depth > nesting
       end
 
       def mutated_receiver(node)

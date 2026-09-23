@@ -13,6 +13,7 @@ require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
+require_relative "jump_targets"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
@@ -29,6 +30,7 @@ require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
+require_relative "unknown_store_widening"
 require_relative "version_guard"
 
 module Rigor
@@ -201,14 +203,23 @@ module Rigor
       #   assumption (`result *= i` annotating `1 | 2` rather than
       #   `Integer`). Display-path only — `rigor check` leaves it off,
       #   keeping its diagnostics and wall-clock unchanged.
+      # @param next_scope_sink — the Array of `[NextNode, Scope]` pairs
+      #   the innermost enclosing block invocation collects its `next`
+      #   exits into ({#evaluate_invocation}), or nil. The scope twin of
+      #   the thread-local `next` VALUE sink, threaded through `sub_eval`
+      #   instead so an evaluation `ExpressionTyper` starts elsewhere —
+      #   the block-return pass, a recursive method's inference — can
+      #   never feed it a `next` from another context. A nested loop's
+      #   `next` still lands here; the consumer filters by node identity.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
-                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false)
+                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
         @lexical_nesting = lexical_nesting.freeze
         @converged_loop_recording = converged_loop_recording
+        @next_scope_sink = next_scope_sink
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -271,6 +282,33 @@ module Rigor
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged.
         [@scope.type_of(node, tracer: @tracer), @scope]
+      end
+
+      # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
+      # parameters onto). Returns `[type, fall_through, exit]`: the body's tail type, the scope it falls off the end
+      # with, and the scope the invocation ends with.
+      #
+      # A `next` ends the invocation as surely as falling off the end does, so `exit` is `fall_through` joined
+      # (`Scope#join`) with the scope at every `next` that targets this block ({JumpTargets}). Without that join a
+      # rebind on a jumping branch (`if e.odd?; n = e; next; end`) vanished — `eval_if` carries only the arm that falls
+      # through — and both readers of the exit scope, ADR-56's write-back fixpoint ({#block_exit_bindings}) and issue
+      # #587 (b)'s per-element fold (`ExpressionTyper#captured_exit_bindings`), kept the pre-call binding. A `break` is
+      # NOT joined: it ends the call, so its scope feeds no further invocation ({#join_block_break_bindings}).
+      # `fall_through` is exposed for the fold's unmoved-pin test, which must not count what a `next` arm adds.
+      #
+      # A body with no block-level `next` pays one allocation-free scan and nothing else.
+      def evaluate_invocation(block_node)
+        body = block_node.body
+        return [Type::Combinator.constant_of(nil), scope, scope] if body.nil?
+
+        unless JumpTargets.any?(body, Prism::NextNode)
+          type, fall_through = sub_eval(body, scope, next_scope_sink: nil)
+          return [type, fall_through, fall_through]
+        end
+
+        sink = []
+        type, fall_through = sub_eval(body, scope, next_scope_sink: sink)
+        [type, fall_through, join_jump_scopes(fall_through, sink, JumpTargets.of(body, Prism::NextNode))]
       end
 
       # ADR-89 WD2 — the sorted positions of the positional parameters whose CONTENT `def_node` mutates
@@ -667,23 +705,28 @@ module Rigor
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
       # what the write put in the slot — for a compound write {#index_write_stored_type}'s
-      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for a multi-assign
-      # index target the slot {MultiTargetBinder} decomposed for it — which is the whole point: it
+      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for an index target
+      # the value its owner stores (the slot {MultiTargetBinder} decomposed, the `for` element, the
+      # rescued exception) — which is the whole point: it
       # is the value the retained element evidence provably no longer covers. Returns `[]` when the
       # key is unresolvable, which reproduces the pre-join widening.
+      # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
+      # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
+      # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
+      # them (each iteration, the moment of the catch).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
-      def index_write_arg_types(node, stored_type)
+      def index_write_arg_types(node, stored_type, type_scope: scope)
         args = node.arguments
         return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, type_scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
         # A splat argument is marked `nil` — its expansion decides the store's arity at
         # runtime, which an untyped index type could not express (issue #1140).
-        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : scope.type_of(arg, tracer: tracer) } + [stored_type]
+        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : type_scope.type_of(arg, tracer: tracer) } + [stored_type]
       end
 
       # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
@@ -691,8 +734,9 @@ module Rigor
       # `a[0, 1] += [2]` reads `a[0, 1] + [2]`, not `[2]` (issue #1140). It is also the node's value
       # outside {#index_compound_write_value}'s memoizing `||=`. That method passes the `current` read
       # and the `rhs` it already typed, so a nested `(a[i] ||= {})[j] ||= v` chain types each level's
-      # receiver once rather than doubling per level. Any other node falls back to its own type (a
-      # multi-assign index target keeps its untyped answer).
+      # receiver once rather than doubling per level. Any other node falls back to its own type (an
+      # index target — a multi-assign slot, a `for` index, a rescue reference — keeps its untyped
+      # answer).
       def index_write_stored_type(node, type_scope, current: nil, rhs: nil)
         case node
         when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode
@@ -822,12 +866,28 @@ module Rigor
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
-        post = bound.index_targets.reduce(bound.apply_to(post_rhs)) do |acc, (target, stored)|
-          widened = IndexWriteWidening.widen(node: target, current_scope: acc,
-                                             arg_types: index_write_arg_types(target, stored))
-          IndexedNarrowing.invalidate_indexed_write(target, widened)
+        [rhs_type, widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)]
+      end
+
+      # Widens the receiver of every index target a {MultiTargetBinder} result reports, over the scope its bindings
+      # were applied to — the multi-write and the `for a, h[:k] in pairs` index share it.
+      def widen_index_targets(bound, post, type_scope:)
+        bound.index_targets.reduce(post) do |acc, (target, stored)|
+          widen_index_target(target, stored, acc, type_scope: type_scope)
         end
-        [rhs_type, post]
+      end
+
+      # An index target (`Prism::IndexTargetNode`) stores `stored` through `[]=` on its receiver wherever it
+      # appears — a multi-assign slot, a `for` index, a rescue reference — so its receiver widens exactly as the
+      # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560), and drops the
+      # `h[:a] ||= default` narrowing on the slot it overwrote, as `eval_call` drops it after a `[]=` — the
+      # widening carries slot narrowings across the rebind, so without the drop `h[:a]` keeps reading the default.
+      # `type_scope` types the index arguments and gates the evidence (`joinable_receiver?`); `current_scope` is
+      # the one widened.
+      def widen_index_target(target, stored, current_scope, type_scope:)
+        widened = IndexWriteWidening.widen(node: target, current_scope: current_scope,
+                                           arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
+        IndexedNarrowing.invalidate_indexed_write(target, widened)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1109,6 +1169,7 @@ module Rigor
       # the value; its scope effects are layered on the joined exit scope so locals bound exclusively in `ensure` stay
       # observable.
       def eval_begin(node)
+        jump_marks = ensure_jump_marks(node)
         entry = scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
@@ -1144,11 +1205,39 @@ module Rigor
         end
 
         if node.ensure_clause
+          carry_jumps_through_ensure(node.ensure_clause, jump_marks)
           _ensure_type, ensure_scope = sub_eval(node.ensure_clause, exit_scope)
           exit_scope = ensure_scope
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The jump sinks' sizes as a `begin … ensure` starts, or nil for a `begin` without `ensure`: every `next` /
+      # `break` scope recorded past these marks leaves through that `ensure`.
+      def ensure_jump_marks(node)
+        return nil unless node.ensure_clause
+
+        [@next_scope_sink&.size, Thread.current[BREAK_SINK_KEY]&.size]
+      end
+
+      # A `next` or `break` inside `begin … ensure` leaves only once the `ensure` clause has run, so each jump scope the
+      # clauses recorded is replaced by that scope carried through the clause: `buf = nil; next if c` under `ensure
+      # buf = +"reset"` leaves with `"reset"`, never `nil`. The clause is evaluated without recording into the
+      # per-node scope index, which keeps the fall-through's visit.
+      def carry_jumps_through_ensure(ensure_clause, marks)
+        next_mark, break_mark = marks
+        carry_through_ensure(ensure_clause, @next_scope_sink, next_mark)
+        carry_through_ensure(ensure_clause, Thread.current[BREAK_SINK_KEY], break_mark)
+      end
+
+      def carry_through_ensure(ensure_clause, sink, mark)
+        return if sink.nil? || mark.nil?
+
+        (mark...sink.size).each do |index|
+          jump, jump_scope = sink[index]
+          sink[index] = [jump, sub_eval(ensure_clause, jump_scope, on_enter: nil).last]
+        end
       end
 
       # `BeginNode#statements` is the primary body; when an else-clause is present, its value replaces the body's per
@@ -1374,33 +1463,12 @@ module Rigor
         found
       end
 
-      # A `break` inside one of these nested constructs targets the inner construct (an inner loop, a block's method, a
-      # nested def), NOT the lexical loop — so the directly-targeting break scan does not descend into them.
-      BREAK_BOUNDARY_NODES = [
-        Prism::ForNode, Prism::WhileNode, Prism::UntilNode,
-        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
-        Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-      ].freeze
-      private_constant :BREAK_BOUNDARY_NODES
-
-      # The `BreakNode`s that lexically target THIS loop — reachable from the body without crossing a nested loop /
-      # block / def boundary. An identity-keyed Hash used as a membership set to filter the collected break scopes (the
-      # thread-local sink also collects breaks from nested blocks that did not install their own sink).
+      # The `BreakNode`s that lexically target THIS loop ({JumpTargets}) — a `break` inside a nested loop, block, or
+      # def targets that construct instead. An identity-keyed Hash used as a membership set to filter the collected
+      # break scopes (the thread-local sink also collects breaks from nested blocks that did not install their own
+      # sink).
       def directly_targeting_breaks(statements)
-        found = {}.compare_by_identity
-        collect_direct_breaks(statements, found)
-        found
-      end
-
-      def collect_direct_breaks(node, found)
-        return if node.nil?
-
-        found[node] = true if node.is_a?(Prism::BreakNode)
-        node.rigor_each_child do |child|
-          next if BREAK_BOUNDARY_NODES.any? { |klass| child.is_a?(klass) }
-
-          collect_direct_breaks(child, found)
-        end
+        JumpTargets.of(statements, Prism::BreakNode)
       end
 
       # Installs a fresh thread-local break sink around `yield` (a loop-body evaluation), returning `[collected,
@@ -1567,8 +1635,8 @@ module Rigor
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
       # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
-      # expression itself types as `Constant[nil]` (the common case where no `break VALUE` is observed), matching the
-      # policy `eval_loop` uses for `while` / `until`.
+      # expression itself types as `Constant[nil]`, the policy `eval_loop` uses for `while` / `until` — a known gap for
+      # `for`, whose value in Ruby is the collection it iterated (issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
@@ -1614,15 +1682,36 @@ module Rigor
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`
       # (the per-iteration value the collection yields). A `MultiTargetNode` (`for a, b in pairs`) delegates to
       # {MultiTargetBinder}, which decomposes a tuple-shaped element into the inner slots.
+      #
+      # An index target — the whole index (`for h[:a] in xs`) or a slot of a multi-target one (`for h[:a], w in
+      # pairs`) — stores the element / its slot through `[]=` at the top of every iteration, so its receiver widens
+      # here, before the body, exactly as a multi-assign target's does; the body then reads the widened receiver and
+      # the post-loop join keeps it beside the zero-iteration literal, as it keeps a body store's `h[:a] = x`.
       def bind_for_index(index_node, element_type, scope)
         case index_node
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
+        when Prism::IndexTargetNode
+          widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind_marked(index_node, element_type, scope: scope).apply_to(scope)
+          bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
+          widen_index_targets(bound, bound.apply_to(scope), type_scope: scope)
+        when Prism::SplatNode
+          bind_for_splat_index(index_node, scope)
         else
           scope
         end
+      end
+
+      # `for *h[:a] in pairs` — Prism gives a bare splat index as a `SplatNode`, not a `MultiTargetNode`, so the
+      # binder never sees it. The store is `*h[:a] = element`, an array of the element's `to_ary` parts; the receiver
+      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. A bare `*name` target stays
+      # unbound here, as before.
+      def bind_for_splat_index(splat, scope)
+        target = splat.expression
+        return scope unless target.is_a?(Prism::IndexTargetNode)
+
+        widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
@@ -2652,11 +2741,16 @@ module Rigor
       # drop matches the spec line "facts about locals it can write become unstable after the escape point": rather than
       # synthesise the union of the block's write types (which the current pass does not yet expose), we discard the
       # narrowed binding altogether. A future sub-phase MAY refine this to the union of the block's actual writes.
+      #
+      # An instance variable the body rebinds is dropped the same way: the block shares the caller's `self`, so a
+      # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
+      # @clicked = true }` left `if @clicked` folding always-falsey). One still on its ADR-58 declaration seed is
+      # left alone ({CapturedLocals.writes}): that seed already holds whatever the callback stores.
       def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope, ivars: true)
         return base_scope if names.empty?
 
-        names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+        names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2665,25 +2759,154 @@ module Rigor
       # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
-      # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
-      # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
+      # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
+      # way — `@n = 0; [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set,
+      # seeded from their pre-call binding. See {#converge_captures_by_kind} for how a block that rebinds both kinds is
+      # answered.
+      #
+      # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
+      # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
+      #
+      # Every pass reads a captured local the body mutates IN PLACE at its unknown-store widening
+      # ({#capture_pass_bindings}), never at the contents the collection held before the call: only the rebound names
+      # move between passes, so a rebind read from such a collection (`last = a.last; a << x`) would otherwise record
+      # the first iteration's answer on every pass and the fixpoint would close over it (ADR-56 WD2.13, second
+      # residue).
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        seed = names.to_h { |name| [name, scope.local(name)] }
-        result = BodyFixpoint.converge(
-          names: names,
-          seed_bindings: seed,
-          widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
-        )
+        break_pass = block_break_pass(block)
+        result = converge_captures_by_kind(call_node, block, names, break_pass)
+        result = join_block_break_bindings(call_node, block, result, break_pass)
+        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
 
-        result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
+      def converge_block_captures(call_node, block, names, break_pass)
+        BodyFixpoint.converge(
+          names: names,
+          seed_bindings: names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: ->(bindings) { block_pass_exit_bindings(call_node, block, bindings, names, break_pass) }
+        )
+      end
+
+      # The continuation of a block's rebound names. One {BodyFixpoint} over locals and ivars together is the wrong
+      # answer for most of them: its final pass widens every name while any name still moves, so an ivar counter beside
+      # `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol` — and a local counter beside `@mode = :b` did the
+      # same to `@mode` — and `take(mode)` against `(:a | :b) -> void` fired on code each kind's own fixpoint accepts.
+      #
+      # So each kind converges on its own first, with the other at its pre-call binding; for a block that rebinds one
+      # kind that is the only fixpoint, and for the locals it is exactly the one a block rebinding no ivar has always
+      # had. A name converged that way is wrong when it reads the other kind (`last = @n; @n += 1`, `@last = count`),
+      # so one more pass under the settled bindings checks every name, and one whose exit leaves its settled binding
+      # takes its answer from a joint fixpoint over both kinds, computed only then. The check repeats, because a name
+      # read off a moved one (`first = last`) may move in turn; every round moves a name to its joint answer or stops.
+      #
+      # The body's last evaluation is therefore a pass under the settled bindings, so the scopes recorded inside the
+      # block read those rather than a pass that pinned one kind to its pre-call value.
+      #
+      # `break_pass` ({#block_break_pass}) rides along so every pass — a fixpoint's or a check's — leaves its `break`
+      # scopes for {#join_block_break_bindings}.
+      def converge_captures_by_kind(call_node, block, names, break_pass)
+        kinds = names.partition { |name| !CapturedLocals.ivar_name?(name) }
+        return converge_block_captures(call_node, block, names, break_pass) if kinds.any?(&:empty?)
+
+        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind, break_pass) }.reduce(:merge)
+        joint = nil
+        loop do
+          exits = block_pass_exit_bindings(call_node, block, settled, names, break_pass)
+          moved = escaped_captures(settled, exits, joint)
+          return settled if moved.empty?
+
+          joint ||= converge_block_captures(call_node, block, names, break_pass)
+          moved.each { |name| settled[name] = joint[name] }
+        end
+      end
+
+      # The names whose `exits` leave their `settled` binding, less those already on their `joint` answer.
+      def escaped_captures(settled, exits, joint)
+        settled.keys.select do |name|
+          exit_type = exits[name]
+          next false if exit_type.nil? || (joint && settled[name] == joint[name])
+
+          Type::Combinator.union(settled[name], exit_type) != settled[name]
+        end
+      end
+
+      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
+      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
+      # rebinds no ivar leaves the locals exactly as before.
+      def bind_capture(scope, name, type)
+        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
+      end
+
+      # A block-level `break` ends the CALL, so the binding it leaves with starts no further iteration and is no input
+      # to the write-back fixpoint — feeding it back would type the next pass's body under a value the body never sees
+      # (`acc = "s"; break` reaching the next pass's `acc`). It IS the continuation's binding on that path, though, and
+      # without this join `found = nil; xs.each { |x| if x > 1; found = x; break; end }` left `found` on `nil` and
+      # folded `if found` always-falsey.
+      #
+      # The arms must come from a pass whose entry is the CONVERGED binding, which contains every iteration's entry.
+      # The write-back's last pass usually is one — a fixpoint that stabilised, and every by-kind check pass
+      # ({#converge_captures_by_kind}), ran from the binding it returns — so its arms are reused
+      # ({#block_pass_exit_bindings}). A capped fixpoint's widened binding was never evaluated, so only then does one
+      # more pass run, without recording into the per-node scope index: that index keeps the write-back's own last
+      # pass, which the check path's diagnostics read, exactly as the loop fixpoint's converged re-record is
+      # display-only ({#record_converged_loop_body}). A name the fixpoint floored to `Dynamic[top]` keeps the floor; a
+      # precise arm unioned into it would read as knowledge the analysis does not have.
+      def join_block_break_bindings(call_node, block, converged, break_pass)
+        return converged if break_pass.nil?
+
+        arms =
+          if break_pass[:entry] == converged
+            break_pass[:arms]
+          else
+            converged_break_arms(call_node, block, converged, break_pass[:targets])
+          end
+        return converged if arms.empty?
+
+        floor = Type::Combinator.untyped
+        converged.to_h do |name, type|
+          next [name, type] if type == floor
+
+          [name, Type::Combinator.union(type, *arms.filter_map { |arm| CapturedLocals.bound_type(arm, name) })]
+        end
+      end
+
+      # nil for a body with no block-level `break` — one allocation-free scan, and the write-back runs exactly as
+      # before. Otherwise the record {#block_pass_exit_bindings} fills: the targeting `break`s, and the entry
+      # bindings and `break` scopes of the most recent fixpoint pass.
+      def block_break_pass(block)
+        body = block.body
+        return nil unless JumpTargets.any?(body, Prism::BreakNode)
+
+        { targets: JumpTargets.of(body, Prism::BreakNode), entry: nil, arms: [] }
+      end
+
+      # One write-back fixpoint pass ({#block_exit_bindings}), collecting the scopes at the block-level `break`s it
+      # reaches when there are any. `BodyFixpoint` hands every pass the same mutable assumption, so the entry is
+      # copied before the fixpoint moves it.
+      def block_pass_exit_bindings(call_node, block, bindings, names, break_pass)
+        return block_exit_bindings(call_node, block, bindings, names) if break_pass.nil?
+
+        sink, exits = collect_break_scopes { block_exit_bindings(call_node, block, bindings, names) }
+        break_pass[:entry] = bindings.dup
+        break_pass[:arms] = targeted_scopes(sink, break_pass[:targets])
+        exits
+      end
+
+      # The `break` scopes of one unrecorded pass from `converged` — for a capped fixpoint, whose widened binding no
+      # pass has run from.
+      def converged_break_arms(call_node, block, converged, targets)
+        entry = block_pass_entry(call_node, block, converged)
+        sink, = collect_break_scopes { sub_eval(block, entry, on_enter: nil) }
+        targeted_scopes(sink, targets)
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and
@@ -3053,7 +3276,7 @@ module Rigor
       def array_element_evidence(calls, entry_scope, shadows = NO_SHADOWS)
         calls.flat_map do |c|
           block_entry = site_evidence_scope(entry_scope, c, shadows)
-          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, an index target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
           # does (issue #1140).
@@ -3066,7 +3289,8 @@ module Rigor
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
       # block-entry scope — the stored value is what the write stores through `[]=`, which for a
       # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, the same
-      # compound result the node itself types as); a multi-assign target stays untyped.
+      # compound result the node itself types as); an index target (a multi-assign slot, a `for`
+      # index, a rescue reference) stays untyped.
       # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
       def index_write_block_arg_types(node, block_entry)
         args = node.arguments
@@ -3093,7 +3317,8 @@ module Rigor
         mutations
       end
 
-      # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
+      # Index-write forms (`h[k] ||= v`, `h[k] += v`, and an index target's `h[k] = v` — a multi-assign slot, a `for`
+      # index, a rescue reference) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
       INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
@@ -3209,24 +3434,105 @@ module Rigor
         []
       end
 
-      # Evaluates `block`'s body once with each written outer local bound to the supplied `bindings` (block params /
-      # `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the `BodyFixpoint`
-      # body-evaluator.
+      # Evaluates `block`'s body once with each written outer local or ivar bound to the supplied `bindings` (block
+      # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
+      # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
+        _type, exit_scope = sub_eval(block, block_pass_entry(call_node, block, bindings))
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
+      end
+
+      # The entry scope of one write-back pass: the block's entry with each written outer local or ivar bound to
+      # `bindings`.
+      def block_pass_entry(call_node, block, bindings)
         entry = build_block_entry_scope(call_node, block)
-        entry = bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
-        _type, exit_scope = sub_eval(block, entry)
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        capture_pass_bindings(block, bindings).reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
+
+      # `bindings` plus the pass binding of every captured local the body mutates in place
+      # ({CapturedLocals.content_mutations}): its binding widened for a store of UNKNOWN values at every mutation site
+      # ({#unknown_store_binding}), so it holds whatever any earlier iteration stored. A name the pass does not move
+      # is widened from its call-site binding; a name it moves (the body both rebinds and mutates it) is widened over
+      # the running assumption, as the per-element fold widens the same name (#587 (b)) — that assumption carries the
+      # exits of the body's straight-line seam, which can close the collection without a gradual arm
+      # (`stack ||= [0]; top = stack.pop; stack.push(x)` kept `top` at `0?`). The stored values are not typed: one
+      # computed from the collection's own entry contents is the same first-iteration answer. `bindings` itself
+      # comes back for the common body that mutates nothing captured.
+      #
+      # The price is the gradual arm on a rebind that reads such a collection — `last = a.last; a << x` over `a =
+      # [0]` reads `0 | Dynamic[top] | nil`, not `0 | 1 | 2 | nil`. Precise evidence would mean iterating this
+      # fixpoint jointly with slice C's content join; ADR-56 WD2.13 records why that was not taken.
+      def capture_pass_bindings(block, bindings)
+        stores = block_content_mutations(block)
+        return bindings if stores.empty?
+
+        widened = stores.each_with_object({}) do |(name, sites), acc|
+          next if bindings.key?(name)
+
+          seed = scope.local(name)
+          acc[name] = unknown_store_binding(seed, sites) unless seed.nil?
+        end
+        widened.merge(bindings.to_h do |name, type|
+          sites = stores[name]
+          [name, sites.nil? || type.nil? ? type : unknown_store_binding(type, sites)]
+        end)
+      end
+
+      # {CapturedLocals.content_mutations} of `block` against this evaluator's scope, once per block: every write-back
+      # pass asks, and neither input changes between them.
+      def block_content_mutations(block)
+        (@block_content_mutations ||= {}.compare_by_identity)[block] ||= CapturedLocals.content_mutations(block, scope)
+      end
+
+      # `type` widened through `sites` for a store of unknown values, with one more step: when the result is still a
+      # collection whose contents are value-pinned, those pins are the first-iteration answer and the contents take
+      # the gradual arm. A widening that DECLINES leaves such a binding — `s = [0, 9]; s.pop` leaves `Array[0 | 9]`,
+      # a nominal the `push` in the body then declines — and so does one that only changes a refinement: under `if
+      # s.any?` the `pop` drops `non-empty-array[0 | 9]` to that same pinned `Array[0 | 9]` before the `push` declines
+      # it. Either way `top = s.last; s.push(x)` would keep `top` at `0 | 9`. A result that already carries the arm
+      # is unchanged by it.
+      def unknown_store_binding(type, sites)
+        widened = UnknownStoreWidening.widen(type, sites)
+        return widened unless value_pinned_collection?(widened)
+
+        UnknownStoreWidening.gradual_content(widened)
+      end
+
+      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
+      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
+      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
+      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
+      def value_pinned_collection?(type)
+        case type
+        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
+        when Type::Difference then value_pinned_collection?(type.base)
+        when Type::Nominal
+          %w[Array Hash].include?(type.class_name) &&
+            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
+        else false
+        end
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller
       # has already augmented with the block's parameter bindings. Effects do not leak past the block (the outer
       # eval_call returns the caller's scope unchanged), but the body's local writes are threaded through subsequent
       # statements *inside* the block so `each { |x| sum = x; sum.succ }` types `sum.succ` under the `sum: x` binding.
+      # The scope returned is the one the invocation ENDS with — the fall-through joined with every `next` that
+      # leaves it ({#evaluate_invocation}).
       def eval_block(node)
-        return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
+        type, _fall_through, exit_scope = evaluate_invocation(node)
+        [type, exit_scope]
+      end
 
-        sub_eval(node.body, scope)
+      # `base` joined with every collected jump scope whose node is in `targets` — a jump belonging to a nested
+      # construct lands in the same sink and is dropped by identity.
+      def join_jump_scopes(base, sink, targets)
+        targeted_scopes(sink, targets).reduce(base) { |acc, jump_scope| acc.join(jump_scope) }
+      end
+
+      # The scopes a sink collected at the jumps in `targets`.
+      def targeted_scopes(sink, targets)
+        sink.filter_map { |node, jump_scope| jump_scope if targets.key?(node) }
       end
 
       # Issue #878 — `->() { }` and `lambda { }` build the same object, so they MUST type the same. The `lambda`
@@ -3658,21 +3964,33 @@ module Rigor
       def eval_next(node)
         sink = Thread.current[NEXT_SINK_KEY]
         sink << [node, jump_value_type(node)] if sink
+        @next_scope_sink << [node, jump_scope(node)] if @next_scope_sink
         [Type::Combinator.bot, scope]
       end
 
-      # A `break` transfers control to the loop exit (its flow value is `Bot`, like `return`). It records the current
-      # scope into the active loop's break sink so the loop join can recover a `break`-path binding the fall-through
-      # would drop (`flag = true; break` -> `flag` is `false | true` after the loop). nil sink = a `break` not inside an
-      # inferred loop body (a block targeting a method, or top-level) — left to the existing escaping-block / no-op
-      # handling.
+      # The scope control leaves with at a `next` / `break`: the entry scope threaded through the jump's arguments, so a
+      # write inside one (`next(n = :odd)`, `break(flag = true)`) is part of the path that leaves. The arguments are
+      # evaluated without recording into the per-node scope index: whether a sink is collecting depends on unrelated
+      # context (a captured write elsewhere in the block), and the index must not change with it.
+      def jump_scope(node)
+        args = node.arguments&.arguments || []
+        args.reduce(scope) { |acc, arg| sub_eval(arg, acc, on_enter: nil).last }
+      end
+
+      # A `break` transfers control to the loop exit (its flow value is `Bot`, like `return`). It records the scope it
+      # leaves with ({#jump_scope}) into the active break sink so the loop join can recover a `break`-path binding the
+      # fall-through would drop (`flag = true; break` -> `flag` is `false | true` after the loop); ADR-56's block
+      # write-back reads the same sink for a `break` that ends a yielding call ({#join_block_break_bindings}), and an
+      # enclosing `begin … ensure` carries the recorded scope through its clause ({#carry_jumps_through_ensure}). nil
+      # sink = a `break` reached outside either collection (top level, or an escaping block) — left to the existing
+      # escaping-block / no-op handling.
       #
       # Issue #853: the value it carries out belongs to the yielding CALL, so it is recorded into the separate
       # break-value sink for `ExpressionTyper#call_dispatch_type_for` to union in. Both sinks are optional and
       # independent — a loop body collects scopes while an enclosing call collects values from the same walk.
       def eval_break(node)
         sink = Thread.current[BREAK_SINK_KEY]
-        sink << [node, scope] if sink
+        sink << [node, jump_scope(node)] if sink
         value_sink = Thread.current[BREAK_VALUE_SINK_KEY]
         value_sink << [node, jump_value_type(node)] if value_sink
         [Type::Combinator.bot, scope]
@@ -3690,14 +4008,18 @@ module Rigor
         Type::Combinator.tuple_of(*args.map { |arg| sub_eval(arg, scope).first })
       end
 
-      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting)
+      # `on_enter: nil` evaluates without recording into the per-node scope index — for a pass whose scopes are not
+      # the ones the index should keep. `next_scope_sink:` is replaced only by {#evaluate_invocation}.
+      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
+                   on_enter: @on_enter, next_scope_sink: @next_scope_sink)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
-          on_enter: @on_enter,
+          on_enter: on_enter,
           class_context: class_context,
           lexical_nesting: lexical_nesting,
-          converged_loop_recording: @converged_loop_recording
+          converged_loop_recording: @converged_loop_recording,
+          next_scope_sink: next_scope_sink
         ).evaluate(node)
       end
 
@@ -3785,17 +4107,24 @@ module Rigor
       # ---------------------------------------------------------------
 
       # Returns `scope` extended with the rescue reference variable bound to the exception instance type. Leaves scope
-      # unchanged when the node carries no reference (bare `rescue` without `=> var`).
+      # unchanged when the node carries no reference (bare `rescue` without `=> var`). An index-target reference
+      # (`rescue => h[:e]`) stores the exception through `[]=` instead, so its receiver widens with the exception
+      # instance type as the stored value, exactly as `rescue => e; h[:e] = e` widens it.
       def bind_rescue_reference(rescue_node, scope)
         ref = rescue_node.reference
-        return scope unless ref.is_a?(Prism::LocalVariableTargetNode)
-
-        scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        case ref
+        when Prism::LocalVariableTargetNode
+          scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        when Prism::IndexTargetNode
+          widen_index_target(ref, rescue_exception_type(rescue_node, scope), scope, type_scope: scope)
+        else
+          scope
+        end
       end
 
       # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. Falls back to
-      # `StandardError` for any class that cannot be resolved to a `Singleton` type.
+      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
+      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
       def rescue_exception_type(rescue_node, scope)
         exceptions = rescue_node.exceptions
         if exceptions.empty?

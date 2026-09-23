@@ -84,10 +84,11 @@ module Rigor
     # - `Prism::IndexTargetNode` (`h[:a], x = rhs`), in the same three positions. It binds no
     #   name: it stores its slot through `[]=` on its receiver. The binder reports the value it
     #   stores in {Result#index_targets}, keyed by the target node itself, so
-    #   `StatementEvaluator#eval_multi_write` can widen the receiver's literal shape with that
-    #   value as content evidence, exactly as a plain `h[:a] = 1` does. It carries no optimistic
-    #   mark: there is no binding for one to qualify. Its slot is softened as a local's is;
-    #   `eval_multi_write` documents why that stays honest without the mark.
+    #   `StatementEvaluator#eval_multi_write` and `#bind_for_index` (`for h[:a], w in pairs`) can
+    #   widen the receiver's literal shape with that value as content evidence, exactly as a plain
+    #   `h[:a] = 1` does. It carries no optimistic mark: there is no binding for one to qualify.
+    #   Its slot is softened as a local's is; `eval_multi_write` documents why that stays honest
+    #   without the mark.
     #
     # Other target kinds (`ClassVariableTargetNode`, `GlobalVariableTargetNode`,
     # `ConstantTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`, `ImplicitRestNode`, ...)

@@ -30,7 +30,7 @@ module Rigor
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
-    # that is no carrier, a name the mutator tables do not list for that carrier (`Hash#shift`), or an
+    # that is no carrier, a name the mutator tables do not list for that carrier (`store` on a `Tuple`), or an
     # empty-witness refinement under a mutator that keeps the witness and joins nothing (`non-empty-array[String]`
     # under `map!`). The caller MUST therefore not read an unchanged binding as describing later iterations.
     #

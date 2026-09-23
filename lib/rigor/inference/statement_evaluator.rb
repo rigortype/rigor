@@ -410,11 +410,16 @@ module Rigor
       # Thread the scope through every child statement in declaration order. The body's value is the type of the last
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope
       # effects are preserved.
+      #
+      # Inside a retrying `begin`'s primary body, each statement's post-scope is also a point the body can raise from
+      # ({#record_raise_points}).
       def eval_statements(node)
         result_type = Type::Combinator.constant_of(nil)
         current = scope
+        raising = Thread.current[RETRY_FRAMES_KEY]
         node.body.each do |stmt|
           result_type, current = sub_eval(stmt, current)
+          record_raise_points(raising, stmt, current) if raising
         end
         [result_type, current]
       end
@@ -1233,31 +1238,19 @@ module Rigor
       def eval_begin(node)
         jump_marks = ensure_jump_marks(node)
         entry = scope
-        primary_type, primary_scope = eval_begin_primary_under(node, entry)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
+        edge = retry_edge_for(node)
+        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)
 
-        # B2.1 — retry-edge widening. When any rescue body contains `Prism::RetryNode`, control re-enters the primary
-        # body with the rescue arm's rebinds visible. Today's flow loses that effect, so a counter like `tries = 0; ...;
-        # rescue; tries += 1; retry; end` observes `tries: Constant[0]` inside the body and any `tries > 100` predicate
-        # folds to always-falsey. The fix: widen rebound locals / ivars in any retry-emitting arm to their Nominal
-        # envelope (Constant → Nominal[<class>], Tuple → Array, HashShape → Hash), then re-evaluate primary body AND
-        # rescue chain once under the widened entry. Nominal envelope is the maximally widened form so the re-evaluation
-        # converges in one step.
-        widened_entry = widen_entry_for_retry(entry, rescue_chain)
-        if widened_entry
-          primary_type, primary_scope = eval_begin_primary_under(node, widened_entry)
-          rescue_chain = collect_rescue_chain_results(node.rescue_clause, widened_entry)
-        end
+        # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
+        # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
+        # the primary body's own, since it can raise after any prefix of itself (`begin; tries += 1; raise if tries < 3;
+        # rescue; retry; end`). Without the widening the re-entry keeps `tries: Constant[0]` and the predicate folds.
+        # {#eval_retried_begin} re-evaluates the primary body AND the rescue chain under a widened entry.
+        retried = edge && eval_retried_begin(node, entry, edge)
+        primary_type, primary_scope, rescue_chain = retried if retried
 
-        # Rescue arms whose body unconditionally exits (`return`, `next`, `break`, `raise`, `throw`, `exit`, `abort`,
-        # `fail`) contribute neither a type fragment NOR a scope to the post-begin flow — control left the `begin` via
-        # that arm. Mirrors the `eval_if` / `eval_unless` / `eval_and_or` early-return narrowing. Without this filter, a
-        # `rescue ... return` on a local bound only in the primary body nil-injects that local across the join,
-        # defeating the rescue arm's whole point of guaranteeing the primary local is in scope for downstream
-        # statements.
-        live_rescues = rescue_chain.reject { |_pair, arm_node| branch_unconditionally_exits?(arm_node.statements) }
-                                   .map(&:first)
-
+        live_rescues = live_rescue_results(rescue_chain)
         if live_rescues.empty?
           exit_type = primary_type
           exit_scope = primary_scope
@@ -1273,6 +1266,19 @@ module Rigor
         end
 
         [exit_type, exit_scope]
+      end
+
+      # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
+      # control left the `begin` via that arm. That is an arm ending in `return`, `next`, `break`, `raise`, `throw`,
+      # `exit`, `abort` or `fail`, and one whose type is `bot` ({#branch_terminates?}): an arm ending in `retry`, or in
+      # `tries < 3 ? retry : raise`, leaves back into the primary body, and joining its scope would carry the retry
+      # edge's widened entry past the `begin`. Mirrors the `eval_if` / `eval_unless` / `eval_and_or` early-return
+      # narrowing. Without this filter, a `rescue ... return` on a local bound only in the primary body nil-injects that
+      # local across the join, defeating the rescue arm's whole point of guaranteeing the primary local is in scope for
+      # downstream statements.
+      def live_rescue_results(rescue_chain)
+        rescue_chain.reject { |(arm_type, _), arm_node| branch_terminates?(arm_node.statements, arm_type) }
+                    .map(&:first)
       end
 
       # The jump sinks' sizes as a `begin … ensure` starts, or nil for a `begin` without `ensure`: every `next` /
@@ -1305,13 +1311,18 @@ module Rigor
       # `BeginNode#statements` is the primary body; when an else-clause is present, its value replaces the body's per
       # Ruby semantics (the else runs only when no exception was raised), but the body's scope effects still apply
       # because the body did run before the else.
-      def eval_begin_primary_under(node, entry_scope)
+      #
+      # `edge`, when given, collects every scope the primary body could raise from: the scope after each statement of
+      # its frame ({#record_raise_points}), and the scope it ends with. The else-clause is not among them: what it
+      # raises is not rescued here.
+      def eval_begin_primary_under(node, entry_scope, edge: nil)
         body_type, body_scope =
           if node.statements
-            sub_eval(node.statements, entry_scope)
+            with_raise_frame(edge) { sub_eval(node.statements, entry_scope) }
           else
             [Type::Combinator.constant_of(nil), entry_scope]
           end
+        edge.raise_scopes << body_scope if edge
 
         if node.else_clause
           else_type, else_scope = sub_eval(node.else_clause, body_scope)
@@ -1321,92 +1332,258 @@ module Rigor
         end
       end
 
-      # B2.1 — return a widened entry scope when at least one rescue arm in `rescue_chain` contains a `Prism::RetryNode`
-      # AND that arm rebinds at least one local or ivar relative to the original entry. Returns nil when no widening is
-      # needed (no retry, or no rebinds reachable across the retry edge).
-      #
-      # Always-safe: the widening can only LOSE precision; it never invents a fact (Nominal envelope is a superset of
-      # the Constant / shape carrier it widens from). Convergent in one step because Nominal envelope is the maximally
-      # widened form against the engine's current carrier set.
-      def widen_entry_for_retry(entry_scope, rescue_chain)
-        widened = nil
-        rescue_chain.each do |(_arm_type, arm_post_scope), arm_node|
-          next unless arm_contains_retry?(arm_node)
+      # B2.1 — what one pass over a `begin` whose rescue chain retries collects: the `retry` nodes that target it, the
+      # arms holding them, the nodes of its primary body's frame and the names that frame writes, and the scopes control
+      # carries back into the primary body — at each point the body can raise from (`raise_scopes`), and at each of
+      # those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
+      RetryEdge = Data.define(:retries, :retrying_arms, :frame, :body_writes, :raise_scopes, :retry_scopes) do
+        def fresh = with(raise_scopes: [], retry_scopes: [])
 
-          accumulator = widened || entry_scope
-          accumulator = absorb_retry_rebinds(accumulator, entry_scope, arm_post_scope)
-          widened = accumulator
+        def merge(other)
+          with(raise_scopes: raise_scopes + other.raise_scopes, retry_scopes: retry_scopes + other.retry_scopes)
         end
-        return nil if widened.nil? || widened == entry_scope
+      end
+      private_constant :RetryEdge
+
+      # The entry and edge one widening reads, whether it widens to the Nominal envelope or keeps literals, and, per
+      # name, the rebinds it has already weighed: a statement-by-statement body shares one binding object across every
+      # scope until the name is rebound, and weighing each copy again is what made a long body quadratic.
+      RetryWidening = Data.define(:entry, :edge, :envelope, :weighed) do
+        def initialize(entry:, edge:, envelope:, weighed: {}) = super
+      end
+      private_constant :RetryWidening
+
+      # The thread-local stack of the {RetryEdge}s whose primary body is being evaluated, innermost last, or nil.
+      RETRY_FRAMES_KEY = :rigor_retry_frames
+      private_constant :RETRY_FRAMES_KEY
+
+      # The retry edge of `node`, or nil when no `retry` in its rescue chain targets it. Allocation-free for a `begin`
+      # no `retry` targets.
+      def retry_edge_for(node)
+        retries = nil
+        retrying_arms = nil
+        current = node.rescue_clause
+        while current
+          found = collect_retries(current.statements)
+          if found
+            (retries ||= Set.new.compare_by_identity).merge(found)
+            (retrying_arms ||= Set.new.compare_by_identity) << current
+          end
+          current = current.subsequent
+        end
+        return nil unless retries
+
+        frame = Set.new.compare_by_identity
+        body_writes = Set.new
+        walk_primary_frame(node.statements, true, frame, body_writes) if node.statements
+        RetryEdge.new(retries: retries, retrying_arms: retrying_arms, frame: frame, body_writes: body_writes,
+                      raise_scopes: [], retry_scopes: [])
+      end
+
+      # The `retry` nodes under `node` that re-enter the `begin` whose rescue arm holds it, or nil for none. A nested
+      # `rescue` clause, or a rescue modifier's fallback, owns the `retry`s inside it (Ruby 4.0.5 retries the modifier's
+      # own expression), and a nested block, lambda, `def` or class body cannot hold one for this `begin`.
+      def collect_retries(node, found = nil)
+        case node
+        when nil, Prism::RescueNode then found
+        when Prism::RetryNode then (found || []) << node
+        when Prism::RescueModifierNode then collect_retries(node.expression, found)
+        else
+          return found if scope_boundary?(node)
+
+          node.rigor_each_child { |child| found = collect_retries(child, found) }
+          found
+        end
+      end
+
+      def scope_boundary?(node)
+        SCOPE_NESTING_NODES.any? { |klass| node.is_a?(klass) } || SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
+      end
+
+      RETRY_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
+      private_constant :RETRY_WRITE_NODES
+
+      # Collects into `frame` the nodes of the primary body that run in its own frame — a nested block or lambda keeps
+      # its own locals (a block parameter can shadow the counter) — and into `writes` every variable name the body
+      # writes, a block's included (it may write an outer local). A `def` or class body runs nothing here.
+      def walk_primary_frame(node, in_frame, frame, writes)
+        return if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
+
+        in_frame &&= SCOPE_NESTING_NODES.none? { |klass| node.is_a?(klass) }
+        frame << node if in_frame
+        writes << node.name if RETRY_WRITE_NODES.include?(node.class)
+        node.rigor_each_child { |child| walk_primary_frame(child, in_frame, frame, writes) }
+      end
+
+      # B2.1 — the primary path's `[type, scope]` and the rescue chain's results re-evaluated under an entry the retry
+      # edge widens, or nil when nothing crosses the edge. The widening first keeps literals, the entry joined with each
+      # rebind, and holds when one re-evaluation under it puts nothing new on the edge: `st = :ok; …; st = :retrying`
+      # stays `:ok | :retrying`. A counter moves again (`0 | 1` meets `2`), so the entry is then widened to the Nominal
+      # envelope of everything both passes saw, and evaluated once more; that pass is taken as converged.
+      def eval_retried_begin(node, entry, edge)
+        literal = widen_entry_for_retry(RetryWidening.new(entry: entry, edge: edge, envelope: false))
+        return nil unless literal
+
+        closing = edge.fresh
+        result = eval_begin_paths(node, literal, closing)
+        return result unless widen_entry_for_retry(RetryWidening.new(entry: literal, edge: closing, envelope: false))
+
+        widened = widen_entry_for_retry(RetryWidening.new(entry: entry, edge: edge.merge(closing), envelope: true))
+        eval_begin_paths(node, widened || literal, nil)
+      end
+
+      def eval_begin_paths(node, entry, edge)
+        primary = eval_begin_primary_under(node, entry, edge: edge)
+        [*primary, collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)]
+      end
+
+      # B2.1 — the entry scope widened by what crosses the retry edge, or nil when nothing does. A local or ivar bound
+      # in the entry widens when a scope on the edge binds it to a type the accumulated binding does not already
+      # accept ({#retry_binding_accepted?}): inside `log if m == :fast` the scope holds `m: :fast`, which the entry's
+      # `:fast | :slow` accepts, and widening it would turn a declared `:fast | :slow` return into `Symbol`.
+      #
+      # A name the entry does not bind joins the edge only from a retrying arm, and only when the primary body never
+      # writes it. One the body writes reads as `Dynamic[top]` on the first entry, as it does on this pass; binding a
+      # type onto the edge would claim it set even when the body raised before assigning it — the arm's `conn.close if
+      # conn` would fold to always-truthy for the body's connection, or to always-falsey for the arm's own `conn = nil`.
+      def widen_entry_for_retry(widening)
+        widened = widening.entry
+        widening.edge.retry_scopes.each do |retry_scope|
+          widened = absorb_retry_rebinds(widened, retry_scope, widening)
+        end
+        widening.edge.raise_scopes.each do |raise_scope|
+          widened = absorb_retry_rebinds(widened, raise_scope, widening, bound_on_entry: true)
+        end
+        return nil if widened == widening.entry
 
         widened
       end
 
-      def arm_contains_retry?(node)
-        return false unless node.is_a?(Prism::Node)
-        return true if node.is_a?(Prism::RetryNode)
-        # Don't descend into nested blocks / defs / classes / modules — a `retry` inside a nested method body or block
-        # targets its own enclosing `begin`, not this one.
-        return false if node.is_a?(Prism::DefNode) ||
-                        node.is_a?(Prism::ClassNode) ||
-                        node.is_a?(Prism::ModuleNode) ||
-                        node.is_a?(Prism::BlockNode)
+      # Runs `block` with `edge` on top of the thread-local stack {#record_raise_points} reads.
+      def with_raise_frame(edge)
+        return yield unless edge
 
-        found = false
-        node.rigor_each_child do |c|
-          next unless arm_contains_retry?(c)
-
-          found = true
-          break
+        previous = Thread.current[RETRY_FRAMES_KEY]
+        Thread.current[RETRY_FRAMES_KEY] = previous ? [*previous, edge] : [edge]
+        begin
+          yield
+        ensure
+          Thread.current[RETRY_FRAMES_KEY] = previous
         end
-        found
       end
 
-      def absorb_retry_rebinds(accumulator, entry_scope, arm_post_scope)
-        scope_acc = accumulator
-        # Walk every local visible in either side, compare types, widen to Nominal envelope on a difference.
-        local_keys = arm_post_scope.locals.keys | entry_scope.locals.keys
-        local_keys.each do |name|
-          pre = entry_scope.local(name)
-          post = arm_post_scope.local(name)
-          next if pre == post || post.nil?
+      # The scope after each statement of a retrying primary body's frame is a point the body can raise from, the next
+      # statement's being the one after. Together they carry every rebind a retry can re-enter with, including one on a
+      # branch that then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a
+      # write threaded into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a
+      # nested block or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect
+      # on this frame shows in the post-scope of the statement holding it. Recording from the evaluator rather than
+      # `on_enter` keeps a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
+      def record_raise_points(frames, stmt, stmt_scope)
+        frames.each { |edge| edge.raise_scopes << stmt_scope if edge.frame.include?(stmt) }
+      end
 
-          widened = retry_widened_type(pre, post)
-          scope_acc = scope_acc.with_local(name, widened)
+      # An `on_enter` that records, besides forwarding to the installed one, the entry scope of each `retry` of `edge`
+      # the rescue chain reaches: the scope control carries back into the primary body.
+      def retry_scope_recorder(edge)
+        forward = @on_enter
+        lambda do |node, node_scope|
+          edge.retry_scopes << node_scope if edge.retries.include?(node)
+          forward&.call(node, node_scope)
         end
-        ivar_keys = arm_post_scope.ivars.keys | entry_scope.ivars.keys
-        ivar_keys.each do |name|
-          pre = entry_scope.ivar(name)
-          post = arm_post_scope.ivar(name)
-          next if pre == post || post.nil?
+      end
 
-          widened = retry_widened_type(pre, post)
-          scope_acc = scope_acc.with_ivar(name, widened)
+      # Widens against the accumulator's binding rather than the entry's, so a name rebound differently by two arms, or
+      # at two points of the primary body, keeps every rebind instead of only the last one absorbed.
+      def absorb_retry_rebinds(accumulator, post_scope, widening, bound_on_entry: false)
+        scope_acc = absorb_retry_kind_rebinds(accumulator, post_scope, widening, :local, bound_on_entry)
+        absorb_retry_kind_rebinds(scope_acc, post_scope, widening, :ivar, bound_on_entry)
+      end
+
+      RETRY_KIND_TABLES = { local: :locals, ivar: :ivars }.freeze
+      private_constant :RETRY_KIND_TABLES
+
+      # Walk every name of `kind` visible on either side (only the entry's under `bound_on_entry`), and widen a binding
+      # the accumulated one does not already accept.
+      def absorb_retry_kind_rebinds(scope_acc, post_scope, widening, kind, bound_on_entry)
+        getter = VAR_KIND_GETTERS.fetch(kind)
+        table = RETRY_KIND_TABLES.fetch(kind)
+        names = widening.entry.public_send(table).keys
+        names |= post_scope.public_send(table).keys unless bound_on_entry
+        names.each do |name|
+          post = post_scope.public_send(getter, name)
+          next if post.nil? || retry_rebind_settled?(widening, name, widening.entry.public_send(getter, name), post)
+
+          current = scope_acc.public_send(getter, name)
+          next if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
+
+          scope_acc = rebind_variable(scope_acc, kind, name, retry_widened_type(current, post, kind, widening.envelope))
         end
         scope_acc
       end
 
-      def retry_widened_type(pre, post)
-        # `pre` is nil when the local was introduced inside the rescue body. The retry edge brings it back into the
-        # primary body's entry — widen the post type itself.
-        envelope = nominal_envelope_for(post)
-        return envelope if pre.nil?
+      # Whether `post` needs no weighing: this widening has weighed it for `name` already, or it is the entry's binding.
+      def retry_rebind_settled?(widening, name, pre, post)
+        return true unless (widening.weighed[name] ||= Set.new.compare_by_identity).add?(post)
 
-        nominal_envelope_for(Type::Combinator.union(pre, envelope))
+        pre.equal?(post) || pre == post
+      end
+
+      # Whether the binding `current` already covers `post`. A `post` carrying `Dynamic` anywhere could be any value,
+      # which only a `current` with a `Dynamic` member covers: `Array[Integer]` gradually accepts `Array[untyped]`, but
+      # keeping it would claim the elements are still Integers.
+      def retry_binding_accepted?(current, post)
+        return ContentJoin.union_members(current).any?(Type::Dynamic) if carries_dynamic?(post)
+
+        Acceptance.accepts(current, post).yes?
+      end
+
+      def carries_dynamic?(type)
+        case type
+        when Type::Dynamic then true
+        when Type::Union then type.members.any? { |member| carries_dynamic?(member) }
+        when Type::Nominal then type.type_args.any? { |arg| carries_dynamic?(arg) }
+        when Type::Tuple then type.elements.any? { |element| carries_dynamic?(element) }
+        when Type::HashShape then type.pairs.each_value.any? { |value| carries_dynamic?(value) }
+        when Type::Difference, Type::Refined then carries_dynamic?(type.base)
+        else false
+        end
+      end
+
+      # The accumulated binding joined with a rebind, widened to the Nominal envelope when `envelope` is set.
+      #
+      # `current` is nil when the name was introduced inside a retrying arm. Such a local is nil on the first entry, and
+      # stays nil past a `begin` whose body never raised, which reaches the exit only through the primary path (a
+      # retrying arm does not join it), so the edge carries `nil` along with the rebind. An instance variable's
+      # first-entry value is unknown rather than nil (another method may set it), so it takes the rebind alone.
+      def retry_widened_type(current, post, kind, envelope)
+        rebind = envelope ? nominal_envelope_for(post) : post
+        return rebind if current.nil? && kind == :ivar
+        return Type::Combinator.union(Type::Combinator.constant_of(nil), rebind) if current.nil?
+
+        joined = Type::Combinator.union(current, rebind)
+        envelope ? nominal_envelope_for(joined) : joined
       end
 
       # Nominal envelope of a value type: widens Constant / Tuple / HashShape carriers to the underlying class's
       # `Nominal`, preserving everything else (`Nominal`, `Union` of non-shape members, `Top`, `Dynamic`, `Bot`). Union
-      # members are walked individually.
+      # members are walked individually. `nil`, `true` and `false` are the only values of their classes, so their
+      # Constant already is the envelope; `Nominal[FalseClass] | Nominal[TrueClass]` would not be accepted where `bool`
+      # is declared.
       def nominal_envelope_for(type)
         members = type.is_a?(Type::Union) ? type.members : [type]
         widened = members.map { |m| nominal_envelope_member(m) }
         Type::Combinator.union(*widened)
       end
 
+      SINGLE_VALUE_CONSTANTS = [nil, true, false].freeze
+      private_constant :SINGLE_VALUE_CONSTANTS
+
       def nominal_envelope_member(member)
         case member
         when Type::Constant
+          return member if SINGLE_VALUE_CONSTANTS.include?(member.value)
+
           Type::Combinator.nominal_of(member.value.class.name)
         when Type::Tuple
           MutationWidening.widen_tuple(member)
@@ -1417,12 +1594,19 @@ module Rigor
         end
       end
 
-      def collect_rescue_chain_results(rescue_node, entry_scope)
+      # `edge`, when given, collects the scope at each of its `retry`s ({#retry_scope_recorder}) and the post-scope of
+      # each arm holding one. The latter still carries a rebind the `retry` itself does not see: a write an `ensure`
+      # runs on the way out (`begin; retry; ensure; tries += 1; end`), or one made before a `retry` the evaluator only
+      # types (`log(tries < 5 ? retry : :gave_up)`).
+      def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil)
+        on_enter = edge ? retry_scope_recorder(edge) : @on_enter
         results = []
         current = rescue_node
         while current
           rescue_scope = bind_rescue_reference(current, entry_scope)
-          results << [eval_branch_or_nil(current.statements, rescue_scope), current]
+          arm = eval_branch_or_nil(current.statements, rescue_scope, on_enter: on_enter)
+          edge.retry_scopes << arm.last if edge&.retrying_arms&.include?(current)
+          results << [arm, current]
           current = current.subsequent
         end
         results
@@ -4573,10 +4757,10 @@ module Rigor
           branch_type.is_a?(Type::Bot)
       end
 
-      def eval_branch_or_nil(branch_node, branch_scope)
+      def eval_branch_or_nil(branch_node, branch_scope, on_enter: @on_enter)
         return [Type::Combinator.constant_of(nil), branch_scope] if branch_node.nil?
 
-        sub_eval(branch_node, branch_scope)
+        sub_eval(branch_node, branch_scope, on_enter: on_enter)
       end
 
       # Joins two branch scopes at a control-flow merge point. Names bound in only one branch are nil-injected into the

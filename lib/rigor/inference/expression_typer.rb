@@ -4789,6 +4789,13 @@ module Rigor
       # the trade the paragraph above already makes: a name the body mutates and VISIBLY rebinds to the widened
       # class (`t << "c"; t = t.strip`) converges on that seed as well, and is floored with the hidden case.
       #
+      # A statement rebind does not buy that case back, because converging on the widened seed is not evidence
+      # that the rebind was all there was. The capped pass above runs no rebind a counter guards past the third
+      # iteration (`s = s.dup; n += 1; s = [e] if n > 3`), and the scans see only write nodes in the body, so a
+      # lambda defined outside it (`close = -> { cur = nil }; … close.call`) or `binding.local_variable_set`
+      # rebinds the local where no pass looks. Both converge on the seed next to a statement rebind, and
+      # believing `String` there reports `undefined method` or an always-falsey `cur.nil?` on correct code.
+      #
       # A pass's exit binding also joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), and
       # a rebind on a `next` arm moves the converged binding off its seed while an unthreaded write on the
       # fall-through stays invisible: `if c; seen = 100; next false; end; (seen += 1) == 2` converged on `0 |

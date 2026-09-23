@@ -117,6 +117,14 @@ FOLD_PARITY_CASES = {
     "(1..3).find(-> { 0 }) { |e| e > 5 }", "(1..3).detect(-> { 0 }) { |e| e > 5 }",
     "[1, 2].find(-> { 0 }, &:nil?)", "[1, 2].index { |e| e == 2 }", "[1, 2].index(2)"
   ],
+  # A `:none` fallback, because upstream's `detect` answered `Elem?` and an Integer `0` would pass for an element.
+  # No `(1..3)` receiver: its element reads `Dynamic[top]` here, which admits `:none` on either answer.
+  "Enumerable#detect(ifnone) — core overlay" => [
+    "{ a: 1 }.detect(-> { :none }) { |k, v| v > 5 }", "[1, 2].each.detect(-> { :none }) { |e| e > 5 }",
+    "[1, 2].each_slice(1).detect(-> { :none }) { |s| false }",
+    "[3, 4].each_with_index.detect(-> { :none }) { |p| false }",
+    "[1, 2].lazy.detect(proc { :none }) { |e| e > 5 }", "{ a: 1 }.detect { |k, v| v > 5 }"
+  ],
   "Enumerator — block-less iteration overload" => [
     "[1, 2, nil].filter", "[1, 2, 3].select", "[1, 2, 3].reject",
     "[1, 2, 3].map", "[1, 2, 3].collect", "[1, 2, 3].each",

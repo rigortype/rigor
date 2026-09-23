@@ -17,8 +17,6 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 RSpec.describe "Hash#transform_keys replacements overloads across rbs lines" do
-  rbs3 = Gem::Version.new(RBS::VERSION) < Gem::Version.new("4.0")
-
   let(:loader) { Rigor::Environment::RbsLoader.new(libraries: []) }
 
   def hash_method(name)
@@ -52,17 +50,17 @@ RSpec.describe "Hash#transform_keys replacements overloads across rbs lines" do
     expect(loader.instance_definition("Hash")).not_to be_nil
   end
 
-  if rbs3
-    it "loads the rbs 3.x overlay on the rbs 3.x line" do
-      expect(overlay_sources(hash_method(:transform_keys))).to include("hash_rbs3.rbs")
-      expect(overlay_sources(hash_method(:transform_keys!))).to include("hash_rbs3.rbs")
-    end
-  else
-    # On 4.x the `| ...` continuation would prepend a second copy of the overloads upstream declares.
-    it "leaves the rbs 4.x declarations to rbs core" do
-      expect(overlay_sources(hash_method(:transform_keys))).not_to include("hash_rbs3.rbs")
-      expect(overlay_sources(hash_method(:transform_keys!))).not_to include("hash_rbs3.rbs")
-    end
+  rbs3 = Gem::Version.new(RBS::VERSION) < Gem::Version.new("4.0")
+
+  it "loads the rbs 3.x overlay on the rbs 3.x line", if: rbs3 do
+    expect(overlay_sources(hash_method(:transform_keys))).to include("hash_rbs3.rbs")
+    expect(overlay_sources(hash_method(:transform_keys!))).to include("hash_rbs3.rbs")
+  end
+
+  # On 4.x the `| ...` continuation would prepend a second copy of the overloads upstream declares.
+  it "leaves the rbs 4.x declarations to rbs core", unless: rbs3 do
+    expect(overlay_sources(hash_method(:transform_keys))).not_to include("hash_rbs3.rbs")
+    expect(overlay_sources(hash_method(:transform_keys!))).not_to include("hash_rbs3.rbs")
   end
 
   describe "call.wrong-arity" do
@@ -80,7 +78,8 @@ RSpec.describe "Hash#transform_keys replacements overloads across rbs lines" do
       result.diagnostics.select { |d| d.qualified_rule == "call.wrong-arity" }.map(&:line)
     end
 
-    # The two-argument control keeps a blanket arity stand-down on `transform_keys` from passing.
+    # The two-argument control keeps a blanket arity stand-down on `transform_keys` from passing. The
+    # zero-argument and block-only lines guard rbs 3.x's own overloads, which the overlay's precede.
     it "accepts a replacements hash and still reports a surplus argument" do
       lines = arity_lines(<<~RUBY)
         h = { a: 1, b: 2 }
@@ -88,10 +87,14 @@ RSpec.describe "Hash#transform_keys replacements overloads across rbs lines" do
         h.transform_keys({ a: :z }) { |k| k.to_s }
         h.transform_keys!({ a: :z })
         h.transform_keys!({ a: :z }) { |k| k }
+        h.transform_keys
+        h.transform_keys { |k| k.to_s }
+        h.transform_keys!
+        h.transform_keys! { |k| k }
         h.transform_keys({ a: :z }, 2)
       RUBY
 
-      expect(lines).to eq([6])
+      expect(lines).to eq([10])
     end
   end
 end

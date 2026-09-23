@@ -1222,7 +1222,8 @@ module Rigor
         # always wins on conflict (these reopenings only fill genuine holes, e.g. `Numeric#to_f`/`to_i`/
         # `to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
         # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
-        # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` files must be gated individually.
+        # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and `RBS_LINE_CORE_OVERLAYS` files must
+        # be gated individually.
         #
         # @param loaded_library_names — libraries that actually resolved on this loader.
         def add_bundled_signatures(rbs_loader, loaded_library_names)

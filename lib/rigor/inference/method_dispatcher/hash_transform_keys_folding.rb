@@ -58,9 +58,9 @@ module Rigor
         end
 
         # The mapping form's block parameter: the receiver's key type, as rbs 4.2's `{ (K old_key) -> K2 }`
-        # declares it, and as `data/core_overlay/hash_rbs3.rbs` restates it on the rbs 3.x line, which has no
-        # mapping overload of its own. Reached through {IteratorDispatch.block_param_types}; nil falls through to
-        # the RBS probe.
+        # declares it, and as `data/core_overlay/hash_rbs3.rbs` restates it on the rbs 3.x line. The RBS probe
+        # does not bind it for a union of receiver shapes. Reached through {IteratorDispatch.block_param_types};
+        # nil falls through to the RBS probe.
         def block_param_types(context)
           return nil unless context.args.size == 1
 

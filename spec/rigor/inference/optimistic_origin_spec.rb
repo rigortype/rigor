@@ -73,6 +73,17 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(arms_of(type)).to contain_exactly(1, "none")
     end
 
+    it "keeps both arms on an `&&=` that stores through an optimistic read" do
+      # `xs[i] &&= "y"` stores nothing when the slot is absent, so its value is `nil` there: the mark the
+      # implicit `[]` read carries is the write's too.
+      integer = Rigor::Type::Combinator.nominal_of("Integer")
+      type, = evaluate_with({ xs: array_of_string, i: integer }, <<~RUBY)
+        if (xs[i] &&= "y") then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
     it "declines when the predicate is the read itself, with no intervening binding" do
       # A distinct path from the cases around it: the mark is read off the call node rather than off a
       # binding, so this pins the node-keyed side of the channel.
@@ -374,6 +385,15 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       type, = evaluate(<<~RUBY)
         v = "abc".upcase
         if v then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "elides on an `&&=` through a Tuple slot, whose element is known to be present" do
+      type, = evaluate(<<~RUBY)
+        t = ["a"]
+        if (t[0] &&= "y") then 1 else "none" end
       RUBY
 
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))

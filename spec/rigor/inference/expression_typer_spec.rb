@@ -1967,6 +1967,21 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(statement_type(source, 2).describe).to eq("7")
       end
 
+      it "keeps the gradual arm when the body infers `Dynamic` beside `nil` (the partly-gradual rule)" do
+        # The Hash control above, reached through a project body: `Dynamic[top]?` is evidence, not a lone
+        # `Dynamic`, so the memo reading does not apply and the slot's untyped value stays in the answer.
+        source = "class S\n  def [](k)\n    return nil unless @data\n\n    @data[k]\n  end\nend\ns = S.new\n" \
+                 "s[:k] ||= 7\n"
+        expect(statement_type(source, 2).describe).to eq("7 | Dynamic[top]")
+      end
+
+      it "does not bind a splat index to the body's parameters" do
+        # `r[*[0, 1]]` calls `[](0, 1)`; binding the one untyped stand-in for the splat folded `keys.size` to
+        # `1`, and `r[*idx] += 1 == 3` read as always falsey on a program that takes the branch.
+        source = "class R\n  def [](*keys) = keys.size\nend\nr = R.new\nidx = [0, 1]\nr[*idx] += 1\n"
+        expect(statement_type(source, 3).describe).to eq("Dynamic[top]")
+      end
+
       it "agrees with the statement evaluator's answer for every operator" do
         ["c[:a] += 1", "c[:a] ||= 3", "c[:a] &&= 3"].each do |write|
           root = Prism.parse("#{klass}#{write}\n").value

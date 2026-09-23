@@ -13,7 +13,7 @@ locals:
   k: Integer[3..]
   m: Integer[3..]
   "n": Integer[5..]
-  p: Integer
+  p: Integer | Integer[2..9]
   q: Integer[3..]
   total: Integer
 assertions:

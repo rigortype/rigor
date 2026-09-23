@@ -10,6 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "optimistic_origin"
+require_relative "receiver_alias"
 
 module Rigor
   module Inference
@@ -480,7 +481,7 @@ module Rigor
         when Prism::GlobalVariableWriteNode
           analyse_global_write(node, scope)
         when Prism::CallNode
-          analyse_call(node, scope)
+          analyse_call(write_receiver_as_read(node) || node, scope)
         when Prism::AndNode, Prism::OrNode, Prism::IfNode, Prism::UnlessNode
           analyse_composition(node, scope)
         when Prism::MatchWriteNode
@@ -918,6 +919,25 @@ module Rigor
         #   literals (Slice 6 phase 2 sub-phase 2).
         # Anything else returns nil so the surrounding analyser falls through to the
         # no-narrowing fallback.
+        # Issue #1223 — `(x = e).nil?`, `(x ||= e).empty?`, `(@x = e).is_a?(C)`. A write's value is the binding
+        # it leaves, and a predicate is narrowed in the scope after its receiver ran, so the call narrows the
+        # variable exactly as the same call on a read of it would. Every analyser keys its receiver on a read
+        # node, so the call is analysed with its receiver replaced by one ({ReceiverAlias.read_of}). Before #1223
+        # the statement evaluator did not thread a receiver's write at all, so the local was unbound and there
+        # was nothing to narrow; nil when the receiver is not such a write, bare or parenthesised on its own.
+        def write_receiver_as_read(node)
+          write = written_receiver(node.receiver)
+          write && node.copy(receiver: ReceiverAlias.read_of(write))
+        end
+
+        def written_receiver(receiver)
+          while receiver.is_a?(Prism::ParenthesesNode) && receiver.body.is_a?(Prism::StatementsNode) &&
+                receiver.body.body.size == 1
+            receiver = receiver.body.body.first
+          end
+          receiver if ReceiverAlias.variable_write?(receiver)
+        end
+
         def analyse_call(node, scope)
           return nil if node.block
 

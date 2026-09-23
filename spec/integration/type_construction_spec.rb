@@ -1015,6 +1015,10 @@ RSpec.describe "Rigor type construction (integration)" do
     it "folds `[1,2,3].all? { true }` to Constant[true]" do
       expect(harness.local(:all_truthy)).to eq(constant(true))
     end
+
+    it "accepts an index write into the all-dropped Hash" do
+      expect(harness.diagnostics.map(&:rule)).not_to include("call.argument-type-mismatch")
+    end
   end
 
   describe "fixtures/block_map.rb — per-position Tuple uplift on Array#map" do
@@ -2069,6 +2073,41 @@ RSpec.describe "Rigor type construction (integration)" do
 
       it "floors a compounding captured local to Dynamic[top] at the cap" do
         expect(harness.local(:growing)).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
+    # Issue #1223 — the statement walk typed a call's receiver and arguments, a literal, an interpolation
+    # and a `rescue` modifier as pure expressions, so a write nested in one never reached the scope after
+    # the statement, straight-line or through ADR-56's block write-back, and a jump nested in one never
+    # reached the block's jump join.
+    describe "fixtures/argument_local_write.rb — a write inside a call operand or a literal" do
+      let(:harness) { harness_for("argument_local_write") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion. The quiet lines each compared a local still on
+      # its pre-write constant; the paired controls write a value the comparison rules out, and fold only
+      # once the write is seen.
+      it "silences the pre-write folds without silencing the genuine ones" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      end
+
+      # The guarded bodies read a local an `&&` predicate's right operand writes; narrowing the scope after the
+      # whole predicate kept the `nil` of the path that skipped that operand.
+      it "reports no possible-nil receiver on a local the predicate's right operand wrote" do
+        nil_receivers = harness.diagnostics.select { |d| d.rule.to_s == "call.possible-nil-receiver" }
+        expect(nil_receivers.map(&:line)).to be_empty
+      end
+
+      it "binds the argument's write in the post-statement scope" do
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        expect(harness.local(:n)).to eq(integer)
+        expect(harness.local(:switched)).to eq(constant(:c))
+        expect(harness.local(:parsed)).to eq(Rigor::Type::Combinator.union(constant(:none), constant(:fallback)))
       end
     end
 

@@ -4728,13 +4728,14 @@ module Rigor
       # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
       # seed, is floored rather than believed.
       #
-      # The fixpoint reads each pass's exit binding out of `StatementEvaluator`, and that evaluator only
-      # threads a write it sees as a STATEMENT: a rebind nested inside an expression — `(seen += 1) == 2` as
-      # the block's whole body — leaves the exit scope holding the entry binding, so the fixpoint converges on
-      # the seed and every position of the fold answers the first iteration again. That is issue #617 residue
-      # (1)'s one-liner, `seen = 0; [1, 2].find { |e| (seen += 1) == 2 }` answering `nil` where Ruby answers
-      # `2`: the pinned `Constant[0]` made both predicates `Constant[false]`, and `find` short-circuits on a
-      # provably-falsey block.
+      # The fixpoint reads each pass's exit binding out of `StatementEvaluator`, and that evaluator does not
+      # thread a write from every position: a rebind nested where it types a pure value leaves the exit scope
+      # holding the entry binding, so the fixpoint converges on the seed and every position of the fold answers
+      # the first iteration again. That is issue #617 residue (1)'s one-liner, `seen = 0; [1, 2].find { |e|
+      # (seen += 1) == 2 }` answering `nil` where Ruby answers `2`: the pinned `Constant[0]` made both
+      # predicates `Constant[false]`, and `find` short-circuits on a provably-falsey block. The evaluator has
+      # threaded a call's receiver since #1223, but a `when` condition or a `yield` argument is still such a
+      # position.
       #
       # An unmoved pin cannot be distinguished from a write that genuinely restores its own entry value
       # (`x = 5; xs.each { x = 5 }`), so the floor gives that shape up too. It is the far cheaper side: a

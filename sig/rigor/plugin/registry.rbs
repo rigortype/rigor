@@ -31,8 +31,8 @@ class Rigor::Plugin::Registry
 
   # ADR-103 WD2/WD6/WD10/WD14 — every loaded plugin's effect contribution, in registration order.
   # Lazy and memoised like `contracts_for_path`: computing it can force a plugin's project-facts
-  # read, which a run with effects off must never pay. Unmarked residue — a memoised flat_map
-  # aggregate, not an `initialize`-parameter read.
+  # read, which a run with effects off must never pay. Unmarked residue — a memoised
+  # `filter_map` aggregate, not an `initialize`-parameter read.
   def effect_contributions: () -> Array[Contribution]
 
   # One plugin's effect contribution, flattened off whichever surface answered it. Carries the two

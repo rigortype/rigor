@@ -24,7 +24,9 @@ module Rigor
       def to_h: () -> Hash[String, untyped]
 
       def ==: (untyped other) -> bool
-      alias eql? ==
+      # `alias eql? ==` — the alias row has no sig-gen shape, so it stays unmarked
+      # residue.
+      def eql?: (untyped other) -> bool
       def hash: () -> Integer
     end
   end

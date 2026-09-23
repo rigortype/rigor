@@ -244,11 +244,14 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin.rbs" => 3,
   # New file (#1181 slice): the `alias eql? ==` row has no sig-gen shape — the sole residue.
   "sig/rigor/plugin/additional_initializer.rbs" => 1,
-  # New file (#1181 vocabulary slice): the init-parameter readers are #1154-marked; the two
-  # unmarked rows are the computed predicates `receiver_path?`/`self_path?` (unrenderable —
-  # `match?` calls sig-gen declines). `effect_edge`, `effect_ancestry`, `effect_entry_points`
-  # classify fully and pin nothing.
-  "sig/rigor/plugin/effect_attribution.rbs" => 2,
+  # New file (#1181 vocabulary slice): the init-parameter readers are #1154-marked; the three
+  # unmarked rows are the computed predicates `receiver_path?`/`self_path?` (`include?`/
+  # `start_with?` bodies sig-gen declines) and the `eql?` alias row.
+  "sig/rigor/plugin/effect_attribution.rbs" => 3,
+  # New files (#1181 vocabulary slice): sole residue in each is the `eql?` alias row.
+  "sig/rigor/plugin/effect_ancestry.rbs" => 1,
+  "sig/rigor/plugin/effect_edge.rbs" => 1,
+  "sig/rigor/plugin/effect_entry_points.rbs" => 1,
   # -1 (#1181 slice): `protocol_contracts` tightened to `Array[ProtocolContract]` — sig-gen
   # already inferred that exact type through `manifest.protocol_contracts`, so the row is
   # generated-equivalent now.
@@ -262,11 +265,10 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/loader.rbs" => 2,
   # -2 (#1181 slices): `additional_initializers` and `protocol_contracts` tightened to
   # `Array[Plugin::AdditionalInitializer]` / `Array[Plugin::ProtocolContract]` and marked #1154.
-  # +2 (#1181 vocabulary slice): the six `effect_*` readers are #1154-marked and `effects?`
-  # earned; `effect_owner` is declared-divergent (declared `String`, inferred `String?` — the
-  # nil guard's narrowing does not reach a repeated reader call; the site warning is suppressed
-  # in `lib/`) and `effect_discharge_allowed?` is unrenderable.
-  "sig/rigor/plugin/manifest.rbs" => 23,
+  # +1 (#1181 vocabulary slice): the six `effect_*` readers are #1154-marked and `effects?` /
+  # `effect_owner` earned (the reader bound once into a local narrows, so sig-gen proves
+  # `String`); `effect_discharge_allowed?` is unrenderable.
+  "sig/rigor/plugin/manifest.rbs" => 22,
   # New file (#1181 slice): `to_h` is declared-divergent (sig-gen infers a string-literal-keyed
   # union; `Hash[String, untyped]` matches the manifest `to_h` convention) and `eql?` is an alias
   # row with no sig-gen shape.

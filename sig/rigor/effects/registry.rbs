@@ -32,8 +32,8 @@ module Rigor
       # an empty vocabulary (fail-open).
       def self.load_file: (untyped path) -> Registry
 
-      # sig-gen gap: #1154 — readers are normalized (`to_s`/`to_h`/sorted/frozen) from the
-      # `initialize` kwargs rather than assigned verbatim.
+      # sig-gen gap: #1154 — `attr_reader` over an ivar assigned in `initialize` from the
+      # parameter of the same name; sig-gen proposes `untyped` for it.
       attr_reader vocabulary_version: Integer
       # sig-gen gap: #1154 — every declared label, sorted; implied ancestors are recognised by
       # {#known?} but not listed here.

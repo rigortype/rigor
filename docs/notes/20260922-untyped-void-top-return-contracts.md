@@ -422,10 +422,13 @@ plugin-side effect row classes.
   `Array[Plugin::Registry::Contribution]`, `entry_points` is `Array[Plugin::EffectEntryPoints]`
   (joining residue as declared-divergent — sig-gen still infers `Array[untyped]` from `absorb`),
   and `extend_registry` is `Effects::Registry` in and out, leaving residue as parameter intent.
-- `Manifest#effect_owner` is declared `String` against sig-gen's `String?`: the
-  `return id if effect_root.nil?` guard narrows the last line, but the engine does not narrow a
-  repeated reader call, so the def site carries `# rigor:disable def.return-type-mismatch` — the
-  same engine-limitation suppression `gem_resolver.rb` already uses for `undefined-method`.
+- `Manifest#effect_owner` binds `effect_root` into a local before the nil guard, so the engine's
+  local narrowing proves `String` and no suppression is needed (an earlier draft suppressed
+  `def.return-type-mismatch` on the repeated-reader shape instead; review caught the cheaper fix).
+- Convention note: the four `Plugin::Effect*` files spell the `eql?` row as
+  `def eql?: (untyped other) -> bool` pinned residue — the same form `additional_initializer.rbs`
+  and `protocol_contract.rbs` already carry — not an RBS `alias` row, which the auditor skips and
+  would leave the ratchet incomparable across sibling files.
 
 ## Two incidental findings
 

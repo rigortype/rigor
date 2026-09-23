@@ -17,8 +17,11 @@ module Rigor
     # `||=` / `&&=` are conditional at runtime, but a widening may only LOSE precision, so answering on the branch that
     # does not store is safe.
     #
-    # `Prism::IndexTargetNode` is deliberately absent: it is a multi-assign TARGET, and the `MultiWriteNode` that owns
-    # it is where that write is observed.
+    # `Prism::IndexTargetNode` (`h[:a], z = 1, 2`) stores through `[]=` too, but it is absent from {NODE_CLASSES}: it
+    # is a multi-assign TARGET, and the value it stores is a slot of the right-hand side, which only the owning
+    # `MultiWriteNode` can type. `StatementEvaluator#eval_multi_write` therefore observes the write there, passing each
+    # target to {.widen} with the slot {MultiTargetBinder} decomposed for it, and `ScopeIndexer`'s pre-pass, which
+    # needs no stored value, names the class next to {NODE_CLASSES}.
     module IndexWriteWidening
       NODE_CLASSES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
 
@@ -35,7 +38,7 @@ module Rigor
       # the widening joins the stored value into the carrier's content evidence exactly as a real `[]=` does
       # (issue #560). Empty means "no evidence" and widens without joining.
       #
-      # @param node — one of {NODE_CLASSES}
+      # @param node — one of {NODE_CLASSES}, or a `Prism::IndexTargetNode`
       def widen(node:, current_scope:, arg_types: MutationWidening::NO_ARG_TYPES)
         MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope, arg_types: arg_types)
       end

@@ -73,19 +73,25 @@ module Rigor
     #   same observable semantics (binding a fresh local in the block-entry scope).
     # - `Prism::MultiTargetNode` — recurses with the slot's type as the new right-hand side.
     # - `Prism::SplatNode` (used for `rest`) — its `expression` MUST be a
-    #   `Prism::LocalVariableTargetNode`, a `Prism::RequiredParameterNode`, or a
-    #   `Prism::InstanceVariableTargetNode` to be observable; an anonymous `*` splat or any other
-    #   target is skipped.
+    #   `Prism::LocalVariableTargetNode`, a `Prism::RequiredParameterNode`, a
+    #   `Prism::InstanceVariableTargetNode` or a `Prism::IndexTargetNode` to be observable; an
+    #   anonymous `*` splat or any other target is skipped.
     # - `Prism::InstanceVariableTargetNode` (issue #1110), as a fixed slot, a rest
     #   (`*@rest`), or inside a nested target. It decomposes by the same carrier rules as a
     #   local and is reported apart, in {Result#ivars} / {Result#optimistic_ivars}, so a caller
     #   that threads only locals never sees it. The binder keys it internally by its `:@name`,
     #   which no local name can collide with.
+    # - `Prism::IndexTargetNode` (`h[:a], x = rhs`), in the same three positions. It binds no
+    #   name: it stores its slot through `[]=` on its receiver. The binder reports the value it
+    #   stores in {Result#index_targets}, keyed by the target node itself, so
+    #   `StatementEvaluator#eval_multi_write` can widen the receiver's literal shape with that
+    #   value as content evidence, exactly as a plain `h[:a] = 1` does. It carries no optimistic
+    #   mark: there is no binding for one to qualify.
     #
     # Other target kinds (`ClassVariableTargetNode`, `GlobalVariableTargetNode`,
-    # `ConstantTargetNode`, `IndexTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`,
-    # `ImplicitRestNode`, ...) MUST be silently skipped: they have no observable contribution to
-    # the scope the StatementEvaluator threads.
+    # `ConstantTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`, `ImplicitRestNode`, ...)
+    # MUST be silently skipped: they have no observable contribution to the scope the
+    # StatementEvaluator threads.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract and
     # docs/adr/4-type-inference-engine.md for the slice rationale.
@@ -97,8 +103,11 @@ module Rigor
       # `types` is the local `name -> Rigor::Type` map {.bind} returns; `optimistic` the frozen list
       # of local names whose nil-freeness is the short-array bet described in the module comment.
       # `ivars` / `optimistic_ivars` are the same pair for instance-variable targets.
-      Result = Data.define(:types, :optimistic, :ivars, :optimistic_ivars) do
-        def initialize(types:, optimistic:, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES)
+      # `index_targets` maps each `Prism::IndexTargetNode` to the value it stores; {#apply_to}
+      # binds nothing for it.
+      Result = Data.define(:types, :optimistic, :ivars, :optimistic_ivars, :index_targets) do
+        def initialize(types:, optimistic:, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES,
+                       index_targets: NO_BINDINGS)
           super
         end
 
@@ -196,18 +205,25 @@ module Rigor
       class << self
         private
 
-        # Partitions the walk's single name-keyed map: an ivar name carries its `@` sigil, which a
-        # local name never does.
+        # Partitions the walk's single map: an ivar name carries its `@` sigil, which a local name
+        # never does, and an index target is keyed by its node rather than by a name.
         def split_result(bindings, marked)
-          return Result.new(types: bindings, optimistic: marked.freeze) if bindings.each_key.none? { |n| ivar_name?(n) }
+          return Result.new(types: bindings, optimistic: marked.freeze) if bindings.each_key.all? { |k| local_key?(k) }
 
-          ivars, locals = bindings.partition { |name, _| ivar_name?(name) }.map(&:to_h)
-          ivar_marked, local_marked = marked.partition { |name| ivar_name?(name) }
-          Result.new(types: locals, optimistic: local_marked.freeze,
-                     ivars: ivars, optimistic_ivars: ivar_marked.freeze)
+          grouped = bindings.group_by { |key, _| key_kind(key) }.transform_values(&:to_h)
+          ivar_marked, local_marked = marked.partition { |name| key_kind(name) == :ivar }
+          Result.new(types: grouped.fetch(:local, {}), optimistic: local_marked.freeze,
+                     ivars: grouped.fetch(:ivar, NO_BINDINGS), optimistic_ivars: ivar_marked.freeze,
+                     index_targets: grouped.fetch(:index, NO_BINDINGS))
         end
 
-        def ivar_name?(name) = name.start_with?("@")
+        def local_key?(key) = key.is_a?(Symbol) && !key.start_with?("@")
+
+        def key_kind(key)
+          return :index unless key.is_a?(Symbol)
+
+          key.start_with?("@") ? :ivar : :local
+        end
 
         # `context` is the `[scope, soften_slots]` pair every step of the walk shares.
         def visit(node, rhs_type, optimistic, bindings, marked, context)
@@ -373,6 +389,8 @@ module Rigor
           case target
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
             bind_name(target.name, type, optimistic, bindings, marked)
+          when Prism::IndexTargetNode
+            bind_name(target, type, optimistic, bindings, marked)
           when Prism::MultiTargetNode
             visit(target, type, optimistic, bindings, marked, context)
           end
@@ -386,14 +404,17 @@ module Rigor
           case expression
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
             bind_name(expression.name, type, false, bindings, marked)
+          when Prism::IndexTargetNode
+            bind_name(expression, type, false, bindings, marked)
           end
         end
 
-        # A later binding of the same name (`a, a = ints`) wins, mark included.
+        # A later binding of the same name (`a, a = ints`) wins, mark included. `name` is the
+        # target node for an index target, which binds no name and so is never marked.
         def bind_name(name, type, optimistic, bindings, marked)
           bindings[name] = type
           marked.delete(name)
-          marked << name if optimistic
+          marked << name if optimistic && name.is_a?(Symbol)
         end
       end
     end

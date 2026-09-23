@@ -773,9 +773,22 @@ module Rigor
       # other carriers fall back to `Dynamic[Top]` per slot. Instance-variable targets bind by the same rules, with the
       # optimistic mark recorded per ivar (issue #1110). The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
+      #
+      # An index target (`h[:a], z = 1, 2`, nested or splatted too) stores its slot through `[]=`, so its receiver
+      # widens here exactly as the plain store `h[:a] = 1` widens it, joining the slot's value as content evidence
+      # (issue #560) — otherwise the literal survives and a later `h[:a] == 0` folds on its stale `0`. The widening
+      # runs AFTER the bindings: Ruby evaluates a target's receiver before any target is assigned, so
+      # `h, h[:a] = h, 1` stores into the object `h` is bound to afterwards, and widening first would let the
+      # binding of `h` restore the literal. When a target rebinds the receiver's variable to another object
+      # instead, widening that one only loses precision.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        [rhs_type, MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs).apply_to(post_rhs)]
+        bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
+        post = bound.apply_to(post_rhs)
+        post = bound.index_targets.reduce(post) do |acc, (target, stored)|
+          IndexWriteWidening.widen(node: target, current_scope: acc, arg_types: index_write_arg_types(target, stored))
+        end
+        [rhs_type, post]
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks

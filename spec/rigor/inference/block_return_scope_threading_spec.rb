@@ -220,6 +220,20 @@ RSpec.describe "block-return scope threading", type: :runner do
   # tail reads the honest `Array[…]`. The gate now also fires on a receiver of any name the widening responds
   # to (`MutationWidening::SHAPE_MUTATORS`), through every variable the receiver can evaluate to.
   describe "a prefix that mutates a captured collection in place" do
+    # Whether the prefix scan counts a compound index write as an in-place mutation — #1205's gate, which a
+    # multi-assign index target needs too. Probed rather than assumed so the example below runs by itself the
+    # moment that gate lands.
+    def index_write_gate?
+      dumped_type(<<~RUBY).start_with?("Hash[")
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          h[:a] += 1
+          h
+        end)
+      RUBY
+    end
+
     it "threads through a content adder on a captured local" do
       # THE ISSUE'S PROBE. Before the fix this answered `[]`.
       type = dumped_type(<<~RUBY)
@@ -288,6 +302,36 @@ RSpec.describe "block-return scope threading", type: :runner do
         end)
       RUBY
       expect(type).to start_with("Array[")
+    end
+
+    it "threads through a straight-line multi-assign index target" do
+      # `h[:a], y = 1, 2` stores through `[]=` on `h`, and `eval_multi_write` widens the receiver, so a threaded
+      # tail reads the widened hash rather than the literal's `{ a: 0 }`. The body threads only once the prefix
+      # scan counts an index write as an in-place mutation (#1205); without that it binds just `y`, the tail
+      # never reads it, and the answer stays the entry literal whatever the widening does. Drop the guard once
+      # #1205 is on master.
+      skip "needs the index-write threading gate of #1205" unless index_write_gate?
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          h[:a], y = 1, 2
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "leaves a tail reading a hash the multi-assign does not store into at its literal" do
+      expect(dumped_type(<<~RUBY)).to eq("{ a: 0 }")
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          g[:a], y = 1, 2
+          h
+        end)
+      RUBY
     end
 
     it "threads a mutated block parameter at every per-element position" do

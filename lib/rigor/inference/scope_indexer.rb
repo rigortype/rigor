@@ -1124,11 +1124,13 @@ module Rigor
       # folded to `Constant[true]` on a hash the class fills. `IndexWriteWidening::NODE_CLASSES` owns that list; it is
       # spelled out here as an explicit disjunction because that is what narrows `node` to something with a
       # `#receiver` — `NODE_CLASSES.any? { … }` reads as a call on `Prism::Node` and Rigor rejects it, correctly.
+      # A multi-assign target `@h[k], x = …` stores the same way; it is outside `NODE_CLASSES` only because the
+      # straight-line seam types its stored value at the owning `MultiWriteNode`, and this widening takes no value.
       def mutation_target(node)
         return [node.name, node.receiver] if node.is_a?(Prism::CallNode)
 
         if node.is_a?(Prism::IndexOrWriteNode) || node.is_a?(Prism::IndexAndWriteNode) ||
-           node.is_a?(Prism::IndexOperatorWriteNode)
+           node.is_a?(Prism::IndexOperatorWriteNode) || node.is_a?(Prism::IndexTargetNode)
           return [IndexWriteWidening::MUTATOR, node.receiver]
         end
 

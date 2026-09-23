@@ -1419,6 +1419,38 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
       expect(post.local(:@x)).to be_nil
     end
+
+    # An index target stores through `[]=` on its receiver, so it widens the receiver's literal shape and joins
+    # the slot's value exactly as the plain store of the same value does — otherwise `h[:a] == 0` after
+    # `h[:a], z = 1, 2` folds on the literal's stale `0`.
+    it "widens an index target's receiver the way a plain `[]=` store of the slot's value does" do
+      _, multi = evaluate("h = { a: 0 }\nh[:a], z = 1, 2")
+      _, plain = evaluate("h = { a: 0 }\nh[:a] = 1")
+      expect(multi.local(:h)).to be_a(Rigor::Type::Nominal)
+      expect(multi.local(:h)).to eq(plain.local(:h))
+      expect(multi.local(:z)).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "joins the slot's own value, not an untyped one, into a seed that admits it" do
+      # An empty literal carries no class set to contradict the stored `Integer`, so the join keeps it.
+      _, multi = evaluate("h = {}\nh[:a], z = 1, 2")
+      _, plain = evaluate("h = {}\nh[:a] = 1")
+      expect(multi.local(:h)).to eq(plain.local(:h))
+    end
+
+    it "widens an index target nested in a group and a splatted one with the value each slot stores" do
+      _, multi = evaluate("h = { a: 0 }\na = [0]\n(h[:a], q), *a[0] = [1, 2], 3, 4")
+      _, plain = evaluate("h = { a: 0 }\na = [0]\nh[:a] = 1\na[0] = [3, 4]")
+      expect(multi.local(:h)).to eq(plain.local(:h))
+      expect(multi.local(:a)).to eq(plain.local(:a))
+      expect(multi.local(:q)).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "leaves a collection the index target does not name at its literal shape" do
+      _, post = evaluate("h = { a: 0 }\ng = {}\ng[:a], z = 1, 2")
+      expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(post.local(:g)).to be_a(Rigor::Type::Nominal)
+    end
   end
 
   describe "block return type uplift (Slice 6 phase C sub-phase 2)" do

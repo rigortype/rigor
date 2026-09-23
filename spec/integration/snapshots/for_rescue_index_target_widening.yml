@@ -1,14 +1,20 @@
 ---
 locals:
+  _narrowed_z: '2'
   _other_pair_w: 2?
   _pair_w: 2?
   kept_for: "{ a: 0 }"
   kept_pair: "{ a: 0 }"
   kept_rescue: "{ e: 0 }"
   looped: 'Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | { a: 0 }'
+  narrowed_for: Hash[Dynamic[top] | Symbol, Dynamic[top]?]
+  narrowed_kept: Hash[Dynamic[top] | Symbol, Dynamic[top]?]
+  narrowed_multi: Hash[Dynamic[top] | Symbol, Dynamic[top]?]
+  narrowed_rescue: Hash[Dynamic[top] | Symbol, Dynamic[top]?]
   other_for: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | {}
   other_pair: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | {}
   other_rescue: Hash[Dynamic[top] | Symbol, Dynamic[top] | StandardError] | {}
   pair: 'Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | { a: 0 }'
   rescued: 'Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | { e: 0 }'
+  splat: 'Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer] | { a: 0 }'
 assertions: {}

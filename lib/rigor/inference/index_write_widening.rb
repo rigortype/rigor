@@ -17,14 +17,13 @@ module Rigor
     # `||=` / `&&=` are conditional at runtime, but a widening may only LOSE precision, so answering on the branch that
     # does not store is safe.
     #
-    # `Prism::IndexTargetNode` (`h[:a], z = 1, 2`) stores through `[]=` too, but it is absent from {NODE_CLASSES}: it
-    # is a multi-assign TARGET, and the value it stores is a slot of the right-hand side, which only the owning
-    # `MultiWriteNode` can type. `StatementEvaluator#eval_multi_write` therefore observes the write there, passing each
-    # target to {.widen} with the slot {MultiTargetBinder} decomposed for it, and `ScopeIndexer`'s pre-pass, which
-    # needs no stored value, names the class next to {NODE_CLASSES}. The same target is also a `for` index
-    # (`for h[:a] in xs`, alone or in a multi-target) and a rescue reference (`rescue => h[:e]`), with no
-    # `MultiWriteNode` around it; `StatementEvaluator#bind_for_index` and `#bind_rescue_reference` observe those,
-    # passing the element and the rescued exception as the stored value.
+    # `Prism::IndexTargetNode` stores through `[]=` too, but it is absent from {NODE_CLASSES}: it is a TARGET, and the
+    # value it stores comes from the construct that owns it — a multi-assign slot (`h[:a], z = 1, 2`), a `for` index
+    # (`for h[:a] in xs`, alone, splatted or in a multi-target) or a rescue reference (`rescue => h[:e]`). Only that
+    # construct can type the value, so `StatementEvaluator#eval_multi_write`, `#bind_for_index` and
+    # `#bind_rescue_reference` observe the write, passing each target to {.widen} with the slot {MultiTargetBinder}
+    # decomposed for it, the element or the rescued exception. `ScopeIndexer`'s pre-pass, which needs no stored
+    # value, names the class next to {NODE_CLASSES}.
     module IndexWriteWidening
       NODE_CLASSES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
 

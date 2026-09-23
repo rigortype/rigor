@@ -15,10 +15,18 @@ looped = { a: 0 }
 for looped[:a] in [1, 2]; end
 puts "zero" if looped[:a] == 0
 
-# `for` with an index target inside a multi-target index.
+# `for` with an index target inside a multi-target index. It is the
+# last slot because CRuby 4.0.5's Prism compiler raises on an index
+# target in the first slot (`for pair[:a], w in ...` calls `[]=` on
+# the Symbol); parse.y and the language agree with Rigor either way.
 pair = { a: 0 }
-for pair[:a], _pair_w in [[1, 2]]; end
+for _pair_w, pair[:a] in [[2, 1]]; end
 puts "zero" if pair[:a] == 0
+
+# A bare splat index (`for *h[k] in`) stores the element as an array.
+splat = { a: 0 }
+for *splat[:a] in [[1, 2]]; end
+puts "zero" if splat[:a] == 0
 
 # `rescue => h[k]` stores the rescued exception.
 rescued = { e: 0 }
@@ -37,7 +45,7 @@ puts "zero" if kept_for[:a] == 0 # GENUINE-TRUTHY
 
 kept_pair = { a: 0 }
 other_pair = {}
-for other_pair[:a], _other_pair_w in [[1, 2]]; end
+for _other_pair_w, other_pair[:a] in [[2, 1]]; end
 puts "zero" if kept_pair[:a] == 0 # GENUINE-TRUTHY
 
 kept_rescue = { e: 0 }
@@ -47,6 +55,32 @@ begin
 rescue => other_rescue[:e]
 end
 puts "zero" if kept_rescue[:e] == 0 # GENUINE-TRUTHY
+
+# A `h[k] ||= default` narrowing on the stored slot is dropped, as a
+# plain `h[k] = v` drops it: the read no longer answers the default.
+narrowed_for = { e: nil }
+narrowed_for[:e] ||= 0
+for narrowed_for[:e] in [1, 2]; end
+puts "zero" if narrowed_for[:e] == 0
+
+narrowed_rescue = { e: nil }
+narrowed_rescue[:e] ||= 0
+begin
+  raise "boom"
+rescue => narrowed_rescue[:e]
+end
+puts "zero" if narrowed_rescue[:e] == 0
+
+narrowed_multi = { e: nil }
+narrowed_multi[:e] ||= 0
+narrowed_multi[:e], _narrowed_z = 1, 2
+puts "zero" if narrowed_multi[:e] == 0
+
+# The control: a store into another slot keeps the narrowing.
+narrowed_kept = { e: nil }
+narrowed_kept[:e] ||= 0
+for narrowed_kept[:f] in [1, 2]; end
+puts "zero" if narrowed_kept[:e] == 0 # GENUINE-TRUTHY
 
 # The same forms on an instance variable, in the method that seeds it
 # and, through the class-ivar pre-pass, in a sibling method.
@@ -60,7 +94,7 @@ class IndexTargetSlots
 
   def fill
     for @looped[:a] in [1, 2]; end
-    for @pair[:a], _w in [[1, 2]]; end
+    for _w, @pair[:a] in [[2, 1]]; end
     begin
       raise "boom"
     rescue => @rescued[:e]
@@ -72,7 +106,7 @@ class IndexTargetSlots
     for @looped[:a] in [1, 2]; end
     puts "zero" if @looped[:a] == 0
     @pair = { a: 0 }
-    for @pair[:a], _w in [[1, 2]]; end
+    for _w, @pair[:a] in [[2, 1]]; end
     puts "zero" if @pair[:a] == 0
   end
 

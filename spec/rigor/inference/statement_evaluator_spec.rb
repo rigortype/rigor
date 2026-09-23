@@ -760,6 +760,25 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(single.local(:g)).not_to be_a(Rigor::Type::HashShape)
       expect(multi.local(:g)).not_to be_a(Rigor::Type::HashShape)
     end
+
+    # The store overwrites the slot a `receiver[key] ||= default` narrowed, so it drops that narrowing as the body
+    # store does — otherwise `h[:e]` keeps reading the `||=` default. A store into another slot keeps it.
+    it "for-loop with an index-target index drops the stored slot's `||=` narrowing and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, index = evaluate("#{seed}for h[:e] in [1, 2]; end\nv = h[:e]")
+      _, body = evaluate("#{seed}for x in [1, 2]; h[:e] = x; end\nv = h[:e]")
+      _, other = evaluate("#{seed}for h[:f] in [1, 2]; end\nv = h[:e]")
+      expect(index.local(:v)).to eq(body.local(:v))
+      expect(index.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    # `for *h[:a] in pairs` is `*h[:a] = element`: Prism gives the index as a bare `SplatNode`, not a multi-target.
+    it "for-loop with a bare splat index-target index widens the receiver" do
+      _, post = evaluate("h = { a: 0 }\ng = { a: 0 }\nfor *h[:a] in [[1, 2]]; end")
+      expect(post.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+      expect(post.local(:g)).to be_a(Rigor::Type::HashShape)
+    end
   end
 
   describe "and/or short-circuit" do
@@ -1491,6 +1510,16 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       _, post = evaluate("h = { a: 0 }\ng = {}\ng[:a], z = 1, 2")
       expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
       expect(post.local(:g)).to be_a(Rigor::Type::Nominal)
+    end
+
+    it "drops the stored slot's `||=` narrowing as the plain `[]=` store does, and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, multi = evaluate("#{seed}h[:e], z = 1, 2\nv = h[:e]")
+      _, plain = evaluate("#{seed}h[:e] = 1\nv = h[:e]")
+      _, other = evaluate("#{seed}h[:f], z = 1, 2\nv = h[:e]")
+      expect(multi.local(:v)).to eq(plain.local(:v))
+      expect(multi.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
     end
   end
 
@@ -2401,6 +2430,16 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       _, post = evaluate("h = { e: 0 }\ng = {}\nbegin\n  risky\nrescue => g[:e]\nend")
       expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
       expect(post.local(:g)).not_to be_a(Rigor::Type::HashShape)
+    end
+
+    it "drops the stored slot's `||=` narrowing as the arm's `[]=` store does, and keeps another slot's" do
+      seed = "h = { e: nil }\nh[:e] ||= 0\n"
+      _, index = evaluate("#{seed}begin\n  risky\nrescue => h[:e]\nend\nv = h[:e]")
+      _, plain = evaluate("#{seed}begin\n  risky\nrescue => e\n  h[:e] = e\nend\nv = h[:e]")
+      _, other = evaluate("#{seed}begin\n  risky\nrescue => h[:f]\nend\nv = h[:e]")
+      expect(index.local(:v)).to eq(plain.local(:v))
+      expect(index.local(:v)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(other.local(:v)).to eq(Rigor::Type::Combinator.constant_of(0))
     end
   end
 

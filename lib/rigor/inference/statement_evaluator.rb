@@ -646,8 +646,10 @@ module Rigor
       # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
       # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
       # when the key is unresolvable, which reproduces the pre-join widening. The index arguments
-      # are typed in `type_scope`, the evaluator's entry scope unless the caller names the scope
-      # Ruby evaluates them in (a `for` index's post-collection scope, a rescue arm's entry).
+      # are typed, and the receiver's joinability read, in `type_scope`: the evaluator's entry
+      # scope by default; a `for` index passes its post-collection scope and a rescue reference
+      # its arm's entry scope, the nearest the engine has to where Ruby evaluates them (each
+      # iteration, the moment of the catch).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
@@ -799,11 +801,15 @@ module Rigor
 
       # An index target (`Prism::IndexTargetNode`) stores `stored` through `[]=` on its receiver wherever it
       # appears — a multi-assign slot, a `for` index, a rescue reference — so its receiver widens exactly as the
-      # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560). `type_scope` is the
-      # scope Ruby evaluates the target's receiver and index arguments in.
+      # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560), and drops the
+      # `h[:a] ||= default` narrowing on the slot it overwrote, as `eval_call` drops it after a `[]=` — the
+      # widening carries slot narrowings across the rebind, so without the drop `h[:a]` keeps reading the default.
+      # `type_scope` types the index arguments and gates the evidence (`joinable_receiver?`); `current_scope` is
+      # the one widened.
       def widen_index_target(target, stored, current_scope, type_scope:)
-        IndexWriteWidening.widen(node: target, current_scope: current_scope,
-                                 arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
+        widened = IndexWriteWidening.widen(node: target, current_scope: current_scope,
+                                           arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
+        IndexedNarrowing.invalidate_indexed_write(target, widened)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1543,8 +1549,8 @@ module Rigor
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
       # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
-      # expression itself types as `Constant[nil]` (the common case where no `break VALUE` is observed), matching the
-      # policy `eval_loop` uses for `while` / `until`.
+      # expression itself types as `Constant[nil]`, the policy `eval_loop` uses for `while` / `until` — a known gap for
+      # `for`, whose value in Ruby is the collection it iterated (issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
@@ -1604,9 +1610,22 @@ module Rigor
         when Prism::MultiTargetNode
           bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
           widen_index_targets(bound, bound.apply_to(scope), type_scope: scope)
+        when Prism::SplatNode
+          bind_for_splat_index(index_node, scope)
         else
           scope
         end
+      end
+
+      # `for *h[:a] in pairs` — Prism gives a bare splat index as a `SplatNode`, not a `MultiTargetNode`, so the
+      # binder never sees it. The store is `*h[:a] = element`, an array of the element's `to_ary` parts; the receiver
+      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. A bare `*name` target stays
+      # unbound here, as before.
+      def bind_for_splat_index(splat, scope)
+        target = splat.expression
+        return scope unless target.is_a?(Prism::IndexTargetNode)
+
+        widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
@@ -2801,7 +2820,7 @@ module Rigor
         return nil unless arrayish?(pre_state)
 
         added = calls.flat_map do |c|
-          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, an index target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
           # does (issue #1140).
@@ -2843,7 +2862,8 @@ module Rigor
         mutations
       end
 
-      # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
+      # Index-write forms (`h[k] ||= v`, `h[k] += v`, and an index target's `h[k] = v` — a multi-assign slot, a `for`
+      # index, a rescue reference) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
       INDEX_WRITE_NODES = [
@@ -3556,8 +3576,8 @@ module Rigor
       end
 
       # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. Falls back to
-      # `StandardError` for any class that cannot be resolved to a `Singleton` type.
+      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
+      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
       def rescue_exception_type(rescue_node, scope)
         exceptions = rescue_node.exceptions
         if exceptions.empty?

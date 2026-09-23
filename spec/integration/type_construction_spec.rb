@@ -2075,7 +2075,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The same seam bound a local the body WRITES at its block-entry value, so a store reading it
     # (`total += x; out << total`) recorded the first iteration's answer. Such a store now reads the
     # local as `Dynamic[top]`, through the block seam and `each_with_object` alike.
-    describe "fixtures/block_content_rebound_capture.rb — a stored value that reads a local the body writes" do
+    describe "fixtures/block_content_rebound_capture/ — a stored value that reads a local the body writes" do
       let(:harness) { harness_for("block_content_rebound_capture") }
 
       it "produces no assert_type mismatches" do

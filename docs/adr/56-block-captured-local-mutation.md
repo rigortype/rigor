@@ -930,11 +930,12 @@ local as `Dynamic[top]`
 (`StatementEvaluator#shadow_rebound_reads`), so `out` reads
 `Array[Dynamic[top]]` and `out.last == 3` no longer folds. The locals
 covered are an outer local the body rebinds, and a block parameter or
-`;`-local it reassigns. A write inside an inner block to a name that
-block introduces does not count, because it is a different variable. A
-joined collection the body also rebinds counts too, because the join's
-seed carries slice A's continuation. A local the body introduces
-already read `Dynamic[top]`.
+`;`-local it reassigns. A write in a parameter's default counts. A write
+inside an inner block to a name that block introduces does not count,
+because it is a different variable, and neither does a write in a
+method body the block defines. A joined collection the body also
+rebinds counts too, because the join's seed carries slice A's
+continuation. A local the body introduces already read `Dynamic[top]`.
 
 The binding joins the per-store `shadows` overlay, where an inner
 block's own names were already bound to `Dynamic[top]`. An Array index
@@ -986,8 +987,10 @@ reading (3) once those gaps close. These shapes stay open:
 - A store that reads an instance variable the body writes
   (`out << @total`) is not covered (#1235).
 - The index of an Array index write keeps its first-iteration reading,
-  so an index the body rebinds to a Range is still classified as an
-  element store, as on master.
+  as on master. So does a stored value that reads the same name:
+  `ids[n] = n; n += 1` still stores `0`, and `ids.last == 1` still
+  folds. An index the body rebinds to a Range is still classified as an
+  element store.
 - A local written through a proc defined outside the block is not seen
   as written, as everywhere in the engine.
 - The rebound local itself keeps whatever slice A gives it.
@@ -1017,11 +1020,14 @@ closure. Its must-not-fire cases each store a local the body writes:
 - a store inside an inner block;
 - a collection the body both rebinds and grows;
 - an index the body increments, under a declared return in the
-  fixture's `sig/`.
+  fixture's `sig/`;
+- a Hash key the body rebinds;
+- a local a parameter's default rebinds.
 
-A precision case keeps an index store's value exact. Its three controls
+A precision case keeps an index store's value exact. Its four controls
 read a local the body does not write, a parameter it does not reassign,
-and a name only an inner block's own parameter writes. Their
+a name only an inner block's own parameter writes, and a name only a
+method body the block defines writes. Their
 always-falsey must still fire, so the seam has not gone gradual on
 every store. The spec asserts every rule, not
 only `flow.*`, because the rejected readings failed as nil receivers

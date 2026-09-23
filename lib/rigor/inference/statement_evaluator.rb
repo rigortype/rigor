@@ -2965,7 +2965,7 @@ module Rigor
       # See ADR-56 WD2.13.
       def shadow_rebound_reads(block, sites, seeds, shadows)
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = scope_local_writes(block.body) & entry_names
+        written = scope_local_writes(block) & entry_names
         return if written.empty?
 
         sites.each do |name, nodes|
@@ -2980,7 +2980,8 @@ module Rigor
       # The locals a store reads to build what it stores. An Array index write's index arguments are left out, and so
       # is any name they read: the join classifies the store as an element or a splice from the index's type, and a
       # `Dynamic` index reads as both, so `grid[i] = [x, x]` would join `x` itself as a member of `grid` beside the
-      # pair. Such an index keeps its block-entry binding, which is master's reading.
+      # pair. Such an index keeps its block-entry binding, which is master's reading, and so does a stored value that
+      # reads the same name: `ids[n] = n; n += 1` still stores `n`'s first-iteration value.
       def store_value_reads(site, array)
         return local_reads(site) unless array
 
@@ -2995,16 +2996,30 @@ module Rigor
         end
       end
 
-      # Every local the body writes in the block's own scope or an outer one. A write inside an inner block or lambda
-      # to a name that block introduces is a different variable: its `depth` climbs fewer scopes than it is nested in.
-      def scope_local_writes(body)
+      # Every local the block writes in its own scope or an outer one, in its body or in a parameter's default. A
+      # write inside an inner block or lambda to a name that block introduces is a different variable: its `depth`
+      # climbs fewer scopes than it is nested in. A method, class or module body inside the block is a scope of its own.
+      def scope_local_writes(block)
         names = []
-        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          next unless CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+        [block.parameters, block.body].compact.each do |root|
+          Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
+            next unless CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) }
 
-          names << node.name if node.depth >= scope_nesting(ancestors)
+            names << node.name if same_scope_local?(node, ancestors)
+          end
         end
         names.uniq
+      end
+
+      # The bodies that open a scope of their own, where a local's `depth` starts again from zero.
+      SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :SCOPE_BODY_NODES
+
+      # True when the local `node` names lives in the scope the walk started in or an outer one.
+      def same_scope_local?(node, ancestors)
+        return false if ancestors.any? { |ancestor| SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) } }
+
+        node.depth >= scope_nesting(ancestors)
       end
 
       # The nodes that read a local's current value: a plain read, and the compound writes that read before they store.
@@ -3025,7 +3040,7 @@ module Rigor
         Source::NodeWalker.each_with_ancestors(node) do |n, ancestors|
           next unless LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
 
-          names << n.name if n.depth >= scope_nesting(ancestors)
+          names << n.name if same_scope_local?(n, ancestors)
         end
         names.uniq
       end

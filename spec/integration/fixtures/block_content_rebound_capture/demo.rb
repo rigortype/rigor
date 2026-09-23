@@ -157,6 +157,29 @@ class ReboundCaptureGrid
 end
 ReboundCaptureGrid.new.rows
 
+# --- A Hash key the body rebinds is covered, unlike an Array index: the
+# key reads `:a` at block entry, and `by_key.keys.last == :b` would fold. ---
+by_key = {}
+key = :a
+[1, 2].each do |x|
+  by_key[key] = x
+  key = :b
+end
+puts "b" if by_key.keys.last == :b
+
+# --- A parameter's default that rebinds an outer local counts as a write.
+# Slice A does not see that write, so `defaulted` itself would pin `0`;
+# the method keeps it out of the golden's locals. ---
+def defaulted_totals
+  defaulted = 0
+  defaults = []
+  [1, 2].each do |x, _y = (defaulted += x)|
+    defaults << defaulted
+  end
+  puts "three" if defaults.last == 3
+end
+defaulted_totals
+
 # --- The value an index store writes keeps its precise type when it
 # reads nothing the body writes. ---
 names = []
@@ -198,3 +221,17 @@ widths = []
 end
 assert_type("Array[5]", widths)
 puts "six" if widths.last == 6 # GENUINE-FALSEY
+
+# A method body the block defines is a scope of its own: the body does
+# not write `limit_seen`.
+limit_seen = 5
+limits = []
+[1, 2].each do
+  limits << limit_seen
+  def self.reset_limit
+    limit_seen = 1
+    limit_seen
+  end
+end
+assert_type("Array[5]", limits)
+puts "six" if limits.last == 6 # GENUINE-FALSEY

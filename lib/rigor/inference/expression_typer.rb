@@ -4188,9 +4188,10 @@ module Rigor
       # ({#per_element_captured_bindings}), and its cost is independent of the arity, so it keeps working above
       # the cap: `total = 0; [1, …, 9].map do total += e; total end` reads `total` as the fixpoint's `Integer`
       # at every position and needs no floor, and `out = []; … do out << e; out.size end` reads `out` as the
-      # widened `Array[Dynamic[top]]`, which holds at any point of any iteration. What the cap actually
-      # withholds is the per-position body evaluation, so the names it leaves unanswered are the ones neither
-      # binding covers — a mutated block PARAMETER (issue #617 residue (2)'s `|a| a << 1; a`).
+      # widened `Array[Dynamic[top]]`, whose content carries a gradual arm and whose arity is open. What the cap
+      # actually withholds is the per-position body evaluation, so the names it leaves unanswered are the ones
+      # neither binding covers — a mutated block PARAMETER (issue #617 residue (2)'s `|a| a << 1; a`), and a
+      # captured local whose in-place widening declined, which is left out of `captured` for exactly this reason.
       def unanswered_tail_dependency?(block, captured)
         body = block.body
         return false unless body.is_a?(Prism::StatementsNode)
@@ -4230,30 +4231,41 @@ module Rigor
       # contents at every position and folded to `[1, 1]` (runtime `[1, 2]`). Each such local
       # ({CapturedLocals.content_mutations}) is bound as if every mutation site in the body had already stored
       # an unknown value ({UnknownStoreWidening.widen}): `Hash[Dynamic[top] | Symbol, Dynamic[top] |
-      # Integer]`, which holds at any point of any iteration. That binding evaluates no body, so it applies
-      # under threading suppression too; the rebind fixpoint runs over it, and a local the body both rebinds
-      # and mutates takes the same widening over its converged type. An unmutated captured local keeps its
-      # exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to `[0, 0]`).
+      # Integer]`, an open arity with a gradual arm on every content parameter a storing site touches. A local
+      # whose widening declines (a precise nominal) gets no binding at all, so it keeps today's answer. The
+      # binding evaluates no body, so it applies under threading suppression too; the rebind fixpoint runs
+      # over it, and a local the body both rebinds and mutates takes the same widening over its converged
+      # type — the rebind can bring a fresh literal back, which the next iteration then mutates. An unmutated
+      # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
+      # `[0, 0]`).
       #
       # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds and mutates nothing
       # captured.
       def per_element_captured_bindings(block, element_types)
         stores = CapturedLocals.content_mutations(block, scope)
-        bindings = stored_capture_bindings(stores)
+        stored = stored_capture_bindings(stores)
+        bindings = stored.dup
         names = CapturedLocals.writes(block, scope)
         unless names.empty?
-          rebound = rebound_capture_bindings(block, names, element_types, bindings)
-          bindings = bindings.merge(rebound) do |name, _stored, converged|
-            UnknownStoreWidening.widen(converged, stores[name])
+          rebound_capture_bindings(block, names, element_types, stored).each do |name, converged|
+            bindings[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
           end
         end
         bindings.empty? ? nil : bindings
       end
 
+      # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, `Hash#shift` on a
+      # literal) is still the entry binding, which says nothing about later iterations; recording it would
+      # make the arity-cap floor ({#unanswered_tail_dependency?}) treat the name as answered and type the tail
+      # from that stale binding. Left out, the name keeps the entry binding below the cap and the floor above
+      # it, which is the fold's answer without this pass.
       def stored_capture_bindings(stores)
         stores.each_with_object({}) do |(name, sites), bindings|
           seed = scope.local(name)
-          bindings[name] = UnknownStoreWidening.widen(seed, sites) unless seed.nil?
+          next if seed.nil?
+
+          widened = UnknownStoreWidening.widen(seed, sites)
+          bindings[name] = widened unless widened == seed
         end
       end
 
@@ -4301,10 +4313,16 @@ module Rigor
       # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
       # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
       # `Nominal` here would only lose a class for nothing.
+      #
+      # "Unmoved" compares against the fixpoint's own seed, but "pinned" is asked of the CALL-SITE binding. For a
+      # name the body also mutates in place the seed is already the in-place widening of that binding
+      # ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for: `s = +"ab"`
+      # seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot see (`(s &&=
+      # s.to_sym)` inside an expression) converge on `String` and be believed, where the local really holds a
+      # Symbol from the second iteration on.
       def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
-          seed = seeds[name]
-          next [name, type] unless type == seed && value_pinned?(seed)
+          next [name, type] unless type == seeds[name] && value_pinned?(scope.local(name))
 
           [name, Type::Combinator.untyped]
         end

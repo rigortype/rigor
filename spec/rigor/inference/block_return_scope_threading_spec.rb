@@ -545,6 +545,59 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "gives a class-changing site the gradual arm its arguments cannot supply" do
+      # `map!` joins no argument evidence, so the widening alone kept `Array[Integer]` and `r.last.upcase` drew
+      # `undefined method` on a slot that holds `"1"` from the first iteration on.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        a = [1]
+        dump_type([1, 2].map do |e|
+          a.map!(&:to_s)
+          a.first
+        end)
+      RUBY
+    end
+
+    it "lays the widened contents under the rebind fixpoint" do
+      # `[nil, 0, "s"]` at runtime. The fixpoint for `total` reads `h[:a]`, so it must see `h` as the body leaves
+      # it; seeded from the entry `{ a: 0 }` it converged on `0?` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer | nil'] * 3).join(', ')}]")
+        h = { a: 0 }
+        total = nil
+        dump_type([1, 2, 3].map do |i|
+          v = total
+          total = h[:a]
+          h[:a] = "s"
+          v
+        end)
+      RUBY
+    end
+
+    it "widens a local the body both rebinds and mutates over its converged type" do
+      # The rebind brings a fresh `{ a: 0 }` back each iteration and a store the evaluator does not thread (it
+      # sits inside an array literal) rewrites it, so the next iteration reads `{ a: "s" }`. The converged
+      # `{ a: 0 }?` alone would pin that.
+      widened = "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]?"
+      expect(dumped_type(<<~RUBY)).to eq("[#{([widened] * 3).join(', ')}]")
+        h = nil
+        dump_type([1, 2, 3].map do |i|
+          v = h
+          h = { a: 0 }
+          [h[:a] = "s"]
+          v
+        end)
+      RUBY
+    end
+
+    it "keeps the unmoved-pin floor for a local both mutated and rebound inside an expression" do
+      # `["abc", :abc]` at runtime. The nested `s &&= …` is invisible to the fixpoint, which converges on its
+      # seed; the seed is the widened `String`, so the #617 floor has to ask the call-site `"ab"` whether a pin
+      # is at stake, or `String` is believed and `r.last.to_proc` draws `undefined method`.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        s = +"ab"
+        dump_type([1, 2].map { |i| [s, (s << "c" if s.is_a?(String)), (s &&= s.to_sym).size].first })
+      RUBY
+    end
+
     it "keeps an unmutated captured hash read by key exact" do
       expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
         h = { a: 0 }
@@ -811,6 +864,51 @@ RSpec.describe "block-return scope threading", type: :runner do
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             total += e
             total
+          end)
+        RUBY
+      end
+
+      it "floors a captured local whose in-place widening declines" do
+        # `Hash#shift` is no Hash mutator to the widening, so `h` would stay the entry literal. Counting it as
+        # answered typed nine `9`s (runtime `8, 7, …, 0`) and fired always-truthy on `r.last == 9`.
+        source = <<~RUBY
+          h = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9 }
+          r = [1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            h.shift
+            h.size
+          end
+        RUBY
+        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        expect(flow_rules("#{source}puts 'nine' if r.last == 9")).to be_empty
+      end
+
+      it "floors a captured precise nominal the body appends to" do
+        # `Array[String]` is a claim the widening may not grow, so it declines and the name stays unanswered.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          ks = ENV.keys
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            ks << e
+            ks.last
+          end)
+        RUBY
+      end
+
+      it "reads a class-changing site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          a = [1]
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            a.map!(&:to_s)
+            a.first
+          end)
+        RUBY
+      end
+
+      it "reads a merging site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          m = { k: 1 }
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            m.merge!(k: "s")
+            m[:k]
           end)
         RUBY
       end

@@ -20,6 +20,8 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       end
     end
 
+    let(:one_pinned_tuple) { Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1)) }
+
     let(:zero_pinned_hash) do
       Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.constant_of(0) })
     end
@@ -35,15 +37,24 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     end
 
     it "keeps the pins an adder leaves in place and adds the gradual element" do
-      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1))
-      widened = described_class.widen(tuple, sites_of("a = []\n[1].each { |e| a << e }\n"))
+      widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a << e }\n"))
       expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
     end
 
     it "forgets the arity a remover falsifies without inventing an element" do
-      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1))
-      widened = described_class.widen(tuple, sites_of("a = []\n[1].each { |e| a.pop }\n"))
+      widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.pop }\n"))
       expect(widened.describe).to eq("Array[1]")
+    end
+
+    it "gives a site whose arguments describe no stored value the gradual arm" do
+      # The widening joins nothing for `map!`, so without the arm the class the block rewrites to is missing.
+      widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
+      expect(widened.describe).to eq("Array[Dynamic[top] | Integer]")
+    end
+
+    it "leaves the binding unchanged when the carrier's table does not list the mutator" do
+      widened = described_class.widen(zero_pinned_hash, sites_of("h = {}\n[1].each { |k| h.shift }\n"))
+      expect(widened).to eq(zero_pinned_hash)
     end
 
     it "leaves a binding no site's widening applies to unchanged" do

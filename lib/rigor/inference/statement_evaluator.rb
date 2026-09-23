@@ -2645,8 +2645,8 @@ module Rigor
       #
       # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
       # way — `@n = 0; [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set,
-      # seeded from their pre-call binding. See {#settle_locals_beside_ivars} for how the locals of a block that
-      # rebinds both kinds are answered.
+      # seeded from their pre-call binding. See {#converge_captures_by_kind} for how a block that rebinds both kinds is
+      # answered.
       #
       # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
       # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
@@ -2658,7 +2658,7 @@ module Rigor
         names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        result = settle_locals_beside_ivars(call_node, block, names, converge_block_captures(call_node, block, names))
+        result = converge_captures_by_kind(call_node, block, names)
         result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
       end
 
@@ -2672,34 +2672,42 @@ module Rigor
         )
       end
 
-      # The locals of a block that rebinds locals AND ivars. `joint` is one fixpoint over both kinds, which the ivars
-      # need: an ivar the body computes from a rebound local (`@last = count`) must see the local move. It is the
-      # wrong answer for most locals, though. The fixpoint widens every name on its final pass once any name still
-      # moves, so an ivar counter beside `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol`, and `take(mode)`
-      # against `(:a | :b) -> void` fired on code the locals-only fixpoint accepts.
+      # The continuation of a block's rebound names. One {BodyFixpoint} over locals and ivars together is the wrong
+      # answer for most of them: its final pass widens every name while any name still moves, so an ivar counter beside
+      # `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol` — and a local counter beside `@mode = :b` did the
+      # same to `@mode` — and `take(mode)` against `(:a | :b) -> void` fired on code each kind's own fixpoint accepts.
       #
-      # So each local starts from the locals-only fixpoint — the answer it gets in a block that rebinds no ivar — and
-      # keeps it unless one more pass, under the ivars' joint answers, moves it out: a local the body reads off a
-      # rebound ivar (`last = @n; @n += 1`), which the locals-only fixpoint pins to the ivar's pre-call value. Such a
-      # local takes its joint answer, and the check repeats, because a local read off THAT one (`first = last`) may
-      # move in turn. Every round moves a local to its joint answer or stops, so it ends within one pass per local.
-      def settle_locals_beside_ivars(call_node, block, names, joint)
-        locals = names.reject { |name| CapturedLocals.ivar_name?(name) }
-        return joint if locals.empty? || locals.size == names.size
+      # So each kind converges on its own first, with the other at its pre-call binding; for a block that rebinds one
+      # kind that is the only fixpoint, and for the locals it is exactly the one a block rebinding no ivar has always
+      # had. A name converged that way is wrong when it reads the other kind (`last = @n; @n += 1`, `@last = count`),
+      # so one more pass under the settled bindings checks every name, and one whose exit leaves its settled binding
+      # takes its answer from a joint fixpoint over both kinds, computed only then. The check repeats, because a name
+      # read off a moved one (`first = last`) may move in turn; every round moves a name to its joint answer or stops.
+      #
+      # The body's last evaluation is therefore a pass under the settled bindings, so the scopes recorded inside the
+      # block read those rather than a pass that pinned one kind to its pre-call value.
+      def converge_captures_by_kind(call_node, block, names)
+        kinds = names.partition { |name| !CapturedLocals.ivar_name?(name) }
+        return converge_block_captures(call_node, block, names) if kinds.any?(&:empty?)
 
-        settled = joint.merge(converge_block_captures(call_node, block, locals))
-        return settled if settled == joint
-
+        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind) }.reduce(:merge)
+        joint = nil
         loop do
-          exits = block_exit_bindings(call_node, block, settled, joint.keys)
-          moved = locals.select do |name|
-            exit_type = exits[name]
-            !exit_type.nil? && settled[name] != joint[name] &&
-              Type::Combinator.union(settled[name], exit_type) != settled[name]
-          end
+          moved = escaped_captures(settled, block_exit_bindings(call_node, block, settled, names), joint)
           return settled if moved.empty?
 
+          joint ||= converge_block_captures(call_node, block, names)
           moved.each { |name| settled[name] = joint[name] }
+        end
+      end
+
+      # The names whose `exits` leave their `settled` binding, less those already on their `joint` answer.
+      def escaped_captures(settled, exits, joint)
+        settled.keys.select do |name|
+          exit_type = exits[name]
+          next false if exit_type.nil? || (joint && settled[name] == joint[name])
+
+          Type::Combinator.union(settled[name], exit_type) != settled[name]
         end
       end
 

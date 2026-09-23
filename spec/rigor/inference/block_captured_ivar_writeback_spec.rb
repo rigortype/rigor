@@ -219,6 +219,70 @@ RSpec.describe "instance variables a block rebinds, in the call's continuation (
       RUBY
     end
 
+    it "answers an ivar beside a rebound local exactly as it would without the local" do
+      expect_types(<<~RUBY)
+        class BesideLocal
+          def with_local
+            @mode = :a
+            k = 0
+            [1, 2].each do
+              @mode = :b
+              k += 1
+            end
+            assert_type(":a | :b", @mode)
+          end
+
+          def without_local
+            @mode = :a
+            [1, 2].each { @mode = :b }
+            assert_type(":a | :b", @mode)
+          end
+        end
+      RUBY
+    end
+
+    it "widens an ivar the body computes from a rebound local" do
+      expect_types(<<~RUBY)
+        class FromLocal
+          def run
+            count = 0
+            @last = 0
+            [1, 2].each do
+              count += 1
+              @last = count
+            end
+            assert_type("Integer", @last)
+          end
+        end
+      RUBY
+    end
+
+    it "records the body under the settled bindings, with or without a rebound local beside the ivar" do
+      # The body's last evaluation is what the per-node scopes inside it keep; a pass that pinned the ivar to
+      # its pre-call `0` would make the in-body read `0`.
+      expect_types(<<~RUBY)
+        class InBody
+          def ivar_only
+            @n = 0
+            [1, 2].each do
+              assert_type("0 | Integer", @n)
+              @n += 1
+            end
+          end
+
+          def ivar_and_local
+            @n = 0
+            count = 0
+            [1, 2].each do
+              assert_type("0 | Integer", @n)
+              @n += 1
+              count += 1
+            end
+          end
+        end
+      RUBY
+    end
+
     it "keeps the exact binding of an ivar the block does not rebind" do
       expect_types(<<~RUBY)
         class Untouched

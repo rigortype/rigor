@@ -4110,7 +4110,9 @@ module Rigor
             rebound << node.name if VARIABLE_WRITE_NODES.include?(node.class)
             next unless in_place_mutation?(node)
 
-            ReceiverAlias.candidates(node.receiver).each { |read| (sites[read.name] ||= []) << node }
+            ReceiverAlias.mutated_reads(node.receiver).each do |read|
+              (sites[ReceiverAlias.read_name(read)] ||= []) << node
+            end
           end
         end
         [rebound, sites]
@@ -4244,10 +4246,11 @@ module Rigor
       private_constant :VARIABLE_WRITE_NODES
 
       # Every node that OBSERVES a variable binding: the plain reads plus the compound writes, which read
-      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`).
+      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`). An `it` read
+      # observes the local `:it` ({ReceiverAlias.read_name}); it has no `name` of its own.
       VARIABLE_READ_NODES = (
         VARIABLE_WRITE_NODES | [
-          Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode,
+          Prism::LocalVariableReadNode, Prism::ItLocalVariableReadNode, Prism::InstanceVariableReadNode,
           Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
         ]
       ).freeze
@@ -4291,12 +4294,13 @@ module Rigor
       # hands downstream rules a provably-empty array. Threading is the fix, not a cost: `StatementEvaluator`
       # runs `MutationWidening.widen_after_call` on the `push`, so the threaded tail reads the widened
       # `Array[…]`. A call therefore contributes every variable its receiver can evaluate to
-      # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
-      # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
-      # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
-      # The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call, so a name-keyed
-      # scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their receiver the
-      # same way.
+      # ({ReceiverAlias.mutated_reads} — the ternary-selected receiver of issue #277 included) whenever its
+      # name is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
+      # tables and receiver answer is what keeps "the scan says thread" and "threading changes something" the
+      # same predicate. The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call,
+      # so a name-keyed scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their
+      # receiver the same way. A scan that read only local and instance-variable receivers missed `$g << w; $g`
+      # and `it << w; it` the same way, while the tail kept the entry `"k"` / `[]`.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
@@ -4309,7 +4313,7 @@ module Rigor
         return false if written.nil?
 
         Source::NodeWalker.each(statements.last) do |node|
-          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(ReceiverAlias.read_name(node))
         end
         false
       end
@@ -4324,7 +4328,10 @@ module Rigor
         return EMPTY_NAME_SET if written.nil?
 
         Source::NodeWalker.each(statements.last).filter_map do |node|
-          node.name if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+          next unless VARIABLE_READ_NODES.include?(node.class)
+
+          name = ReceiverAlias.read_name(node)
+          name if written.include?(name)
         end.to_set
       end
 
@@ -4378,8 +4385,11 @@ module Rigor
         INDEX_WRITE_NODES.include?(node.class)
       end
 
+      # The receiver's variables are {ReceiverAlias.mutated_reads}' — the answer the straight-line widening the
+      # threaded body runs reads too — so a global or class variable counts (`$g << w; $g`) as well as a local, an
+      # instance variable and the `it` parameter.
       def collect_mutated_receivers(node, written)
-        ReceiverAlias.candidates(node.receiver).each { |read| written << read.name }
+        ReceiverAlias.mutated_reads(node.receiver).each { |read| written << ReceiverAlias.read_name(read) }
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every

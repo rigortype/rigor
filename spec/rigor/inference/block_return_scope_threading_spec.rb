@@ -434,6 +434,107 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    # The receiver scan collected only local and instance-variable reads, so a global or class variable the prefix
+    # mutated in place did not make the body thread, and the tail kept the entry binding. The straight-line
+    # widening the threaded body runs had the same blind spot, so threading alone would not have moved it either.
+    it "threads through an append to a global" do
+      # THE REPORTED PROBE. Runtime `r` is `"k1"`; `r == "k"` folded to always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        $g = +"k"
+        m = Mutex.new
+        v = 1
+        r = m.synchronize { $g << v.to_s; $g }
+        puts "same" if r == "k"
+      RUBY
+    end
+
+    it "still reports the condition when the append lands on another global" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        $g = +"k"
+        $h = +"k"
+        m = Mutex.new
+        v = 1
+        r = m.synchronize { $h << v.to_s; $g }
+        puts "same" if r == "k"
+      RUBY
+    end
+
+    it "threads through an append to a class variable" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        class Buf
+          def run(v)
+            @@out = +"k"
+            m = Mutex.new
+            r = m.synchronize { @@out << v.to_s; @@out }
+            puts "same" if r == "k"
+          end
+        end
+      RUBY
+    end
+
+    it "still reports the condition when the append lands on another class variable" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        class Buf
+          def run(v)
+            @@out = +"k"
+            @@log = +"k"
+            m = Mutex.new
+            r = m.synchronize { @@log << v.to_s; @@out }
+            puts "same" if r == "k"
+          end
+        end
+      RUBY
+    end
+
+    it "threads through a compound index write on a global" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        $h = { a: 0 }
+        m = Mutex.new
+        v = m.synchronize do
+          $h[:a] += 1
+          $h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "still reports the condition when the index write lands on another global" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        $g = { a: 0 }
+        $h = { a: 0 }
+        m = Mutex.new
+        v = m.synchronize do
+          $g[:a] += 1
+          $h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    # `it` reads are `Prism::ItLocalVariableReadNode`, which carries no `name`: neither the tail's read set nor the
+    # receiver scan saw it, and the straight-line widening skipped it as a receiver, so the body typed from its
+    # entry element while the `|a|` spelling above widened.
+    it "threads a mutated `it` parameter at every per-element position" do
+      # Runtime `[[1], [1]]`; the fold answered `[[], []]`.
+      type = dumped_type(<<~RUBY)
+        dump_type([[], []].map do
+          it << 1
+          it
+        end)
+      RUBY
+      expect(type).to match(/\A\[Array\[.*\], Array\[.*\]\]\z/)
+    end
+
+    it "leaves a tail that ignores the mutated `it` parameter unchanged" do
+      expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+        b = []
+        dump_type([[], []].map do
+          it << 1
+          b
+        end)
+      RUBY
+    end
+
     it "joins a value-carrying `next` ahead of the mutation with the widened tail" do
       # The two mechanisms compose. Before issue #841 the jump made the fold decline and the tail kept the
       # entry literal `[]` — no better than the runtime value (`[1]` or `5`). The join runs the same threaded
@@ -2453,6 +2554,100 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "widens a global the body appends to" do
+        # Runtime `"k1"`; the pass read `$g` at its entry `"k"`, since the receiver scan did not collect a global.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          $g = +"k"
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              $g << w.to_s
+              $g
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports the condition the stale global folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          $g = +"k"
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            m.synchronize do
+              $g << w.to_s
+              $g
+            end
+          end
+          puts "same" if r == "k"
+        RUBY
+      end
+
+      it "still reports the condition when the tail reads a global the body does not touch" do
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          $g = +"k"
+          $h = +"k"
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            m.synchronize do
+              $h << w.to_s
+              $g
+            end
+          end
+          puts "same" if r == "k"
+        RUBY
+      end
+
+      it "widens a class variable the body appends to" do
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          class Buf
+            def run(v)
+              @@out = +"k"
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @@out << w.to_s
+                  @@out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "floors an `it` parameter the body mutated in place under a Tuple map, as it floors `|a|`" do
+        # Runtime `[[1], [1]]`; the fold read `it` at its entry `[]` and answered `[[], []]`.
+        expected = "[Dynamic[top], Dynamic[top]]"
+        expect(dumped_type(<<~RUBY)).to eq(expected)
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              it << w
+              it
+            end
+          end)
+        RUBY
+        expect(dumped_type(<<~RUBY)).to eq(expected)
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
       it "keeps a nominal String pre-state the append cannot move" do
         # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
         expect(dumped_type(<<~RUBY)).to eq("String")
@@ -2642,6 +2837,41 @@ RSpec.describe "block-return scope threading", type: :runner do
       it "leaves a non-mutating sibling call pinned" do
         # `upcase` returns a new String; only the bang form rewrites the receiver.
         expect(dumped_type("s = +\"ab\"\ns.upcase\ndump_type(s)")).to eq("\"ab\"")
+      end
+
+      # The block-return threading above only helps a global or class variable once the straight-line widening the
+      # threaded body runs names one as well; with only the local and ivar rows it kept the literal here too.
+      it "stops the always-truthy firing on a mutated global" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          $s = +"ab"
+          $s << "c"
+          puts "x" if $s == "ab"
+        RUBY
+      end
+
+      it "still reports the condition on an unmutated global" do
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          $s = +"ab"
+          $t = +"ab"
+          $t << "c"
+          puts "x" if $s == "ab"
+        RUBY
+      end
+
+      it "stops the always-truthy firing on a mutated class variable" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          class Buf
+            def run
+              @@s = +"ab"
+              @@s << "c"
+              puts "x" if @@s == "ab"
+            end
+          end
+        RUBY
+      end
+
+      it "widens a mutated `it` parameter" do
+        expect(dumped_type("[+\"ab\"].each do\n  it << \"c\"\n  dump_type(it)\nend")).to eq("String")
       end
     end
   end

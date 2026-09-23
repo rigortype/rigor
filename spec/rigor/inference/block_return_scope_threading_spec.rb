@@ -1914,6 +1914,254 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
+    # The same suppression reaches every block-bearing call that is not one of the two folds above: the dispatcher's
+    # generic block-return pass types it tail-only too. Its answer is the per-name one the folds give a captured
+    # local — a name the prefix rebinds reads `Dynamic[top]`, one it only mutates in place reads its in-place
+    # widening — extended to the names nothing re-answers here: a block parameter, and any capture of a block the
+    # call runs once, which lays no captured binding at all. A name whose widening declines keeps its entry
+    # binding, because threading would have kept it too.
+    describe "(2), nested: the generic block-return pass under the same suppression" do
+      it "widens a parameter the body mutated in place under a HashShape map" do
+        # Runtime `[[1], [1]]`; the pass read `a` at its entry `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Array[Dynamic[top]]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.map do |_k, a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale parameter" do
+        # THE HAZARD: `a.first` read `[].first`, a provable nil, and `+` was reported on correct code.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.map do |_k, a|
+              a << w
+              a
+            end
+          end
+          r.each { |a| a.first + 1 }
+        RUBY
+      end
+
+      it "floors a parameter the body rebinds under a nominal map" do
+        # Runtime `Array[String]`; the pass read `e` at its entry `Integer`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              e = e.to_s + w.to_s
+              e
+            end
+          end)
+        RUBY
+      end
+
+      it "floors the rebound name only, keeping the structure around it" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[[Dynamic[top], 1]]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              e = e.to_s
+              [e, w]
+            end
+          end)
+        RUBY
+      end
+
+      it "floors a captured local a block the call runs once rebinds" do
+        # Runtime `1`. `synchronize` runs its block once, so the pass lays no captured binding and read `i` as `0`.
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          m = Mutex.new
+          v = 1
+          i = 0
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              i
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports the condition the stale counter folded" do
+        # THE HAZARD: `k == 0` folded to `true`, and the rule fired on a condition Ruby answers `false`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          i = 0
+          k = m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              i
+            end
+          end
+          puts "zero" if k == 0
+        RUBY
+      end
+
+      it "floors an instance variable a block the call runs once rebinds" do
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          class Counter
+            def run
+              m = Mutex.new
+              v = 1
+              @n = 0
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @n += w
+                  @n
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "keeps an instance variable on its class-wide seed, which already holds the prefix's write" do
+        # `@mode` enters on `:fast | :slow`, the union of every write in the class, so the tail is not stale.
+        expect(dumped_type(<<~RUBY)).to eq("[:fast | :slow, 1]")
+          class Mode
+            def initialize
+              @mode = :fast
+            end
+
+            def run
+              m = Mutex.new
+              v = 1
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @mode = :slow
+                  [@mode, w]
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "widens a captured String literal the body appends to" do
+        # Runtime `"k1"`; the pass read `buf` at its entry `"k"`.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          m = Mutex.new
+          v = 1
+          buf = +"k"
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              buf << w.to_s
+              buf
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a nominal String pre-state the append cannot move" do
+        # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          m = Mutex.new
+          v = 1
+          s = String.new
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              s << w.to_s
+              s
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a precise nominal Array whose widening declines" do
+        # `Array[String]` is a claim the widening may not grow, so the threaded body keeps it as well.
+        expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+          m = Mutex.new
+          v = 1
+          ks = ENV.keys
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              ks << w.to_s
+              ks
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a tail that ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[5]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              q = e + w
+              5
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a single-statement body exact" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map { |e| e + w }
+          end)
+        RUBY
+      end
+
+      it "still reports the condition when the tail ignores the counter it rebinds" do
+        # The must-fire sibling: the tail reads a fresh `0`, so `k == 0` really is always true.
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          m = Mutex.new
+          v = 1
+          i = 0
+          k = m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              0
+            end
+          end
+          puts "zero" if k == 0
+        RUBY
+      end
+
+      it "threads the same body when nothing suppresses it" do
+        # No enclosing threaded body, so the pass evaluates the prefix and reads what it stored.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Array[Dynamic[top] | Integer]]")
+          v = 1
+          dump_type({ x: [], y: [] }.map do |_k, a|
+            a << v
+            a
+          end)
+        RUBY
+      end
+    end
+
     describe "(3) a compound write as the block's tail" do
       it "types the map result as the counter's converged type" do
         # Runtime `[1, 2]`. The pin answered `[1, 1]` because the expression typer read a compound write as

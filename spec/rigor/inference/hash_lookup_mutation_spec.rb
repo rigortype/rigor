@@ -263,11 +263,16 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
     end
 
     it "drops a recorded read of the receiver when it is given a default" do
-      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top] | Integer", "1"])
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top] | Integer", "Dynamic[top] | Integer", "1"])
         s = {}
         s[:k] ||= 1
         s.default = 0
         dump_type(s[:k])
+
+        c = {}
+        c[:k] ||= 1
+        c.default ||= 0
+        dump_type(c[:k])
 
         t = {}
         t[:k] ||= 1
@@ -386,9 +391,10 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
     end
   end
 
-  # ADR-56 slice C: the content a block stores into a captured collection, or into an `each_with_object` memo, is
-  # joined onto a seed read before the block's mutations widened it. The seed must still see the default.
-  describe "the block content join" do
+  # ADR-56 slice C: the content a block stores into a captured collection, into an `each_with_object` memo, or a
+  # `while` / `until` body into a local, is joined onto a seed read before the body's mutations widened it. The seed
+  # must still see the default.
+  describe "the content joins" do
     it "reopens the seed of a captured hash the block both gives a default and stores into" do
       expect(rules(<<~RUBY)).to be_empty
         b = { a: 1 }
@@ -399,6 +405,46 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
         c = { a: 1 }
         [1].each { c[:c] = 2 }
         puts "zero" if c[:zz] == 0
+      RUBY
+    end
+
+    it "reopens the seed of a hash an `until` body both gives a default and stores into" do
+      expect(rules(<<~RUBY)).to be_empty
+        def defaulted(i)
+          u = { a: 1 }
+          until i.zero?
+            u.default = 0
+            u[:c] = 2
+            i -= 1
+          end
+          puts "zero" if u[:zz] == 0
+        end
+      RUBY
+    end
+
+    it "reopens the seed of a hash a `while` body both gives a default and stores into" do
+      expect(rules(<<~RUBY)).to be_empty
+        def defaulted
+          h = { a: 1 }
+          i = 0
+          while i < 2
+            h.default = 0
+            h[:c] = 2
+            i += 1
+          end
+          puts "zero" if h[:zz] == 0
+        end
+      RUBY
+      expect(rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        def plain
+          h = { a: 1 }
+          i = 0
+          while i < 2
+            h[:c] = 2
+            i += 1
+          end
+          puts "zero" if h[:zz] == 0
+        end
       RUBY
     end
 

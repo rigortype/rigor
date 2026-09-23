@@ -937,8 +937,17 @@ module Rigor
       # responds to widens the receiver as the plain call does: `h.default ||= 0` reopens `h` as `h.default = 0`
       # does ({HashLookupMutation}). The node's value is typed as before; the widening is its only scope effect.
       def eval_attribute_compound_write(node)
-        widened = MutationWidening.widen_receiver_aliases(node.receiver, node.write_name, scope)
-        [scope.type_of(node, tracer: tracer), widened]
+        [scope.type_of(node, tracer: tracer), widen_attribute_write(node.receiver, node.write_name, scope)]
+      end
+
+      # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
+      # the receiver-wide drop of recorded `receiver[key]` narrowings `IndexedNarrowing` makes after a mutator call.
+      def widen_attribute_write(receiver, writer, current_scope)
+        widened = MutationWidening.widen_receiver_aliases(receiver, writer, current_scope)
+        stable = IndexedNarrowing.stable_receiver(receiver)
+        return widened unless stable && IndexedNarrowing.mutator?(writer)
+
+        widened.without_indexed_narrowings_for(*stable)
       end
 
       # The attribute targets of a multi-write (`h.default, x = 0, 1`), nested ones included, each widening its
@@ -948,7 +957,7 @@ module Rigor
         targets.reduce(post) do |acc, target|
           target = target.expression if target.is_a?(Prism::SplatNode)
           case target
-          when Prism::CallTargetNode then MutationWidening.widen_receiver_aliases(target.receiver, target.name, acc)
+          when Prism::CallTargetNode then widen_attribute_write(target.receiver, target.name, acc)
           when Prism::MultiTargetNode then widen_attribute_targets(target, acc)
           else acc
           end
@@ -1732,7 +1741,9 @@ module Rigor
         return post_loop if mutations.empty?
 
         mutations.reduce(post_loop) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, content_seed_scope(name, acc, pre_body, rebound), post_loop)
+          seed = content_seed_scope(name, acc, pre_body, rebound).local(name)
+          seed = lookup_mutated_seed(statements, name, seed) { |depth, nesting| depth == nesting }
+          joined = join_content_for_param(calls, seed, post_loop)
           joined.nil? ? acc : acc.with_local(name, joined)
         end
       end
@@ -3699,11 +3710,13 @@ module Rigor
       # `seed` as the {HashLookupMutation} calls `body` makes on `name` leave it. They add no content, so the join
       # never sees them as sites, and a seed read before `widen_after_block` is still the closed shape whose known
       # values answer every missing key: `b = { a: 1 }; [1].each { b.default = 0; b[:c] = 2 }` read `b[:zz]` as
-      # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores. The block receives a
-      # read's `depth` and its enclosing scope count, and says whether the read is the variable `seed` describes.
+      # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores, and a `while` body. The
+      # block receives a read's `depth` and its enclosing block count, and says whether the read is the variable
+      # `seed` describes. A `def` opens a scope of its own, so nothing under one is.
       def lookup_mutated_seed(body, name, seed)
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
           next unless node.is_a?(Prism::CallNode) && HashLookupMutation::MUTATORS.include?(node.name)
+          next if ancestors.any?(Prism::DefNode)
 
           receiver = node.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
@@ -3875,13 +3888,6 @@ module Rigor
         return NO_CONTENT_MUTATION unless yield(receiver)
 
         [receiver.name, node]
-      end
-
-      # Computes the joined continuation collection type for one captured local from its content-mutator calls. Returns
-      # `nil` (no overlay) when the pre-state is neither an Array-ish nor a Hash-ish binding — e.g. a String
-      # accumulator, whose `<<` carries no element parameter and whose binding already types as `String`.
-      def join_content_for_local(name, calls, post_scope, block_entry)
-        join_content_for_param(calls, post_scope.local(name), block_entry)
       end
 
       def index_write?(node)

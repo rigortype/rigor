@@ -19,9 +19,11 @@ module Rigor
       # seed held there is known to survive, so the position becomes `Dynamic[top]` outright. Keeping the seed beside
       # the gradual arm would leave a closed claim about values that are gone — `a = [1, 2]; a.map!(&:to_s)` read
       # `Array[1 | 2 | Dynamic[top]]`, which a hand-written `-> Array[String]` rejects on correct code, and the kept
-      # `1` gated a later `a << "x"` out of the re-join as foreign evidence.
+      # `1` gated a later `a << "x"` out of the re-join as foreign evidence. `Array#replace` is listed although its
+      # argument IS its new content: {MutationWidening#join_added_elements} still joins that evidence after the
+      # replacement, and the seed it would otherwise keep beside it is gone.
       REPLACED = {
-        "Array" => { map!: [0], collect!: [0], flatten!: [0] }.freeze,
+        "Array" => { map!: [0], collect!: [0], flatten!: [0], replace: [0] }.freeze,
         "Hash" => { transform_keys!: [0], transform_values!: [1], replace: [0, 1] }.freeze
       }.freeze
 

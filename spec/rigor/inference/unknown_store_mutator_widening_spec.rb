@@ -275,6 +275,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
 
     it "accepts a literal a class-changing rewrite turned into the declared element" do
       expect(return_rules("a = [1, 2]\na.map!(&:to_s)\na\n", "Array[String]")).to be_empty
+      expect(return_rules("a = [1, 2]\na.replace([\"x\"])\na\n", "Array[String]")).to be_empty
       expect(return_rules("h = { a: 1 }\nh.transform_values!(&:to_s)\nh\n", "Hash[Symbol, String]")).to be_empty
       expect(return_rules("h = { a: 1 }\nh.transform_keys!(&:to_s)\nh\n", "Hash[String, Integer]")).to be_empty
     end

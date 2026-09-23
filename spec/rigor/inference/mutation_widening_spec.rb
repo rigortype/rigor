@@ -613,6 +613,29 @@ RSpec.describe Rigor::Inference::MutationWidening do
 
       expect(described_class.widen_after_call(call_node: call, current_scope: seeded)).to equal(seeded)
     end
+
+    # A global or class variable is a binding the scope tracks as well. With only the local and ivar rows the
+    # widening skipped them, and `$g << x; $g == "k"` folded always-truthy on a `$g` Ruby holds as `"kx"`.
+    it "widens a global receiver and a class-variable receiver bound to a Tuple under `<<`" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+
+      global = described_class.widen_after_call(call_node: parse_call("$tags << x"),
+                                                current_scope: scope.with_global(:$tags, tuple))
+      expect(global.global(:$tags).class_name).to eq("Array")
+
+      cvar = described_class.widen_after_call(call_node: parse_call("@@tags << x"),
+                                              current_scope: scope.with_cvar(:@@tags, tuple))
+      expect(cvar.cvar(:@@tags).class_name).to eq("Array")
+    end
+
+    # Prism reads the Ruby 3.4 `it` parameter through a node with no `name`; it is the local `:it`.
+    it "widens the `it` parameter bound to a Tuple under `<<`" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+      call = Prism.parse("items.each { it << x }").value.statements.body.first.block.body.body.first
+      result = described_class.widen_after_call(call_node: call, current_scope: scope.with_local(:it, tuple))
+
+      expect(result.local(:it).class_name).to eq("Array")
+    end
   end
 
   describe ".widen_after_block" do
@@ -663,6 +686,19 @@ RSpec.describe Rigor::Inference::MutationWidening do
       seeded = Rigor::Scope.empty.with_local(:arr, tuple)
       result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
       expect(result.local(:arr)).to equal(tuple)
+    end
+
+    it "is a no-op when the receiver is the block's `it` parameter" do
+      # `it` is always the parameter of the innermost block around it, never a capture, so an `it` binding in the
+      # outer scope (an enclosing block's own parameter) MUST NOT widen.
+      call = parse_each_call(<<~RUBY)
+        items.each do
+          it << 1
+        end
+      RUBY
+      seeded = Rigor::Scope.empty.with_local(:it, tuple)
+      result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
+      expect(result.local(:it)).to equal(tuple)
     end
 
     it "widens an outer-scope ivar mutated by `<<` inside a block body" do

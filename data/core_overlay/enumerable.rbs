@@ -1,0 +1,51 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Enumerable#detect with an ifnone argument ---
+#
+# CRuby binds `detect` and `find` to one C function (`enum.c`:
+# `rb_define_method(rb_mEnumerable, "detect", enum_find, -1)`), so
+# `detect(ifnone)` answers `ifnone.call` when no element matches, exactly as
+# `find(ifnone)` does. Upstream `ruby/rbs` declares the two apart, and only
+# `find` carries the fallback arm:
+#
+#   def find: () { (Elem) -> boolish } -> Elem?
+#           | () -> ::Enumerator[Elem, Elem?]
+#           | [T] (_NotFound[T] ifnone) { (Elem) -> boolish } -> (Elem | T)
+#           | [T] (_NotFound[T] ifnone) -> ::Enumerator[Elem, Elem | T]
+#   def detect: (?Proc ifnone) { (Elem) -> boolish } -> Elem?
+#             | (?Proc ifnone) -> ::Enumerator[Elem, Elem?]
+#
+# so `r = { a: 1 }.detect(-> { 0 }) { |k, v| v > 5 }` typed `[:a, 1]?`
+# although it is `0` at runtime, and `r + 1` reported
+# `call.possible-nil-receiver` on correct code. No core or stdlib class
+# declares a `detect` of its own except `Array`, which rbs 4.1 and later
+# alias to `Array#find`; `Hash`, `Range`, `Set`, `Struct`, `Enumerator`,
+# `Enumerator::Lazy` (whose lazy method table leaves `detect` eager), `IO`,
+# `Dir`, `ENV` and every other includer inherit this one, as does `Array`
+# before rbs 4.1.
+#
+# Upstream's `?Proc` parameter also rejected a valid fallback that is not a
+# `Proc` — `nil` (no fallback) or any object answering `call` — with
+# `call.argument-type-mismatch`. Such an argument reaches the `_NotFound[T]`
+# arms below, so `detect` checks its argument as `find` does.
+#
+# The overloads below are prepended to upstream's through `| ...` (rbs
+# unshifts a continuation's overloads, so they are tried first). The last two
+# are `find`'s ifnone arms. The first two restate them for a `Proc` argument:
+# `OverloadSelector`'s strict pass skips an interface-typed parameter such as
+# `_NotFound[T]`, so without them upstream's strictly typed `(?Proc ifnone)`
+# arm would win a lambda and answer `Elem?` again. A block-only
+# `detect { ... }` passes no argument, skips all four on arity, and keeps
+# upstream's `Elem?`.
+#
+# The continuation's base is in rbs core on every supported release, so the
+# file loads unconditionally. Once an upstream release aligns `detect` with
+# `find`, gate this file off that release through
+# `RbsLoader::RBS_LINE_CORE_OVERLAYS`, as `hash_rbs3.rbs` is.
+module Enumerable[unchecked out Elem]
+  def detect: [T] (^() -> T ifnone) { (Elem) -> boolish } -> (Elem | T)
+            | [T] (^() -> T ifnone) -> ::Enumerator[Elem, Elem | T]
+            | [T] (_NotFound[T] ifnone) { (Elem) -> boolish } -> (Elem | T)
+            | [T] (_NotFound[T] ifnone) -> ::Enumerator[Elem, Elem | T]
+            | ...
+end

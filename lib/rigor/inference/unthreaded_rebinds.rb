@@ -42,13 +42,14 @@ module Rigor
     #
     # A threaded rebind can still miss the exit binding when a jump leaves after it. The fold's pass and a
     # nested block's write-back join every block-level `next` (and the write-back every `break`) into the exit
-    # ({StatementEvaluator#evaluate_invocation}), but a `while` / `until` / `for` loop's continuation joins none
-    # of its `next` paths, and its `break` paths only for a local and not in every shape — the rebind such a
-    # branch made and the narrowing its guard applied drop out — and `redo` / `retry` re-enter code with
-    # bindings no join sees. A rebind that textually precedes such a jump is therefore unthreaded too; the body runs
-    # forward-only, so a rebind after every jump cannot be on a jump's path, and a jump that is its construct's
-    # final statement leaves with the exit scope itself. A rebind in an `ensure` runs after any jump in its
-    # `begin`, so under any such jump it counts as preceding one.
+    # ({StatementEvaluator#evaluate_invocation}), but a `while` / `until` / `for` loop's continuation joins its
+    # `next` and `break` paths only in part ({StatementEvaluator#loop_iteration}): a `for` body runs one pass,
+    # and a name outside the `while` / `until` rebind fixpoint (an instance variable) sees the first pass's
+    # `next` exits and no `break` — so the rebind such a branch made can still drop out — and `redo` / `retry`
+    # re-enter code with bindings no join sees. A rebind that textually precedes such a jump is therefore
+    # unthreaded too; the body runs forward-only, so a rebind after every jump cannot be on a jump's path, and
+    # a jump that is its construct's final statement leaves with the exit scope itself. A rebind in an `ensure`
+    # runs after any jump in its `begin`, so under any such jump it counts as preceding one.
     module UnthreadedRebinds
       VARIABLE_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
       private_constant :VARIABLE_WRITE_NODES
@@ -101,7 +102,7 @@ module Rigor
       # The jumps whose path the exit binding misses, per construct. A block's `next` and `break` are joined
       # ({StatementEvaluator#evaluate_invocation}, the write-back), and a `break` out of the fold's own call ends
       # it, so no later iteration reads what it carried; `redo` and `retry` are joined nowhere. A loop joins
-      # none of its `next` paths and not every `break` path, so both count.
+      # its `next` and `break` paths only in part, so both still count.
       BLOCK_JUMPS = Set[Prism::RedoNode, Prism::RetryNode].freeze
       LOOP_JUMPS = (BLOCK_JUMPS | [Prism::NextNode, Prism::BreakNode]).freeze
       private_constant :BLOCK_JUMPS, :LOOP_JUMPS

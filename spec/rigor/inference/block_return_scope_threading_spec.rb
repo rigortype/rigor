@@ -878,6 +878,279 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The in-place scan above names a mutated local only when the mutation site's RECEIVER reads it. Straight-line
+  # code also widens a local whose content changes by two other routes, and every position of a fold read that
+  # local at its entry contents: a mutator on an element read (`a[0] << e`, `ElementReadWidening`), and a
+  # self-call whose callee content-mutates the matching parameter (`add_to(a, e)`, ADR-57's callee floor).
+  describe "captured contents the body mutates through a slot or a callee under the per-element fold" do
+    let(:add_to) do
+      <<~RUBY
+        def add_to(arr, x)
+          arr << x
+        end
+      RUBY
+    end
+
+    it "widens a captured tuple whose element the body mutates" do
+      # `[1, 2]` at runtime. `a[0]` names no variable, so the scan missed it and both positions read `a[0]` as
+      # the entry `[1]`: `[1, 1]`.
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        a = [[1]]
+        dump_type([1, 2].map do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the entry element folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        a = [[1]]
+        r = [1, 2].map do |e|
+          v = a.first.size
+          a.first << e
+          v
+        end
+        puts "x" if r.last == 1
+      RUBY
+    end
+
+    it "keeps the sibling slots of a captured tuple exact" do
+      # The widening runs through the path the read names, as the straight-line one does: only `a[0]` moves.
+      expect(dumped_type(<<~RUBY)).to eq("[2, 2]")
+        a = [[1], [2]]
+        dump_type([1, 2].map do |e|
+          v = a[1].first
+          a[0] << e
+          v
+        end)
+      RUBY
+    end
+
+    it "leaves a find over an element the body fills undecided" do
+      # `2` at runtime. Both predicates read the entry `[]`, so each was provably false and `find` folded to `nil`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        a = [[]]
+        dump_type([1, 2].find do |e|
+          a[0] << e
+          a[0].size == 2
+        end)
+      RUBY
+    end
+
+    it "keeps a captured tuple exact when the body only reads its element" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [[1]]
+        dump_type([1, 2].map { |e| a[0].size })
+      RUBY
+    end
+
+    it "floors a captured array a self-call content-mutates" do
+      # `[1, 2]` at runtime. The callee's `arr << x` is invisible at the call, so both positions read `[1]`.
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        #{add_to}
+        a = [1]
+        dump_type([1, 2].map do |e|
+          v = a.size
+          add_to(a, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the entry contents folded under a callee mutation" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        #{add_to}
+        a = [1]
+        r = [1, 2].map do |e|
+          v = a.size
+          add_to(a, e)
+          v
+        end
+        puts "x" if r.last == 1
+      RUBY
+    end
+
+    it "leaves a membership test over a hash a callee fills undecided" do
+      # `[:new, :new, :dup]` at runtime; the entry `{}` made every `key?` provably false.
+      expect(dumped_type(<<~RUBY)).to eq("[:dup | :new, :dup | :new, :dup | :new]")
+        def mark(seen, key)
+          seen[key] = true
+        end
+        seen = {}
+        dump_type([1, 2, 1].map { |x| seen.key?(x) ? :dup : (mark(seen, x); :new) })
+      RUBY
+    end
+
+    it "floors a captured array a method in the same class content-mutates" do
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        class Collector
+          def run
+            a = [1]
+            dump_type([1, 2].map do |e|
+              v = a.size
+              add(a, e)
+              v
+            end)
+          end
+
+          def add(arr, x)
+            arr << x
+          end
+        end
+      RUBY
+    end
+
+    it "floors a capture passed to a mutator-named method called on self" do
+      # `[0, 1]` and `[1, 2]` at runtime. `self.store` and `self.push` carry a mutator's name on a `self` receiver,
+      # so the scan took them for in-place sites on `self`, found no variable there, and never asked the callee.
+      expect(dumped_types(<<~RUBY)).to eq(["[non-negative-int, non-negative-int]"] * 2)
+        class Registry
+          def store(h, k)
+            h[k] = true
+          end
+
+          def push(arr, x)
+            arr << x
+          end
+
+          def run
+            seen = {}
+            dump_type([1, 2].map do |e|
+              v = seen.size
+              self.store(seen, e)
+              v
+            end)
+            buf = [0]
+            dump_type([1, 2].map do |e|
+              v = buf.size
+              self.push(buf, e)
+              v
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors a string refinement a callee can empty, under the fold and after a straight-line call" do
+      # `[false, true]` and `true` at runtime. The floor kept `non-empty-string`, so `empty?` folded to `false`.
+      expect(dumped_types(<<~RUBY)).to eq(["[bool, bool]", "bool"])
+        def reset(s)
+          s.replace("")
+        end
+        s = RUBY_VERSION.upcase
+        dump_type([1, 2].map do |e|
+          v = s.empty?
+          reset(s)
+          v
+        end)
+        t = RUBY_VERSION.upcase
+        reset(t)
+        dump_type(t.empty?)
+      RUBY
+    end
+
+    it "floors a string refinement an escaping block mutates, directly or through a callee" do
+      # The escaping-block floor shares the straight-line callee floor's carrier test, which read only a plain
+      # `String`: both locals left `Thread.new` still `decimal-int-string`, although `"5x"` is not one.
+      expect(dumped_types(<<~RUBY)).to eq(%w[String String])
+        def app(x)
+          x << "y"
+        end
+        s = rand(10).to_s
+        Thread.new { s << "x" }
+        dump_type(s)
+        u = rand(10).to_s
+        Thread.new { app(u) }
+        dump_type(u)
+      RUBY
+    end
+
+    it "keeps a captured array exact when the callee only reads it" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        def peek(arr, x)
+          arr.size + x
+        end
+        a = [1]
+        dump_type([1, 2].map do |e|
+          v = a.size
+          peek(a, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "keeps a captured array exact when the callee mutates a different parameter" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        def copy_size(src, dst)
+          dst << src.size
+        end
+        a = [1]
+        b = []
+        dump_type([1, 2].map do |e|
+          v = a.size
+          copy_size(a, b)
+          v
+        end)
+      RUBY
+    end
+
+    it "widens a callee-mutated capture a rebind reads across an each loop" do
+      # `"s"` at runtime. The ADR-56 write-back's fixpoint pass read `a` at its entry `[:x]` every iteration, so
+      # `last` left the loop as `:x?`.
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]?")
+        #{add_to}
+        a = [:x]
+        last = nil
+        [1, 2].each do |e|
+          last = a.last
+          add_to(a, "s")
+        end
+        dump_type(last)
+      RUBY
+    end
+
+    it "widens both routes under the HashShape per-pair fold" do
+      # `{ x: 1, y: 2 }` twice at runtime; each folded `{ x: 1, y: 1 }`.
+      expect(dumped_types(<<~RUBY)).to eq(["{ x: non-negative-int, y: non-negative-int }"] * 2)
+        #{add_to}
+        a = [[1]]
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+        b = [1]
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          v = b.size
+          add_to(b, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "widens both routes under the generic block-return pass" do
+      # A receiver with no per-element fold. Each answered `Array[1]` where the runtime holds `[1, 2]`.
+      expect(dumped_types(<<~RUBY)).to eq(["Array[non-negative-int]"] * 2)
+        #{add_to}
+        xs = [1, 2].to_a.shuffle
+        a = [[1]]
+        dump_type(xs.map do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+        b = [1]
+        dump_type(xs.map do |e|
+          v = b.size
+          add_to(b, e)
+          v
+        end)
+      RUBY
+    end
+  end
+
   describe "the per-element Tuple fold's arity cap" do
     it "threads every position at the cap" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")
@@ -1920,6 +2193,360 @@ RSpec.describe "block-return scope threading", type: :runner do
               a << w
               w.nil? ? (next []) : a
             end
+          end)
+        RUBY
+      end
+    end
+
+    # The same suppression types every other nested block tail-only too: the dispatcher's generic block-return pass,
+    # and the `inject` fold, which shares its body typing. The answer is the per-name one the folds give a captured
+    # local — a name the prefix rebinds reads `Dynamic[top]`, one it only mutates in place reads its in-place
+    # widening — extended to every name no #587 (b) binding answers: a block parameter, and a capture of a block the
+    # call runs at most once, of an iterator that discards its block's value or that the catalogue does not know, or
+    # of the `inject` fold, and an instance variable on its class-wide seed. A name whose widening declines keeps its
+    # entry binding, because threading would have kept it too; a class-wide seed already holds the prefix's rebinds,
+    # so only its in-place mutations widen it.
+    describe "(2), nested: the generic block-return pass under the same suppression" do
+      it "widens a parameter the body mutated in place under a HashShape map" do
+        # Runtime `[[1], [1]]`; the pass read `a` at its entry `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Array[Dynamic[top]]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.map do |_k, a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale parameter" do
+        # THE HAZARD: `a.first` read `[].first`, a provable nil, and `+` was reported on correct code.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.map do |_k, a|
+              a << w
+              a
+            end
+          end
+          r.each { |a| a.first + 1 }
+        RUBY
+      end
+
+      it "floors a parameter the body rebinds under a nominal map" do
+        # Runtime `Array[String]`; the pass read `e` at its entry `Integer`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              e = e.to_s + w.to_s
+              e
+            end
+          end)
+        RUBY
+      end
+
+      it "floors the rebound name only, keeping the structure around it" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[[Dynamic[top], 1]]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              e = e.to_s
+              [e, w]
+            end
+          end)
+        RUBY
+      end
+
+      it "floors a captured local a block the call runs once rebinds" do
+        # Runtime `1`. `synchronize` runs its block once, so the pass lays no captured binding and read `i` as `0`.
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          m = Mutex.new
+          v = 1
+          i = 0
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              i
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports the condition the stale counter folded" do
+        # THE HAZARD: `k == 0` folded to `true`, and the rule fired on a condition Ruby answers `false`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          i = 0
+          k = m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              i
+            end
+          end
+          puts "zero" if k == 0
+        RUBY
+      end
+
+      it "floors an instance variable a block the call runs once rebinds" do
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          class Counter
+            def run
+              m = Mutex.new
+              v = 1
+              @n = 0
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @n += w
+                  @n
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "keeps an instance variable on its class-wide seed, which already holds the prefix's write" do
+        # `@mode` enters on `:fast | :slow`, the union of every write in the class, so the tail is not stale.
+        expect(dumped_type(<<~RUBY)).to eq("[:fast | :slow, 1]")
+          class Mode
+            def initialize
+              @mode = :fast
+            end
+
+            def run
+              m = Mutex.new
+              v = 1
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @mode = :slow
+                  [@mode, w]
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "widens an instance variable on its class-wide seed that the body mutates in place" do
+        # Runtime `"k1"`. `<<` is no write, so the seed `"k"` does not hold it.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def append(v)
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @out << w.to_s
+                  @out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "no longer reports the condition the stale class-wide seed folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def append(v)
+              m = Mutex.new
+              r = m.synchronize do
+                w = v
+                m.synchronize do
+                  @out << w.to_s
+                  @out
+                end
+              end
+              puts "unchanged" if r == "k"
+            end
+          end
+        RUBY
+      end
+
+      it "widens the class-wide seed of an instance variable the body both rebinds and mutates" do
+        # The seed `"a" | "k"` holds the rebind's `"a"` but not the append after it: runtime `"a1"`.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          class Buf
+            def initialize
+              @out = +"k"
+            end
+
+            def reset(v)
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @out = +"a"
+                  @out << w.to_s
+                  @out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "floors a captured local an iterator outside the catalogue runs" do
+        # Runtime `2`; no #587 (b) binding is laid for an iterator the catalogue does not know.
+        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+          class Pair
+            def each_twice
+              yield
+              yield
+            end
+          end
+          m = Mutex.new
+          v = 1
+          tot = 0
+          dump_type(m.synchronize do
+            w = v
+            Pair.new.each_twice do
+              tot += w
+              tot
+            end
+          end)
+        RUBY
+      end
+
+      it "re-answers an accumulator the inject fold's block rebinds" do
+        # Runtime `6`. The fold types its block through the same pass, which read `acc` at the seed `0`.
+        expect(dumped_type(<<~RUBY)).to eq("0 | Dynamic[top]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2, 3].inject(0) do |acc, e|
+              acc += e + w - 1
+              acc
+            end
+          end)
+        RUBY
+      end
+
+      it "widens a captured String literal the body appends to" do
+        # Runtime `"k1"`; the pass read `buf` at its entry `"k"`.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          m = Mutex.new
+          v = 1
+          buf = +"k"
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              buf << w.to_s
+              buf
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a nominal String pre-state the append cannot move" do
+        # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          m = Mutex.new
+          v = 1
+          s = String.new
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              s << w.to_s
+              s
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a precise nominal Array whose widening declines" do
+        # `Array[String]` is a claim the widening may not grow, so the threaded body keeps it as well.
+        expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+          m = Mutex.new
+          v = 1
+          ks = ENV.keys
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              ks << w.to_s
+              ks
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a tail that ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[5]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map do |e|
+              q = e + w
+              5
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a single-statement body exact" do
+        expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+          m = Mutex.new
+          v = 1
+          xs = Array.new(rand(3)) { |i| i }
+          dump_type(m.synchronize do
+            w = v
+            xs.map { |e| e + w }
+          end)
+        RUBY
+      end
+
+      it "still reports the condition when the tail ignores the counter it rebinds" do
+        # The must-fire sibling: the tail reads a fresh `0`, so `k == 0` really is always true.
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          m = Mutex.new
+          v = 1
+          i = 0
+          k = m.synchronize do
+            w = v
+            m.synchronize do
+              i += w
+              0
+            end
+          end
+          puts "zero" if k == 0
+        RUBY
+      end
+
+      it "threads the same body when nothing suppresses it" do
+        # No enclosing threaded body, so the pass evaluates the prefix and reads what it stored.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Array[Dynamic[top] | Integer]]")
+          v = 1
+          dump_type({ x: [], y: [] }.map do |_k, a|
+            a << v
+            a
           end)
         RUBY
       end

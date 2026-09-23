@@ -62,7 +62,12 @@ module Rigor
       # `[<local read>, [step, …]]` for a chain of element reads rooted at a local variable, or
       # `nil` when the expression is anything else. A step is an Integer position (negative counts
       # from the end, as Ruby's own indexing does) or `:all` when the index is not a literal.
+      #
+      # Every mutation site's receiver is asked, and nearly every one is a plain variable read, so a
+      # receiver that is no call answers before the step list is allocated.
       def element_read_path(node)
+        return nil unless node.is_a?(Prism::CallNode)
+
         steps = []
         cursor = node
         while cursor.is_a?(Prism::CallNode)
@@ -118,22 +123,29 @@ module Rigor
       end
 
       # Rebuilds `type` with the element at `steps` widened against `method_name`, or `nil` when
-      # nothing along the path widened.
-      def widen_through_path(type, steps, method_name, arg_types)
-        return MutationWidening.widen_for_mutator(type, method_name, arg_types: arg_types) if steps.empty?
+      # nothing along the path widened. A block, when given, replaces the straight-line widening of the
+      # element itself: it receives the element's type and answers the widened one, or `nil` to decline.
+      # {UnknownStoreWidening} passes one so a site on an element takes the same unknown-store widening a
+      # site on a variable does.
+      def widen_through_path(type, steps, method_name, arg_types, &element_widening)
+        if steps.empty?
+          return element_widening.call(type) if element_widening
+
+          return MutationWidening.widen_for_mutator(type, method_name, arg_types: arg_types)
+        end
 
         case type
-        when Type::Tuple then widen_tuple_path(type, steps, method_name, arg_types)
-        when Type::Union then widen_union_path(type, steps, method_name, arg_types)
+        when Type::Tuple then widen_tuple_path(type, steps, method_name, arg_types, &element_widening)
+        when Type::Union then widen_union_path(type, steps, method_name, arg_types, &element_widening)
         end
       end
 
-      def widen_tuple_path(tuple, steps, method_name, arg_types)
+      def widen_tuple_path(tuple, steps, method_name, arg_types, &)
         elements = tuple.elements.dup
         rest = steps.drop(1)
         widened_any = false
         tuple_positions(tuple, steps.first).each do |position|
-          inner = widen_through_path(elements[position], rest, method_name, arg_types)
+          inner = widen_through_path(elements[position], rest, method_name, arg_types, &)
           next if inner.nil?
 
           elements[position] = inner
@@ -142,10 +154,10 @@ module Rigor
         widened_any ? Type::Tuple.new(elements) : nil
       end
 
-      def widen_union_path(union, steps, method_name, arg_types)
+      def widen_union_path(union, steps, method_name, arg_types, &)
         widened_any = false
         members = union.members.map do |member|
-          widened = widen_through_path(member, steps, method_name, arg_types)
+          widened = widen_through_path(member, steps, method_name, arg_types, &)
           next member if widened.nil?
 
           widened_any = true

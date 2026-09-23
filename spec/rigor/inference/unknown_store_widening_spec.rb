@@ -109,5 +109,70 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     it "leaves the binding unchanged when there is no site" do
       expect(described_class.widen(zero_pinned_hash, [])).to eq(zero_pinned_hash)
     end
+
+    describe "a site on an element read" do
+      let(:nested_tuple) do
+        Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1)),
+          Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(2))
+        )
+      end
+
+      it "widens the element the path selects and keeps its siblings" do
+        widened = described_class.widen(nested_tuple, sites_of("a = []\n[1].each { |e| a[0] << e }\n"))
+        expect(widened.describe).to eq("[Array[1 | Dynamic[top]], [2]]")
+      end
+
+      it "gives the element the gradual arm a class-changing site needs" do
+        widened = described_class.widen(nested_tuple, sites_of("a = []\n[1].each { |e| a.last.map!(&:to_s) }\n"))
+        expect(widened.describe).to eq("[[1], Array[Dynamic[top] | Integer]]")
+      end
+
+      it "declines a path the straight-line widening cannot follow" do
+        # A `HashShape` slot: `ElementReadWidening` walks tuples only, on straight-line code too.
+        seed = Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.tuple_of })
+        expect(described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h[:a] << e }\n"))).to equal(seed)
+      end
+    end
+
+    describe "a callee store" do
+      let(:store) do
+        call = Prism.parse("add(a)").value.statements.body.first
+        [described_class::CalleeStore.new(call, call.arguments.arguments)]
+      end
+
+      it "floors each collection member of a union and keeps the others" do
+        seed = Rigor::Type::Combinator.union(one_pinned_tuple, Rigor::Type::Combinator.constant_of(nil))
+        expect(described_class.widen(seed, store).describe).to eq("Array[Dynamic[top]]?")
+      end
+
+      it "floors a hash, a precise nominal, a refinement's collection base and a string to their bare carriers" do
+        seeds = [
+          zero_pinned_hash,
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")]),
+          Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer")),
+          Rigor::Type::Combinator.constant_of("ab")
+        ]
+        expect(seeds.map { |seed| described_class.widen(seed, store).describe })
+          .to eq(["Hash[Dynamic[top], Dynamic[top]]", "Array[Dynamic[top]]", "Array[Dynamic[top]]", "String"])
+      end
+
+      it "floors every refined form of a string to String" do
+        seeds = [
+          Rigor::Type::Combinator.non_empty_string,
+          Rigor::Type::Combinator.decimal_int_string,
+          Rigor::Type::Combinator.non_empty_uppercase_string
+        ]
+        expect(seeds.map { |seed| described_class.widen(seed, store).describe }).to eq(["String"] * 3)
+      end
+
+      it "leaves a binding that holds no collection unchanged" do
+        non_zero = Rigor::Type::Combinator.difference(
+          Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.constant_of(0)
+        )
+        seeds = [Rigor::Type::Combinator.constant_of(3), non_zero]
+        expect(seeds.map { |seed| described_class.widen(seed, store) }).to eq(seeds)
+      end
+    end
   end
 end

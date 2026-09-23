@@ -63,6 +63,16 @@ RSpec.describe Rigor::Inference::CapturedLocals do
       expect(site_classes(source, :h)).to be_empty
     end
 
+    it "collects a mutator on an element read rooted at a captured local" do
+      source = "a = []\n[1].each { |e| a[0] << e; a.first.push(e) }\n"
+      expect(site_classes(source, :a)).to eq(a: [Prism::CallNode, Prism::CallNode])
+    end
+
+    it "excludes an element read rooted at a nested block's parameter" do
+      source = "a = []\n[1].each { |e| [[[]]].each { |a| a[0] << e } }\n"
+      expect(site_classes(source, :a)).to be_empty
+    end
+
     it "answers empty for a block with no body" do
       expect(site_classes("h = {}\n[1].each { |k| }\n", :h)).to be_empty
     end

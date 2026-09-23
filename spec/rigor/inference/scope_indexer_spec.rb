@@ -56,6 +56,37 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    it "shadows an outer local inside a block the evaluator never entered" do
+      program, idx = index_for(<<~RUBY)
+        o = "s"
+        k = 2
+        show([1].map { |o| o + k })
+        [1].map { |o| o }
+      RUBY
+      value_block = program.statements.body[2].arguments.arguments.first.block
+      sum = value_block.body.body.first
+      statement_read = program.statements.body[3].block.body.body.first
+
+      # The argument's block reaches the index only through `propagate`. Its parameter is a new variable, so the
+      # outer `o` MUST NOT be visible inside it, while the captured `k` keeps its enclosing binding.
+      expect(idx[sum.receiver].local(:o)).to eq(Rigor::Type::Combinator.untyped)
+      expect(idx[sum.arguments.arguments.first].local(:k)).to eq(Rigor::Type::Combinator.constant_of(2))
+      # A statement-level block is entered, and its parameter keeps the signature's element type.
+      expect(idx[statement_read].local(:o)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "shadows a local the unentered block's body introduces, not only its parameters" do
+      # No outer `z` exists in the source, so Ruby makes the body's `z` the block's own local. The seeded binding
+      # stands in for a name the scope binds for a non-lexical reason; the block's local table MUST still win.
+      seeded = Rigor::Scope.empty.with_local(:z, Rigor::Type::Combinator.constant_of("s"))
+      program = parse("show([1].map { |e| z = e; z })")
+      idx = described_class.index(program, default_scope: seeded)
+      z_read = program.statements.body.first.arguments.arguments.first.block.body.body[1]
+
+      expect(z_read).to be_a(Prism::LocalVariableReadNode)
+      expect(idx[z_read].local(:z)).to eq(Rigor::Type::Combinator.untyped)
+    end
+
     it "binds locals visible to children inside an rvalue expression" do
       program, idx = index_for(<<~RUBY)
         x = 1

@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "singleton_folding"
+require_relative "hash_transform_keys_folding"
 
 module Rigor
   module Inference
@@ -22,6 +23,8 @@ module Rigor
       #   bound from the argument.
       # - `a.downto(b) { |i| … }` yields the same domain `[b, a]`, just iterated in reverse. Lower bound
       #   from the argument, upper bound from the receiver.
+      # - `h.transform_keys(mapping) { |k| … }` yields the receiver's keys, a rule rbs 3.10 cannot state
+      #   ({HashTransformKeysFolding.block_param_types}).
       module IteratorDispatch
         module_function
 
@@ -41,6 +44,7 @@ module Rigor
           when :group_by, :partition then single_element_block_params(receiver)
           when :each_slice, :each_cons then slice_block_params(receiver)
           when :new then class_new_block_params(receiver, args)
+          when :transform_keys then HashTransformKeysFolding.block_param_types(context)
           end
         end
 

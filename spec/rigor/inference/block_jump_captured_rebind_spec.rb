@@ -185,9 +185,9 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
     end
 
     it "does not take a nested loop's `next` for this block's" do
-      # A loop installs no collection of its own, so its `next` lands in the block's — which exists because of the
-      # block-level `next` on the first line — and must be dropped by node identity: it ends a loop iteration, not
-      # this invocation, and the body rebinds `n` to `:sym` after the loop.
+      # The loop's `next` ends a loop iteration, not this invocation — the loop collects it itself, beside the
+      # block's collection that the block-level `next` on the first line installs — and the body rebinds `n` to
+      # `:sym` after the loop.
       expect(dumped_type(<<~RUBY)).to eq("0 | :sym")
         n = 0
         [1, 2].each do |a|

@@ -3838,10 +3838,11 @@ module Rigor
         receiver = receiver_override || call_receiver_type_for(call_node)
         return EMPTY_BREAK_ARMS if receiver.nil?
 
+        param_types = break_arm_param_types(call_node, receiver)
         block_scope = block_entry_scope(
-          block_node, break_arm_param_types(call_node, receiver),
+          block_node, param_types,
           narrowed_self_type: block_body_self_narrowing(call_node, receiver),
-          repeats: block_may_repeat?(call_node, receiver)
+          captured: repeating_captured_bindings(block_node, param_types, block_may_repeat?(call_node, receiver))
         )
         _result, collected = StatementEvaluator.with_break_value_sink do
           without_block_body_threading { block_scope.evaluate(body) }
@@ -3880,28 +3881,34 @@ module Rigor
       def block_return_for(block_arg, expected, narrowed_self_type: nil, repeats: false)
         case block_arg
         when Prism::BlockNode
-          entry = block_entry_scope(block_arg, expected, narrowed_self_type: narrowed_self_type, repeats: repeats)
-          type_block_body(block_arg, entry)
+          captured = repeating_captured_bindings(block_arg, expected, repeats)
+          entry = block_entry_scope(block_arg, expected, narrowed_self_type: narrowed_self_type, captured: captured)
+          type_block_body(block_arg, entry, captured: captured)
         when Prism::BlockArgumentNode
           symbol_block_return_type(block_arg, expected)
         end
       end
 
       # The scope a block body is typed under: the surrounding scope plus the parameter bindings the receiving
-      # method's signature implies. When the call may run the block more than once (`repeats`,
-      # {#block_may_repeat?}) the #587 (b) captured binding is laid between the two, so the body reads what a
-      # captured local, instance variable, class variable or global holds on ANY run rather than the first.
+      # method's signature implies, with the #587 (b) `captured` binding ({#repeating_captured_bindings}) laid
+      # between the two, so the body reads what a captured local, instance variable, class variable or global
+      # holds on ANY run rather than the first.
       #
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
-      def block_entry_scope(block_node, expected, narrowed_self_type: nil, repeats: false)
+      def block_entry_scope(block_node, expected, narrowed_self_type: nil, captured: nil)
         entry = scope.entering_opaque_block
-        captured = repeats ? generic_captured_bindings(block_node, expected) : nil
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowed_self_type
 
         block_scope.with_self_type(narrowed_self_type)
+      end
+
+      # The #587 (b) captured binding when the call may run the block more than once ({#block_may_repeat?}), and
+      # nil — no binding — for a block it runs at most once, whose captures no earlier run can have moved.
+      def repeating_captured_bindings(block_node, expected, repeats)
+        repeats ? generic_captured_bindings(block_node, expected) : nil
       end
 
       # The #587 (b) captured binding for the generic pass — or nil, which keeps the entry scope, when computing
@@ -3951,14 +3958,113 @@ module Rigor
       # join, `ops.all? { |o| next false unless o; true }` read as `Constant[true]` and
       # {MethodDispatcher::BlockFolding} folded the call to always-truthy on a program that really can answer
       # false — a warning on correct code.
-      def type_block_body(block_node, block_scope)
+      #
+      # `captured` is the #587 (b) binding `block_scope` was laid over, if any; the names it answers are left to it
+      # ({#tail_only_block_body_type}).
+      def type_block_body(block_node, block_scope, captured: nil)
         body = block_node.body
         return Type::Combinator.constant_of(nil) if body.nil?
 
         arms = block_level_next_arms(body)
         return block_body_type_joining_nexts(body, block_scope, arms) if arms
 
-        threaded_block_body_type(body, block_scope) || block_scope.type_of(body)
+        threaded_block_body_type(body, block_scope) || tail_only_block_body_type(body, block_scope, captured)
+      end
+
+      # The tail typed in the entry scope — except under {#block_body_threading_suppressed?}, where a tail that
+      # reads what its own prefix changed would get the ENTRY binding back, a stale answer rather than a wider
+      # one. There the tail is typed over {#prefix_answered_scope}, which re-answers exactly those names without
+      # evaluating the prefix. The threading's other declines keep the plain tail-only answer: a body with no
+      # prefix, or whose tail ignores it, is not stale, while a `rescue` body and a prefix that can `break`
+      # ({JUMP_NODES}) are typed tail-only with or without the suppression, and neither path re-answers them.
+      #
+      # A failure in the re-answer falls back to the plain tail-only answer, for the reason
+      # {#threaded_block_body_type} gives: a raise reaching `block_return_type_for` would report "no block".
+      def tail_only_block_body_type(body, block_scope, captured)
+        return block_scope.type_of(body) unless block_body_threading_suppressed? && body.is_a?(Prism::StatementsNode)
+
+        answered =
+          begin
+            prefix_answered_scope(body.body, block_scope, captured)
+          rescue StandardError
+            block_scope
+          end
+        answered.type_of(body)
+      end
+
+      # `block_scope` with every name the tail reads and the prefix changed ({#tail_dependent_body_names}) bound to
+      # what the prefix can have left in it, answered without evaluating the prefix — which is the cost the
+      # suppression refuses — on the terms the per-element fold's captured binding answers a capture under the same
+      # suppression:
+      #
+      # - a name the prefix REBINDS reads `Dynamic[top]` ({#captured_floor}'s answer). `i += w; i` inside a block
+      #   the call runs once read `i` at its entry `0`, and `k == 0` then fired always-truthy on a `k` Ruby holds
+      #   as `1`.
+      # - a name the prefix only MUTATES IN PLACE reads its unknown-store widening ({UnknownStoreWidening.widen}),
+      #   the binding {#stored_capture_bindings} lays: `|_k, a| a << w; a` over `{ x: [], y: [] }` read `a` as its
+      #   entry `[]` and the call as `Array[[]]`; it now reads `Array[Array[Dynamic[top]]]`.
+      #
+      # That is a floor per NAME, not per block, so the structure around a floored name survives (`e = e.to_s; [e, w]`
+      # keeps its Tuple), and it is limited to the names tail-only answers stale. A name the entry scope does not bind —
+      # a body-local, or an instance variable, class variable or global nothing bound yet — already reads
+      # `Dynamic[top]`. An instance variable on its ADR-58 class-wide seed takes no floor for a rebind, since the seed
+      # is the union of every write in the class, this prefix's included, though its mutation sites still widen it
+      # ({#class_seeded_ivar?}). A name whose widening declines keeps its entry binding, because the threaded body
+      # would have kept it as well: `s = String.new; … { s << "x"; s }` is `String` either way, and a precise nominal
+      # `Array[String]` is a claim the widening may not grow on either path. And a name the #587 (b) `captured` binding
+      # answers is left to it, as {#unanswered_tail_dependency?} leaves it: the per-element fold computes that binding
+      # before it suppresses the threading above its cap, so it can hold the fixpoint's converged `Integer` for
+      # `total += e; total`, which a floor here would throw away.
+      def prefix_answered_scope(statements, block_scope, captured)
+        return block_scope if statements.size < 2
+
+        names = tail_dependent_body_names(statements) - (captured&.names || EMPTY_NAME_SET)
+        return block_scope if names.empty?
+
+        rebound, sites = prefix_changes(statements)
+        names.reduce(block_scope) do |acc, name|
+          answer = prefix_left_binding(block_scope, name, rebound, sites)
+          answer ? CapturedLocals.bind(acc, name, answer) : acc
+        end
+      end
+
+      def prefix_left_binding(block_scope, name, rebound, sites)
+        entry = CapturedLocals.bound_type(block_scope, name)
+        return nil if entry.nil?
+
+        return Type::Combinator.untyped if rebound.include?(name) && !class_seeded_ivar?(block_scope, name)
+
+        widened = UnknownStoreWidening.widen(entry, sites.fetch(name, NO_MUTATION_SITES))
+        widened == entry ? nil : widened
+      end
+
+      # An instance variable still on its ADR-58 class-wide seed: the union of every WRITE in the class, so a rebind
+      # in the prefix is already in it and needs no floor. An in-place mutation is no write — `@out << w.to_s` leaves
+      # the seed `"k"` while the object holds `"k1"` — so the mutation sites still widen the seed, as they widen any
+      # other entry binding.
+      def class_seeded_ivar?(block_scope, name)
+        CapturedLocals.ivar_name?(name) && block_scope.declaration_sourced?(:ivar, name)
+      end
+
+      NO_MUTATION_SITES = [].freeze
+      private_constant :NO_MUTATION_SITES
+
+      # The prefix's changes split the way {#prefix_left_binding} answers them: the names a write node rebinds,
+      # and each in-place mutation site filed under every variable its receiver can evaluate to. The walk and both
+      # predicates are {#prefix_statement_jump_free?}'s, so a name {#tail_dependent_body_names} reports is always
+      # filed here under one of the two. Only a suppressed tail-only body with a dependent tail pays it.
+      def prefix_changes(statements)
+        rebound = Set.new
+        sites = {}
+        statements[0...-1].each do |statement|
+          Source::NodeWalker.each(statement) do |node|
+            rebound << node.name if VARIABLE_WRITE_NODES.include?(node.class)
+            next unless in_place_mutation?(node)
+
+            ReceiverAlias.candidates(node.receiver).each { |read| (sites[read.name] ||= []) << node }
+          end
+        end
+        [rebound, sites]
       end
 
       # Evaluates the body once under a `next` sink and joins the arms that leave THIS block with the
@@ -4024,7 +4130,8 @@ module Rigor
       #   threaded body a nested block-bearing call reverts to the tail-only path. That is a wider answer only
       #   while the nested tail ignores its own prefix: a tail reading a parameter or captured local the prefix
       #   mutated gets the ENTRY binding back, so the per-element and per-pair folds floor that shape
-      #   ({#tail_only_body_floor}). The generic block-return pass still answers it tail-only.
+      #   ({#tail_only_body_floor}), and the generic block-return pass re-answers each stale name on its own
+      #   ({#prefix_answered_scope}).
       #
       # ADR-56 interaction: the fold cannot double-apply or fight the captured-local write-back. That
       # write-back is `StatementEvaluator#write_back_block_captures`, computed from the CALLER's scope into
@@ -5096,12 +5203,14 @@ module Rigor
       end
 
       # A key fold that cannot build a `HashShape` declines to the dispatcher — except under the suppression, where
-      # the dispatcher's block-return pass is typed tail-only too and reads a captured value the body mutates in
+      # the dispatcher's block-return pass is typed tail-only too and read a captured value the body mutates in
       # place at its entry contents: `buf = +"k"; … { a: 1 }.transform_keys { |k| buf << w.to_s; buf }` answered
       # `Hash["k", 1]` for `{ "k1" => 1 }`, though the pairs themselves were typed over the #587 (b) binding that
       # answers `buf`. There the fold answers from the keys it typed, `Hash[union(<new keys>), union(<values>)]`,
       # and takes the plain floor ({#hash_keys_floor}) when a pair could not be typed at all. The pairs are
-      # re-typed for it, which only a suppressed, undecided key fold pays.
+      # re-typed for it, which only a suppressed, undecided key fold pays. That pass now re-answers such a name
+      # itself ({#prefix_answered_scope}), so a decline would no longer read `"k"`; the fold still answers from
+      # the pairs it has typed.
       def undecided_keys_floor(shape, block_arg, key_types, captured)
         return nil unless block_body_threading_suppressed?
 
@@ -5136,9 +5245,10 @@ module Rigor
       # `{ x: [], y: [] }.transform_values do |a| a << w; a end` inside a threaded `m.synchronize do w = v; …
       # end` answered `{ x: [], y: [] }` for a hash whose values each hold `[1]`, and `r[:x].first + 1` was
       # then reported on correct code. The floor is the Tuple fold's, applied per pair and over the same
-      # `captured` names, with the fold answering it rather than declining: a decline reaches the dispatcher,
-      # whose block-return pass the same suppression types tail-only, so `k = "#{k}#{w}"; k` read its keys
-      # as the entry `:a | :b`. An empty shape types no pair, so it keeps its exact `{}`.
+      # `captured` names, with the fold answering it rather than declining: a decline reached the dispatcher,
+      # whose block-return pass the same suppression typed tail-only, so `k = "#{k}#{w}"; k` read its keys
+      # as the entry `:a | :b` until that pass re-answered the stale name itself ({#prefix_answered_scope}).
+      # An empty shape types no pair, so it keeps its exact `{}`.
       def tail_only_pairs_floored?(shape, block_arg, captured)
         !shape.pairs.empty? && block_arg.is_a?(Prism::BlockNode) && block_body_threading_suppressed? &&
           unanswered_tail_dependency?(block_arg, captured)
@@ -5187,7 +5297,7 @@ module Rigor
         block_scope = captured ? captured.lay(scope) : scope
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
-        type_block_body(block_node, block_scope)
+        type_block_body(block_node, block_scope, captured: captured)
       rescue StandardError
         nil
       end

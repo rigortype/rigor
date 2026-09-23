@@ -4193,8 +4193,8 @@ module Rigor
       #
       # The walk reads only the block, so an argument declines: `index(value)` / `find_index(value)` search by
       # `==` without running the block, and `find(ifnone)` / `detect(ifnone)` answer `ifnone.call` when no
-      # position matches — `[1, 2].find(-> { 0 }) { |e| e > 5 }` is `0`, where the walk answered `nil` and `r +
-      # 1` then reported a nil receiver on correct code. The other supported methods take no argument.
+      # position matches. `r = [1, 2].find(-> { 0 }) { |e| e > 5 }` is `0` at runtime; the walk answered `nil`,
+      # and `r + 1` then reported a nil receiver on correct code. The other supported methods take no argument.
       PER_ELEMENT_TUPLE_METHODS = Set[
         :map, :collect, :filter_map, :flat_map,
         :select, :filter, :reject,

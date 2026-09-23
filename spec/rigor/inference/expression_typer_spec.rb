@@ -1592,13 +1592,25 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       RUBY
     end
 
-    it "declines detect and a Constant<Range> receiver alike" do
-      # Runtime `0` both times.
+    it "declines detect, a Constant<Range> receiver and a &:symbol block alike" do
+      # Runtime `0` every time. The `&:nil?` block takes the fold's symbol path rather than the block-body one.
       expect(reported_rules(<<~RUBY)).to be_empty
         d = [1, 2].detect(proc { 0 }) { |e| e > 5 }
         d + 1
         g = (1..3).find(-> { 0 }) { |e| e > 5 }
         g + 1
+        h = (1..3).detect(-> { 0 }) { |e| e > 5 }
+        h + 1
+        s = [1, 2].find(-> { 0 }, &:nil?)
+        s + 1
+      RUBY
+    end
+
+    it "still reports the nil a block-only find answers on no match" do
+      # The positive control for the silent examples above: without a fallback the runtime answer is `nil`.
+      expect(reported_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        r = [1, 2].find { |e| e > 5 }
+        r + 1
       RUBY
     end
 

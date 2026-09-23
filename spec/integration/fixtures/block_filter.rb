@@ -27,3 +27,25 @@ assert_type("[]", empty_select)
 # shape (vacuous-truth side handled too: see the spec).
 all_truthy = [1, 2, 3].all? { true }
 assert_type("true", all_truthy)
+
+# `Hash#select` / `#reject` return a Hash, so dropping every entry
+# folds to the empty HashShape rather than the empty tuple — the
+# latter made `hash_rejected[:x] = 1` report an argument-type
+# mismatch on correct code.
+hash_rejected = { a: :q }.reject { |_k, _v| true }
+assert_type("{}", hash_rejected)
+hash_rejected[:x] = 1
+
+hash_selected = { a: :q }.select { false }
+assert_type("{}", hash_selected)
+hash_selected[:x] = 1
+
+# `Hash#take_while` is Enumerable's and returns an Array of pairs.
+hash_taken = { a: :q }.take_while { false }
+assert_type("[]", hash_taken)
+
+# A `Hash[K, V]` receiver drops to the empty HashShape too.
+nominal_hash = Hash.new(0)
+hash_kept_none = nominal_hash.select { false }
+assert_type("{}", hash_kept_none)
+hash_kept_none[:y] = 2

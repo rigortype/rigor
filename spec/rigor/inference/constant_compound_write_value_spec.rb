@@ -194,6 +194,57 @@ RSpec.describe "constant compound write value", type: :runner do
     end
   end
 
+  describe "a constant this file binds in a form its own table does not carry" do
+    # The in-source table holds plain writes only; the publication census sees every form, and any write in it
+    # other than a memo `||=` binds the constant, so the compound write reads it gradually. The census reaches
+    # the typer through the project discovery a whole run seeds, which the in-memory single-source path skips,
+    # so these examples analyse a project directory.
+    def dumped_type(source)
+      result = analyze(files: { "code.rb" => %(require "rigor/testing"\ninclude Rigor::Testing\n#{source}) })
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end.first
+    end
+
+    def call_rules(source)
+      analyze(files: { "code.rb" => source }).diagnostics.filter_map do |diagnostic|
+        diagnostic.rule if diagnostic.rule.to_s.start_with?("call.")
+      end
+    end
+
+    it "reads a constant a multiple assignment wrote as gradual" do
+      # Runtime: `{ x: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("0 | Dynamic[top]")
+        A, B = { x: 1 }, 2
+        dump_type(A ||= 0)
+      RUBY
+    end
+
+    it "does not report a call on that value" do
+      expect(call_rules(<<~RUBY)).to be_empty
+        A, B = { x: 1 }, 2
+        w = (A ||= 0)
+        w[:x]
+      RUBY
+    end
+
+    it "reads the inner write of a chain as gradual" do
+      # Runtime: `{ x: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("0 | Dynamic[top]")
+        OUTER = INNER = { x: 1 }
+        dump_type(INNER ||= 0)
+      RUBY
+    end
+
+    it "reads a memo an operator write also moves as gradual" do
+      # Runtime: `COUNT` is `1` once `bump` has run, so the memo's `0` is not its only value.
+      expect(dumped_type(<<~RUBY)).to eq("0 | Dynamic[top]")
+        def count = dump_type(COUNT ||= 0)
+        def bump = (COUNT += 1)
+      RUBY
+    end
+  end
+
   describe "a top-level memo body typed under a namespaced caller" do
     it "still walks a path's tail through its owner's ancestors" do
       # Runtime: `4`. `Client::DEFAULTS` is `Base::DEFAULTS` wherever it is written; only the path's head

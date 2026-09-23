@@ -2832,10 +2832,21 @@ module Rigor
         calls = body_content_mutations_on(body, memo_param)
         return call_type if calls.empty?
 
-        pre_state = scope.type_of(memo_arg, tracer: tracer)
-        entry = build_block_entry_scope(call_node, block)
-        joined = join_content_to_fixpoint({ memo_param => calls }, { memo_param => pre_state }, entry)[memo_param]
+        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer))
         joined || call_type
+      end
+
+      # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
+      # memo's carrier is kept: a memo store reading one of them (`buf << w; m << buf.length`) must see it as it
+      # stands at any iteration's entry, not at its pre-call contents. Their own continuation is the block seam's to
+      # write.
+      def join_memo_content(call_node, memo_param, calls, pre_state)
+        block = call_node.block
+        captured = collect_content_mutations(block.body)
+        seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
+        seeds[memo_param] = pre_state
+        sites = captured.merge(memo_param => calls)
+        join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block))[memo_param]
       end
 
       # The name of the memo block parameter (the SECOND positional param of an `each_with_object` block), or nil when

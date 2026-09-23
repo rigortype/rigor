@@ -58,6 +58,25 @@ end
 assert_type("Array[non-negative-int]", lens)
 puts "four" if lens.last == 4
 
+# --- `each_with_object`: a memo store that reads a CAPTURED collection
+# the same block mutates sees it at any iteration's entry, as the block
+# seam's own stores do. ---
+words = +""
+widths = %w[ab cd].each_with_object([]) do |w, m|
+  words << w
+  m << words.length
+end
+assert_type("Array[non-negative-int]", widths)
+puts "four" if widths.last == 4
+
+run = [0]
+seen = [1, 2].each_with_object([]) do |_x, m|
+  run << (run.last + 1)
+  m << run.last
+end
+assert_type("Array[Integer]", seen)
+puts "two" if seen.last == 2
+
 # --- Evidence that grows structurally on every pass never converges, and
 # the slot floors to its one-unknown-store answer: the seed's `[]` element
 # survives beside `Dynamic[top]`. ---

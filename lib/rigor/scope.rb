@@ -66,6 +66,17 @@ module Rigor
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
 
+    # Issue #617 — the census names sharing `name`'s last segment that bind, spelled as the census spells
+    # them (a `*::LIMIT` wildcard included), so the caller still decides which of them a reference resolves
+    # to. A `||=`-only name is left out while no other file memoizes its segment: the memoization idiom's
+    # own write, however often one file repeats it, is not what binds it.
+    def bound_constant_names(name)
+      @discovery.constant_writers[name.split("::").last] || EMPTY_BOUND_CONSTANT_NAMES
+    end
+
+    EMPTY_BOUND_CONSTANT_NAMES = [].freeze
+    private_constant :EMPTY_BOUND_CONSTANT_NAMES
+
     # Issue #667 — the instance-variable names of `class_name` whose class-ivar seed comes from a foreign
     # published constant (`@mode = AppConfig::MODE` in `initialize`, read in a sibling method).
     # `StatementEvaluator#seed_instance_ivars` stamps the flow mark for these at method-body entry, the way

@@ -4033,4 +4033,40 @@ end
       expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
     end
   end
+
+  # Issue #617 — a constant compound write reads a name the census sees bound as `Dynamic[top]`, and a name a file
+  # writes only through `||=` is the memoization idiom rather than a binding, so it carries its own descriptor.
+  describe "the publication census's memo descriptor" do
+    def census(source) = described_class.send(:constant_writes_for_file, parse(source))
+
+    it "files a name written only through `||=` as a memo, bare or as a path, however often" do
+      expect(census(<<~RUBY)).to eq("A" => :memo, "Conf::B" => :memo)
+        def a = (A ||= {})
+        def again = (A ||= {})
+        def b = (Conf::B ||= [])
+      RUBY
+    end
+
+    it "files every other form, and a memo the same file also writes another way, as unpublishable" do
+      writes = census(<<~RUBY)
+        A ||= 1
+        A += 1
+        B &&= 1
+        C ||= 1
+        C = 2
+        D = 1
+        D ||= 2
+        E += 1
+      RUBY
+      expect(writes).to eq(%w[A B C D E].to_h { |name| [name, :unpublishable] })
+    end
+
+    it "renders the memo in the declaration signature apart from an unpublishable write" do
+      parts = []
+      described_class.append_constant_signature(
+        parts, constant_writes: { "A" => { "a.rb" => :memo }, "B" => { "a.rb" => :unpublishable } }
+      )
+      expect(parts).to eq(["k:A=||", "k:B=?"])
+    end
+  end
 end

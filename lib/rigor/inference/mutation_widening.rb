@@ -53,6 +53,8 @@ module Rigor
     #
     # - `arr.<mutator>(...)` where `arr` is a local variable.
     # - `@arr.<mutator>(...)` where `@arr` is an instance variable.
+    # - `@@arr.<mutator>(...)` / `$arr.<mutator>(...)` where the receiver is a class variable or global, and
+    #   `it.<mutator>(...)` on the Ruby 3.4 `it` parameter ({ReceiverAlias.mutated_reads}).
     # - a receiver that *selects* among such variables rather than naming one —
     #   `(kind == :required ? required : optional)[key] = info`, an `if`/`else`, `||` / `&&`. Every
     #   variable the expression can evaluate to is a possible mutation target, so every one widens
@@ -144,13 +146,9 @@ module Rigor
       def joinable_receiver?(receiver, scope)
         return false if receiver.nil?
 
-        ReceiverAlias.candidates(receiver).any? do |read|
-          current =
-            case read
-            when Prism::LocalVariableReadNode then scope.local(read.name)
-            when Prism::InstanceVariableReadNode then scope.ivar(read.name)
-            end
-          shape_carrier?(current)
+        ReceiverAlias.mutated_reads(receiver).any? do |read|
+          getter, = ALIAS_ACCESSORS[read.class]
+          getter && shape_carrier?(scope.public_send(getter, ReceiverAlias.read_name(read)))
         end
       end
 
@@ -175,11 +173,12 @@ module Rigor
         end
       end
 
-      # Widens every variable `receiver` can evaluate to, against `method_name`'s mutator table.
+      # Widens every variable `receiver` can evaluate to ({ReceiverAlias.mutated_reads}), against `method_name`'s
+      # mutator table.
       def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES)
         return current_scope if receiver.nil?
 
-        ReceiverAlias.candidates(receiver).reduce(current_scope) do |acc, read|
+        ReceiverAlias.mutated_reads(receiver).reduce(current_scope) do |acc, read|
           widen_alias_read(method_name, read, acc, arg_types: arg_types)
         end
       end
@@ -234,9 +233,10 @@ module Rigor
         return scope if receiver.nil?
 
         ReceiverAlias.candidates(receiver).reduce(scope) do |acc, read|
-          # A block-local read (`depth == 0`) is not a capture of the outer scope, so widening its
-          # name against the OUTER scope would hit an unrelated same-named binding.
-          next acc if read.is_a?(Prism::LocalVariableReadNode) && read.depth.zero?
+          # A block-local read ({ReceiverAlias.block_local?}: a `depth == 0` local, or `it`) is not a
+          # capture of the outer scope, so widening its name against the OUTER scope would hit an
+          # unrelated same-named binding.
+          next acc if ReceiverAlias.block_local?(read)
 
           # `values: :keep` — this is the block-capture path, and the slice-C content join that runs
           # after it re-adds the appended values' types onto the widened seed, so the seed's own value
@@ -246,12 +246,16 @@ module Rigor
         end
       end
 
-      # The local and ivar arms differ only in which pair of `Scope` accessors they use, so they are read out
-      # of one table rather than written twice: a carrier the widening responds to must not be widened on one
-      # kind of binding and left on the other.
+      # The arms per kind of binding differ only in which pair of `Scope` accessors they use, so they are read out
+      # of one table rather than written once per kind: a carrier the widening responds to must not be widened on
+      # one kind of binding and left on another. `$g << x; $g == "k"` folded always-truthy on a `$g` Ruby holds
+      # as `"kx"` while the table had only the local and ivar rows.
       ALIAS_ACCESSORS = Ractor.make_shareable({
                                                 Prism::LocalVariableReadNode => %i[local with_local],
-                                                Prism::InstanceVariableReadNode => %i[ivar with_ivar]
+                                                Prism::ItLocalVariableReadNode => %i[local with_local],
+                                                Prism::InstanceVariableReadNode => %i[ivar with_ivar],
+                                                Prism::ClassVariableReadNode => %i[cvar with_cvar],
+                                                Prism::GlobalVariableReadNode => %i[global with_global]
                                               })
       private_constant :ALIAS_ACCESSORS
 
@@ -259,11 +263,12 @@ module Rigor
         getter, builder = ALIAS_ACCESSORS[read.class]
         return scope if getter.nil?
 
-        current = scope.public_send(getter, read.name)
+        name = ReceiverAlias.read_name(read)
+        current = scope.public_send(getter, name)
         widened = widen_for_mutator(current, method_name, values: values, arg_types: arg_types)
         return scope if widened.nil?
 
-        MutationRejoin.rebind(scope, builder, read.name, widened, pre_state: current, kind: getter)
+        MutationRejoin.rebind(scope, builder, name, widened, pre_state: current, kind: getter)
       end
 
       # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning

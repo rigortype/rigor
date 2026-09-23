@@ -434,6 +434,115 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    # The receiver scan collected only local and instance-variable reads, so a global or class variable the prefix
+    # mutated in place did not make the body thread, and the tail kept the entry binding. The straight-line
+    # widening the threaded body runs had the same blind spot, so threading alone would not have moved it either.
+    it "threads through an append to a global" do
+      # THE REPORTED PROBE. Runtime `r` is `"k1"`; `r == "k"` folded to always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        $g = +"k"
+        m = Mutex.new
+        v = 1
+        r = m.synchronize { $g << v.to_s; $g }
+        puts "same" if r == "k"
+      RUBY
+    end
+
+    it "still reports the condition when the append lands on another global" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        $g = +"k"
+        $h = +"k"
+        m = Mutex.new
+        v = 1
+        r = m.synchronize { $h << v.to_s; $g }
+        puts "same" if r == "k"
+      RUBY
+    end
+
+    it "threads through an append to a class variable" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        class Buf
+          def run(v)
+            @@out = +"k"
+            m = Mutex.new
+            r = m.synchronize { @@out << v.to_s; @@out }
+            puts "same" if r == "k"
+          end
+        end
+      RUBY
+    end
+
+    it "still reports the condition when the append lands on another class variable" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        class Buf
+          def run(v)
+            @@out = +"k"
+            @@log = +"k"
+            m = Mutex.new
+            r = m.synchronize { @@log << v.to_s; @@out }
+            puts "same" if r == "k"
+          end
+        end
+      RUBY
+    end
+
+    it "threads through a compound index write on a global" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        $h = { a: 0 }
+        m = Mutex.new
+        v = m.synchronize do
+          $h[:a] += 1
+          $h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "still reports the condition when the index write lands on another global" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        $g = { a: 0 }
+        $h = { a: 0 }
+        m = Mutex.new
+        v = m.synchronize do
+          $g[:a] += 1
+          $h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    # `it` reads are `Prism::ItLocalVariableReadNode`, which carries no `name`: neither the tail's read set nor the
+    # receiver scan saw it, and the straight-line widening skipped it as a receiver, so the body typed from its
+    # entry element while the `|a|` spelling above widened.
+    it "threads a mutated `it` parameter at every per-element position, as it threads `|a|`" do
+      # Runtime `[[1], [1]]`; the fold answered `[[], []]`. The joined `Integer` is the pushed evidence, which the
+      # widening reads only when it knows the receiver names a carrier it will grow.
+      expected = "[Array[Dynamic[top] | Integer], Array[Dynamic[top] | Integer]]"
+      expect(dumped_type(<<~RUBY)).to eq(expected)
+        dump_type([[], []].map do
+          it << 1
+          it
+        end)
+      RUBY
+      expect(dumped_type(<<~RUBY)).to eq(expected)
+        dump_type([[], []].map do |a|
+          a << 1
+          a
+        end)
+      RUBY
+    end
+
+    it "leaves a tail that ignores the mutated `it` parameter unchanged" do
+      # A must-hold check rather than a control for the `it` naming: `b` is untouched on every path.
+      expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+        b = []
+        dump_type([[], []].map do
+          it << 1
+          b
+        end)
+      RUBY
+    end
+
     it "joins a value-carrying `next` ahead of the mutation with the widened tail" do
       # The two mechanisms compose. Before issue #841 the jump made the fold decline and the tail kept the
       # entry literal `[]` — no better than the runtime value (`[1]` or `5`). The join runs the same threaded
@@ -2657,6 +2766,148 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "widens a global the body appends to" do
+        # Runtime `"k1"`; the pass read `$g` at its entry `"k"`, since the receiver scan did not collect a global.
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          $g = +"k"
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            m.synchronize do
+              $g << w.to_s
+              $g
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports the condition the stale global folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          $g = +"k"
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            m.synchronize do
+              $g << w.to_s
+              $g
+            end
+          end
+          puts "same" if r == "k"
+        RUBY
+      end
+
+      it "still reports the condition when the tail reads a global the body does not touch" do
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          $g = +"k"
+          $h = +"k"
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            m.synchronize do
+              $h << w.to_s
+              $g
+            end
+          end
+          puts "same" if r == "k"
+        RUBY
+      end
+
+      it "widens a class variable the body appends to" do
+        expect(dumped_type(<<~RUBY)).to eq("String")
+          class Buf
+            def run(v)
+              @@out = +"k"
+              m = Mutex.new
+              dump_type(m.synchronize do
+                w = v
+                m.synchronize do
+                  @@out << w.to_s
+                  @@out
+                end
+              end)
+            end
+          end
+        RUBY
+      end
+
+      it "floors an `it` parameter the body mutated in place under a Tuple map, as it floors `|a|`" do
+        # Runtime `[[1], [1]]`; the fold read `it` at its entry `[]` and answered `[[], []]`.
+        expected = "[Dynamic[top], Dynamic[top]]"
+        expect(dumped_type(<<~RUBY)).to eq(expected)
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              it << w
+              it
+            end
+          end)
+        RUBY
+        expect(dumped_type(<<~RUBY)).to eq(expected)
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "leaves the body's `it` alone when only a nested block's own `it` is mutated" do
+        # Runtime `[[], []]`. The nested `each` block's `it` is that block's parameter, so the body's `it` is never
+        # mutated; filing both under `:it` floored the body's to `Dynamic[top]`. The `|a|` spelling never confused them.
+        expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              [[]].each { it << w }
+              it
+            end
+          end)
+        RUBY
+      end
+
+      it "floors the body's `it` mutated inside a loop, which binds no `it` of its own" do
+        # Runtime `[[1], [1]]`: a `for` body runs in the block's own scope, so its `it` is the body's.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              for i in [1]
+                it << w
+              end
+              it
+            end
+          end)
+        RUBY
+      end
+
+      it "leaves the body's `it` alone when only a nested lambda's own `it` is mutated" do
+        # Runtime `[[], []]`: the lambda's `it` is the `[]` it is called with.
+        expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              -> { it << w }.call([])
+              it
+            end
+          end)
+        RUBY
+      end
+
       it "keeps a nominal String pre-state the append cannot move" do
         # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
         expect(dumped_type(<<~RUBY)).to eq("String")
@@ -2846,6 +3097,99 @@ RSpec.describe "block-return scope threading", type: :runner do
       it "leaves a non-mutating sibling call pinned" do
         # `upcase` returns a new String; only the bang form rewrites the receiver.
         expect(dumped_type("s = +\"ab\"\ns.upcase\ndump_type(s)")).to eq("\"ab\"")
+      end
+
+      # The block-return threading above only helps a global or class variable once the straight-line widening the
+      # threaded body runs names one as well; with only the local and ivar rows it kept the literal here too.
+      it "stops the always-truthy firing on a mutated global" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          $s = +"ab"
+          $s << "c"
+          puts "x" if $s == "ab"
+        RUBY
+      end
+
+      it "still reports the condition on an unmutated global" do
+        expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+          $s = +"ab"
+          $t = +"ab"
+          $t << "c"
+          puts "x" if $s == "ab"
+        RUBY
+      end
+
+      it "stops the always-truthy firing on a mutated class variable" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          class Buf
+            def run
+              @@s = +"ab"
+              @@s << "c"
+              puts "x" if @@s == "ab"
+            end
+          end
+        RUBY
+      end
+
+      it "widens a mutated `it` parameter" do
+        expect(dumped_type("[+\"ab\"].each do\n  it << \"c\"\n  dump_type(it)\nend")).to eq("String")
+      end
+
+      # A write evaluates to the variable it writes, so `(@@c ||= []) << 1` mutates `@@c`. The local and
+      # instance-variable spellings were aliased first; the class-variable and global ones kept the `[]` the `||=`
+      # stored, and `@@c.first.succ` then reported a nil receiver on code whose `@@c.first` is `1`.
+      it "widens a class variable and a global written in the mutated receiver itself" do
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          class Reg
+            def add_cvar
+              @@c = nil
+              (@@c ||= []) << 1
+              @@c.first.succ
+            end
+
+            def add_global
+              $gc = nil
+              ($gc ||= []) << 1
+              $gc.first.succ
+            end
+          end
+        RUBY
+      end
+
+      it "still reports the nil receiver when the write lands on another class variable or global" do
+        # The read variable starts as an empty literal, so naming it by mistake would widen it and silence `succ`.
+        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method", "call.undefined-method"])
+          class Reg
+            def add_cvar
+              @@c = []
+              @@d = nil
+              (@@d ||= []) << 1
+              @@c.first.succ
+            end
+
+            def add_global
+              $gc = []
+              $gd = nil
+              ($gd ||= []) << 1
+              $gc.first.succ
+            end
+          end
+        RUBY
+      end
+
+      # The widening joins the pushed value only when it knows the receiver names a carrier it will grow
+      # (`MutationWidening.joinable_receiver?`); a kind that check skipped widened to a bare `Array[Dynamic[top]]`.
+      it "joins the pushed value into a mutated global, class variable and `it` parameter" do
+        expect(dumped_type("$acc = []\n$acc << 1\ndump_type($acc)")).to eq("Array[Dynamic[top] | Integer]")
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top] | Integer]")
+          class Acc
+            def run
+              @@acc = []
+              @@acc << 1
+              dump_type(@@acc)
+            end
+          end
+        RUBY
+        expect(dumped_type("[[]].each do\n  it << 1\n  dump_type(it)\nend")).to eq("Array[Dynamic[top] | Integer]")
       end
     end
   end

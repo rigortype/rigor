@@ -46,6 +46,18 @@ memo = %i[a a].each_with_object({ a: 0 }) { |k, m| m[k] = m[k] + 1 }
 assert_type("Hash[Symbol, 0 | Integer]", memo)
 puts "two" if memo[:a] == 2
 
+# --- A String the same block appends to. Its join is `String` whatever it
+# stored, so a store that reads it sees `String`, never its pre-call
+# value (which read `Array[0]` here). ---
+buf = +""
+lens = []
+%w[ab cd].each do |w|
+  buf << w
+  lens << buf.length
+end
+assert_type("Array[non-negative-int]", lens)
+puts "four" if lens.last == 4
+
 # --- Evidence that grows structurally on every pass never converges, and
 # the slot floors to its one-unknown-store answer: the seed's `[]` element
 # survives beside `Dynamic[top]`. ---
@@ -61,6 +73,20 @@ fixed = { a: 0 }
 %i[a a a].each { |k| fixed[k] = 1 }
 assert_type("Hash[:a | Symbol, 0 | 1]", fixed)
 puts "three" if fixed[:a] == 3 # GENUINE-FALSEY
+
+# --- Paired control, mixed block: a store that reads nothing keeps its
+# one-pass evidence beside a self-reading store — only a moving slot is
+# widened — and the fold it supports still fires: `ones` only ever
+# holds 1. ---
+ones = []
+tails = [0]
+[1, 2].each do |x|
+  ones << 1
+  tails << (tails.last + x)
+end
+assert_type("Array[1]", ones)
+assert_type("Array[0 | Integer]", tails)
+puts "two" if ones.last == 2 # GENUINE-FALSEY
 
 # --- Issue #586 / WD2.9: an empty accumulator filled from the block's
 # element closes over the body's stores — no gradual arm. ---

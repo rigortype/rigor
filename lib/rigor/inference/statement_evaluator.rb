@@ -2681,27 +2681,37 @@ module Rigor
       # The evidence is typed in the block-entry scope, where each mutated collection still holds its PRE-CALL
       # contents. A store whose evidence reads one of them therefore records the FIRST iteration's answer: `h = { a:
       # 0 }; [:a, :a, :a].each { |k| h[k] = h[k] + 1 }` stored `1` as far as a single pass could tell, the join read
-      # `Hash[:a | Symbol, 0 | 1]`, and `h[:a] == 3` folded always-falsey on a program that prints. Such evidence is
-      # iterated to a fixpoint through {BodyFixpoint} — each evidence slot is one of its names, and each pass re-types
-      # the stores with every mutated collection bound to its seed joined with the evidence so far — so the join above
-      # widens to `Hash[Symbol, 0 | Integer]` on the final pass, and evidence that keeps growing structurally floors to
-      # `Dynamic[top]`, the slot's one-unknown-store answer.
+      # `Hash[:a | Symbol, 0 | 1]`, and `h[:a] == 3` folded always-falsey on a program that prints.
       #
-      # That is what keeps this seam's claim to complete evidence true ({MutationWidening#gradual_floor} rests on it):
-      # the scan sees every store in the body, and the fixpoint makes each one's evidence hold for every iteration, not
-      # just the first. A gradual arm on every self-reading store would be sound too, but its `Dynamic` would quiet
-      # every later read of the collection, where the converged `Integer` still reports `h[:a].upcase`. Evidence no
-      # store can read — the `acc = []; xs.each { |x| acc.push(x) }` accumulator — is typed once, as before: a second
-      # pass could only reproduce it.
+      # So each collection a store reads is bound to what it holds at ANY iteration's entry. A name none of whose
+      # stores reads a mutated Array or Hash is FIXED: its evidence is the same on every iteration, so it is typed
+      # once and the name is bound to its own join — a String to `String`, whatever it stored, so `lens << buf.length`
+      # after `buf << w` reads `Integer`, not the length of `buf`'s pre-call value. Every other name MOVES, and its
+      # evidence is iterated to a fixpoint through {BodyFixpoint}: each of its evidence slots is one fixpoint name,
+      # and each pass re-types its stores with every moving collection bound to its seed joined with the evidence so
+      # far. The join above widens to `Hash[Symbol, 0 | Integer]` on the final pass, and evidence that keeps growing
+      # structurally floors to `Dynamic[top]`, the slot's one-unknown-store answer. Only moving slots are ever
+      # widened, so `acc << 1` beside such a store keeps `Array[1]`.
+      #
+      # That is what keeps this seam's claim to complete evidence ({MutationWidening#gradual_floor} rests on it): the
+      # scan sees every store in the body, and no store's evidence is read off a first-iteration binding. The final
+      # pass trusts its widening without re-checking it, exactly as slice A's fixpoint does (ADR-56 WD3). A gradual
+      # arm on every self-reading store would be sound too, but its `Dynamic` would quiet every later read of the
+      # collection, where the converged `Integer` still reports `h[:a].upcase`. With no moving name — the `acc = [];
+      # xs.each { |x| acc.push(x) }` accumulator — this is the single pass it always was.
       def join_content_to_fixpoint(sites, seeds, entry)
         kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
         return {} if kinds.empty?
 
-        evidence = if content_evidence_self_read?(sites, kinds)
-                     converge_content_evidence(sites, seeds, kinds, entry)
-                   else
-                     content_evidence(sites, kinds, entry)
-                   end
+        moving = moving_content_names(sites, kinds)
+        fixed = kinds.except(*moving)
+        strings, settled = fixed.partition { |_name, kind| kind == :string }.map(&:to_h)
+        fixed_entry = bind_content_joins(entry, strings, seeds, {})
+        evidence = content_evidence(sites, fixed, fixed_entry)
+        unless moving.empty?
+          base = bind_content_joins(fixed_entry, settled, seeds, evidence)
+          evidence = evidence.merge(converge_content_evidence(sites, seeds, kinds.slice(*moving), base))
+        end
         kinds.to_h { |name, kind| [name, join_content_evidence(seeds[name], kind, name, evidence)] }
       end
 
@@ -2715,14 +2725,34 @@ module Rigor
         :array if arrayish?(pre_state)
       end
 
-      def converge_content_evidence(sites, seeds, kinds, entry)
+      # The names whose evidence can differ between iterations: a store that reads a mutated Array or Hash among its
+      # arguments (a `[]=` call's stored value is one), or an Array-side compound index write (`a[i] += v`), whose
+      # stored value is computed from the slot it overwrites. A String never moves — its join is `String` whatever it
+      # stored — and the Hash side floors an index write's value, so there only the key arguments are typed.
+      def moving_content_names(sites, kinds)
+        movable = kinds.reject { |_name, kind| kind == :string }.keys
+        movable.select do |name|
+          sites[name].any? do |node|
+            (kinds[name] == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
+          end
+        end
+      end
+
+      def bind_content_joins(scope, kinds, seeds, evidence)
+        kinds.reduce(scope) do |acc, (name, kind)|
+          acc.with_local(name, join_content_evidence(seeds[name], kind, name, evidence))
+        end
+      end
+
+      # `base` binds every fixed name to its join; the moving names are rebound on each pass.
+      def converge_content_evidence(sites, seeds, kinds, base)
         slots = kinds.flat_map { |name, kind| CONTENT_EVIDENCE_SLOTS.fetch(kind).map { |slot| [name, slot] } }
         BodyFixpoint.converge(
           names: slots,
           seed_bindings: slots.to_h { |slot| [slot, Type::Combinator.bot] },
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: lambda do |assumption|
-            pass_entry = kinds.reduce(entry) do |acc, (name, kind)|
+            pass_entry = kinds.reduce(base) do |acc, (name, kind)|
               acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
             end
             content_evidence(sites, kinds, pass_entry)
@@ -2730,7 +2760,7 @@ module Rigor
         )
       end
 
-      # The binding a fixpoint pass reads a mutated collection at: its seed until any evidence exists, then the seed
+      # The binding a fixpoint pass reads a moving collection at: its seed until any evidence exists, then the seed
       # joined with the evidence so far.
       def content_carrier_under(seed, kind, name, evidence)
         no_evidence = CONTENT_EVIDENCE_SLOTS.fetch(kind).all? { |slot| present_evidence(evidence[[name, slot]]).empty? }
@@ -2768,19 +2798,6 @@ module Rigor
 
       def present_evidence(type)
         type.nil? || type.is_a?(Type::Bot) ? [] : [type]
-      end
-
-      # True when some store's evidence can read a collection the join moves: a local read of a mutated name among its
-      # arguments (a `[]=` call's stored value is one), or an Array-side compound index write (`a[i] += v`), whose
-      # stored value is computed from the slot it overwrites. The Hash side floors an index write's value, so there
-      # only the key arguments are typed.
-      def content_evidence_self_read?(sites, kinds)
-        names = kinds.keys
-        kinds.any? do |name, kind|
-          sites[name].any? do |node|
-            (kind == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, names)
-          end
-        end
       end
 
       def store_arguments_read?(node, names)

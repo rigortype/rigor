@@ -1,13 +1,17 @@
 ---
 locals:
   acc: Array[Integer]
+  buf: String
   counts: Hash[Symbol, 0 | Integer]
   fixed: Hash[:a | Symbol, 0 | 1]
+  lens: Array[non-negative-int]
   memo: Hash[Symbol, 0 | Integer]
   nested: Array[Dynamic[top] | []]
+  ones: Array[1]
   sizes: Array[0 | Integer]
   slots: Array[0 | Integer]
   sums: Array[0 | Integer]
+  tails: Array[0 | Integer]
   tally: Hash[Symbol, 0 | Integer]
 assertions:
   '1': Hash[Symbol, 0 | Integer]
@@ -16,6 +20,9 @@ assertions:
   '4': Array[0 | Integer]
   '5': Array[0 | Integer]
   '6': Hash[Symbol, 0 | Integer]
-  '7': Array[Dynamic[top] | []]
-  '8': Hash[:a | Symbol, 0 | 1]
-  '9': Array[Integer]
+  '7': Array[non-negative-int]
+  '8': Array[Dynamic[top] | []]
+  '9': Hash[:a | Symbol, 0 | 1]
+  '10': Array[1]
+  '11': Array[0 | Integer]
+  '12': Array[Integer]

@@ -1441,6 +1441,7 @@ module Rigor
       # 1), reflecting the common case where no `break VALUE` is observed.
       def eval_loop(node)
         _pred_type, post_pred = sub_eval(node.predicate, scope)
+        post_pred = widen_predicate_pins(node, post_pred)
         return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 
         # The historical single body pass joined with the pre-loop scope. This continues to carry everything the
@@ -1473,6 +1474,31 @@ module Rigor
         post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
         post_loop = narrow_loop_exit_edge(node, post_loop)
         [Type::Combinator.constant_of(nil), post_loop]
+      end
+
+      # A `while` / `until` predicate runs before every iteration and once more to leave, but the walk evaluates it
+      # once, from the scope before the loop. A variable it writes therefore holds its first evaluation's value, and a
+      # value pin there is a claim about that evaluation alone when a later evaluation can store something else: when
+      # the predicate reads the variable it writes (`i = 0; while (i += 1) < 3; end` pinned `i` to `1`, and the exit
+      # edge `i >= 3` contradicted the pin and left `i` as `bot`), or reads one the body rebinds (`while check(k = i *
+      # 2); i += 1; end`). Each such binding is widened past its value pin (`Type::Combinator.widen_value_pinned`), as
+      # the loop fixpoint widens a body's rebinds; a write that reads neither stores the same answer every time and
+      # keeps it (`until line = (flag ? "x" : nil)` still exits on `"x"`). Issue #1223 made the shape common: a write
+      # nested in a predicate's call operand was not threaded at all before it.
+      def widen_predicate_pins(node, post_pred)
+        written = OperandEffects.written_variables(node.predicate)
+        return post_pred if written.empty?
+
+        reads = OperandEffects.read_variables(node.predicate)
+        body_writes = OperandEffects.written_variables(node.statements)
+        varying = reads.intersect?(body_writes) ? written : written & reads
+        varying.reduce(post_pred) do |acc, name|
+          current = CapturedLocals.bound_type(acc, name)
+          next acc if current.nil?
+
+          widened = Type::Combinator.widen_value_pinned(current)
+          widened == current ? acc : CapturedLocals.bind(acc, name, widened)
+        end
       end
 
       # The continuation scope for a loop whose body rebinds locals: the ADR-56 slice-B rebind fixpoint overlaid on

@@ -3177,6 +3177,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(local_after("s = 0\nr = nil\nr&.foo(s = 1)\n", :s)).to eq(union(0, 1))
     end
 
+    it "widens a loop predicate's write past the one evaluation the walk makes" do
+      # Runtime `3`. The pinned `1` met the exit edge `i >= 3` and left `i` as `bot`.
+      expect(local_after("i = 0\nwhile (i += 1) < 3\nend\n", :i).describe).to eq("Integer[3..]")
+      k = local_after("i = 0\nk = nil\nwhile check(k = i * 2)\n  i += 1\nend\n", :k)
+      expect(k).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
     it "carries a write in an argument's block through that call's write-back" do
       expect(local_after("t = 0\nputs([1].each { |x| t = :w })\n", :t)).to eq(union(0, :w))
     end

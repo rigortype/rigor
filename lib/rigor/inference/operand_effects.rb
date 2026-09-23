@@ -35,13 +35,20 @@ module Rigor
         Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
       ].freeze
+      COMPOUND_LOCAL_WRITES = Set[
+        Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
+      ].freeze
+      COMPOUND_INSTANCE_WRITES = Set[
+        Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode
+      ].freeze
       JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
       SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
       OPAQUE_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
-      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :JUMP_NODES, :SCOPE_NODES,
-                       :OPAQUE_NODES
+      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :COMPOUND_LOCAL_WRITES,
+                       :COMPOUND_INSTANCE_WRITES, :JUMP_NODES, :SCOPE_NODES, :OPAQUE_NODES
 
       module_function
 
@@ -73,6 +80,28 @@ module Rigor
         collect_written(node, 0, names) if node.is_a?(Prism::Node)
         names.uniq
       end
+
+      # The locals and instance variables `node` reads, named as {.written_variables} names them. A compound write
+      # (`x += 1`, `x ||= v`) reads the variable it writes.
+      def read_variables(node)
+        names = []
+        collect_read(node, 0, names) if node.is_a?(Prism::Node)
+        names.uniq
+      end
+
+      def collect_read(node, nesting, names)
+        klass = node.class
+        if klass == Prism::LocalVariableReadNode || COMPOUND_LOCAL_WRITES.include?(klass)
+          names << node.name if node.depth >= nesting
+        elsif klass == Prism::InstanceVariableReadNode || COMPOUND_INSTANCE_WRITES.include?(klass)
+          names << node.name
+        end
+        return if OPAQUE_NODES.include?(klass)
+
+        nesting += 1 if SCOPE_NODES.include?(klass)
+        node.rigor_each_child { |child| collect_read(child, nesting, names) }
+      end
+      private_class_method :collect_read
 
       def collect_written(node, nesting, names)
         klass = node.class

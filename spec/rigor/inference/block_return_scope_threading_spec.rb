@@ -1653,24 +1653,27 @@ RSpec.describe "block-return scope threading", type: :runner do
     # two ever disagree on reaches the fixpoint unflagged; stubbing the scan empty stands in for that drift. A
     # literal `Tuple` / `HashShape` seed carries a first-iteration pin as surely as a `Constant` — its arity and
     # its key set — so the backstop has to take it too.
+    #
+    # Each rebind sits in a `when` condition, a position the evaluator does not thread, so the fixpoint cannot see
+    # it. If the evaluator ever threads that position, move these rebinds to one it still does not.
     describe "(1), the unmoved-pin floor over a literal-shape seed the scan misses" do
       before do
         allow(Rigor::Inference::UnthreadedRebinds).to receive(:names).and_return(Set.new)
       end
 
-      it "floors a Tuple seed a rebind nested inside an expression leaves unmoved" do
+      it "floors a Tuple seed an unthreaded rebind leaves unmoved" do
         # Runtime `[[0], [0, 1]]`. The fixpoint converged on the `[0]` seed, which the pin test read as carrying
         # no pin, so both positions answered the first iteration's one-element array.
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           g = [0]
-          dump_type([1, 2].map { |i| [g, ((g += [1]).size == 3)].first })
+          dump_type([1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x })
         RUBY
       end
 
       it "no longer reports the size check the pinned arity folded" do
         expect(flow_rules(<<~RUBY)).to be_empty
           g = [0]
-          r = [1, 2].map { |i| [g, ((g += [1]).size == 3)].first }
+          r = [1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x }
           puts "one" if r.last.size == 1
         RUBY
       end
@@ -1679,7 +1682,7 @@ RSpec.describe "block-return scope threading", type: :runner do
         # Runtime `[{ a: 0 }, { a: 0, b: 1 }]`.
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           h = { a: 0 }
-          dump_type([1, 2].map { |i| [h, (h = h.merge(b: 1)).size].first })
+          dump_type([1, 2].map { |i| x = h; case i when (h = h.merge(b: 1)) then 0 end; x })
         RUBY
       end
 
@@ -1688,7 +1691,7 @@ RSpec.describe "block-return scope threading", type: :runner do
         expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
           def run(flag)
             g = flag ? [0] : nil
-            dump_type([1, 2].map { |i| [g, (g = [0, 1]).size].first })
+            dump_type([1, 2].map { |i| x = g; case i when (g = [0, 1]) then 0 end; x })
           end
         RUBY
       end

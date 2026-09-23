@@ -58,6 +58,11 @@ All merged, CI green, adversarial review (Fable/Grok) Approved:
   `PluginFacts`+`Row`/`Edge`) unblocking all four `Runner#effect_*` readers; review dropped
   `forced_file_effects` (private API is not declared in `sig/`) and scoped `#1154` markers to
   initialize-parameter readers only.
+- [#1190](https://github.com/rigortype/rigor/pull/1190) → `c56c2ccf` — #1181 slice 7:
+  `Effects::Registry`, `Plugin::{EffectAttribution,EffectEdge,EffectAncestry,EffectEntryPoints}`,
+  `Registry::Contribution`; `Manifest`/`Base`/`Registry` `effect_*` readers +
+  `PluginFacts#extend_registry`/`contributions:`/`entry_points` tightened. Grok+Opus review:
+  `effect_owner` narrows via a local (no suppression needed); `effects?`/ancestry filed as #1200.
 
 Earlier `queue-release` merges (`#1158`–`#1162`, `79fa99cf`/`9fd4b6d4`/`19c2af59`) are all landed;
 no open PRs at handoff time.
@@ -69,15 +74,17 @@ Nothing new. Long-standing `ready-for-human` backlog is unchanged (`gh issue lis
 ## What is worth picking up next
 
 - **#1181** — Class B sig-coverage backlog (landed: Baseline #1184, AdditionalInitializer #1185,
-  ProtocolContract #1186, ProjectScan #1187, Effects bound #1188, Effects collection #1189 —
-  `Effects::*` is done). Remaining: `Plugin::Macro::*` (Manifest `block_as_methods` /
-  `heredoc_templates` / `nested_class_templates` / `trait_registries`), `Inference::HktRegistry::*`
+  ProtocolContract #1186, ProjectScan #1187, Effects bound #1188, Effects collection #1189,
+  vocabulary/Contribution #1190 — `Effects::*` and the plugin effect row classes are done).
+  Remaining: `Plugin::Macro::*` (Manifest `block_as_methods` / `heredoc_templates` /
+  `nested_class_templates` / `trait_registries`), `Inference::HktRegistry::*`
   (`#hkt_registrations` / `#hkt_definitions`), `Environment::Reflection` + the three `*_reporter`
-  duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types, and stragglers
-  `Effects::Registry`, `Plugin::Registry::Contribution`, `Plugin::EffectEntryPoints`,
-  `Rigor::FlowContribution`. Process: `rigor sig-gen --print` provenance first per
-  `docs/agents/type-authoring.md`; `#1154` markers only cover readers assigned from `initialize`
-  parameters — `absorb`/`compute`-built readers pin unmarked.
+  duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types, and
+  `Rigor::FlowContribution` (`RbsExtended.read_flow_contribution`). Process: `rigor sig-gen
+  --print` provenance first per `docs/agents/type-authoring.md`; `#1154` markers only cover
+  readers assigned from `initialize` parameters — `absorb`/`compute`-built readers pin unmarked;
+  `#1150` for `Data`/`Struct` members; reviewers are Grok 4.6 + Opus (`run-role.sh reviewer`,
+  `PRINT=1` + prompt).
 - **#1177** — `OptimisticOrigin` lost across method boundary (needs-triage; a
   `rigor-wt/optimistic-origin-nil-predicate` directory exists on disk but is NOT a registered
   worktree — verify before reusing).

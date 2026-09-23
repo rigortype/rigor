@@ -401,6 +401,21 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
       RUBY
     end
 
+    it "floors a Tuple seed only a `next` arm rebinds, as it floors a Constant" do
+      # A `Tuple`'s arity is a first-iteration pin like a `Constant`'s value, so the same trade applies:
+      # the joined `[0] | [5]` is right here, and is given up with the hidden-rebind case it cannot be told from.
+      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], Dynamic[top]]")
+        g = [0]
+        dump_type([1, 2].map do |e|
+          if e.odd?
+            g = [5]
+            next e
+          end
+          g
+        end)
+      RUBY
+    end
+
     it "keeps the unmoved-pin floor when a `next` arm moves a name the fall-through writes unthreaded" do
       # `(seen += 1) == 2` is a write the evaluator does not thread. The `next` arm moved `seen` to `0 | 100`, so a
       # converged-binding test believed it and folded `find` to `nil`: `r.succ` became `undefined method` for

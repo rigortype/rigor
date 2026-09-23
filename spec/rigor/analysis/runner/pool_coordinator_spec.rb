@@ -1472,7 +1472,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       expect(calls).to eq([["a.rb", built]])
     end
 
-    it "snapshots quarantined signatures and the env-build failure when the project declares signature_paths" do
+    it "snapshots the whole project-signature state when the project declares signature_paths" do
       configuration = Rigor::Configuration.new("signature_paths" => ["sig"])
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       coordinator = build_coordinator(
@@ -1480,16 +1480,19 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       )
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [], virtual_rbs: [],
-                                       quarantined_signatures: ["bad.rbs"], env_build_failure: [StandardError, 1, []],
-                                       definition_build_failures: []
+                                       synthesized_namespaces: ["Acme"], quarantined_signatures: ["bad.rbs"],
+                                       env_build_failure: [StandardError, 1, []], definition_build_failures: []
       )
       built = instance_double(Rigor::Environment, rbs_loader: loader, hkt_registry: nil, hkt_scan_failure: nil)
       allow(coordinator).to receive(:build_runner_environment).and_return(built)
+      allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan).with(loader).and_return([:conformance_hit])
 
       coordinator.send(:analyze_files_sequentially_fallback, ["a.rb"], reason: "x")
 
+      expect(snapshots.synthesized_namespaces).to eq(["Acme"])
       expect(snapshots.quarantined_signatures).to eq(["bad.rbs"])
       expect(snapshots.env_build_failure).to eq([StandardError, 1, []])
+      expect(snapshots.conformance_results).to eq([:conformance_hit])
     end
 
     it "leaves quarantined signatures and the env-build failure at their inert defaults " \
@@ -1505,6 +1508,67 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(snapshots.quarantined_signatures).to eq([])
       expect(snapshots.env_build_failure).to be_nil
+    end
+
+    # `class Acme::Widget` has no enclosing `module Acme`, so the loader synthesizes one. `Reader` declares
+    # `conforms-to _Reads` without `read`. `DupDemo` is declared twice under the same directive, and no
+    # analysed file names it, so the conformance scan is the only demand that reaches its failing build.
+    def write_signature_state_fixture(dir)
+      sig = File.join(dir, "sig")
+      FileUtils.mkdir_p(sig)
+      File.write(File.join(sig, "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+      File.write(File.join(sig, "reads.rbs"), <<~RBS)
+        interface _Reads
+          def read: () -> String
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class Reader
+        end
+
+        %a{rigor:v1:conforms-to _Reads}
+        class DupDemo
+          def read: () -> String
+        end
+      RBS
+      File.write(File.join(sig, "dup.rbs"), "class DupDemo\n  def read: () -> String\nend\n")
+      File.write(File.join(dir, "a.rb"), "x = 1\n")
+      Rigor::Configuration.new("paths" => [dir], "signature_paths" => [sig])
+    end
+
+    def signature_state(snapshots)
+      [snapshots.synthesized_namespaces,
+       snapshots.conformance_results.map { |record| [record.class, record.class_name] },
+       snapshots.definition_build_failures.map(&:first)]
+    end
+
+    # #798 brought the fork and Ractor pools up to `#snapshot_project_signature_state` and left this path
+    # hand-copying three of its slots, so a run that degraded here (no `fork`; `RIGOR_POOL_BACKEND=ractor`
+    # with `--no-cache`) never set `synthesized_namespaces` or `conformance_results`. The run then lost
+    # `rbs.coverage.synthesized-namespace`, every `rigor:v1:conforms-to` row, and the definition-build
+    # failure only the conformance scan demands. Both sides build a real environment over the same fixture,
+    # so the fallback is compared with what the sequential path actually reports.
+    it "reports the same project-signature state as the sequential path over a real environment" do
+      Dir.mktmpdir do |dir|
+        configuration = write_signature_state_fixture(dir)
+        path = File.join(dir, "a.rb")
+        allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:warn) # rubocop:disable RSpec/AnyInstance
+        sequential = Rigor::Analysis::Runner::RunSnapshots.new
+        fallback = Rigor::Analysis::Runner::RunSnapshots.new
+
+        Dir.chdir(dir) do
+          coordinator = build_coordinator(configuration: configuration, snapshots: sequential)
+          coordinator.analyze_files_sequentially([path], coordinator.build_runner_environment(source_files: [path]))
+          build_coordinator(configuration: configuration, snapshots: fallback)
+            .send(:analyze_files_sequentially_fallback, [path], reason: "x")
+        end
+
+        # Guards the fixture: an empty state on both sides would pass the equality below for the wrong reason.
+        expect(signature_state(sequential)).to eq(
+          [["Acme"], [[Rigor::RbsExtended::ConformanceChecker::Unsatisfied, "Reader"]], ["DupDemo"]]
+        )
+        expect(signature_state(fallback)).to eq(signature_state(sequential))
+      end
     end
   end
 end

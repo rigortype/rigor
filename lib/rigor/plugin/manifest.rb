@@ -267,10 +267,11 @@ module Rigor
       # otherwise. A third-party plugin's `effect_root:` is ignored here (and warned about by the registry),
       # so it opens only the root named after itself.
       def effect_owner
-        return id if effect_root.nil?
+        root = effect_root
+        return id if root.nil?
         return id unless FirstParty.bundled?(id)
 
-        effect_root
+        root
       end
 
       # Whether this plugin's `effect_attributions:` may carry `discharge: true` (ADR-103 WD6).

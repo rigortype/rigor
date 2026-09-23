@@ -3,7 +3,7 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?rbs_complete_ancestors: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: Array[Rigor::Plugin::ProtocolContract], ?source_rbs_synthesizer: untyped, ?additional_initializers: Array[Rigor::Plugin::AdditionalInitializer], ?effect_root: untyped, ?effect_labels: untyped, ?effect_attributions: untyped, ?effect_edges: untyped, ?effect_entry_points: untyped, ?effect_ancestry: untyped, ?template_globs: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?target_gems: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?rbs_complete_ancestors: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: Array[Rigor::Plugin::ProtocolContract], ?source_rbs_synthesizer: untyped, ?additional_initializers: Array[Rigor::Plugin::AdditionalInitializer], ?effect_root: String?, ?effect_labels: Array[String], ?effect_attributions: Array[Rigor::Plugin::EffectAttribution], ?effect_edges: Array[Rigor::Plugin::EffectEdge], ?effect_entry_points: Array[Rigor::Plugin::EffectEntryPoints], ?effect_ancestry: Array[Rigor::Plugin::EffectAncestry], ?template_globs: untyped) -> void
 
   # Public attribute readers (the full `attr_reader` surface). Plugins
   # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
@@ -46,6 +46,31 @@ class Rigor::Plugin::Manifest
   # the validator (`validate_additional_initializers!`) requires every element
   # `is_a?(AdditionalInitializer)`, so the element type is hand-written.
   def additional_initializers: () -> Array[Rigor::Plugin::AdditionalInitializer]
+
+  # sig-gen gap: #1154 — `attr_reader` over an ivar assigned in `initialize` from a parameter
+  # (`to_s`-normalized); `validate_effect_root!` bounds the spelling.
+  def effect_root: () -> String?
+  # sig-gen gap: #1154 — `attr_reader` over an ivar normalized in `initialize` from a parameter;
+  # `validate_effect_labels!` requires non-empty `String` elements.
+  def effect_labels: () -> Array[String]
+  # sig-gen gap: #1154 — `attr_reader` over an ivar assigned in `initialize` from a parameter;
+  # `validate_effect_attributions!` requires every element `is_a?(EffectAttribution)`.
+  def effect_attributions: () -> Array[Rigor::Plugin::EffectAttribution]
+  # sig-gen gap: #1154 — same shape; `validate_effect_edges!` requires `is_a?(EffectEdge)`.
+  def effect_edges: () -> Array[Rigor::Plugin::EffectEdge]
+  # sig-gen gap: #1154 — same shape; `validate_effect_entry_points!` requires
+  # `is_a?(EffectEntryPoints)`.
+  def effect_entry_points: () -> Array[Rigor::Plugin::EffectEntryPoints]
+  # sig-gen gap: #1154 — same shape; `validate_effect_ancestry!` requires `is_a?(EffectAncestry)`.
+  def effect_ancestry: () -> Array[Rigor::Plugin::EffectAncestry]
+
+  # The identity opening a root when this plugin's labels join the run's vocabulary: the
+  # `effect_root` for a bundled first-party plugin that declares one, the plugin `id` otherwise.
+  def effect_owner: () -> String
+  # Whether this plugin's `effect_attributions:` may carry `discharge: true` (ADR-103 WD6).
+  def effect_discharge_allowed?: () -> bool
+  # Whether the plugin contributes anything to the effect surfaces at all.
+  def effects?: () -> bool
 
   def validate_config: (untyped) -> Array[String]
   def to_h: () -> Hash[String, untyped]

@@ -25,6 +25,12 @@ RSpec.describe "block-return scope threading", type: :runner do
   # exactly one; "reports exactly one dump per fixture" below is the assertion that keeps it honest.
   def dumped_type(source) = dumped_types(source).first
 
+  # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
+  def flow_rules(source)
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+  end
+
   describe "the tail reads a name the body binds" do
     it "types a block-local tail through a generic block-return signature" do
       # The reported repro: `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the block's return type IS
@@ -336,12 +342,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # `true`. The fold now runs the ADR-56 `BodyFixpoint` over the rebound names up front and types every
   # position with them bound to the converged (widened) type — what the local can be in ANY iteration.
   describe "captured outer locals the body rebinds under the per-element fold" do
-    # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     it "widens a rebound counter to its continuation binding at every position" do
       # THE ISSUE'S PROBE. Before the fix this answered `[1, 1]` (and `[0, 0]` before #584 — a pin either way).
       expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
@@ -784,11 +784,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # Issue #617 — the four block-return residues #587 left behind. Each pair is a residue plus the arm that
   # must keep folding, because every decline here is bought with precision somewhere adjacent.
   describe "issue #617 block-return residues" do
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     describe "(1) find / detect / index / find_index over a rebound-capture predicate" do
       it "answers an element-or-nil where the entry-scope predicate short-circuited to nil" do
         # Runtime answer is `2`. The per-position predicates do not fold, so the walk floors instead of
@@ -965,6 +960,131 @@ RSpec.describe "block-return scope threading", type: :runner do
         # `upcase` returns a new String; only the bang form rewrites the receiver.
         expect(dumped_type("s = +\"ab\"\ns.upcase\ndump_type(s)")).to eq("\"ab\"")
       end
+    end
+  end
+
+  # The HashShape twin of #587 (b). `transform_values` / `transform_keys` over a closed `HashShape` type the
+  # block once per pair, every pair from the same entry scope, so a captured local the body rebinds was read at
+  # its first-iteration value at every pair: `{ x: 1, y: 1 }` for a block whose runtime values are `{ x: 1,
+  # y: 2 }`. The per-pair fold now takes the per-element fold's entry binding, the parameter bound to the
+  # union of the values (or keys) for the fixpoint.
+  describe "captured outer locals the body rebinds under the HashShape per-pair fold" do
+    it "widens a rebound counter at every value pair" do
+      # THE REPORTED PROBE. Before the fix this answered `{ x: 1, y: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        dump_type({ x: 1, y: 2 }.transform_values { |e| total += 1 })
+      RUBY
+    end
+
+    it "no longer reports the condition the first-iteration pin used to fold" do
+      # THE HAZARD: `r[:y] == 1` folded to `Constant[true]` off the pinned `{ x: 1, y: 1 }`; it is `2 == 1`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        total = 0
+        r = { x: 1, y: 2 }.transform_values { |e| total += 1 }
+        puts "x" if r[:y] == 1
+      RUBY
+    end
+
+    it "still reports the condition when the per-pair fold is exact" do
+      # The must-fire sibling: a body that rebinds nothing keeps its exact per-pair values.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        r = { x: 1, y: 2 }.transform_values { |e| e }
+        puts "x" if r[:y] == 2
+      RUBY
+    end
+
+    it "widens an accumulator fed by the block parameter" do
+      # `{ x: 1, y: 3 }` at runtime; the pin answered `{ x: 1, y: 2 }`, the value itself.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "widens past the Tuple fold's arity cap, which the per-pair fold does not have" do
+      # `45` at `:k9` at runtime; the pin answered `9`. No cap means no above-the-cap floor either: every pair
+      # threads its full body, and the fixpoint's cost does not scale with the pair count.
+      pairs = (1..9).map { |n| "k#{n}: #{n}" }.join(", ")
+      expected = (1..9).map { |n| "k#{n}: Integer" }.join(", ")
+      expect(dumped_type(<<~RUBY)).to eq("{ #{expected} }")
+        total = 0
+        dump_type({ #{pairs} }.transform_values do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "widens the bang form through the same fold" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        h = { x: 1, y: 2 }
+        dump_type(h.transform_values! { |e| total += 1 })
+      RUBY
+    end
+
+    it "keeps a pair whose tail reads a captured local the body does not rebind" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 5, y: 5 }")
+        total = 0
+        k = 5
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          total += e
+          k
+        end)
+      RUBY
+    end
+
+    it "keeps a value fold that ignores the rebound counter" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 10, y: 20 }")
+        seen = 0
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          seen += 1
+          e * 10
+        end)
+      RUBY
+    end
+
+    it "declines a key fold whose new keys the pinned counter spelled" do
+      # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1": 1,
+      # "b1": 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
+      # no single `Constant`, so the tier declines to the dispatcher. Only the decline is asserted: the
+      # dispatcher's key argument comes from the generic block-return pass, which types the body from the
+      # call's entry scope and still reads `i` as `1` there.
+      expect(dumped_type(<<~RUBY)).to start_with("Hash[")
+        i = 0
+        dump_type({ a: 1, b: 2 }.transform_keys do |k|
+          i += 1
+          k.to_s + i.to_s
+        end)
+      RUBY
+    end
+
+    it "keeps a key fold that ignores the rebound counter" do
+      expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+        seen = 0
+        dump_type({ a: 1, b: 2 }.transform_keys do |k|
+          seen += 1
+          k.to_s
+        end)
+      RUBY
+    end
+
+    it "floors the rebound local when the fold is nested inside a threaded body" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
+        m = Mutex.new
+        total = 0
+        dump_type(m.synchronize do
+          v = 1
+          { x: 1, y: 2 }.transform_values do |e|
+            total += v
+            total
+          end
+        end)
+      RUBY
     end
   end
 end

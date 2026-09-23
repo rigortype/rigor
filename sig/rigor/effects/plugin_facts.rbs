@@ -86,10 +86,9 @@ module Rigor
       # Unmarked residue — built by `absorb`, not an `initialize` parameter.
       attr_reader labels_by_owner: Hash[String, Array[String]]
 
-      # Every `effect_entry_points:` preset across the loaded set — `Plugin::EffectEntryPoints`
-      # instances, whose class is still unsigned #1181 backlog, so `untyped` elements for now.
+      # Every `effect_entry_points:` preset across the loaded set.
       # Unmarked residue — concatenated by `absorb`, not an `initialize` parameter.
-      attr_reader entry_points: Array[untyped]
+      attr_reader entry_points: Array[Plugin::EffectEntryPoints]
 
       # A content digest of every compiled plugin fact; {Identity} folds it in.
       # Unmarked residue — computed by `compute_digest`, not an `initialize` parameter.
@@ -102,9 +101,9 @@ module Rigor
       def self.build: (Plugin::Registry? plugin_registry, ?superclasses: Hash[String, String]?,
                        ?includes: Hash[String, Array[String]]?) -> PluginFacts
 
-      # `contributions:` elements are `Plugin::Registry::Contribution` rows — that nested Data class
-      # is still unsigned #1181 backlog, so `untyped` elements for now.
-      def initialize: (contributions: Array[untyped], superclasses: Hash[String, String]?,
+      # `contributions:` elements are `Plugin::Registry::Contribution` rows.
+      def initialize: (contributions: Array[Plugin::Registry::Contribution],
+                       superclasses: Hash[String, String]?,
                        ?includes: Hash[String, Array[String]]?) -> void
 
       def empty?: () -> bool
@@ -134,9 +133,9 @@ module Rigor
       # lines and included modules.
       def descends_from?: (String? class_name, String? ancestor) -> bool
 
-      # `registry` extended with every plugin's `effect_labels:` under its own owner. The parameter
-      # is `Effects::Registry`, still unsigned #1181 backlog — `untyped` for now.
-      def extend_registry: (untyped registry) -> untyped
+      # `registry` extended with every plugin's `effect_labels:` under its own owner. Rejected
+      # extensions land in {#warnings} instead of raising.
+      def extend_registry: (Registry registry) -> Registry
     end
   end
 end

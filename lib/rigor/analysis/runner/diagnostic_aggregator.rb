@@ -447,8 +447,9 @@ module Rigor
         # "Explicit conformance directive"). A class that declares `conforms-to _Interface` but is missing
         # a required interface method surfaces as `rbs_extended.unsatisfied-conformance`; an unresolvable
         # interface name surfaces as `dynamic.rbs-extended.unresolved` `:info` (the same fail-soft channel
-        # the other directive parsers use). Empty for a project with no directive, a well-formed
-        # conformance, or a non-sequential pool run (the snapshot mirrors `synthesized_namespaces`).
+        # the other directive parsers use). Empty for a project with no directive or a well-formed
+        # conformance; every analysis path, pooled or degraded, takes the snapshot `synthesized_namespaces`
+        # comes from.
         def conforms_to_diagnostics
           results = conformance_results_snapshot
           return [] if results.nil? || results.empty?

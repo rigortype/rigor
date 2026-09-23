@@ -228,6 +228,50 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     it "none? { true } folds to Constant[true] on an empty receiver" do
       expect(fold(receiver: tuple_of, method: :none?, block: true_const)).to eq(true_const)
     end
+
+    # With a pattern argument Ruby tests `pattern === element` and ignores the block ("given block not used"),
+    # so the block's truthiness decides nothing: `[1, 2].all?(String) { true }` is `false`.
+    %i[all? any? none?].each do |method|
+      it "declines `#{method}(pattern) { … }`, whose block Ruby ignores" do
+        pattern = Rigor::Type::Combinator.singleton_of("String")
+        results = [true_const, false_const].product([tuple_of(integer_nominal), tuple_of]).map do |block, receiver|
+          fold(receiver: receiver, method: method, block: block, args: [pattern])
+        end
+
+        expect(results).to all(be_nil)
+      end
+    end
+  end
+
+  describe "predicate folds with a pattern argument", type: :runner do
+    def reported_rules(source)
+      analyze(source).diagnostics.filter_map do |diagnostic|
+        diagnostic.qualified_rule if diagnostic.severity == :error || diagnostic.rule.to_s.start_with?("flow.")
+      end
+    end
+
+    # Each value is the opposite of what the ignored block says (`false`, `true`, `false` at runtime), so the
+    # folded constant made the condition read as always truthy or always falsey.
+    it "no longer folds the ignored block's answer into a condition" do
+      expect(reported_rules(<<~RUBY)).to be_empty
+        xs = [Integer(ARGV.first), 2]
+        a = xs.all?(String) { |e| true }
+        puts "a" if a
+        b = xs.any?(Integer) { |e| false }
+        puts "b" if b
+        c = xs.none?(Integer) { |e| false }
+        puts "c" if c
+      RUBY
+    end
+
+    # The paired control: without a pattern the block decides, and the condition still folds.
+    it "still folds the block-only form" do
+      expect(reported_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        xs = [Integer(ARGV.first), 2]
+        b = xs.any? { |e| false }
+        puts "b" if b
+      RUBY
+    end
   end
 
   describe "find/detect/find_index/index falsey-block short-circuit" do

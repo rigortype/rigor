@@ -8304,7 +8304,8 @@ module Rigor
         when Prism::BlockNode, Prism::LambdaNode
           # An entered block is recorded with its entry scope, parameters bound. An entered `->` is recorded with
           # the ENCLOSING scope ({StatementEvaluator#eval_lambda} enters only its body), so its parameter list
-          # still needs the boundary: `f = ->(o, b = (o + 1)) { b }` reads the default's `o` as the parameter.
+          # still needs the boundary: `f = ->(o, b = (o + 1)) { b }` reads the default's `o` as the parameter. A
+          # `when ->(o) { … }` condition is recorded without being entered at all, body included.
           entered = recorded && node.is_a?(Prism::BlockNode)
           child_scope = entered ? current_scope : closure_scope(node, current_scope)
           node.rigor_each_child { |child| propagate(child, table, child_scope) }

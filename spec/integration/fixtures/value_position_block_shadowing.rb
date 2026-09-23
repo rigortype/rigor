@@ -80,6 +80,14 @@ def lambda_parameter_default
   f
 end
 
+# A `when` condition is recorded without being entered, so its lambda's parameter needs the boundary too.
+def when_lambda_condition(v)
+  o = { x: 1 }
+  case v
+  when ->(o) { o + 1 > 2 } then o
+  end
+end
+
 # --- Statement positions: the evaluator enters these blocks already; the controls. ---
 def statement_control
   o = { x: 1 }

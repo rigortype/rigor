@@ -2603,12 +2603,13 @@ module Rigor
       #
       # An instance variable the body rebinds is dropped the same way: the block shares the caller's `self`, so a
       # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
-      # @clicked = true }` left `if @clicked` folding always-falsey).
+      # @clicked = true }` left `if @clicked` folding always-falsey). One still on its ADR-58 declaration seed is
+      # left alone ({CapturedLocals.writes}): that seed already holds whatever the callback stores.
       def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope) + CapturedLocals.ivar_writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope, ivars: true)
         return base_scope if names.empty?
 
-        names.reduce(base_scope) { |acc, name| CapturedLocals.bind(acc, name, Type::Combinator.untyped) }
+        names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2617,30 +2618,71 @@ module Rigor
       # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
-      # The instance variables the body rebinds ({CapturedLocals.ivar_writes}) outlive the call the same way — `@n = 0;
-      # [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set, seeded from their
-      # pre-call binding. The fixpoint runs over both kinds at once: a local the body reads off a rebound ivar (`last =
-      # @n; @n += 1`) moves with it, which two separate fixpoints would each have pinned to the other's pre-call value.
+      # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
+      # way — `@n = 0; [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set,
+      # seeded from their pre-call binding. See {#settle_locals_beside_ivars} for how the locals of a block that
+      # rebinds both kinds are answered.
       #
-      # Fast path: a block writing no outer local and no bound ivar leaves `post_scope` byte-identical (the
-      # overwhelming majority of blocks), so this costs the two `CapturedLocals` walks and nothing else.
+      # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
+      # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope) + CapturedLocals.ivar_writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        seed = names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] }
-        result = BodyFixpoint.converge(
+        result = settle_locals_beside_ivars(call_node, block, names, converge_block_captures(call_node, block, names))
+        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
+
+      # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
+      def converge_block_captures(call_node, block, names)
+        BodyFixpoint.converge(
           names: names,
-          seed_bindings: seed,
+          seed_bindings: names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] },
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
         )
+      end
 
-        result.reduce(post_scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+      # The locals of a block that rebinds locals AND ivars. `joint` is one fixpoint over both kinds, which the ivars
+      # need: an ivar the body computes from a rebound local (`@last = count`) must see the local move. It is the
+      # wrong answer for most locals, though. The fixpoint widens every name on its final pass once any name still
+      # moves, so an ivar counter beside `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol`, and `take(mode)`
+      # against `(:a | :b) -> void` fired on code the locals-only fixpoint accepts.
+      #
+      # So each local starts from the locals-only fixpoint — the answer it gets in a block that rebinds no ivar — and
+      # keeps it unless one more pass, under the ivars' joint answers, moves it out: a local the body reads off a
+      # rebound ivar (`last = @n; @n += 1`), which the locals-only fixpoint pins to the ivar's pre-call value. Such a
+      # local takes its joint answer, and the check repeats, because a local read off THAT one (`first = last`) may
+      # move in turn. Every round moves a local to its joint answer or stops, so it ends within one pass per local.
+      def settle_locals_beside_ivars(call_node, block, names, joint)
+        locals = names.reject { |name| CapturedLocals.ivar_name?(name) }
+        return joint if locals.empty? || locals.size == names.size
+
+        settled = joint.merge(converge_block_captures(call_node, block, locals))
+        return settled if settled == joint
+
+        loop do
+          exits = block_exit_bindings(call_node, block, settled, joint.keys)
+          moved = locals.select do |name|
+            exit_type = exits[name]
+            !exit_type.nil? && settled[name] != joint[name] &&
+              Type::Combinator.union(settled[name], exit_type) != settled[name]
+          end
+          return settled if moved.empty?
+
+          moved.each { |name| settled[name] = joint[name] }
+        end
+      end
+
+      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
+      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
+      # rebinds no ivar leaves the locals exactly as before.
+      def bind_capture(scope, name, type)
+        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and
@@ -2941,7 +2983,7 @@ module Rigor
       # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
         entry = build_block_entry_scope(call_node, block)
-        entry = bindings.reduce(entry) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+        entry = bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
         _type, exit_scope = sub_eval(block, entry)
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end

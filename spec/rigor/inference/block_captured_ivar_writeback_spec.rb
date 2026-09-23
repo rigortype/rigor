@@ -15,6 +15,9 @@ require "spec_helper"
 # `flow.always-truthy-condition` on correct code. Every widening below is paired with a control that must
 # stay exact, so a fix that widens too much goes red as surely as one that widens too little.
 #
+# An ivar still on its ADR-58 declaration seed is left out on both paths: the seed already unions every
+# write in the class, and rebinding it would drop the mark that keeps its nil from being diagnostic fuel.
+#
 # The engine's own `assert.type-mismatch` rule is the type channel: an empty mismatch list means the
 # engine answered exactly the asserted type. `assert_type` is itself an implicit-self call, which joins
 # every ivar with its class seed on the way out (the intervening-call invalidation), so a method that
@@ -33,6 +36,27 @@ RSpec.describe "instance variables a block rebinds, in the call's continuation (
 
   def always_truthy_lines(source)
     diagnostics_for(source, "flow.always-truthy-condition").map(&:line)
+  end
+
+  def possible_nil_lines(source)
+    diagnostics_for(source, "call.possible-nil-receiver").map(&:line)
+  end
+
+  # `List` seeds `@tail` as `Node | nil` from its constructor's `nil` and `reset`'s write — a declaration-sourced
+  # nil. `methods` land in the class body from line 10 on.
+  def seeded_tail_list(methods)
+    <<~RUBY
+      class Node
+        attr_reader :value
+        def initialize(v) = (@value = v)
+      end
+
+      class List
+        def initialize = (@tail = nil)
+        def reset = (@tail = Node.new(0))
+
+      #{methods.gsub(/^(?=.)/, '  ')}end
+    RUBY
   end
 
   describe "the counter idiom" do
@@ -150,19 +174,46 @@ RSpec.describe "instance variables a block rebinds, in the call's continuation (
       RUBY
     end
 
-    it "runs locals and ivars through one fixpoint, so a local read from a rebound ivar widens too" do
+    it "widens a local the body reads off a rebound ivar, and one read off that local in turn" do
       expect_types(<<~RUBY)
         class Joint
           def run
             @n = 0
             last = 0
+            first = 0
             [1, 2].each do
+              first = last
               last = @n
               @n += 1
             end
             n = @n
+            assert_type("Integer", first)
             assert_type("Integer", last)
             assert_type("Integer", n)
+          end
+        end
+      RUBY
+    end
+
+    it "answers a local beside a rebound ivar exactly as it would without the ivar" do
+      # One fixpoint over both kinds widens every name on its final pass while `@n` still moves, which
+      # turned `mode`'s converged `:a | :b` into `Symbol`.
+      expect_types(<<~RUBY)
+        class Beside
+          def with_ivar
+            mode = :a
+            @n = 0
+            [1, 2].each do
+              mode = :b
+              @n += 1
+            end
+            assert_type(":a | :b", mode)
+          end
+
+          def without_ivar
+            mode = :a
+            [1, 2].each { mode = :b }
+            assert_type(":a | :b", mode)
           end
         end
       RUBY
@@ -204,6 +255,48 @@ RSpec.describe "instance variables a block rebinds, in the call's continuation (
             ivar = @u
             assert_type("Integer", u)
             assert_type("5", ivar)
+          end
+        end
+      RUBY
+    end
+  end
+
+  describe "an ivar on its ADR-58 declaration seed" do
+    it "is left on the seed, so a read before the rebind stays silent while a flow-live nil still fires" do
+      source = seeded_tail_list(<<~RUBY)
+        def declaration_nil
+          [1, 2, 3].each do |v|
+            node = @tail
+            node.value
+            @tail = Node.new(v)
+          end
+          last = @tail
+          last.value
+        end
+
+        def flow_live_nil
+          @tail = nil
+          [1, 2, 3].each do |v|
+            node = @tail
+            node.value
+            @tail = Node.new(v)
+          end
+        end
+      RUBY
+
+      expect(possible_nil_lines(source)).to eq([24])
+    end
+
+    it "keeps a counter the class seeds on that seed" do
+      expect_types(<<~RUBY)
+        class Seeded
+          def initialize
+            @count = 0
+          end
+
+          def run
+            [1, 2].each { @count += 1 }
+            assert_type("0 | Integer", @count)
           end
         end
       RUBY

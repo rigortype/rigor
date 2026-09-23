@@ -20,11 +20,11 @@ module Rigor
       #   / `#reject` keep the Hash receiver or drop to the empty HashShape; every other combination is
       #   Enumerable's and returns an Array, so it drops to the empty-tuple carrier and keeps the receiver
       #   only when that receiver is itself an Array (otherwise the all-kept side declines).
-      # - **Predicate-shaped** (`all?` / `any?` / `none?`): the block's truthiness combined with the
-      #   receiver's emptiness collapses the call to a `Constant[bool]` in the cases where Ruby's actual
-      #   semantics make it unconditional. Non-empty + truthy `any?` is `true`; non-empty + falsey `all?` is
-      #   `false`; the empty-receiver "vacuous" answers (`[].all? { false } == true`, `[].any? { true } ==
-      #   false`, `[].none? { true } == true`) are likewise honoured.
+      # - **Predicate-shaped** (`all?` / `any?` / `none?`, without a pattern argument): the block's
+      #   truthiness combined with the receiver's emptiness collapses the call to a `Constant[bool]` in the
+      #   cases where Ruby's actual semantics make it unconditional. Non-empty + truthy `any?` is `true`;
+      #   non-empty + falsey `all?` is `false`; the empty-receiver "vacuous" answers (`[].all? { false } ==
+      #   true`, `[].any? { true } == false`, `[].none? { true } == true`) are likewise honoured.
       #
       # The dispatcher returns `nil` for any case that cannot be decided from the (receiver-shape, method,
       # block-truthiness) tuple — element-wise block re-evaluation against `Constant<Array>` receivers (the
@@ -72,7 +72,7 @@ module Rigor
           return nil if truthiness.nil?
 
           if PREDICATE_METHODS.include?(method_name)
-            fold_predicate(receiver, method_name, truthiness)
+            fold_predicate(receiver, method_name, truthiness, args)
           elsif filter_method?(method_name)
             fold_filter(receiver, method_name, truthiness)
           elsif FALSEY_BLOCK_NIL_METHODS.include?(method_name)
@@ -143,8 +143,11 @@ module Rigor
         end
 
         # Predicate folds. The decision table mirrors Ruby's actual semantics on `Enumerable#all?` / `#any?` /
-        # `#none?` — see the table at the top of the module.
-        def fold_predicate(receiver, method_name, truthiness)
+        # `#none?` — see the table at the top of the module. A pattern argument declines: Ruby then tests
+        # `pattern === element` and ignores the block, so `[1, 2].all?(String) { true }` is `false`.
+        def fold_predicate(receiver, method_name, truthiness, args)
+          return nil unless args.empty?
+
           emptiness = receiver_emptiness(receiver)
           decision = predicate_decision(method_name, truthiness, emptiness)
           return nil if decision.nil?

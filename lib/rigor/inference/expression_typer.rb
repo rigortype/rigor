@@ -4106,11 +4106,12 @@ module Rigor
         rebound = Set.new
         sites = {}
         statements[0...-1].each do |statement|
-          Source::NodeWalker.each(statement) do |node|
+          Source::NodeWalker.each_with_ancestors(statement) do |node, ancestors|
             rebound << node.name if VARIABLE_WRITE_NODES.include?(node.class)
             next unless in_place_mutation?(node)
 
-            ReceiverAlias.candidates(node.receiver).each { |read| (sites[read.name] ||= []) << node }
+            nested = ancestors.any? { |ancestor| CLOSURE_NODES.include?(ancestor.class) }
+            each_mutated_name(node, nested) { |name| (sites[name] ||= []) << node }
           end
         end
         [rebound, sites]
@@ -4244,10 +4245,11 @@ module Rigor
       private_constant :VARIABLE_WRITE_NODES
 
       # Every node that OBSERVES a variable binding: the plain reads plus the compound writes, which read
-      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`).
+      # their target before rebinding it (`v += 1` in the tail depends on an earlier `v = 0`). An `it` read
+      # observes the local `:it` ({ReceiverAlias.read_name}); it has no `name` of its own.
       VARIABLE_READ_NODES = (
         VARIABLE_WRITE_NODES | [
-          Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode,
+          Prism::LocalVariableReadNode, Prism::ItLocalVariableReadNode, Prism::InstanceVariableReadNode,
           Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
         ]
       ).freeze
@@ -4291,12 +4293,13 @@ module Rigor
       # hands downstream rules a provably-empty array. Threading is the fix, not a cost: `StatementEvaluator`
       # runs `MutationWidening.widen_after_call` on the `push`, so the threaded tail reads the widened
       # `Array[…]`. A call therefore contributes every variable its receiver can evaluate to
-      # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
-      # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
-      # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
-      # The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call, so a name-keyed
-      # scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their receiver the
-      # same way.
+      # ({ReceiverAlias.mutated_reads} — the ternary-selected receiver of issue #277 included) whenever its
+      # name is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
+      # tables and receiver answer is what keeps "the scan says thread" and "threading changes something" the
+      # same predicate. The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call,
+      # so a name-keyed scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their
+      # receiver the same way. A scan that read only local and instance-variable receivers missed `$g << w; $g`
+      # and `it << w; it` the same way, while the tail kept the entry `"k"` / `[]`.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
@@ -4309,7 +4312,7 @@ module Rigor
         return false if written.nil?
 
         Source::NodeWalker.each(statements.last) do |node|
-          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+          return true if VARIABLE_READ_NODES.include?(node.class) && written.include?(ReceiverAlias.read_name(node))
         end
         false
       end
@@ -4324,7 +4327,10 @@ module Rigor
         return EMPTY_NAME_SET if written.nil?
 
         Source::NodeWalker.each(statements.last).filter_map do |node|
-          node.name if VARIABLE_READ_NODES.include?(node.class) && written.include?(node.name)
+          next unless VARIABLE_READ_NODES.include?(node.class)
+
+          name = ReceiverAlias.read_name(node)
+          name if written.include?(name)
         end.to_set
       end
 
@@ -4333,7 +4339,7 @@ module Rigor
       def prefix_written_names(statements)
         written = Set.new
         statements[0...-1].each do |statement|
-          return nil unless prefix_statement_jump_free?(statement, written, false)
+          return nil unless prefix_statement_jump_free?(statement, written, false, false)
         end
         return nil if written.empty?
 
@@ -4346,20 +4352,22 @@ module Rigor
       # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
       # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call or an
       # {INDEX_WRITE_NODES} store, through every variable its receiver can evaluate to) on the way down.
-      # `retargeted` is true once the descent has passed a boundary.
+      # `retargeted` is true once the descent has passed a boundary, and `nested` once it has passed a block or
+      # lambda ({CLOSURE_NODES}), whose `it` is not the body's.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
-      def prefix_statement_jump_free?(node, written, retargeted)
+      def prefix_statement_jump_free?(node, written, retargeted, nested)
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
-        collect_mutated_receivers(node, written) if in_place_mutation?(node)
+        each_mutated_name(node, nested) { |name| written << name } if in_place_mutation?(node)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
+        child_nested = nested || CLOSURE_NODES.include?(node.class)
         node.rigor_each_child do |child|
-          return false unless prefix_statement_jump_free?(child, written, child_retargeted)
+          return false unless prefix_statement_jump_free?(child, written, child_retargeted, child_nested)
         end
         true
       end
@@ -4378,9 +4386,22 @@ module Rigor
         INDEX_WRITE_NODES.include?(node.class)
       end
 
-      def collect_mutated_receivers(node, written)
-        ReceiverAlias.candidates(node.receiver).each { |read| written << read.name }
+      # Yields the name of every variable the in-place mutation `node` changes: its receiver's
+      # {ReceiverAlias.mutated_reads}, the answer the straight-line widening the threaded body runs reads too, so a
+      # global or class variable counts (`$g << w; $g`) as well as a local, an instance variable and the `it`
+      # parameter. An `it` read `nested` under a block or lambda inside the prefix is that closure's own parameter,
+      # never the body's `it`, so it names nothing here: `[[]].each { it << w }; it` leaves the body's `it` as it was.
+      def each_mutated_name(node, nested)
+        ReceiverAlias.mutated_reads(node.receiver).each do |read|
+          next if nested && read.is_a?(Prism::ItLocalVariableReadNode)
+
+          yield ReceiverAlias.read_name(read)
+        end
       end
+
+      # The closures whose `it` is their own: a nested block or lambda always binds `it` to its own parameter.
+      CLOSURE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :CLOSURE_NODES
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
       # Tuple position, binds the block parameter to that element's type, and re-types the block body. The

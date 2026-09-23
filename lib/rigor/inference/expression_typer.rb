@@ -16,6 +16,7 @@ require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "captured_locals"
 require_relative "closure_escape_analyzer"
+require_relative "receiver_blind_block"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
 require_relative "external_ancestor_resolution"
@@ -4152,6 +4153,9 @@ module Rigor
       ].freeze
       private_constant :HASH_SHAPE_TRANSFORM_METHODS
 
+      IN_PLACE_HASH_SHAPE_TRANSFORMS = Set[:transform_keys!, :transform_values!].freeze
+      private_constant :IN_PLACE_HASH_SHAPE_TRANSFORMS
+
       # Cardinality cap for per-element block fold over finite-bound `Constant<Range>` receivers. Walking
       # `(1..1_000_000).map { … }` element-wise would balloon block-typing cost and explode the resulting
       # Tuple, so only short ranges expand into per-position folds. Larger ranges decline so the RBS tier
@@ -4909,22 +4913,38 @@ module Rigor
       #   `Constant[Symbol | String]` — otherwise the tier declines (the new key cannot be used as a static
       #   HashShape index). Collisions (two old keys mapping to the same new key) also decline.
       #
+      # Two runtime behaviours fall outside this model, and both decline:
+      #
+      # - A call with arguments. `transform_keys(mapping)` renames the keys `mapping` names and yields only
+      #   the rest to the block, and the fold never reads the mapping. `transform_values` takes none.
+      # - An in-place form whose block could see the receiver ({ReceiverBlindBlock}). The bang forms rewrite
+      #   the receiver pair by pair, so the block can see pairs it has already rewritten, while the fold types
+      #   every pair against the pre-call shape. The non-bang forms build a new hash and keep the exact fold.
+      #
       # Returns `nil` on any decline so the dispatcher falls through to `RbsDispatch` and gets the widened
       # `Hash[K, V]` answer.
       def try_hash_shape_block_fold(call_node, receiver_type)
-        return nil unless HASH_SHAPE_TRANSFORM_METHODS.include?(call_node.name)
-        return nil unless receiver_type.is_a?(Type::HashShape)
-        return nil unless receiver_type.closed?
-        return nil unless receiver_type.optional_keys.empty?
+        return nil unless hash_shape_fold_applicable?(call_node, receiver_type)
 
         block_arg = call_node.block
-        return nil if block_arg.nil?
+        return nil if in_place_block_sees_receiver?(call_node.name, block_arg)
 
         if %i[transform_values transform_values!].include?(call_node.name)
           fold_hash_shape_transform_values(receiver_type, block_arg)
         else
-          fold_hash_shape_transform_keys(receiver_type, block_arg)
+          fold_hash_shape_transform_keys(receiver_type, block_arg, in_place: call_node.name == :transform_keys!)
         end
+      end
+
+      def hash_shape_fold_applicable?(call_node, receiver_type)
+        HASH_SHAPE_TRANSFORM_METHODS.include?(call_node.name) &&
+          receiver_type.is_a?(Type::HashShape) && receiver_type.closed? && receiver_type.optional_keys.empty? &&
+          call_node.arguments.nil? && !call_node.block.nil?
+      end
+
+      def in_place_block_sees_receiver?(method_name, block_arg)
+        IN_PLACE_HASH_SHAPE_TRANSFORMS.include?(method_name) &&
+          block_arg.is_a?(Prism::BlockNode) && !ReceiverBlindBlock.blind?(block_arg, scope)
       end
 
       def fold_hash_shape_transform_values(shape, block_arg)
@@ -4941,7 +4961,7 @@ module Rigor
         Type::Combinator.hash_shape_of(new_pairs)
       end
 
-      def fold_hash_shape_transform_keys(shape, block_arg)
+      def fold_hash_shape_transform_keys(shape, block_arg, in_place: false)
         key_types = shape.pairs.keys.map { |key| Type::Combinator.constant_of(key) }
         captured = hash_block_captured_bindings(block_arg, key_types)
         return hash_keys_floor(shape) if tail_only_pairs_floored?(shape, block_arg, captured)
@@ -4953,7 +4973,24 @@ module Rigor
 
           new_pairs[new_key] = value
         end
-        Type::Combinator.hash_shape_of(new_pairs)
+        Type::Combinator.hash_shape_of(in_place ? in_place_key_order(shape.pairs, new_pairs) : new_pairs)
+      end
+
+      # `transform_keys!` rewrites the receiver in place, pair by pair, so its pairs end in a different order from
+      # the new hash `transform_keys` builds. For each old pair, CRuby's `rb_hash_transform_keys_bang` deletes the
+      # old key unless an earlier pair already produced it as a new key, then stores the new key: in place when the
+      # new key is an old key not yet reached, appended otherwise. `{ a: 1, b: 2, c: 3 }.transform_keys! { |k| k ==
+      # :b ? :c : (k == :c ? :b : k) }` is `{ c: 2, a: 1, b: 3 }`, not `{ a: 1, c: 2, b: 3 }`, and `r.keys.first ==
+      # :a` folded always-truthy on the wrong order. Replaying those steps over a Ruby `Hash`, which orders its keys
+      # the same way, gives the same order. `new_pairs` is collision-free and in the old pairs' order, so every
+      # old key is either deleted or overwritten, and no old value survives.
+      def in_place_key_order(old_pairs, new_pairs)
+        produced = {}
+        old_pairs.keys.zip(new_pairs).each_with_object(old_pairs.dup) do |(old_key, (new_key, value)), result|
+          result.delete(old_key) unless produced.key?(old_key)
+          result[new_key] = value
+          produced[new_key] = true
+        end
       end
 
       # The key a pair's block result can index the new `HashShape` with — a `Constant` Symbol or String that no

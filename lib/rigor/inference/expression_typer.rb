@@ -109,12 +109,12 @@ module Rigor
         Prism::ConstantPathNode => :type_of_constant_path,
         Prism::ConstantWriteNode => :type_of_assignment_write,
         Prism::ConstantPathWriteNode => :type_of_assignment_write,
-        Prism::ConstantOperatorWriteNode => :type_of_assignment_write,
-        Prism::ConstantOrWriteNode => :type_of_assignment_write,
-        Prism::ConstantAndWriteNode => :type_of_assignment_write,
-        Prism::ConstantPathOperatorWriteNode => :type_of_assignment_write,
-        Prism::ConstantPathOrWriteNode => :type_of_assignment_write,
-        Prism::ConstantPathAndWriteNode => :type_of_assignment_write,
+        Prism::ConstantOperatorWriteNode => :type_of_compound_constant_write,
+        Prism::ConstantOrWriteNode => :type_of_compound_constant_write,
+        Prism::ConstantAndWriteNode => :type_of_compound_constant_write,
+        Prism::ConstantPathOperatorWriteNode => :type_of_compound_constant_write,
+        Prism::ConstantPathOrWriteNode => :type_of_compound_constant_write,
+        Prism::ConstantPathAndWriteNode => :type_of_compound_constant_write,
         # Self and instance/class/global variables
         Prism::SelfNode => :type_of_self_node,
         Prism::InstanceVariableReadNode => :type_of_instance_variable_read,
@@ -431,15 +431,34 @@ module Rigor
       # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
       # inventing the rvalue.
       #
-      # Constant targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body. Index
-      # targets have their own handler, {#type_of_index_compound_write}.
+      # Constant targets have {#type_of_compound_constant_write}, over the same algebra. Index targets have their
+      # own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
-        current = compound_write_current_binding(node)
+        compound_write_value(node, compound_write_current_binding(node))
+      end
+
+      # `H ||= 0` / `Conf::LIMIT += 1` as an EXPRESSION: the value it stores, by
+      # {#type_of_compound_variable_write}'s algebra. Typed as the rvalue alone, `H = { x: 1 }; v = (H ||= 0);
+      # v[:x]` reported `Integer#[]` on a program whose `v` is `H`, and `F.transform_values { |e| F ||= 0 }`
+      # folded every value to `0`.
+      #
+      # A constant has no scope binding, so its current binding is what a plain read of the same spelling
+      # resolves to at the write site — the lexical ladder, the in-source table of plain writes, then RBS. The
+      # memoization idiom (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic
+      # constant assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue
+      # reading exactly as an unbound variable does. A path whose base renders no static name (`klass::X`,
+      # `self::X`) names no binding the resolver can look up, and reads as unbound too.
+      def type_of_compound_constant_write(node)
+        compound_write_value(node, compound_write_constant_binding(node))
+      end
+
+      def compound_write_value(node, current)
         rhs = type_of(node.value)
 
         case node
         when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
-             Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
+             Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode,
+             Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode
           # An UNBOUND target is the memoization idiom (`def self.default = @default ||= new`): nothing
           # has written the variable on any path the analyzer saw, so the stored value is the rvalue.
           # Reading it as `Dynamic[top] | rhs` would skip every memoized singleton in `sig-gen`
@@ -448,7 +467,8 @@ module Rigor
 
           Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
         when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
-             Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
+             Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode,
+             Prism::ConstantAndWriteNode, Prism::ConstantPathAndWriteNode
           return rhs if current.nil?
 
           Type::Combinator.union(Narrowing.narrow_falsey(current), rhs)
@@ -485,6 +505,24 @@ module Rigor
              Prism::ClassVariableAndWriteNode then scope.cvar(node.name)
         else scope.global(node.name)
         end
+      end
+
+      # A miss records the same negative `class:` edge an unresolved plain read does
+      # ({#unresolved_constant_fallback}): a file that later declares the name moves this answer off the rvalue.
+      def compound_write_constant_binding(node)
+        case node
+        when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
+          full_name = node.name.to_s
+          rooted = false
+        else
+          full_name = Source::ConstantPath.qualified_name_or_nil(node.target)
+          return nil if full_name.nil?
+
+          rooted = Source::ConstantPath.rooted?(node.target)
+        end
+        bound = resolve_constant_name(full_name, rooted: rooted)
+        record_missing_constant(full_name) if bound.nil? && Analysis::DependencyRecorder.active?
+        bound
       end
 
       def compound_operator_result(current, rhs, operator)

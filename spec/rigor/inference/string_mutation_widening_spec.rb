@@ -276,6 +276,98 @@ RSpec.describe "String mutation widening", type: :runner do
     end
   end
 
+  # A content scan counts a String mutator by name, so it reaches a capture that may hold a String OR a collection.
+  # Joined or floored whole, such a union went to the Array or Hash arm, which read the String mutator's arguments as
+  # elements or pairs and let one carrier swallow the other; each member now joins or floors on its own terms.
+  describe "a capture that may be a String or a collection" do
+    it "joins a block capture's String member as String, reading no mutator arguments as elements" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[1] | String", "Hash[Symbol, 1] | String", '"ab" | [1]'])
+        def each_block(flag)
+          x = flag ? [1] : +"ab"
+          [1, 2].each { x.force_encoding(Encoding::UTF_16LE) if x.is_a?(String) }
+          dump_type(x)
+        end
+
+        def hash_union(flag)
+          h = flag ? { a: 1 } : +"ab"
+          [1].each { h.sub!("a", "b") if h.is_a?(String) }
+          dump_type(h)
+        end
+
+        def read_only(flag)
+          y = flag ? [1] : +"ab"
+          [1, 2].each { y.bytesize if y.is_a?(String) }
+          dump_type(y)
+        end
+      RUBY
+    end
+
+    it "joins a loop capture's String member as String" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[1] | String"])
+        def while_loop(flag)
+          w = flag ? [1] : +"ab"
+          i = 0
+          while i < 2
+            w.setbyte(0, 98) if w.is_a?(String)
+            i += 1
+          end
+          dump_type(w)
+        end
+      RUBY
+    end
+
+    it "does not fold a comparison on the String branch" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        def each_block(flag)
+          x = flag ? [1] : +"ab"
+          [1, 2].each { x.force_encoding(Encoding::UTF_16LE) if x.is_a?(String) }
+          puts "same" if x.is_a?(String) && x == "ab"
+        end
+      RUBY
+    end
+
+    it "floors an escaping closure's capture member by member" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]] | String"])
+        def escaping(flag)
+          x = flag ? [1] : +"ab"
+          up = -> { x.upcase! if x.is_a?(String) }
+          up.call
+          dump_type(x)
+        end
+      RUBY
+      expect(flow_rules(<<~RUBY)).to be_empty
+        def escaping(flag)
+          x = flag ? [1] : +"ab"
+          up = -> { x.upcase! if x.is_a?(String) }
+          up.call
+          case x
+          when String then puts "s"
+          when Array then puts "a"
+          end
+        end
+      RUBY
+    end
+
+    it "floors an optional String a closure or a callee mutates, keeping its nil" do
+      expect(dumped_types(<<~RUBY)).to eq(["String?", "String?"])
+        def optional(flag)
+          o = flag ? +"ab" : nil
+          up = -> { o&.upcase! }
+          up.call
+          dump_type(o)
+        end
+
+        def strip_a(s) = s&.delete_prefix!("a")
+
+        def optional_callee(flag)
+          q = flag ? +"ab" : nil
+          strip_a(q)
+          dump_type(q)
+        end
+      RUBY
+    end
+  end
+
   # Issue #936: an empty-witness refinement keeps its witness only under a mutator that cannot empty the receiver.
   describe "the non-empty-string refinement" do
     let(:sig) do

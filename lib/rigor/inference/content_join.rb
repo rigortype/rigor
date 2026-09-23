@@ -82,8 +82,12 @@ module Rigor
           # `fill(value)` — only the no-block single-value form adds a concrete element; block /
           # range forms are conservatively ignored (the arity-forget already widened the binding).
           arg_types.size == 1 ? arg_types : []
-        else # << push append prepend unshift
+        when :<<, :push, :append, :prepend, :unshift
           arg_types
+        else
+          # Not an Array adder — a String mutator a content scan counted (`x.sub!("a", "b")` on an
+          # `Array | String` capture): its arguments are not elements.
+          []
         end
       end
 

@@ -22,8 +22,9 @@ module Rigor
     # `||=` / `&&=` compound forms, and a multi-assign target (`x, y = …` → `LocalVariableTargetNode` under
     # a `MultiWriteNode`) — at ANY depth: a block is a closure, so a write inside a nested block binds the
     # same outer variable. Block-introduced names (parameters, numbered parameters, `;`-locals), names
-    # not bound in the outer scope, and a write a nested block's own parameter or block-local shadows
-    # ({.outer_local?}) are excluded; a write to any of them is not a captured rebind of an outer variable.
+    # not bound in the outer scope, a write a nested block's own parameter or block-local shadows, and a
+    # write inside a nested `def` or class body ({.outer_local?}) are excluded; a write to any of them is
+    # not a captured rebind of an outer variable.
     #
     # All three also ask for the instance variables the body rebinds (`ivars: true`). The per-element fold asks
     # for every other binding that outlives an iteration as well (`non_locals: true`): the class variables and
@@ -135,8 +136,8 @@ module Rigor
       end
 
       # The outer local a local-write node rebinds, or nil when the call site does not bind it, the write resolves
-      # inside a nested block ({.outer_local?}), or the block introduces it (the block yields the introduced set,
-      # computed only when needed).
+      # inside a nested block or `def` ({.outer_local?}), or the block introduces it (the block yields the
+      # introduced set, computed only when needed).
       def captured_local_write(node, ancestors, base_scope)
         name = node.name
         return nil unless base_scope.locals.key?(name) && outer_local?(node, ancestors)
@@ -332,19 +333,27 @@ module Rigor
         non_locals && rebindable_non_local?(base_scope, read.name)
       end
 
-      # False when a local read or write resolves inside a block or lambda nested between the body and `node` — its
-      # Prism `depth` stops short of the body's own scope. Prism resolves a name in a nested block's own scope first,
-      # so `[[9]].each { |a| a << x }` mutates, and `[[9]].each { |a| a = x }` rebinds, that block's parameter, not
-      # the outer local that happens to share its name. {.writes} and {.content_mutations} both ask it, so the two
-      # sets cannot disagree about which `a` a site names. A name resolving in the body's own scope is left to the
-      # block-introduced exclusion: Prism puts an outer local there only when the parse never saw it declared, which
-      # a synthetic call-site scope can still bind.
+      # False when a local read or write resolves inside a scope nested between the body and `node`. Prism resolves a
+      # name in a nested block's own scope first, so `[[9]].each { |a| a << x }` mutates, and `[[9]].each { |a| a =
+      # x }` rebinds, that block's parameter, not the outer local that happens to share its name: its `depth` stops
+      # short of the body's own scope. A `def`, `class`, `module` or `class << self` body opens a scope of its own
+      # that sees no outer local at all, so `def helper; z = 5; end` writes the method's `z`. {.writes} and
+      # {.content_mutations} both ask it, so the two sets cannot disagree about which `a` a site names. A name
+      # resolving in the body's own scope is left to the block-introduced exclusion: Prism puts an outer local there
+      # only when the parse never saw it declared, which a synthetic call-site scope can still bind.
       def outer_local?(node, ancestors)
-        node.depth >= ancestors.count { |ancestor| NESTED_SCOPE_NODES.include?(ancestor.class) }
+        nesting = 0
+        ancestors.each do |ancestor|
+          return false if HARD_SCOPE_NODES.include?(ancestor.class)
+
+          nesting += 1 if NESTED_SCOPE_NODES.include?(ancestor.class)
+        end
+        node.depth >= nesting
       end
 
       NESTED_SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
-      private_constant :NESTED_SCOPE_NODES
+      HARD_SCOPE_NODES = Set[Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :NESTED_SCOPE_NODES, :HARD_SCOPE_NODES
 
       def mutated_receiver(node)
         case node

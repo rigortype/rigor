@@ -1632,6 +1632,14 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "does not treat a nested def's local as a rebind of the outer local" do
+      # `[0, 0]` at runtime: the `def`'s `z` is the method's own local.
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        z = 0
+        dump_type([1, 2].map { |k| def helper; z = 5; end; z })
+      RUBY
+    end
+
     it "still widens the outer local a nested block without the shadow rebinds" do
       expect(dumped_type(<<~RUBY)).not_to eq("[1, 1]")
         a = [1]

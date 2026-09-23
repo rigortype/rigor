@@ -22,10 +22,10 @@ module Rigor
       # `1` gated a later `a << "x"` out of the re-join as foreign evidence. `Array#replace` is listed although its
       # argument IS its new content: {MutationWidening#join_added_elements} still joins that evidence after the
       # replacement, and the seed it would otherwise keep beside it is gone.
-      REPLACED = {
-        "Array" => { map!: [0], collect!: [0], flatten!: [0], replace: [0] }.freeze,
-        "Hash" => { transform_keys!: [0], transform_values!: [1], replace: [0, 1] }.freeze
-      }.freeze
+      REPLACED = Ractor.make_shareable({
+                                         "Array" => { map!: [0], collect!: [0], flatten!: [0], replace: [0] },
+                                         "Hash" => { transform_keys!: [0], transform_values!: [1], replace: [0, 1] }
+                                       })
 
       # Mutators that store values nothing describes BESIDE values they may keep: `fill(x, start)` leaves the slots
       # before `start`, and `merge!` / `update` leave every key the argument lacks. The listed positions join
@@ -35,10 +35,10 @@ module Rigor
       # the arm costs the argument form nothing, since {MutationWidening#join_added_elements} already floors every
       # straight-line store it joins. `merge!` on a `Hash.new(0)` counter opens the value side the default proved
       # (`Dynamic[top] | Integer`), since the seam cannot tell a merging block or a foreign argument from neither.
-      JOINED = {
-        "Array" => { fill: [0] }.freeze,
-        "Hash" => { merge!: [0, 1], update: [0, 1] }.freeze
-      }.freeze
+      JOINED = Ractor.make_shareable({
+                                       "Array" => { fill: [0] },
+                                       "Hash" => { merge!: [0, 1], update: [0, 1] }
+                                     })
 
       module_function
 

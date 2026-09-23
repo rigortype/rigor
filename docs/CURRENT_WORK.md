@@ -88,7 +88,6 @@ Nothing new. Long-standing `ready-for-human` backlog is unchanged (`gh issue lis
 - **#1177** — `OptimisticOrigin` lost across method boundary (needs-triage; a
   `rigor-wt/optimistic-origin-nil-predicate` directory exists on disk but is NOT a registered
   worktree — verify before reusing).
-- **#1168** — ready-for-agent: straight-line multi-assign index targets.
 - **sig-gen skip batch** — #1148–#1157 (element-type / Data-member / endless-def gaps); the honest
   fix per `type-authoring.md` is a sig-gen gap issue, several already filed.
 

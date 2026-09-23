@@ -4080,9 +4080,9 @@ module Rigor
 
       # The forms that store through `[]=` without being a `[]=` call ({IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES}).
       # `StatementEvaluator` widens the three compound writes in straight-line code, and its captured-local
-      # write-back widens all four when a nested block stores through one. A straight-line index TARGET (a
-      # multi-assign, `rescue =>` or `for` target) is not widened yet, so threading on it spends the fold
-      # without moving the answer.
+      # write-back widens all four when a nested block stores through one. A straight-line multi-assign index
+      # TARGET widens too (`eval_multi_write`); a `rescue =>` or `for` target does not yet, so threading on one
+      # spends the fold without moving the answer.
       INDEX_WRITE_NODES = Set.new(IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES).freeze
       private_constant :INDEX_WRITE_NODES
 

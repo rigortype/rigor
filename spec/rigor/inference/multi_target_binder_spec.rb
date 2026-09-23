@@ -431,6 +431,47 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
     end
   end
 
+  # An index target (`h[:a], x = …`) binds no name — it stores through `[]=` on its receiver — so the binder
+  # reports the value each one stores apart from every binding, for the evaluator to widen the receiver with.
+  describe "index targets" do
+    def union(*members)
+      Rigor::Type::Combinator.union(*members)
+    end
+
+    it "reports fixed, nested and rest index targets keyed by their node, apart from the locals" do
+      node = parse_multi_write("h[:a], (x, g[0]), *f[1] = rhs")
+      fixed = node.lefts[0]
+      nested = node.lefts[1].lefts[1]
+      rest = node.rest.expression
+      rhs = tuple(constant(1), tuple(constant(2), constant(3)), constant(4), constant(5))
+      result = described_class.bind_marked(node, rhs)
+      expect(result.types).to eq(x: constant(2))
+      expect(result.index_targets).to eq(
+        fixed => constant(1), nested => constant(3), rest => tuple(constant(4), constant(5))
+      )
+    end
+
+    it "joins an index target's value across the members of a union right-hand side" do
+      node = parse_multi_write("h[:a], b = x")
+      rhs = union(tuple(constant(1), constant(2)), tuple(constant("s"), constant(3)))
+      result = described_class.bind_marked(node, rhs)
+      expect(result.index_targets).to eq(node.lefts[0] => union(constant(1), constant("s")))
+      expect(result.types).to eq(b: union(constant(2), constant(3)))
+    end
+
+    it "binds nothing for an index target through Result#apply_to" do
+      result = described_class.bind_marked(parse_multi_write("h[:a], b = x"), tuple(constant(1), constant(2)))
+      scope = result.apply_to(Rigor::Scope.empty)
+      expect(scope.local(:b)).to eq(constant(2))
+      expect(scope.locals.keys).to eq([:b])
+    end
+
+    it "reports none for a destructure without index targets" do
+      result = described_class.bind_marked(parse_multi_write("a, @b = x"), tuple(constant(1), constant(2)))
+      expect(result.index_targets).to be_empty
+    end
+  end
+
   # Issue #1110. The class-ivar seed drops the marks, so it turns off the ADR-57 softening they keep honest.
   describe ".bind_marked with soften_slots: false" do
     let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }

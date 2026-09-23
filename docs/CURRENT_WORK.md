@@ -49,6 +49,15 @@ All merged, CI green, adversarial review (Fable/Grok) Approved:
   `Analysis::ProjectScan` (Data.define) unblocking `Runner#prepare_project_scan` + the `prebuilt:`
   kwarg; 3 members stay `untyped` (SyntheticMethodIndex / ProjectPatchedMethods / TemplateUnits
   unsigned).
+- [#1188](https://github.com/rigortype/rigor/pull/1188) → `99ea44e5` — #1181 slice 5:
+  `Effects::*` bound side (`Label`/`MethodKey`/`TaintCause`/`Origin`/`LabelSet`/`Envelope`/
+  `ConfigEnvelopes`/`EnvelopeIndex`), `Runner#effect_envelopes` +
+  `RbsExtended.read_effect_envelope → Envelope?`.
+- [#1189](https://github.com/rigortype/rigor/pull/1189) → `9b2d943e` — #1181 slice 6:
+  `Effects::*` collection side (`Summary`, `EffectTable`+`Entry`, `FileCollection`+`Edge`,
+  `PluginFacts`+`Row`/`Edge`) unblocking all four `Runner#effect_*` readers; review dropped
+  `forced_file_effects` (private API is not declared in `sig/`) and scoped `#1154` markers to
+  initialize-parameter readers only.
 
 Earlier `queue-release` merges (`#1158`–`#1162`, `79fa99cf`/`9fd4b6d4`/`19c2af59`) are all landed;
 no open PRs at handoff time.
@@ -60,11 +69,15 @@ Nothing new. Long-standing `ready-for-human` backlog is unchanged (`gh issue lis
 ## What is worth picking up next
 
 - **#1181** — Class B sig-coverage backlog (landed: Baseline #1184, AdditionalInitializer #1185,
-  ProtocolContract #1186, ProjectScan #1187). Remaining: `Effects::*` (`EffectTable`,
-  `FileCollection`, `PluginFacts`, `Envelope`, `EnvelopeIndex` — unblocks 4 Runner readers + 2
-  RbsExtended readers), `Plugin::Macro::*`, `HktRegistry::*`, `Environment::Reflection` + reporter
-  duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types. Process:
-  `rigor sig-gen --print` provenance first per `docs/agents/type-authoring.md`.
+  ProtocolContract #1186, ProjectScan #1187, Effects bound #1188, Effects collection #1189 —
+  `Effects::*` is done). Remaining: `Plugin::Macro::*` (Manifest `block_as_methods` /
+  `heredoc_templates` / `nested_class_templates` / `trait_registries`), `Inference::HktRegistry::*`
+  (`#hkt_registrations` / `#hkt_definitions`), `Environment::Reflection` + the three `*_reporter`
+  duck types, `RuleWalk::CollectorDriver`, `Cache::*` entry/descriptor types, and stragglers
+  `Effects::Registry`, `Plugin::Registry::Contribution`, `Plugin::EffectEntryPoints`,
+  `Rigor::FlowContribution`. Process: `rigor sig-gen --print` provenance first per
+  `docs/agents/type-authoring.md`; `#1154` markers only cover readers assigned from `initialize`
+  parameters — `absorb`/`compute`-built readers pin unmarked.
 - **#1177** — `OptimisticOrigin` lost across method boundary (needs-triage; a
   `rigor-wt/optimistic-origin-nil-predicate` directory exists on disk but is NOT a registered
   worktree — verify before reusing).

@@ -917,6 +917,40 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    describe "an empty-witness refinement the body rewrites" do
+      # `map!` keeps the `non-empty-array` witness and joins nothing, so the straight-line widening declines, and a
+      # declined site left `xs` the entry `non-empty-array[String]`: every position read `String` for an element
+      # the first iteration already turned into a Symbol, and `r.last.to_proc` drew `undefined method`.
+      def rewriting(site, tail)
+        <<~RUBY
+          xs = gets.to_s.split(",")
+          if xs.any?
+            r = [1, 2].map do |e|
+              xs.#{site}
+              xs.first
+            end
+            #{tail}
+          end
+        RUBY
+      end
+
+      it "reads the rewritten contents through the gradual arm" do
+        expect(dumped_type(rewriting("map!(&:to_sym)", "dump_type(r)")))
+          .to eq("[Dynamic[top] | String, Dynamic[top] | String]")
+      end
+
+      it "does not report a method the rewritten element defines" do
+        expect(undefined_method_rules(rewriting("map!(&:to_sym)", "r.last.to_proc"))).to be_empty
+      end
+
+      # The paired control: a site that only reorders cannot change an element's class, so the refinement stands
+      # and a call its element does not define still fires.
+      it "keeps the element type a reordering site cannot change" do
+        expect(dumped_type(rewriting("sort!", "dump_type(r)"))).to eq("[String, String]")
+        expect(undefined_method_rules(rewriting("sort!", "r.last.to_proc"))).to eq(["call.undefined-method"])
+      end
+    end
+
     it "lays the widened contents under the rebind fixpoint" do
       # `[nil, 0, "s"]` at runtime. The fixpoint for `total` reads `h[:a]`, so it must see `h` as the body leaves
       # it; seeded from the entry `{ a: 0 }` it converged on `0?` at every position.
@@ -2048,11 +2082,10 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "floors a captured local whose in-place widening declines" do
-        # `map!` keeps a `non-empty-array` witness and joins nothing, so the widening declines and `xs` stays the
-        # entry `non-empty-array[String]`. Counted as answered, every position would read `String` for an element
-        # the first iteration already turned into a Symbol.
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+      it "answers a captured empty-witness refinement a class-changing site rewrites" do
+        # `map!` keeps a `non-empty-array` witness and joins nothing, so the straight-line widening declines. The
+        # site still takes the gradual arm, so `xs` moves and is answered rather than floored.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | String'] * 9).join(', ')}]")
           xs = ENV.keys
           unless xs.empty?
             dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|

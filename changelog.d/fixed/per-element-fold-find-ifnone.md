@@ -1,0 +1,1 @@
+- **[inference]** `find` and `detect` called with a fallback (`ifnone`) on an array or range literal no longer answer `nil` when no element matches: `r = [1, 2].find(-> { 0 }) { |e| e > 5 }; r + 1` is no longer reported as a call on `nil`, and `r == :none` against a `-> { :none }` fallback no longer folds always-falsey. ([#1242](https://github.com/rigortype/rigor/pull/1242))

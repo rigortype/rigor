@@ -1548,6 +1548,81 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # The Tuple / `Constant<Range>` per-element fold (`try_per_element_block_fold`) runs the block once per
+  # position and reads only the block. `find(ifnone)` / `detect(ifnone)` answer `ifnone.call` when no position
+  # matches, so a walk that decided "no match" answered `nil` for a call the runtime answers the fallback for.
+  describe "Tuple per-element fold declines an argument", type: :runner do
+    def dumped_types(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+    end
+
+    # Every error-severity rule plus the always-truthy / always-falsey family: what a wrong `nil` reports on
+    # correct code.
+    def reported_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.rule if diagnostic.severity == :error || diagnostic.rule.to_s.start_with?("flow.")
+      end
+    end
+
+    it "no longer reports a nil receiver on find's ifnone fallback" do
+      # THE REPORTED HAZARD: runtime `0`; the fold answered `nil`, so `+` fired on correct code.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        r = [1, 2].find(-> { 0 }) { |e| e > 5 }
+        r + 1
+      RUBY
+    end
+
+    it "answers the RBS projection instead of the walk's nil" do
+      # `find` is `[T] (_NotFound[T] ifnone) { … } -> (Elem | T)`. The argument binding does not read `T` out of
+      # the `_NotFound[T]` interface, so the fallback arm is `Dynamic[top]`.
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | Dynamic[top]"])
+        dump_type([1, 2].find(-> { 0 }) { |e| e > 5 })
+      RUBY
+    end
+
+    it "no longer folds a comparison against the fallback to always-falsey" do
+      # Runtime `:none`, so the branch runs.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        r = [1, 2].find(-> { :none }) { |e| e > 5 }
+        puts "missing" if r == :none
+      RUBY
+    end
+
+    it "declines detect, a Constant<Range> receiver and a &:symbol block alike" do
+      # Runtime `0` every time. The `&:nil?` block takes the fold's symbol path rather than the block-body one.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        d = [1, 2].detect(proc { 0 }) { |e| e > 5 }
+        d + 1
+        g = (1..3).find(-> { 0 }) { |e| e > 5 }
+        g + 1
+        h = (1..3).detect(-> { 0 }) { |e| e > 5 }
+        h + 1
+        s = [1, 2].find(-> { 0 }, &:nil?)
+        s + 1
+      RUBY
+    end
+
+    it "still reports the nil a block-only find answers on no match" do
+      # The positive control for the silent examples above: without a fallback the runtime answer is `nil`.
+      expect(reported_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        r = [1, 2].find { |e| e > 5 }
+        r + 1
+      RUBY
+    end
+
+    it "still folds a block-only find and detect, matched or not" do
+      expect(dumped_types(<<~RUBY)).to eq(%w[nil 2 2])
+        dump_type([1, 2].find { |e| e > 5 })
+        dump_type([1, 2].find { |e| e > 1 })
+        dump_type((1..3).detect { |e| e > 1 })
+      RUBY
+    end
+  end
+
   describe "control flow (Slice 3 phase 1)" do
     let(:tracer) { Rigor::Inference::FallbackTracer.new }
 

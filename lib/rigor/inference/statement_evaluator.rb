@@ -2726,10 +2726,13 @@ module Rigor
 
       # The Dynamic-floor carrier for a content-mutated escaping capture, or nil when the pre-state is not a recognised
       # mutable collection (leave it alone — e.g. an already-`Dynamic` binding or an unknown shape).
+      #
+      # A String counts in any refined form (`non-empty-string`, `decimal-int-string`), which `stringish?` does not
+      # accept: the mutation can empty or rewrite it as it can a plain `String`.
       def content_floor_for(type)
         return nil if type.nil?
 
-        if stringish?(type)
+        if UnknownStoreWidening.carrier_class(type) == "String"
           Type::Combinator.nominal_of("String")
         elsif hashish?(type)
           Type::Combinator.nominal_of("Hash",

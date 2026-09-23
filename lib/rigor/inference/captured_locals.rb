@@ -282,9 +282,12 @@ module Rigor
 
       # The mutation site `node` is — the node itself, or a {UnknownStoreWidening::CalleeStore} for a self-call
       # whose callee content-mutates a local it is passed — or nil. A self-call is resolved by the
-      # `StatementEvaluator` the block yields, which the caller builds only when one is needed.
+      # `StatementEvaluator` the block yields, which the caller builds only when one is needed. A mutator name
+      # called on `self` (`self.store(h, k)`, `self.push(a, x)`) names no variable as its receiver, so it is asked
+      # as a self-call, as the straight-line callee floor asks it.
       def mutation_site(node)
-        return node if mutated_receiver(node)
+        receiver = mutated_receiver(node)
+        return node if receiver && !receiver.is_a?(Prism::SelfNode)
         return nil unless callee_call?(node)
 
         arguments = yield.content_mutated_arguments(node)

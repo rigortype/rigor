@@ -157,6 +157,15 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
           .to eq(["Hash[Dynamic[top], Dynamic[top]]", "Array[Dynamic[top]]", "Array[Dynamic[top]]", "String"])
       end
 
+      it "floors every refined form of a string to String" do
+        seeds = [
+          Rigor::Type::Combinator.non_empty_string,
+          Rigor::Type::Combinator.decimal_int_string,
+          Rigor::Type::Combinator.non_empty_uppercase_string
+        ]
+        expect(seeds.map { |seed| described_class.widen(seed, store).describe }).to eq(["String"] * 3)
+      end
+
       it "leaves a binding that holds no collection unchanged" do
         non_zero = Rigor::Type::Combinator.difference(
           Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.constant_of(0)

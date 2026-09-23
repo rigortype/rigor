@@ -1002,6 +1002,55 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "floors a capture passed to a mutator-named method called on self" do
+      # `[0, 1]` and `[1, 2]` at runtime. `self.store` and `self.push` carry a mutator's name on a `self` receiver,
+      # so the scan took them for in-place sites on `self`, found no variable there, and never asked the callee.
+      expect(dumped_types(<<~RUBY)).to eq(["[non-negative-int, non-negative-int]"] * 2)
+        class Registry
+          def store(h, k)
+            h[k] = true
+          end
+
+          def push(arr, x)
+            arr << x
+          end
+
+          def run
+            seen = {}
+            dump_type([1, 2].map do |e|
+              v = seen.size
+              self.store(seen, e)
+              v
+            end)
+            buf = [0]
+            dump_type([1, 2].map do |e|
+              v = buf.size
+              self.push(buf, e)
+              v
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors a string refinement a callee can empty, under the fold and after a straight-line call" do
+      # `[false, true]` and `true` at runtime. The floor kept `non-empty-string`, so `empty?` folded to `false`.
+      expect(dumped_types(<<~RUBY)).to eq(["[bool, bool]", "bool"])
+        def reset(s)
+          s.replace("")
+        end
+        s = RUBY_VERSION.upcase
+        dump_type([1, 2].map do |e|
+          v = s.empty?
+          reset(s)
+          v
+        end)
+        t = RUBY_VERSION.upcase
+        reset(t)
+        dump_type(t.empty?)
+      RUBY
+    end
+
     it "keeps a captured array exact when the callee only reads it" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
         def peek(arr, x)

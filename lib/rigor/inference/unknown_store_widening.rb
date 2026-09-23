@@ -61,9 +61,10 @@ module Rigor
       CalleeStore = Data.define(:call, :arguments)
 
       COLLECTION_CLASSES = %w[Array Hash].freeze
+      FLOORED_CLASSES = %w[Array Hash String].freeze
 
       NO_ARG_NODES = [].freeze
-      private_constant :COLLECTION_CLASSES, :NO_ARG_NODES
+      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
 
       module_function
 
@@ -95,26 +96,45 @@ module Rigor
         VALUE_PRESERVING.include?(method_name) && !literal_carrier?(type) ? widened : gradual_content(widened)
       end
 
-      # Every `Array` / `Hash` / `String` carrier `type` can be — a literal, a nominal, a refinement's base — as its
-      # bare carrier: `Array[Dynamic[top]]`, `Hash[Dynamic[top], Dynamic[top]]`, `String`. Unlike the escaping
-      # floor (`StatementEvaluator#content_floor_for`), which answers one carrier for a whole `Union`, this floors a
-      # `Union` member by member, so a member no callee can fill (`nil`) stays: the binding stands where the entry
-      # binding stood, and dropping a member would narrow it. Anything else is returned untouched.
+      # Every `Array` / `Hash` / `String` carrier `type` can be as its bare carrier: `Array[Dynamic[top]]`,
+      # `Hash[Dynamic[top], Dynamic[top]]`, `String`. A literal, a nominal (a precise one included) and a refinement
+      # over one ({.carrier_class}) all floor; so `non-empty-string`, which a callee can empty, reads `String`.
+      # Unlike the escaping floor (`StatementEvaluator#content_floor_for`), which answers one carrier for a whole
+      # `Union`, this floors a `Union` member by member, so a member no callee can fill (`nil`) stays: the binding
+      # stands where the entry binding stood, and dropping a member would narrow it. Anything else is returned
+      # untouched.
       def content_floor(type)
+        return Type::Combinator.union(*type.members.map { |member| content_floor(member) }) if type.is_a?(Type::Union)
+
+        carrier = carrier_class(type)
+        carrier ? carrier_floor(carrier) : type
+      end
+
+      # `"Array"`, `"Hash"` or `"String"` when `type` is a form of that carrier — a literal, a nominal, or a
+      # difference, refinement or intersection over one (`non-empty-array[Integer]`, `decimal-int-string`,
+      # `non-empty-uppercase-string`) — else nil.
+      def carrier_class(type)
         case type
-        when Type::Union then Type::Combinator.union(*type.members.map { |member| content_floor(member) })
-        when Type::Difference
-          floored = content_floor(type.base)
-          floored.equal?(type.base) ? type : floored
-        when Type::Tuple then carrier_floor("Array")
-        when Type::HashShape then carrier_floor("Hash")
-        when Type::Nominal then COLLECTION_CLASSES.include?(type.class_name) ? carrier_floor(type.class_name) : type
-        when Type::Constant then type.value.is_a?(String) ? Type::Combinator.nominal_of("String") : type
-        else type
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::Constant then "String" if type.value.is_a?(String)
+        when Type::Nominal then type.class_name if FLOORED_CLASSES.include?(type.class_name)
+        when Type::Difference, Type::Refined then carrier_class(type.base)
+        when Type::Intersection then intersection_carrier_class(type)
         end
       end
 
+      def intersection_carrier_class(type)
+        type.members.each do |member|
+          carrier = carrier_class(member)
+          return carrier if carrier
+        end
+        nil
+      end
+
       def carrier_floor(class_name)
+        return Type::Combinator.nominal_of("String") if class_name == "String"
+
         arity = class_name == "Hash" ? 2 : 1
         Type::Combinator.nominal_of(class_name, type_args: Array.new(arity) { Type::Combinator.untyped })
       end

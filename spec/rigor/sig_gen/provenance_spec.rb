@@ -227,10 +227,11 @@ SIG_PROVENANCE_RESIDUE = {
   # `descends_from?` are unrenderable. `extend_registry` left residue the same slice — typed
   # `Effects::Registry` in and out makes it parameter-intent.
   "sig/rigor/effects/plugin_facts.rbs" => 11,
-  # New file (#1181 vocabulary slice): the four attr_readers are #1154-marked (normalized
-  # `initialize` kwargs) and the factories/`with` are earned; `known?`, `suggest`, `retired`
-  # are unrenderable — their bodies route through private helpers sig-gen declines.
-  "sig/rigor/effects/registry.rbs" => 3,
+  # New file (#1181 vocabulary slice): `vocabulary_version`, `labels` and `descriptions` are
+  # #1154-marked (normalized `initialize` kwargs); `roots` is computed from `@known` — not a
+  # parameter — so it pins unmarked. The factories/`with` are earned; `known?`, `suggest`,
+  # `retired` are unrenderable — their bodies route through private helpers sig-gen declines.
+  "sig/rigor/effects/registry.rbs" => 4,
   # New file (#1181 collection-side slice): `bundles`/`declared_bundles`/`causes` are
   # #1154-marked (normalized `initialize` kwargs), while `declared`/`proven` are flattened from
   # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).

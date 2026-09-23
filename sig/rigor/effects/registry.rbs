@@ -38,8 +38,9 @@ module Rigor
       # sig-gen gap: #1154 — every declared label, sorted; implied ancestors are recognised by
       # {#known?} but not listed here.
       attr_reader labels: Array[String]
-      # sig-gen gap: #1154 — the roots of the vocabulary; the outermost segments {#with} treats as
-      # already owned.
+      # The roots of the vocabulary — the outermost segments {#with} treats as already owned.
+      # Unmarked residue: `@roots` is computed from `@known` in `initialize`, not assigned from a
+      # parameter, so #1154 does not cover it.
       attr_reader roots: Array[String]
       # sig-gen gap: #1154 — one line per root, from the data file's `descriptions:`.
       attr_reader descriptions: Hash[String, String]

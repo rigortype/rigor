@@ -399,7 +399,8 @@ The stragglers the two `Effects::*` sweeps deferred: the label-vocabulary value 
 plugin-side effect row classes.
 
 - `Effects::Registry` is declared with `#1154`-marked normalized readers (`vocabulary_version`,
-  `labels`, `roots`, `descriptions`); `known?`/`suggest`/`retired` pin unrenderable — private
+  `labels`, `descriptions`); `roots` pins unmarked — it is computed from `@known`, not assigned
+  from a parameter — beside `known?`/`suggest`/`retired`, which are unrenderable because private
   helpers build their answers. Factories (`default`, `for_configuration`, `load_file`) and
   `with` are earned.
 - `Plugin::EffectAttribution` / `EffectEdge` / `EffectAncestry` / `EffectEntryPoints` are new
@@ -408,9 +409,9 @@ plugin-side effect row classes.
   (`receiver_path?`/`self_path?`) are the only unmarked rows; the edge/ancestry/entry-points
   files classify fully.
 - `Plugin::Registry::Contribution` is declared as a nested `Data` subclass — the members and
-  the kwargs-only `new`/`initialize` are [#1150]-marked. The positional `self.[]` arm is left
-  undeclared because the custom `initialize(ancestry: [], **rest)` takes keywords only, so the
-  positional constructor is not callable.
+  the kwargs-only `self.new`/`self.[]` are [#1150]-marked (same shape as
+  `PluginFacts::Row`; `Data`'s positional constructor dispatch bypasses the custom
+  `initialize`, so only the kwargs arm is declared as the intended call form).
 - `Manifest` gains the six `effect_*` readers (each #1154 — `validate_effect_*!` proves the
   element types), `effect_owner`, `effect_discharge_allowed?`, `effects?`, and the five
   validated `effect_*` initialize kwargs. `Base` gains the five `effect_*` manifest delegates

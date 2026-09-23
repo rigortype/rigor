@@ -58,16 +58,18 @@ class Rigor::Plugin::Registry
     # sig-gen gap: #1150 — a `Data.define` member.
     attr_reader ancestry: Array[EffectAncestry]
 
-    # sig-gen gap: #1150 — `ancestry:` defaults so pre-#465 callers keep working; the custom
-    # initialize takes keywords only, so the positional `self.[]` constructor is not callable.
+    # sig-gen gap: #1150 — member constructor. The custom `initialize` defaults `ancestry:`;
+    # the positional arm `Data` dispatches bypasses it, so only the kwargs arm is declared
+    # (same shape as `Effects::PluginFacts::Row`).
     def self.new: (id: String, owner: String, requested_root: String?, discharge_allowed: bool,
                    labels: Array[String], attributions: Array[EffectAttribution],
                    edges: Array[EffectEdge], entry_points: Array[EffectEntryPoints],
                    ?ancestry: Array[EffectAncestry]) -> instance
-    def initialize: (id: String, owner: String, requested_root: String?, discharge_allowed: bool,
-                     labels: Array[String], attributions: Array[EffectAttribution],
-                     edges: Array[EffectEdge], entry_points: Array[EffectEntryPoints],
-                     ?ancestry: Array[EffectAncestry]) -> void
+    # sig-gen gap: #1150 — as above.
+    def self.[]: (id: String, owner: String, requested_root: String?, discharge_allowed: bool,
+                  labels: Array[String], attributions: Array[EffectAttribution],
+                  edges: Array[EffectEdge], entry_points: Array[EffectEntryPoints],
+                  ?ancestry: Array[EffectAncestry]) -> instance
 
     # Whether the row carries nothing — no labels, attributions, edges, entry points, or ancestry.
     def empty?: () -> bool

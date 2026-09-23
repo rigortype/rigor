@@ -1,0 +1,60 @@
+module Rigor
+  module Effects
+    # The propagated result of the fixpoint walk: every method's direct summary plus the transitive
+    # `proven` / `undischarged` / `declared` lanes, the exhaustiveness bit, and the resolved callee keys.
+    class EffectTable
+      # One row of the closed table.
+      class Entry < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type.
+        def key: () -> String
+        # sig-gen gap: #1150
+        def direct: () -> Summary
+        # sig-gen gap: #1150
+        def proven: () -> LabelSet
+        # sig-gen gap: #1150
+        def undischarged: () -> LabelSet
+        # sig-gen gap: #1150
+        def declared: () -> LabelSet
+        # sig-gen gap: #1150
+        def exhaustive: () -> bool
+        # sig-gen gap: #1150 — `causes` are frozen `[cause, detail]` pairs.
+        def causes: () -> Array[[String, String?]]
+        # sig-gen gap: #1150 — resolved callee keys (`"Class#m"` strings).
+        def edges: () -> Array[String]
+        # sig-gen gap: #1150
+        def unclaimed: () -> bool
+
+        # sig-gen gap: #1150 — the custom `initialize` supplies defaults for `undischarged` (=
+        # `proven`), `declared` (= empty) and `unclaimed` (= false); it accepts kwargs only, so the
+        # member constructor has no positional arm.
+        def self.new: (key: String, direct: Summary, proven: LabelSet, exhaustive: bool,
+                       causes: Array[[String, String?]], edges: Array[String],
+                       ?undischarged: LabelSet?, ?declared: LabelSet?, ?unclaimed: bool) -> instance
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (key: String, direct: Summary, proven: LabelSet, exhaustive: bool,
+                      causes: Array[[String, String?]], edges: Array[String],
+                      ?undischarged: LabelSet?, ?declared: LabelSet?, ?unclaimed: bool) -> instance
+
+        def unclaimed?: () -> bool
+
+        # The declared labels worth printing beside `proven` — those the proven lane does not already
+        # admit.
+        def rendered_declared: () -> LabelSet
+
+        def exhaustive?: () -> bool
+        def trivial?: () -> bool
+      end
+
+      def self.empty: () -> EffectTable
+
+      def initialize: (Hash[String, Entry] entries) -> void
+
+      def []: (String key) -> Entry?
+      def keys: () -> Array[String]
+      def each: () { (Entry) -> untyped } -> void
+      include Enumerable[Entry]
+      def size: () -> Integer
+      def empty?: () -> bool
+    end
+  end
+end

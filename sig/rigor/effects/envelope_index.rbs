@@ -9,9 +9,9 @@ module Rigor
 
       # Reads every stratum this index serves, once per process. `environment` supplies the accepted
       # stratum through its RBS loader (nil drops it, fail-quiet); `plugin_facts` is the plugins'
-      # `Effects::PluginFacts` contributions — that class is still unsigned #1181 backlog, so the
-      # parameter is `untyped` for now.
-      def self.build: (configuration: Configuration, ?environment: Rigor::Environment?, ?plugin_facts: untyped) -> EnvelopeIndex
+      # compiled `Effects::PluginFacts` contributions (nil where no plugin set was loaded).
+      def self.build: (configuration: Configuration, ?environment: Rigor::Environment?,
+                       ?plugin_facts: PluginFacts?) -> EnvelopeIndex
 
       def initialize: (
         ?method_envelopes: Hash[String, Envelope],

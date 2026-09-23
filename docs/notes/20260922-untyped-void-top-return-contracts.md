@@ -189,7 +189,8 @@ comments say so explicitly (`sig/rigor.rbs` on `cache_store` and `effect_table`)
 - `Cache::*` — `Plugin::IoBoundary#cache_descriptor`, `Plugin::Base#plugin_entry`,
   `Runner#cache_store`.
 - `Effects::*` — `Runner#effect_table`, `#effect_collection`, `#effect_sources`,
-  `#effect_plugin_facts`, `#effect_collections_by_path`.
+  `#effect_plugin_facts`, `#effect_collections_by_path`. Landed across the sixth and seventh
+  sweeps (bound side, then collection side).
 - `Analysis::ProjectScan` — `Runner#prepare_project_scan`.
 - `Plugin::ProtocolContract` — `Manifest#protocol_contracts`, `Base#protocol_contracts`.
 
@@ -244,15 +245,15 @@ blocked. The second batch tightens the ones that clear that bar:
 | `Runner#param_inferred_types` / `#collect_param_inference_table` | `Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]` |
 | `Runner#evaluate_return_types` | `Hash[[String, Symbol, bool], Array[String?]]` |
 
-What remains is genuinely Class B: `Runner#effect_table` / `#effect_collection` /
-`#effect_plugin_facts` / `#effect_collections_by_path` wait on `Effects::*`
-(`#prepare_project_scan` landed — see the fifth sweep); `Manifest#block_as_methods` / `#heredoc_templates` /
+What remains is genuinely Class B: `Manifest#block_as_methods` / `#heredoc_templates` /
 `#nested_class_templates` / `#trait_registries` on `Plugin::Macro::*`; `#hkt_registrations` /
 `#hkt_definitions` on `Inference::HktRegistry::*` (`#protocol_contracts` landed — see the fourth
 sweep); `CheckRules.node_collector_driver` on
 `RuleWalk::CollectorDriver`; `Environment#reflection` and the
 three `*_reporter` readers on `Environment::Reflection` and the reporter duck types; and
-`RbsExtended.read_flow_contribution` / `read_effect_envelope` on `Effects::Envelope`. Class D from
+`RbsExtended.read_flow_contribution` on `Rigor::FlowContribution` — still unsigned, and not an
+`Effects` type as its issue row once claimed (`read_effect_envelope` and the whole `Effects::*`
+surface landed — see the sixth and seventh sweeps). Class D from
 the first sweep is unchanged — `RbsCacheProducer.fetch` is additionally subclass-polymorphic, so its
 `untyped` is honest for the same reason `read_fact`'s is, and `Manifest#source_rbs_synthesizer`
 joined it on review: the constructor only requires `respond_to?(:call)` and ADR-32 WD6/WD12 give the
@@ -359,6 +360,38 @@ side** — `Label`, `MethodKey`, `TaintCause`, `Origin`, `LabelSet`, `Envelope`,
   unions rather than `Symbol`.
 - `EnvelopeIndex.build`'s `plugin_facts:` stays `untyped` pending the collection-side
   `PluginFacts` declaration.
+
+## Seventh sweep: `Effects::*`, collection side
+
+The remaining half of the namespace: `Summary`, `EffectTable` (+ `Entry`), `FileCollection`
+(+ `Edge`), `PluginFacts` (+ `Row`/`Edge`), and the `Runner` readers they unblock.
+
+- `Runner#effect_table` → `Effects::EffectTable`, `#effect_collection` → `Effects::FileCollection`,
+  `#effect_plugin_facts` → `Effects::PluginFacts`, `#effect_collections_by_path` →
+  `Hash[String, Effects::FileCollection]`. `effect_collection`, `effect_plugin_facts`,
+  `adopt_effect_summary` and `effects_served_from_cache?` classify as earned (generated or return
+  intent) — the residue the `untyped` rows carried shrank rather than moving.
+- Newly declared where absent: `effect_ancestry` (`Hash[String, String]` — the as-written
+  superclass table `effect.liskov-widened` reads), `adopt_effect_collections`,
+  `adopt_effect_summary`, `effects_served_from_cache?`. `forced_file_effects` was typed and then
+  dropped on review — the method is `private` (`runner.rb`'s `private :…` list) and private API is
+  not declared in `sig/`.
+- `EnvelopeIndex.build`'s `plugin_facts:` tightens to `PluginFacts?`, closing the deferral the
+  bound-side sweep left open.
+- Honest `untyped` residue kept: `PluginFacts`'s `contributions:`/`entry_points` elements
+  (`Plugin::Registry::Contribution` and `Plugin::EffectEntryPoints` are still unsigned) and
+  `extend_registry`'s parameter (`Effects::Registry` likewise).
+- `PluginFacts::Row#callee_fallbacks` is `Hash[String, Array[String]]?` — the #1065 lookup-order
+  table, not the `Array[String]` of `FileCollection::Edge#fallback_selectors`; the two carry the
+  same concept at different stages (per-selector table vs. the resolved retry list).
+- `class_row`/`result_row` pin as declared-divergent: sig-gen infers `nil` because the `ancestry`
+  memo helper is opaque to it, and `edges_for` as declared-divergent (`Array[untyped]` from
+  `select`) — all three honest, all pinned. Four `PluginFacts` attr_readers
+  (`unit_callee_rows`, `warnings`, `labels_by_owner`, `digest`) and `Summary`'s
+  `declared`/`proven` pin unmarked too: they are built by `absorb`/`compute_digest`/`flatten`,
+  not assigned from `initialize` parameters, so #1154 does not cover them (the same shape
+  `Registry#additional_initializers` already pinned unmarked). `entry_points` is the exception
+  that stays earned — sig-gen infers `Array[untyped]`, exactly what the declaration says.
 
 ## Two incidental findings
 

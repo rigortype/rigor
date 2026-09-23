@@ -131,26 +131,32 @@ module Rigor
       def file_dependents: () -> Hash[String, untyped]
       def prepare_project_scan: (?paths: Array[String]) -> Analysis::ProjectScan
       # ADR-103 — the propagated effect graph and the merged per-file collections behind it. A report
-      # surface: never a diagnostic, empty when the configuration carries no `effects:` block. Typed
-      # `untyped` for the same reason `cache_store` is — `Effects::EffectTable` /
-      # `Effects::FileCollection` / `Effects::PluginFacts` are still unsigned (the bound side of the
-      # namespace is covered — `effect_envelopes` below is the proof), and a named reference would
-      # raise `RBS::UnknownTypeName`.
-      def effect_table: () -> untyped
-      def effect_collection: () -> untyped
-      # Newly declared — the public reader was absent from the sig. ADR-103 WD9 (#391): the resolved
-      # envelope index `rigor sig-gen`'s annotation emission consults, built on demand so a warm-cache
-      # run still serves the same strata.
+      # surface: never a diagnostic, empty when the configuration carries no `effects:` block.
+      def effect_table: () -> Effects::EffectTable
+      def effect_collection: () -> Effects::FileCollection
+      # ADR-103 WD9 (#391): the resolved envelope index `rigor sig-gen`'s annotation emission
+      # consults, built on demand so a warm-cache run still serves the same strata.
       def effect_envelopes: () -> Effects::EnvelopeIndex
       # #381 — `{ "Class#m" => [path] }`, which the snapshot's `reach:` globs match against.
       def effect_sources: () -> Hash[String, Array[String]]
-      # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the snapshot's
-      # vocabulary is the one the collection window scanned under. Same `untyped` reasoning again.
-      def effect_plugin_facts: () -> untyped
+      # #387 — the loaded plugins' compiled effect contributions, read by `rigor effects` so the
+      # snapshot's vocabulary is the one the collection window scanned under.
+      def effect_plugin_facts: () -> Effects::PluginFacts
+      # The run's as-written superclass table — what `effect.liskov-widened` reads.
+      def effect_ancestry: () -> Hash[String, String]
+      # `{ "lib/a.rb" => FileCollection, … }` — the per-file collections the caches persist (#382).
+      def effect_collections_by_path: () -> Hash[String, Effects::FileCollection]
+      # Issue #382 — adopt persisted collections as this run's own (the warm-hit half of the
+      # whole-run effects slot).
+      def adopt_effect_collections: (Hash[String, Effects::FileCollection] collections,
+                                     ?table: Effects::EffectTable?) -> void
+      # #482 — adopt the served run's small summary entry, collections left behind a loader.
+      def adopt_effect_summary: (table: Effects::EffectTable, sources: Hash[String, Array[String]],
+                                 ancestry: Hash[String, String], collections_loader: untyped) -> void
+      # Whether this run's effect collections came from the whole-run effects slot (#382).
+      def effects_served_from_cache?: () -> bool
       # The incremental session's read surface (ADR-46 / ADR-67 / ADR-103) — `IncrementalSession`
-      # drives a live Runner through these between rechecks. The core-shaped tables carry their real
-      # key/value types; the collection-side `Effects::`-valued readers stay `untyped` until those
-      # classes are sig-covered.
+      # drives a live Runner through these between rechecks.
       # sig-gen gap: #1008 — `result` is populated by `collect_return_summaries` mutating it by
       # reference from a sibling method; sig-gen folds only the `{}` seed and the empty-memo early
       # return, so it proposes the seed shape instead of the honest, usually-non-empty contract.
@@ -158,7 +164,6 @@ module Rigor
       def return_summaries: () -> Hash[[String, String], Hash[Symbol, untyped]]
       # ADR-67 — `[class_name, method_name, kind] => { param_name => Type }`.
       def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
-      def effect_collections_by_path: () -> untyped
       def collect_param_inference_table: (untyped files) -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
       # `{ class_name:, method_name:, singleton: }` spec triple => the per-key return descriptors
       # (`describe(:short)` strings; nil for a missing/bodyless def).

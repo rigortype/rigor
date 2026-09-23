@@ -1,0 +1,50 @@
+module Rigor
+  module Effects
+    # One method's direct effect record: the labels its own body contributes, grouped by the origin
+    # that claimed them, plus the declared (`<=`) lane, the exhaustiveness bit, and the taint causes.
+    class Summary
+      TRIVIAL_BOUND: LabelSet
+
+      # The pure-modulo-frame-ownership summary: no origins, nothing declared, exhaustive, untainted.
+      def self.empty: () -> Summary
+
+      # A summary carrying a single taint and no labels — the fail-soft answer for a unit the collector
+      # could not finish.
+      def self.tainted: (String cause, ?String? detail) -> Summary
+
+      # sig-gen gap: #1154 — `initialize` normalizes the `bundles:`/`declared_bundles:` kwargs through
+      # `normalize_bundles` (join-merging per origin), so the readers do not trace to the parameters.
+      attr_reader bundles: Hash[Origin, LabelSet]
+      # sig-gen gap: #1154 — as above.
+      attr_reader declared_bundles: Hash[Origin, LabelSet]
+      # Unmarked residue — `proven`/`declared` are flattened from the bundle tables by `initialize`,
+      # not assigned from a parameter, so #1154 does not cover them (same shape as
+      # `Registry#additional_initializers`).
+      attr_reader declared: LabelSet
+      attr_reader proven: LabelSet
+      # sig-gen gap: #1154 — `causes` are `[cause, detail]` pairs normalized in `initialize`.
+      attr_reader causes: Array[[String, String?]]
+
+      def initialize: (?bundles: Hash[Origin, LabelSet], ?declared_bundles: Hash[Origin, LabelSet],
+                       ?exhaustive: bool, ?causes: Array[[String, String?]], ?unclaimed: bool) -> void
+
+      # Whether every call this method makes was resolved.
+      def exhaustive?: () -> bool
+
+      # Whether this method made a call nothing described — read by `rigor sig-gen`'s annotation
+      # emission alone (#391).
+      def unclaimed?: () -> bool
+
+      # Whether the report omits this row by default (#386).
+      def trivial?: () -> bool
+
+      # Union in every lane — reopenings and multi-file contributors fold through this.
+      def join: (Summary other) -> Summary
+
+      def ==: (untyped other) -> bool
+      alias eql? ==
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+  end
+end

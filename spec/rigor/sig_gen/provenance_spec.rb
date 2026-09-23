@@ -162,9 +162,17 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `Reflection` pair were already non-residue as `untyped`.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
-  # +1 (#1181 slice): `effect_envelopes` is a newly-declared public reader that stays unrenderable
-  # residue — its body memoises through `effect_envelope_index(@run_environment)`, a private helper
-  # sig-gen cannot infer.
+  # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
+  # unrenderable residue — its body memoises through `effect_envelope_index(@run_environment)`, a
+  # private helper sig-gen cannot infer. The collection-side slice then typed `effect_table`,
+  # `effect_collection`, `effect_plugin_facts`, `effect_ancestry`,
+  # `effect_collections_by_path`, `adopt_effect_collections`, `adopt_effect_summary` and
+  # `effects_served_from_cache?`: `effect_collection`, `effect_plugin_facts`,
+  # `adopt_effect_summary` and `effects_served_from_cache?` classify as earned (generated or
+  # return intent), and the rest stay unrenderable — net 0 residue rows over the `untyped`
+  # declarations they replaced. `forced_file_effects` was typed and
+  # then dropped on review: the method is `private` (runner.rb's `private :…` list) and private
+  # API is not declared in this sig.
   "sig/rigor.rbs" => 51,
   # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
@@ -192,12 +200,36 @@ SIG_PROVENANCE_RESIDUE = {
   # unmarked residue is the ordinary unrenderable/declared-divergent mix (`label_set.rbs` also pins
   # the `eql?` alias row, `origin.rbs`/`taint_cause.rbs` fully classify).
   "sig/rigor/effects/config_envelopes.rbs" => 3,
-  "sig/rigor/effects/envelope.rbs" => 2,
+  # New file (#1181 collection-side slice): `Entry`'s members and constructors are #1150-marked;
+  # the five unmarked rows are `[]`/`keys`/`each`/`size`/`empty?` — unrenderable
+  # (`sig.skipped.untyped-return`, all single-expression readers sig-gen declines).
+  "sig/rigor/effects/effect_table.rbs" => 5,
+  # -1 (#1181 collection-side slice): `Envelope#tolerates?` reads `Summary::TRIVIAL_BOUND`, and
+  # `Summary` being declared lets sig-gen resolve the reference it could not name before.
+  "sig/rigor/effects/envelope.rbs" => 1,
   "sig/rigor/effects/envelope_index.rbs" => 2,
+  # New file (#1181 collection-side slice): `Edge` members/constructors are #1150-marked and the
+  # five attr_readers #1154-marked; the sole unmarked row is `empty?` (unrenderable).
+  "sig/rigor/effects/file_collection.rbs" => 1,
   "sig/rigor/effects/label.rbs" => 5,
   "sig/rigor/effects/label_set.rbs" => 8,
   "sig/rigor/effects/method_key.rbs" => 3,
   "sig/rigor/effects/origin.rbs" => 0,
+  # New file (#1181 collection-side slice): `Row`/`Edge` members and constructors are
+  # #1150-marked. Eleven unmarked rows: four attr_readers (`unit_callee_rows`, `warnings`,
+  # `labels_by_owner`, `digest`) are built by `absorb`/`compute_digest` rather than assigned
+  # from `initialize` parameters, so #1154 does not cover them (same shape as
+  # `Registry#additional_initializers`); `entry_points` is the fifth such reader but stays
+  # earned — sig-gen infers `Array[untyped]`, exactly what the declaration says.
+  # `class_row` and `result_row` are declared-divergent (sig-gen infers `nil` — the `ancestry`
+  # memo helper is opaque to it), `edges_for` is declared-divergent (`Array[untyped]` from
+  # `select`), and `path_row` / `self_path_row` / `descends_from?` / `extend_registry` are
+  # unrenderable.
+  "sig/rigor/effects/plugin_facts.rbs" => 11,
+  # New file (#1181 collection-side slice): `bundles`/`declared_bundles`/`causes` are
+  # #1154-marked (normalized `initialize` kwargs), while `declared`/`proven` are flattened from
+  # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
+  "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
   "sig/rigor/inference.rbs" => 85,

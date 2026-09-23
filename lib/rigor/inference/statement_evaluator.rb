@@ -2727,8 +2727,8 @@ module Rigor
       # post-call effect applied ahead of the widening; the pre-CALL `scope` would carry neither. The loop seam makes
       # the same choice with `pre_body`; see {#loop_content_writeback}.
       #
-      # The block body is typed once for argument evidence; the floor is `Array[Dynamic[top]]` /
-      # `Hash[untyped, untyped]` (the sound empty-seed behaviour). Always sound — only ever widens.
+      # The stored evidence is typed in the block-entry scope and iterated to a fixpoint when a store reads a
+      # collection the join moves — see {#join_content_to_fixpoint}. Always sound — only ever widens.
       def content_writeback_block_captures(call_node, post_scope, seed_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -2737,14 +2737,220 @@ module Rigor
         body = block.body
         return post_scope if body.nil?
 
-        mutations = collect_content_mutations(body)
+        shadows = {}.compare_by_identity
+        mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        entry = build_block_entry_scope(call_node, block)
-        mutations.reduce(post_scope) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, seed_scope, entry)
-          joined.nil? ? acc : acc.with_local(name, joined)
+        seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
+        joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
+      # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
+      CONTENT_EVIDENCE_SLOTS = { array: %i[element].freeze, hash: %i[key value].freeze, string: [].freeze }.freeze
+      private_constant :CONTENT_EVIDENCE_SLOTS
+
+      # The joined continuation carrier of each content-mutated name, shared by the block seam and
+      # {#each_with_object_return}. `sites` maps each name to its mutation nodes, `seeds` to its pre-state; the answer
+      # omits a name whose pre-state is no collection.
+      #
+      # The evidence is typed in the block-entry scope, where each mutated collection still holds its PRE-CALL
+      # contents. A store whose evidence reads one of them therefore records the FIRST iteration's answer: `h = { a:
+      # 0 }; [:a, :a, :a].each { |k| h[k] = h[k] + 1 }` stored `1` as far as a single pass could tell, the join read
+      # `Hash[:a | Symbol, 0 | 1]`, and `h[:a] == 3` folded always-falsey on a program that prints.
+      #
+      # So each collection a store reads is bound to what it holds at ANY iteration's entry. A name none of whose
+      # stores reads a mutated Array or Hash is FIXED: its evidence is the same on every iteration, so it is typed
+      # once and the name is bound to its own join — a String to `String`, whatever it stored, so `lens << buf.length`
+      # after `buf << w` reads `Integer`, not the length of `buf`'s pre-call value. Every other name MOVES, and its
+      # evidence is iterated to a fixpoint through {BodyFixpoint}: each of its evidence slots is one fixpoint name,
+      # and each pass re-types its stores with every moving collection bound to its seed joined with the evidence so
+      # far. The join above widens to `Hash[Symbol, 0 | Integer]` on the final pass, and evidence that keeps growing
+      # structurally floors to `Dynamic[top]`, the slot's one-unknown-store answer. Only moving slots are ever
+      # widened, so `acc << 1` beside such a store keeps `Array[1]`.
+      #
+      # That is what keeps this seam's claim to complete evidence ({MutationWidening#gradual_floor} rests on it): the
+      # scan sees every store in the body, and no store's evidence is read off a first-iteration binding. The final
+      # pass trusts its widening without re-checking it, exactly as slice A's fixpoint does (ADR-56 WD3). A gradual
+      # arm on every self-reading store would be sound too, but its `Dynamic` would quiet every later read of the
+      # collection, where the converged `Integer` still reports `h[:a].upcase`. With no moving name — the `acc = [];
+      # xs.each { |x| acc.push(x) }` accumulator — this is the single pass it always was.
+      #
+      # `shadows` maps a site nested in an inner block or lambda to the names that block binds itself (parameters,
+      # `;`-locals). The entry scope is the seam block's, where such a name resolves to the OUTER local it shadows, so
+      # the site's evidence is typed with those names bound to `Dynamic[top]` instead: `|y| out << y.first` inside
+      # the block must not read an outer `y = [0]`.
+      def join_content_to_fixpoint(sites, seeds, entry, shadows = NO_SHADOWS)
+        kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
+        return {} if kinds.empty?
+
+        moving = moving_content_names(sites, kinds)
+        fixed = kinds.except(*moving)
+        strings, settled = fixed.partition { |_name, kind| kind == :string }.map(&:to_h)
+        fixed_entry = bind_content_joins(entry, strings, seeds, {})
+        evidence = content_evidence(sites, fixed, fixed_entry, shadows)
+        unless moving.empty?
+          base = bind_content_joins(fixed_entry, settled, seeds, evidence)
+          evidence = evidence.merge(converge_content_evidence(sites, seeds, kinds.slice(*moving), base, shadows))
         end
+        kinds.to_h { |name, kind| [name, join_content_evidence(seeds[name], kind, name, evidence)] }
+      end
+
+      # The pre-state's collection kind, or nil when the join has no carrier to rederive — the dispatch
+      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states.
+      def content_kind(pre_state)
+        return nil if pre_state.nil?
+        return :string if stringish?(pre_state)
+        return :hash if hashish?(pre_state)
+
+        :array if arrayish?(pre_state)
+      end
+
+      # The names whose evidence can differ between iterations: a store that reads a mutated Array or Hash among its
+      # arguments (a `[]=` call's stored value is one), or an Array-side compound index write (`a[i] += v`), whose
+      # stored value is computed from the slot it overwrites. A String never moves — its join is `String` whatever it
+      # stored — and the Hash side floors an index write's value, so there only the key arguments are typed.
+      def moving_content_names(sites, kinds)
+        movable = kinds.reject { |_name, kind| kind == :string }.keys
+        movable.select do |name|
+          sites[name].any? do |node|
+            (kinds[name] == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
+          end
+        end
+      end
+
+      def bind_content_joins(scope, kinds, seeds, evidence)
+        kinds.reduce(scope) do |acc, (name, kind)|
+          acc.with_local(name, content_entry_binding(seeds[name], kind, name, evidence))
+        end
+      end
+
+      # What a collection holds at any iteration's entry, given the evidence so far: its join, plus the seed members
+      # that join refutes. The join already covers every other seed value — a `Tuple`, `HashShape` or `Difference`
+      # is absorbed into the rederived carrier and any other member survives beside it — but it drops a seed's
+      # `nil` ({ContentJoin::NON_SURVIVING_CLASSES}). The first iteration's entry still holds that `nil`, and it can
+      # outlive another collection's growth: without it `out << a.nil?; a ||= []; a << v` read `Array[false]`.
+      # Unioning the whole seed back would re-add its literal shape as well, and dispatch over `[] | Array[2]` is
+      # wider than over `Array[2]`, so `a[0, 1] ||= [2]` stopped converging.
+      def content_entry_binding(seed, kind, name, evidence)
+        join = join_content_evidence(seed, kind, name, evidence)
+        members = seed.is_a?(Type::Union) ? seed.members : [seed]
+        refuted = members.select do |member|
+          ContentJoin::NON_SURVIVING_CLASSES.include?(ContentJoin.evidence_class(member))
+        end
+        refuted.empty? ? join : Type::Combinator.union(join, *refuted)
+      end
+
+      # The nodes that open a local scope a read's `depth` counts.
+      SCOPE_NESTING_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :SCOPE_NESTING_NODES
+
+      # The block's captured content mutations: `{ name => [node, ...] }` for every content mutator whose receiver is
+      # a local from OUTSIDE the block. A read's `depth` counts the scopes it climbs, so it reaches past the seam's
+      # block only when it climbs more scopes than the blocks and lambdas nested between it and the block's body.
+      # `collect_content_mutations` tests `depth >= 1`, which is that rule only directly in the body: it took a block
+      # PARAMETER mutated inside a nested block (`|y| [9].each { y << 9 }`), or a nested block's own parameter one
+      # level deeper, for the outer local it shadows, and the join rebound the parameter to that local's contents.
+      #
+      # Each site nested in an inner block or lambda is recorded in `shadows` with the names those blocks bind
+      # themselves (see {#join_content_to_fixpoint}).
+      def captured_content_mutations(block, shadows)
+        mutations = Hash.new { |h, k| h[k] = [] }
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
+          next if name.nil?
+
+          mutations[name] << site
+          record_shadows(shadows, site, ancestors)
+        end
+        mutations
+      end
+
+      def scope_nesting(ancestors)
+        ancestors.count { |ancestor| scope_nesting_node?(ancestor) }
+      end
+
+      def scope_nesting_node?(node)
+        SCOPE_NESTING_NODES.any? { |klass| node.is_a?(klass) }
+      end
+
+      def record_shadows(shadows, site, ancestors)
+        names = ancestors.select { |a| scope_nesting_node?(a) }
+                         .flat_map { |a| CapturedLocals.introduced_locals(a).to_a }
+        shadows[site] = names unless names.empty?
+      end
+
+      # `scope` with each name a site's enclosing inner blocks bind bound to `Dynamic[top]`: the seam's scope cannot
+      # see those bindings, and the name would otherwise resolve to the outer local it shadows.
+      def site_evidence_scope(scope, site, shadows)
+        names = shadows[site]
+        return scope if names.nil?
+
+        names.reduce(scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+      end
+
+      # `base` binds every fixed name to its join; the moving names are rebound on each pass.
+      def converge_content_evidence(sites, seeds, kinds, base, shadows)
+        slots = kinds.flat_map { |name, kind| CONTENT_EVIDENCE_SLOTS.fetch(kind).map { |slot| [name, slot] } }
+        BodyFixpoint.converge(
+          names: slots,
+          seed_bindings: slots.to_h { |slot| [slot, Type::Combinator.bot] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: lambda do |assumption|
+            pass_entry = kinds.reduce(base) do |acc, (name, kind)|
+              acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
+            end
+            content_evidence(sites, kinds, pass_entry, shadows)
+          end
+        )
+      end
+
+      # The binding a fixpoint pass reads a moving collection at: its seed until any evidence exists, then — as for a
+      # fixed name — {#content_entry_binding} over the evidence so far.
+      def content_carrier_under(seed, kind, name, evidence)
+        no_evidence = CONTENT_EVIDENCE_SLOTS.fetch(kind).all? { |slot| present_evidence(evidence[[name, slot]]).empty? }
+        no_evidence ? seed : content_entry_binding(seed, kind, name, evidence)
+      end
+
+      # `{ [name, slot] => union }` for every collection name, typed in `evidence_scope`; a slot no store contributes
+      # to reads `bot`.
+      def content_evidence(sites, kinds, evidence_scope, shadows)
+        kinds.each_with_object({}) do |(name, kind), evidence|
+          case kind
+          when :hash
+            pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
+            evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
+            evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+          when :array
+            evidence[[name, :element]] =
+              Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
+          end
+        end
+      end
+
+      def join_content_evidence(seed, kind, name, evidence)
+        case kind
+        when :string
+          Type::Combinator.nominal_of("String")
+        when :hash
+          key = present_evidence(evidence[[name, :key]]).first
+          value = present_evidence(evidence[[name, :value]]).first
+          ContentJoin.join_hash_content(seed, key.nil? && value.nil? ? [] : [[key, value]])
+        else
+          ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
+        end
+      end
+
+      def present_evidence(type)
+        type.nil? || type.is_a?(Type::Bot) ? [] : [type]
+      end
+
+      def store_arguments_read?(node, names)
+        arguments = node.arguments
+        return false if arguments.nil?
+
+        Source::NodeWalker.each(arguments).any? { |n| n.is_a?(Prism::LocalVariableReadNode) && names.include?(n.name) }
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
@@ -2769,13 +2975,25 @@ module Rigor
 
         # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
         # captured-local walk.
-        calls = body_content_mutations_on(body, memo_param)
+        shadows = {}.compare_by_identity
+        calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        pre_state = scope.type_of(memo_arg, tracer: tracer)
-        entry = build_block_entry_scope(call_node, block)
-        joined = join_content_for_param(calls, pre_state, entry)
+        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
         joined || call_type
+      end
+
+      # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
+      # memo's carrier is kept: a memo store reading one of them (`buf << w; m << buf.length`) must see it as it
+      # stands at any iteration's entry, not at its pre-call contents. Their own continuation is the block seam's to
+      # write.
+      def join_memo_content(call_node, memo_param, calls, pre_state, shadows)
+        block = call_node.block
+        captured = captured_content_mutations(block, shadows)
+        seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
+        seeds[memo_param] = pre_state
+        sites = captured.merge(memo_param => calls)
+        join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 
       # The name of the memo block parameter (the SECOND positional param of an `each_with_object` block), or nil when
@@ -2794,18 +3012,21 @@ module Rigor
         second.respond_to?(:name) ? second.name : nil
       end
 
-      # Content-mutator calls on a block-local receiver `var_name` (depth 0) within `body`.
-      def body_content_mutations_on(body, var_name)
+      # Content-mutator calls on the block-local `var_name` within `body` — directly, or from a nested block that
+      # reaches it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a
+      # different variable and does not count.
+      def body_content_mutations_on(body, var_name, shadows)
         calls = []
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
           next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
-          next unless receiver.name == var_name
+          next unless receiver.name == var_name && receiver.depth == scope_nesting(ancestors)
 
           calls << descendant
+          record_shadows(shadows, descendant, ancestors)
         end
         calls
       end
@@ -2831,7 +3052,7 @@ module Rigor
       end
 
       def join_hash_param(calls, pre_state, block_entry)
-        pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
+        pairs = hash_pair_evidence(calls, block_entry)
         return nil if pairs.empty? && !hashish?(pre_state)
 
         ContentJoin.join_hash_content(pre_state, pairs)
@@ -2840,7 +3061,22 @@ module Rigor
       def join_array_param(calls, pre_state, block_entry)
         return nil unless arrayish?(pre_state)
 
-        added = calls.flat_map do |c|
+        ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
+      end
+
+      # No site sits under an inner block that shadows a name — the loop seam's answer, and the default.
+      NO_SHADOWS = {}.freeze
+      private_constant :NO_SHADOWS
+
+      # The `[key, value]` pairs `calls` store into a Hash, typed in `block_entry`.
+      def hash_pair_evidence(calls, block_entry, shadows = NO_SHADOWS)
+        calls.flat_map { |c| hash_pair_types(c, site_evidence_scope(block_entry, c, shadows)) }
+      end
+
+      # The elements `calls` add to an Array, typed in `block_entry`.
+      def array_element_evidence(calls, entry_scope, shadows = NO_SHADOWS)
+        calls.flat_map do |c|
+          block_entry = site_evidence_scope(entry_scope, c, shadows)
           # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
@@ -2849,7 +3085,6 @@ module Rigor
 
           ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
-        ContentJoin.join_array_content(pre_state, added)
       end
 
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
@@ -2885,12 +3120,7 @@ module Rigor
       # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
-      INDEX_WRITE_NODES = [
-        Prism::IndexOrWriteNode,
-        Prism::IndexAndWriteNode,
-        Prism::IndexOperatorWriteNode,
-        Prism::IndexTargetNode
-      ].freeze
+      INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and

@@ -10,6 +10,7 @@ require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "optimistic_origin"
+require_relative "receiver_alias"
 
 module Rigor
   module Inference
@@ -488,18 +489,6 @@ module Rigor
         end
       end
 
-      # The local and instance-variable write forms whose value is the binding they leave
-      # ({.write_receiver_as_read}).
-      RECEIVER_LOCAL_WRITES = Set[
-        Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
-        Prism::LocalVariableAndWriteNode, Prism::LocalVariableOperatorWriteNode
-      ].freeze
-      RECEIVER_IVAR_WRITES = Set[
-        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode
-      ].freeze
-      private_constant :RECEIVER_LOCAL_WRITES, :RECEIVER_IVAR_WRITES
-
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
@@ -933,22 +922,12 @@ module Rigor
         # Issue #1223 — `(x = e).nil?`, `(x ||= e).empty?`, `(@x = e).is_a?(C)`. A write's value is the binding
         # it leaves, and a predicate is narrowed in the scope after its receiver ran, so the call narrows the
         # variable exactly as the same call on a read of it would. Every analyser keys its receiver on a read
-        # node, so the call is analysed with its receiver replaced by one (`Prism` 1.x constructs every node
-        # from `source, node_id, location, flags` and its fields). Before #1223 the statement evaluator did not
-        # thread a receiver's write at all, so the local was unbound and there was nothing to narrow; nil when the
-        # receiver is not such a write, bare or parenthesised on its own.
+        # node, so the call is analysed with its receiver replaced by one ({ReceiverAlias.read_of}). Before #1223
+        # the statement evaluator did not thread a receiver's write at all, so the local was unbound and there
+        # was nothing to narrow; nil when the receiver is not such a write, bare or parenthesised on its own.
         def write_receiver_as_read(node)
           write = written_receiver(node.receiver)
-          return nil if write.nil?
-
-          source = write.send(:source)
-          read =
-            if RECEIVER_LOCAL_WRITES.include?(write.class)
-              Prism::LocalVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name, write.depth)
-            else
-              Prism::InstanceVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name)
-            end
-          node.copy(receiver: read)
+          write && node.copy(receiver: ReceiverAlias.read_of(write))
         end
 
         def written_receiver(receiver)
@@ -956,8 +935,7 @@ module Rigor
                 receiver.body.body.size == 1
             receiver = receiver.body.body.first
           end
-          klass = receiver.class
-          receiver if RECEIVER_LOCAL_WRITES.include?(klass) || RECEIVER_IVAR_WRITES.include?(klass)
+          receiver if ReceiverAlias.variable_write?(receiver)
         end
 
         def analyse_call(node, scope)

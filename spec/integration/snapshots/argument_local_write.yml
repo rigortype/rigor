@@ -1,8 +1,10 @@
 ---
 locals:
   bound: Integer
+  buf: Array[Dynamic[top] | Integer]
   count: Integer
   fresh: ":ran | Integer"
+  groups: Hash[Dynamic[top] | Symbol, Array[Dynamic[top]] | Dynamic[top]]
   hit: 1 | 2 | :missed | nil
   kept: Array[Dynamic[top]]
   last: 1 | 2 | :init
@@ -23,6 +25,9 @@ locals:
   table: "{ 1 => :a }"
   tag: ":off | :on"
   tail: 1 | 2 | :fell | :init
+  tallies: Hash[Dynamic[top] | Symbol, Array[Dynamic[top]] | Dynamic[top]]
+  text: '"t" | String'
+  text_width: Integer
   total: Integer
   unchanged: '0'
 assertions: {}

@@ -3224,6 +3224,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(local_after("puts([1].map { |x| y = x })\n", :y)).to be_nil
       end
 
+      it "does not record a lambda's `return` as the enclosing method's" do
+        # `return` inside a lambda returns from the lambda; the argument position now evaluates the lambda's body.
+        source = "register(-> { return :skip })\ncb = -> { return 1 }\n42\n"
+        _, sink = described_class.with_return_sink { evaluate(source) }
+        expect(sink).to be_empty
+      end
+
       it "keeps a write inside a `def` argument out of the enclosing scope" do
         expect(local_after("private def helper\n  q = 1\nend\n", :q)).to be_nil
       end

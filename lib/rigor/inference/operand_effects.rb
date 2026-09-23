@@ -22,20 +22,26 @@ module Rigor
     # expression ({JumpTargets}). A `def`, class or module body is a scope of its own, and `defined?`
     # evaluates nothing, so neither is looked into.
     #
-    # Allocation-free and early-exiting: the evaluator asks it of every call's operands, and the
-    # overwhelming majority answer false.
+    # Allocation-free and short-circuiting: the evaluator asks it of every call's operands, and asks it
+    # again of each operand it threads. A found effect stops the recursion without a `return` out of the
+    # child block, which would allocate once per frame it unwinds and make a deep literal quadratic.
     module OperandEffects
       LOCAL_WRITE_NODES = CapturedLocals::LOCAL_WRITE_NODES
       OUTLIVING_WRITE_NODES = (
         CapturedLocals::NON_LOCAL_WRITE_NODES |
         Set[Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode]
       ).freeze
+      INSTANCE_WRITE_NODES = Set[
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
+      ].freeze
       JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
       SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
       OPAQUE_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
-      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :JUMP_NODES, :SCOPE_NODES, :OPAQUE_NODES
+      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :JUMP_NODES, :SCOPE_NODES,
+                       :OPAQUE_NODES
 
       module_function
 
@@ -54,10 +60,33 @@ module Rigor
 
         nesting += 1 if SCOPE_NODES.include?(klass)
         jumps &&= !JumpTargets.boundary?(node)
-        node.rigor_each_child { |child| return true if effect?(child, nesting, jumps) }
-        false
+        found = false
+        node.rigor_each_child { |child| found ||= effect?(child, nesting, jumps) }
+        found
       end
       private_class_method :effect?
+
+      # The locals (bare names) and instance variables (`@`-prefixed names, as {CapturedLocals.bind} reads
+      # them) `node` writes on the terms {.any?} counts a write, in first-write order.
+      def written_variables(node)
+        names = []
+        collect_written(node, 0, names) if node.is_a?(Prism::Node)
+        names.uniq
+      end
+
+      def collect_written(node, nesting, names)
+        klass = node.class
+        if LOCAL_WRITE_NODES.include?(klass)
+          names << node.name if node.depth >= nesting
+        elsif INSTANCE_WRITE_NODES.include?(klass)
+          names << node.name
+        end
+        return if OPAQUE_NODES.include?(klass)
+
+        nesting += 1 if SCOPE_NODES.include?(klass)
+        node.rigor_each_child { |child| collect_written(child, nesting, names) }
+      end
+      private_class_method :collect_written
     end
   end
 end

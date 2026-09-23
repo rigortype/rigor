@@ -126,6 +126,67 @@ def arg_write_guard(items)
 end
 arg_write_guard(%w[a b])
 
+# --- The same edge keeps what the left operand narrowed although the
+# right operand's call resets instance variables and regex globals, as
+# the edge read off the joined scope always did. ---
+class ArgumentWriteTree
+  def initialize(parent)
+    @parent = parent ? "root" : nil
+  end
+
+  def find_node
+    ENV.fetch("NODE", "leaf")
+  end
+
+  def guarded
+    return unless @parent && (node = find_node)
+
+    parent = @parent
+    "#{parent.upcase}/#{node}"
+  end
+end
+ArgumentWriteTree.new(true).guarded
+
+def arg_write_parse(line)
+  if line =~ /\A(\w+)=(\d+)\z/ && (key = Integer($2))
+    name = $1
+    puts name.upcase, key
+  end
+end
+arg_write_parse("a=1")
+
+# --- A call nested in an operand applies no statement-position reset:
+# `$1` stays narrowed after `Integer(value = $2)` as after `Integer($2)`. ---
+def arg_write_capture(line)
+  return unless line =~ /\A(\w+)=(\d+)\z/
+
+  $stdout.puts(Integer(value = $2))
+  name = $1
+  puts name.upcase, value
+end
+arg_write_capture("a=1")
+
+# --- A mutator on a parenthesised write mutates the variable it writes,
+# and the element an index `||=` stores. ---
+buf = nil
+(buf ||= []) << 1
+puts "one" if buf.size == 1
+
+groups = {}
+(groups[:a] ||= []) << 1
+puts "one" if groups[:a].size == 1
+
+tallies = {}
+tallies[:a] ||= []
+tallies[:a] << 1
+puts "one" if tallies[:a].size == 1
+
+# --- A provably-live branch runs on the edge the right operand ran on. ---
+text = ENV.fetch("TEXT", "t")
+if text && (text_width = text.size)
+  puts text_width + 1
+end
+
 # --- Paired controls: an argument that writes nothing leaves its local
 # alone, and a write storing a value the comparison rules out still
 # folds. ---

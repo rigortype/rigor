@@ -147,6 +147,10 @@ module Rigor
       ].freeze
       private_constant :OPERAND_CONTAINERS
 
+      # Statement sequences an operand may hold, threaded statement by statement like a container ({#thread_operand}).
+      OPERAND_SEQUENCES = Set[Prism::StatementsNode, Prism::ParenthesesNode].freeze
+      private_constant :OPERAND_SEQUENCES
+
       # Thread-local sink (an Array) collecting the value types of explicit `return value` nodes reached while
       # evaluating a method body, so `ExpressionTyper#infer_user_method_return` can join them into the method's inferred
       # return type. The flow value of a `return` is still `Bot` (it transfers control rather than producing a value);
@@ -930,7 +934,7 @@ module Rigor
         # When the predicate is a known-truthy / known-falsey type (notably `Constant[true]` / `Constant[false]` after
         # the constant-fold tier), only the live branch contributes a type and a post-scope. The dead branch is skipped
         # so the result type is precise (`Constant[:even]` instead of the joined `Constant[:even] | Constant[:odd]`).
-        live = live_branch_for_if(node, pred_type, post_pred)
+        live = live_branch_for_if(node, pred_type, post_pred, truthy_scope, falsey_scope)
         if live
           live_type, _live_scope = live
           # When the provably-live then-branch terminates and there is no else, apply the same falsey-scope narrowing as
@@ -972,7 +976,7 @@ module Rigor
       def eval_unless(node)
         pred_type, post_pred, truthy_scope, falsey_scope = eval_with_edges(node.predicate, scope)
 
-        live = live_branch_for_unless(node, pred_type, post_pred)
+        live = live_branch_for_unless(node, pred_type, post_pred, truthy_scope, falsey_scope)
         if live
           live_type, _live_scope = live
           # Mirror of the eval_if fix: when the provably-live unless-body terminates and there is no else, apply the
@@ -1005,18 +1009,27 @@ module Rigor
       # the caller falls through to the standard both-branch evaluation. Constant `true`/`false` is the obvious trigger;
       # non-falsey carriers like `Nominal[Integer]` (Integer is always truthy in Ruby — including 0) also collapse the
       # dead else.
-      def live_branch_for_if(node, pred_type, post_pred)
+      def live_branch_for_if(node, pred_type, post_pred, truthy_scope, falsey_scope)
+        truthy_scope, falsey_scope = live_branch_scopes(node.predicate, post_pred, truthy_scope, falsey_scope)
         case branch_certainty(node.predicate, pred_type, post_pred)
-        when :truthy then eval_branch_or_nil(node.statements, post_pred)
-        when :falsey then eval_branch_or_nil(node.subsequent, post_pred)
+        when :truthy then eval_branch_or_nil(node.statements, truthy_scope)
+        when :falsey then eval_branch_or_nil(node.subsequent, falsey_scope)
         end
       end
 
-      def live_branch_for_unless(node, pred_type, post_pred)
+      def live_branch_for_unless(node, pred_type, post_pred, truthy_scope, falsey_scope)
+        truthy_scope, falsey_scope = live_branch_scopes(node.predicate, post_pred, truthy_scope, falsey_scope)
         case branch_certainty(node.predicate, pred_type, post_pred)
-        when :truthy then eval_branch_or_nil(node.else_clause, post_pred)
-        when :falsey then eval_branch_or_nil(node.statements, post_pred)
+        when :truthy then eval_branch_or_nil(node.else_clause, truthy_scope)
+        when :falsey then eval_branch_or_nil(node.statements, falsey_scope)
         end
+      end
+
+      # A provably-live branch runs from the post-predicate scope, un-narrowed, except under an `&&` / `||` whose right
+      # operand writes ({#eval_with_edges}): there the joined scope still reads the write as possibly `nil`, and the
+      # live edge is the one on which the right operand ran (`if text && (w = text.size)` with `text` a String).
+      def live_branch_scopes(predicate, post_pred, truthy_scope, falsey_scope)
+        and_or_right_effects?(predicate) ? [truthy_scope, falsey_scope] : [post_pred, post_pred]
       end
 
       # ADR-47 WD5 — a decidable **version guard** answers first (#627). `RUBY_VERSION >= "3.1"` and the
@@ -1826,9 +1839,25 @@ module Rigor
         type = Type::Combinator.union(skipped_type, right_type) unless right_operand_dead?(node, left_type, left_scope)
         return [type, joined_scope] unless edges
 
-        return [type, joined_scope, truthy_right, join_with_nil_injection(falsey_left, falsey_right)] if and_node
+        ran = ran_edge(node, right_scope, and_node ? truthy_right : falsey_right, and_node)
+        return [type, joined_scope, ran, join_with_nil_injection(falsey_left, falsey_right)] if and_node
 
-        [type, joined_scope, join_with_nil_injection(truthy_left, truthy_right), falsey_right]
+        [type, joined_scope, join_with_nil_injection(truthy_left, truthy_right), ran]
+      end
+
+      # The edge on which the right operand certainly ran — `&&`'s truthy one, `||`'s falsey one. It is the whole
+      # operator narrowed over the scope the right operand left, as the joined-scope path narrows it: a call in the
+      # right operand resets the instance variables and regex globals the left operand narrowed (issue #1223 review:
+      # `@parent && (node = find_node)` read `@parent` as nilable), and narrowing afresh puts that narrowing back as
+      # the joined path always did. A variable the right operand writes keeps the binding of the right operand's own
+      # edge instead, since narrowing the left operand over its new value can contradict it (`x.nil? && (x = "d")`).
+      def ran_edge(node, right_scope, right_edge, and_node)
+        truthy, falsey = Narrowing.predicate_scopes(node, right_scope)
+        renarrowed = and_node ? truthy : falsey
+        OperandEffects.written_variables(node.right).reduce(renarrowed) do |acc, name|
+          type = CapturedLocals.bound_type(right_edge, name)
+          type ? CapturedLocals.bind(acc, name, type) : acc
+        end
       end
 
       # `[type, scope, truthy_edge, falsey_edge]` for `node` evaluated from `entry` as a predicate. The edges are
@@ -2029,13 +2058,24 @@ module Rigor
       # write or jump ({OperandEffects}) answers `entry` itself. A call contributes its effects without its value
       # ({#call_effects}), any other node with a handler is evaluated through it, and an {OPERAND_CONTAINERS} node
       # threads its children in order. Nothing is recorded into the per-node scope index.
+      #
+      # A call threaded this way is an operand, so it also leaves out the two resets a statement-position call
+      # applies because it might have done anything ({#invoke_call}): the class's narrowed instance variables and the
+      # regex globals. A call in an operand never applied them before #1223, and applying them only when the operand
+      # happens to write made `$stdout.puts(Integer(v = $2)); $1.upcase` report where `$stdout.puts(Integer($2))`
+      # does not.
       def thread_operand(node, entry)
         return entry unless OperandEffects.any?(node)
         return evaluator_at(entry, on_enter: nil).send(:call_effects, node) if node.is_a?(Prism::CallNode)
+        # A container is threaded child by child even when it has a handler: the handler types the whole literal,
+        # which a nested literal would repeat once per level of nesting. A statement list or `(…)` inside an operand
+        # runs its statements in order just the same, and evaluating it would type each statement it holds.
+        if OPERAND_CONTAINERS.include?(node.class) || OPERAND_SEQUENCES.include?(node.class)
+          return thread_operand_children(node, entry)
+        end
         return sub_eval(node, entry, on_enter: nil).last if HANDLERS.key?(node.class)
-        return entry unless OPERAND_CONTAINERS.include?(node.class)
 
-        thread_operand_children(node, entry)
+        entry
       end
 
       def thread_operand_children(node, entry)
@@ -2117,7 +2157,7 @@ module Rigor
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
-        post_scope = invalidate_ivars_for_intervening_call(node, post_scope)
+        post_scope = invalidate_ivars_for_intervening_call(node, post_scope) unless call_type.nil?
         # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call is match-CAPABLE (a regex-matching method, or an implicit-self / unknown-receiver call
@@ -2128,7 +2168,7 @@ module Rigor
         # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
         # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
         post_scope ||= scope
-        post_scope = post_scope.forget_match_globals if match_capable_call?(node)
+        post_scope = post_scope.forget_match_globals if !call_type.nil? && match_capable_call?(node)
         post_scope
       end
 
@@ -3820,9 +3860,21 @@ module Rigor
       # literal is a value that outlives the expression, exactly like the Proc `lambda` returns, so the outer locals it
       # can rebind lose their narrowing rather than being written back through ADR-56's non-escaping fixpoint. Both
       # halves are widenings — the two spellings now agree in both directions instead of `->` being the precise one.
+      # A lambda is a return barrier: `return` inside it returns from the lambda, so its body runs with the method's
+      # return sink suspended, as a nested `def` body does ({#eval_def}). Issue #1223 made the barrier matter more
+      # often: a lambda passed as an argument (`register(-> { return :skip if … })`) is now evaluated with its
+      # enclosing call's operands, where it used to be typed as a value only.
       def eval_lambda(node)
         lambda_type = scope.type_of(node, tracer: tracer)
-        sub_eval(node.body, build_block_entry_scope(nil, node)) unless node.body.nil?
+        unless node.body.nil?
+          outer_sink = Thread.current[RETURN_SINK_KEY]
+          Thread.current[RETURN_SINK_KEY] = nil
+          begin
+            sub_eval(node.body, build_block_entry_scope(nil, node))
+          ensure
+            Thread.current[RETURN_SINK_KEY] = outer_sink
+          end
+        end
 
         [lambda_type, escaping_closure_captures(node, scope)]
       end

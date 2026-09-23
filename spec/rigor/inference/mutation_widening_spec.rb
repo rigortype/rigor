@@ -210,9 +210,11 @@ RSpec.describe Rigor::Inference::MutationWidening do
 
     it "widens a non-empty-array refinement under every Array mutator that can empty it" do
       non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      # `replace` rewrites every element too, so its base is the rewritten one.
       %i[pop shift delete_if reject! clear replace select!].each do |mutator|
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
-          eq(non_empty.base), "expected #{mutator} to widen non-empty-array to its base"
+          eq(Rigor::Inference::RewriteMutation.arm(non_empty.base, mutator)),
+          "expected #{mutator} to widen non-empty-array to its base"
         )
       end
     end
@@ -292,9 +294,11 @@ RSpec.describe Rigor::Inference::MutationWidening do
       )
       emptying = described_class::HASH_MUTATORS.to_a - Rigor::Inference::RefinementMutation::EMPTY_PRESERVING["Hash"].to_a
       expect(emptying).to include(:shift)
+      # A mutator its arguments do not describe (`replace`) also gives the sides it rewrites the gradual arm.
       emptying.each do |mutator|
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
-          eq(non_empty.base), "expected #{mutator} to widen non-empty-hash to its base"
+          eq(Rigor::Inference::RewriteMutation.arm(non_empty.base, mutator)),
+          "expected #{mutator} to widen non-empty-hash to its base"
         )
       end
     end

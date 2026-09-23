@@ -1,0 +1,1 @@
+- **[inference]** A block or lambda parameter that shadows an outer local no longer reads as that outer local when the call carrying the block is used as a value — an argument, a receiver chain, another block's result — so `o = { x: 1 }; show([1, 2].map { |o| o + 1 })` no longer reports an undefined `+` for the Hash. [#1245](https://github.com/rigortype/rigor/pull/1245)

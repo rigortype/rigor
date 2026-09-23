@@ -565,10 +565,16 @@ module Rigor
       end
 
       # `self::X ||= v` / `klass::X ||= v` name no constant the resolver can look up, so any binding write
-      # that shares the last segment may be the one the base reaches.
+      # that shares the last segment may be the one the base reaches. The answer now depends on other files'
+      # writes, and this path never reaches `Reflection.resolve_constant_type`, which records the
+      # `constant:<segment>` edge for every other form — so it records the edge itself, or an incremental
+      # run keeps serving the reading from before another file's write of the segment appeared.
       def unnamed_path_binding(target)
         segment = target.name&.to_s
-        dynamic_top if segment && !scope.bound_constant_names(segment).empty?
+        return nil if segment.nil?
+
+        Analysis::DependencyRecorder.read_name(:constant, segment) if Analysis::DependencyRecorder.active?
+        dynamic_top unless scope.bound_constant_names(segment).empty?
       end
 
       def compound_operator_result(current, rhs, operator)

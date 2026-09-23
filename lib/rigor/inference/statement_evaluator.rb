@@ -13,6 +13,7 @@ require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
+require_relative "jump_targets"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
@@ -201,14 +202,23 @@ module Rigor
       #   assumption (`result *= i` annotating `1 | 2` rather than
       #   `Integer`). Display-path only — `rigor check` leaves it off,
       #   keeping its diagnostics and wall-clock unchanged.
+      # @param next_scope_sink — the Array of `[NextNode, Scope]` pairs
+      #   the innermost enclosing block invocation collects its `next`
+      #   exits into ({#evaluate_invocation}), or nil. The scope twin of
+      #   the thread-local `next` VALUE sink, threaded through `sub_eval`
+      #   instead so an evaluation `ExpressionTyper` starts elsewhere —
+      #   the block-return pass, a recursive method's inference — can
+      #   never feed it a `next` from another context. A nested loop's
+      #   `next` still lands here; the consumer filters by node identity.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
-                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false)
+                     lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
         @lexical_nesting = lexical_nesting.freeze
         @converged_loop_recording = converged_loop_recording
+        @next_scope_sink = next_scope_sink
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -271,6 +281,33 @@ module Rigor
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged.
         [@scope.type_of(node, tracer: @tracer), @scope]
+      end
+
+      # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
+      # parameters onto). Returns `[type, fall_through, exit]`: the body's tail type, the scope it falls off the end
+      # with, and the scope the invocation ends with.
+      #
+      # A `next` ends the invocation as surely as falling off the end does, so `exit` is `fall_through` joined
+      # (`Scope#join`) with the scope at every `next` that targets this block ({JumpTargets}). Without that join a
+      # rebind on a jumping branch (`if e.odd?; n = e; next; end`) vanished — `eval_if` carries only the arm that falls
+      # through — and both readers of the exit scope, ADR-56's write-back fixpoint ({#block_exit_bindings}) and issue
+      # #587 (b)'s per-element fold (`ExpressionTyper#captured_exit_bindings`), kept the pre-call binding. A `break` is
+      # NOT joined: it ends the call, so its scope feeds no further invocation ({#join_block_break_bindings}).
+      # `fall_through` is exposed for the fold's unmoved-pin test, which must not count what a `next` arm adds.
+      #
+      # A body with no block-level `next` pays one allocation-free scan and nothing else.
+      def evaluate_invocation(block_node)
+        body = block_node.body
+        return [Type::Combinator.constant_of(nil), scope, scope] if body.nil?
+
+        unless JumpTargets.any?(body, Prism::NextNode)
+          type, fall_through = sub_eval(body, scope, next_scope_sink: nil)
+          return [type, fall_through, fall_through]
+        end
+
+        sink = []
+        type, fall_through = sub_eval(body, scope, next_scope_sink: sink)
+        [type, fall_through, join_jump_scopes(fall_through, sink, JumpTargets.of(body, Prism::NextNode))]
       end
 
       # ADR-89 WD2 — the sorted positions of the positional parameters whose CONTENT `def_node` mutates
@@ -1131,6 +1168,7 @@ module Rigor
       # the value; its scope effects are layered on the joined exit scope so locals bound exclusively in `ensure` stay
       # observable.
       def eval_begin(node)
+        jump_marks = ensure_jump_marks(node)
         entry = scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
@@ -1166,11 +1204,39 @@ module Rigor
         end
 
         if node.ensure_clause
+          carry_jumps_through_ensure(node.ensure_clause, jump_marks)
           _ensure_type, ensure_scope = sub_eval(node.ensure_clause, exit_scope)
           exit_scope = ensure_scope
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The jump sinks' sizes as a `begin … ensure` starts, or nil for a `begin` without `ensure`: every `next` /
+      # `break` scope recorded past these marks leaves through that `ensure`.
+      def ensure_jump_marks(node)
+        return nil unless node.ensure_clause
+
+        [@next_scope_sink&.size, Thread.current[BREAK_SINK_KEY]&.size]
+      end
+
+      # A `next` or `break` inside `begin … ensure` leaves only once the `ensure` clause has run, so each jump scope the
+      # clauses recorded is replaced by that scope carried through the clause: `buf = nil; next if c` under `ensure
+      # buf = +"reset"` leaves with `"reset"`, never `nil`. The clause is evaluated without recording into the
+      # per-node scope index, which keeps the fall-through's visit.
+      def carry_jumps_through_ensure(ensure_clause, marks)
+        next_mark, break_mark = marks
+        carry_through_ensure(ensure_clause, @next_scope_sink, next_mark)
+        carry_through_ensure(ensure_clause, Thread.current[BREAK_SINK_KEY], break_mark)
+      end
+
+      def carry_through_ensure(ensure_clause, sink, mark)
+        return if sink.nil? || mark.nil?
+
+        (mark...sink.size).each do |index|
+          jump, jump_scope = sink[index]
+          sink[index] = [jump, sub_eval(ensure_clause, jump_scope, on_enter: nil).last]
+        end
       end
 
       # `BeginNode#statements` is the primary body; when an else-clause is present, its value replaces the body's per
@@ -1396,33 +1462,12 @@ module Rigor
         found
       end
 
-      # A `break` inside one of these nested constructs targets the inner construct (an inner loop, a block's method, a
-      # nested def), NOT the lexical loop — so the directly-targeting break scan does not descend into them.
-      BREAK_BOUNDARY_NODES = [
-        Prism::ForNode, Prism::WhileNode, Prism::UntilNode,
-        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
-        Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-      ].freeze
-      private_constant :BREAK_BOUNDARY_NODES
-
-      # The `BreakNode`s that lexically target THIS loop — reachable from the body without crossing a nested loop /
-      # block / def boundary. An identity-keyed Hash used as a membership set to filter the collected break scopes (the
-      # thread-local sink also collects breaks from nested blocks that did not install their own sink).
+      # The `BreakNode`s that lexically target THIS loop ({JumpTargets}) — a `break` inside a nested loop, block, or
+      # def targets that construct instead. An identity-keyed Hash used as a membership set to filter the collected
+      # break scopes (the thread-local sink also collects breaks from nested blocks that did not install their own
+      # sink).
       def directly_targeting_breaks(statements)
-        found = {}.compare_by_identity
-        collect_direct_breaks(statements, found)
-        found
-      end
-
-      def collect_direct_breaks(node, found)
-        return if node.nil?
-
-        found[node] = true if node.is_a?(Prism::BreakNode)
-        node.rigor_each_child do |child|
-          next if BREAK_BOUNDARY_NODES.any? { |klass| child.is_a?(klass) }
-
-          collect_direct_breaks(child, found)
-        end
+        JumpTargets.of(statements, Prism::BreakNode)
       end
 
       # Installs a fresh thread-local break sink around `yield` (a loop-body evaluation), returning `[collected,
@@ -2728,17 +2773,19 @@ module Rigor
         names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        result = converge_captures_by_kind(call_node, block, names)
+        break_pass = block_break_pass(block)
+        result = converge_captures_by_kind(call_node, block, names, break_pass)
+        result = join_block_break_bindings(call_node, block, result, break_pass)
         result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
       end
 
       # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
-      def converge_block_captures(call_node, block, names)
+      def converge_block_captures(call_node, block, names, break_pass)
         BodyFixpoint.converge(
           names: names,
           seed_bindings: names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] },
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
+          evaluate_body: ->(bindings) { block_pass_exit_bindings(call_node, block, bindings, names, break_pass) }
         )
       end
 
@@ -2756,17 +2803,21 @@ module Rigor
       #
       # The body's last evaluation is therefore a pass under the settled bindings, so the scopes recorded inside the
       # block read those rather than a pass that pinned one kind to its pre-call value.
-      def converge_captures_by_kind(call_node, block, names)
+      #
+      # `break_pass` ({#block_break_pass}) rides along so every pass — a fixpoint's or a check's — leaves its `break`
+      # scopes for {#join_block_break_bindings}.
+      def converge_captures_by_kind(call_node, block, names, break_pass)
         kinds = names.partition { |name| !CapturedLocals.ivar_name?(name) }
-        return converge_block_captures(call_node, block, names) if kinds.any?(&:empty?)
+        return converge_block_captures(call_node, block, names, break_pass) if kinds.any?(&:empty?)
 
-        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind) }.reduce(:merge)
+        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind, break_pass) }.reduce(:merge)
         joint = nil
         loop do
-          moved = escaped_captures(settled, block_exit_bindings(call_node, block, settled, names), joint)
+          exits = block_pass_exit_bindings(call_node, block, settled, names, break_pass)
+          moved = escaped_captures(settled, exits, joint)
           return settled if moved.empty?
 
-          joint ||= converge_block_captures(call_node, block, names)
+          joint ||= converge_block_captures(call_node, block, names, break_pass)
           moved.each { |name| settled[name] = joint[name] }
         end
       end
@@ -2786,6 +2837,69 @@ module Rigor
       # rebinds no ivar leaves the locals exactly as before.
       def bind_capture(scope, name, type)
         CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
+      end
+
+      # A block-level `break` ends the CALL, so the binding it leaves with starts no further iteration and is no input
+      # to the write-back fixpoint — feeding it back would type the next pass's body under a value the body never sees
+      # (`acc = "s"; break` reaching the next pass's `acc`). It IS the continuation's binding on that path, though, and
+      # without this join `found = nil; xs.each { |x| if x > 1; found = x; break; end }` left `found` on `nil` and
+      # folded `if found` always-falsey.
+      #
+      # The arms must come from a pass whose entry is the CONVERGED binding, which contains every iteration's entry.
+      # The write-back's last pass usually is one — a fixpoint that stabilised, and every by-kind check pass
+      # ({#converge_captures_by_kind}), ran from the binding it returns — so its arms are reused
+      # ({#block_pass_exit_bindings}). A capped fixpoint's widened binding was never evaluated, so only then does one
+      # more pass run, without recording into the per-node scope index: that index keeps the write-back's own last
+      # pass, which the check path's diagnostics read, exactly as the loop fixpoint's converged re-record is
+      # display-only ({#record_converged_loop_body}). A name the fixpoint floored to `Dynamic[top]` keeps the floor; a
+      # precise arm unioned into it would read as knowledge the analysis does not have.
+      def join_block_break_bindings(call_node, block, converged, break_pass)
+        return converged if break_pass.nil?
+
+        arms =
+          if break_pass[:entry] == converged
+            break_pass[:arms]
+          else
+            converged_break_arms(call_node, block, converged, break_pass[:targets])
+          end
+        return converged if arms.empty?
+
+        floor = Type::Combinator.untyped
+        converged.to_h do |name, type|
+          next [name, type] if type == floor
+
+          [name, Type::Combinator.union(type, *arms.filter_map { |arm| CapturedLocals.bound_type(arm, name) })]
+        end
+      end
+
+      # nil for a body with no block-level `break` — one allocation-free scan, and the write-back runs exactly as
+      # before. Otherwise the record {#block_pass_exit_bindings} fills: the targeting `break`s, and the entry
+      # bindings and `break` scopes of the most recent fixpoint pass.
+      def block_break_pass(block)
+        body = block.body
+        return nil unless JumpTargets.any?(body, Prism::BreakNode)
+
+        { targets: JumpTargets.of(body, Prism::BreakNode), entry: nil, arms: [] }
+      end
+
+      # One write-back fixpoint pass ({#block_exit_bindings}), collecting the scopes at the block-level `break`s it
+      # reaches when there are any. `BodyFixpoint` hands every pass the same mutable assumption, so the entry is
+      # copied before the fixpoint moves it.
+      def block_pass_exit_bindings(call_node, block, bindings, names, break_pass)
+        return block_exit_bindings(call_node, block, bindings, names) if break_pass.nil?
+
+        sink, exits = collect_break_scopes { block_exit_bindings(call_node, block, bindings, names) }
+        break_pass[:entry] = bindings.dup
+        break_pass[:arms] = targeted_scopes(sink, break_pass[:targets])
+        exits
+      end
+
+      # The `break` scopes of one unrecorded pass from `converged` — for a capped fixpoint, whose widened binding no
+      # pass has run from.
+      def converged_break_arms(call_node, block, converged, targets)
+        entry = block_pass_entry(call_node, block, converged)
+        sink, = collect_break_scopes { sub_eval(block, entry, on_enter: nil) }
+        targeted_scopes(sink, targets)
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and
@@ -3317,20 +3431,37 @@ module Rigor
       # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
       # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
-        entry = build_block_entry_scope(call_node, block)
-        entry = bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
-        _type, exit_scope = sub_eval(block, entry)
+        _type, exit_scope = sub_eval(block, block_pass_entry(call_node, block, bindings))
         names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
+      end
+
+      # The entry scope of one write-back pass: the block's entry with each written outer local or ivar bound to
+      # `bindings`.
+      def block_pass_entry(call_node, block, bindings)
+        entry = build_block_entry_scope(call_node, block)
+        bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller
       # has already augmented with the block's parameter bindings. Effects do not leak past the block (the outer
       # eval_call returns the caller's scope unchanged), but the body's local writes are threaded through subsequent
       # statements *inside* the block so `each { |x| sum = x; sum.succ }` types `sum.succ` under the `sum: x` binding.
+      # The scope returned is the one the invocation ENDS with — the fall-through joined with every `next` that
+      # leaves it ({#evaluate_invocation}).
       def eval_block(node)
-        return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
+        type, _fall_through, exit_scope = evaluate_invocation(node)
+        [type, exit_scope]
+      end
 
-        sub_eval(node.body, scope)
+      # `base` joined with every collected jump scope whose node is in `targets` — a jump belonging to a nested
+      # construct lands in the same sink and is dropped by identity.
+      def join_jump_scopes(base, sink, targets)
+        targeted_scopes(sink, targets).reduce(base) { |acc, jump_scope| acc.join(jump_scope) }
+      end
+
+      # The scopes a sink collected at the jumps in `targets`.
+      def targeted_scopes(sink, targets)
+        sink.filter_map { |node, jump_scope| jump_scope if targets.key?(node) }
       end
 
       # Issue #878 — `->() { }` and `lambda { }` build the same object, so they MUST type the same. The `lambda`
@@ -3762,21 +3893,33 @@ module Rigor
       def eval_next(node)
         sink = Thread.current[NEXT_SINK_KEY]
         sink << [node, jump_value_type(node)] if sink
+        @next_scope_sink << [node, jump_scope(node)] if @next_scope_sink
         [Type::Combinator.bot, scope]
       end
 
-      # A `break` transfers control to the loop exit (its flow value is `Bot`, like `return`). It records the current
-      # scope into the active loop's break sink so the loop join can recover a `break`-path binding the fall-through
-      # would drop (`flag = true; break` -> `flag` is `false | true` after the loop). nil sink = a `break` not inside an
-      # inferred loop body (a block targeting a method, or top-level) — left to the existing escaping-block / no-op
-      # handling.
+      # The scope control leaves with at a `next` / `break`: the entry scope threaded through the jump's arguments, so a
+      # write inside one (`next(n = :odd)`, `break(flag = true)`) is part of the path that leaves. The arguments are
+      # evaluated without recording into the per-node scope index: whether a sink is collecting depends on unrelated
+      # context (a captured write elsewhere in the block), and the index must not change with it.
+      def jump_scope(node)
+        args = node.arguments&.arguments || []
+        args.reduce(scope) { |acc, arg| sub_eval(arg, acc, on_enter: nil).last }
+      end
+
+      # A `break` transfers control to the loop exit (its flow value is `Bot`, like `return`). It records the scope it
+      # leaves with ({#jump_scope}) into the active break sink so the loop join can recover a `break`-path binding the
+      # fall-through would drop (`flag = true; break` -> `flag` is `false | true` after the loop); ADR-56's block
+      # write-back reads the same sink for a `break` that ends a yielding call ({#join_block_break_bindings}), and an
+      # enclosing `begin … ensure` carries the recorded scope through its clause ({#carry_jumps_through_ensure}). nil
+      # sink = a `break` reached outside either collection (top level, or an escaping block) — left to the existing
+      # escaping-block / no-op handling.
       #
       # Issue #853: the value it carries out belongs to the yielding CALL, so it is recorded into the separate
       # break-value sink for `ExpressionTyper#call_dispatch_type_for` to union in. Both sinks are optional and
       # independent — a loop body collects scopes while an enclosing call collects values from the same walk.
       def eval_break(node)
         sink = Thread.current[BREAK_SINK_KEY]
-        sink << [node, scope] if sink
+        sink << [node, jump_scope(node)] if sink
         value_sink = Thread.current[BREAK_VALUE_SINK_KEY]
         value_sink << [node, jump_value_type(node)] if value_sink
         [Type::Combinator.bot, scope]
@@ -3794,14 +3937,18 @@ module Rigor
         Type::Combinator.tuple_of(*args.map { |arg| sub_eval(arg, scope).first })
       end
 
-      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting)
+      # `on_enter: nil` evaluates without recording into the per-node scope index — for a pass whose scopes are not
+      # the ones the index should keep. `next_scope_sink:` is replaced only by {#evaluate_invocation}.
+      def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
+                   on_enter: @on_enter, next_scope_sink: @next_scope_sink)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
-          on_enter: @on_enter,
+          on_enter: on_enter,
           class_context: class_context,
           lexical_nesting: lexical_nesting,
-          converged_loop_recording: @converged_loop_recording
+          converged_loop_recording: @converged_loop_recording,
+          next_scope_sink: next_scope_sink
         ).evaluate(node)
       end
 

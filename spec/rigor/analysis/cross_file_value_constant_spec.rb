@@ -874,6 +874,12 @@ RSpec.describe "cross-file value constants" do
       end
     end
 
+    def error_rules(files)
+      analysed(files, nil) do |result|
+        result.diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
+      end
+    end
+
     it "reads an unpublishable foreign write's binding as gradual" do
       # Runtime: `{ x: 1 }` once a.rb has loaded, `0` before.
       expect(dumps("a.rb" => "H2 = { x: 1 }\n",
@@ -966,12 +972,49 @@ RSpec.describe "cross-file value constants" do
       expect(dumps(files)).to eq(["0"])
     end
 
-    it "keeps the memo reading beside other memos of the name, in this file or another" do
+    it "keeps the memo reading beside another memo of the name in the same file" do
       files = {
-        "a.rb" => "def other_registry = (REGISTRY ||= {})\n",
+        "a.rb" => "UNRELATED = { x: 1 }\n",
         "b.rb" => "def registry = Rigor.dump_type(REGISTRY ||= {})\ndef again = (REGISTRY ||= {})\n"
       }
       expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "counts one file's memo once however discovery spells the file" do
+      # Checking `<dir>/./lib` against a configured `<dir>/lib` widens discovery over both spellings, so the
+      # census holds the one memo under two paths.
+      Dir.mktmpdir do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "b.rb"), "def registry = Rigor.dump_type(REGISTRY ||= {})\n")
+        runner = Rigor::Analysis::Runner.new(
+          configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
+        )
+        result = guarded_run(runner, [File.join(dir, ".", "lib")])
+        dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+        expect(dumped).to eq(["dump_type: {}"])
+      end
+    end
+
+    it "reads a memo another file shares as gradual" do
+      # Runtime: `{ x: 1 }` once a.rb has loaded — a.rb's `||=` sets the constant b.rb's then reads.
+      expect(dumps("a.rb" => "H3 ||= { x: 1 }\n",
+                   "b.rb" => "Rigor.dump_type(H3 ||= 0)\n")).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "does not report a call on a value another file's memo set" do
+      # Runtime: `6` once a.rb has loaded.
+      files = {
+        "a.rb" => "DEFAULTS ||= { timeout: 5 }\n",
+        "b.rb" => "d = (DEFAULTS ||= {})\nd[:timeout] + 1\n"
+      }
+      expect(error_rules(files)).to eq([])
+    end
+
+    it "reads another file's memo of the segment as gradual through the lexical nesting" do
+      # Runtime: `{ n: 1 }` once a.rb has loaded — `LIM` inside `App` finds the top-level constant.
+      expect(dumps("a.rb" => "LIM ||= { n: 1 }\n",
+                   "b.rb" => "module App\n  Rigor.dump_type(LIM ||= 0)\nend\n")).to eq(["0 | Dynamic[top]"])
     end
 
     it "keeps the memo reading at a call site in another file" do

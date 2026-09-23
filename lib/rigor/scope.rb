@@ -66,10 +66,10 @@ module Rigor
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
 
-    # Issue #617 — the census names sharing `name`'s last segment that some write other than a memo `||=`
-    # binds, in whichever file, spelled as the census spells them (a `*::LIMIT` wildcard included), so the
-    # caller still decides which of them a reference resolves to. A `||=`-only name is left out whoever
-    # writes it: the memoization idiom's own write, in this file or another, is not what binds it.
+    # Issue #617 — the census names sharing `name`'s last segment that bind, spelled as the census spells
+    # them (a `*::LIMIT` wildcard included), so the caller still decides which of them a reference resolves
+    # to. A `||=`-only name is left out while no other file memoizes its segment: the memoization idiom's
+    # own write, however often one file repeats it, is not what binds it.
     def bound_constant_names(name)
       @discovery.constant_writers[name.split("::").last] || EMPTY_BOUND_CONSTANT_NAMES
     end

@@ -51,10 +51,10 @@ module Rigor
       CONSTANT_UNPUBLISHABLE = :unpublishable
 
       # Issue #617 — the descriptor for a name a file writes ONLY through `||=`. It publishes nothing either,
-      # but it is the memoization idiom rather than a binding: a constant compound write elsewhere keeps its
-      # memo reading beside it ({Scope#bound_constant_names}), where every other form makes that write read
-      # the constant as bound. A second write of any other form in the same file retracts it to
-      # {CONSTANT_UNPUBLISHABLE}.
+      # and it is the memoization idiom rather than a binding while no other file memoizes the name: a
+      # constant compound write keeps its memo reading beside it ({Scope#bound_constant_names}), where every
+      # other form makes that write read the constant as bound. A second write of any other form in the same
+      # file retracts it to {CONSTANT_UNPUBLISHABLE}.
       CONSTANT_MEMO = :memo
 
       # Issue #668 — the census key a constant write through a base no name reaches is filed under:

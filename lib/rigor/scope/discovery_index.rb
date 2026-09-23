@@ -177,11 +177,11 @@ module Rigor
         # dependency recording, so the runner seeds it only on a recording run; every other run leaves it
         # empty and the edge costs one nil check.
         constant_sources: EMPTY_TABLE,
-        # Issue #617 — the censused names some write other than a memo `||=` binds, grouped by LAST SEGMENT,
-        # wildcard keys (`*::LIMIT`) under their segment. `Scope#bound_constant_names` reads it for a constant
-        # compound write whose plain read resolves to nothing: such a name is bound, just not to a value the
-        # analyzer carries. Seeded on every run, because the question is a typing one rather than a recording
-        # one.
+        # Issue #617 — the censused names that bind (any write other than a memo `||=`, or memos of the
+        # segment in two files), grouped by LAST SEGMENT, wildcard keys (`*::LIMIT`) under their segment.
+        # `Scope#bound_constant_names` reads it for a constant compound write whose plain read resolves to
+        # nothing: such a name is bound, just not to a value the analyzer carries. Seeded on every run, because
+        # the question is a typing one rather than a recording one.
         constant_writers: EMPTY_TABLE,
         # Issue #644 — the two halves of `Scope#published_constant?`, the question
         # {Analysis::CheckRules::PublishedConstantGuard} asks. `published_constant_names` is the LAST

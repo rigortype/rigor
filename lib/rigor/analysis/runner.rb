@@ -2053,16 +2053,32 @@ module Rigor
         tables[:published_constant_names] = names unless names.empty?
       end
 
-      # Issue #617 — the censused names some write other than a memo `||=` binds, grouped by last segment
-      # (`Scope#bound_constant_names`).
+      # Issue #617 — the censused names that bind, grouped by last segment (`Scope#bound_constant_names`). A
+      # name some write other than a memo `||=` touches always binds. A memo-only name binds once memos of its
+      # segment span two files: either may load first and set the constant the other then reads, so only a
+      # memo no other file shares keeps the idiom's reading. Files are counted expanded, because discovery can
+      # walk one file under two spellings (`lib/b.rb`, `./lib/b.rb`).
       def constant_writer_index
-        @constant_writer_index ||=
+        @constant_writer_index ||= begin
+          memo_files = memo_files_by_segment
           @project_constant_writes.each_with_object({}) do |(name, by_path), index|
-            next if by_path.each_value.all?(Inference::ScopeIndexer::CONSTANT_MEMO)
+            segment = name.split("::").last
+            next if memo_only?(by_path) && memo_files.fetch(segment).size < 2
 
-            (index[name.split("::").last] ||= []) << name
+            (index[segment] ||= []) << name
           end.each_value(&:freeze).freeze
+        end
       end
+
+      def memo_files_by_segment
+        @project_constant_writes.each_with_object({}) do |(name, by_path), files|
+          set = (files[name.split("::").last] ||= Set.new)
+          by_path.each { |path, descriptor| set << File.expand_path(path) if memo_descriptor?(descriptor) }
+        end
+      end
+
+      def memo_only?(by_path) = by_path.each_value.all? { |descriptor| memo_descriptor?(descriptor) }
+      def memo_descriptor?(descriptor) = descriptor == Inference::ScopeIndexer::CONSTANT_MEMO
 
       # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of
       # `Scope#published_constant?`. Seeded on EVERY run (unlike `constant_sources`, which only a recording

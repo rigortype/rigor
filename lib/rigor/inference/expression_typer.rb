@@ -538,8 +538,9 @@ module Rigor
       # published (`H = { x: 1 }`), the compound write withdrew one by being the second writer the census
       # counts, or this file writes it in a form its own table does not carry (`A, B = …`, `A = B = …`). The
       # value is one the analyzer does not have, so the binding is `Dynamic[top]` rather than the memo's
-      # unbound reading. A `||=` alone never binds, in this file or another, so the memoization idiom keeps
-      # that reading however many files use it.
+      # unbound reading. The one write that does not bind is a memo `||=` no other file shares, so the
+      # memoization idiom keeps that reading however often its file repeats it; memos of the name in two files
+      # bind, since either may load first and set what the other reads.
       #
       # Which name the write reads is the ladder's to decide, not the spelling's: the same resolution runs
       # again with only the census's binding names in the in-source table, so `Other::REGISTRY` elsewhere

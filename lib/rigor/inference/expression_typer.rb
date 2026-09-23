@@ -4829,8 +4829,14 @@ module Rigor
       end
 
       def statement_rebind?(body, name)
-        body.is_a?(Prism::StatementsNode) &&
-          body.body.any? { |statement| VARIABLE_WRITE_NODES.include?(statement.class) && statement.name == name }
+        body.is_a?(Prism::StatementsNode) && body.body.any? { |statement| rebound_name(statement) == name }
+      end
+
+      # The name a variable-write node rebinds, or nil for any other node.
+      def rebound_name(node)
+        case node
+        when *VARIABLE_WRITE_NODES then node.name
+        end
       end
 
       # A binding carries a pin when widening its values changes it, or when it is a `Tuple` / `HashShape` —

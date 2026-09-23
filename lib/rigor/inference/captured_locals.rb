@@ -20,11 +20,11 @@ module Rigor
     # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
     # variable.
     #
-    # {.ivar_writes} is the instance-variable sibling, which only the per-element fold reads. Its names keep
-    # their `@`, so a map over both sets never collides, and {.bound_type} / {.bind} reach each name through
-    # its own kind of binding.
+    # The per-element fold also asks for the instance variables the body rebinds (`ivars: true`). Their
+    # names keep their `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each
+    # name through its own kind of binding.
     module CapturedLocals
-      LOCAL_WRITE_NODES = [
+      LOCAL_WRITE_NODES = Set[
         Prism::LocalVariableWriteNode,
         Prism::LocalVariableOperatorWriteNode,
         Prism::LocalVariableOrWriteNode,
@@ -32,7 +32,7 @@ module Rigor
         Prism::LocalVariableTargetNode
       ].freeze
 
-      IVAR_WRITE_NODES = [
+      IVAR_WRITE_NODES = Set[
         Prism::InstanceVariableWriteNode,
         Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode,
@@ -43,54 +43,54 @@ module Rigor
       module_function
 
       # @param base_scope — the call-site scope the block closes over.
+      # @param ivars — also collect the instance variables the body rebinds, for the per-element fold. An
+      #   ivar is not captured — the block shares the caller's `self` — but it outlives an iteration exactly
+      #   as a captured local does. It counts on the same terms as a local (every write form, any depth, bound
+      #   in `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration
+      #   seed is the union of every write in the class, this body's included, so there is no first-iteration
+      #   pin in it to remove. A nested block that rebinds `self` (`o.instance_eval`) writes another object's
+      #   ivar, and a nested `def` runs only when called; both still count, because an `instance_eval` without
+      #   a receiver, or a call to that `def` inside the body, does write this one.
       # @return the captured names the body writes, each once, in first-write order.
-      def writes(block_node, base_scope)
+      def writes(block_node, base_scope, ivars: false)
         body = block_node.body
         return [] if body.nil?
 
         introduced = introduced_locals(block_node)
-        outer_writes = []
+        names = []
         Source::NodeWalker.each(body) do |descendant|
-          next unless LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
-          next if introduced.include?(descendant.name)
-          next unless base_scope.locals.key?(descendant.name)
+          if LOCAL_WRITE_NODES.include?(descendant.class)
+            next if introduced.include?(descendant.name)
+            next unless base_scope.locals.key?(descendant.name)
+          else
+            next unless ivars && IVAR_WRITE_NODES.include?(descendant.class)
+            next unless rebindable_ivar?(base_scope, descendant.name)
+          end
 
-          outer_writes << descendant.name
+          names << descendant.name
         end
-        outer_writes.uniq
+        names.uniq
       end
 
-      # The instance variables the body writes, on the same terms as {.writes}: every ivar-write form, at any
-      # depth, bound in `base_scope`. An ivar is not captured — the block shares the caller's `self` — but it
-      # outlives an iteration exactly as a captured local does, which is all the per-element fold's
-      # first-iteration pin needs. A block cannot introduce an ivar, so nothing is excluded on that ground;
-      # one the call-site scope does not bind has no entry binding to pin. A nested block that rebinds `self`
-      # (`instance_eval`) writes another object's ivar, which counts anyway: counting a name can only widen
-      # its binding, never narrow it.
-      #
-      # @return `@`-prefixed names, each once, in first-write order.
-      def ivar_writes(block_node, base_scope)
-        body = block_node.body
-        return [] if body.nil?
-
-        ivars = []
-        Source::NodeWalker.each(body) do |descendant|
-          next unless IVAR_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
-          next if base_scope.ivar(descendant.name).nil?
-
-          ivars << descendant.name
-        end
-        ivars.uniq
+      def rebindable_ivar?(scope, name)
+        !scope.ivar(name).nil? && !scope.declaration_sourced?(:ivar, name)
       end
 
-      # The binding `scope` holds for a name from {.writes} or {.ivar_writes}.
+      # The binding `scope` holds for a name from {.writes}.
       def bound_type(scope, name)
         ivar_name?(name) ? scope.ivar(name) : scope.local(name)
       end
 
-      # `scope` with a name from {.writes} or {.ivar_writes} bound to `type`.
+      # `scope` with a name from {.writes} bound to `type`, keeping the name's optimistic nil-freeness mark
+      # (issue #286). `Scope#with_local` / `#with_ivar` drop it as a fresh write should, but here `type`
+      # stands for the binding across iterations, and a value that was nil-free only optimistically still is:
+      # without the mark `x.nil?` folds to `false` where the runtime answers `true`.
       def bind(scope, name, type)
-        ivar_name?(name) ? scope.with_ivar(name, type) : scope.with_local(name, type)
+        if ivar_name?(name)
+          scope.with_ivar(name, type).with_optimistic_ivar(name, scope.optimistic_ivar(name))
+        else
+          scope.with_local(name, type).with_optimistic_local(name, scope.optimistic_local(name))
+        end
       end
 
       # Ruby spells every instance variable with a leading `@` and no local with one.

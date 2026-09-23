@@ -4225,13 +4225,13 @@ module Rigor
       #
       # An instance variable pins the same way — the block shares the caller's `self`, so `@t = 0; [1,
       # 2].map { @t += 1 }` folded to `[1, 1]` too — and takes the same treatment under every rule above: the
-      # ivars the body rebinds ({CapturedLocals.ivar_writes}) join the name set. They keep their `@`, so the one
-      # map cannot confuse `@t` with a local `t`, and the arity-cap floor ({#unanswered_tail_dependency?}),
-      # which compares names sigil-and-all, counts a rebound ivar as answered.
+      # ivars the body rebinds ({CapturedLocals.writes} with `ivars: true`) join the name set. They keep their
+      # `@`, so the one map cannot confuse `@t` with a local `t`, and the arity-cap floor
+      # ({#unanswered_tail_dependency?}), which compares names sigil-and-all, counts a rebound ivar as answered.
       #
       # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds nothing captured.
       def per_element_captured_bindings(block, element_types)
-        names = CapturedLocals.writes(block, scope) + CapturedLocals.ivar_writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         return nil if names.empty?
         return captured_floor(names) if block_body_threading_suppressed?
 
@@ -4249,14 +4249,13 @@ module Rigor
       def converged_captured_bindings(block, names, element_types)
         param_types = [Type::Combinator.union(*element_types)]
         seeds = names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] }
-        moved = Set.new
         converged = BodyFixpoint.converge(
           names: names,
           seed_bindings: seeds,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names, moved) }
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names) }
         )
-        unmoved_pins_floored(converged, seeds, moved)
+        unmoved_pins_floored(converged, seeds)
       end
 
       # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
@@ -4274,42 +4273,40 @@ module Rigor
       # (`x = 5; xs.each { x = 5 }`), so the floor gives that shape up too. It is the far cheaper side: a
       # value-pinned seed the block rebinds is the exact pre-state this fold exists to stop trusting, and
       # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
-      # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
-      # `Nominal` here would only lose a class for nothing.
-      #
-      # Coming back on the seed is the symptom; the cause is an exit binding that never left its entry
-      # binding. A name some pass MOVED (`moved`, from {#captured_exit_bindings}) was threaded, and converging
-      # on its seed then means the seed already holds what the body stored: `@n` seeded `0 | Integer` from
-      # its class's writes, under `@n += 1`, exits `Integer` and joins back to the seed. Flooring that one
-      # would trade a correct `Integer` for `Dynamic[top]` — which is what every ivar the class initializes to
-      # a literal and bumps elsewhere would pay.
-      def unmoved_pins_floored(converged, seeds, moved)
+      # first-iteration pin ({#first_iteration_pin?}) are left alone — there is no constant in them for a later
+      # iteration to escape, and widening a `Nominal` here would only lose a class for nothing.
+      def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
           seed = seeds[name]
-          next [name, type] if moved.include?(name)
-          next [name, type] unless type == seed && value_pinned?(seed)
+          next [name, type] unless type == seed && first_iteration_pin?(seed)
 
           [name, Type::Combinator.untyped]
         end
       end
 
-      def value_pinned?(type)
-        !type.nil? && Type::Combinator.widen_value_pinned(type) != type
+      # True when some value-pinned member of `type` is not already joined with its own widened base. `0`
+      # and `0 | nil` are pins; `0 | Integer` is not, since every `Integer` a later iteration stores is
+      # already in it. The difference is precision, not soundness: `x = flag ? 0 : n; [1, 2].map { x += 1 }`
+      # converges on that seed because the threaded write joins back into it, and flooring it would trade the
+      # correct `[Integer, Integer]` for `Dynamic[top]`.
+      def first_iteration_pin?(type)
+        return false if type.nil?
+
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.any? do |member|
+          widened = Type::Combinator.widen_value_pinned(member)
+          widened != member && !members.include?(widened)
+        end
       end
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
       # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
-      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs. A name
-      # whose exit binding differs from the one it entered with is added to `moved`.
-      def captured_exit_bindings(block, param_types, bindings, names, moved)
+      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
+      def captured_exit_bindings(block, param_types, bindings, names)
         entry = bindings.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
         _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
-        names.to_h do |name|
-          exit_type = CapturedLocals.bound_type(exit_scope, name)
-          moved << name unless exit_type == bindings[name]
-          [name, exit_type]
-        end
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
       def per_element_symbol_results(block_arg, element_types)

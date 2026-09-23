@@ -105,12 +105,12 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
   # runtime value is a new way for a comparison to fold. Each of these is correct code and reports nothing.
   describe "a mapping typed narrower than its runtime value" do
     # `{ **o, b: :y }` typed `Hash[:b, :y]` until the literal joined its splatted entries, and the tier carried a
-    # `Dynamic[top]` arm for a splatted literal written as the argument. The literal's own type now lists `:z`,
-    # however it reaches the call.
+    # `Dynamic[top]` arm for a splatted literal written as the argument. The literal's own type now lists `:z`
+    # and its own `Dynamic[top]` arm, however it reaches the call.
     it "reads a literal with a **splat entry by its own type" do
       # Runtime `{ z: 1, y: 2, c: 3 }` each time; `send` reaches the tier with the `send` node, whose first
-      # argument is the method name.
-      expect(dumped_types(<<~RUBY)).to eq(["Hash[:a | :b | :c | :y | :z, 1 | 2 | 3]"] * 3)
+      # argument is the method name. A bound literal read `Hash[:b, :y]` before and missed `:z`.
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[:a | :b | :c | :y | :z | Dynamic[top], 1 | 2 | 3]"] * 3)
         H = { a: 1, b: 2, c: 3 }
         o = { a: :z }
         dump_type(H.transform_keys(**o, b: :y))
@@ -129,6 +129,10 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
         m = { **o, b: :y }
         s = H.send(:transform_keys, m)
         puts "z" if s.keys.first == :z
+        c = { **o }
+        c[:b] = :w
+        t = H.transform_keys(c)
+        puts "w" if t.keys.last == :w
       RUBY
     end
 

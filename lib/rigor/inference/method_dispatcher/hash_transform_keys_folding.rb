@@ -24,7 +24,8 @@ module Rigor
       # untyped argument, a `to_hash`-convertible object, a Hash subclass, the unlisted entries of an open shape,
       # and an empty closed shape, which is what a mapping filled through an alias the engine does not track still
       # reads as. A block the call carries but the block pass could not type contributes `Dynamic[top]` too. A
-      # literal with a `**splat` entry needs no arm of its own: its type joins the splatted hash's pairs. A
+      # literal with a `**splat` entry needs no arm of its own: its type joins the splatted hash's pairs and a
+      # `Dynamic[top]` arm, which also keeps a copy the code writes into (`m = { **o }; m[:b] = :w`) growing. A
       # non-empty shape filled through an alias still reads narrower than it is: that is a gap in the binding's
       # own type.
       #

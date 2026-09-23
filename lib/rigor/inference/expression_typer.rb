@@ -749,8 +749,9 @@ module Rigor
       # or `nil` (covering `{ a: 1, "b" => 2 }` and `{ 1 => 2, 1.0 => 4 }` alike) — falling back to the
       # generic `Hash[K, V]` form otherwise. Splatted entries (`{ **other }`) and dynamic keys widen to the
       # underlying `Hash[K, V]` form by unioning the types each entry exposes — a splat exposes the `[K, V]`
-      # of the hash it copies (see {#hash_splat_pair}); when no concrete pair survives we fall back to the raw
-      # `Hash` so callers stay backward compatible. A splat never keeps a shape, even over an exact closed one.
+      # of the hash it copies plus a `Dynamic[top]` arm (see {#hash_splat_pair}); when no concrete pair survives
+      # we fall back to the raw `Hash` so callers stay backward compatible. A splat never keeps a shape, even
+      # over an exact closed one.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
         # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
@@ -817,62 +818,62 @@ module Rigor
         keys = []
         values = []
         elements.each do |entry|
-          pair = entry.is_a?(Prism::AssocNode) ? [type_of(entry.key), type_of(entry.value)] : hash_splat_pair(entry)
-          next if pair.nil?
-
-          keys << pair.first
-          values << pair.last
+          if entry.is_a?(Prism::AssocNode)
+            keys << type_of(entry.key)
+            values << type_of(entry.value)
+          else
+            key, value = hash_splat_pair(entry)
+            keys << key
+            values << value
+          end
         end
         [keys, values]
       end
 
-      # The `[K, V]` a `**splat` entry copies into the literal, or nil when it copies nothing. Ruby converts the
-      # value with `to_hash` and inserts every pair, so leaving the entry out typed `o = { a: :z }; { **o, b: :y }`
-      # as `Hash[:b, :y]` and folded `h[:a] == :z` on correct code. An anonymous `**` has no value to read.
+      # The `[K, V]` a `**splat` entry adds to the literal: what the analysis can read of the hash it copies, each
+      # side joined with `Dynamic[top]`. Ruby inserts every pair of that hash, so leaving the entry out typed
+      # `o = { a: :z }; { **o, b: :y }` as `Hash[:b, :y]` and folded `h[:a] == :z` on correct code.
+      #
+      # The `Dynamic[top]` arm is there even when the copy is read exactly. The literal builds a new hash that no
+      # declaration describes, while `MutationRejoin` regrows a `Hash[K, V]` after `[]=` / `merge!` only when it
+      # already carries a gradual arm, because it reads a precise one as a declared claim. Without the arm
+      # `h = { **o }; h[:b] = 2; h[:b] == 2` folded always-falsey and `h[:e] = "s"; h[:e].upcase` fired
+      # `call.undefined-method`, where the `Hash` a splat-only literal used to type as had stayed quiet. The same
+      # arm stands in for what the analysis cannot read: an anonymous `**`, an untyped value, a nominal other than
+      # `Hash`, an open shape's unlisted entries, and a hash filled through an alias the engine does not track,
+      # which still reads `{}`.
       def hash_splat_pair(entry)
-        return unreadable_hash_pair if entry.value.nil?
+        untyped = Type::Combinator.untyped
+        copied = entry.value && splatted_hash_pair(type_of(entry.value))
+        return [untyped, untyped] if copied.nil?
 
-        splatted_hash_pair(type_of(entry.value))
+        copied.map { |side| Type::Combinator.union(side, untyped) }
       end
 
-      # A shape contributes its keys and values, a `Hash[K, V]` (or a difference over one, `non-empty-hash[K, V]`)
-      # its type arguments, and a union the join over its members. `nil` contributes nothing (`**nil` is an empty
-      # splat since Ruby 3.4), and so does `bot`. Anything else is `[Dynamic[top], Dynamic[top]]`: an untyped
-      # value, a raw `Hash`, a subclass that may override `to_hash`, an object `to_hash` converts, an open shape's
-      # unlisted entries, and an empty closed shape, which is what a hash filled through an alias the engine does
-      # not track still reads as (the floor `HashTransformKeysFolding` gives an empty mapping).
+      # The `[K, V]` the analysis can read of a splatted value, or nil when it reads nothing: a shape's keys and
+      # values, a `Hash[K, V]`'s type arguments (through a difference over one, `non-empty-hash[K, V]`), and the
+      # join over a union's members. `nil` reads as nothing because `**nil` splats nothing (Ruby 3.4+; earlier
+      # Rubies raise). A `Hash` subclass is not read: its own type arguments, if any, are not `Hash`'s `K` and `V`.
       def splatted_hash_pair(type)
         case type
         when Type::HashShape then splatted_shape_pair(type)
-        when Type::Nominal
-          type.class_name == "Hash" && type.type_args.size == 2 ? type.type_args : unreadable_hash_pair
+        when Type::Nominal then type.class_name == "Hash" && type.type_args.size == 2 ? type.type_args : nil
         when Type::Difference then splatted_hash_pair(type.base)
-        when Type::Union then splatted_union_pair(type)
-        when Type::Bot then nil
-        else type.is_a?(Type::Constant) && type.value.nil? ? nil : unreadable_hash_pair
+        when Type::Union then joined_hash_pair(type.members.filter_map { |member| splatted_hash_pair(member) })
         end
       end
 
       def splatted_shape_pair(shape)
-        return unreadable_hash_pair if shape.pairs.empty? && shape.closed?
+        return nil if shape.pairs.empty?
 
-        key = Type::Combinator.union(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) })
-        value = Type::Combinator.union(*shape.pairs.values)
-        return [key, value] if shape.closed?
-
-        untyped = Type::Combinator.untyped
-        [Type::Combinator.union(key, untyped), Type::Combinator.union(value, untyped)]
+        [Type::Combinator.union(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) }),
+         Type::Combinator.union(*shape.pairs.values)]
       end
 
-      def splatted_union_pair(union)
-        pairs = union.members.filter_map { |member| splatted_hash_pair(member) }
+      def joined_hash_pair(pairs)
         return nil if pairs.empty?
 
         [Type::Combinator.union(*pairs.map(&:first)), Type::Combinator.union(*pairs.map(&:last))]
-      end
-
-      def unreadable_hash_pair
-        [Type::Combinator.untyped, Type::Combinator.untyped]
       end
 
       # An interpolated string `"#{a}b#{c}"` is `literal-string` when every part contributes literal-bearing

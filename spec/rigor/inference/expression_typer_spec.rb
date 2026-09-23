@@ -1046,7 +1046,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Hash")
     end
 
-    # `o = { a: :z }; { **o, b: :y }` typed `Hash[:b, :y]`: the splatted entry was skipped, not joined.
+    # `o = { a: :z }; { **o, b: :y }` typed `Hash[:b, :y]`: the splatted entry was skipped, not joined. Each splat
+    # now adds what the analysis reads of the copied hash plus a `Dynamic[top]` arm, so a copy the code writes
+    # into keeps growing (`MutationRejoin` regrows only a carrier with a gradual arm).
     describe "a **splat entry's key and value types" do
       let(:c) { Rigor::Type::Combinator }
       let(:untyped) { c.untyped }
@@ -1059,8 +1061,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         c.nominal_of(Hash, type_args: [key, value])
       end
 
+      # The literal `{ **o, b: :y }` for a splat the analysis reads as `[key, value]`.
       def b_joined(key, value)
-        hash_of(c.union(key, c.constant_of(:b)), c.union(value, c.constant_of(:y)))
+        hash_of(c.union(key, c.constant_of(:b), untyped), c.union(value, c.constant_of(:y), untyped))
       end
 
       it "keeps the splat-free literal a HashShape (control)" do
@@ -1068,18 +1071,14 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
           .to eq(c.hash_shape_of({ a: c.constant_of(:z), b: c.constant_of(:y) }))
       end
 
-      it "joins a closed shape's keys and values, optional ones included" do
+      it "joins a shape's keys and values, optional ones included, and a Dynamic[top] arm" do
         shape = c.hash_shape_of({ a: c.constant_of(:z), c: c.constant_of(1) }, optional_keys: [:c])
-        expect(splat_literal(shape))
-          .to eq(b_joined(c.union(c.constant_of(:a), c.constant_of(:c)), c.union(c.constant_of(:z), c.constant_of(1))))
-        expect(splat_literal(shape, "{ **o }"))
-          .to eq(hash_of(c.union(c.constant_of(:a), c.constant_of(:c)), c.union(c.constant_of(:z), c.constant_of(1))))
-      end
-
-      it "adds a Dynamic[top] arm for an open shape's unlisted entries" do
-        shape = c.hash_shape_of({ a: c.constant_of(:z) }, extra_keys: :open)
-        expect(splat_literal(shape))
-          .to eq(b_joined(c.union(c.constant_of(:a), untyped), c.union(c.constant_of(:z), untyped)))
+        keys = c.union(c.constant_of(:a), c.constant_of(:c))
+        values = c.union(c.constant_of(:z), c.constant_of(1))
+        expect(splat_literal(shape)).to eq(b_joined(keys, values))
+        expect(splat_literal(shape, "{ **o }")).to eq(hash_of(c.union(keys, untyped), c.union(values, untyped)))
+        expect(splat_literal(c.hash_shape_of({ a: c.constant_of(:z) }, extra_keys: :open)))
+          .to eq(b_joined(c.constant_of(:a), c.constant_of(:z)))
       end
 
       it "joins a Hash[K, V]'s type arguments, read through a non-empty-hash difference too" do
@@ -1089,32 +1088,30 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
           .to eq(b_joined(c.nominal_of(String), c.nominal_of(Integer)))
       end
 
-      it "joins a union's members and drops nil, which splats nothing" do
+      it "joins the members of a union it can read" do
         shape = c.hash_shape_of({ a: c.constant_of(:z) })
-        expect(splat_literal(c.union(shape, c.constant_of(nil))))
-          .to eq(b_joined(c.constant_of(:a), c.constant_of(:z)))
-        expect(splat_literal(c.constant_of(nil))).to eq(hash_of(c.constant_of(:b), c.constant_of(:y)))
-        expect(splat_literal(c.constant_of(nil), "{ **o }")).to eq(c.nominal_of(Hash))
-      end
-
-      it "contributes Dynamic[top] for a splat it cannot read" do
-        pair = c.nominal_of("Pair", type_args: [c.nominal_of(String), c.nominal_of(Integer)])
-        [untyped, c.nominal_of(Hash), c.nominal_of("ActiveSupport::HashWithIndifferentAccess"), pair,
-         c.dynamic(hash_of(c.nominal_of(String), c.nominal_of(Integer))), c.nominal_of(Integer),
-         c.union(c.hash_shape_of({ a: c.constant_of(:z) }), c.nominal_of(Integer))].each do |splatted|
-          expect(splat_literal(splatted).type_args.map { |arg| arg.members.include?(untyped) })
-            .to eq([true, true]), "for #{splatted.describe}"
+        [c.union(shape, c.constant_of(nil)), c.union(shape, c.nominal_of(Integer))].each do |splatted|
+          expect(splat_literal(splatted)).to eq(b_joined(c.constant_of(:a), c.constant_of(:z))),
+                                             "for #{splatted.describe}"
         end
       end
 
-      # The engine records no aliasing, so `m = {}; m.tap { |x| x[:a] = :z }` still reads `{}`.
-      it "contributes Dynamic[top] for an empty closed shape, not nothing" do
-        expect(splat_literal(c.hash_shape_of({}))).to eq(b_joined(untyped, untyped))
+      it "adds only the Dynamic[top] arm for a splat it cannot read" do
+        pair = c.nominal_of("Pair", type_args: [c.nominal_of(String), c.nominal_of(Integer)])
+        [untyped, c.constant_of(nil), c.hash_shape_of({}), c.nominal_of(Hash),
+         c.nominal_of("ActiveSupport::HashWithIndifferentAccess"), pair,
+         c.dynamic(hash_of(c.nominal_of(String), c.nominal_of(Integer))), c.nominal_of(Integer)].each do |splatted|
+          expect(splat_literal(splatted)).to eq(hash_of(c.union(c.constant_of(:b), untyped),
+                                                        c.union(c.constant_of(:y), untyped))),
+                                             "for #{splatted.describe}"
+        end
+        expect(splat_literal(c.constant_of(nil), "{ **o }")).to eq(hash_of(untyped, untyped))
       end
 
-      it "contributes Dynamic[top] for an anonymous **" do
+      it "adds only the Dynamic[top] arm for an anonymous **" do
         def_node = parse_expression("def forward(**) = { **, b: :y }")
-        expect(scope.type_of(def_node.body.body.first)).to eq(b_joined(untyped, untyped))
+        expect(scope.type_of(def_node.body.body.first))
+          .to eq(hash_of(c.union(c.constant_of(:b), untyped), c.union(c.constant_of(:y), untyped)))
       end
 
       it "types a keyword-hash argument the same way" do

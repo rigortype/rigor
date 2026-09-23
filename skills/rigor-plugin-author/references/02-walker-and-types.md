@@ -165,20 +165,14 @@ Rigor::Plugin::Base.suggest(typo, known_names)  # nearest match, or nil
 
 ## Optional — contribute a return type with `dynamic_return` / `narrowing_facts`
 
-> **Critical — these hooks do NOT make a method "defined", so they do
-> NOT suppress `call.undefined-method`.** Method *existence* and call
-> *type* are two independent checks. A return-type contribution sharpens
-> the type of a call the analyzer has **already resolved to a real
-> method** (turning a `Dynamic` return into something precise). It is
-> never consulted for a receiver/method the analyzer cannot find — that
-> fires `call.undefined-method` first, and a contribution does nothing
-> to silence it. **If your goal is to kill a `call.undefined-method`
-> cluster on a DSL-generated method (the common reason
-> `rigor-project-init` hands off to this skill), the fix is to make the
-> method *exist* in Rigor's view — ship RBS declaring it (see "Shipping
-> RBS for the DSL" below), not a return-type contribution.** Reach for
-> these only when the call already resolves and you want a *better
-> return type*.
+> **Prefer RBS to make a DSL method exist.** A `dynamic_return` answer
+> suppresses `call.undefined-method` only at the call sites where the
+> rule fires (its gated receiver kind and methods); RBS makes the method
+> defined for all of core inference — arity, argument types, every call
+> site. To clear a `call.undefined-method` cluster on DSL-generated
+> methods (the common reason `rigor-project-init` hands off to this
+> skill), ship RBS (see "Shipping RBS for the DSL" below). Reach for
+> these hooks when you want a better *return type* for a call.
 
 A plugin can do more than emit diagnostics: it can *supply* the
 inferred return type (or narrowing facts) for a call site the core
@@ -213,10 +207,6 @@ narrowing_facts methods: [:assert_kind_of] do |call_node, scope|
 end
 ```
 
-> **`narrowing_facts` was renamed from `type_specifier` in ADR-80.**
-> The old verb was removed in 0.3.0 — `narrowing_facts` is the only
-> spelling a plugin can declare.
-
 Build return types with `Rigor::Type::Combinator`:
 
 ```ruby
@@ -233,12 +223,9 @@ plugin is confident; a wrong contribution propagates downstream.
 `rigor plugins --capabilities` catalogue enumerates — run it to see
 exactly what each loaded plugin contributes.
 
-> **The removed fat hook.** The original `flow_contribution_for(call_node:,
-> scope:)` was **deleted pre-1.0 in ADR-52 WD3** — defining it now raises
-> `ArgumentError` at load time. The two shapes it used to cover are
-> expressed by `dynamic_return`'s callable gates: a **method-gated return
-> type** (an RSpec `let(:x) { … }` binding, a Sorbet `sig`-driven return —
-> keyed on the method, not a fixed receiver class) uses
+> **Callable gates.** A **method-gated return type** (an RSpec
+> `let(:x) { … }` binding, a Sorbet `sig`-driven return — keyed on the
+> method, not a fixed receiver class) uses
 > `dynamic_return methods: -> { [...] }` or `file_methods: ->(path) { [...] }`;
 > a **dynamic per-project receiver set** (ActiveStorage's `Attached::One`
 > on discovered model classes) uses `dynamic_return receivers: -> { [...] }`,
@@ -247,7 +234,7 @@ exactly what each loaded plugin contributes.
 > if the plugin genuinely needs to sharpen call-site types; a
 > diagnostics-only plugin skips them entirely.
 
-## Shipping RBS for the DSL — the way to suppress `call.undefined-method`
+## Shipping RBS for the DSL — making DSL methods exist
 
 If the DSL introduces methods or classes that Rigor cannot see (a
 `Money` class defined by metaprogramming, `Setting.<name>` accessors a

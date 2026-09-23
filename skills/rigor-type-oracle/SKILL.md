@@ -61,10 +61,6 @@ scope the moment you are about to write or assert one:
 - Being asked "what type is this?", "what does this method return?",
   "add types to this class", "document this file".
 
-It applies to **Rigor's own tree** as well: `lib/`, the bundled plugins,
-and the examples are held to the same rule, and a gap found there is
-engine signal worth more than the annotation you would have written.
-
 ## When NOT to use
 
 - **Setting Rigor up on a project that has none** → `rigor-next-steps`

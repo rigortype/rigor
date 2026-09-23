@@ -52,12 +52,15 @@ rigor --version
 ### Phase 2 — see the delta against the committed baseline
 
 ```sh
-rigor check
-rigor diff            # compare current diagnostics to the saved baseline JSON
+rigor check             # everything outside the committed baseline's envelope
+rigor baseline drift    # per-bucket movement against .rigor-baseline.yml
 ```
 
-`rigor diff` shows what is **new** relative to the baseline — that set is
-what the upgrade changed.
+With `baseline:` wired, `rigor check` already hides what the baseline
+covers, so what it prints is **new** relative to the baseline — that set
+is what the upgrade changed. `rigor baseline drift` adds the bucket view:
+buckets now over their recorded count, and buckets the new version
+cleared or shrank.
 
 ### Phase 3 — sort the new diagnostics
 
@@ -82,8 +85,8 @@ envelope so the regeneration does not bury what you just fixed:
 rigor baseline regenerate
 ```
 
-Commit the updated `.rigor-baseline.yml` together with any fixes, so the
-team adopts the same post-upgrade baseline.
+Recommend committing the updated `.rigor-baseline.yml` together with any
+fixes, so the team adopts the same post-upgrade baseline.
 
 ## Note
 

@@ -2686,11 +2686,12 @@ module Rigor
         body = block.body
         return post_scope if body.nil?
 
-        mutations = captured_content_mutations(block)
+        shadows = {}.compare_by_identity
+        mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
         seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
-        joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block))
+        joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
       end
 
@@ -2724,7 +2725,12 @@ module Rigor
       # arm on every self-reading store would be sound too, but its `Dynamic` would quiet every later read of the
       # collection, where the converged `Integer` still reports `h[:a].upcase`. With no moving name — the `acc = [];
       # xs.each { |x| acc.push(x) }` accumulator — this is the single pass it always was.
-      def join_content_to_fixpoint(sites, seeds, entry)
+      #
+      # `shadows` maps a site nested in an inner block or lambda to the names that block binds itself (parameters,
+      # `;`-locals). The entry scope is the seam block's, where such a name resolves to the OUTER local it shadows, so
+      # the site's evidence is typed with those names bound to `Dynamic[top]` instead: `|y| out << y.first` inside
+      # the block must not read an outer `y = [0]`.
+      def join_content_to_fixpoint(sites, seeds, entry, shadows = NO_SHADOWS)
         kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
         return {} if kinds.empty?
 
@@ -2732,10 +2738,10 @@ module Rigor
         fixed = kinds.except(*moving)
         strings, settled = fixed.partition { |_name, kind| kind == :string }.map(&:to_h)
         fixed_entry = bind_content_joins(entry, strings, seeds, {})
-        evidence = content_evidence(sites, fixed, fixed_entry)
+        evidence = content_evidence(sites, fixed, fixed_entry, shadows)
         unless moving.empty?
           base = bind_content_joins(fixed_entry, settled, seeds, evidence)
-          evidence = evidence.merge(converge_content_evidence(sites, seeds, kinds.slice(*moving), base))
+          evidence = evidence.merge(converge_content_evidence(sites, seeds, kinds.slice(*moving), base, shadows))
         end
         kinds.to_h { |name, kind| [name, join_content_evidence(seeds[name], kind, name, evidence)] }
       end
@@ -2785,19 +2791,56 @@ module Rigor
         refuted.empty? ? join : Type::Combinator.union(join, *refuted)
       end
 
-      # The block's captured content mutations — `collect_content_mutations` less the names the block itself
-      # introduces. That walk counts any receiver read at depth >= 1, so a block PARAMETER mutated inside a nested
-      # block (`|y| [9].each { y << 9 }`) would otherwise pass for the outer local it shadows, and the join would
-      # rebind the parameter to that local's contents.
-      def captured_content_mutations(block)
-        mutations = collect_content_mutations(block.body)
-        return mutations if mutations.empty?
+      # The nodes that open a local scope a read's `depth` counts.
+      SCOPE_NESTING_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :SCOPE_NESTING_NODES
 
-        mutations.except(*CapturedLocals.introduced_locals(block))
+      # The block's captured content mutations: `{ name => [node, ...] }` for every content mutator whose receiver is
+      # a local from OUTSIDE the block. A read's `depth` counts the scopes it climbs, so it reaches past the seam's
+      # block only when it climbs more scopes than the blocks and lambdas nested between it and the block's body.
+      # `collect_content_mutations` tests `depth >= 1`, which is that rule only directly in the body: it took a block
+      # PARAMETER mutated inside a nested block (`|y| [9].each { y << 9 }`), or a nested block's own parameter one
+      # level deeper, for the outer local it shadows, and the join rebound the parameter to that local's contents.
+      #
+      # Each site nested in an inner block or lambda is recorded in `shadows` with the names those blocks bind
+      # themselves (see {#join_content_to_fixpoint}).
+      def captured_content_mutations(block, shadows)
+        mutations = Hash.new { |h, k| h[k] = [] }
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
+          next if name.nil?
+
+          mutations[name] << site
+          record_shadows(shadows, site, ancestors)
+        end
+        mutations
+      end
+
+      def scope_nesting(ancestors)
+        ancestors.count { |ancestor| scope_nesting_node?(ancestor) }
+      end
+
+      def scope_nesting_node?(node)
+        SCOPE_NESTING_NODES.any? { |klass| node.is_a?(klass) }
+      end
+
+      def record_shadows(shadows, site, ancestors)
+        names = ancestors.select { |a| scope_nesting_node?(a) }
+                         .flat_map { |a| CapturedLocals.introduced_locals(a).to_a }
+        shadows[site] = names unless names.empty?
+      end
+
+      # `scope` with each name a site's enclosing inner blocks bind bound to `Dynamic[top]`: the seam's scope cannot
+      # see those bindings, and the name would otherwise resolve to the outer local it shadows.
+      def site_evidence_scope(scope, site, shadows)
+        names = shadows[site]
+        return scope if names.nil?
+
+        names.reduce(scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
       end
 
       # `base` binds every fixed name to its join; the moving names are rebound on each pass.
-      def converge_content_evidence(sites, seeds, kinds, base)
+      def converge_content_evidence(sites, seeds, kinds, base, shadows)
         slots = kinds.flat_map { |name, kind| CONTENT_EVIDENCE_SLOTS.fetch(kind).map { |slot| [name, slot] } }
         BodyFixpoint.converge(
           names: slots,
@@ -2807,7 +2850,7 @@ module Rigor
             pass_entry = kinds.reduce(base) do |acc, (name, kind)|
               acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
             end
-            content_evidence(sites, kinds, pass_entry)
+            content_evidence(sites, kinds, pass_entry, shadows)
           end
         )
       end
@@ -2821,16 +2864,16 @@ module Rigor
 
       # `{ [name, slot] => union }` for every collection name, typed in `evidence_scope`; a slot no store contributes
       # to reads `bot`.
-      def content_evidence(sites, kinds, evidence_scope)
+      def content_evidence(sites, kinds, evidence_scope, shadows)
         kinds.each_with_object({}) do |(name, kind), evidence|
           case kind
           when :hash
-            pairs = hash_pair_evidence(sites[name], evidence_scope)
+            pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
             evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
             evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
           when :array
             evidence[[name, :element]] =
-              Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope).compact)
+              Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
           end
         end
       end
@@ -2881,10 +2924,11 @@ module Rigor
 
         # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
         # captured-local walk.
-        calls = body_content_mutations_on(body, memo_param)
+        shadows = {}.compare_by_identity
+        calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer))
+        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
         joined || call_type
       end
 
@@ -2892,13 +2936,13 @@ module Rigor
       # memo's carrier is kept: a memo store reading one of them (`buf << w; m << buf.length`) must see it as it
       # stands at any iteration's entry, not at its pre-call contents. Their own continuation is the block seam's to
       # write.
-      def join_memo_content(call_node, memo_param, calls, pre_state)
+      def join_memo_content(call_node, memo_param, calls, pre_state, shadows)
         block = call_node.block
-        captured = captured_content_mutations(block)
+        captured = captured_content_mutations(block, shadows)
         seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
         seeds[memo_param] = pre_state
         sites = captured.merge(memo_param => calls)
-        join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block))[memo_param]
+        join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 
       # The name of the memo block parameter (the SECOND positional param of an `each_with_object` block), or nil when
@@ -2917,18 +2961,21 @@ module Rigor
         second.respond_to?(:name) ? second.name : nil
       end
 
-      # Content-mutator calls on a block-local receiver `var_name` (depth 0) within `body`.
-      def body_content_mutations_on(body, var_name)
+      # Content-mutator calls on the block-local `var_name` within `body` — directly, or from a nested block that
+      # reaches it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a
+      # different variable and does not count.
+      def body_content_mutations_on(body, var_name, shadows)
         calls = []
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
           next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
-          next unless receiver.name == var_name
+          next unless receiver.name == var_name && receiver.depth == scope_nesting(ancestors)
 
           calls << descendant
+          record_shadows(shadows, descendant, ancestors)
         end
         calls
       end
@@ -2966,14 +3013,19 @@ module Rigor
         ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
       end
 
+      # No site sits under an inner block that shadows a name — the loop seam's answer, and the default.
+      NO_SHADOWS = {}.freeze
+      private_constant :NO_SHADOWS
+
       # The `[key, value]` pairs `calls` store into a Hash, typed in `block_entry`.
-      def hash_pair_evidence(calls, block_entry)
-        calls.flat_map { |c| hash_pair_types(c, block_entry) }
+      def hash_pair_evidence(calls, block_entry, shadows = NO_SHADOWS)
+        calls.flat_map { |c| hash_pair_types(c, site_evidence_scope(block_entry, c, shadows)) }
       end
 
       # The elements `calls` add to an Array, typed in `block_entry`.
-      def array_element_evidence(calls, block_entry)
+      def array_element_evidence(calls, entry_scope, shadows = NO_SHADOWS)
         calls.flat_map do |c|
+          block_entry = site_evidence_scope(entry_scope, c, shadows)
           # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path

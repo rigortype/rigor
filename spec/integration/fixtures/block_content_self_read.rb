@@ -91,6 +91,22 @@ assert_type("Array[1 | 2]", firsts)
 assert_type("Array[0]", shade)
 puts "two" if firsts.last == 2
 
+# --- A nested block's own parameter, one level deeper: the outer block's
+# seam types `picks << inner.first` from its own entry scope, where
+# `inner` would resolve to the outer local it shadows. It reads the
+# parameter as unknown instead, never the outer `[0]`. ---
+inner = [0]
+picks = []
+[1, 2].each do |v|
+  [[v]].each do |inner|
+    [9].each { inner << 9 }
+    picks << inner.first
+  end
+end
+assert_type("Array[Dynamic[top]]", picks)
+assert_type("Array[0]", inner)
+puts "two" if picks.last == 2
+
 # --- A lazily initialised capture is still `nil` at the first
 # iteration's entry, though the join drops that arm afterwards. ---
 lazy = gets ? [0] : nil
@@ -105,7 +121,9 @@ puts "true first" if nils.first == true
 
 # --- A moving collection keeps its seed arm on every pass: `maybe` can
 # still be nil on an iteration where `grow` has already grown, so
-# `grow`'s store reads both arms. ---
+# `grow`'s store reads both arms. `maybe` itself continues as
+# `Array[0 | Integer]` in the golden snapshot, which drops the nil it
+# keeps at runtime when `gets` is nil — flip this when #1219 is fixed. ---
 maybe = gets ? [0] : nil
 grow = [0]
 [1, 2].each do |_x|

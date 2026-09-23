@@ -8,7 +8,7 @@
 # `call.possible-nil-receiver` on correct code. `data/core_overlay/enumerable.rbs` prepends the ifnone arms.
 #
 # This file lives under `spec/rigor/environment` because that is what CI's "RBS compatibility (RBS 3.x)" job
-# runs. On rbs 3.x `Array#detect` is Enumerable's too; rbs 4.x aliases it to `Array#find`.
+# runs. Before rbs 4.1 `Array#detect` is Enumerable's too; rbs 4.1 and later alias it to `Array#find`.
 require "spec_helper"
 
 RSpec.describe "Enumerable#detect ifnone overloads" do
@@ -38,7 +38,7 @@ RSpec.describe "Enumerable#detect ifnone overloads" do
     # An `| ...` continuation with no base declaration raises `InvalidOverloadMethodError` and degrades the whole
     # module, and every includer's `detect` with it, to `Dynamic[top]`.
     it "leaves Enumerable and its includers buildable" do
-      %w[Enumerable Hash Range Struct Enumerator Enumerator::Lazy].each do |name|
+      %w[Enumerable Array Hash Range Struct Enumerator Enumerator::Lazy].each do |name|
         expect(loader.instance_definition(name)).not_to be_nil, "#{name} failed to build"
       end
     end
@@ -86,6 +86,21 @@ RSpec.describe "Enumerable#detect ifnone overloads" do
       RUBY
     end
 
+    # `nil` means no fallback, and any object answering `call` is one; upstream's `?Proc` parameter rejected both
+    # with `call.argument-type-mismatch`. The surplus-argument line keeps a blanket stand-down from passing.
+    it "accepts nil and any callable as the fallback, as find does" do
+      expect(error_lines(<<~RUBY)).to eq([[8, "call.wrong-arity"]])
+        n = Integer(ARGV.first)
+        class Fallback
+          def call = 0
+        end
+        (1..n).detect(nil) { |e| e > 5 }
+        (1..n).detect(Fallback.new) { |e| e > 5 }
+        (1..n).detect(method(:rand)) { |e| e > 5 }
+        (1..n).detect(nil, nil) { |e| e > 5 }
+      RUBY
+    end
+
     it "answers find's type for every ifnone form" do
       detect_types, find_types = dumped_types(<<~RUBY).each_slice(2).to_a.transpose
         n = Integer(ARGV.first)
@@ -114,13 +129,18 @@ RSpec.describe "Enumerable#detect ifnone overloads" do
       RUBY
     end
 
-    # `Array#detect` resolves to `Array#find` on rbs 4.x, which the overlay does not touch.
-    it "leaves Array#detect's answer where Array#find's is" do
-      expect(dumped_types(<<~RUBY)).to eq(["1 | Dynamic[top] | Integer", "1 | Integer | nil"])
+    # rbs 4.1 and later resolve `Array#detect` to `Array#find`, which the overlay does not touch; earlier releases
+    # route it through the overlay, which must give the same answers.
+    it "keeps Array#detect's answer where Array#find's is" do
+      detect_types, find_types = dumped_types(<<~RUBY).each_slice(2).to_a.transpose
         n = Integer(ARGV.first)
         dump_type([1, n].detect(-> { 0 }) { |e| e > 5 })
+        dump_type([1, n].find(-> { 0 }) { |e| e > 5 })
         dump_type([1, n].detect { |e| e > 5 })
+        dump_type([1, n].find { |e| e > 5 })
       RUBY
+
+      expect([detect_types.size, detect_types]).to eq([2, find_types])
     end
   end
 end

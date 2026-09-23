@@ -1,0 +1,1 @@
+- `sig/`: declared `Effects::Registry`, `Plugin::{EffectAttribution,EffectEdge,EffectAncestry,EffectEntryPoints}` and `Plugin::Registry::Contribution`, and tightened the `effect_*` readers on `Plugin::Manifest`, `Plugin::Base`, `Plugin::Registry` and `Effects::PluginFacts` (#1181, #1190).

@@ -7127,13 +7127,15 @@ module Rigor
       # where the descriptor is either `[literal]` (a publishable frozen scalar) or {CONSTANT_UNPUBLISHABLE}.
       #
       # EVERY constant write is censused, whatever its rvalue and whatever its form, because the census is
-      # three things at once and only the first cares about the value:
+      # four things at once and only the first cares about the value:
       #
       # 1. the published table ({#finalize_constant_writes}: a name publishes only when exactly one file
       #    writes it and that write is a literal),
-      # 2. the attribution the ADR-46 positive edge reads, and
+      # 2. the attribution the ADR-46 positive edge reads,
       # 3. the producer whose per-file DIFF re-checks readers on an incremental run
-      #    ({Analysis::Incremental.changed_constant_publications}).
+      #    ({Analysis::Incremental.changed_constant_publications}), and
+      # 4. the other files' writes a constant compound write finds its binding among when its plain read
+      #    resolves nothing ({Scope#foreign_constant_writes}).
       #
       # A write the census cannot see does not merely lose precision — it silently bypasses the conflict rule
       # and publishes a value the program does not have. That is why the operator / multi-assign / chained /

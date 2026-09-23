@@ -69,6 +69,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     external_ancestor_name_candidates(req:class_name,key:name_memo,key:mixins)
     fact_store()
     facts_for(key:target,key:bucket)
+    foreign_constant_writes(req:name)
     forget_match_globals()
     global(req:name)
     globals()

@@ -66,6 +66,19 @@ module Rigor
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
 
+    # Issue #617 — `{census name => Set[writing file]}` for every censused constant write with `name`'s last
+    # segment that some file other than the analysed one makes, in any form. Keyed by the census's spelling,
+    # a `*::LIMIT` wildcard included, so the caller still decides which of them a reference resolves to.
+    def foreign_constant_writes(name)
+      writers = @discovery.constant_writers[name.split("::").last]
+      return EMPTY_FOREIGN_CONSTANT_WRITES if writers.nil?
+
+      writers.reject { |_census_name, paths| paths.all? { |path| path == @source_path } }
+    end
+
+    EMPTY_FOREIGN_CONSTANT_WRITES = {}.freeze
+    private_constant :EMPTY_FOREIGN_CONSTANT_WRITES
+
     # Issue #667 — the instance-variable names of `class_name` whose class-ivar seed comes from a foreign
     # published constant (`@mode = AppConfig::MODE` in `initialize`, read in a sibling method).
     # `StatementEvaluator#seed_instance_ivars` stamps the flow mark for these at method-body entry, the way

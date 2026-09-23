@@ -425,6 +425,7 @@ module Rigor
         # ...and the raw per-(name, path) publication census the incremental producer diffs.
         @project_constant_writes = {}.freeze
         @published_constant_name_set = nil
+        @constant_writer_index = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
@@ -1464,6 +1465,7 @@ module Rigor
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
+        @constant_writer_index = nil
         @project_constant_sources = discovery.constant_sources
         @project_constant_writes = discovery.constant_writes
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
@@ -2011,7 +2013,12 @@ module Rigor
       # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
       # for the constant-write map). A normal run carries neither. Extracted to keep
       # {#project_scope_seed_tables} under the complexity budget.
+      #
+      # Issue #617 — the constant-write map regrouped by last segment rides every run, because a constant
+      # compound write whose plain read resolves nothing reads its binding off it: a TYPE, not an edge.
       def seed_dependency_attribution_tables(tables)
+        writers = constant_writer_index
+        tables[:constant_writers] = writers unless writers.empty?
         return unless @record_dependencies
 
         tables[:discovered_class_sources] = @project_discovered_class_sources unless
@@ -2044,6 +2051,14 @@ module Rigor
         tables[:in_source_constants] = constants
         names = published_constant_name_set
         tables[:published_constant_names] = names unless names.empty?
+      end
+
+      # Issue #617 — the constant attribution regrouped by last segment (`Scope#foreign_constant_writes`).
+      def constant_writer_index
+        @constant_writer_index ||=
+          @project_constant_sources.each_with_object({}) do |(name, paths), index|
+            (index[name.split("::").last] ||= {})[name] = paths
+          end.each_value(&:freeze).freeze
       end
 
       # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of

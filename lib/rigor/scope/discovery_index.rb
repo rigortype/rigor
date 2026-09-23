@@ -33,6 +33,7 @@ module Rigor
       :discovered_extends,
       :discovered_class_sources,
       :constant_sources,
+      :constant_writers,
       :published_constant_names,
       :local_constant_names,
       :published_constant_alias_names,
@@ -176,6 +177,12 @@ module Rigor
         # dependency recording, so the runner seeds it only on a recording run; every other run leaves it
         # empty and the edge costs one nil check.
         constant_sources: EMPTY_TABLE,
+        # Issue #617 — the same attribution regrouped by LAST SEGMENT, `{segment => {census name => Set[writing
+        # file]}}`, wildcard keys (`*::LIMIT`) filed under their segment. `Scope#foreign_constant_writes` reads it
+        # for a constant compound write whose plain read resolves to nothing: a name another file writes is
+        # bound there, just not to a value the analyzer published. Seeded on every run, because the question is
+        # a typing one rather than a recording one.
+        constant_writers: EMPTY_TABLE,
         # Issue #644 — the two halves of `Scope#published_constant?`, the question
         # {Analysis::CheckRules::PublishedConstantGuard} asks. `published_constant_names` is the LAST
         # SEGMENTS of the project-wide published table (run-wide, seeded by the runner);

@@ -447,8 +447,9 @@ module Rigor
       # less the caller-derived rungs a top-level body keeps for reads Ruby raises on. The memoization idiom
       # (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic constant
       # assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue reading
-      # exactly as an unbound variable does. A path whose base renders no static name (`klass::X`,
-      # `self::X`) names no binding the resolver can look up, and reads as unbound too.
+      # exactly as an unbound variable does — unless another file writes it ({#foreign_constant_binding}). A
+      # path whose base renders no static name (`klass::X`, `self::X`) names no binding the resolver can look
+      # up, and reads as unbound too.
       #
       # One exception is the index rule's: an unbound `||=` whose rvalue has no truthy part is a guard, not a
       # memo. `SETTINGS ||= raise "boot first"` returns only when something the analyzer did not see set
@@ -529,7 +530,27 @@ module Rigor
 
           rooted = Source::ConstantPath.rooted?(node.target)
         end
-        resolve_constant_name(full_name, rooted: rooted, caller_derived: false)
+        resolve_constant_name(full_name, rooted: rooted, caller_derived: false) ||
+          foreign_constant_binding(full_name, rooted)
+      end
+
+      # A constant the plain read cannot resolve may still be one another file writes: its value never
+      # published (`H = { x: 1 }`), or the compound write withdrew it by being the second writer the census
+      # counts. Either way the constant is bound whenever that file has loaded first, to a value the analyzer
+      # does not carry, so the binding is `Dynamic[top]` rather than the memo's unbound reading.
+      #
+      # Which name the write reads is the ladder's to decide, not the spelling's: the same resolution runs
+      # again with only the other files' names in the in-source table, so `Other::REGISTRY` elsewhere leaves
+      # a top-level `REGISTRY ||= {}` its memo reading. A write through a base nothing names (`k::X = 1`) may
+      # have written any of them, as the census's conflict rule reads it.
+      def foreign_constant_binding(full_name, rooted)
+        writes = scope.foreign_constant_writes(full_name)
+        return nil if writes.empty?
+        return dynamic_top if writes.each_key.any? { |name| name.start_with?(ScopeIndexer::DYNAMIC_TARGET_PREFIX) }
+
+        foreign = writes.transform_values { dynamic_top }
+        probe = scope.with_discovery(scope.discovery.with(in_source_constants: foreign))
+        Reflection.resolve_constant_type(full_name, scope: probe, rooted: rooted, caller_derived: false)
       end
 
       def compound_operator_result(current, rhs, operator)

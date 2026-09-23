@@ -34,8 +34,7 @@ module Rigor
       def widen_shape(shape, method_name)
         case method_name
         when :default=, :default_proc= then open_shape(shape)
-        when :compare_by_identity
-          MutationWidening.widen_hash_shape(shape, values: :widen) if identity_sensitive?(shape)
+        when :compare_by_identity then identity_widening(shape) if identity_sensitive?(shape)
         end
       end
 
@@ -58,11 +57,21 @@ module Rigor
       # `s = { "k" => 1 }; s.compare_by_identity; s["k"]` is `nil` in one file and `1` in the next — and a bignum or
       # a heap Float is a fresh object per evaluation.
       #
-      # Such a shape is widened as a storing mutator widens it, with its values unpinned: the read of that key is
-      # then the nil-free nominal answer, which neither folds `s["k"] == 1` nor draws `possible nil receiver` on the
-      # file where the key does hit. A shape whose every key is identity-stable reads exactly as before.
+      # A shape whose every key is identity-stable reads exactly as before; any other is widened by
+      # {.identity_widening}.
       def identity_sensitive?(shape)
         shape.pairs.each_key.any? { |key| !identity_stable_key?(key) }
+      end
+
+      # An identity-sensitive shape widened as a storing mutator widens it, its values unpinned, with a `Dynamic[top]`
+      # arm on the value side. A read of a String key may find its pair or miss it and answer `nil`, or a default set
+      # before or after, and the nominal cannot say which: the arm keeps that read from folding (`s["k"] == 1`) or
+      # drawing `possible nil receiver` in the file where the key does hit. It also keeps the answer independent of
+      # order — a nominal ignores a later `default=`, so without the arm `s.compare_by_identity; s.default = "x"` read
+      # `s["zz"]` as `Integer`.
+      def identity_widening(shape)
+        key, value = MutationWidening.widen_hash_shape(shape, values: :widen).type_args
+        Type::Combinator.nominal_of("Hash", type_args: [key, Type::Combinator.union(value, Type::Combinator.untyped)])
       end
 
       # `Integer#bit_length` is at most 62 for exactly CRuby's 64-bit fixnum range, `-(2**62)..(2**62 - 1)`.

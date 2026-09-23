@@ -459,13 +459,15 @@ module Rigor
 
       # `[keys, values]` evidence from a Hash-ish pre-state binding — a `HashShape` (literal pairs)
       # or a `Nominal[Hash, [K, V]]`. A `Difference` (`non-empty-hash[K, V]`) reads through to its
-      # base, as {#collection_element_types} does for the Array side.
+      # base, as {#collection_element_types} does for the Array side. An open shape adds a
+      # `Dynamic[top]` key and value: its unseen keys may hold anything, and the joined carrier's
+      # read of one must not answer a known value (`flags = { debug: true }; flags.default = false`
+      # then a store in a block read `flags[:verbose]` as `true`).
       def hash_shape_key_values(type)
         case type
         when Type::HashShape
-          return [[], []] if type.pairs.empty?
-
-          [[key_union_for(type.pairs.keys)], type.pairs.values]
+          keys, values = type.pairs.empty? ? [[], []] : [[key_union_for(type.pairs.keys)], type.pairs.values]
+          type.open? ? [keys + [Type::Combinator.untyped], values + [Type::Combinator.untyped]] : [keys, values]
         when Type::Nominal
           type.class_name == "Hash" && type.type_args.size == 2 ? [[type.type_args[0]], [type.type_args[1]]] : [[], []]
         when Type::Union

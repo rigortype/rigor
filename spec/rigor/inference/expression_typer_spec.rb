@@ -1919,6 +1919,11 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("@opts[:k] ||= raise(KeyError)")).describe).to eq("Dynamic[top]")
     end
 
+    it "keeps the untracked slot when the rvalue is never truthy" do
+      # `@flags[n] ||= false` answers `true` once another method stored `true`; it never stores a truthy value.
+      expect(scope.type_of(parse_expression("@flags[:k] ||= false")).describe).to eq("Dynamic[top] | false")
+    end
+
     it "keeps the gradual arm when the read is only partly gradual (control)" do
       # The read is `Dynamic[top]?`, not a lone `Dynamic`: the slot may hold the untyped `x`.
       type = statement_type("x = foo\nh = { a: x, b: nil }\nk = rand.to_s\nh[k] ||= \"s\"\n", 3)

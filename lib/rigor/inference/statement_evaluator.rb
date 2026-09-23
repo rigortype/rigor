@@ -294,14 +294,16 @@ module Rigor
       # never writes — where the value the idiom returns is the one it stores, and `Dynamic[top] | rhs` sent
       # every such method to `sig.skipped.untyped-return`. It is the variable form's optimism for an unbound
       # target (`ExpressionTyper#type_of_compound_variable_write`) keyed on the slot, and narrower: `&&=` is no
-      # memo (`h[k] &&= v` on an absent slot is `nil`), an operator write has no such reading, and a `bot`
-      # rvalue is a guard (`opts[k] ||= raise KeyError`) whose value is the slot, never `bot`.
+      # memo (`h[k] &&= v` on an absent slot is `nil`), an operator write has no such reading, and an rvalue
+      # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
+      # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
+      # `@flags[n] = true` elsewhere, never provably `false`.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 
         current = index_read_type(node, scope)
         rhs = scope.type_of(node.value, tracer: tracer)
-        return rhs if current.is_a?(Type::Dynamic) && !rhs.is_a?(Type::Bot)
+        return rhs if current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
 
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
@@ -2801,8 +2803,8 @@ module Rigor
 
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
       # block-entry scope — the stored value is what the write stores through `[]=`, which for a
-      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, not the
-      # rvalue the node itself types as); a multi-assign target stays untyped.
+      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, the same
+      # compound result the node itself types as); a multi-assign target stays untyped.
       # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
       def index_write_block_arg_types(node, block_entry)
         args = node.arguments

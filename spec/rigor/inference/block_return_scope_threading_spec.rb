@@ -764,6 +764,14 @@ RSpec.describe "block-return scope threading", type: :runner do
 
       it "types an untracked slot's `+=` tail as untyped, not the increment" do
         # `c` is a parameter, so nothing is known of `c[x]`; the rvalue answer pinned both positions to `1`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          def tally(c)
+            dump_type([1, 2].map { |x| c[x] += 1 })
+          end
+        RUBY
+      end
+
+      it "stops the always-truthy firing on an untracked slot's `+=` tail" do
         expect(flow_rules(<<~RUBY)).to be_empty
           def tally(c)
             r = [1, 2].map { |x| c[x] += 1 }

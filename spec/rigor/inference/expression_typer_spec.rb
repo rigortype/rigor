@@ -1909,6 +1909,22 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("@cache[:k] += 1")).describe).to eq("Dynamic[top]")
     end
 
+    it "keeps the untracked slot in a `&&=`, which is no memo (control)" do
+      # `@h[:x] &&= "y"` on an absent slot is `nil` at runtime, so the rvalue alone would drop it.
+      expect(scope.type_of(parse_expression("@cache[:k] &&= 7")).describe).to eq("7 | Dynamic[top]")
+    end
+
+    it "never answers `bot` for a `||= raise` guard on an untracked slot" do
+      # `def fetch(k) = @opts[k] ||= raise(KeyError)` returns the slot whenever it is set.
+      expect(scope.type_of(parse_expression("@opts[:k] ||= raise(KeyError)")).describe).to eq("Dynamic[top]")
+    end
+
+    it "keeps the gradual arm when the read is only partly gradual (control)" do
+      # The read is `Dynamic[top]?`, not a lone `Dynamic`: the slot may hold the untyped `x`.
+      type = statement_type("x = foo\nh = { a: x, b: nil }\nk = rand.to_s\nh[k] ||= \"s\"\n", 3)
+      expect(type.describe).to eq('"s" | Dynamic[top]')
+    end
+
     it "agrees with the statement evaluator's answer for every operator" do
       ["h[:a] += 1", "h[:a] ||= 3", "h[:a] &&= 3"].each do |write|
         root = Prism.parse("h = { a: 1 }\n#{write}\n").value

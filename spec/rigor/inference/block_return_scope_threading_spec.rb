@@ -761,6 +761,16 @@ RSpec.describe "block-return scope threading", type: :runner do
       it "types a straight-line index compound write in argument position as the stored value" do
         expect(dumped_type("h = { a: 1 }\ndump_type(h[:a] += 1)")).to eq("2")
       end
+
+      it "types an untracked slot's `+=` tail as untyped, not the increment" do
+        # `c` is a parameter, so nothing is known of `c[x]`; the rvalue answer pinned both positions to `1`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          def tally(c)
+            r = [1, 2].map { |x| c[x] += 1 }
+            puts "x" if r.last == 1
+          end
+        RUBY
+      end
     end
 
     describe "(4) straight-line String mutation" do

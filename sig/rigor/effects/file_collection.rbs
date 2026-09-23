@@ -1,0 +1,81 @@
+module Rigor
+  module Effects
+    # The per-file unit of the collection window (ADR-103): the direct summaries, the call edges, and
+    # the as-written ancestry a file contributes. {merge_all} folds a run's collections in one pass.
+    class FileCollection
+      # An ancestry entry that names nothing and can never resolve (#1039).
+      OPAQUE_ANCESTOR: String
+
+      # One recorded call edge: who the receiver's class is, which lane (`:instance` / `:singleton`)
+      # the selector dispatches on, and the bits that decide what an unresolved edge seeds.
+      class Edge < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type.
+        def receiver_class: () -> String?
+        # sig-gen gap: #1150
+        def kind: () -> (:instance | :singleton)
+        # sig-gen gap: #1150
+        def selector: () -> String
+        # sig-gen gap: #1150
+        def self_call: () -> bool
+        # sig-gen gap: #1150
+        def super_call: () -> bool
+        # sig-gen gap: #1150
+        def unclaimed: () -> bool
+        # sig-gen gap: #1150
+        def constant_receiver: () -> bool
+        # sig-gen gap: #1150 — the `[cause, detail]` pair an unresolved edge seeds, when the row
+        # named a `taint:`.
+        def taint_if_unresolved: () -> [String, String?]?
+        # sig-gen gap: #1150 — the plugin's lookup-order retry selectors (#1065).
+        def fallback_selectors: () -> Array[String]?
+
+        # sig-gen gap: #1150 — member constructor. The custom `initialize` accepts kwargs only and
+        # defaults every member after `self_call`, so there is no positional arm.
+        def self.new: (receiver_class: String?, kind: (:instance | :singleton), selector: String,
+                       self_call: bool, ?super_call: bool, ?unclaimed: bool,
+                       ?constant_receiver: bool, ?taint_if_unresolved: [String, String?]?,
+                       ?fallback_selectors: Array[String]?) -> instance
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (receiver_class: String?, kind: (:instance | :singleton), selector: String,
+                      self_call: bool, ?super_call: bool, ?unclaimed: bool,
+                      ?constant_receiver: bool, ?taint_if_unresolved: [String, String?]?,
+                      ?fallback_selectors: Array[String]?) -> instance
+      end
+
+      # The collection a file with nothing to say contributes.
+      def self.empty: (?String? path) -> FileCollection
+
+      # sig-gen gap: #1154 — `initialize` freezes the kwarg tables rather than assigning them
+      # verbatim, so sig-gen proposes the default constant's shape for each reader.
+      attr_reader path: String?
+      # sig-gen gap: #1154 — `{ "Class#m" => Summary }`.
+      attr_reader summaries: Hash[String, Summary]
+      # sig-gen gap: #1154 — `{ "Class#m" => [Edge] }`, sorted and de-duplicated.
+      attr_reader edges: Hash[String, Array[Edge]]
+      # sig-gen gap: #1154 — `{ class_name => superclass_name }`, `OPAQUE_ANCESTOR` included.
+      attr_reader superclasses: Hash[String, String]
+      # sig-gen gap: #1154 — `{ class_name => [module_name] }`, include/prepend merged.
+      attr_reader includes: Hash[String, Array[String]]
+
+      def initialize: (?path: String?, ?summaries: Hash[String, Summary],
+                       ?edges: Hash[String, Array[Edge]], ?superclasses: Hash[String, String],
+                       ?includes: Hash[String, Array[String]], ?failed: bool) -> void
+
+      # Whether the collector gave up on this file entirely (the fail-soft path).
+      def failed?: () -> bool
+
+      # Whether this collection contributes nothing.
+      def empty?: () -> bool
+
+      # Two-collection fold — {merge_all} for a whole run.
+      def merge: (FileCollection other) -> FileCollection
+
+      # Folds a run's collections in one linear pass; order-independent except `superclasses`.
+      def self.merge_all: (Enumerable[FileCollection] collections) -> FileCollection
+
+      def ==: (untyped other) -> bool
+      alias eql? ==
+      def hash: () -> Integer
+    end
+  end
+end

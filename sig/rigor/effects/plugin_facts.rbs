@@ -1,0 +1,142 @@
+module Rigor
+  module Effects
+    # The loaded plugins' effect contributions, compiled once per process (ADR-103): attribution rows
+    # indexed by receiver spelling, framework-edge strategies, label vocabulary, entry-point presets,
+    # and plugin-claimed ancestry.
+    class PluginFacts
+      # How many ancestors the walk visits before giving up — bounds work, not correctness.
+      ANCESTRY_CAP: Integer
+
+      # One compiled attribution row. `discharge` is the RESOLVED grant — `.build` has already
+      # demoted a non-first-party plugin's `true` and recorded a warning.
+      class Row < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type.
+        def key: () -> String
+        # sig-gen gap: #1150
+        def labels: () -> LabelSet
+        # sig-gen gap: #1150 — a {Narrowing} handler name, when the call's own arguments settle the
+        # row's answer.
+        def narrow: () -> String?
+        # sig-gen gap: #1150
+        def discharge: () -> bool
+        # sig-gen gap: #1150 — the class a `self`-path row is scoped to.
+        def within: () -> String?
+        # sig-gen gap: #1150 — the taint cause the row seeds where its edge resolves to nothing.
+        def taint: () -> String?
+        # sig-gen gap: #1150
+        def plugin_id: () -> String
+        # sig-gen gap: #1150 — the receiver a UNIT rule has no call node to read off.
+        def receiver: () -> String?
+        # sig-gen gap: #1150 — the {CalleeRule} rule name (#1048), nil when the row records no edge.
+        def callee: () -> String?
+        # sig-gen gap: #1150 — the plugin's lookup-order table for the rule's answer (#1065).
+        def callee_fallbacks: () -> Hash[String, Array[String]]?
+        # sig-gen gap: #1150
+        def responds: () -> bool
+
+        # sig-gen gap: #1150 — member constructor. The custom `initialize` accepts kwargs only and
+        # defaults `receiver` / `callee` / `callee_fallbacks` / `responds`, so there is no
+        # positional arm.
+        def self.new: (key: String, labels: LabelSet, narrow: String?, discharge: bool,
+                       within: String?, taint: String?, plugin_id: String, ?receiver: String?,
+                       ?callee: String?, ?callee_fallbacks: Hash[String, Array[String]]?,
+                       ?responds: bool) -> instance
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (key: String, labels: LabelSet, narrow: String?, discharge: bool,
+                      within: String?, taint: String?, plugin_id: String, ?receiver: String?,
+                      ?callee: String?, ?callee_fallbacks: Hash[String, Array[String]]?,
+                      ?responds: bool) -> instance
+
+        def discharge?: () -> bool
+      end
+
+      # One compiled framework-edge strategy: the base class a plugin pointed the engine at, and
+      # which plugin pointed.
+      class Edge < ::Data
+        # sig-gen gap: #1150 — `Data.define` member reads carry no type. `target` is the closed
+        # {Plugin::EffectEdge::TARGETS} set.
+        def target: () -> (:activerecord_callbacks | :perform_now | :mailer_body)
+        # sig-gen gap: #1150
+        def receiver: () -> String
+        # sig-gen gap: #1150 — nil for a whole-class edge (`method` omitted).
+        def selector: () -> Symbol?
+        # sig-gen gap: #1150
+        def plugin_id: () -> String
+
+        # sig-gen gap: #1150 — member constructor.
+        def self.new: (target: (:activerecord_callbacks | :perform_now | :mailer_body),
+                       receiver: String, selector: Symbol?, plugin_id: String) -> instance
+        | ((:activerecord_callbacks | :perform_now | :mailer_body) target, String receiver,
+           Symbol? selector, String plugin_id) -> instance
+        # sig-gen gap: #1150 — as above.
+        def self.[]: (target: (:activerecord_callbacks | :perform_now | :mailer_body),
+                      receiver: String, selector: Symbol?, plugin_id: String) -> instance
+      end
+
+      # The rows whose `callee:` names a {CalleeRule::UNIT_RULES} rule — applied once per unit.
+      # sig-gen gap: #1154 — populated by `absorb_attribution`, not assigned from a parameter.
+      attr_reader unit_callee_rows: Array[Row]
+
+      # Human-readable notes about contributions accepted only in part. Surfaced by `rigor effects`;
+      # never a diagnostic.
+      # sig-gen gap: #1154 — accumulated by `absorb`/`extend_registry`, not assigned from a parameter.
+      attr_reader warnings: Array[String]
+
+      # `{owner => [labels]}` — what {#extend_registry} folds into the run's vocabulary.
+      # sig-gen gap: #1154 — built by `absorb`, not assigned from a parameter.
+      attr_reader labels_by_owner: Hash[String, Array[String]]
+
+      # Every `effect_entry_points:` preset across the loaded set — `Plugin::EffectEntryPoints`
+      # instances, whose class is still unsigned #1181 backlog, so `untyped` elements for now.
+      # sig-gen gap: #1154 — concatenated by `absorb`, not assigned from a parameter.
+      attr_reader entry_points: Array[untyped]
+
+      # A content digest of every compiled plugin fact; {Identity} folds it in.
+      # sig-gen gap: #1154 — computed by `compute_digest`, not assigned from a parameter.
+      attr_reader digest: String
+
+      def self.empty: () -> PluginFacts
+
+      # `superclasses`/`includes` are the project's as-written ancestry tables
+      # (`Scope::DiscoveryIndex#discovered_superclasses` / `#discovered_includes`).
+      def self.build: (Plugin::Registry? plugin_registry, ?superclasses: Hash[String, String]?,
+                       ?includes: Hash[String, Array[String]]?) -> PluginFacts
+
+      # `contributions:` elements are `Plugin::Registry::Contribution` rows — that nested Data class
+      # is still unsigned #1181 backlog, so `untyped` elements for now.
+      def initialize: (contributions: Array[untyped], superclasses: Hash[String, String]?,
+                       ?includes: Hash[String, Array[String]]?) -> void
+
+      def empty?: () -> bool
+
+      # Whether any attribution row exists at all — the scan's fast path.
+      def attributions?: () -> bool
+      def edges?: () -> bool
+
+      # The row colouring `owner`'s `selector`, on `owner` itself or a project ancestor.
+      def class_row: (String? owner, bool singleton, String selector) -> Row?
+
+      # The row colouring receiver `path`'s `selector` (`"Rails.cache"`) — exact, no ancestry walk.
+      def path_row: (String? path, String selector) -> Row?
+
+      # The row colouring `path`'s `selector` for a self-rooted receiver (`"self.flash.now"`) inside
+      # a unit whose class is `owner_class`.
+      def self_path_row: (String? path, String selector, String? owner_class) -> Row?
+
+      # The row colouring `selector` on the RESULT of a call to `producer` (or an ancestor of it).
+      def result_row: (String? producer, String selector) -> Row?
+
+      # The framework-edge strategies of one kind, e.g. every `:activerecord_callbacks` base class
+      # the loaded plugins named.
+      def edges_for: (Symbol target) -> Array[Edge]
+
+      # Whether `class_name` is `ancestor`, or reaches it through the project's own `class … <`
+      # lines and included modules.
+      def descends_from?: (String? class_name, String? ancestor) -> bool
+
+      # `registry` extended with every plugin's `effect_labels:` under its own owner. The parameter
+      # is `Effects::Registry`, still unsigned #1181 backlog — `untyped` for now.
+      def extend_registry: (untyped registry) -> untyped
+    end
+  end
+end

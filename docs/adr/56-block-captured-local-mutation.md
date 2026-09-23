@@ -979,8 +979,9 @@ local. It now counts a read only when it resolves past every nested
 block. The fourth was a seed closed before the call: `s = [0, 9];
 s.pop` leaves the value-pinned `Array[0 | 9]`, which the widening
 declines like a declared nominal, so every pass read its pins. A
-declined widening over a value-pinned collection now takes the gradual
-arm instead.
+widening whose result is still a value-pinned collection now takes the
+gradual arm instead, a refinement's base included (under `if s.any?`
+the `pop` drops `non-empty-array[0 | 9]` to the same pinned nominal).
 
 What stays open is the same pin through a binding slice A does not
 own. An instance variable read before an in-place mutation
@@ -990,15 +991,15 @@ rebinds nothing and returns the read (`xs.map { v = a.last; a << x;
 v }` on a nominal receiver) goes through the block-return pass, which
 is WD2.10's generic `Array[U]` residue.
 
-Gate: the `block_rebind_reads_mutated_capture` fixture carries nine
+Gate: the `block_rebind_reads_mutated_capture` fixture carries ten
 must-not-fire shapes: tail, Hash slot, emptiness, String size,
 remover-before-adder, slot rewriter, lone remover,
-rebound-and-mutated, and a seed closed before the call. The first five
-are pinned by `assert_type`. Two controls must still fire: a
-collection the body does not mutate, and an inner block parameter
-sharing the outer name. The spec asserts the exact `flow.*` line set,
-that no error fires on a value the body stored, and the accumulator's
-pass count.
+rebound-and-mutated, and a seed closed before the call, bare and under
+a guard. The first five are pinned by `assert_type`. Two controls must
+still fire: a collection the body does not mutate, and an inner block
+parameter sharing the outer name. The spec asserts the exact `flow.*`
+line set, that no error fires on a value the body stored, and the
+accumulator's pass count.
 
 ### WD3 — One mechanism, shared
 

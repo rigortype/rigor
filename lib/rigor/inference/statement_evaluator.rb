@@ -2701,23 +2701,28 @@ module Rigor
         end
       end
 
-      # `type` widened through `sites` for a store of unknown values. A widening that declines leaves the entry
-      # binding, which says nothing about later iterations ({UnknownStoreWidening} warns its callers not to read it
-      # so); when that binding is a collection whose contents are still value-pinned — `s = [0, 9]; s.pop` leaves
-      # `Array[0 | 9]`, a nominal the `push` in the body then declines — the pins are exactly the first-iteration
-      # answer, so the contents take the gradual arm instead (`top = s.last; s.push(x)` would keep `top` at `0 | 9`).
+      # `type` widened through `sites` for a store of unknown values, with one more step: when the result is still a
+      # collection whose contents are value-pinned, those pins are the first-iteration answer and the contents take
+      # the gradual arm. A widening that DECLINES leaves such a binding — `s = [0, 9]; s.pop` leaves `Array[0 | 9]`,
+      # a nominal the `push` in the body then declines — and so does one that only changes a refinement: under `if
+      # s.any?` the `pop` drops `non-empty-array[0 | 9]` to that same pinned `Array[0 | 9]` before the `push` declines
+      # it. Either way `top = s.last; s.push(x)` would keep `top` at `0 | 9`. A result that already carries the arm
+      # is unchanged by it.
       def unknown_store_binding(type, sites)
         widened = UnknownStoreWidening.widen(type, sites)
-        return widened unless widened == type && value_pinned_collection?(type)
+        return widened unless value_pinned_collection?(widened)
 
-        UnknownStoreWidening.gradual_content(type)
+        UnknownStoreWidening.gradual_content(widened)
       end
 
-      # An `Array` / `Hash` nominal (alone or as a `Union` member) with a value-pinned type argument.
-      # `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on its own.
+      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
+      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
+      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
+      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
       def value_pinned_collection?(type)
         case type
         when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
+        when Type::Difference then value_pinned_collection?(type.base)
         when Type::Nominal
           %w[Array Hash].include?(type.class_name) &&
             type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }

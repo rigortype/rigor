@@ -109,6 +109,21 @@ peeked = nil
 end
 puts "one" if peeked == 1
 
+# --- The same seed under a guard: `pinned2` enters as
+# `non-empty-array[0 | 9]`, which the `pop` in the body drops to the same
+# pinned `Array[0 | 9]` before the `push` declines it. ---
+pinned2 = [0, 9]
+pinned2.pop
+if pinned2.any?
+  peeked2 = nil
+  [1, 2].each do |x|
+    peeked2 = pinned2.last
+    pinned2.pop
+    pinned2.push(x)
+  end
+  puts "one" if peeked2 == 1
+end
+
 # --- Paired control: the same rebind shape over a collection the body
 # does NOT mutate. Only `out` moves, so `base` keeps its exact contents and
 # the comparison it rules out still folds — `base.last` is only ever 0. ---

@@ -1988,18 +1988,24 @@ module Rigor
         [type, joined_scope, join_with_nil_injection(truthy_left, truthy_right), ran]
       end
 
-      # The edge on which the right operand certainly ran — `&&`'s truthy one, `||`'s falsey one. It is the whole
-      # operator narrowed over the scope the right operand left, as the joined-scope path narrows it: a call in the
-      # right operand resets the instance variables and regex globals the left operand narrowed (issue #1223 review:
-      # `@parent && (node = find_node)` read `@parent` as nilable), and narrowing afresh puts that narrowing back as
-      # the joined path always did. A variable the right operand writes keeps the binding of the right operand's own
-      # edge instead, since narrowing the left operand over its new value can contradict it (`x.nil? && (x = "d")`).
+      # The edge on which the right operand certainly ran — `&&`'s truthy one, `||`'s falsey one. It is the right
+      # operand's own edge, which keeps every binding and provenance mark the operands' writes made, with the
+      # instance variables and globals of the whole operator narrowed over the scope the right operand left laid over
+      # it. A call in the right operand resets the instance variables and regex globals the left operand narrowed
+      # (`@parent && (node = find_node)` read `@parent` as nilable, `$1` after `line =~ re && (k = Integer($2))` as
+      # nil), and narrowing afresh puts that back as the joined-scope narrowing always did. No call resets a local, so
+      # locals keep the right operand's edge: re-narrowing one the operands write can contradict its new value
+      # (`x.nil? && log(x = "d") && ok` read `x` as `bot`) or drop the marks its write stamped (a published-constant
+      # copy `m = AppConfig::MODE`). A variable the operands write is never overlaid, for the same reason.
       def ran_edge(node, right_scope, right_edge, and_node)
         truthy, falsey = Narrowing.predicate_scopes(node, right_scope)
         renarrowed = and_node ? truthy : falsey
-        OperandEffects.written_variables(node.right).reduce(renarrowed) do |acc, name|
-          type = CapturedLocals.bound_type(right_edge, name)
-          type ? CapturedLocals.bind(acc, name, type) : acc
+        written = OperandEffects.written_variables(node)
+        edge = renarrowed.ivars.reduce(right_edge) do |acc, (name, type)|
+          written.include?(name) || acc.ivar(name) == type ? acc : acc.with_ivar(name, type)
+        end
+        renarrowed.globals.reduce(edge) do |acc, (name, type)|
+          written.include?(name) || acc.global(name) == type ? acc : acc.with_global(name, type)
         end
       end
 
@@ -2732,9 +2738,42 @@ module Rigor
         #
         # Outer locals stay visible: unlike a `class` keyword body, the block is a closure.
         anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
-        return sub_eval(block, block_entry) if anonymous.nil?
+        if anonymous.nil?
+          return sub_eval(block, block_entry) unless return_barrier_block?(node)
+
+          return without_return_sink { sub_eval(block, block_entry) }
+        end
 
         enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
+      end
+
+      # The block calls whose body `return` leaves only the block: `lambda { … }`, and the method a
+      # `define_method` / `define_singleton_method` block defines, called directly or through `send`
+      # (`klass.send(:define_method, :m) { … }`). Like a `->` body ({#eval_lambda}), each runs with the enclosing
+      # method's return sink suspended.
+      RETURN_BARRIER_BLOCK_CALLS = %i[lambda define_method define_singleton_method].to_set.freeze
+      SEND_CALLS = %i[send public_send __send__].to_set.freeze
+      private_constant :RETURN_BARRIER_BLOCK_CALLS, :SEND_CALLS
+
+      def return_barrier_block?(node)
+        name = node.name
+        if SEND_CALLS.include?(name)
+          sent = node.arguments&.arguments&.first
+          sent.is_a?(Prism::SymbolNode) && RETURN_BARRIER_BLOCK_CALLS.include?(sent.unescaped.to_sym)
+        else
+          RETURN_BARRIER_BLOCK_CALLS.include?(name) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+        end
+      end
+
+      # Runs the block with the method's return sink suspended, for a body whose `return` is not the method's.
+      def without_return_sink
+        outer_sink = Thread.current[RETURN_SINK_KEY]
+        Thread.current[RETURN_SINK_KEY] = nil
+        begin
+          yield
+        ensure
+          Thread.current[RETURN_SINK_KEY] = outer_sink
+        end
       end
 
       # Issue #963 — `define_method(:name) { ... }` in a class body defines an INSTANCE method, and Ruby runs
@@ -3997,15 +4036,7 @@ module Rigor
       # enclosing call's operands, where it used to be typed as a value only.
       def eval_lambda(node)
         lambda_type = scope.type_of(node, tracer: tracer)
-        unless node.body.nil?
-          outer_sink = Thread.current[RETURN_SINK_KEY]
-          Thread.current[RETURN_SINK_KEY] = nil
-          begin
-            sub_eval(node.body, build_block_entry_scope(nil, node))
-          ensure
-            Thread.current[RETURN_SINK_KEY] = outer_sink
-          end
-        end
+        without_return_sink { sub_eval(node.body, build_block_entry_scope(nil, node)) } unless node.body.nil?
 
         [lambda_type, escaping_closure_captures(node, scope)]
       end

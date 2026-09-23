@@ -11,13 +11,16 @@ locals:
   level: Integer
   lines: Integer
   "n": Integer
+  nested_slots: Hash[Dynamic[top] | Symbol, Dynamic[top] | Hash[Dynamic[top], Dynamic[top]]]
   out: Array[Dynamic[top] | Integer]
   pair: "[:x, Integer]"
   parsed: ":fallback | :none"
   picked: ":c"
+  picked_name: Dynamic[top]
   seen: Integer
   seen_bound: Integer?
   slot: Integer
+  slots: Hash[Dynamic[top] | Symbol, Dynamic[top] | Hash[Dynamic[top], Dynamic[top]]]
   step: Integer
   stepped: bool
   stop: ":ran | Integer"

@@ -155,6 +155,44 @@ def arg_write_parse(line)
 end
 arg_write_parse("a=1")
 
+# --- That edge keeps what the operands' writes stamped and never
+# re-narrows a variable they write: a declaration-sourced ivar copy stays
+# one, and `name` is not narrowed to `nil` over its `"guest"`. ---
+class ArgumentWriteRight
+  def initialize
+    @right = nil
+  end
+
+  def attach
+    @right = "leaf"
+  end
+
+  def ready?
+    ENV.key?("R")
+  end
+
+  def log(value)
+    value
+  end
+
+  def copied
+    if ready? && log(r = @right)
+      r.upcase
+    end
+  end
+end
+ArgumentWriteRight.new.copied
+
+def arg_write_pick_name
+  name = ENV["NAME"]
+  if name.nil? && record_values(name = "guest") && ENV.key?("GUEST")
+    return name
+  end
+  :none
+end
+picked_name = arg_write_pick_name
+puts "guest" if picked_name == "guest"
+
 # --- A call nested in an operand applies no statement-position reset:
 # `$1` stays narrowed after `Integer(value = $2)` as after `Integer($2)`. ---
 def arg_write_capture(line)
@@ -180,6 +218,15 @@ tallies = {}
 tallies[:a] ||= []
 tallies[:a] << 1
 puts "one" if tallies[:a].size == 1
+
+slots = {}
+(slots[:k] ||= {})[:x] = 1
+puts "one" if slots[:k].size == 1
+
+nested_slots = {}
+nested_slots[:k] ||= {}
+nested_slots[:k][:x] = 1
+puts "one" if nested_slots[:k].size == 1
 
 # --- A provably-live branch runs on the edge the right operand ran on. ---
 text = ENV.fetch("TEXT", "t")

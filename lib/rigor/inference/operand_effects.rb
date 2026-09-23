@@ -35,6 +35,10 @@ module Rigor
         Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
       ].freeze
+      GLOBAL_WRITE_NODES = Set[
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
+      ].freeze
       COMPOUND_LOCAL_WRITES = Set[
         Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
       ].freeze
@@ -47,7 +51,8 @@ module Rigor
       OPAQUE_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
-      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :COMPOUND_LOCAL_WRITES,
+      private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :GLOBAL_WRITE_NODES,
+                       :COMPOUND_LOCAL_WRITES,
                        :COMPOUND_INSTANCE_WRITES, :JUMP_NODES, :SCOPE_NODES, :OPAQUE_NODES
 
       module_function
@@ -73,8 +78,8 @@ module Rigor
       end
       private_class_method :effect?
 
-      # The locals (bare names) and instance variables (`@`-prefixed names, as {CapturedLocals.bind} reads
-      # them) `node` writes on the terms {.any?} counts a write, in first-write order.
+      # The locals (bare names), instance variables and globals (sigil-prefixed names, as {CapturedLocals.bind}
+      # reads them) `node` writes on the terms {.any?} counts a write, in first-write order.
       def written_variables(node)
         names = []
         collect_written(node, 0, names) if node.is_a?(Prism::Node)
@@ -107,7 +112,7 @@ module Rigor
         klass = node.class
         if LOCAL_WRITE_NODES.include?(klass)
           names << node.name if node.depth >= nesting
-        elsif INSTANCE_WRITE_NODES.include?(klass)
+        elsif INSTANCE_WRITE_NODES.include?(klass) || GLOBAL_WRITE_NODES.include?(klass)
           names << node.name
         end
         return if OPAQUE_NODES.include?(klass)

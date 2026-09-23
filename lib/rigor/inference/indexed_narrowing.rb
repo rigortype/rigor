@@ -124,7 +124,7 @@ module Rigor
         return current_scope unless call_node.is_a?(Prism::CallNode)
 
         if call_node.name == :[]=
-          invalidate_indexed_write(call_node, current_scope)
+          widen_mutated_slot(call_node, invalidate_indexed_write(call_node, current_scope))
         elsif mutator?(call_node.name)
           invalidate_mutator(call_node, current_scope)
         else
@@ -154,9 +154,10 @@ module Rigor
         current_scope.without_indexed_narrowings_for(*receiver)
       end
 
-      # A mutator whose receiver is the element a `(receiver, key)` narrowing records — `h[k] << x`, or
-      # `(h[k] ||= []) << x`, whose value is that element — changes the object the narrowing holds, so the
-      # narrowing is widened as the mutator widens that value, or dropped when the widening declines.
+      # A mutator whose receiver is the element a `(receiver, key)` narrowing records — `h[k] << x`,
+      # `h[k][:x] = v`, or `(h[k] ||= []) << x`, whose value is that element — changes the object the
+      # narrowing holds, so the narrowing is widened as the mutator widens that value, or dropped when the
+      # widening declines.
       # Without it `groups[:a] ||= []; groups[:a] << 1` kept reading `groups[:a]` as `[]` and folded
       # `groups[:a].size == 0`; issue #1223's threading of a receiver's write made the parenthesised spelling
       # record the same narrowing.

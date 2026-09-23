@@ -3660,13 +3660,15 @@ module Rigor
       # nested block, lambda, `def`, or loop targets THAT construct instead; {JUMP_BOUNDARY_NODES} stops the
       # scan there, and the identity filter drops the ones the sink still collects because the nested
       # construct is walked under the same installation. `break` with no argument carries nil, so the call
-      # becomes optional — which is what Ruby does.
+      # becomes optional — which is what Ruby does. A call that only stores its block ({BlockCallTiming.stores_block?}:
+      # `lambda`, `proc`, `Proc.new`) never runs it, so no arm of that block is the call's value.
       #
       # A failure yields no arms rather than propagating, matching {#block_return_type_for}: a call typed
       # without its break arms is the pre-#853 answer, while a raise here would take out the whole call.
       def call_break_arm_types(node, receiver_override: nil)
         block_node = node.block
         return EMPTY_BREAK_ARMS unless block_node.is_a?(Prism::BlockNode)
+        return EMPTY_BREAK_ARMS if BlockCallTiming.stores_block?(node)
 
         body = block_node.body
         return EMPTY_BREAK_ARMS if body.nil? || !block_level_jump?(body, Prism::BreakNode)

@@ -157,6 +157,61 @@ RSpec.describe "block `break` arm union", type: :runner do
       RUBY
     end
 
+    it "leaves a `break` in a `lambda { }` block out of the lambda call's value" do
+      # `lambda` stores its block and returns the lambda; a `break` in it returns from the lambda when it is
+      # called. Unioning the arm typed the call `Proc | nil`, and `check.call(t)` then drew
+      # `call.possible-nil-receiver` (kramdown's `check_nr_cells` once the guard in front of the `break` stopped
+      # reading as provably dead).
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        def run(flag)
+          dump_type(lambda do |t|
+            break if flag
+            t
+          end)
+        end
+      RUBY
+    end
+
+    it "leaves a `break` in a `proc { }` or `Proc.new { }` block out of the call's value" do
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        def run(flag)
+          dump_type(proc do |t|
+            break 1 if flag
+            t
+          end)
+        end
+      RUBY
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        def run(flag)
+          dump_type(Proc.new do |t|
+            break 1 if flag
+            t
+          end)
+        end
+      RUBY
+    end
+
+    it "does not report a recursive lambda whose body breaks" do
+      source = <<~RUBY
+        def run(el)
+          count = 0
+          walk = lambda do |t|
+            if count == 0
+              count = t.size
+            else
+              count = -1
+              break
+            end
+            t.each { |c| walk.call(c) }
+          end
+          walk.call(el)
+          count
+        end
+      RUBY
+      result = analyze(source)
+      expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+    end
+
     it "leaves an early `return` out of the union" do
       # A `return` exits the enclosing METHOD and joins that method's return type; the call is unaffected.
       expect(dumped_type(<<~RUBY)).to eq("42")

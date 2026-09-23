@@ -75,6 +75,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[statement_read].local(:o)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
+    it "shadows a local the unentered block's body introduces, not only its parameters" do
+      # No outer `z` exists in the source, so Ruby makes the body's `z` the block's own local. The seeded binding
+      # stands in for a name the scope binds for a non-lexical reason; the block's local table MUST still win.
+      seeded = Rigor::Scope.empty.with_local(:z, Rigor::Type::Combinator.constant_of("s"))
+      program = parse("show([1].map { |e| z = e; z })")
+      idx = described_class.index(program, default_scope: seeded)
+      z_read = program.statements.body.first.arguments.arguments.first.block.body.body[1]
+
+      expect(z_read).to be_a(Prism::LocalVariableReadNode)
+      expect(idx[z_read].local(:z)).to eq(Rigor::Type::Combinator.untyped)
+    end
+
     it "binds locals visible to children inside an rvalue expression" do
       program, idx = index_for(<<~RUBY)
         x = 1

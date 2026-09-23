@@ -242,16 +242,18 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
-  # A block in a value position — a call argument, a receiver chain, another block's tail — is never
-  # entered by the statement evaluator, so its body takes the enclosing statement's scope from the
-  # scope index's fallback. That scope still binds the outer local a block parameter shadows, and
-  # `show([1, 2].map { |o| o + 1 })` after `o = { x: 1 }` reported `undefined method '+' for { x: 1 }`.
+  # A block in a value position — a call argument, a receiver chain, a literal element — or on a
+  # `super` call is never entered by the statement evaluator, so its body takes the enclosing
+  # statement's scope from the scope index's fallback. That scope still binds the outer local a block
+  # parameter shadows, and `show([1, 2].map { |o| o + 1 })` after `o = { x: 1 }` reported
+  # `undefined method '+' for { x: 1 }`.
   describe "fixtures/value_position_block_shadowing.rb — a block parameter shadows the outer local" do
     let(:harness) { harness_for("value_position_block_shadowing") }
 
-    # Must-not-fire and must-still-fire in one assertion: every shadowing parameter, `;`-local and
-    # lambda parameter in a value position goes quiet, while a statement-level block's misused
-    # parameter and a value-position block's CAPTURED outer read still fire.
+    # Must-not-fire and must-still-fire in one assertion: every shadowing parameter, `;`-local,
+    # destructured name, implicit `it` and lambda parameter of an unentered closure goes quiet, and so
+    # does a statement-level lambda's parameter default; a statement-level block's misused parameter
+    # and a value-position block's CAPTURED outer read still fire.
     it "reads a shadowing parameter as the block's own, not the outer local" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))

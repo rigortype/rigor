@@ -8302,7 +8302,11 @@ module Rigor
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
         when Prism::BlockNode, Prism::LambdaNode
-          child_scope = recorded ? current_scope : closure_scope(node, current_scope)
+          # An entered block is recorded with its entry scope, parameters bound. An entered `->` is recorded with
+          # the ENCLOSING scope ({StatementEvaluator#eval_lambda} enters only its body), so its parameter list
+          # still needs the boundary: `f = ->(o, b = (o + 1)) { b }` reads the default's `o` as the parameter.
+          entered = recorded && node.is_a?(Prism::BlockNode)
+          child_scope = entered ? current_scope : closure_scope(node, current_scope)
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
@@ -8311,22 +8315,27 @@ module Rigor
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level
       # call's block ({StatementEvaluator#evaluate_block_if_present}), an assignment's rvalue and a statement-level
-      # `->`, but not a closure in a value position — a call argument (`show(xs.map { |o| o + 1 })`), a receiver
-      # chain (`xs.map { |o| o + 1 }.sum`), a literal element — so its body falls to this walk and would inherit the
-      # enclosing statement's scope verbatim. That scope still binds an outer `o` the block parameter shadows, and a
-      # read of the parameter typed as the outer local: `o = { x: 1 }` made `o + 1` an undefined-method error.
+      # `->`'s body, but not a closure in a value position — a call argument (`show(xs.map { |o| o + 1 })`), a
+      # receiver chain (`xs.map { |o| o + 1 }.sum`), a literal element — nor a `super` call's block, so its body
+      # falls to this walk and would inherit the enclosing statement's scope verbatim. That scope still binds an
+      # outer `o` the block parameter shadows, and a read of the parameter typed as the outer local: `o = { x: 1 }`
+      # made `o + 1` an undefined-method error.
       #
       # Every name in the closure's own local table (Prism's `locals`: its parameters, `;`-locals and the locals
-      # its body introduces — exactly the names a depth-0 read inside it resolves to) is a new variable, so an
-      # enclosing binding of that name is replaced with `Dynamic[top]`. Not the signature's parameter type: this
-      # walk evaluates nothing, and a body write to the name is never threaded, so any narrower claim could be
-      # stale. A name the enclosing scope does not bind is left unbound, which reads the same `Dynamic[top]`.
-      # Captured names — outer locals the body reads or rebinds without redeclaring them — keep the enclosing
-      # binding.
+      # its body introduces) is a new variable, and so is the implicit `it` of a block that uses it, which Prism
+      # keeps out of `locals` although the binder binds it (`xs.each { show(it.map { it + 1 }) }` read the inner
+      # `it` as the outer block's). An enclosing binding of such a name is replaced with `Dynamic[top]`. Not the
+      # signature's parameter type: this walk evaluates nothing, and a body write to the name is never threaded,
+      # so any narrower claim could be stale. A name the enclosing scope does not bind is left unbound, which
+      # reads the same `Dynamic[top]`. Captured names — outer locals the body reads or rebinds without
+      # redeclaring them — keep the enclosing binding.
       def closure_scope(closure, scope)
-        closure.locals.reduce(scope) do |acc, name|
-          acc.local(name).nil? ? acc : acc.with_local(name, Type::Combinator.untyped)
-        end
+        scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
+        closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }
+      end
+
+      def shadow_local(scope, name)
+        scope.local(name).nil? ? scope : scope.with_local(name, Type::Combinator.untyped)
       end
 
       def propagate_if_branches(node, table, current_scope)

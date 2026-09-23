@@ -1,15 +1,16 @@
 require "rigor/testing"
 include Rigor::Testing
 
-# A block or lambda parameter shadows the outer local of the same name, wherever the call carrying the
-# block sits. The statement evaluator enters only a statement-level call's block, so a block in a value
-# position (a call argument, a receiver chain, another block's tail) keeps the enclosing statement's
-# scope, and before the fix its parameters read as the outer local. Every unmarked line is correct Ruby
-# and MUST stay silent; the marked lines are genuine errors and MUST still fire.
+# A block or lambda parameter shadows the outer local of the same name, wherever the closure sits. The
+# statement evaluator enters a statement-level call's block and a statement-level lambda's body, but not a
+# closure in a value position (a call argument, a receiver chain, a literal element) nor a `super` call's
+# block, so such a body keeps the enclosing statement's scope, and before the fix its parameters read as the
+# outer local. Every unmarked line is correct Ruby and MUST stay silent; the marked lines are genuine errors
+# and MUST still fire.
 
 def show(value) = value
 
-# --- Value positions: each parameter here shadows an outer Hash that has no `+`. ---
+# --- Unentered closures: each parameter here shadows an outer local that has no `+` / `upcase`. ---
 def call_argument
   o = { x: 1 }
   show([1, 2].map { |o| o + 1 })
@@ -25,7 +26,7 @@ def receiver_chain
   [1, 2].map { |o| o + 1 }.sum
 end
 
-def enclosing_block_tail
+def receiver_chain_inside_a_block
   h = { x: 1, y: 2 }
   [5].map { |e| [e].map { |h| h + 1 }.first }
 end
@@ -33,6 +34,11 @@ end
 def nested_in_an_argument
   h = { x: 1, y: 2 }
   show([5].map { |e| [e].map { |h| h + 1 } })
+end
+
+def literal_element
+  o = { x: 1 }
+  [[1, 2].map { |o| o + 1 }]
 end
 
 def lambda_argument
@@ -49,6 +55,29 @@ def destructured_parameter
   o = { x: 1 }
   h = { x: 1, y: 2 }
   show([[1, 2]].map { |(o, h)| o + h })
+end
+
+# The implicit `it` is not in Prism's local table, but it is the inner block's own parameter.
+def implicit_it
+  [["a", "b"]].each { show(it.map { it.upcase }) }
+end
+
+class ShadowingBase
+  def run = yield(1)
+end
+
+class ShadowingSuper < ShadowingBase
+  def run
+    o = { x: 1 }
+    super { |o| o + 1 }
+  end
+end
+
+# An entered lambda is recorded with the enclosing scope, so its parameter list needs the boundary too.
+def lambda_parameter_default
+  o = { x: 1 }
+  f = ->(o, b = (o + 1)) { b }
+  f
 end
 
 # --- Statement positions: the evaluator enters these blocks already; the controls. ---

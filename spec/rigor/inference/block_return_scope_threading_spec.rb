@@ -2126,10 +2126,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     it "declines a key fold whose new keys the pinned counter spelled" do
       # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1": 1,
       # "b1": 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
-      # no single `Constant`, so the tier declines to the dispatcher. Only the decline is asserted: the
-      # dispatcher's key argument comes from the generic block-return pass, which types the body from the
-      # call's entry scope and still reads `i` as `1` there.
-      expect(dumped_type(<<~RUBY)).to start_with("Hash[")
+      # no single `Constant`, so the tier declines to the dispatcher, whose generic block-return pass lays the
+      # same captured binding and reads the key as a `String` rather than the entry scope's `"a1"`.
+      expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1 | 2]")
         i = 0
         dump_type({ a: 1, b: 2 }.transform_keys do |k|
           i += 1
@@ -2188,6 +2187,459 @@ RSpec.describe "block-return scope threading", type: :runner do
           end
         end
       RUBY
+    end
+  end
+
+  # The #587 (b) fixpoint reads each pass's exit binding out of `StatementEvaluator`, and the evaluator carries a
+  # rebind into that exit only from the positions it threads: a statement, an assignment's value, a branch, a
+  # loop, an `&&` / `||` operand. A rebind inside a call's receiver or arguments, a literal, an interpolation,
+  # an index or a `when` condition, a rebind of an instance variable inside a nested block, and a rebind that a
+  # later `next` can leave the iteration with never reaches it. #617's unmoved-pin floor caught such a name only
+  # while nothing else moved its binding; a threaded `||=` or a guarded write elsewhere moves it, and the pin
+  # came back. A name rebound in any of those positions is floored whatever the fixpoint converged to.
+  describe "rebinds the body evaluator does not thread under the per-element fold" do
+    it "floors a counter rebound inside an expression after a threaded `||=` moved it" do
+      # THE REPORTED PROBE. Runtime answer `2`; the `||=` moved the exit binding to `0`, so the unmoved-pin floor
+      # let the pin through, every predicate read `0 + 1 == 2`, and `find` answered `nil`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        seen = nil
+        dump_type([1, 2].find { |e| seen ||= 0; (seen += 1) == 2 })
+      RUBY
+    end
+
+    it "no longer reports the always-falsey condition the moved pin folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        seen = nil
+        r = [1, 2].find { |e| seen ||= 0; (seen += 1) == 2 }
+        puts "found" if r
+      RUBY
+    end
+
+    it "floors a counter a guarded statement write moves" do
+      # `seen = 5 if …` is threaded, so the exit binding joins `5` and stops being the seed.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        seen = 0
+        dump_type([1, 2].find { |e| seen = 5 if rand > 2; (seen += 1) == 2 })
+      RUBY
+    end
+
+    it "floors a counter rebound inside a call argument" do
+      # Runtime `[1, 2]`; the pin answered `[0, 0]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+        def log(x) = x
+
+        def run
+          s = nil
+          dump_type([1, 2].map { |e| s ||= 0; log(s += 1); s })
+        end
+      RUBY
+    end
+
+    it "keeps the joined binding of a counter rebound on a branch a `next` leaves from" do
+      # Runtime `[0, 1]`. The pass's exit joins the `next` path (`StatementEvaluator#evaluate_invocation`), so
+      # the scan leaves the rebind threaded and the fixpoint answers it; the pin answered `[0, 0]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
+        seen = nil
+        dump_type([1, 2].map { |e| seen ||= 0; if e == 1; seen += 1; next 0; end; seen })
+      RUBY
+    end
+
+    it "keeps the nil a `next` whose guard narrows a rebound local leaves with" do
+      # Runtime `[0, 0, nil]`. The fall-through alone binds `last` narrowed away from nil; the joined `next` path
+      # brings the nil back, so the third position no longer reads `0 | 1 | 2`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | 1 | 2 | nil, 0 | 1 | 2 | nil, 0 | 1 | 2 | nil]")
+        last = 0
+        dump_type([1, nil, 2].map { |e| r = last; last = e; next 0 if last.nil?; r })
+      RUBY
+    end
+
+    it "keeps the joined binding of a local a nested block rebinds before its own `next`" do
+      # Runtime `[1, 2]`: the nested write-back joins its `next` branch, so the rebind is threaded.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
+        s = nil
+        dump_type([1, 2].map { |e| s ||= 0; [1, 2].each { |x| if x == 1; s += 1; next; end }; s })
+      RUBY
+    end
+
+    it "floors a global a nested block rebinds" do
+      # The nested write-back covers locals and instance variables, not globals. Runtime `[1, 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+        $n = nil
+        dump_type([1, 2].map { |e| $n ||= 0; [1].each { $n += 1 }; $n })
+      RUBY
+    end
+
+    it "floors a local a `while` loop rebinds before its `next`" do
+      # The loop's continuation does not join its `next` path. Runtime `[1, 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+        s = nil
+        dump_type([1, 2].map { |e| s ||= 0; i = 0; while i < 1; i += 1; if i == 1; s += 1; next; end; end; s })
+      RUBY
+    end
+
+    it "floors an instance variable rebound inside an expression after a threaded `||=`" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run
+            @seen = nil
+            dump_type([1, 2].find { |e| @seen ||= 0; (@seen += 1) == 2 })
+          end
+        end
+      RUBY
+    end
+
+    it "keeps the written-back binding of an instance variable a nested block rebinds" do
+      # A nested block's write-back carries its instance variables too, so `@n += 1` inside it reaches the exit
+      # binding. Runtime `[1, 2]`; the pin answered `[0, 0]`.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Integer, 0 | Integer]")
+        class Counter
+          def run
+            @n = nil
+            dump_type([1, 2].map { |e| @n ||= 0; [1].each { @n += 1 }; @n })
+          end
+        end
+      RUBY
+    end
+
+    it "floors the same shape under the per-pair fold" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 0 | Dynamic[top], y: 0 | Dynamic[top] }")
+        def log(x) = x
+
+        def run
+          s = nil
+          dump_type({ x: 1, y: 2 }.transform_values { |v| s ||= 0; log(s += 1); s })
+        end
+      RUBY
+    end
+
+    it "floors a global a multi-assign target rebinds" do
+      # The evaluator binds a multi-assign's locals and instance variables only: `_, $last = x, x` leaves `$last`
+      # on `nil`, which carries no value pin for the unmoved-pin floor to see. Runtime `2`.
+      source = <<~RUBY
+        $last = nil
+        r = [1, 2].find { |x| prev = $last; _, $last = x, x; prev == 1 }
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'hit' if r")).to be_empty
+    end
+
+    it "floors an instance variable a `rescue =>` reference rebinds" do
+      # It binds a local only. Runtime `2`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run
+            @err = nil
+            dump_type([1, 2].find do |x|
+              prev = @err
+              begin
+                raise ArgumentError, "x"
+              rescue => @err
+              end
+              prev
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors an instance variable a `for` index rebinds" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run
+            @cur = nil
+            dump_type([1, 2].find do |x|
+              prev = @cur
+              for @cur in [x]; end
+              prev
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors a local a `while` loop rebinds before its `break`" do
+      # The loop's continuation does not join the scope its `break` left with. Runtime `1`.
+      source = <<~RUBY
+        seen = nil
+        r = [1, 2].find do |e|
+          i = 0
+          while i < 3
+            i += 1
+            if i == 2
+              seen = e
+              break
+            end
+          end
+          seen == 1
+        end
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'found' if r")).to be_empty
+    end
+
+    it "widens a global the body mutates in place" do
+      # `$seen << x` is never a rebind, so the global needs the in-place half. Runtime `2`.
+      source = <<~RUBY
+        $seen = []
+        r = [1, 2].find { |x| n = $seen.size; $seen << x; n == 1 }
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'hit' if r")).to be_empty
+    end
+
+    it "widens a parenthesised global the body mutates in place" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        $gp = []
+        dump_type([1, 2].find { |x| n = $gp.size; ($gp) << x; n == 1 })
+      RUBY
+    end
+
+    it "keeps the fixpoint of a counter whose every rebind is threaded" do
+      # The paired control: the same `||=` and `+=` as statements are both threaded, so the fixpoint is the
+      # answer and nothing is floored.
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        total = nil
+        dump_type([1, 2].map { |e| total ||= 0; total += 1; total })
+      RUBY
+    end
+
+    it "keeps the fixpoint of a rebind that follows the `next` guard" do
+      # A `next` ahead of every rebind leaves with the binding the iteration entered on, which the fixpoint
+      # already holds.
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        total = 0
+        dump_type([1, 2].map { |e| next 0 if e > 5; total += e; total })
+      RUBY
+    end
+
+    it "keeps the fixpoint of a threaded name beside a floored one" do
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        def log(x) = x
+
+        def run
+          seen = nil
+          total = 0
+          dump_type([1, 2].map { |e| seen ||= 0; log(seen += 1); total += e; total })
+        end
+      RUBY
+    end
+
+    it "keeps a predicate fold that ignores the floored counter" do
+      expect(dumped_type(<<~RUBY)).to eq("[2]")
+        def log(x) = x
+
+        def run
+          seen = nil
+          dump_type([1, 2].select { |e| seen ||= 0; log(seen += 1); e > 1 })
+        end
+      RUBY
+    end
+  end
+
+  # When a fold declines — or never applies, because the receiver is no `Tuple` or closed `HashShape` — the
+  # dispatcher reads ONE block-return type, typed from the call's ENTRY scope. That is the first iteration's
+  # binding of every captured local and instance variable the body rebinds, so a `transform_keys` whose new key
+  # a rebound flag chooses answered the first key only, and over a nominal `Array` a counter predicate folded
+  # `all?` to `true` and `find` to `nil` on programs that answer otherwise. The pass now lays the #587 (b)
+  # captured binding under the block's parameters before typing the body.
+  describe "captured rebinds under the generic block-return pass" do
+    it "keeps every key a rebound flag chooses when the per-pair key fold declines" do
+      # Runtime `{ a: 1, other: 2 }`; the entry scope read `flag` as `true` and answered `Hash[:a | :b, 1 | 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("Hash[:a | :b | :other, 1 | 2]")
+        flag = true
+        dump_type({ a: 1, b: 2 }.transform_keys { |k| out = flag ? k : :other; flag = false; out })
+      RUBY
+    end
+
+    it "keeps every key a rebound instance-variable counter chooses" do
+      # Runtime `{ first: 1, rest: 2 }`; the entry scope answered `Hash[:first, 1 | 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("Hash[:first | :rest, 1 | 2]")
+        class Counter
+          def run
+            @i = 0
+            dump_type({ a: 1, b: 2 }.transform_keys { |k| @i += 1; @i == 1 ? :first : :rest })
+          end
+        end
+      RUBY
+    end
+
+    it "types a nominal map over a rebound counter as the converged type" do
+      # Runtime `[1, 2, …]`; the entry scope answered `Array[1]`.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+        xs = Array.new(rand(3)) { |i| i }
+        total = 0
+        dump_type(xs.map { |x| total += 1; total })
+      RUBY
+    end
+
+    it "no longer folds a nominal all? over a rebound counter to true" do
+      # `seen == 1` is `true` only on the first element, so `all?` over two elements is `false`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        xs = Array.new(rand(3)) { |i| i }
+        seen = 0
+        r = xs.all? { |x| seen += 1; seen == 1 }
+        puts "all" if r
+      RUBY
+    end
+
+    it "no longer folds a nominal find over a rebound counter to nil" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        xs = Array.new(rand(3)) { |i| i }
+        seen = 0
+        r = xs.find { |x| seen += 1; seen == 2 }
+        puts "found" if r
+      RUBY
+    end
+
+    it "no longer folds a nominal any? over a counter rebound inside an expression" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        xs = Array.new(rand(3)) { |i| i }
+        seen = 0
+        r = xs.any? { |x| (seen += 1) == 2 }
+        puts "any" if r
+      RUBY
+    end
+
+    it "still folds a nominal all? whose block rebinds only block locals" do
+      # The must-fire sibling: nothing captured moves, so the block really is `true` on every element.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        xs = Array.new(rand(3)) { |i| i }
+        r = xs.all? { |x| k = 1; k == 1 }
+        puts "all" if r
+      RUBY
+    end
+
+    it "keeps the entry binding of a block `then` runs exactly once" do
+      # No second run exists, so a rebind never reaches a read: runtime `5`, and `w + 1` is fine.
+      source = <<~RUBY
+        first = true
+        w = 5.then { |n| was = first; first = false; was ? n : nil }
+        dump_type(w)
+        w + 1
+      RUBY
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      expect(dumped_type(source)).to eq("Integer")
+      expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+    end
+
+    it "keeps the call type of a `tap` block whose `break` only a second run could take" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+        done = false
+        dump_type([1].tap { |a| break if done; done = true })
+      RUBY
+    end
+
+    it "keeps the entry binding of a block a method outside the iteration catalogue runs" do
+      # `synchronize` runs its block once; the take-and-clear idiom answers the taken value.
+      expect(dumped_type(<<~RUBY)).to eq('"abc"')
+        buf = "abc"
+        m = Mutex.new
+        dump_type(m.synchronize { out = buf; buf = nil; out })
+      RUBY
+    end
+
+    it "keeps the entry binding under an iterator whose receiver holds at most one element" do
+      # One run at most, so `done` is still `false` when the guard reads it: runtime `[:only]` and `1`.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Symbol]")
+        done = false
+        dump_type([:only].each { |s| break if done; done = true })
+      RUBY
+      expect(dumped_type(<<~RUBY)).to eq("Integer")
+        done = false
+        dump_type(1.times { |i| break if done; done = true })
+      RUBY
+    end
+
+    it "keeps a nominal map over an untouched captured local exact" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[5]")
+        xs = Array.new(rand(3)) { |i| i }
+        total = 0
+        k = 5
+        dump_type(xs.map { |x| total += x; k })
+      RUBY
+    end
+  end
+
+  # Residues of the #587 (b) name set: a class variable or a global outlives an iteration exactly as an
+  # instance variable does, an attribute setter on `self` rebinds the instance variable behind it without a write
+  # node, and an optimistic nil-freeness mark the body's own rebind makes belongs to the converged binding as much
+  # as the call site's does.
+  describe "the per-element fold's other outliving bindings" do
+    it "widens a rebound global counter at every position" do
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        $g = 0
+        dump_type([1, 2].map { |e| $g += 1 })
+      RUBY
+    end
+
+    it "no longer reports the condition the pinned global folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        $g = 0
+        r = [1, 2].map { |e| $g += 1 }
+        puts "one" if r.last == 1
+      RUBY
+    end
+
+    it "keeps a global the body does not rebind exact" do
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        $g = 0
+        dump_type([1, 2].map { |e| $g })
+      RUBY
+    end
+
+    it "widens a rebound class-variable counter at every position" do
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        class Counter
+          def run
+            @@c = 0
+            dump_type([1, 2].map { |e| @@c += 1 })
+          end
+        end
+      RUBY
+    end
+
+    it "floors an instance variable an attribute setter on self rebinds" do
+      # Runtime `[1, 2]`; `self.w =` writes `@w` through `attr_accessor`, which no write node shows.
+      source = <<~RUBY
+        class Counter
+          attr_accessor :w
+
+          def run
+            @w = 0
+            r = [1, 2].map { |e| self.w = @w + 1; @w }
+            dump_type(r)
+            puts "one" if r.last == 1
+          end
+        end
+      RUBY
+      expect(dumped_type(source)).to eq("[Dynamic[top], Dynamic[top]]")
+      expect(flow_rules(source)).to be_empty
+    end
+
+    it "keeps an instance variable exact when self only reads the attribute" do
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        class Counter
+          attr_accessor :w
+
+          def run
+            @w = 0
+            dump_type([1, 2].map { |e| self.w; @w })
+          end
+        end
+      RUBY
+    end
+
+    it "carries the optimistic nil-freeness mark the body's rebind makes" do
+      # `v` enters nil-free for real (`5`) and leaves as `xs.first`, nil-free only optimistically; runtime
+      # `[true, false]` over an empty `xs`. Without the exit mark `v.nil?` folded to `false` at the second
+      # position and `unless r.last` fired always-truthy.
+      source = <<~RUBY
+        xs = Array.new(rand(0)) { |i| i }
+        v = 5
+        r = [1, 2].map { |e| out = v.nil? ? false : true; v = xs.first; out }
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("[bool, bool]")
+      expect(flow_rules("#{source}puts 'second missing' unless r.last")).to be_empty
     end
   end
 end

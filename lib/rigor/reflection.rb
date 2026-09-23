@@ -140,10 +140,15 @@ module Rigor
     # answer to `::Foo`, and falling back to it was the bug (`::Rails` inside `module MyApp` typed
     # as `MyApp::Rails`).
     #
+    # `caller_derived: false` drops {.toplevel_first_constant_type}'s rungs below the top level, for a
+    # reader whose miss is a meaningful answer rather than a read Ruby raises on. A constant compound write
+    # is one: an unset top-level `REGISTRY ||= {}` is the memoization idiom, and the caller's
+    # `Plugin::REGISTRY` is a binding Ruby never consults there.
+    #
     # This is the shared owner of the lexical-constant resolution: `Inference::ExpressionTyper`
     # reads it to type a constant read, and `Inference::Narrowing` reads it to recognise a
     # value-pinned `Constant[Regexp]` match-predicate operand.
-    def resolve_constant_type(name, scope: Scope.empty, rooted: false)
+    def resolve_constant_type(name, scope: Scope.empty, rooted: false, caller_derived: true)
       # Issue #644 — the ADR-46 name edge, recorded ONCE PER REFERENCE and BEFORE the ladder, so it does not
       # depend on which resolver answers. A reference that resolves through RBS (`Math::PI`) or through the
       # class registry is exactly as dependent on the project's constant write set as one that resolves
@@ -156,7 +161,7 @@ module Rigor
       # Issue #716 — a body whose `Module.nesting` was RECORDED EMPTY is definitively top level, and Ruby
       # resolves its constants there no matter which namespace calls it. Steps 1 and 2 both derive from the
       # caller and are both wrong for it, so it takes its own ladder.
-      return toplevel_first_constant_type(name, scope) if recorded_toplevel_nesting?(scope)
+      return toplevel_first_constant_type(name, scope, caller_derived) if recorded_toplevel_nesting?(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.
       #
@@ -222,8 +227,11 @@ module Rigor
     #
     # Issue #656's rung goes LAST here rather than second: for a top-level body Ruby's own first answer
     # for `A::B` is the top level, and a whole-string hit there already means "`A` owns `B`". The
-    # segment-wise walk only has something to add once that misses.
-    def toplevel_first_constant_type(name, scope)
+    # segment-wise walk only has something to add once that misses. It is caller-derived too — the path's
+    # head consults the caller's ancestors — so `caller_derived: false` answers the top-level rung alone.
+    def toplevel_first_constant_type(name, scope, caller_derived)
+      return constant_type_at(name, scope) unless caller_derived
+
       constant_type_at(name, scope) || caller_derived_constant_type(name, scope) || constant_path_type(name, scope)
     end
     private_class_method :toplevel_first_constant_type

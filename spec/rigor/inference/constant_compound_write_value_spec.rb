@@ -116,6 +116,24 @@ RSpec.describe "constant compound write value", type: :runner do
         dump_type(Conf::LIMIT += 1)
       RUBY
     end
+
+    it "reads a rooted path at the top level" do
+      # Runtime: `{ a: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("0 | { a: 1 }")
+        ROOT = { a: 1 }
+        module Mod
+          dump_type(::ROOT ||= 0)
+        end
+      RUBY
+    end
+
+    it "keeps a `||=` whose rvalue is a guard on the binding" do
+      # Runtime: `{ a: 1 }`; the `raise` never runs.
+      expect(dumped_type(<<~RUBY)).to eq("{ a: 1 }")
+        SETTINGS = { a: 1 }
+        dump_type(SETTINGS ||= raise("boot first"))
+      RUBY
+    end
   end
 
   describe "an unbound constant (controls)" do
@@ -145,6 +163,45 @@ RSpec.describe "constant compound write value", type: :runner do
     it "reads an unbound operator write as Dynamic[top], as a variable target does" do
       # Runtime: NameError. The rvalue alone is never the value; the binding is somewhere the analyzer did not see.
       expect(dumped_type("dump_type(COUNT_ONLY += 1)")).to eq("Dynamic[top]")
+    end
+
+    it "reads a path whose base has no static name as unbound" do
+      # Runtime: `"s"` for a `Box` with no `ITEM`, and NameError for the operator write.
+      expect(dumped_types(<<~RUBY)).to eq([%("s"), "Dynamic[top]"])
+        def put(klass) = dump_type(klass::ITEM ||= "s")
+        def bump(klass) = dump_type(klass::COUNT += 1)
+      RUBY
+    end
+
+    it "reads an unbound `||=` guard as the binding it guards, not the rvalue's bot" do
+      # `SETTINGS_ONLY ||= raise ...` returns only when something the analyzer did not see set the constant.
+      expect(dumped_type(%(dump_type(SETTINGS_ONLY ||= raise("boot first"))))).to eq("Dynamic[top]")
+    end
+
+    it "does not bind a top-level memo to a constant of the namespace that calls it" do
+      # Runtime: `{}`. Ruby resolves the top-level `def`'s `REGISTRY` at the top level, which is unset there;
+      # `Plugin::REGISTRY` is the caller's, and the lexical ladder's caller-derived rungs must not supply it.
+      expect(dumped_type(<<~RUBY)).to eq("{}")
+        def registry = (REGISTRY ||= {})
+
+        class Plugin
+          REGISTRY = "plugins"
+
+          def entries = dump_type(registry)
+        end
+      RUBY
+    end
+  end
+
+  describe "a meta-new class under `||=` (issue #963)" do
+    it "reads the class the first write names as the binding of a later one" do
+      # Runtime: `Line`, the first struct. The class the meta-new write declares is the binding.
+      expect(dumped_type(<<~RUBY)).to eq("Struct.new(:other) | singleton(Line)")
+        Line ||= Struct.new(:text) do
+          def hi = text
+        end
+        dump_type(Line ||= Struct.new(:other))
+      RUBY
     end
   end
 end

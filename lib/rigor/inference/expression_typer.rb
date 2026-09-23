@@ -434,7 +434,7 @@ module Rigor
       # Constant targets have {#type_of_compound_constant_write}, over the same algebra. Index targets have their
       # own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
-        compound_write_value(node, compound_write_current_binding(node))
+        compound_write_value(node, compound_write_current_binding(node), type_of(node.value))
       end
 
       # `H ||= 0` / `Conf::LIMIT += 1` as an EXPRESSION: the value it stores, by
@@ -443,18 +443,29 @@ module Rigor
       # folded every value to `0`.
       #
       # A constant has no scope binding, so its current binding is what a plain read of the same spelling
-      # resolves to at the write site — the lexical ladder, the in-source table of plain writes, then RBS. The
-      # memoization idiom (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic
-      # constant assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue
-      # reading exactly as an unbound variable does. A path whose base renders no static name (`klass::X`,
+      # resolves to at the write site — the lexical ladder, the in-source table of plain writes, then RBS —
+      # less the caller-derived rungs a top-level body keeps for reads Ruby raises on. The memoization idiom
+      # (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic constant
+      # assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue reading
+      # exactly as an unbound variable does. A path whose base renders no static name (`klass::X`,
       # `self::X`) names no binding the resolver can look up, and reads as unbound too.
+      #
+      # One exception is the index rule's: an unbound `||=` whose rvalue has no truthy part is a guard, not a
+      # memo. `SETTINGS ||= raise "boot first"` returns only when something the analyzer did not see set
+      # `SETTINGS`, so its value is that unseen binding, not the rvalue's `bot`.
       def type_of_compound_constant_write(node)
-        compound_write_value(node, compound_write_constant_binding(node))
+        rhs = type_of(node.value)
+        current = compound_write_constant_binding(node)
+        current ||= dynamic_top if constant_or_write_guard?(node, rhs)
+        compound_write_value(node, current, rhs)
       end
 
-      def compound_write_value(node, current)
-        rhs = type_of(node.value)
+      def constant_or_write_guard?(node, rhs)
+        (node.is_a?(Prism::ConstantOrWriteNode) || node.is_a?(Prism::ConstantPathOrWriteNode)) &&
+          Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+      end
 
+      def compound_write_value(node, current, rhs)
         case node
         when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
              Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode,
@@ -507,8 +518,6 @@ module Rigor
         end
       end
 
-      # A miss records the same negative `class:` edge an unresolved plain read does
-      # ({#unresolved_constant_fallback}): a file that later declares the name moves this answer off the rvalue.
       def compound_write_constant_binding(node)
         case node
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
@@ -520,9 +529,7 @@ module Rigor
 
           rooted = Source::ConstantPath.rooted?(node.target)
         end
-        bound = resolve_constant_name(full_name, rooted: rooted)
-        record_missing_constant(full_name) if bound.nil? && Analysis::DependencyRecorder.active?
-        bound
+        resolve_constant_name(full_name, rooted: rooted, caller_derived: false)
       end
 
       def compound_operator_result(current, rhs, operator)
@@ -733,8 +740,8 @@ module Rigor
       # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
       # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
       # `Rigor::Type` or nil; the caller decides whether to fall back.
-      def resolve_constant_name(name, rooted: false)
-        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted)
+      def resolve_constant_name(name, rooted: false, caller_derived: true)
+        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted, caller_derived: caller_derived)
       end
 
       # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`

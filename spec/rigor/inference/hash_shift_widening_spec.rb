@@ -71,6 +71,26 @@ RSpec.describe "Hash#shift mutation widening", type: :runner do
       RUBY
     end
 
+    it "widens a HashShape element the receiver reads through" do
+      expect(dumped_types(<<~RUBY)).to eq(["[Hash[Symbol, 1]]", "[{ a: 1 }]"])
+        c = [{ a: 1 }]
+        c[0].shift
+        dump_type(c)
+
+        d = [{ a: 1 }]
+        d[0].fetch(:a)
+        dump_type(d)
+      RUBY
+    end
+
+    it "does not fold the exit test of a loop that drains a HashShape" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        work = { a: 1, b: 2 }
+        work.shift while work.size > 0
+        puts "drained" if work.size == 0
+      RUBY
+    end
+
     it "widens the HashShape member of a Union alongside the Tuple member" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[1] | Hash[Symbol, 1]", "[1] | { a: 1 }"])
         def drained(flag)

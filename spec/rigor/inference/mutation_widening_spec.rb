@@ -282,14 +282,17 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(widened.type_args.map(&:class_name)).to eq(%w[Symbol Integer])
     end
 
-    # The Hash twin of the Array list above. `shift` is the case that matters: it removes a pair, and
-    # a witness kept past it folds `h.empty?` to `false` on a hash the shift may have emptied.
+    # The Hash twin of the Array list above, read off the tables so a name added to either is covered.
+    # `shift` is the case that matters: it removes a pair, and a witness kept past it folds
+    # `h.size == 0` to `false` on a hash the shift may have emptied.
     it "widens a non-empty-hash refinement under every Hash mutator that can empty it" do
       non_empty = Rigor::Type::Combinator.non_empty_hash(
         Rigor::Type::Combinator.nominal_of("Symbol"),
         Rigor::Type::Combinator.nominal_of("Integer")
       )
-      %i[shift delete delete_if reject! select! filter! keep_if clear compact! replace].each do |mutator|
+      emptying = described_class::HASH_MUTATORS.to_a - Rigor::Inference::RefinementMutation::EMPTY_PRESERVING["Hash"].to_a
+      expect(emptying).to include(:shift)
+      emptying.each do |mutator|
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
           eq(non_empty.base), "expected #{mutator} to widen non-empty-hash to its base"
         )

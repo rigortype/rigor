@@ -1785,13 +1785,14 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "floors a captured local whose in-place widening declines" do
-        # `sort!` keeps a `non-empty-array` witness and joins nothing, so the widening declines and `xs` stays the
-        # entry binding — which says nothing about the order later iterations see.
+        # `map!` keeps a `non-empty-array` witness and joins nothing, so the widening declines and `xs` stays the
+        # entry `non-empty-array[String]`. Counted as answered, every position would read `String` for an element
+        # the first iteration already turned into a Symbol.
         expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
           xs = ENV.keys
           unless xs.empty?
             dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
-              xs.sort!
+              xs.map!(&:to_sym)
               xs.first
             end)
           end

@@ -2,8 +2,8 @@
 
 Status: **Accepted, 2026-09-23 — scheduled for after the v0.4.0 cut; no slice has landed.** This
 ADR fixes the direction, the three criteria, and the slice order (WD0–WD7). Each slice lands as its
-own PR in the `v0.4.x` milestone. WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries
-its own corpus diff.
+own PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve
+behaviour; WD6 changes it and carries its own corpus diff.
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -80,8 +80,8 @@ never chooses the cut.
 
 ## Working decisions — the slices, in order
 
-- **WD0 — File-size ratchet.** A spec gate, like [ADR-97](97-adr-index-budgets.md)'s index budgets,
-  records a line budget for each `lib/` file of 1,000+ lines:
+- **WD0 — File-size ratchet (#1192).** A spec gate, like [ADR-97](97-adr-index-budgets.md)'s index
+  budgets, records a line budget for each `lib/` file of 1,000+ lines:
   - growing past the budget fails;
   - raising a budget is an explicit diff in the PR that needs it;
   - a new file that crosses 1,000 lines needs an entry;
@@ -89,12 +89,12 @@ never chooses the cut.
 
   The inline cop disables stay; the ratchet is the control. It lands first, so the budgets exist
   before the splits shrink them.
-- **WD1 — `CheckRules` by rule.** `call_node_diagnostics` (`check_rules.rb` ~L267) already calls ten
-  rule entries in sequence. Each rule becomes a `check_rules/<rule>.rb` module with one entry.
+- **WD1 — `CheckRules` by rule (#1193).** `call_node_diagnostics` (`check_rules.rb` ~L267) already
+  calls ten rule entries in sequence. Each rule becomes a `check_rules/<rule>.rb` module with one entry.
   Suppression parsing (~L447–660) becomes one more module, and the shared receiver predicates
   (`lookup_method`, `concrete_class_name`, `project_defines_method?`, …) one shared module. This is
   a pure move; the largest pieces are undefined-method (~L664–1507) and argument-type (~L2621–3230).
-- **WD2 — Discovery-table declarations (C1).** Each `DiscoveryIndex` table declares:
+- **WD2 — Discovery-table declarations (C1; #1194).** Each `DiscoveryIndex` table declares:
   - its empty value;
   - its per-file-over-seed merge;
   - its cross-file fold — later-wins, first-wins, nearest-first list, set union, or envelope join;
@@ -106,7 +106,7 @@ never chooses the cut.
   `Runner` holds one discovery value in place of the ivars `#apply_discovery_result` (~L1453) copies
   and `#project_scope_seed_tables` (~L1958) re-lists. *Done when:* a new table is its collector,
   one declaration and a `SCHEMA` bump.
-- **WD3 — Run-level fact registry (C1).** Each fact declares:
+- **WD3 — Run-level fact registry (C1; #1195).** Each fact declares:
   - its name and empty value;
   - its merge rule — de-duplicating union, first-wins, or assignment;
   - its source — the coordinator's environment, or drained from the analysing process;
@@ -119,11 +119,11 @@ never chooses the cut.
   and absorb themselves. When a fact is collected stays with each backend: before the fork for
   #798, after the loop for #696. *Done when:* a new stream like #801 or #854 touches only its
   reporter and its row.
-- **WD4 — Extract user-method return inference from `ExpressionTyper` (C3).** This is ~L1862–3527:
-  resolution and the override gate, the memo, recursion guard and fixpoint, and body-scope and
-  parameter binding. It owns ten thread-local keys and reaches the rest of `ExpressionTyper` only
-  through `dynamic_top` and one `type_of`. `return_type_for` and `harvest_return_memo` are already
-  its public face. Known blockers:
+- **WD4 — Extract user-method return inference from `ExpressionTyper` (C3; #1196).** This is
+  ~L1862–3527: resolution and the override gate, the memo, recursion guard and fixpoint, and
+  body-scope and parameter binding. It owns ten thread-local keys and reaches the rest of
+  `ExpressionTyper` only through `dynamic_top` and one `type_of`. `return_type_for` and
+  `harvest_return_memo` are already its public face. Known blockers:
   - `return_memo_taint_spec` reads the file as text;
   - `class_graph_memo_slot_spec` sends `class_graph_buckets`, which the dispatch cluster also needs;
   - two specs pin thread-local key names;
@@ -131,7 +131,7 @@ never chooses the cut.
 
   Block-return typing and the per-element folds (~L3601–4713) may then move together as a pure
   move; that is optional.
-- **WD5 — One declaration-context walk for `ScopeIndexer` (C2; ADR-53 Theme B).**
+- **WD5 — One declaration-context walk for `ScopeIndexer` (C2; ADR-53 Theme B; #1197).**
   - *Design.* A context value carries the qualified prefix, the rebound self or def owner, the
     singleton-cref flag, the nesting, the default scope and nameability. One traversal owns the
     `class`/`module`, `class <<`, `Class.new`-family and eval-family rules. Each table becomes a
@@ -147,7 +147,8 @@ never chooses the cut.
     indexing still holds.
   - *Amendment rule.* If the event set needs a traversal contract beyond these, amend this ADR
     before porting further.
-- **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change).**
+- **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change;
+  #1198).**
   - *Problem.* Block entry-scope construction exists three times: ET ~L3690–3726, SE ~L2984–3061,
     and the per-element folds. The jump-target scans (ET ~L3818, SE ~L1327) disagree on boundary
     nodes.
@@ -155,7 +156,7 @@ never chooses the cut.
     delegated value-position `&&`/`||` to SE.
   - *Verification.* The slice carries a corpus false-positive diff. It also updates
     `docs/type-specification/` wherever a binding rule changes.
-- **WD7 — Smaller seams, taken when their file next becomes a co-change hotspot.**
+- **WD7 — Smaller seams, taken when their file next becomes a co-change hotspot (#1199).**
   - `Scope`'s class-graph queries (~L630–1500 read only `@discovery`) move behind `DiscoveryIndex`,
     with `Scope` delegating.
   - The four identity-keyed advisory tables (`dynamic_origins`, `void_origins`,

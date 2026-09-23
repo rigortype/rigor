@@ -1174,5 +1174,33 @@ RSpec.describe "block-return scope threading", type: :runner do
         end)
       RUBY
     end
+
+    it "widens a rebound instance variable at every value pair" do
+      # The instance variables the per-element binding covers move per pair too; the pin answered `{ x: 1,
+      # y: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        class Counter
+          def run
+            @t = 0
+            dump_type({ x: 1, y: 2 }.transform_values { |e| @t += 1 })
+          end
+        end
+      RUBY
+    end
+
+    it "keeps an instance variable the body does not rebind exact at every value pair" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 5, y: 5 }")
+        class Counter
+          def run
+            @t = 0
+            @u = 5
+            dump_type({ x: 1, y: 2 }.transform_values do |e|
+              @t += e
+              @u
+            end)
+          end
+        end
+      RUBY
+    end
   end
 end

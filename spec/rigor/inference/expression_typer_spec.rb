@@ -1046,6 +1046,86 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Hash")
     end
 
+    # `o = { a: :z }; { **o, b: :y }` typed `Hash[:b, :y]`: the splatted entry was skipped, not joined.
+    describe "a **splat entry's key and value types" do
+      let(:c) { Rigor::Type::Combinator }
+      let(:untyped) { c.untyped }
+
+      def splat_literal(splatted, source = "{ **o, b: :y }")
+        scope.with_local(:o, splatted).type_of(parse_expression(source, scopes: [[:o]]))
+      end
+
+      def hash_of(key, value)
+        c.nominal_of(Hash, type_args: [key, value])
+      end
+
+      def b_joined(key, value)
+        hash_of(c.union(key, c.constant_of(:b)), c.union(value, c.constant_of(:y)))
+      end
+
+      it "keeps the splat-free literal a HashShape (control)" do
+        expect(splat_literal(untyped, "{ a: :z, b: :y }"))
+          .to eq(c.hash_shape_of({ a: c.constant_of(:z), b: c.constant_of(:y) }))
+      end
+
+      it "joins a closed shape's keys and values, optional ones included" do
+        shape = c.hash_shape_of({ a: c.constant_of(:z), c: c.constant_of(1) }, optional_keys: [:c])
+        expect(splat_literal(shape))
+          .to eq(b_joined(c.union(c.constant_of(:a), c.constant_of(:c)), c.union(c.constant_of(:z), c.constant_of(1))))
+        expect(splat_literal(shape, "{ **o }"))
+          .to eq(hash_of(c.union(c.constant_of(:a), c.constant_of(:c)), c.union(c.constant_of(:z), c.constant_of(1))))
+      end
+
+      it "adds a Dynamic[top] arm for an open shape's unlisted entries" do
+        shape = c.hash_shape_of({ a: c.constant_of(:z) }, extra_keys: :open)
+        expect(splat_literal(shape))
+          .to eq(b_joined(c.union(c.constant_of(:a), untyped), c.union(c.constant_of(:z), untyped)))
+      end
+
+      it "joins a Hash[K, V]'s type arguments, read through a non-empty-hash difference too" do
+        expect(splat_literal(hash_of(c.nominal_of(String), c.nominal_of(Integer))))
+          .to eq(b_joined(c.nominal_of(String), c.nominal_of(Integer)))
+        expect(splat_literal(c.non_empty_hash(c.nominal_of(String), c.nominal_of(Integer))))
+          .to eq(b_joined(c.nominal_of(String), c.nominal_of(Integer)))
+      end
+
+      it "joins a union's members and drops nil, which splats nothing" do
+        shape = c.hash_shape_of({ a: c.constant_of(:z) })
+        expect(splat_literal(c.union(shape, c.constant_of(nil))))
+          .to eq(b_joined(c.constant_of(:a), c.constant_of(:z)))
+        expect(splat_literal(c.constant_of(nil))).to eq(hash_of(c.constant_of(:b), c.constant_of(:y)))
+        expect(splat_literal(c.constant_of(nil), "{ **o }")).to eq(c.nominal_of(Hash))
+      end
+
+      it "contributes Dynamic[top] for a splat it cannot read" do
+        pair = c.nominal_of("Pair", type_args: [c.nominal_of(String), c.nominal_of(Integer)])
+        [untyped, c.nominal_of(Hash), c.nominal_of("ActiveSupport::HashWithIndifferentAccess"), pair,
+         c.dynamic(hash_of(c.nominal_of(String), c.nominal_of(Integer))), c.nominal_of(Integer),
+         c.union(c.hash_shape_of({ a: c.constant_of(:z) }), c.nominal_of(Integer))].each do |splatted|
+          expect(splat_literal(splatted).type_args.map { |arg| arg.members.include?(untyped) })
+            .to eq([true, true]), "for #{splatted.describe}"
+        end
+      end
+
+      # The engine records no aliasing, so `m = {}; m.tap { |x| x[:a] = :z }` still reads `{}`.
+      it "contributes Dynamic[top] for an empty closed shape, not nothing" do
+        expect(splat_literal(c.hash_shape_of({}))).to eq(b_joined(untyped, untyped))
+      end
+
+      it "contributes Dynamic[top] for an anonymous **" do
+        def_node = parse_expression("def forward(**) = { **, b: :y }")
+        expect(scope.type_of(def_node.body.body.first)).to eq(b_joined(untyped, untyped))
+      end
+
+      it "types a keyword-hash argument the same way" do
+        call = parse_expression("f(**o, b: :y)", scopes: [[:o]])
+        keywords = call.arguments.arguments.first
+        expect(keywords).to be_a(Prism::KeywordHashNode)
+        expect(scope.with_local(:o, c.hash_shape_of({ a: c.constant_of(:z) })).type_of(keywords))
+          .to eq(b_joined(c.constant_of(:a), c.constant_of(:z)))
+      end
+    end
+
     it "Hash#fetch returns the precise value for a static key (Slice 5 phase 2)" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }.fetch(:a)"))
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))

@@ -748,8 +748,9 @@ module Rigor
       # whose key is a value-pinned scalar literal — Symbol, plain String, Integer, Float, `true`, `false`,
       # or `nil` (covering `{ a: 1, "b" => 2 }` and `{ 1 => 2, 1.0 => 4 }` alike) — falling back to the
       # generic `Hash[K, V]` form otherwise. Splatted entries (`{ **other }`) and dynamic keys widen to the
-      # underlying `Hash[K, V]` form by unioning the types each entry exposes; when no concrete pair
-      # survives we fall back to the raw `Hash` so callers stay backward compatible.
+      # underlying `Hash[K, V]` form by unioning the types each entry exposes — a splat exposes the `[K, V]`
+      # of the hash it copies (see {#hash_splat_pair}); when no concrete pair survives we fall back to the raw
+      # `Hash` so callers stay backward compatible. A splat never keeps a shape, even over an exact closed one.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
         # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
@@ -816,12 +817,62 @@ module Rigor
         keys = []
         values = []
         elements.each do |entry|
-          next unless entry.is_a?(Prism::AssocNode)
+          pair = entry.is_a?(Prism::AssocNode) ? [type_of(entry.key), type_of(entry.value)] : hash_splat_pair(entry)
+          next if pair.nil?
 
-          keys << type_of(entry.key)
-          values << type_of(entry.value)
+          keys << pair.first
+          values << pair.last
         end
         [keys, values]
+      end
+
+      # The `[K, V]` a `**splat` entry copies into the literal, or nil when it copies nothing. Ruby converts the
+      # value with `to_hash` and inserts every pair, so leaving the entry out typed `o = { a: :z }; { **o, b: :y }`
+      # as `Hash[:b, :y]` and folded `h[:a] == :z` on correct code. An anonymous `**` has no value to read.
+      def hash_splat_pair(entry)
+        return unreadable_hash_pair if entry.value.nil?
+
+        splatted_hash_pair(type_of(entry.value))
+      end
+
+      # A shape contributes its keys and values, a `Hash[K, V]` (or a difference over one, `non-empty-hash[K, V]`)
+      # its type arguments, and a union the join over its members. `nil` contributes nothing (`**nil` is an empty
+      # splat since Ruby 3.4), and so does `bot`. Anything else is `[Dynamic[top], Dynamic[top]]`: an untyped
+      # value, a raw `Hash`, a subclass that may override `to_hash`, an object `to_hash` converts, an open shape's
+      # unlisted entries, and an empty closed shape, which is what a hash filled through an alias the engine does
+      # not track still reads as (the floor `HashTransformKeysFolding` gives an empty mapping).
+      def splatted_hash_pair(type)
+        case type
+        when Type::HashShape then splatted_shape_pair(type)
+        when Type::Nominal
+          type.class_name == "Hash" && type.type_args.size == 2 ? type.type_args : unreadable_hash_pair
+        when Type::Difference then splatted_hash_pair(type.base)
+        when Type::Union then splatted_union_pair(type)
+        when Type::Bot then nil
+        else type.is_a?(Type::Constant) && type.value.nil? ? nil : unreadable_hash_pair
+        end
+      end
+
+      def splatted_shape_pair(shape)
+        return unreadable_hash_pair if shape.pairs.empty? && shape.closed?
+
+        key = Type::Combinator.union(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) })
+        value = Type::Combinator.union(*shape.pairs.values)
+        return [key, value] if shape.closed?
+
+        untyped = Type::Combinator.untyped
+        [Type::Combinator.union(key, untyped), Type::Combinator.union(value, untyped)]
+      end
+
+      def splatted_union_pair(union)
+        pairs = union.members.filter_map { |member| splatted_hash_pair(member) }
+        return nil if pairs.empty?
+
+        [Type::Combinator.union(*pairs.map(&:first)), Type::Combinator.union(*pairs.map(&:last))]
+      end
+
+      def unreadable_hash_pair
+        [Type::Combinator.untyped, Type::Combinator.untyped]
       end
 
       # An interpolated string `"#{a}b#{c}"` is `literal-string` when every part contributes literal-bearing

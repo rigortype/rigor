@@ -388,6 +388,28 @@ RSpec.describe "String mutation widening", type: :runner do
       expect(nil_receivers.map(&:line)).to eq([named.lines.index("    q.size\n") + 3])
     end
 
+    # Issue #1251's two shapes: a union of String literals matched none of the floor's single-carrier tests and was
+    # left pinned, and a union with an Array member floored whole to `Array[untyped]`, dropping its String member.
+    it "floors a union a callee mutates member by member" do
+      expect(dumped_types(<<~RUBY)).to eq(["non-negative-int", "Array[Dynamic[top]] | String"])
+        def reset(s) = s.replace("")
+        def app(x) = x << "y"
+
+        c = ["ab", "cd"].sample.dup
+        reset(c)
+        dump_type(c.size)
+        x = [true, false].sample ? [1] : +"s"
+        app(x)
+        dump_type(x)
+      RUBY
+      expect(flow_rules(<<~RUBY)).to be_empty
+        def reset(s) = s.replace("")
+        c = ["ab", "cd"].sample.dup
+        reset(c)
+        puts "empty" if c.size == 0
+      RUBY
+    end
+
     it "floors an optional String a closure or a callee mutates, keeping its nil" do
       expect(dumped_types(<<~RUBY)).to eq(["String?", "String?"])
         def optional(flag)

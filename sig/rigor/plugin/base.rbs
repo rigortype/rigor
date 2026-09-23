@@ -75,6 +75,13 @@ class Rigor::Plugin::Base
   # Defaults to `manifest.protocol_contracts`; a plugin MAY override to fold per-project config in,
   # but the contract (an Array of ProtocolContract) holds either way.
   def protocol_contracts: () -> Array[Rigor::Plugin::ProtocolContract]
+  # The ADR-103 effect surfaces delegate to the manifest by default; a plugin MAY override
+  # `effect_attributions` to fold per-project config in, but the contract holds either way.
+  def effect_labels: () -> Array[String]
+  def effect_attributions: () -> Array[Rigor::Plugin::EffectAttribution]
+  def effect_edges: () -> Array[Rigor::Plugin::EffectEdge]
+  def effect_entry_points: () -> Array[Rigor::Plugin::EffectEntryPoints]
+  def effect_ancestry: () -> Array[Rigor::Plugin::EffectAncestry]
   def io_boundary: () -> Rigor::Plugin::IoBoundary
   def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> Proc
   def plugin_entry: () -> untyped

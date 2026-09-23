@@ -1,0 +1,68 @@
+module Rigor
+  module Effects
+    # The effect-label vocabulary: which spellings are recognised, which have been retired, and who
+    # may open a new root (ADR-103 WD2; normative in `docs/type-specification/effect-labels.md`).
+    # A frozen value object; {#with} returns a new one rather than mutating.
+    class Registry
+      class Error < StandardError
+      end
+
+      # An added label whose root neither exists already nor belongs to the extender.
+      class OwnershipError < Error
+      end
+
+      # An added label that is not well-formed under {Label::PATTERN}.
+      class InvalidLabelError < Error
+      end
+
+      DATA_PATH: String
+
+      # How far a misspelling may be from a known label before {#suggest} declines to guess.
+      SUGGESTION_DISTANCE_CAP: Integer
+
+      # The shared registry as shipped, memoised per process.
+      def self.default: () -> Registry
+
+      # The vocabulary one run works in: the shipped registry plus `effects.labels:` and every
+      # loaded plugin's `effect_labels:` (ADR-103 WD2 / #385 / #387). Fail-soft: a rejected
+      # extension degrades to the shipped vocabulary.
+      def self.for_configuration: (Configuration configuration, ?plugin_facts: PluginFacts?) -> Registry
+
+      # Build a registry from a registry-shaped YAML file. Missing or unreadable data degrades to
+      # an empty vocabulary (fail-open).
+      def self.load_file: (untyped path) -> Registry
+
+      # sig-gen gap: #1154 — `attr_reader` over an ivar assigned in `initialize` from the
+      # parameter of the same name; sig-gen proposes `untyped` for it.
+      attr_reader vocabulary_version: Integer
+      # sig-gen gap: #1154 — every declared label, sorted; implied ancestors are recognised by
+      # {#known?} but not listed here.
+      attr_reader labels: Array[String]
+      # The roots of the vocabulary — the outermost segments {#with} treats as already owned.
+      # Unmarked residue: `@roots` is computed from `@known` in `initialize`, not assigned from a
+      # parameter, so #1154 does not cover it.
+      attr_reader roots: Array[String]
+      # sig-gen gap: #1154 — one line per root, from the data file's `descriptions:`.
+      attr_reader descriptions: Hash[String, String]
+
+      def initialize: (vocabulary_version: Integer, labels: Array[untyped],
+                       ?retired: Hash[untyped, untyped],
+                       ?descriptions: Hash[untyped, untyped]) -> void
+
+      # Whether the vocabulary recognises `label`: an exact row, or an ancestor of one.
+      def known?: (untyped label) -> bool
+
+      # The nearest recognised label to a misspelling within {SUGGESTION_DISTANCE_CAP} edits, or
+      # nil when nothing is close enough.
+      def suggest: (untyped label) -> String?
+
+      # The replacement labels for a retired spelling, or nil when it was never retired.
+      def retired: (untyped label) -> Array[String]?
+
+      # A new registry carrying `labels` on top of this one. `owner` is the identity opening a
+      # root — a plugin id, or a first-party plugin's framework root; nil is the project, which
+      # may open any root.
+      def with: (labels: Array[untyped], owner: String?) -> Registry
+    end
+  end
+end

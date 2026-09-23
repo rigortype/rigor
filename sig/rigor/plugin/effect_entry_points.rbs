@@ -1,0 +1,25 @@
+module Rigor
+  module Plugin
+    # One `effect_entry_points:` row: a named set of globs marking project files whose methods are
+    # framework entry points (ADR-103 WD6). Frozen value object; {#globs} are deduplicated and
+    # sorted in `initialize`.
+    class EffectEntryPoints
+      # sig-gen gap: #1154 — `to_s`-normalized in `initialize` from the `name:` parameter.
+      attr_reader name: String
+      # sig-gen gap: #1154 — deduplicated/sorted/frozen in `initialize` from `globs:`.
+      attr_reader globs: Array[String]
+      # sig-gen gap: #1154 — `to_s`-normalized in `initialize` from `why:`.
+      attr_reader why: String
+
+      def initialize: (name: untyped, globs: untyped, ?why: untyped) -> void
+
+      def to_h: () -> Hash[String, untyped]
+
+      def ==: (untyped other) -> bool
+      # `alias eql? ==` — the alias row has no sig-gen shape, so it stays unmarked
+      # residue.
+      def eql?: (untyped other) -> bool
+      def hash: () -> Integer
+    end
+  end
+end

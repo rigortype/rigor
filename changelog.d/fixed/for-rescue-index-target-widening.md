@@ -1,0 +1,1 @@
+- **[inference]** A `for` loop or `rescue` clause that stores into a hash or array slot (`for h[:a] in xs`, `for h[:a], w in pairs`, `rescue => h[:e]`) now widens the collection exactly as `h[:a] = x` does, so a later `h[:a] == 0` no longer reports an always-truthy condition. ([#1211](https://github.com/rigortype/rigor/pull/1211))

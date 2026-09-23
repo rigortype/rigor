@@ -25,6 +25,12 @@ RSpec.describe "block-return scope threading", type: :runner do
   # exactly one; "reports exactly one dump per fixture" below is the assertion that keeps it honest.
   def dumped_type(source) = dumped_types(source).first
 
+  # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
+  def flow_rules(source)
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+  end
+
   describe "the tail reads a name the body binds" do
     it "types a block-local tail through a generic block-return signature" do
       # The reported repro: `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the block's return type IS
@@ -336,12 +342,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # `true`. The fold now runs the ADR-56 `BodyFixpoint` over the rebound names up front and types every
   # position with them bound to the converged (widened) type — what the local can be in ANY iteration.
   describe "captured outer locals the body rebinds under the per-element fold" do
-    # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     it "widens a rebound counter to its continuation binding at every position" do
       # THE ISSUE'S PROBE. Before the fix this answered `[1, 1]` (and `[0, 0]` before #584 — a pin either way).
       expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
@@ -608,11 +608,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # Issue #617 — the four block-return residues #587 left behind. Each pair is a residue plus the arm that
   # must keep folding, because every decline here is bought with precision somewhere adjacent.
   describe "issue #617 block-return residues" do
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     describe "(1) find / detect / index / find_index over a rebound-capture predicate" do
       it "answers an element-or-nil where the entry-scope predicate short-circuited to nil" do
         # Runtime answer is `2`. The per-position predicates do not fold, so the walk floors instead of
@@ -753,11 +748,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # y: 2 }`. The per-pair fold now takes the per-element fold's entry binding, the parameter bound to the
   # union of the values (or keys) for the fixpoint.
   describe "captured outer locals the body rebinds under the HashShape per-pair fold" do
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     it "widens a rebound counter at every value pair" do
       # THE REPORTED PROBE. Before the fix this answered `{ x: 1, y: 1 }`.
       expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
@@ -788,6 +778,20 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
         total = 0
         dump_type({ x: 1, y: 2 }.transform_values do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "widens past the Tuple fold's arity cap, which the per-pair fold does not have" do
+      # `45` at `:k9` at runtime; the pin answered `9`. No cap means no above-the-cap floor either: every pair
+      # threads its full body, and the fixpoint's cost does not scale with the pair count.
+      pairs = (1..9).map { |n| "k#{n}: #{n}" }.join(", ")
+      expected = (1..9).map { |n| "k#{n}: Integer" }.join(", ")
+      expect(dumped_type(<<~RUBY)).to eq("{ #{expected} }")
+        total = 0
+        dump_type({ #{pairs} }.transform_values do |e|
           total += e
           total
         end)

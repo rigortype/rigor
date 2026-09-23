@@ -3246,12 +3246,12 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       bool = Rigor::Type::Combinator.union(
         Rigor::Type::Combinator.constant_of(true), Rigor::Type::Combinator.constant_of(false)
       )
-      scope.with_local(:flag, bool).with_local(:k, integer)
+      scope.with_local(:flag, bool).with_local(:k, integer).with_local(:src, union(integer, nil_type))
     end
 
-    # `flag` and `k` are bound in `base`; `scopes:` makes Prism parse them as the locals they are.
+    # `flag`, `k` and `src` are bound in `base`; `scopes:` makes Prism parse them as the locals they are.
     def local_after(source, name)
-      _, post = base.evaluate(Prism.parse(source, scopes: [%i[flag k]]).value)
+      _, post = base.evaluate(Prism.parse(source, scopes: [%i[flag k src]]).value)
       post.local(name)
     end
 
@@ -3282,6 +3282,24 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     it "keeps the path that skipped the right operand on the other edge" do
       r = local_after("r = if flag && limit(n = k) then :no else n end\n", :r)
       expect(r).to eq(union(no, integer, nil_type))
+    end
+
+    # A write's value is the binding it leaves, so a predicate on it narrows the variable like the same
+    # predicate on a read of it.
+    it "narrows a local written in a predicate's receiver as a read of it" do
+      expect(local_after("r = if (v = src).nil? then :no else v end\n", :r)).to eq(union(no, integer))
+      expect(local_after("r = if (v = src).nil? || v.zero? then :no else v end\n", :r)).to eq(union(no, integer))
+      expect(local_after("v = nil\nr = if (v ||= src).nil? then :no else v end\n", :r)).to eq(union(no, integer))
+    end
+
+    it "narrows an instance variable written in a predicate's receiver" do
+      source = "r = if (@w = src).nil? then :no else @w end\n"
+      _, post = base.evaluate(Prism.parse(source, scopes: [%i[flag k src]]).value)
+      expect(post.local(:r)).to eq(union(no, integer))
+    end
+
+    it "keeps the nil on the edge where the receiver's value was nil" do
+      expect(local_after("r = if (v = src).nil? then v else :no end\n", :r)).to eq(union(nil_type, no))
     end
   end
 end

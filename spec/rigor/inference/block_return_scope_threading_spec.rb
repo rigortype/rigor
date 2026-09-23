@@ -1349,10 +1349,21 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "still floors a union seed that an unthreaded write of another class escapes" do
-        # `log(seen = nil)` stores nil inside an argument, which the body evaluator does not thread, so the
+        # `when (seen = nil)` stores nil in a `when` condition, which the body evaluator does not thread, so the
         # fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
         # it folded `seen.nil?` to `false` at both positions, and `find` to `nil` where Ruby answers `1`.
         expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def run(flag)
+            seen = flag ? 0 : rand(10)
+            dump_type([1, 2].find { |e| case e when (seen = nil) then 0 end; seen.nil? })
+          end
+        RUBY
+      end
+
+      it "reads a write of another class stored inside an argument" do
+        # Issue #1223 threads `log(seen = nil)`, so the body reads `nil` and `find` answers the first element, as
+        # Ruby does. The fold's scan still floors `seen` across passes; only this pass's own write is seen.
+        expect(dumped_type(<<~RUBY)).to eq("1")
           def log(x) = x
 
           def run(flag)
@@ -2224,8 +2235,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "floors a counter rebound inside a call argument" do
-      # Runtime `[1, 2]`; the pin answered `[0, 0]`.
-      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+      # Runtime `[1, 2]`; the pin answered `[0, 0]`. The scan floors `s` across passes, and since issue #1223 the
+      # body threads `s += 1` over that floor too, so no position keeps the `0` it can never hold at the tail.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
         def log(x) = x
 
         def run
@@ -2302,7 +2314,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "floors the same shape under the per-pair fold" do
-      expect(dumped_type(<<~RUBY)).to eq("{ x: 0 | Dynamic[top], y: 0 | Dynamic[top] }")
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
         def log(x) = x
 
         def run

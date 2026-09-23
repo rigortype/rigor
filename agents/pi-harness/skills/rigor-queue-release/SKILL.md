@@ -112,7 +112,7 @@ Every turn:
 
 ## Shared lane traps (feed into LaneInput / spawn)
 
-From `docs/notes/20260921-queue-release-lane-experience.md` (when on branch):
+From `docs/notes/20260921-queue-release-lane-experience.md`:
 
 - Pin Flash registry id on spawn (`opencode-go/deepseek-v4.1-flash` or current).
 - Child ~30m is enough for code, **not** for dual-project corpus `check` twice —
@@ -131,8 +131,7 @@ After CI is green on a draft PR:
    both must `Approved`.
 3. **Complex design:** spawn `rigor-reviewer` (Fable:medium) — reserve for
    architecture / API / inference-shape; do not use on routine tidies.
-4. No pollable claude-bridge usage % — do not wait for one.
-5. On `Approved`, require `pr_body_draft` + `pr_comment_drafts` from the
+4. On `Approved`, require `pr_body_draft` + `pr_comment_drafts` from the
    final reviewer. Apply / post them (or hand to human) before treating the
    PR as merge-ready — Approved without matching PR text is incomplete.
 

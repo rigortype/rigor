@@ -16,14 +16,14 @@ Land the whole change as **one commit** so the markers never diverge in history.
 
 ## Two kinds of marker — do not conflate them
 
-An earlier version of this skill bumped *every* marker to the exact patch. That was wrong: it coupled the **development Ruby** to the **supported-range markers**, which breaks CI and force-upgrades contributors. Keep the two groups separate.
+Bumping every marker to the exact patch couples the **development Ruby** to the **supported-range markers**, which breaks CI and force-upgrades contributors. Keep the two groups separate.
 
 **Development Ruby** — the exact patch the contributor shell runs. Flake-controlled; bump freely to any released patch.
 
 - `flake.nix` — the `mkRuby` version + re-derived `hash`.
 - `.ruby-version` — read by rbenv / chruby / asdf and by `ruby/setup-ruby` in CI.
 - `.tool-versions` — read by asdf / mise; a peer of `.ruby-version`.
-- `AGENTS.md` — the target-Ruby line.
+- `AGENTS.md` — the Flake Ruby version under "Development Environment".
 
 **Supported-range markers** — express what Ruby the *gem* supports, not the dev patch. A **patch** bump MUST NOT touch these.
 
@@ -39,7 +39,7 @@ An earlier version of this skill bumped *every* marker to the exact patch. That 
 The scope depends on which digit moves:
 
 - **Patch** (`4.0.4` → `4.0.5`): **development markers only** — Steps 1–3. The supported-range markers already admit the new patch; leave them untouched.
-- **Minor** (`4.0` → `4.1`): Steps 1–3 **plus** Step 6 — a minor bump is also where the supported-range markers move (gemspec ceiling, `Gemfile` range, `Gemfile.lock` floor, `ci.yml` matrix). The `references/ruby` submodule tracks branch `ruby_4_0` (see AGENTS.md) — a minor bump may need that branch repointed.
+- **Minor** (`4.0` → `4.1`): Steps 1–3 **plus** Step 6 — a minor bump is also where the supported-range markers move (gemspec ceiling, `Gemfile` range, `Gemfile.lock` floor, `ci.yml` matrix). The `references/ruby` submodule tracks branch `ruby_4_0` (see `.gitmodules`) — a minor bump may need that branch repointed.
 - **Major**: treat as a project decision, not a mechanical bump — confirm intent before proceeding.
 
 ## Step 1 — `flake.nix` (the source of truth for local builds)
@@ -96,15 +96,9 @@ Two single-line version files. Set each to the full `x.y.z` version.
 ruby 4.0.5
 ```
 
-## Step 3 — `AGENTS.md` — the target-Ruby line
+## Step 3 — `AGENTS.md` — the Flake Ruby version
 
-Under "Development Environment":
-
-```
-- Target Ruby is `4.0.5`. The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
-```
-
-Update only the *development* digit (`4.0.5`) — the gemspec range stated on the same line is a supported-range fact and moves only on a minor bump (Step 6).
+Under "Development Environment", update the version in "The Flake owns Ruby 4.0.5 and the vendored `vendor/bundle`". AGENTS.md states no supported range; that lives in the gemspec (Step 6).
 
 Then `grep -rn` the old version across `docs/` and update **live** docs (`docs/CURRENT_WORK.md`). Leave **dated records** — `docs/adr/*`, `docs/notes/*`, and existing `CHANGELOG.md` entries — untouched: they record a point-in-time fact, not the current target.
 
@@ -128,7 +122,7 @@ Body — note what changed and why the supported-range markers were left alone, 
 
 ```
 Only the development markers move on a patch bump: flake.nix,
-.ruby-version, .tool-versions, and the AGENTS.md target line. The Gemfile `ruby`
+.ruby-version, .tool-versions, and the AGENTS.md Flake Ruby version. The Gemfile `ruby`
 directive (a >= 4.0.0, < 4.1 range), Gemfile.lock's RUBY VERSION
 (held at the 4.0.0 floor), the gemspec range, and the ci.yml
 "4.0" minor series are supported-range markers and deliberately
@@ -163,7 +157,7 @@ Bundler writes the `RUBY VERSION` block from the *running* Ruby whenever `bundle
 - `nix develop --command ruby -v` reports the new version.
 - `.ruby-version` — full `x.y.z`.
 - `.tool-versions` — `ruby x.y.z`.
-- `AGENTS.md` target-Ruby line (development digit only); live `docs/` updated, dated records left alone.
+- `AGENTS.md` Flake Ruby version; live `docs/` updated, dated records left alone.
 - `Gemfile`, `Gemfile.lock`, `rigortype.gemspec`, `ci.yml` — NOT modified.
 - `flake.lock` — NOT modified.
 - `make verify` clean on the new Ruby.

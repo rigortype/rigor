@@ -107,7 +107,7 @@ plugins:
 
 severity_profile: lenient
 
-# Phase 6 (acknowledge mode) appends this line after generating the
+# Phase 7 (acknowledge mode) appends this line after generating the
 # baseline. Strict mode leaves it out entirely.
 # baseline: .rigor-baseline.yml
 ```
@@ -154,15 +154,15 @@ handbook document the full surface.
 | `signature_paths:` | Extra RBS source **directories** (paths, not gem names; resolved relative to the config file). Use it for the project's own local `sig/` if it has one. RBS-bundle *plugins* like `rigor-activesupport-core-ext` ship their own `sig/` and need no entry here — list them under `plugins:`. |
 | `severity_profile:` | `lenient` / `balanced` / `strict`. See the table above. |
 | `severity_overrides:` | Per-rule severity tweaks. Leave empty at init; the baseline-reduce workflow tunes it later. |
-| `baseline:` | Path to the baseline file. **Only acknowledge mode sets it**, and only in Phase 6 *after* the file exists. Per Rigor's no-magic rule, a `.rigor-baseline.yml` on disk does nothing until this key names it. |
-| `pre_eval:` | Project files Rigor walks before per-file inference — used to register in-project monkey-patches. Leave empty at init; Phase 7 may suggest it. |
-| `dependencies.source_inference:` | Opt-in inference for gems shipping no RBS. Leave empty at init; Phase 7 may suggest it. |
+| `baseline:` | Path to the baseline file. **Only acknowledge mode sets it**, and only in Phase 7 *after* the file exists. Per Rigor's no-magic rule, a `.rigor-baseline.yml` on disk does nothing until this key names it. |
+| `pre_eval:` | Project files Rigor walks before per-file inference — used to register in-project monkey-patches. Leave empty at init; Phase 6a may add it. |
+| `dependencies.source_inference:` | Opt-in inference for gems shipping no RBS. Leave empty at init; Phase 8 may suggest it. |
 
 ## Do not write the baseline yet
 
 Phase 4 writes the config with the `baseline:` line **commented out
-or absent**. The baseline file does not exist until Phase 6, and a
-`baseline:` pointing at a missing file is an error. Phase 6 writes
+or absent**. The baseline file does not exist until Phase 7, and a
+`baseline:` pointing at a missing file is an error. Phase 7 writes
 the file and uncomments / appends the line in one step.
 
 Strict mode never adds `baseline:` at all.

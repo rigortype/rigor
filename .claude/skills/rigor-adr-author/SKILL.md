@@ -160,16 +160,15 @@ grew this column to 5,195 characters a cell before
 | ADR-40 | [`config_schema` declared defaults](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
 ```
 
-### 4c. `CLAUDE.md` — **usually nothing to do**
+### 4c. `AGENTS.md` — **usually nothing to do**
 
-`CLAUDE.md` is loaded into context at the start of every session, so its
+`AGENTS.md` is loaded into context at the start of every session, so its
 ADR list is a **premise set, not an index** ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)
 WD1): only the ADRs an agent would get wrong *without knowing to look
 them up* — the foundation / conceptual core (ADR-0–5) and the standing
-policies in force. It holds 10 entries against a cap of 12.
+policies in force. The gate caps it at 12 entries.
 
-**Your ADR almost certainly does not belong there.** 88 of 98 do not. It
-earns a line only if it is a new **standing policy** — a rule that binds
+**Your ADR almost certainly does not belong there.** It earns a line only if it is a new **standing policy** — a rule that binds
 a contribution whatever it touches, not merely an important decision in
 its own area. "This is significant" is not the test; "a session that
 never thought to look this up will do the wrong thing" is. When in doubt,
@@ -191,7 +190,7 @@ pointer — most ADRs do not need this.)
 ```sh
 git diff --check                                # whitespace
 git status --short                              # expect: new ADR file + modified docs/adr/README.md
-                                                # (+ CLAUDE.md only in the rare 4c case)
+                                                # (+ AGENTS.md only in the rare 4c case)
 nix … develop --command make docs-check         # gates the index rules (ADR-97)
 ```
 
@@ -200,10 +199,10 @@ itself. If the ADR lands *alongside* an implementation slice, that slice
 follows the normal `make verify` protocol (AGENTS.md) — but the ADR text
 does not gate on it.
 
-Do **not** run `bundle exec rake release` or commit unless the user asks
-(per CLAUDE.md). Per-slice commits are pre-authorized in this repo; a new
-ADR is a reasonable single commit (`Add ADR-N — <title>` or, if it lands
-with code, fold it into that slice's commit).
+Commit and release rules are in `docs/agents/contribution-flow.md`;
+`bundle exec rake release` needs explicit authorization. A new ADR is a
+reasonable single commit (`Add ADR-N — <title>` or, if it lands with
+code, fold it into that slice's commit).
 
 ## Quick checklist
 
@@ -218,7 +217,7 @@ with code, fold it into that slice's commit).
 - `docs/adr/README.md` row inserted in **ascending** position (after the
   last row, before `## Adding a New ADR`) — status only, ≤ 200 chars,
   derived from your ADR's own `Status:` block (ADR-97).
-- `CLAUDE.md` — confirmed the ADR is a *lookup*, so no line added (the
+- `AGENTS.md` — confirmed the ADR is a *lookup*, so no line added (the
   normal case); or it is a new standing policy and earns one (ADR-97).
 - `make docs-check` green — it gates both lists.
 - `git diff --check` clean; `git status` shows exactly the expected

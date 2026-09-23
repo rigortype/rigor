@@ -199,7 +199,7 @@ module Rigor
               found = overloads.find do |method_type|
                 engages_block_shape?(method_type, block_required) &&
                   strictly_typed_params?(method_type, arg_types.size) &&
-                  matches?(method_type, shared)
+                  matches?(method_type, shared, strict: true)
               end
               return found ? [found] : NO_MATCH
             end
@@ -339,7 +339,7 @@ module Rigor
           end
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
-          def matches?(method_type, shared)
+          def matches?(method_type, shared, strict: false)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
             arg_types = shared[:arg_types]
@@ -347,17 +347,7 @@ module Rigor
             return false unless arity_compatible?(fun, arg_types.size)
 
             params = positional_params_for(fun, arg_types.size)
-            each_param_accepts?(params, arg_types) do |param, arg|
-              accepts_param?(
-                param,
-                arg,
-                self_type: shared[:self_type],
-                instance_type: shared[:instance_type],
-                type_vars: shared[:type_vars],
-                param_overrides: shared[:param_overrides],
-                alias_expander: shared[:alias_expander]
-              )
-            end
+            each_param_accepts?(params, arg_types) { |param, arg| accepts_param?(param, arg, shared, strict) }
           end
 
           # Slice 4 phase 2c does not pass keyword arguments through the call site (caller passes only
@@ -413,14 +403,14 @@ module Rigor
             head
           end
 
-          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:, param_overrides:,
-                             alias_expander: nil)
-            param_type = param_overrides[param.name] || RbsTypeTranslator.translate(
+          # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
+          def accepts_param?(param, arg, shared, strict)
+            param_type = shared[:param_overrides][param.name] || RbsTypeTranslator.translate(
               param.type,
-              self_type: self_type,
-              instance_type: instance_type,
-              type_vars: type_vars,
-              alias_expander: alias_expander
+              self_type: shared[:self_type],
+              instance_type: shared[:instance_type],
+              type_vars: shared[:type_vars],
+              alias_expander: shared[:alias_expander]
             )
             # An `untyped` arg gradually accepts against every param, so a value-pinning param would be
             # "matched" with zero evidence and its value-precise return (`(nil) -> []`) would beat broader
@@ -430,6 +420,11 @@ module Rigor
             return false if untyped_arg?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
+            # A record's `maybe` for a `Hash` with a gradual arm is no evidence for the overload: with
+            # `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
+            # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.
+            return false if strict && result.maybe? && Acceptance.record_against_gradual_hash?(param_type, arg)
+
             result.yes? || result.maybe?
           end
 

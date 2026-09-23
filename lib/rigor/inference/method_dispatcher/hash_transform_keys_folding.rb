@@ -14,10 +14,9 @@ module Rigor
       # no block. The values are the receiver's, untouched.
       #
       # Neither RBS line says that. rbs 4.2 declares `[K2] (hash[_Key, K2] replacements) { (K old_key) -> K2 }
-      # -> Hash[K2, V]`, and {RbsDispatch} binds `K2` from the block return alone: it binds an argument position
-      # only when the parameter is a bare type variable, so the mapping's values drop out of the key. The
-      # blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound. rbs 3.x declares no mapping
-      # overload at all; `data/core_overlay/hash_rbs3.rbs` supplies rbs 4.2's on that line, with the same gaps.
+      # -> Hash[K2, V]`, and {RbsDispatch} leaves `K2` untyped because the mapping and the block both decide it.
+      # The blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound too. rbs 3.x declares no
+      # mapping overload at all; `data/core_overlay/hash_rbs3.rbs` supplies rbs 4.2's on that line, with the same gaps.
       # This tier answers ahead of both, so the forms it accepts get one answer on either RBS line.
       #
       # A mapping the analysis cannot read contributes a `Dynamic[top]` key arm instead of nothing. That covers an

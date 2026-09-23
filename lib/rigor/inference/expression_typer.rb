@@ -285,6 +285,28 @@ module Rigor
         infer_user_method_return(def_node, receiver, arg_types)
       end
 
+      # The `receiver[args]` read a compound index write performs before it stores (`c[k] += v` reads `c[k]`),
+      # or nil when no tier answers. No `Prism::CallNode` for that read exists in the tree, so the write node
+      # itself stands in as the call context: it carries the same `receiver` / `arguments` / `block` a
+      # plain `c[k]` call does, which is what the context-reading tiers consult. With it, the read reaches
+      # the tiers a plain `c[k]` takes, in the same order — the own-`def` override check, the dispatcher's
+      # node- and scope-gated tiers, then the project `def` inference a dispatch miss falls to — so a project
+      # `[]` with no signature answers from its body instead of the whole write degrading to `Dynamic[top]`.
+      #
+      # A plugin `dynamic_return` rule written for `[]` still does not answer this read. Its `methods:` gate
+      # matches `call_node.name`, which an index write does not have, and the shipped rules decline any node
+      # that is not a `Prism::CallNode`, by an explicit check or through the rescue around a rule that reads
+      # `name` anyway. Minting a `Prism::CallNode` for the read would hand plugins a node that is not in the
+      # tree, through a constructor whose field list changed inside the `prism` range the gemspec accepts.
+      def implicit_index_read_type(node, receiver, arg_types)
+        return splat_index_read_type(node, receiver, arg_types) if node.arguments&.arguments&.any?(Prism::SplatNode)
+
+        try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[]) ||
+          index_read_dispatch(node, receiver, arg_types) ||
+          try_user_method_inference(receiver, node, arg_types, method_name: :[]) ||
+          try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
+      end
+
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
       # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
@@ -1302,21 +1324,48 @@ module Rigor
       # describes the source under analysis, while a bundled signature describes a class the project does
       # not own, where a project `def` is a monkey-patch and [ADR-17] owns the question.
       # `project_declared_class?` fail-softs to false, so an unattributable environment changes nothing.
-      def try_overriding_def_dispatch(node, receiver, arg_types)
-        return nil unless user_inference_receiver?(receiver)
+      def try_overriding_def_dispatch(node, receiver, arg_types, method_name: node.name)
+        return nil unless overriding_own_def?(receiver, method_name)
+
+        try_user_method_inference(receiver, node, arg_types, method_name: method_name) || dynamic_top
+      end
+
+      # The three conditions above: an own source `def` of `method_name` on the receiver's class, which has no
+      # declaration of its own but inherits one a project-declared ancestor wrote.
+      def overriding_own_def?(receiver, method_name)
+        return false unless user_inference_receiver?(receiver)
 
         class_name = receiver.class_name
-        return nil if class_name.nil?
+        return false if class_name.nil?
         # `Scope#user_def_for`, not `discovered_method?`: the cross-file table deliberately withholds a
         # plain instance `def` under the ADR-17 monkey-patch contract, and this gate must see one.
-        return nil if scope.user_def_for(class_name, node.name).nil?
+        return false if scope.user_def_for(class_name, method_name).nil?
 
-        definition = safe_rbs_method_definition(class_name, node.name, :instance)
-        return nil if definition.nil?
-        return nil if rbs_declared_on_class?(definition, class_name)
-        return nil unless project_declared_owner?(definition)
+        definition = safe_rbs_method_definition(class_name, method_name, :instance)
+        return false if definition.nil?
+        return false if rbs_declared_on_class?(definition, class_name)
 
-        try_user_method_inference(receiver, node, arg_types) || dynamic_top
+        project_declared_owner?(definition)
+      end
+
+      # {#implicit_index_read_type}'s dispatcher tier, with the write node as the call context.
+      def index_read_dispatch(node, receiver, arg_types)
+        MethodDispatcher.dispatch(
+          receiver_type: receiver, method_name: :[], arg_types: arg_types,
+          environment: scope.environment, call_node: node, scope: scope
+        )
+      end
+
+      # A splat index (`c[*keys] += v`) leaves the read's arity to the splat's expansion, and the one untyped
+      # argument standing in for it would bind positionally to a body written for several: `def [](*keys) =
+      # keys.size` folded the read of `r[*[0, 1]] += 1` to `1` and drew an always-falsey `n == 3` on a program
+      # that takes that branch. So the body tiers decline under a splat, as `try_literal_send` does, and only
+      # the signature-driven dispatch answers. An own `def` overriding an inherited declaration still outranks
+      # that declaration; with its body unreadable, it answers `Dynamic[top]`.
+      def splat_index_read_type(node, receiver, arg_types)
+        return dynamic_top if overriding_own_def?(receiver, :[])
+
+        index_read_dispatch(node, receiver, arg_types)
       end
 
       # Whether the class an inherited declaration was written about is one the project declares itself.

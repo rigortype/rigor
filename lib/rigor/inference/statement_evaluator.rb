@@ -283,6 +283,14 @@ module Rigor
         callee_content_mutated_parameters(def_node).values.uniq.sort
       end
 
+      # The value `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` evaluates to in this evaluator's scope: what it stores
+      # through `[]=` ({#index_write_stored_type}). The `[]=` widening and the indexed-narrowing record are scope
+      # effects, so they stay with {#eval_index_or_write} / {#eval_index_write}. `ExpressionTyper` types a
+      # value-position index compound write from here, so the two positions share one algebra.
+      def index_compound_write_value(node)
+        index_write_stored_type(node, scope)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -628,8 +636,7 @@ module Rigor
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
       # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
-      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone, which the
-      # expression typer's `type_of_assignment_write` answer would join as if it were what got stored.
+      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       def eval_index_write(node)
         _rhs_type, post_rhs = sub_eval(node.value, scope)
         stored = index_write_stored_type(node, scope)
@@ -662,11 +669,10 @@ module Rigor
       end
 
       # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
-      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`.
-      # `type_of(node)` cannot answer it: every index-write node types as its rvalue, so a `+=`
-      # would join the RHS as if it were the stored value — `a[0, 1] += [2]` reads `a[0, 1] + [2]`,
-      # not `[2]` (issue #1140). Any other node falls back to its own type (a multi-assign index
-      # target keeps its untyped answer).
+      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`:
+      # `a[0, 1] += [2]` reads `a[0, 1] + [2]`, not `[2]` (issue #1140). This is also the node's
+      # value — `ExpressionTyper` reads it through {#index_compound_write_value}. Any other node falls
+      # back to its own type (a multi-assign index target keeps its untyped answer).
       def index_write_stored_type(node, type_scope)
         case node
         when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode

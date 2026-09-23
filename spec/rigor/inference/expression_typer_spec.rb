@@ -1860,6 +1860,45 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # The index compound-write family (`h[k] += v` / `||=` / `&&=`) as an EXPRESSION. Its value is what
+  # it stores through `[]=` — `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — not the rvalue
+  # alone. The statement evaluator already computed that; the expression typer answered `v`, so a
+  # value position (an argument, a block's tail, a method's tail) disagreed with the statement form.
+  describe "index compound writes" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    it "types `h[k] += v` as the dispatched `h[k] + v`" do
+      expect(statement_type("h = { a: 1 }\nh[:a] += 1\n", 1).describe).to eq("2")
+    end
+
+    it "types a tuple slot's `t[i] += v` as the stored sum" do
+      expect(statement_type("t = [1, 2]\nt[0] += 5\n", 1).describe).to eq("6")
+    end
+
+    it "keeps a truthy slot's current value in `h[k] ||= v`" do
+      expect(statement_type("h = { a: \"x\" }\nh[:a] ||= 3\n", 1).describe).to eq('"x" | 3')
+    end
+
+    it "keeps a falsey slot's current value in `h[k] &&= v`" do
+      # `3?` is `3 | nil`: the `nil` slot survives the `&&=` that does not store.
+      expect(statement_type("h = { a: nil }\nh[:a] &&= 3\n", 1).describe).to eq("3?")
+    end
+
+    it "agrees with the statement evaluator's answer for every operator" do
+      ["h[:a] += 1", "h[:a] ||= 3", "h[:a] &&= 3"].each do |write|
+        root = Prism.parse("h = { a: 1 }\n#{write}\n").value
+        node = root.statements.body[1]
+        entry = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)[node]
+        expect(entry.type_of(node)).to eq(entry.evaluate(node).first), write
+      end
+    end
+  end
+
   # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
   # `String − \"\"`) erases to its base for RBS method lookup, so a method the catalog tier does not
   # promote still resolves instead of declining the whole dispatch to Dynamic.

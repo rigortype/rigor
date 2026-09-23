@@ -974,7 +974,8 @@ each one for reporting on correct code (ADR-5):
    - an `inject` accumulator is treated as fresh on every iteration
      (#1232);
    - slice A dropped the scope at `next` (#1214, since joined by #1215);
-   - a local written inside an argument reaches no later scope (#1223);
+   - a local written inside an argument reaches no later scope (#1223,
+     since threaded by #1250);
    - ivars can be written through setters.
 
    Each gap surfaced as a new false positive the moment a store read

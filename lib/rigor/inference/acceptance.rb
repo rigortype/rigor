@@ -761,8 +761,9 @@ module Rigor
         # `IntegerRange` that skips an Integer removed value, a `Tuple` whose fixed arity differs from a
         # removed `Tuple`, or a `HashShape` with a required key a closed removed `HashShape` cannot hold. The
         # last three cover the empty witnesses of `non-zero-int`, `non-empty-array[T]` and
-        # `non-empty-hash[K, V]`. Any other shape — Nominal, or a Union whose member is none of these — could
-        # overlap the removed value, so the difference rejects it under gradual mode.
+        # `non-empty-hash[K, V]`. Any other carrier — a Nominal above all — is no proof and the difference
+        # rejects it under gradual mode, even where its values happen to exclude `removed`. A Union or
+        # Intersection argument never reaches this rule whole: `accepts` splits it into members first.
         def accepts_difference(self_type, other_type, mode)
           base_result = accepts(self_type.base, other_type, mode: mode)
           return base_result if base_result.no?

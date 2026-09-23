@@ -156,9 +156,10 @@ RSpec.describe Rigor::Type::Difference do
         expect(neh.accepts(hash_shape({ name: constant_of(1) })).yes?).to be(true)
       end
 
-      it "accepts an open HashShape with a required key" do
-        # Extra keys only add entries; the required one alone keeps every inhabitant non-empty.
-        expect(neh.accepts(hash_shape({ name: constant_of(1) }, extra_keys: :open)).yes?).to be(true)
+      it "does not reject an open HashShape with a required key" do
+        # Extra keys only add entries; the required one alone keeps every inhabitant non-empty. Asserted as
+        # "not no" because the verdict on the untyped extra entries belongs to the base's Hash acceptance.
+        expect(neh.accepts(hash_shape({ name: constant_of(1) }, extra_keys: :open)).no?).to be(false)
       end
 
       it "rejects the closed empty HashShape, which is the removed value" do
@@ -179,6 +180,35 @@ RSpec.describe Rigor::Type::Difference do
       end
     end
 
+    # The same proofs against removed shapes other than the empty witness, which `T - U` can spell. They pin
+    # what each arm compares: the Tuple arm the two arities, the HashShape arm the removed shape's closedness
+    # and listed keys.
+    describe "against a removed shape other than the empty witness" do
+      def difference(base, removed) = Rigor::Type::Combinator.difference(base, removed)
+
+      it "accepts a Tuple of another arity and rejects one of the removed arity" do
+        minus_one_slot = difference(nominal_of("Array", type_args: [integer]), tuple([integer]))
+        expect(minus_one_slot.accepts(tuple([constant_of(1), constant_of(2)])).yes?).to be(true)
+        expect(minus_one_slot.accepts(tuple([constant_of(1)])).no?).to be(true)
+      end
+
+      it "accepts a required key a closed removed shape does not list and rejects one it does" do
+        minus_a = difference(nominal_of("Hash", type_args: [symbol, integer]), hash_shape({ a: integer }))
+        expect(minus_a.accepts(hash_shape({ b: constant_of(1) })).yes?).to be(true)
+        expect(minus_a.accepts(hash_shape({ a: constant_of(1) })).no?).to be(true)
+      end
+
+      it "rejects any required key when the removed shape is open" do
+        # `{ a: Integer, ... }` holds every hash with an Integer `:a`, whatever else it carries — `{ a: 1, b: 1 }`
+        # included — so a shape requiring `:b` still overlaps it.
+        open_minus_a = difference(
+          nominal_of("Hash", type_args: [symbol, integer]),
+          hash_shape({ a: integer }, extra_keys: :open)
+        )
+        expect(open_minus_a.accepts(hash_shape({ b: constant_of(1) })).no?).to be(true)
+      end
+    end
+
     describe "non-zero-int" do
       let(:nzi) { Rigor::Type::Combinator.non_zero_int }
 
@@ -190,6 +220,12 @@ RSpec.describe Rigor::Type::Difference do
       it "rejects an IntegerRange that covers zero" do
         expect(nzi.accepts(Rigor::Type::Combinator.integer_range(0, 5)).no?).to be(true)
         expect(nzi.accepts(Rigor::Type::Combinator.integer_range(-1, 1)).no?).to be(true)
+      end
+
+      it "proves nothing against a non-Integer removed value, as the Constant arm counts 0 == 0.0" do
+        minus_float_zero = Rigor::Type::Combinator.difference(integer, constant_of(0.0))
+        expect(minus_float_zero.accepts(constant_of(0)).no?).to be(true)
+        expect(minus_float_zero.accepts(Rigor::Type::Combinator.integer_range(-1, 1)).no?).to be(true)
       end
     end
   end

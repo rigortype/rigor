@@ -16,18 +16,18 @@ module Rigor
       # Neither RBS line says that. rbs 4.2 declares `[K2] (hash[_Key, K2] replacements) { (K old_key) -> K2 }
       # -> Hash[K2, V]`, and {RbsDispatch} binds `K2` from the block return alone: it binds an argument position
       # only when the parameter is a bare type variable, so the mapping's values drop out of the key. The
-      # blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound. rbs 3.10 declares no mapping
-      # overload at all and answers an `Enumerator`. This tier answers ahead of both, so the forms it accepts
-      # get one answer on either RBS line.
+      # blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound. rbs 3.x declares no mapping
+      # overload at all; `data/core_overlay/hash_rbs3.rbs` supplies rbs 4.2's on that line, with the same gaps.
+      # This tier answers ahead of both, so the forms it accepts get one answer on either RBS line.
       #
       # A mapping the analysis cannot read contributes a `Dynamic[top]` key arm instead of nothing. That covers an
       # untyped argument, a `to_hash`-convertible object, a Hash subclass, the unlisted entries of an open shape,
-      # a literal with a `**splat` entry written as the call's argument (the literal's own type leaves the splat
-      # out), and an empty closed shape, which is what a mapping filled through an alias the engine does not track
-      # still reads as. A block the call carries but the block pass could not type contributes `Dynamic[top]` too.
-      # A splatted literal that arrives through a binding (a local, a constant, an inline assignment) or a method
-      # return, and a non-empty shape filled through an alias, still read narrower than they are: those are gaps in
-      # the literal's and the binding's own types.
+      # and an empty closed shape, which is what a mapping filled through an alias the engine does not track still
+      # reads as. A block the call carries but the block pass could not type contributes `Dynamic[top]` too. A
+      # literal with a `**splat` entry needs no arm of its own: its type joins the splatted hash's pairs and a
+      # `Dynamic[top]` arm, which also keeps a copy the code writes into (`m = { **o }; m[:b] = :w`) growing. A
+      # non-empty shape filled through an alias still reads narrower than it is: that is a gap in the binding's
+      # own type.
       #
       # Declines, leaving the RBS answer, when:
       #
@@ -58,9 +58,9 @@ module Rigor
         end
 
         # The mapping form's block parameter: the receiver's key type, as rbs 4.2's `{ (K old_key) -> K2 }`
-        # declares it. rbs 3.10 has no mapping overload for the block-parameter probe to select, so without this
-        # rule the parameter is `Dynamic[top]` there, and so is every key the block returns. Reached through
-        # {IteratorDispatch.block_param_types}; nil falls through to the RBS probe.
+        # declares it, and as `data/core_overlay/hash_rbs3.rbs` restates it on the rbs 3.x line. The RBS probe
+        # does not bind it for a union of receiver shapes. Reached through {IteratorDispatch.block_param_types};
+        # nil falls through to the RBS probe.
         def block_param_types(context)
           return nil unless context.args.size == 1
 
@@ -117,8 +117,7 @@ module Rigor
           return block.nil? ? nil : unknown if unresolved_argument_count?(arguments)
           return nil unless context.args.size == 1
 
-          renamed = mapping_value_type(context.args.first)
-          arguments.any? { |argument| splatted_literal?(argument) } ? Type::Combinator.union(renamed, unknown) : renamed
+          mapping_value_type(context.args.first)
         end
 
         # The mapping's value type. Anything whose value type cannot be read contributes `Dynamic[top]`,
@@ -181,21 +180,6 @@ module Rigor
             when Prism::KeywordHashNode then argument.elements.all?(Prism::AssocSplatNode)
             else false
             end
-          end
-        end
-
-        # A hash literal or keyword arguments with a `**splat` entry. The literal's type lists only its own pairs
-        # (`{ **o, b: :y }` reads `Hash[:b, :y]`), so the splatted mapping's values are missing from it. Any
-        # argument is checked, not only the first: `h.send(:transform_keys, { **o, b: :y })` reaches this tier
-        # with the `send` node, whose first argument is the method name. Parentheses are looked through to the
-        # value they yield, their last statement.
-        def splatted_literal?(argument)
-          case argument
-          when Prism::HashNode, Prism::KeywordHashNode then argument.elements.any?(Prism::AssocSplatNode)
-          when Prism::ParenthesesNode
-            body = argument.body
-            body.is_a?(Prism::StatementsNode) && splatted_literal?(body.body.last)
-          else false
           end
         end
 

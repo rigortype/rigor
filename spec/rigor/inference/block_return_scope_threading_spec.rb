@@ -1622,10 +1622,21 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "still floors a union seed that an unthreaded write of another class escapes" do
-        # `log(seen = nil)` stores nil inside an argument, which the body evaluator does not thread, so the
+        # `when (seen = nil)` stores nil in a `when` condition, which the body evaluator does not thread, so the
         # fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
         # it folded `seen.nil?` to `false` at both positions, and `find` to `nil` where Ruby answers `1`.
         expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def run(flag)
+            seen = flag ? 0 : rand(10)
+            dump_type([1, 2].find { |e| case e when (seen = nil) then 0 end; seen.nil? })
+          end
+        RUBY
+      end
+
+      it "reads a write of another class stored inside an argument" do
+        # Issue #1223 threads `log(seen = nil)`, so the body reads `nil` and `find` answers the first element, as
+        # Ruby does. The fold's scan still floors `seen` across passes; only this pass's own write is seen.
+        expect(dumped_type(<<~RUBY)).to eq("1")
           def log(x) = x
 
           def run(flag)
@@ -1645,6 +1656,150 @@ RSpec.describe "block-return scope threading", type: :runner do
 
       it "still folds index to the matching position" do
         expect(dumped_type("dump_type([1, 2].index { |e| e == 2 })")).to eq("1")
+      end
+    end
+
+    # The fixpoint stops after `BodyFixpoint::CAP` passes, so a rebind a counter guards past the third iteration
+    # runs in none of them, and the widen on the capped pass erases a `Constant`'s value but leaves a `Tuple` /
+    # `HashShape` as it is. The
+    # name comes back on its seed, and only the unmoved-pin floor stands between that seed and every position of
+    # the fold, so a shape carrier has to count as pinned there.
+    describe "(1), a Tuple or HashShape seed the capped fixpoint never moves" do
+      it "floors a Tuple seed whose guarded rebind no fixpoint pass runs" do
+        # Runtime `[[], [], [], [], [4, 4], [5, 5]]`; every position answered the entry `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 6).join(', ')}]")
+          count = 0
+          row = []
+          dump_type([1, 2, 3, 4, 5, 6].map { |v| prev = row; count += 1; row = [v, v] if count > 3; prev })
+        RUBY
+      end
+
+      it "no longer reports the comparison the pinned size folded" do
+        # Runtime `[0, 0, 0, 0, 2, 2]`; `sizes.last == 2` folded always-falsey off the entry `[]`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          count = 0
+          row = []
+          sizes = [1, 2, 3, 4, 5, 6].map { |v| prev = row; count += 1; row = [v, v] if count > 3; prev.size }
+          puts "full" if sizes.last == 2
+        RUBY
+      end
+
+      it "floors a HashShape seed the same way" do
+        # Runtime `{ a: 0, b: 1 }` at the sixth position; the entry `{ a: 0 }` answered all six.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 6).join(', ')}]")
+          n = 0
+          h = { a: 0 }
+          dump_type([1, 2, 3, 4, 5, 6].map { |i| x = h; n += 1; h = { a: 0, b: 1 } if n == 5; x })
+        RUBY
+      end
+
+      it "floors the seed under the generic block-return pass too" do
+        # A plain Array receiver has no per-element fold; the dispatcher's block-return pass lays the same binding
+        # and answered `Array[[0]]`.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+          n = 0
+          g = [0]
+          dump_type(ARGV.map { |a| x = g; n += 1; g = [0, 1] if n == 5; x })
+        RUBY
+      end
+
+      it "still widens a Constant seed the same fixpoint never moves" do
+        # The capped pass widens `0` to `Integer`, which moves it off its seed. That covers a later rebind of the same
+        # class only; a class-changing one (`m = nil if n == 5`) still escapes, issue #1260.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Integer'] * 6).join(', ')}]")
+          n = 0
+          m = 0
+          dump_type([1, 2, 3, 4, 5, 6].map { |i| x = m; n += 1; m = 7 if n == 5; x })
+        RUBY
+      end
+
+      it "keeps a nominal seed a rebind brings back unchanged" do
+        # `names.select { … }` rebinds `names` to the `Array[String]` it started from: unmoved, but carrying no
+        # pin, so it is believed.
+        expect(dumped_type(<<~RUBY)).to eq("[Array[String], Array[String]]")
+          names = ARGV.map(&:upcase)
+          dump_type([1, 2].map { |i| prev = names; names = names.select { |s| s.size > i }; prev })
+        RUBY
+      end
+
+      it "floors a shape seed a visible write restores to its entry value" do
+        # The cost side, which `n = 0; … n = 0` already pays: a threaded `buf = []` converges on the `[]` seed
+        # exactly as a guarded rebind does, so the runtime `[[], []]` is given up.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          buf = []
+          dump_type([1, 2].map { |i| out = buf; buf = []; out })
+        RUBY
+      end
+
+      it "floors a shape seed a rebind of the same type leaves unmoved" do
+        # The cost is wider for a shape than for a Constant: the unmoved test is type equality, so a rebind to a
+        # different value of the same `[Integer, Integer]` is floored too. It answered `[Integer, Integer]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          n = ARGV.size
+          qr = n.divmod(3)
+          dump_type([1, 2].map { |i| out = qr; qr = n.divmod(i + 2); out })
+        RUBY
+      end
+    end
+
+    # The unmoved-pin floor is also the backstop behind `UnthreadedRebinds`, which floors every rebind it can show
+    # the pass's exit scope misses. That scan is a whitelist written against `StatementEvaluator`, so a position
+    # the two ever disagree on reaches the fixpoint unflagged; stubbing the scan empty stands in for that drift.
+    #
+    # Each rebind sits in a `when` condition, a position the evaluator does not thread, so the fixpoint cannot see
+    # it. If the evaluator ever threads that position, move these rebinds to one it still does not.
+    describe "(1), the unmoved-pin floor over a shape seed the scan misses" do
+      before do
+        allow(Rigor::Inference::UnthreadedRebinds).to receive(:names).and_return(Set.new)
+      end
+
+      it "floors a Tuple seed an unthreaded rebind leaves unmoved" do
+        # Runtime `[[0], [0, 1]]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          g = [0]
+          dump_type([1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x })
+        RUBY
+      end
+
+      it "no longer reports the size check the pinned arity folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          g = [0]
+          r = [1, 2].map { |i| x = g; case i when (g += [1]) then 0 end; x }
+          puts "one" if r.last.size == 1
+        RUBY
+      end
+
+      it "floors a HashShape seed the same way" do
+        # Runtime `[{ a: 0 }, { a: 0, b: 1 }]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          h = { a: 0 }
+          dump_type([1, 2].map { |i| x = h; case i when (h = h.merge(b: 1)) then 0 end; x })
+        RUBY
+      end
+
+      it "floors a Tuple seed that is one member of a union" do
+        # Runtime `[[0], [0, 1]]` when `flag` holds.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          def run(flag)
+            g = flag ? [0] : nil
+            dump_type([1, 2].map { |i| x = g; case i when (g = [0, 1]) then 0 end; x })
+          end
+        RUBY
+      end
+
+      it "keeps the exact fold of a Tuple capture the body does not rebind" do
+        expect(dumped_type(<<~RUBY)).to eq("[[0], [0]]")
+          c = [0]
+          seen = 0
+          dump_type([1, 2].map { |i| seen += 1; c })
+        RUBY
+      end
+
+      it "keeps the converged fold of a Tuple seed a threaded rebind moves" do
+        expect(dumped_type(<<~RUBY)).to eq("[[0] | [1], [0] | [1]]")
+          g = [0]
+          dump_type([1, 2].map { |i| x = g; g = [1]; x })
+        RUBY
       end
     end
 
@@ -1785,8 +1940,24 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "floors a captured local whose in-place widening declines" do
-        # `Hash#shift` is no Hash mutator to the widening, so `h` would stay the entry literal. Counting it as
-        # answered typed nine `9`s (runtime `8, 7, …, 0`) and fired always-truthy on `r.last == 9`.
+        # `map!` keeps a `non-empty-array` witness and joins nothing, so the widening declines and `xs` stays the
+        # entry `non-empty-array[String]`. Counted as answered, every position would read `String` for an element
+        # the first iteration already turned into a Symbol.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          xs = ENV.keys
+          unless xs.empty?
+            dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+              xs.map!(&:to_sym)
+              xs.first
+            end)
+          end
+        RUBY
+      end
+
+      it "answers a captured literal Hash the body shifts" do
+        # `Hash#shift` was missing from the Hash mutator table, so the widening declined and this was floored; when
+        # it was counted as answered instead, `h` stayed the entry literal, typed nine `9`s (runtime `8, 7, …, 0`)
+        # and fired always-truthy on `r.last == 9`. It now widens as `delete` does.
         source = <<~RUBY
           h = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9 }
           r = [1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
@@ -1794,7 +1965,7 @@ RSpec.describe "block-return scope threading", type: :runner do
             h.size
           end
         RUBY
-        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['non-negative-int'] * 9).join(', ')}]")
         expect(flow_rules("#{source}puts 'nine' if r.last == 9")).to be_empty
       end
 
@@ -2851,8 +3022,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "floors a counter rebound inside a call argument" do
-      # Runtime `[1, 2]`; the pin answered `[0, 0]`.
-      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top], 0 | Dynamic[top]]")
+      # Runtime `[1, 2]`; the pin answered `[0, 0]`. The scan floors `s` across passes, and since issue #1223 the
+      # body threads `s += 1` over that floor too, so no position keeps the `0` it can never hold at the tail.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
         def log(x) = x
 
         def run
@@ -2929,7 +3101,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "floors the same shape under the per-pair fold" do
-      expect(dumped_type(<<~RUBY)).to eq("{ x: 0 | Dynamic[top], y: 0 | Dynamic[top] }")
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
         def log(x) = x
 
         def run

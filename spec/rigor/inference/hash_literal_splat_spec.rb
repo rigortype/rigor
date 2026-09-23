@@ -1,0 +1,117 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# A hash literal with a `**splat` entry typed as if the splat were absent: `o = { a: :z }; h = { **o, b: :y }`
+# read `Hash[:b, :y]` while Ruby builds `{ a: :z, b: :y }`, so a read of a splatted key folded on correct code.
+# The literal now joins each splatted entry's key and value types into its `Hash[K, V]`, with a `Dynamic[top]`
+# arm on each side: the literal is a new hash no declaration describes, and a precise `Hash[K, V]` is one
+# `MutationRejoin` never regrows, so a copy the code then writes into would fold instead.
+#
+# The splat-free literal is the control: it stays the exact `HashShape` it always was.
+RSpec.describe "A hash literal with a **splat entry", type: :runner do
+  def dumped_types(source, sig: {})
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig)
+    result.diagnostics.filter_map do |diagnostic|
+      diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+    end
+  end
+
+  # Every error-severity rule plus the always-truthy / always-falsey family.
+  def reported_rules(source, sig: {})
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig)
+    result.diagnostics.filter_map do |diagnostic|
+      diagnostic.rule if diagnostic.severity == :error || diagnostic.rule.to_s.start_with?("flow.")
+    end
+  end
+
+  let(:store_sig) do
+    { "store.rbs" => <<~RBS }
+      class Store
+        def self.counts: () -> Hash[String, Integer]
+      end
+    RBS
+  end
+
+  it "keeps a splat-free literal an exact shape" do
+    expect(dumped_types(<<~RUBY)).to eq(["{ a: :z, b: :y }"])
+      dump_type({ a: :z, b: :y })
+    RUBY
+  end
+
+  it "joins a splatted shape's keys and values into the literal's Hash[K, V]" do
+    # Runtime `{ a: :z, b: :y }` and `{ a: :z }`.
+    expected = ["Hash[:a | :b | Dynamic[top], :y | :z | Dynamic[top]]", "Hash[:a | Dynamic[top], :z | Dynamic[top]]"]
+    expect(dumped_types(<<~RUBY)).to eq(expected)
+      o = { a: :z }
+      dump_type({ **o, b: :y })
+      dump_type({ **o })
+    RUBY
+  end
+
+  it "joins a splatted Hash[K, V]'s type arguments" do
+    expected = ["Hash[:b | Dynamic[top] | String, :y | Dynamic[top] | Integer]"]
+    expect(dumped_types(<<~RUBY, sig: store_sig)).to eq(expected)
+      dump_type({ **Store.counts, b: :y })
+    RUBY
+  end
+
+  it "adds only the Dynamic[top] arm for a splat it cannot read" do
+    expect(dumped_types(<<~RUBY)).to eq(["Hash[:b | Dynamic[top], :y | Dynamic[top]]"] * 2)
+      def merge(opts)
+        dump_type({ **opts, b: :y })
+      end
+
+      def forward(**)
+        dump_type({ **, b: :y })
+      end
+    RUBY
+  end
+
+  it "no longer folds a read of a splatted key on correct code" do
+    # THE REPORTED HAZARD: `h.keys` read `Array[:b]` and `h[:a]` read `:y | nil`, so both comparisons folded
+    # always-falsey.
+    expect(reported_rules(<<~RUBY)).to be_empty
+      o = { a: :z }
+      h = { **o, b: :y }
+      puts "a first" if h.keys.first == :a
+      puts "a is z" if h[:a] == :z
+    RUBY
+  end
+
+  # A splat-only literal typed as the raw `Hash` before, so none of these folded; a precise `Hash[K, V]` would
+  # have made every one of them fold, two at error severity. The mixed literal (the last pair) folded before.
+  it "does not fold a read of what the code writes into the copy" do
+    expect(reported_rules(<<~RUBY, sig: store_sig)).to be_empty
+      DEFAULTS = { retries: 3 }
+      o = DEFAULTS.dup
+      h1 = { **o }
+      h1[:b] = 2
+      puts "stored" if h1[:b] == 2
+      h2 = { **o }
+      h2[:e] = "s"
+      puts h2[:e].upcase
+      h3 = { **DEFAULTS }
+      h3[:retries] += 1
+      puts "four" if h3[:retries] == 4
+      h4 = { **o }
+      h4.merge!(b: :sym)
+      puts "merged" if h4[:b] == :sym
+      h5 = { **Store.counts }
+      h5["name"] = "str"
+      puts h5["name"].upcase
+      h6 = { **o, b: 2 }
+      h6[:c] = 3
+      puts "mixed" if h6[:c] == 3
+    RUBY
+  end
+
+  it "still folds the splat-free literal's impossible comparison" do
+    # The positive control for the silence above. The rule id names the family, not the direction: its
+    # message says "always falsey".
+    expect(reported_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+      h = { b: :y }
+      puts "a first" if h.keys.first == :a
+    RUBY
+  end
+end

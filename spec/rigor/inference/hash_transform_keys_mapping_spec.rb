@@ -104,23 +104,35 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
   # The blockless form answered `Hash[K | Dynamic[top], V]` before, so a mapping typed narrower than its
   # runtime value is a new way for a comparison to fold. Each of these is correct code and reports nothing.
   describe "a mapping typed narrower than its runtime value" do
-    it "does not trust a literal that leaves its **splat entries out" do
-      # Runtime `{ z: 1, y: 2, c: 3 }`; `{ **o, b: :y }` types as `Hash[:b, :y]`.
+    # `{ **o, b: :y }` typed `Hash[:b, :y]` until the literal joined its splatted entries, and the tier carried a
+    # `Dynamic[top]` arm for a splatted literal written as the argument. The literal's own type now lists `:z`
+    # and its own `Dynamic[top]` arm, however it reaches the call.
+    it "reads a literal with a **splat entry by its own type" do
+      # Runtime `{ z: 1, y: 2, c: 3 }` each time; `send` reaches the tier with the `send` node, whose first
+      # argument is the method name. A bound literal read `Hash[:b, :y]` before and missed `:z`.
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[:a | :b | :c | :y | :z | Dynamic[top], 1 | 2 | 3]"] * 3)
+        H = { a: 1, b: 2, c: 3 }
+        o = { a: :z }
+        dump_type(H.transform_keys(**o, b: :y))
+        dump_type(H.send(:transform_keys, { **o, b: :y }))
+        m = { **o, b: :y }
+        dump_type(H.transform_keys(m))
+      RUBY
+    end
+
+    it "does not fold a comparison with a key the splatted mapping renames to" do
       expect(reported_rules(<<~RUBY)).to be_empty
         H = { a: 1, b: 2, c: 3 }
         o = { a: :z }
         r = H.transform_keys(**o, b: :y)
         puts "z" if r.keys.first == :z
-      RUBY
-    end
-
-    it "does not trust the same literal passed through send" do
-      # `send` reaches the tier with the `send` node, whose first argument is the method name.
-      expect(reported_rules(<<~RUBY)).to be_empty
-        H = { a: 1, b: 2, c: 3 }
-        o = { a: :z }
-        r = H.send(:transform_keys, { **o, b: :y })
-        puts "z" if r.keys.first == :z
+        m = { **o, b: :y }
+        s = H.send(:transform_keys, m)
+        puts "z" if s.keys.first == :z
+        c = { **o }
+        c[:b] = :w
+        t = H.transform_keys(c)
+        puts "w" if t.keys.last == :w
       RUBY
     end
 

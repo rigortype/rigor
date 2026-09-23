@@ -78,6 +78,93 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
   end
 
+  describe "filter-shaped folds over a Hash receiver (the result kind follows the method, not the receiver)" do
+    def hash_nominal = Rigor::Type::Combinator.nominal_of("Hash", type_args: [symbol_nominal, integer_nominal])
+    def symbol_nominal = Rigor::Type::Combinator.nominal_of("Symbol")
+    def non_empty_hash = Rigor::Type::Combinator.non_empty_hash(symbol_nominal, integer_nominal)
+    def shape = hash_shape_of(a: constant_of(:q))
+
+    # `Hash#select` / `#filter` / `#reject` return a Hash: `{ a: :q }.reject { true } == {}`.
+    [[:select, false], [:filter, false], [:reject, true]].each do |method, block_value|
+      it "#{method} { #{block_value} } on a HashShape folds to the empty HashShape" do
+        expect(fold(receiver: shape, method: method, block: constant_of(block_value))).to eq(hash_shape_of({}))
+      end
+
+      it "#{method} { #{block_value} } on Hash[K, V] folds to the empty HashShape" do
+        expect(fold(receiver: hash_nominal, method: method, block: constant_of(block_value)))
+          .to eq(hash_shape_of({}))
+      end
+
+      it "#{method} { #{block_value} } on non-empty-hash folds to the empty HashShape" do
+        expect(fold(receiver: non_empty_hash, method: method, block: constant_of(block_value)))
+          .to eq(hash_shape_of({}))
+      end
+
+      it "#{method} { #{!block_value} } on a HashShape keeps the receiver shape" do
+        expect(fold(receiver: shape, method: method, block: constant_of(!block_value))).to eq(shape)
+      end
+
+      it "#{method} { #{!block_value} } on Hash[K, V] and non-empty-hash keeps the receiver" do
+        expect(fold(receiver: hash_nominal, method: method, block: constant_of(!block_value))).to eq(hash_nominal)
+        expect(fold(receiver: non_empty_hash, method: method, block: constant_of(!block_value))).to eq(non_empty_hash)
+      end
+    end
+
+    # `Hash#take_while` / `#drop_while` are Enumerable's and return an Array of `[key, value]` pairs:
+    # `{ a: :q }.take_while { false } == []`, `{ a: :q }.take_while { true } == [[:a, :q]]`.
+    it "take_while { false } on a HashShape folds to the empty tuple" do
+      expect(fold(receiver: shape, method: :take_while, block: false_const)).to eq(tuple_of)
+    end
+
+    it "drop_while { true } on Hash[K, V] folds to the empty tuple" do
+      expect(fold(receiver: hash_nominal, method: :drop_while, block: true_const)).to eq(tuple_of)
+    end
+
+    it "take_while { true } on a HashShape declines rather than answer the Hash receiver" do
+      expect(fold(receiver: shape, method: :take_while, block: true_const)).to be_nil
+    end
+
+    it "drop_while { false } on Hash[K, V] declines rather than answer the Hash receiver" do
+      expect(fold(receiver: hash_nominal, method: :drop_while, block: false_const)).to be_nil
+    end
+  end
+
+  describe "filter-shaped folds over a Set or Range receiver (Enumerable's, so they return an Array)" do
+    def set_nominal = Rigor::Type::Combinator.nominal_of("Set", type_args: [integer_nominal])
+    def range_nominal = Rigor::Type::Combinator.nominal_of("Range", type_args: [integer_nominal])
+
+    it "select { false } on a folded Set constant folds to the empty tuple" do
+      expect(fold(receiver: constant_of(Set[1, 2]), method: :select, block: false_const)).to eq(tuple_of)
+    end
+
+    it "select { true } on a folded Set constant declines rather than answer the Set receiver" do
+      # `Set[1, 2].select { true } == [1, 2]` — `Set` does not define `select`, so `Enumerable#select` answers.
+      expect(fold(receiver: constant_of(Set[1, 2]), method: :select, block: true_const)).to be_nil
+    end
+
+    it "reject { false } on Set[T] declines rather than answer the Set receiver" do
+      expect(fold(receiver: set_nominal, method: :reject, block: false_const)).to be_nil
+    end
+
+    it "select { true } on Range[T] declines rather than answer the Range receiver" do
+      expect(fold(receiver: range_nominal, method: :select, block: true_const)).to be_nil
+    end
+
+    it "select { true } on a Range constant declines rather than answer the Range receiver" do
+      expect(fold(receiver: constant_of(1..3), method: :select, block: true_const)).to be_nil
+    end
+
+    it "reject { true } on Range[T] folds to the empty tuple" do
+      expect(fold(receiver: range_nominal, method: :reject, block: true_const)).to eq(tuple_of)
+    end
+
+    it "declines on a non-collection Constant or Difference receiver" do
+      non_empty_string = Rigor::Type::Combinator.non_empty_string
+      expect(fold(receiver: constant_of("abc"), method: :select, block: false_const)).to be_nil
+      expect(fold(receiver: non_empty_string, method: :select, block: false_const)).to be_nil
+    end
+  end
+
   describe "any?/all?/none? predicate folds with constant block" do
     it "all? { true } folds to Constant[true] regardless of receiver shape" do
       expect(fold(receiver: array_of(integer_nominal), method: :all?, block: true_const))

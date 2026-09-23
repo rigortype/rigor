@@ -89,10 +89,12 @@ module Rigor
       ].to_set.freeze
 
       # Hash mutators that invalidate a `HashShape` carrier. Same principle as `ARRAY_MUTATORS`:
-      # only the receiver-mutating methods are listed.
+      # only the receiver-mutating methods are listed. A name both classes define is listed in
+      # both tables — being in `ARRAY_MUTATORS` does not put it here, and `shift`'s absence let
+      # `k = { a: 1 }; k.shift` keep the literal shape of a hash that is empty at runtime.
       HASH_MUTATORS = %i[
         []= store
-        delete delete_if reject! select! filter! keep_if
+        shift delete delete_if reject! select! filter! keep_if
         clear compact! merge! update transform_keys! transform_values!
         replace
       ].to_set.freeze

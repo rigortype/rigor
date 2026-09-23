@@ -758,9 +758,11 @@ module Rigor
         end
       end
 
-      # The `receiver[i]` read a compound index write performs before storing — the `[]` dispatch
-      # on the receiver's own type with the write's index arguments (a splat reads untyped),
-      # refined by a recorded indexed narrowing when the single-index form names a stable slot.
+      # The `receiver[i]` read a compound index write performs before storing — the `[]` read on the
+      # receiver's own type with the write's index arguments (a splat reads untyped), refined by a
+      # recorded indexed narrowing when the single-index form names a stable slot. The read takes the
+      # tiers a plain `receiver[i]` call does ({ExpressionTyper#implicit_index_read_type}), so a project
+      # `[]` with no signature answers from its body.
       def index_read_type(node, read_scope)
         receiver = read_scope.type_of(node.receiver, tracer: tracer)
         args = node.arguments
@@ -772,10 +774,10 @@ module Rigor
         key = single_index_argument(node)
         address = key && IndexedNarrowing.stable_address(node.receiver, key)
         narrowed = address && read_scope.indexed_narrowing(*address)
-        narrowed || MethodDispatcher.dispatch(
-          receiver_type: receiver, method_name: :[], arg_types: index_types,
-          environment: read_scope.environment
-        ) || Type::Combinator.untyped
+        return narrowed if narrowed
+
+        typer = ExpressionTyper.new(scope: read_scope, tracer: tracer)
+        typer.implicit_index_read_type(node, receiver, index_types) || Type::Combinator.untyped
       end
 
       # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).

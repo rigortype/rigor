@@ -1938,6 +1938,44 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(entry.type_of(node)).to eq(entry.evaluate(node).first), write
       end
     end
+
+    # The implicit `c[k]` read takes the tiers a plain `c[k]` call takes, so a project `[]` with no
+    # signature answers from its body instead of degrading the whole write to `Dynamic[top]`.
+    context "with a project-defined `[]` and no signature" do
+      let(:klass) { "class C\n  def [](k) = 0\n  def []=(k, v); end\nend\nc = C.new\n" }
+
+      it "types `c[k] += v` from the inferred `[]` body, as the plain read does" do
+        expect(statement_type("#{klass}c[:a]\n", 2).describe).to eq("0")
+        expect(statement_type("#{klass}c[:a] += 1\n", 2).describe).to eq("1")
+      end
+
+      it "keeps the inferred read's truthy value in `c[k] ||= v`" do
+        expect(statement_type("#{klass}c[:a] ||= \"s\"\n", 2).describe).to eq('"s" | 0')
+      end
+
+      it "drops the inferred read's truthy value in `c[k] &&= v`" do
+        expect(statement_type("#{klass}c[:a] &&= \"s\"\n", 2).describe).to eq('"s"')
+      end
+
+      it "reads a project singleton `[]` the same way" do
+        source = "class K\n  def self.[](k) = 0\n  def self.[]=(k, v); end\nend\nK[:a] += 1\n"
+        expect(statement_type(source, 1).describe).to eq("1")
+      end
+
+      it "still reads a memoizing `||=` as the rvalue when the body itself infers `Dynamic`" do
+        source = "class M\n  def [](k) = @store[k]\nend\nm = M.new\nm[:k] ||= 7\n"
+        expect(statement_type(source, 2).describe).to eq("7")
+      end
+
+      it "agrees with the statement evaluator's answer for every operator" do
+        ["c[:a] += 1", "c[:a] ||= 3", "c[:a] &&= 3"].each do |write|
+          root = Prism.parse("#{klass}#{write}\n").value
+          node = root.statements.body[2]
+          entry = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)[node]
+          expect(entry.type_of(node)).to eq(entry.evaluate(node).first), write
+        end
+      end
+    end
   end
 
   # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is

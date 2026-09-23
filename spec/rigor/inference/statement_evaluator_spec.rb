@@ -2050,6 +2050,34 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # A compound index write reads `c[k]` before it stores. That read dispatches with the write node and
+  # the scope as its call context, so a project `[]` with no signature answers from its body — the
+  # value a plain `c[k]` read gets — rather than `Dynamic[top]`.
+  describe "compound index write's implicit `[]` read" do
+    def statement_result(source)
+      ast = parse_program(source)
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      node = ast.statements.body.last
+      index[node].evaluate(node).first
+    end
+
+    let(:klass) { "class C\n  def [](k) = 0\n  def []=(k, v); end\nend\nc = C.new\n" }
+
+    it "stores the operator dispatched on the inferred read for `c[k] += v`" do
+      expect(statement_result("#{klass}c[:a] += 1").describe).to eq("1")
+    end
+
+    it "stores `truthy(read) | v` for `c[k] ||= v` and `falsey(read) | v` for `c[k] &&= v`" do
+      expect(statement_result("#{klass}c[:a] ||= \"s\"").describe).to eq('"s" | 0')
+      expect(statement_result("#{klass}c[:a] &&= \"s\"").describe).to eq('"s"')
+    end
+
+    it "reads a project singleton `[]` the same way" do
+      source = "class K\n  def self.[](k) = 0\n  def self.[]=(k, v); end\nend\nK[:a] += 1"
+      expect(statement_result(source).describe).to eq("1")
+    end
+  end
+
   describe "compound writes rebind into post-scope (Slice 7 phase 3)" do
     def constant(value) = Rigor::Type::Combinator.constant_of(value)
 

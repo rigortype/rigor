@@ -284,6 +284,29 @@ module Rigor
         infer_user_method_return(def_node, receiver, arg_types)
       end
 
+      # The `receiver[args]` read a compound index write performs before it stores (`c[k] += v` reads `c[k]`),
+      # or nil when no tier answers. No `Prism::CallNode` for that read exists in the tree, so the write node
+      # itself stands in as the call context: it carries the same `receiver` / `arguments` / `block` a
+      # plain `c[k]` call does, which is what the context-reading tiers consult. With it, the read reaches
+      # the tiers a plain `c[k]` takes — the dispatcher's scope-gated tiers, then the project `def` inference a
+      # dispatch miss falls to — so a project `[]` with no signature answers from its body instead of the
+      # whole write degrading to `Dynamic[top]`.
+      #
+      # A plugin `dynamic_return` rule written for `[]` still does not answer this read. Its `methods:` gate
+      # matches `call_node.name`, which an index write does not have, and the shipped rules decline a node
+      # that is not a `Prism::CallNode`. Minting a `Prism::CallNode` for the read would hand plugins a node
+      # that is not in the tree, through a constructor whose field list changed inside the `prism` range the
+      # gemspec accepts.
+      def implicit_index_read_type(node, receiver, arg_types)
+        try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[]) ||
+          MethodDispatcher.dispatch(
+            receiver_type: receiver, method_name: :[], arg_types: arg_types,
+            environment: scope.environment, call_node: node, scope: scope
+          ) ||
+          try_user_method_inference(receiver, node, arg_types, method_name: :[]) ||
+          try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
+      end
+
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
       # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
@@ -1301,21 +1324,21 @@ module Rigor
       # describes the source under analysis, while a bundled signature describes a class the project does
       # not own, where a project `def` is a monkey-patch and [ADR-17] owns the question.
       # `project_declared_class?` fail-softs to false, so an unattributable environment changes nothing.
-      def try_overriding_def_dispatch(node, receiver, arg_types)
+      def try_overriding_def_dispatch(node, receiver, arg_types, method_name: node.name)
         return nil unless user_inference_receiver?(receiver)
 
         class_name = receiver.class_name
         return nil if class_name.nil?
         # `Scope#user_def_for`, not `discovered_method?`: the cross-file table deliberately withholds a
         # plain instance `def` under the ADR-17 monkey-patch contract, and this gate must see one.
-        return nil if scope.user_def_for(class_name, node.name).nil?
+        return nil if scope.user_def_for(class_name, method_name).nil?
 
-        definition = safe_rbs_method_definition(class_name, node.name, :instance)
+        definition = safe_rbs_method_definition(class_name, method_name, :instance)
         return nil if definition.nil?
         return nil if rbs_declared_on_class?(definition, class_name)
         return nil unless project_declared_owner?(definition)
 
-        try_user_method_inference(receiver, node, arg_types) || dynamic_top
+        try_user_method_inference(receiver, node, arg_types, method_name: method_name) || dynamic_top
       end
 
       # Whether the class an inherited declaration was written about is one the project declares itself.

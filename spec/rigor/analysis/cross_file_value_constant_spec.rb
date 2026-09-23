@@ -860,4 +860,171 @@ RSpec.describe "cross-file value constants" do
       expect(dumps(files)).to eq([":nested", ":top"])
     end
   end
+
+  # Issue #617's compound-write rule reads a constant's current binding off the plain-read ladder. A constant
+  # another file writes has none there: an unpublishable value (a Hash) never publishes, and a publishable one
+  # is withdrawn by the compound write itself, which the census counts as a second writer. Read as unbound,
+  # the write took the memoization idiom's rvalue for a value Ruby stores only when the other file has not
+  # loaded yet. Its binding is gradual instead. Each positive is paired with a control whose name nothing
+  # but a memo `||=` writes, or nothing the write resolves to, where the ADR-5 memo reading stays.
+  describe "a compound write to a constant another file writes" do
+    def call_rules(files)
+      analysed(files, nil) do |result|
+        result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)
+      end
+    end
+
+    def error_rules(files)
+      analysed(files, nil) do |result|
+        result.diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
+      end
+    end
+
+    it "reads an unpublishable foreign write's binding as gradual" do
+      # Runtime: `{ x: 1 }` once a.rb has loaded, `0` before.
+      expect(dumps("a.rb" => "H2 = { x: 1 }\n",
+                   "b.rb" => "w = (H2 ||= 0)\nRigor.dump_type(w)\n")).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "does not report a call on the value that `||=` returns" do
+      expect(call_rules("a.rb" => "H2 = { x: 1 }\n", "b.rb" => "w = (H2 ||= 0)\nw[:x]\n")).to eq([])
+    end
+
+    it "reads a publishable foreign write that the `||=` withdrew as gradual too" do
+      # Runtime: `5` once a.rb has loaded, `"s"` before.
+      expect(dumps("a.rb" => "N2 = 5\n",
+                   "b.rb" => "Rigor.dump_type(N2 ||= \"s\")\n")).to eq([%("s" | Dynamic[top])])
+    end
+
+    it "reads `&&=` over a foreign write as gradual" do
+      # Runtime: `:off` once a.rb has loaded; NameError before.
+      expect(dumps("a.rb" => "FLAG = { on: true }\n",
+                   "b.rb" => "Rigor.dump_type(FLAG &&= :off)\n")).to eq([":off | Dynamic[top]"])
+    end
+
+    it "resolves the foreign binding through the lexical nesting a plain read takes" do
+      files = {
+        "a.rb" => "module App\n  LIMIT = { n: 1 }\nend\n",
+        "b.rb" => "module App\n  Rigor.dump_type(LIMIT ||= 1)\nend\nRigor.dump_type(App::LIMIT ||= 2)\n"
+      }
+      expect(dumps(files)).to eq(["1 | Dynamic[top]", "2 | Dynamic[top]"])
+    end
+
+    it "reads a foreign write whose base nothing names as gradual" do
+      # `k::SLOT = 1` may write the top-level `SLOT` (`k` may be `Object`), as the conflict rule reads it.
+      expect(dumps("a.rb" => "[Object].each { |k| k::SLOT = 1 }\n",
+                   "b.rb" => "Rigor.dump_type(SLOT ||= \"s\")\n")).to eq([%("s" | Dynamic[top])])
+    end
+
+    it "reads that wildcard as gradual where no census name the ladder reaches shares its segment" do
+      # A `class << self` write is censused under no name, so only the wildcard key carries `REG`.
+      files = {
+        "a.rb" => "class Foo; end\n[Foo].each { |k| k::REG = { x: 1 } }\n",
+        "b.rb" => "class Foo\n  class << self\n    def r = Rigor.dump_type(REG ||= 0)\n  end\nend\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "reads a foreign write through a `self::` or dynamic base as gradual" do
+      # Runtime: `{ x: 1 }` for both once a.rb has loaded.
+      files = {
+        "a.rb" => "class Foo\n  H2 = { x: 1 }\nend\n",
+        "b.rb" => "class Foo\n  Rigor.dump_type(self::H2 ||= 0)\nend\n" \
+                  "def put(klass) = Rigor.dump_type(klass::H2 ||= 1)\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]", "1 | Dynamic[top]"])
+    end
+
+    it "reads a foreign path write the census keeps as written" do
+      # The census spells `Foo::BAR = …` inside `module M` as `Foo::BAR` (#690), a name the ladder never tries.
+      files = {
+        "a.rb" => "module M\n  module Foo; end\n  Foo::BAR = { x: 1 }\nend\n",
+        "b.rb" => "Rigor.dump_type(M::Foo::BAR ||= 0)\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "keeps the memo reading for a name the ladder cannot reach from the write" do
+      # Runtime: `{}`. `Other::REGISTRY` is not the top-level `REGISTRY` the memo writes.
+      files = {
+        "a.rb" => "module Other\n  REGISTRY = []\nend\n",
+        "b.rb" => "def registry = Rigor.dump_type(REGISTRY ||= {})\n"
+      }
+      expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "keeps a top-level memo off a foreign constant of the namespace that calls it" do
+      # Runtime: `{}`. The caller's `Plugin::REGISTRY` is written in a.rb, but Ruby resolves the top-level
+      # `def`'s `REGISTRY` at the top level, where only the memo writes it.
+      files = {
+        "a.rb" => "class Plugin\n  REGISTRY = \"plugins\"\nend\n",
+        "b.rb" => "def registry = (REGISTRY ||= {})\n\nclass Plugin\n  def entries = Rigor.dump_type(registry)\nend\n"
+      }
+      expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "keeps a rooted memo off a nearer foreign constant" do
+      # Runtime: `0`. `::ROOT` is the top-level constant, which nothing but the memo writes.
+      files = {
+        "a.rb" => "module Mod\n  ROOT = { a: 1 }\nend\n",
+        "b.rb" => "module Mod\n  Rigor.dump_type(::ROOT ||= 0)\nend\n"
+      }
+      expect(dumps(files)).to eq(["0"])
+    end
+
+    it "keeps the memo reading beside another memo of the name in the same file" do
+      files = {
+        "a.rb" => "UNRELATED = { x: 1 }\n",
+        "b.rb" => "def registry = Rigor.dump_type(REGISTRY ||= {})\ndef again = (REGISTRY ||= {})\n"
+      }
+      expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "counts one file's memo once however discovery spells the file" do
+      # Checking `<dir>/./lib` against a configured `<dir>/lib` widens discovery over both spellings, so the
+      # census holds the one memo under two paths.
+      Dir.mktmpdir do |dir|
+        lib = File.join(dir, "lib")
+        FileUtils.mkdir_p(lib)
+        File.write(File.join(lib, "b.rb"), "def registry = Rigor.dump_type(REGISTRY ||= {})\n")
+        runner = Rigor::Analysis::Runner.new(
+          configuration: Rigor::Configuration.new("paths" => [lib]), cache_store: nil
+        )
+        result = guarded_run(runner, [File.join(dir, ".", "lib")])
+        dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+        expect(dumped).to eq(["dump_type: {}"])
+      end
+    end
+
+    it "reads a memo another file shares as gradual" do
+      # Runtime: `{ x: 1 }` once a.rb has loaded — a.rb's `||=` sets the constant b.rb's then reads.
+      expect(dumps("a.rb" => "H3 ||= { x: 1 }\n",
+                   "b.rb" => "Rigor.dump_type(H3 ||= 0)\n")).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "does not report a call on a value another file's memo set" do
+      # Runtime: `6` once a.rb has loaded.
+      files = {
+        "a.rb" => "DEFAULTS ||= { timeout: 5 }\n",
+        "b.rb" => "d = (DEFAULTS ||= {})\nd[:timeout] + 1\n"
+      }
+      expect(error_rules(files)).to eq([])
+    end
+
+    it "reads another file's memo of the segment as gradual through the lexical nesting" do
+      # Runtime: `{ n: 1 }` once a.rb has loaded — `LIM` inside `App` finds the top-level constant.
+      expect(dumps("a.rb" => "LIM ||= { n: 1 }\n",
+                   "b.rb" => "module App\n  Rigor.dump_type(LIM ||= 0)\nend\n")).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "keeps the memo reading at a call site in another file" do
+      # Runtime: `{}` at both calls. The callee body is typed with the caller's scope, so the memo's own write
+      # must not look like another file's.
+      files = {
+        "c.rb" => "class Reg\n  def self.all = (REGISTRY ||= {})\n  Rigor.dump_type(all)\nend\n",
+        "b.rb" => "Rigor.dump_type(Reg.all)\n"
+      }
+      expect(dumps(files)).to eq(["{}", "{}"])
+    end
+  end
 end

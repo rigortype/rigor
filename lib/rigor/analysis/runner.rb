@@ -425,6 +425,7 @@ module Rigor
         # ...and the raw per-(name, path) publication census the incremental producer diffs.
         @project_constant_writes = {}.freeze
         @published_constant_name_set = nil
+        @constant_writer_index = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
@@ -1464,6 +1465,7 @@ module Rigor
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
+        @constant_writer_index = nil
         @project_constant_sources = discovery.constant_sources
         @project_constant_writes = discovery.constant_writes
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
@@ -2009,9 +2011,14 @@ module Rigor
 
       # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read only by the recording accessors
       # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
-      # for the constant-write map). A normal run carries neither. Extracted to keep
+      # for the constant-write map). A normal run carries neither of the two. Extracted to keep
       # {#project_scope_seed_tables} under the complexity budget.
+      #
+      # Issue #617 — the census's binding writes, grouped by last segment, ride every run instead: a constant
+      # compound write whose plain read resolves nothing reads its binding off them, a TYPE rather than an edge.
       def seed_dependency_attribution_tables(tables)
+        writers = constant_writer_index
+        tables[:constant_writers] = writers unless writers.empty?
         return unless @record_dependencies
 
         tables[:discovered_class_sources] = @project_discovered_class_sources unless
@@ -2045,6 +2052,33 @@ module Rigor
         names = published_constant_name_set
         tables[:published_constant_names] = names unless names.empty?
       end
+
+      # Issue #617 — the censused names that bind, grouped by last segment (`Scope#bound_constant_names`). A
+      # name some write other than a memo `||=` touches always binds. A memo-only name binds once memos of its
+      # segment span two files: either may load first and set the constant the other then reads, so only a
+      # memo no other file shares keeps the idiom's reading. Files are counted expanded, because discovery can
+      # walk one file under two spellings (`lib/b.rb`, `./lib/b.rb`).
+      def constant_writer_index
+        @constant_writer_index ||= begin
+          memo_files = memo_files_by_segment
+          @project_constant_writes.each_with_object({}) do |(name, by_path), index|
+            segment = name.split("::").last
+            next if memo_only?(by_path) && memo_files.fetch(segment).size < 2
+
+            (index[segment] ||= []) << name
+          end.each_value(&:freeze).freeze
+        end
+      end
+
+      def memo_files_by_segment
+        @project_constant_writes.each_with_object({}) do |(name, by_path), files|
+          set = (files[name.split("::").last] ||= Set.new)
+          by_path.each { |path, descriptor| set << File.expand_path(path) if memo_descriptor?(descriptor) }
+        end
+      end
+
+      def memo_only?(by_path) = by_path.each_value.all? { |descriptor| memo_descriptor?(descriptor) }
+      def memo_descriptor?(descriptor) = descriptor == Inference::ScopeIndexer::CONSTANT_MEMO
 
       # Issue #644 — the LAST SEGMENTS of the published table, the run-wide half of
       # `Scope#published_constant?`. Seeded on EVERY run (unlike `constant_sources`, which only a recording

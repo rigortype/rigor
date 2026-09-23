@@ -31,6 +31,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
+require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
 require_relative "version_guard"
 
@@ -1891,9 +1892,13 @@ module Rigor
         end
         return post_loop if mutations.empty?
 
+        rewrites = local_rewrites(statements) { true }
         mutations.reduce(post_loop) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, content_seed_scope(name, acc, pre_body, rebound), post_loop)
-          joined.nil? ? acc : acc.with_local(name, joined)
+          seed_scope = content_seed_scope(name, acc, pre_body, rebound)
+          joined = join_content_for_local(name, calls, seed_scope, post_loop)
+          next acc if joined.nil?
+
+          acc.with_local(name, rewritten_capture(joined, seed_scope.local(name), rewrites.fetch(name, NO_REWRITES)))
         end
       end
 
@@ -3525,7 +3530,38 @@ module Rigor
         seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
         shadow_rebound_reads(block, mutations, seeds, shadows)
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
-        joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        rewrites = local_rewrites(block.body) { |receiver, ancestors| receiver.depth > scope_nesting(ancestors) }
+        joined.reduce(post_scope) do |acc, (name, type)|
+          acc.with_local(name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
+        end
+      end
+
+      NO_REWRITES = [].freeze
+      private_constant :NO_REWRITES
+
+      # The {RewriteMutation} names `root` calls on each local its block admits — `a.map!(&:to_s)` beside an `a << x`.
+      # The receiver test is the one the caller's content-mutation walk applies.
+      def local_rewrites(root)
+        rewrites = {}
+        Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
+          next unless node.is_a?(Prism::CallNode) && RewriteMutation.rewriter?(node.name)
+
+          receiver = node.receiver
+          next unless receiver.is_a?(Prism::LocalVariableReadNode) && yield(receiver, ancestors)
+
+          (rewrites[receiver.name] ||= []) << node.name
+        end
+        rewrites
+      end
+
+      # The slice-C join (and the loop seam's) rebuilds a collection from its SEED, so the rewrite the body's own
+      # widening applied is gone from it: `a = [1]; [0].each { a.map!(&:to_s); a << "x" }` read `Array["x" | 1]`, and
+      # `a[0] == "1"` folded always-falsey. Each rewrite the body makes on the local is re-applied here, on the seam's
+      # terms: a seed the straight-line widening may not grow (a precise nominal, #561) is left as the join answered it.
+      def rewritten_capture(type, seed, method_names)
+        return type if method_names.empty? || !MutationWidening.shape_carrier?(seed)
+
+        method_names.uniq.reduce(type) { |acc, method_name| RewriteMutation.arm_through(acc, method_name) }
       end
 
       # Adds to each store's `shadows` every local it reads that the block body writes and the block-entry scope binds:

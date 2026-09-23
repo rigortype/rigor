@@ -28,12 +28,27 @@ module Rigor
     # The `it` parameter (Ruby 3.4) is a local like any other, but Prism reads it through
     # `Prism::ItLocalVariableReadNode`, which carries no `name`; {.read_name} answers `:it` for it, the
     # binding `BlockParameterBinder` installs. A consumer names a read through {.read_name}, never `#name`.
+    #
+    # A local or instance-variable write evaluates to the variable it writes, so `(buf ||= []) << x`
+    # mutates `buf` and yields a read of it ({.read_of}). Issue #1223 made that binding visible: the
+    # statement evaluator threads a write in a receiver, and without the alias `buf` kept the `[]`
+    # the `||=` stored.
     module ReceiverAlias
       # Deep enough for any hand-written selection; a nest beyond it degrades to "names no binding".
       WALK_DEPTH_CAP = 6
 
       NON_ALIASED_READS = [Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode].freeze
       private_constant :NON_ALIASED_READS
+
+      LOCAL_WRITE_NODES = Set[
+        Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
+        Prism::LocalVariableAndWriteNode, Prism::LocalVariableOperatorWriteNode
+      ].freeze
+      INSTANCE_WRITE_NODES = Set[
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode
+      ].freeze
+      private_constant :LOCAL_WRITE_NODES, :INSTANCE_WRITE_NODES
 
       module_function
 
@@ -43,6 +58,8 @@ module Rigor
       #   read the expression can evaluate to; empty when it can evaluate to none.
       def candidates(node, depth = 0)
         return [] if node.nil? || depth > WALK_DEPTH_CAP
+        # Tested before the `case`: a `when *SET` arm would copy the set into an Array on every call.
+        return [read_of(node)] if variable_write?(node)
 
         case node
         when Prism::LocalVariableReadNode, Prism::ItLocalVariableReadNode, Prism::InstanceVariableReadNode then [node]
@@ -80,6 +97,22 @@ module Rigor
       # `it` read, which is always that block's own parameter and never a capture of an enclosing scope.
       def block_local?(read)
         read.is_a?(Prism::ItLocalVariableReadNode) || (read.is_a?(Prism::LocalVariableReadNode) && read.depth.zero?)
+      end
+
+      # True when `node` is a local or instance-variable write, whose value is the variable it leaves.
+      def variable_write?(node)
+        LOCAL_WRITE_NODES.include?(node.class) || INSTANCE_WRITE_NODES.include?(node.class)
+      end
+
+      # A read of the variable `write` writes, at the write's name, for the analysers that key a receiver on a
+      # read node. `Prism` 1.x constructs every node from `source, node_id, location, flags` and its fields.
+      def read_of(write)
+        source = write.send(:source)
+        if LOCAL_WRITE_NODES.include?(write.class)
+          Prism::LocalVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name, write.depth)
+        else
+          Prism::InstanceVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name)
+        end
       end
     end
   end

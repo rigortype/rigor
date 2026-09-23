@@ -1,0 +1,41 @@
+# Rigor core overlay — supplemental core signatures, rbs 3.x line only.
+#
+# --- Hash#transform_keys / #transform_keys! with a replacements hash ---
+#
+# Ruby 3.0 added the replacements-hash argument
+# (`h.transform_keys({ a: :z }) { |k| k.to_s }`), and rbs 4.0 declares it.
+# Every rbs 3.x release declares only the blockless `Enumerator` form and
+# the block form, both with no positional parameter:
+#
+#   def transform_keys: () -> Enumerator[K, Hash[untyped, V]]
+#                     | [A] () { (K) -> A } -> Hash[A, V]
+#   def transform_keys!: () -> Enumerator[K, self]
+#                      | () { (K) -> K } -> self
+#
+# so under rbs 3.x a correct replacements call reports `call.wrong-arity`
+# ("given 1, expected 0"), and `transform_keys!` answers `Enumerator`
+# instead of the receiver.
+#
+# The overloads below are rbs 4.2's, prepended to 3.x's own through
+# `| ...`. `RbsLoader::RBS_LINE_CORE_OVERLAYS` loads this file only on
+# the rbs 3.x line: on 4.x the continuation would add a second copy of
+# the overloads upstream already declares.
+#
+# Two spellings differ from rbs 4.2 so that every name resolves on every
+# rbs 3.x release the gemspec admits:
+#
+# * `hash[K, V]` is written out as `Hash[K, V] | _ToHash[K, V]`: the
+#   `hash` alias arrived in rbs 3.3, `_ToHash` is in 3.0.
+# * `hash[_Key, K2]`'s key is `untyped`: `Hash::_Key` arrived in rbs 3.4.
+#   It constrains only `hash` / `eql?`, which every object answers.
+#
+# The non-bang return type is answered ahead of either declaration by
+# `MethodDispatcher::HashTransformKeysFolding`.
+class Hash[unchecked out K, unchecked out V]
+  def transform_keys: [K2] (Hash[untyped, K2] | _ToHash[untyped, K2] replacements) -> Hash[K | K2, V]
+                    | [K2] (Hash[untyped, K2] | _ToHash[untyped, K2] replacements) { (K old_key) -> K2 } -> Hash[K2, V]
+                    | ...
+
+  def transform_keys!: (Hash[K, K] | _ToHash[K, K] replacements) ?{ (K key) -> K } -> self
+                     | ...
+end

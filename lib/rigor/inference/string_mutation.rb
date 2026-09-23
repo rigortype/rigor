@@ -17,20 +17,34 @@ module Rigor
     module StringMutation
       # Receiver-mutating String methods only. The non-bang siblings (`upcase` vs `upcase!`, `sub` vs `sub!`)
       # return a new String and leave the receiver's value intact, so they stay precise.
+      #
+      # This is the one String table: `MutationWidening::SHAPE_MUTATORS` unions it with the Array and Hash ones, and
+      # the effect classifier and the effect catalogue's `mutators: string` cite it rather than keep a list of their
+      # own (ADR-103 WD3). A spec holds it to every bang method `String` defines plus the non-bang mutators reflection
+      # cannot find by name.
       MUTATORS = %i[
         << concat insert prepend replace clear []= slice!
+        setbyte bytesplice append_as_bytes force_encoding
         sub! gsub! tr! tr_s! delete! squeeze! succ! next!
         upcase! downcase! capitalize! swapcase! reverse!
-        strip! lstrip! rstrip! chomp! chop! force_encoding
+        strip! lstrip! rstrip! chomp! chop!
+        delete_prefix! delete_suffix! encode! scrub! unicode_normalize!
       ].to_set.freeze
 
-      # The {MUTATORS} that can leave the receiver EMPTY, and so retract a `non-empty-string` refinement. The
-      # rest are appenders or same-length rewrites: `s << x` / `s.prepend(x)` / `s.upcase!` cannot empty a
-      # string that already holds a character, so the refinement is still provable afterwards.
-      EMPTYING_MUTATORS = %i[
-        replace clear slice! []=
-        sub! gsub! delete! squeeze! strip! lstrip! rstrip! chomp! chop!
+      # The {MUTATORS} that CANNOT leave a non-empty receiver empty, and so keep a `non-empty-string` refinement:
+      # appenders (`<<`, `concat`, `insert`, `prepend`, `append_as_bytes`), and rewrites that keep at least one
+      # character (`setbyte`, `force_encoding`, the case mappings, `reverse!`, `succ!` / `next!`,
+      # `unicode_normalize!`). A whitelist, as `RefinementMutation::EMPTY_PRESERVING` is for Array and Hash: a mutator
+      # missing here retracts the witness, which costs precision, where a mutator missing from a list of emptiers kept
+      # the witness of a string it had just emptied — `tr!` and `tr_s!` did, since `"a".tr!("a", "")` is `""`.
+      EMPTY_PRESERVING = %i[
+        << concat insert prepend append_as_bytes
+        setbyte force_encoding
+        upcase! downcase! capitalize! swapcase! reverse! succ! next! unicode_normalize!
       ].to_set.freeze
+
+      # The {MUTATORS} that can leave the receiver EMPTY, and so retract a `non-empty-string` refinement.
+      EMPTYING_MUTATORS = (MUTATORS - EMPTY_PRESERVING).freeze
 
       module_function
 

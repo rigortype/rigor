@@ -43,7 +43,7 @@ module Rigor
       MUTATOR_SETS = {
         "array" => Inference::MutationWidening::ARRAY_MUTATORS,
         "hash" => Inference::MutationWidening::HASH_MUTATORS,
-        "string" => MutationClassifier::STRING_MUTATORS
+        "string" => Inference::StringMutation::MUTATORS
       }.freeze
 
       NO_MUTATORS = Set[].freeze

@@ -35,9 +35,8 @@ module Rigor
     # - The receiver variable is rebound (handled inside `Scope#with_local` / `Scope#with_ivar`).
     # - An intervening `receiver[key] = value` writes the same slot — `:[]=` could rebind the
     #   slot to nil; conservative drop.
-    # - An intervening mutator from {MutationWidening::HASH_MUTATORS} or
-    #   {MutationWidening::ARRAY_MUTATORS} runs against the receiver (e.g. `params.delete(:f)`,
-    #   `params.clear`).
+    # - An intervening mutator from {MutationWidening::SHAPE_MUTATORS} runs against the receiver
+    #   (e.g. `params.delete(:f)`, `params.clear`, `buf.delete_prefix!("x")`).
     #
     # All three are implemented in `StatementEvaluator#eval_call`'s post-dispatch path through
     # {.invalidate_after_call}.
@@ -116,8 +115,8 @@ module Rigor
       #
       # - `receiver[key] = value` (a `:[]=` against a stable address): drop the specific
       #   `(receiver, key)` entry.
-      # - Any mutator from `HASH_MUTATORS` / `ARRAY_MUTATORS` against a stable receiver: drop
-      #   EVERY entry rooted at that receiver, because the mutator could rebind any slot.
+      # - Any mutator from `SHAPE_MUTATORS` against a stable receiver: drop EVERY entry rooted at
+      #   that receiver, because the mutator could rebind any slot.
       #
       # Returns the updated scope. Always-safe (only forgets; never invents).
       def invalidate_after_call(call_node:, current_scope:)
@@ -132,9 +131,9 @@ module Rigor
         end
       end
 
+      # The String table too: `s[0] ||= "x"; s.delete_prefix!("x")` leaves `s[0]` nil.
       def mutator?(method_name)
-        MutationWidening::HASH_MUTATORS.include?(method_name) ||
-          MutationWidening::ARRAY_MUTATORS.include?(method_name)
+        MutationWidening::SHAPE_MUTATORS.include?(method_name)
       end
 
       def invalidate_indexed_write(call_node, current_scope)

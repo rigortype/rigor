@@ -278,9 +278,6 @@ module Rigor
         sites || NO_SITES
       end
 
-      NON_ALIASED_READS = [Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode].freeze
-      private_constant :NON_ALIASED_READS
-
       # The mutation site `node` is — the node itself, or a {UnknownStoreWidening::CalleeStore} for a self-call
       # whose callee content-mutates a local it is passed — or nil. A self-call is resolved by the
       # `StatementEvaluator` the block yields, which the caller builds only when one is needed. A mutator name
@@ -296,13 +293,13 @@ module Rigor
       end
 
       # The variable reads a mutation site reaches: a callee store's arguments, the local an element read is
-      # rooted at, or else {.mutated_reads} of the receiver.
+      # rooted at, or else {ReceiverAlias.mutated_reads} of the receiver.
       def site_reads(site)
         return site.arguments if site.is_a?(UnknownStoreWidening::CalleeStore)
 
         receiver = mutated_receiver(site)
         path = ElementReadWidening.element_read_path(receiver)
-        path ? [path.first] : mutated_reads(receiver)
+        path ? [path.first] : ReceiverAlias.mutated_reads(receiver)
       end
 
       # A call to a method on `self` (implicit or explicit) that passes a local as an argument — the only kind
@@ -315,18 +312,12 @@ module Rigor
         !arguments.nil? && arguments.any?(Prism::LocalVariableReadNode)
       end
 
-      # The variable reads a mutated receiver can evaluate to: {ReceiverAlias.candidates}' locals and instance
-      # variables, or the class variable or global the receiver reads directly, parenthesised or not.
-      def mutated_reads(receiver)
-        direct = receiver
-        direct = direct.body.body.last while direct.is_a?(Prism::ParenthesesNode) && direct.body.is_a?(Prism::StatementsNode)
-        NON_ALIASED_READS.include?(direct.class) ? [direct] : ReceiverAlias.candidates(receiver)
-      end
-
       # True when `read` names a variable {.content_mutations} collects: a {.content_target?} which, when it is a
       # local, does not resolve inside a nested block and is not one the block introduces (the block yields that set,
-      # computed only when needed).
+      # computed only when needed). An `it` read is never one: it is the parameter of the innermost block around
+      # it, so the body's own `it` is introduced and a nested block's `it` is that block's.
       def captured_target?(read, ancestors, base_scope, non_locals)
+        return false if read.is_a?(Prism::ItLocalVariableReadNode)
         return false unless content_target?(read, base_scope, non_locals)
         return true unless read.is_a?(Prism::LocalVariableReadNode)
 

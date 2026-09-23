@@ -117,11 +117,12 @@ RSpec.describe "constant compound write value", type: :runner do
       RUBY
     end
 
-    it "reads a rooted path at the top level" do
-      # Runtime: `{ a: 1 }`.
+    it "reads a rooted path at the top level, past a lexically nearer shadow" do
+      # Runtime: `{ a: 1 }`; the unrooted `ROOT` inside `Mod` is `5`.
       expect(dumped_type(<<~RUBY)).to eq("0 | { a: 1 }")
         ROOT = { a: 1 }
         module Mod
+          ROOT = 5
           dump_type(::ROOT ||= 0)
         end
       RUBY
@@ -188,6 +189,40 @@ RSpec.describe "constant compound write value", type: :runner do
           REGISTRY = "plugins"
 
           def entries = dump_type(registry)
+        end
+      RUBY
+    end
+  end
+
+  describe "a top-level memo body typed under a namespaced caller" do
+    it "still walks a path's tail through its owner's ancestors" do
+      # Runtime: `4`. `Client::DEFAULTS` is `Base::DEFAULTS` wherever it is written; only the path's head
+      # must not come from the caller.
+      expect(dumped_type(<<~RUBY)).to eq("[] | { retries: 3 }")
+        class Base
+          DEFAULTS = { retries: 3 }
+        end
+        class Client < Base; end
+
+        def client_defaults = (Client::DEFAULTS ||= [])
+
+        class Worker
+          def run = dump_type(client_defaults)
+        end
+      RUBY
+    end
+
+    it "does not report a call on that memo" do
+      expect(call_rules(<<~RUBY)).to be_empty
+        class Base
+          DEFAULTS = { retries: 3 }
+        end
+        class Client < Base; end
+
+        def client_defaults = (Client::DEFAULTS ||= [])
+
+        class Worker
+          def run = client_defaults.fetch(:retries).succ
         end
       RUBY
     end

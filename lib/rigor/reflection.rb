@@ -140,10 +140,11 @@ module Rigor
     # answer to `::Foo`, and falling back to it was the bug (`::Rails` inside `module MyApp` typed
     # as `MyApp::Rails`).
     #
-    # `caller_derived: false` drops {.toplevel_first_constant_type}'s rungs below the top level, for a
-    # reader whose miss is a meaningful answer rather than a read Ruby raises on. A constant compound write
-    # is one: an unset top-level `REGISTRY ||= {}` is the memoization idiom, and the caller's
-    # `Plugin::REGISTRY` is a binding Ruby never consults there.
+    # `caller_derived: false` drops what {.toplevel_first_constant_type} takes from the caller — its
+    # namespaces and ancestors, for a bare name and for a path's head — for a reader whose miss is a
+    # meaningful answer rather than a read Ruby raises on. A constant compound write is one: an unset
+    # top-level `REGISTRY ||= {}` is the memoization idiom, and the caller's `Plugin::REGISTRY` is a binding
+    # Ruby never consults there. A path's later segments still walk their owner's ancestors.
     #
     # This is the shared owner of the lexical-constant resolution: `Inference::ExpressionTyper`
     # reads it to type a constant read, and `Inference::Narrowing` reads it to recognise a
@@ -227,12 +228,11 @@ module Rigor
     #
     # Issue #656's rung goes LAST here rather than second: for a top-level body Ruby's own first answer
     # for `A::B` is the top level, and a whole-string hit there already means "`A` owns `B`". The
-    # segment-wise walk only has something to add once that misses. It is caller-derived too — the path's
-    # head consults the caller's ancestors — so `caller_derived: false` answers the top-level rung alone.
+    # segment-wise walk only has something to add once that misses. Its head consults the caller's
+    # ancestors, so under `caller_derived: false` it resolves the head at the top level alone.
     def toplevel_first_constant_type(name, scope, caller_derived)
-      return constant_type_at(name, scope) unless caller_derived
-
-      constant_type_at(name, scope) || caller_derived_constant_type(name, scope) || constant_path_type(name, scope)
+      constant_type_at(name, scope) || (caller_derived && caller_derived_constant_type(name, scope)) ||
+        constant_path_type(name, scope, caller_derived: caller_derived)
     end
     private_class_method :toplevel_first_constant_type
 

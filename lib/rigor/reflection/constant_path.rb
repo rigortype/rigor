@@ -35,10 +35,17 @@ module Rigor
     # silent wrong answer for a silent absent one at no gain (the same reasoning as
     # {.toplevel_first_constant_type}'s caller-derived rungs).
     def resolve_constant_path_name(name, scope, &known)
+      walk_constant_path(name, scope, known, caller_derived: true)
+    end
+
+    # {.resolve_constant_path_name}'s walk. `caller_derived: false` is {.resolve_constant_type}'s flag: the
+    # head skips the enclosing class's ancestors — the one step a recorded top-level body takes from its
+    # caller — while every later segment still walks its owner's ancestors, as Ruby does.
+    def walk_constant_path(name, scope, known, caller_derived:)
       segments = name.to_s.split("::")
       return nil unless segments.size > 1
 
-      owner = path_head_owner(segments.first, scope)
+      owner = path_head_owner(segments.first, scope, caller_derived)
       last = segments.size - 1
       segments.each_with_index do |segment, index|
         next if index.zero?
@@ -50,11 +57,13 @@ module Rigor
       end
       owner
     end
+    private_class_method :walk_constant_path
 
     # Step 2.5's rung as a type: the segment-wise name, then that name looked up like any other
     # candidate so the answer comes from the same source-precedence order as every other rung.
-    def constant_path_type(name, scope)
-      qualified = resolve_constant_path_name(name, scope) { |candidate| constant_type_at(candidate, scope) }
+    def constant_path_type(name, scope, caller_derived: true)
+      known = ->(candidate) { constant_type_at(candidate, scope) }
+      qualified = walk_constant_path(name, scope, known, caller_derived: caller_derived)
       qualified && constant_type_at(qualified, scope)
     end
     private_class_method :constant_path_type
@@ -62,11 +71,11 @@ module Rigor
     # The namespace a path's FIRST segment names — the bare-name ladder, restricted to answers that can
     # OWN the segments that follow. A value constant is not one of them, so it declines here rather
     # than producing a namespace prefix no source knows.
-    def path_head_owner(head, scope)
+    def path_head_owner(head, scope, caller_derived)
       hit = first_namespace_hit(lexical_nesting_chain(scope), head, scope)
       return hit if hit
 
-      prefix = enclosing_class_path(scope)
+      prefix = caller_derived ? enclosing_class_path(scope) : nil
       unless prefix.nil? || prefix.empty?
         hit = first_namespace_hit(bounded_ancestor_scopes(prefix, scope), head, scope)
         return hit if hit

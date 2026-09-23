@@ -31,6 +31,12 @@ RSpec.describe "block-return scope threading", type: :runner do
     result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
   end
 
+  # Every `call.undefined-method` diagnostic `source` produced — what a receiver a stale fold proved nil reports.
+  def undefined_method_rules(source)
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s == "call.undefined-method" }
+  end
+
   describe "the tail reads a name the body binds" do
     it "types a block-local tail through a generic block-return signature" do
       # The reported repro: `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the block's return type IS
@@ -692,6 +698,194 @@ RSpec.describe "block-return scope threading", type: :runner do
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             q = e
             5
+          end)
+        RUBY
+      end
+    end
+
+    # The same pre-state at ANY arity. A fold nested inside a body that is itself being threaded runs under the
+    # suppression that keeps the threading from re-entering, so every position is typed tail-only exactly as it
+    # is above the cap — and the per-pair HashShape fold, which has no cap, reaches tail-only this way alone.
+    # The outer body threads only when its own tail reads a name its prefix binds, which is why every fixture
+    # routes the outer `w` into the inner block; the last example drops it to show the floor follows the
+    # suppression, not the lexical nesting.
+    describe "(2), nested: the same family under block-body threading suppression" do
+      it "floors a Tuple position whose tail reads a parameter the body mutated in place" do
+        # Runtime `[[1], [1]]`; the nested walk answered two provably-empty `[]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "floors a HashShape value whose tail reads a parameter the body mutated in place" do
+        # THE REPORTED PROBE. Runtime `{ x: [1], y: [1] }`; the nested per-pair fold answered `{ x: [], y: [] }`.
+        expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale HashShape value" do
+        # THE HAZARD: `r[:x].first` read `[].first`, a provable nil, and `+` was reported on correct code.
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << w
+              a
+            end
+          end
+          r[:x].first + 1
+        RUBY
+      end
+
+      it "no longer reports a nil receiver read out of the stale Tuple position" do
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            [[], []].map do |a|
+              a << w
+              a
+            end
+          end
+          r[0].first + 1
+        RUBY
+      end
+
+      it "still reports the nil receiver when the tail ignores its prefix" do
+        # The must-fire sibling: nothing mutates `a`, so the value really is `[]` and `.first` really is nil.
+        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+          m = Mutex.new
+          v = 1
+          r = m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              q = w
+              a
+            end
+          end
+          r[:x].first + 1
+        RUBY
+      end
+
+      it "floors a flat_map whose flattened positions were the pre-state" do
+        # Runtime `[1, 1]`; flattening two stale `[]` answered a provably-empty `[]`. The floored positions are no
+        # Tuple, so the assembler declines and the dispatcher answers.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].flat_map do |a|
+              a << w
+              a
+            end
+          end)
+        RUBY
+      end
+
+      it "floors a position whose tail reads a captured local the body mutates in place" do
+        # Runtime `[[1, 1], [1, 1]]` — both positions are `out` itself. The rebind fixpoint does not cover a name
+        # the body never rebinds, so nothing re-answers it under the suppression. Flip this to the in-place
+        # binding's widened reading when #1203 lands: that binding evaluates no body, so it holds here too.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          out = []
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              out << w
+              out
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a Tuple position whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("[5, 5]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map do |e|
+              q = e + w
+              5
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a single-statement Tuple body exact" do
+        expect(dumped_type(<<~RUBY)).to eq("[2, 3]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [1, 2].map { |e| e + w }
+          end)
+        RUBY
+      end
+
+      it "keeps a HashShape value whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq("{ x: 10, y: 20 }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: 1, y: 2 }.transform_values do |e|
+              q = w
+              e * 10
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps a HashShape key fold whose tail ignores its prefix exact" do
+        expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { a: 1, b: 2 }.transform_keys do |k|
+              q = w
+              k.to_s
+            end
+          end)
+        RUBY
+      end
+
+      it "threads the same body when the outer tail does not read its own prefix" do
+        # The outer body is not threaded, so nothing suppresses the inner fold and every pair threads its own
+        # mutation — the same answer as with no outer block at all.
+        expect(dumped_type(<<~RUBY)).to eq("{ x: Array[Dynamic[top] | Integer], y: Array[Dynamic[top] | Integer] }")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            { x: [], y: [] }.transform_values do |a|
+              a << v
+              a
+            end
           end)
         RUBY
       end

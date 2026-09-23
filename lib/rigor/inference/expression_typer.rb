@@ -3859,8 +3859,10 @@ module Rigor
       # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
       #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
       #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
-      #   threaded body a nested block-bearing call reverts to the tail-only path — a wider answer in a rare
-      #   shape, never a new false positive.
+      #   threaded body a nested block-bearing call reverts to the tail-only path. That is a wider answer only
+      #   while the nested tail ignores its own prefix: a tail reading a parameter or captured local the prefix
+      #   mutated gets the ENTRY binding back, so the per-element and per-pair folds floor that shape
+      #   ({#tail_only_body_floor}). The generic block-return pass still answers it tail-only.
       #
       # ADR-56 interaction: the fold cannot double-apply or fight the captured-local write-back. That
       # write-back is `StatementEvaluator#write_back_block_captures`, computed from the CALLER's scope into
@@ -4155,29 +4157,40 @@ module Rigor
         results = lambda do
           element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
         end
-        return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
-        return uncapped_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
+        return results.call unless tail_only_walk?(element_types)
+        return tail_only_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
 
         without_block_body_threading(&results)
       end
 
-      # Above {PER_ELEMENT_THREADING_LIMIT} the threading is suppressed, and a position is typed tail-only.
-      # For a tail that reads what the body's own prefix wrote or mutated, tail-only is not a wider answer —
-      # it is the ENTRY binding, which the prefix has already falsified.
+      # A position is typed tail-only in two cases: above {PER_ELEMENT_THREADING_LIMIT}, where this walk
+      # suppresses the threading itself, and anywhere the walk runs nested inside a body that is already being
+      # threaded, where {#threaded_block_body_type} suppressed it first so the fold never re-enters. The
+      # second case has no arity in it: `[[], []].map do |a| a << w; a end` inside a threaded
+      # `m.synchronize do w = v; … end` is typed tail-only at two positions.
+      def tail_only_walk?(element_types)
+        element_types.size > PER_ELEMENT_THREADING_LIMIT || block_body_threading_suppressed?
+      end
+
+      # Wherever a position is typed tail-only ({#tail_only_walk?}), a tail that reads what the body's own
+      # prefix wrote or mutated does not get a wider answer. It gets the ENTRY binding, which the prefix has
+      # already falsified.
       #
       # #584's cliff comment promised `Dynamic[top]` above the cap, and that held for a body-LOCAL: `[1, …,
       # 9].map do v = e; v end` has no entry binding for `v`, so tail-only lands on `Dynamic[top]` by itself.
       # A mutated PARAMETER has one, and issue #617 residue (2) is what it buys: `([[]] * 9).map do |a| a <<
       # 1; a end` answered nine stale `[]`, a provably-empty array at every position of a result whose slots
-      # each hold `[1]`. Flooring the whole walk restores the promise for both shapes — the cost the cap
-      # refuses to pay is the per-position body evaluation, and declining to pay it means declining to know,
-      # not answering the pre-state.
+      # each hold `[1]`. Nested under the suppression the same body did it at two positions, and a
+      # `transform_values` over `{ x: [], y: [] }` did it at every pair ({#tail_only_pairs_floored?}). Flooring
+      # the whole walk restores the promise for every shape. What the cap and the suppression refuse to pay
+      # is the per-position body evaluation, and refusing to pay it means declining to know, not answering the
+      # pre-state.
       #
       # {#tail_depends_on_body_binding?} is the same predicate the threading gate uses, so "would threading
       # have changed this tail" and "is tail-only untrustworthy here" stay one question. A body it answers
-      # false for keeps its exact tail-only fold above the cap, which is every single-statement block and
-      # every multi-statement block whose tail ignores its prefix.
-      def uncapped_body_floor(element_types)
+      # false for keeps its exact tail-only fold, which is every single-statement block and every
+      # multi-statement block whose tail ignores its prefix.
+      def tail_only_body_floor(element_types)
         Array.new(element_types.size) { Type::Combinator.untyped }
       end
 
@@ -4651,6 +4664,8 @@ module Rigor
 
       def fold_hash_shape_transform_values(shape, block_arg)
         captured = hash_block_captured_bindings(block_arg, shape.pairs.values)
+        return hash_shape_values_floor(shape) if tail_only_pairs_floored?(block_arg, captured)
+
         new_pairs = {}
         shape.pairs.each do |key, value|
           new_value = apply_hash_block(block_arg, value, captured: captured)
@@ -4664,6 +4679,8 @@ module Rigor
       def fold_hash_shape_transform_keys(shape, block_arg)
         key_types = shape.pairs.keys.map { |key| Type::Combinator.constant_of(key) }
         captured = hash_block_captured_bindings(block_arg, key_types)
+        return nil if tail_only_pairs_floored?(block_arg, captured)
+
         new_pairs = {}
         key_types.zip(shape.pairs.values).each do |key_type, value|
           new_key_type = apply_hash_block(block_arg, key_type, captured: captured)
@@ -4693,6 +4710,23 @@ module Rigor
         return nil if param_types.empty?
 
         per_element_captured_bindings(block_arg, param_types)
+      end
+
+      # The per-pair fold has no arity cap, so running nested inside a threaded body ({#tail_only_walk?}'s
+      # second case) is the one way a pair is typed tail-only, and it reaches the same pre-state
+      # {#tail_only_body_floor} describes: `{ x: [], y: [] }.transform_values do |a| a << w; a end` inside a
+      # threaded `m.synchronize do w = v; … end` answered `{ x: [], y: [] }` for a hash whose values each hold
+      # `[1]`, and `r[:x].first + 1` was then reported on correct code. The floor is the Tuple fold's, applied
+      # per pair and over the same `captured` names: `transform_values` keeps the keys and answers every value
+      # `Dynamic[top]`, and `transform_keys` declines, since a `Dynamic[top]` key could not index the result.
+      # That decline reaches the dispatcher, whose block-return pass the same suppression types tail-only.
+      def tail_only_pairs_floored?(block_arg, captured)
+        block_arg.is_a?(Prism::BlockNode) && block_body_threading_suppressed? &&
+          unanswered_tail_dependency?(block_arg, captured)
+      end
+
+      def hash_shape_values_floor(shape)
+        Type::Combinator.hash_shape_of(shape.pairs.transform_values { Type::Combinator.untyped })
       end
 
       # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to

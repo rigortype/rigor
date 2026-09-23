@@ -2843,6 +2843,38 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "floors the body's `it` mutated inside a loop, which binds no `it` of its own" do
+        # Runtime `[[1], [1]]`: a `for` body runs in the block's own scope, so its `it` is the body's.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              for i in [1]
+                it << w
+              end
+              it
+            end
+          end)
+        RUBY
+      end
+
+      it "leaves the body's `it` alone when only a nested lambda's own `it` is mutated" do
+        # Runtime `[[], []]`: the lambda's `it` is the `[]` it is called with.
+        expect(dumped_type(<<~RUBY)).to eq("[[], []]")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            [[], []].map do
+              -> { it << w }.call([])
+              it
+            end
+          end)
+        RUBY
+      end
+
       it "keeps a nominal String pre-state the append cannot move" do
         # The must-hold sibling: `String` is what the threaded body answers too, so tail-only was never stale.
         expect(dumped_type(<<~RUBY)).to eq("String")
@@ -3090,14 +3122,22 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "still reports the nil receiver when the write lands on another class variable" do
-        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+      it "still reports the nil receiver when the write lands on another class variable or global" do
+        # The read variable starts as an empty literal, so naming it by mistake would widen it and silence `succ`.
+        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method", "call.undefined-method"])
           class Reg
             def add_cvar
-              @@c = nil
+              @@c = []
               @@d = nil
               (@@d ||= []) << 1
-              @@c.first
+              @@c.first.succ
+            end
+
+            def add_global
+              $gc = []
+              $gd = nil
+              ($gd ||= []) << 1
+              $gc.first.succ
             end
           end
         RUBY

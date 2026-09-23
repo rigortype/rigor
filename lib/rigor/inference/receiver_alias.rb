@@ -102,6 +102,8 @@ module Rigor
         candidates(receiver)
       end
 
+      # True when `node` is a class-variable or global write, which {.mutated_reads} answers only as the receiver
+      # itself, as it answers a class-variable or global read.
       def non_aliased_write?(node)
         CLASS_VARIABLE_WRITE_NODES.include?(node.class) || GLOBAL_WRITE_NODES.include?(node.class)
       end

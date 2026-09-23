@@ -4690,8 +4690,10 @@ module Rigor
       # An unmoved pin cannot be distinguished from a write that genuinely restores its own entry value
       # (`x = 5; xs.each { x = 5 }`), so the floor gives that shape up too. It is the far cheaper side: a
       # value-pinned seed the block rebinds is the exact pre-state this fold exists to stop trusting, and
-      # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
-      # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
+      # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. A literal `Tuple` /
+      # `HashShape` is value-pinned in this sense too ({#value_pinned?}): its arity and key set are the first
+      # iteration's, so `g = [0]` under a hidden `(g += [1])` answered `[0]` at every position. Seeds that carry
+      # no pinning are left alone — there is no first-iteration constant in them to remove, and widening a
       # `Nominal` here would only lose a class for nothing.
       #
       # The pin test reads a binding as a whole and nothing else. A `0 | Integer` seed is floored too, although a
@@ -4736,8 +4738,16 @@ module Rigor
         end
       end
 
+      # A binding carries a first-iteration pin when widening its values or erasing its literal shape changes
+      # it, alone or as one member of a union. A literal `Tuple` / `HashShape` is pinned whatever its elements
+      # are: its arity and its key set are what the first iteration wrote, and `g = [0]` under a hidden `(g +=
+      # [1])` would otherwise read `[0]` at every position, `size` folded to `1`. The shapes are the ones
+      # {MutationWidening.shape_erased} erases, so the two cannot disagree about which carrier holds one.
       def value_pinned?(type)
-        !type.nil? && Type::Combinator.widen_value_pinned(type) != type
+        return false if type.nil?
+        return type.members.any? { |member| value_pinned?(member) } if type.is_a?(Type::Union)
+
+        Type::Combinator.widen_value_pinned(type) != type || MutationWidening.shape_erased(type) != type
       end
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the

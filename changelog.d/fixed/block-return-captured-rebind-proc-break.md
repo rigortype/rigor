@@ -1,0 +1,1 @@
+- **[inference]** A `break` inside a `lambda`, `proc` or `Proc.new` block no longer adds `nil` or its value to the created Proc's type, so `f = lambda { |t| break if t; 1 }; f.call(x)` no longer reports a possible nil receiver. ([#1226](https://github.com/rigortype/rigor/pull/1226))

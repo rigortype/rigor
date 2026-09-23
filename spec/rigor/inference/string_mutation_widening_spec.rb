@@ -280,6 +280,36 @@ RSpec.describe "String mutation widening", type: :runner do
   # Joined or floored whole, such a union went to the Array or Hash arm, which read the String mutator's arguments as
   # elements or pairs and let one carrier swallow the other; each member now joins or floors on its own terms.
   describe "a capture that may be a String or a collection" do
+    let(:named) do
+      <<~RUBY
+        class Named
+          def initialize = @name = nil
+          def set = @name = +"x"
+          def shout(v) = v.upcase!
+
+          def via_closure
+            r = @name
+            up = -> { r << "!" }
+            up.call
+            dump_type(r)
+            r.size
+          end
+
+          def via_callee
+            r = @name
+            shout(r)
+            dump_type(r)
+            r.size
+          end
+
+          def undeclared(flag)
+            q = flag ? +"x" : nil
+            q.size
+          end
+        end
+      RUBY
+    end
+
     it "joins a block capture's String member as String, reading no mutator arguments as elements" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[1] | String", "Hash[Symbol, 1] | String", '"ab" | [1]'])
         def each_block(flag)
@@ -346,6 +376,16 @@ RSpec.describe "String mutation widening", type: :runner do
           end
         end
       RUBY
+    end
+
+    # ADR-58: a local copied from a declaration-seeded ivar carries a mark that keeps the ivar's declaration-only `nil`
+    # from firing a nil-receiver diagnostic. A floor rebinds the same object rather than writing a new one, so the mark
+    # stays; the undeclared local beside them shows the rule is live.
+    it "keeps a declaration-sourced local's mark when a closure or callee floors it" do
+      nil_receivers = diagnostics(named, {}).select { |d| d.rule.to_s == "call.possible-nil-receiver" }
+
+      expect(dumped_types(named)).to eq(["String?", "String?"])
+      expect(nil_receivers.map(&:line)).to eq([named.lines.index("    q.size\n") + 3])
     end
 
     it "floors an optional String a closure or a callee mutates, keeping its nil" do

@@ -2882,8 +2882,18 @@ module Rigor
           next acc unless acc.locals.key?(argument.name)
 
           floored = content_floor_for(acc.local(argument.name))
-          floored.nil? ? acc : acc.with_local(argument.name, floored)
+          floored.nil? ? acc : with_floored_local(acc, argument.name, floored)
         end
+      end
+
+      # A floor rebinds a local to the same object with its contents forgotten, which is not a flow-live write, so the
+      # marks a write drops stay: ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark.
+      # With a plain `with_local`, a `String?` copied from a declaration-seeded ivar and floored after a closure or
+      # callee mutated it (`r = @name; -> { r.upcase! }.call`) lost the first, and `r.size` reported a nil receiver.
+      def with_floored_local(scope, name, floored)
+        rebound = scope.with_local(name, floored)
+        rebound = rebound.with_local_declaration_mark(name) if scope.declaration_sourced?(:local, name)
+        rebound.with_optimistic_local(name, scope.optimistic_local(name))
       end
 
       # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
@@ -3070,7 +3080,7 @@ module Rigor
 
         mutations.keys.reduce(post_scope) do |acc, name|
           floored = content_floor_for(acc.local(name))
-          floored.nil? ? acc : acc.with_local(name, floored)
+          floored.nil? ? acc : with_floored_local(acc, name, floored)
         end
       end
 

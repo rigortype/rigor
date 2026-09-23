@@ -51,10 +51,11 @@ module Rigor
       #   read the expression can evaluate to; empty when it can evaluate to none.
       def candidates(node, depth = 0)
         return [] if node.nil? || depth > WALK_DEPTH_CAP
+        # Tested before the `case`: a `when *SET` arm would copy the set into an Array on every call.
+        return [read_of(node)] if variable_write?(node)
 
         case node
         when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then [node]
-        when *LOCAL_WRITE_NODES, *INSTANCE_WRITE_NODES then [read_of(node)]
         when Prism::ParenthesesNode then candidates(node.body, depth + 1)
         when Prism::StatementsNode then candidates(node.body.last, depth + 1)
         when Prism::ElseNode then candidates(node.statements, depth + 1)

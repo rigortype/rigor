@@ -1,0 +1,21 @@
+---
+locals:
+  acc: Array[Integer]
+  counts: Hash[Symbol, 0 | Integer]
+  fixed: Hash[:a | Symbol, 0 | 1]
+  memo: Hash[Symbol, 0 | Integer]
+  nested: Array[Dynamic[top] | []]
+  sizes: Array[0 | Integer]
+  slots: Array[0 | Integer]
+  sums: Array[0 | Integer]
+  tally: Hash[Symbol, 0 | Integer]
+assertions:
+  '1': Hash[Symbol, 0 | Integer]
+  '2': Hash[Symbol, 0 | Integer]
+  '3': Array[0 | Integer]
+  '4': Array[0 | Integer]
+  '5': Array[0 | Integer]
+  '6': Hash[Symbol, 0 | Integer]
+  '7': Array[Dynamic[top] | []]
+  '8': Hash[:a | Symbol, 0 | 1]
+  '9': Array[Integer]

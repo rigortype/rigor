@@ -2651,8 +2651,8 @@ module Rigor
       # post-call effect applied ahead of the widening; the pre-CALL `scope` would carry neither. The loop seam makes
       # the same choice with `pre_body`; see {#loop_content_writeback}.
       #
-      # The block body is typed once for argument evidence; the floor is `Array[Dynamic[top]]` /
-      # `Hash[untyped, untyped]` (the sound empty-seed behaviour). Always sound — only ever widens.
+      # The stored evidence is typed in the block-entry scope and iterated to a fixpoint when a store reads a
+      # collection the join moves — see {#join_content_to_fixpoint}. Always sound — only ever widens.
       def content_writeback_block_captures(call_node, post_scope, seed_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -2664,11 +2664,130 @@ module Rigor
         mutations = collect_content_mutations(body)
         return post_scope if mutations.empty?
 
-        entry = build_block_entry_scope(call_node, block)
-        mutations.reduce(post_scope) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, seed_scope, entry)
-          joined.nil? ? acc : acc.with_local(name, joined)
+        seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block))
+        joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
+      # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
+      CONTENT_EVIDENCE_SLOTS = { array: %i[element].freeze, hash: %i[key value].freeze, string: [].freeze }.freeze
+      private_constant :CONTENT_EVIDENCE_SLOTS
+
+      # The joined continuation carrier of each content-mutated name, shared by the block seam and
+      # {#each_with_object_return}. `sites` maps each name to its mutation nodes, `seeds` to its pre-state; the answer
+      # omits a name whose pre-state is no collection.
+      #
+      # The evidence is typed in the block-entry scope, where each mutated collection still holds its PRE-CALL
+      # contents. A store whose evidence reads one of them therefore records the FIRST iteration's answer: `h = { a:
+      # 0 }; [:a, :a, :a].each { |k| h[k] = h[k] + 1 }` stored `1` as far as a single pass could tell, the join read
+      # `Hash[:a | Symbol, 0 | 1]`, and `h[:a] == 3` folded always-falsey on a program that prints. Such evidence is
+      # iterated to a fixpoint through {BodyFixpoint} — each evidence slot is one of its names, and each pass re-types
+      # the stores with every mutated collection bound to its seed joined with the evidence so far — so the join above
+      # widens to `Hash[Symbol, 0 | Integer]` on the final pass, and evidence that keeps growing structurally floors to
+      # `Dynamic[top]`, the slot's one-unknown-store answer.
+      #
+      # That is what keeps this seam's claim to complete evidence true ({MutationWidening#gradual_floor} rests on it):
+      # the scan sees every store in the body, and the fixpoint makes each one's evidence hold for every iteration, not
+      # just the first. A gradual arm on every self-reading store would be sound too, but its `Dynamic` would quiet
+      # every later read of the collection, where the converged `Integer` still reports `h[:a].upcase`. Evidence no
+      # store can read — the `acc = []; xs.each { |x| acc.push(x) }` accumulator — is typed once, as before: a second
+      # pass could only reproduce it.
+      def join_content_to_fixpoint(sites, seeds, entry)
+        kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
+        return {} if kinds.empty?
+
+        evidence = if content_evidence_self_read?(sites, kinds)
+                     converge_content_evidence(sites, seeds, kinds, entry)
+                   else
+                     content_evidence(sites, kinds, entry)
+                   end
+        kinds.to_h { |name, kind| [name, join_content_evidence(seeds[name], kind, name, evidence)] }
+      end
+
+      # The pre-state's collection kind, or nil when the join has no carrier to rederive — the dispatch
+      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states.
+      def content_kind(pre_state)
+        return nil if pre_state.nil?
+        return :string if stringish?(pre_state)
+        return :hash if hashish?(pre_state)
+
+        :array if arrayish?(pre_state)
+      end
+
+      def converge_content_evidence(sites, seeds, kinds, entry)
+        slots = kinds.flat_map { |name, kind| CONTENT_EVIDENCE_SLOTS.fetch(kind).map { |slot| [name, slot] } }
+        BodyFixpoint.converge(
+          names: slots,
+          seed_bindings: slots.to_h { |slot| [slot, Type::Combinator.bot] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: lambda do |assumption|
+            pass_entry = kinds.reduce(entry) do |acc, (name, kind)|
+              acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
+            end
+            content_evidence(sites, kinds, pass_entry)
+          end
+        )
+      end
+
+      # The binding a fixpoint pass reads a mutated collection at: its seed until any evidence exists, then the seed
+      # joined with the evidence so far.
+      def content_carrier_under(seed, kind, name, evidence)
+        no_evidence = CONTENT_EVIDENCE_SLOTS.fetch(kind).all? { |slot| present_evidence(evidence[[name, slot]]).empty? }
+        no_evidence ? seed : join_content_evidence(seed, kind, name, evidence)
+      end
+
+      # `{ [name, slot] => union }` for every collection name, typed in `evidence_scope`; a slot no store contributes
+      # to reads `bot`.
+      def content_evidence(sites, kinds, evidence_scope)
+        kinds.each_with_object({}) do |(name, kind), evidence|
+          case kind
+          when :hash
+            pairs = hash_pair_evidence(sites[name], evidence_scope)
+            evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
+            evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+          when :array
+            evidence[[name, :element]] =
+              Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope).compact)
+          end
         end
+      end
+
+      def join_content_evidence(seed, kind, name, evidence)
+        case kind
+        when :string
+          Type::Combinator.nominal_of("String")
+        when :hash
+          key = present_evidence(evidence[[name, :key]]).first
+          value = present_evidence(evidence[[name, :value]]).first
+          ContentJoin.join_hash_content(seed, key.nil? && value.nil? ? [] : [[key, value]])
+        else
+          ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
+        end
+      end
+
+      def present_evidence(type)
+        type.nil? || type.is_a?(Type::Bot) ? [] : [type]
+      end
+
+      # True when some store's evidence can read a collection the join moves: a local read of a mutated name among its
+      # arguments (a `[]=` call's stored value is one), or an Array-side compound index write (`a[i] += v`), whose
+      # stored value is computed from the slot it overwrites. The Hash side floors an index write's value, so there
+      # only the key arguments are typed.
+      def content_evidence_self_read?(sites, kinds)
+        names = kinds.keys
+        kinds.any? do |name, kind|
+          sites[name].any? do |node|
+            (kind == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, names)
+          end
+        end
+      end
+
+      def store_arguments_read?(node, names)
+        arguments = node.arguments
+        return false if arguments.nil?
+
+        Source::NodeWalker.each(arguments).any? { |n| n.is_a?(Prism::LocalVariableReadNode) && names.include?(n.name) }
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
@@ -2698,7 +2817,7 @@ module Rigor
 
         pre_state = scope.type_of(memo_arg, tracer: tracer)
         entry = build_block_entry_scope(call_node, block)
-        joined = join_content_for_param(calls, pre_state, entry)
+        joined = join_content_to_fixpoint({ memo_param => calls }, { memo_param => pre_state }, entry)[memo_param]
         joined || call_type
       end
 
@@ -2755,7 +2874,7 @@ module Rigor
       end
 
       def join_hash_param(calls, pre_state, block_entry)
-        pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
+        pairs = hash_pair_evidence(calls, block_entry)
         return nil if pairs.empty? && !hashish?(pre_state)
 
         ContentJoin.join_hash_content(pre_state, pairs)
@@ -2764,7 +2883,17 @@ module Rigor
       def join_array_param(calls, pre_state, block_entry)
         return nil unless arrayish?(pre_state)
 
-        added = calls.flat_map do |c|
+        ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
+      end
+
+      # The `[key, value]` pairs `calls` store into a Hash, typed in `block_entry`.
+      def hash_pair_evidence(calls, block_entry)
+        calls.flat_map { |c| hash_pair_types(c, block_entry) }
+      end
+
+      # The elements `calls` add to an Array, typed in `block_entry`.
+      def array_element_evidence(calls, block_entry)
+        calls.flat_map do |c|
           # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
@@ -2773,7 +2902,6 @@ module Rigor
 
           ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
-        ContentJoin.join_array_content(pre_state, added)
       end
 
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the

@@ -186,7 +186,9 @@ slice-A/B `MutationWidening` carrier-widening helpers:
    *(Superseded by WD2.9: the seed is now read from the scope BEFORE
    `widen_after_block` runs, so an empty literal contributes no element
    and nothing is dropped — the same `Array[Integer]` by a route that
-   cannot mistake a declared `untyped` for the floor.)*
+   cannot mistake a declared `untyped` for the floor.)* *(Amended by
+   WD2.13: a store whose evidence reads a collection the join moves is
+   iterated to a fixpoint instead of typed once.)*
 
 2. **Loops** — `eval_loop` overlays `loop_content_writeback` on both the
    fast-path single-pass join and the slice-B fixpoint result; arguments
@@ -804,6 +806,71 @@ restoring the `nil` seed turns the idiom examples red; judging a union
 fill wholesale, or stopping the container walk at the outermost level,
 turns the container examples red. The literal-size tuple fold is
 untouched by all four.
+
+### WD2.13 — A store that reads its own collection is iterated, not typed once (2026-09-23)
+
+WD2.5 specified the block join "under the same `BodyFixpoint`
+cap/widen/floor discipline" as slices A and B, but the seam shipped as
+a single pass: it typed every store's evidence once, in the
+block-entry scope. There each content-mutated collection still holds
+its pre-call contents, so a store computed FROM that collection
+recorded the first iteration's value and the join closed over it:
+
+    h = { a: 0 }
+    [:a, :a, :a].each { |k| h[k] = h[k] + 1 }
+    puts "three" if h[:a] == 3   # always-falsey: h read Hash[:a | Symbol, 0 | 1]
+
+`a << a.last + x`, `a.push(a.size)`, `a[0] += 1`, `h.store(k,
+h.fetch(k) + 1)` and an `each_with_object` memo read back through its
+alias (`m[k] = m[k] + 1`) are the same defect. Each is wrong-precise,
+and the block path is where it costs most, because that join adds no
+gradual arm on purpose: WD2.5's "how much the joining path saw" rests
+on the body scan's evidence being complete, and it was complete in the
+set of stores while stale in their values.
+
+Two repairs were open. Giving every store whose evidence reads the
+mutated collection the one-store gradual floor is sound and cheap, but
+its `Dynamic` arm quiets every later read of the collection —
+`h[:a].upcase` goes silent — for a store whose value the engine can in
+fact bound. **Decision: iterate the evidence.** The block seam and
+`each_with_object` share one join
+(`StatementEvaluator#join_content_to_fixpoint`) that runs
+`BodyFixpoint` over the evidence slots — an Array's element union, a
+Hash's key union and value union — each seeded `bot`. Each pass
+re-types the stores with every mutated collection bound to its seed
+joined with the evidence so far; the final pass value-pin widens the
+evidence, and a slot that still grows takes the one-unknown-store
+floor beside the seed's own arms. `h` reads `Hash[Symbol, 0 |
+Integer]`, and `nested << [nested.last]` floors to
+`Array[Dynamic[top] | []]`. The seed is never widened: it is the
+zero-iteration contents. This is WD3 kept rather than a second
+mechanism — the evidence slots are simply the fixpoint's names.
+
+The iteration runs only when a store can read a collection the join
+moves: a local read of a mutated name among a mutator's arguments, or
+an Array-side compound index write, whose stored value reads the slot
+it overwrites. Every other block keeps the single pass, so `acc = [];
+xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and
+the common block pays one walk over its mutators' arguments. The loop
+seam needed nothing: it types its evidence against `post_loop`, where
+the in-body straight-line join has already given the binding its
+gradual arm.
+
+Two residues are recorded rather than fixed here. Both are the same
+first-iteration pin reached through a different binding: the evidence
+still reads a captured local the body REBINDS at its pre-call binding
+(`total = 0; out = []; [1, 2].each { |x| total += x; out << total }`
+reads `Array[0]`), and slice A's rebind fixpoint reads a
+content-mutated capture at its pre-call contents (`last = nil; [1,
+2].each { |x| last = a.last; a << x }` leaves `last` at `0?` over
+`a = [0]`).
+
+Gate: the `block_content_self_read` fixture carries the six
+self-reading shapes (must-not-fire, each pinned by `assert_type`), the
+structural floor, the #586 accumulator, and a same-shape control that
+stores a receiver-independent value and whose always-falsey must still
+fire. The spec asserts the exact `flow.*` line set, so a seam that went
+gradual everywhere fails as loudly as the old pin did.
 
 ### WD3 — One mechanism, shared
 

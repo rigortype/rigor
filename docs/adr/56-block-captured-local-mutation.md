@@ -843,13 +843,13 @@ reading a captured collection the same block appends to (`buf << w; m
 << buf.length`) reads `String` and not the pre-call value. A name none
 of whose stores reads a mutated Array or Hash is FIXED: its evidence
 is the same on every iteration, so it is typed once and the name is
-bound to the union of its seed and its own join. A String is always
-fixed at `String`, since its join ignores what it stored and already
-holds any String seed. The remaining names MOVE, and `BodyFixpoint`
-iterates their evidence slots (an Array's element union, a Hash's key
-union and value union), each seeded `bot`. Each pass re-types the
-moving stores with every moving collection bound, like a fixed one, to
-the union of its seed and its join over the evidence so far, since a
+bound to its own join plus the seed members that join refutes (its
+`nil`). A String is always fixed at `String`, since its join ignores
+what it stored. The remaining names MOVE, and `BodyFixpoint` iterates
+their evidence slots (an Array's element union, a Hash's key union and
+value union), each seeded `bot`. Each pass re-types the moving stores
+with every moving collection bound, like a fixed one, to its join over
+the evidence so far plus the seed members that join refutes, since a
 `nil` seed can still be `nil` on an iteration where another moving
 collection has already grown. The final pass value-pin widens the
 moving evidence, and a slot that still grows takes the
@@ -880,7 +880,10 @@ v` as `Array[false]`. Both were new false positives against master,
 and both are why the joined set excludes the block's own names and a
 fixed name keeps its seed. A moving name then kept its seed only on
 the first pass, which missed a `nil` that outlives another
-collection's growth; it now keeps it on every pass.
+collection's growth; it now keeps it on every pass. Only the refuted
+members come back, not the whole seed: re-adding a seed's literal
+shape widened dispatch enough that `a = []; [1].each { a[0, 1] ||= [2]
+}` stopped converging and lost its `Array[2]`.
 
 A block with no moving name takes a single pass, so `acc = [];
 xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and

@@ -958,7 +958,7 @@ each one for reporting on correct code (ADR-5):
    - a `rescue` arm reads the `begin`'s entry scope (#1231);
    - an `inject` accumulator is treated as fresh on every iteration
      (#1232);
-   - slice A drops the scope at `next` (#1214);
+   - slice A dropped the scope at `next` (#1214, since joined by #1215);
    - a local written inside an argument reaches no later scope (#1223);
    - ivars can be written through setters.
 

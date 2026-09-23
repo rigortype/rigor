@@ -107,9 +107,7 @@ sums = []
 end
 puts "three" if sums.last == 3
 
-# --- A value carried into the next iteration only through `next`.
-# `step` itself still reads `0?` (runtime `3`); flip the golden when
-# #1214 is fixed. ---
+# --- A value carried into the next iteration only through `next`. ---
 step = 0
 stepped = []
 [1, 2, 3].each do |x|

@@ -169,9 +169,8 @@ SIG_PROVENANCE_RESIDUE = {
   # `effect_collections_by_path`, `adopt_effect_collections`, `adopt_effect_summary` and
   # `effects_served_from_cache?`: `effect_collection`, `effect_plugin_facts`,
   # `adopt_effect_summary` and `effects_served_from_cache?` classify as earned (generated or
-  # return intent), `effect_collections_by_path` pins as declared-divergent (sig-gen infers the
-  # `pooled.empty?` `base.dup` arm as a separate union member), and the rest stay unrenderable —
-  # net 0 residue rows over the `untyped` declarations they replaced. `forced_file_effects` was typed and
+  # return intent), and the rest stay unrenderable — net 0 residue rows over the `untyped`
+  # declarations they replaced. `forced_file_effects` was typed and
   # then dropped on review: the method is `private` (runner.rb's `private :…` list) and private
   # API is not declared in this sig.
   "sig/rigor.rbs" => 51,

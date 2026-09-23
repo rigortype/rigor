@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "element_read_widening"
 require_relative "mutation_widening"
 
 module Rigor
@@ -37,6 +38,17 @@ module Rigor
     # it lays under each position has to hold whatever earlier iterations stored. Unknown evidence is the point,
     # not a shortcut — a stored value typed in that same entry scope (`h[k] = h[k] + 1`) is itself a
     # first-iteration answer.
+    #
+    # Two more kinds of site change a binding's contents without naming it as the receiver, and each is widened
+    # the way straight-line code widens it:
+    #
+    # - A mutator on an ELEMENT of the binding (`a[0] << e`, `a.first.push(e)`): the site's receiver is an element
+    #   read rooted at the variable ({ElementReadWidening.element_read_path}), and the same widening runs on the
+    #   element the path selects, rebuilding the carrier around it. The other slots keep their types, and a path
+    #   {ElementReadWidening} cannot follow (a `HashShape` slot) declines, as it does on straight-line code.
+    # - A self-call whose callee content-mutates the parameter the binding is passed to (`add_to(a, e)`, a
+    #   {CalleeStore}): nothing at the call says what the callee stores or removes, so each collection the binding
+    #   can hold is floored to its bare carrier ({.content_floor}), as ADR-57's callee floor does after the call.
     module UnknownStoreWidening
       # Mutators that only remove or reorder what the receiver already holds.
       VALUE_PRESERVING = %i[
@@ -44,23 +56,87 @@ module Rigor
         sort! sort_by! reverse! rotate! shuffle!
       ].to_set.freeze
 
+      # A site that mutates a binding through a callee: `call` passes the variable, read by one of `arguments`, to
+      # a parameter the callee content-mutates.
+      CalleeStore = Data.define(:call, :arguments)
+
       COLLECTION_CLASSES = %w[Array Hash].freeze
+      FLOORED_CLASSES = %w[Array Hash String].freeze
 
       NO_ARG_NODES = [].freeze
-      private_constant :COLLECTION_CLASSES, :NO_ARG_NODES
+      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
 
       module_function
 
-      # @param sites — in-place mutation nodes whose receiver can evaluate to the binding `type` describes.
+      # @param sites — in-place mutation nodes whose receiver, or an element read their receiver starts from, can
+      #   evaluate to the binding `type` describes, and {CalleeStore}s whose call passes that binding.
       # @return `type` widened through every site; `type` itself when no site's widening applies.
       def widen(type, sites)
-        sites.reduce(type) do |acc, site|
-          method_name, arg_types = unknown_store(site)
-          widened = MutationWidening.widen_for_mutator(acc, method_name, arg_types: arg_types)
-          next acc if widened.nil?
+        sites.reduce(type) { |acc, site| widen_site(acc, site) || acc }
+      end
 
-          VALUE_PRESERVING.include?(method_name) && !literal_carrier?(acc) ? widened : gradual_content(widened)
+      # `type` widened through one site, or `nil` when its widening declines.
+      def widen_site(type, site)
+        return content_floor(type) if site.is_a?(CalleeStore)
+
+        method_name, arg_types = unknown_store(site)
+        path = ElementReadWidening.element_read_path(site.receiver)
+        return widen_store(type, method_name, arg_types) if path.nil?
+
+        ElementReadWidening.widen_through_path(type, path.last, method_name, arg_types) do |element|
+          widen_store(element, method_name, arg_types)
         end
+      end
+
+      # The straight-line widening of `type` under `method_name`, with the gradual arm on every site that can store.
+      def widen_store(type, method_name, arg_types)
+        widened = MutationWidening.widen_for_mutator(type, method_name, arg_types: arg_types)
+        return nil if widened.nil?
+
+        VALUE_PRESERVING.include?(method_name) && !literal_carrier?(type) ? widened : gradual_content(widened)
+      end
+
+      # Every `Array` / `Hash` / `String` carrier `type` can be as its bare carrier: `Array[Dynamic[top]]`,
+      # `Hash[Dynamic[top], Dynamic[top]]`, `String`. A literal, a nominal (a precise one included) and a refinement
+      # over one ({.carrier_class}) all floor; so `non-empty-string`, which a callee can empty, reads `String`.
+      # Unlike the escaping floor (`StatementEvaluator#content_floor_for`), which answers one carrier for a whole
+      # `Union`, this floors a `Union` member by member, so a member no callee can fill (`nil`) stays: the binding
+      # stands where the entry binding stood, and dropping a member would narrow it. Anything else is returned
+      # untouched.
+      def content_floor(type)
+        return Type::Combinator.union(*type.members.map { |member| content_floor(member) }) if type.is_a?(Type::Union)
+
+        carrier = carrier_class(type)
+        carrier ? carrier_floor(carrier) : type
+      end
+
+      # `"Array"`, `"Hash"` or `"String"` when `type` is a form of that carrier — a literal, a nominal, or a
+      # difference, refinement or intersection over one (`non-empty-array[Integer]`, `decimal-int-string`,
+      # `non-empty-uppercase-string`) — else nil.
+      def carrier_class(type)
+        case type
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::Constant then "String" if type.value.is_a?(String)
+        when Type::Nominal then type.class_name if FLOORED_CLASSES.include?(type.class_name)
+        when Type::Difference, Type::Refined then carrier_class(type.base)
+        when Type::Intersection then intersection_carrier_class(type)
+        end
+      end
+
+      def intersection_carrier_class(type)
+        type.members.each do |member|
+          carrier = carrier_class(member)
+          return carrier if carrier
+        end
+        nil
+      end
+
+      def carrier_floor(class_name)
+        return Type::Combinator.nominal_of("String") if class_name == "String"
+
+        arity = class_name == "Hash" ? 2 : 1
+        Type::Combinator.nominal_of(class_name, type_args: Array.new(arity) { Type::Combinator.untyped })
       end
 
       # A carrier that still records its slots or keys: a `Tuple` / `HashShape`, alone or as a `Union` member.

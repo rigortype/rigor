@@ -878,6 +878,279 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The in-place scan above names a mutated local only when the mutation site's RECEIVER reads it. Straight-line
+  # code also widens a local whose content changes by two other routes, and every position of a fold read that
+  # local at its entry contents: a mutator on an element read (`a[0] << e`, `ElementReadWidening`), and a
+  # self-call whose callee content-mutates the matching parameter (`add_to(a, e)`, ADR-57's callee floor).
+  describe "captured contents the body mutates through a slot or a callee under the per-element fold" do
+    let(:add_to) do
+      <<~RUBY
+        def add_to(arr, x)
+          arr << x
+        end
+      RUBY
+    end
+
+    it "widens a captured tuple whose element the body mutates" do
+      # `[1, 2]` at runtime. `a[0]` names no variable, so the scan missed it and both positions read `a[0]` as
+      # the entry `[1]`: `[1, 1]`.
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        a = [[1]]
+        dump_type([1, 2].map do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the entry element folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        a = [[1]]
+        r = [1, 2].map do |e|
+          v = a.first.size
+          a.first << e
+          v
+        end
+        puts "x" if r.last == 1
+      RUBY
+    end
+
+    it "keeps the sibling slots of a captured tuple exact" do
+      # The widening runs through the path the read names, as the straight-line one does: only `a[0]` moves.
+      expect(dumped_type(<<~RUBY)).to eq("[2, 2]")
+        a = [[1], [2]]
+        dump_type([1, 2].map do |e|
+          v = a[1].first
+          a[0] << e
+          v
+        end)
+      RUBY
+    end
+
+    it "leaves a find over an element the body fills undecided" do
+      # `2` at runtime. Both predicates read the entry `[]`, so each was provably false and `find` folded to `nil`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        a = [[]]
+        dump_type([1, 2].find do |e|
+          a[0] << e
+          a[0].size == 2
+        end)
+      RUBY
+    end
+
+    it "keeps a captured tuple exact when the body only reads its element" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [[1]]
+        dump_type([1, 2].map { |e| a[0].size })
+      RUBY
+    end
+
+    it "floors a captured array a self-call content-mutates" do
+      # `[1, 2]` at runtime. The callee's `arr << x` is invisible at the call, so both positions read `[1]`.
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        #{add_to}
+        a = [1]
+        dump_type([1, 2].map do |e|
+          v = a.size
+          add_to(a, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the entry contents folded under a callee mutation" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        #{add_to}
+        a = [1]
+        r = [1, 2].map do |e|
+          v = a.size
+          add_to(a, e)
+          v
+        end
+        puts "x" if r.last == 1
+      RUBY
+    end
+
+    it "leaves a membership test over a hash a callee fills undecided" do
+      # `[:new, :new, :dup]` at runtime; the entry `{}` made every `key?` provably false.
+      expect(dumped_type(<<~RUBY)).to eq("[:dup | :new, :dup | :new, :dup | :new]")
+        def mark(seen, key)
+          seen[key] = true
+        end
+        seen = {}
+        dump_type([1, 2, 1].map { |x| seen.key?(x) ? :dup : (mark(seen, x); :new) })
+      RUBY
+    end
+
+    it "floors a captured array a method in the same class content-mutates" do
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        class Collector
+          def run
+            a = [1]
+            dump_type([1, 2].map do |e|
+              v = a.size
+              add(a, e)
+              v
+            end)
+          end
+
+          def add(arr, x)
+            arr << x
+          end
+        end
+      RUBY
+    end
+
+    it "floors a capture passed to a mutator-named method called on self" do
+      # `[0, 1]` and `[1, 2]` at runtime. `self.store` and `self.push` carry a mutator's name on a `self` receiver,
+      # so the scan took them for in-place sites on `self`, found no variable there, and never asked the callee.
+      expect(dumped_types(<<~RUBY)).to eq(["[non-negative-int, non-negative-int]"] * 2)
+        class Registry
+          def store(h, k)
+            h[k] = true
+          end
+
+          def push(arr, x)
+            arr << x
+          end
+
+          def run
+            seen = {}
+            dump_type([1, 2].map do |e|
+              v = seen.size
+              self.store(seen, e)
+              v
+            end)
+            buf = [0]
+            dump_type([1, 2].map do |e|
+              v = buf.size
+              self.push(buf, e)
+              v
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors a string refinement a callee can empty, under the fold and after a straight-line call" do
+      # `[false, true]` and `true` at runtime. The floor kept `non-empty-string`, so `empty?` folded to `false`.
+      expect(dumped_types(<<~RUBY)).to eq(["[bool, bool]", "bool"])
+        def reset(s)
+          s.replace("")
+        end
+        s = RUBY_VERSION.upcase
+        dump_type([1, 2].map do |e|
+          v = s.empty?
+          reset(s)
+          v
+        end)
+        t = RUBY_VERSION.upcase
+        reset(t)
+        dump_type(t.empty?)
+      RUBY
+    end
+
+    it "floors a string refinement an escaping block mutates, directly or through a callee" do
+      # The escaping-block floor shares the straight-line callee floor's carrier test, which read only a plain
+      # `String`: both locals left `Thread.new` still `decimal-int-string`, although `"5x"` is not one.
+      expect(dumped_types(<<~RUBY)).to eq(%w[String String])
+        def app(x)
+          x << "y"
+        end
+        s = rand(10).to_s
+        Thread.new { s << "x" }
+        dump_type(s)
+        u = rand(10).to_s
+        Thread.new { app(u) }
+        dump_type(u)
+      RUBY
+    end
+
+    it "keeps a captured array exact when the callee only reads it" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        def peek(arr, x)
+          arr.size + x
+        end
+        a = [1]
+        dump_type([1, 2].map do |e|
+          v = a.size
+          peek(a, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "keeps a captured array exact when the callee mutates a different parameter" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        def copy_size(src, dst)
+          dst << src.size
+        end
+        a = [1]
+        b = []
+        dump_type([1, 2].map do |e|
+          v = a.size
+          copy_size(a, b)
+          v
+        end)
+      RUBY
+    end
+
+    it "widens a callee-mutated capture a rebind reads across an each loop" do
+      # `"s"` at runtime. The ADR-56 write-back's fixpoint pass read `a` at its entry `[:x]` every iteration, so
+      # `last` left the loop as `:x?`.
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]?")
+        #{add_to}
+        a = [:x]
+        last = nil
+        [1, 2].each do |e|
+          last = a.last
+          add_to(a, "s")
+        end
+        dump_type(last)
+      RUBY
+    end
+
+    it "widens both routes under the HashShape per-pair fold" do
+      # `{ x: 1, y: 2 }` twice at runtime; each folded `{ x: 1, y: 1 }`.
+      expect(dumped_types(<<~RUBY)).to eq(["{ x: non-negative-int, y: non-negative-int }"] * 2)
+        #{add_to}
+        a = [[1]]
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+        b = [1]
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          v = b.size
+          add_to(b, e)
+          v
+        end)
+      RUBY
+    end
+
+    it "widens both routes under the generic block-return pass" do
+      # A receiver with no per-element fold. Each answered `Array[1]` where the runtime holds `[1, 2]`.
+      expect(dumped_types(<<~RUBY)).to eq(["Array[non-negative-int]"] * 2)
+        #{add_to}
+        xs = [1, 2].to_a.shuffle
+        a = [[1]]
+        dump_type(xs.map do |e|
+          v = a[0].size
+          a[0] << e
+          v
+        end)
+        b = [1]
+        dump_type(xs.map do |e|
+          v = b.size
+          add_to(b, e)
+          v
+        end)
+      RUBY
+    end
+  end
+
   describe "the per-element Tuple fold's arity cap" do
     it "threads every position at the cap" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")

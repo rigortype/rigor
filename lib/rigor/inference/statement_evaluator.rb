@@ -321,6 +321,33 @@ module Rigor
         callee_content_mutated_parameters(def_node).values.uniq.sort
       end
 
+      # The local-variable reads among `call_node`'s positional arguments whose matching parameter the callee
+      # content-mutates, when `call_node` is a self-dispatch call resolving to a user def in this evaluator's scope
+      # (`callee_content_mutated_parameters`); empty for any other call. These are the locals the straight-line
+      # callee floor ({#widen_callee_escaped_argument_captures}) floors after the call, and the ones
+      # {CapturedLocals.content_mutations} reports as a block's callee-mutated captures.
+      def content_mutated_arguments(call_node)
+        return NO_ARGUMENT_READS unless self_dispatch_call?(call_node)
+        # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
+        # resolution and the body scan entirely (the overwhelming common case).
+        return NO_ARGUMENT_READS unless call_passes_local_argument?(call_node)
+
+        def_node = resolve_self_callee_def(call_node)
+        return NO_ARGUMENT_READS if def_node.nil?
+
+        mutated = callee_content_mutated_parameters(def_node)
+        return NO_ARGUMENT_READS if mutated.empty?
+
+        argument_nodes = call_node.arguments.arguments
+        mutated.values.uniq.filter_map do |index|
+          argument = argument_nodes[index]
+          argument if argument.is_a?(Prism::LocalVariableReadNode)
+        end
+      end
+
+      NO_ARGUMENT_READS = [].freeze
+      private_constant :NO_ARGUMENT_READS
+
       # The value `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` evaluates to in this evaluator's scope: what it stores
       # through `[]=` ({#index_write_stored_type}). The `[]=` widening and the indexed-narrowing record are scope
       # effects, so they stay with {#eval_index_or_write} / {#eval_index_write}. `ExpressionTyper` types a
@@ -2478,19 +2505,18 @@ module Rigor
         acc
       end
 
+      # Runs for every call of every body it walks, and nearly every call reports no argument, so that case returns
+      # before `reduce`: `Enumerable#inject` allocates its iteration state even over an empty array.
       def floor_callee_escaped_args_for_call(node, base_scope)
-        return base_scope unless self_dispatch_call?(node)
-        # Fast path — the floor only ever touches a local passed as an argument, so a call with no arguments cannot
-        # floor anything. Skip the def resolution + body scan entirely (the overwhelming common case).
-        return base_scope unless call_passes_local_argument?(node)
+        arguments = content_mutated_arguments(node)
+        return base_scope if arguments.empty?
 
-        def_node = resolve_self_callee_def(node)
-        return base_scope if def_node.nil?
+        arguments.reduce(base_scope) do |acc, argument|
+          next acc unless acc.locals.key?(argument.name)
 
-        mutated = callee_content_mutated_parameters(def_node)
-        return base_scope if mutated.empty?
-
-        floor_arguments_at_positions(node, mutated, base_scope)
+          floored = content_floor_for(acc.local(argument.name))
+          floored.nil? ? acc : acc.with_local(argument.name, floored)
+        end
       end
 
       # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
@@ -2636,20 +2662,6 @@ module Rigor
         end
       end
 
-      def floor_arguments_at_positions(node, positions, base_scope)
-        args = node.arguments
-        return base_scope unless args.respond_to?(:arguments)
-
-        argument_nodes = args.arguments
-        positions.values.uniq.reduce(base_scope) do |acc, index|
-          arg = argument_nodes[index]
-          next acc unless arg.is_a?(Prism::LocalVariableReadNode) && acc.locals.key?(arg.name)
-
-          floored = content_floor_for(acc.local(arg.name))
-          floored.nil? ? acc : acc.with_local(arg.name, floored)
-        end
-      end
-
       # Walk the receiver chain of `node` and fold the escaping-content widening of every block-bearing, escaping
       # receiver call into `base_scope`. Only receiver calls are walked — `node` itself is handled by the caller. A
       # `:non_escaping` receiver block is left to slice C's non-escaping write-back (which the receiver expression
@@ -2714,10 +2726,13 @@ module Rigor
 
       # The Dynamic-floor carrier for a content-mutated escaping capture, or nil when the pre-state is not a recognised
       # mutable collection (leave it alone — e.g. an already-`Dynamic` binding or an unknown shape).
+      #
+      # A String counts in any refined form (`non-empty-string`, `decimal-int-string`), which `stringish?` does not
+      # accept: the mutation can empty or rewrite it as it can a plain `String`.
       def content_floor_for(type)
         return nil if type.nil?
 
-        if stringish?(type)
+        if UnknownStoreWidening.carrier_class(type) == "String"
           Type::Combinator.nominal_of("String")
         elsif hashish?(type)
           Type::Combinator.nominal_of("Hash",

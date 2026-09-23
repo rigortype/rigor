@@ -4590,9 +4590,11 @@ module Rigor
       # whose widening declines (a precise nominal) gets no binding at all, so it keeps today's answer. The
       # binding evaluates no body, so it applies under threading suppression too; the rebind fixpoint runs
       # over it, and a local the body both rebinds and mutates takes the same widening over its converged
-      # type — the rebind can bring a fresh literal back, which the next iteration then mutates. An unmutated
-      # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
-      # `[0, 0]`). An instance variable the body mutates in place takes the same binding
+      # type — the rebind can bring a fresh literal back, which the next iteration then mutates. A local mutated
+      # through an element read (`a[0] << e`) or passed to a self-call whose callee content-mutates that
+      # parameter (`add_to(a, e)`) takes it too, widened as straight-line code widens it after such a site. An
+      # unmutated captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds
+      # to `[0, 0]`). An instance variable the body mutates in place takes the same binding
       # ({CapturedLocals.content_mutations} with `non_locals: true`, on the rebind set's terms): once the #587
       # (a) gate threads an index write, `@cache[:first] ||= e` pins the same way. So do a class variable and a
       # global.

@@ -2,8 +2,14 @@
 locals:
   all_truthy: 'true'
   empty_select: "[]"
+  hash_rejected: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  hash_selected: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  hash_taken: "[]"
   non_empty_any: 'true'
 assertions:
   '1': 'true'
   '2': "[]"
   '3': 'true'
+  '4': "{}"
+  '5': "{}"
+  '6': "[]"

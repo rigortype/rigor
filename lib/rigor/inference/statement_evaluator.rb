@@ -22,6 +22,7 @@ require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "element_read_widening"
+require_relative "hash_lookup_mutation"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
 require_relative "method_dispatcher"
@@ -90,6 +91,9 @@ module Rigor
         Prism::IndexOrWriteNode => :eval_index_or_write,
         Prism::IndexAndWriteNode => :eval_index_write,
         Prism::IndexOperatorWriteNode => :eval_index_write,
+        Prism::CallOrWriteNode => :eval_attribute_compound_write,
+        Prism::CallAndWriteNode => :eval_attribute_compound_write,
+        Prism::CallOperatorWriteNode => :eval_attribute_compound_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::ConstantWriteNode => :eval_constant_write,
         Prism::ConstantPathWriteNode => :eval_constant_write,
@@ -934,7 +938,39 @@ module Rigor
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
-        [rhs_type, widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)]
+        post = widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)
+        [rhs_type, widen_attribute_targets(node, post)]
+      end
+
+      # `recv.attr ||= v` / `&&=` / `op=` calls the writer `attr=` on `recv`, so a writer the mutation widening
+      # responds to widens the receiver as the plain call does: `h.default ||= 0` reopens `h` as `h.default = 0`
+      # does ({HashLookupMutation}). The node's value is typed as before; the widening is its only scope effect.
+      def eval_attribute_compound_write(node)
+        [scope.type_of(node, tracer: tracer), widen_attribute_write(node.receiver, node.write_name, scope)]
+      end
+
+      # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
+      # the receiver-wide drop of recorded `receiver[key]` narrowings `IndexedNarrowing` makes after a mutator call.
+      def widen_attribute_write(receiver, writer, current_scope)
+        widened = MutationWidening.widen_receiver_aliases(receiver, writer, current_scope)
+        stable = IndexedNarrowing.stable_receiver(receiver)
+        return widened unless stable && IndexedNarrowing.mutator?(writer)
+
+        widened.without_indexed_narrowings_for(*stable)
+      end
+
+      # The attribute targets of a multi-write (`h.default, x = 0, 1`), nested ones included, each widening its
+      # receiver as the plain writer call would.
+      def widen_attribute_targets(node, post)
+        targets = [*node.lefts, node.rest, *node.rights]
+        targets.reduce(post) do |acc, target|
+          target = target.expression if target.is_a?(Prism::SplatNode)
+          case target
+          when Prism::CallTargetNode then widen_attribute_write(target.receiver, target.name, acc)
+          when Prism::MultiTargetNode then widen_attribute_targets(target, acc)
+          else acc
+          end
+        end
       end
 
       # Widens the receiver of every index target a {MultiTargetBinder} result reports, over the scope its bindings
@@ -1895,10 +1931,11 @@ module Rigor
         rewrites = local_rewrites(statements) { true }
         mutations.reduce(post_loop) do |acc, (name, calls)|
           seed_scope = content_seed_scope(name, acc, pre_body, rebound)
-          joined = join_content_for_local(name, calls, seed_scope, post_loop)
+          seed = lookup_mutated_seed(statements, name, seed_scope.local(name)) { |depth, nesting| depth == nesting }
+          joined = join_content_for_param(calls, seed, post_loop)
           next acc if joined.nil?
 
-          acc.with_local(name, rewritten_capture(joined, seed_scope.local(name), rewrites.fetch(name, NO_REWRITES)))
+          acc.with_local(name, rewritten_capture(joined, seed, rewrites.fetch(name, NO_REWRITES)))
         end
       end
 
@@ -3527,7 +3564,9 @@ module Rigor
         mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        seeds = mutations.to_h do |name, _calls|
+          [name, lookup_mutated_seed(body, name, seed_scope.local(name)) { |depth, nesting| depth > nesting }]
+        end
         shadow_rebound_reads(block, mutations, seeds, shadows)
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         rewrites = local_rewrites(block.body) { |receiver, ancestors| receiver.depth > scope_nesting(ancestors) }
@@ -3904,8 +3943,31 @@ module Rigor
         calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
+        pre_state = lookup_mutated_seed(body, memo_param, scope.type_of(memo_arg, tracer: tracer)) do |depth, nesting|
+          depth == nesting
+        end
+        joined = join_memo_content(call_node, memo_param, calls, pre_state, shadows)
         joined || call_type
+      end
+
+      # `seed` as the {HashLookupMutation} calls `body` makes on `name` leave it. They add no content, so the join
+      # never sees them as sites, and a seed read before `widen_after_block` is still the closed shape whose known
+      # values answer every missing key: `b = { a: 1 }; [1].each { b.default = 0; b[:c] = 2 }` read `b[:zz]` as
+      # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores, and a `while` body. The
+      # block receives a read's `depth` and its enclosing block count, and says whether the read is the variable
+      # `seed` describes. A `def` opens a scope of its own, so nothing under one is.
+      def lookup_mutated_seed(body, name, seed)
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless node.is_a?(Prism::CallNode) && HashLookupMutation::MUTATORS.include?(node.name)
+          next if ancestors.any?(Prism::DefNode)
+
+          receiver = node.receiver
+          next unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
+          next unless yield(receiver.depth, scope_nesting(ancestors))
+
+          seed = MutationWidening.widen_for_mutator(seed, node.name) || seed
+        end
+        seed
       end
 
       # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
@@ -4108,13 +4170,6 @@ module Rigor
         return NO_CONTENT_MUTATION unless yield(receiver)
 
         [receiver.name, node]
-      end
-
-      # Computes the joined continuation collection type for one captured local from its content-mutator calls. Returns
-      # `nil` (no overlay) when the pre-state is neither an Array-ish nor a Hash-ish binding — e.g. a String
-      # accumulator, whose `<<` carries no element parameter and whose binding already types as `String`.
-      def join_content_for_local(name, calls, post_scope, block_entry)
-        join_content_for_param(calls, post_scope.local(name), block_entry)
       end
 
       def index_write?(node)

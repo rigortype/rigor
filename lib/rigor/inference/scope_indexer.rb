@@ -12,6 +12,7 @@ require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
@@ -586,10 +587,12 @@ module Rigor
 
           Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::HashShape
-          return member unless observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+          if observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+            return Type::Combinator.nominal_of("Hash",
+                                               type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          end
 
-          Type::Combinator.nominal_of("Hash",
-                                      type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          widen_member_for_lookup_mutators(member, observed_methods)
         when Type::Constant
           # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every
           # other method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`.
@@ -599,6 +602,18 @@ module Rigor
           Type::Combinator.nominal_of("String")
         else
           member
+        end
+      end
+
+      # A `HashShape` ivar seed some method gave a default, a default proc or identity keys, and no method stored
+      # into, removed from or rewrote: its pairs are the seed's own, so it takes the per-method {HashLookupMutation}
+      # widening rather than the untyped floor above — a present key keeps its value across methods, a missing one
+      # stops reading `nil`.
+      def widen_member_for_lookup_mutators(member, observed_methods)
+        observed_methods.reduce(member) do |acc, method_name|
+          next acc unless acc.is_a?(Type::HashShape)
+
+          HashLookupMutation.widen_shape(acc, method_name) || acc
         end
       end
 

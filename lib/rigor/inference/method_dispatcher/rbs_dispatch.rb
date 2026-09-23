@@ -411,11 +411,19 @@ module Rigor
             [Type::Combinator.union(*tuple.elements)]
           end
 
+          # An open shape's unseen keys may hold any value (rbs-erasure.md § *Open shapes with extra-value
+          # bounds*), so its projection carries a `Dynamic[top]` arm on both sides. Without it every read the
+          # shape tier does not answer — a `Union` receiver, a non-literal key — took the known values for a
+          # key outside them: `h = { a: 1 }; h.default = 0 if flag; h[:b] == 1` folded always-truthy.
           def hash_shape_type_args(shape)
             return [] if shape.pairs.empty?
 
             key_types = shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) }
             value_types = shape.pairs.values
+            if shape.open?
+              key_types += [Type::Combinator.untyped]
+              value_types += [Type::Combinator.untyped]
+            end
             [
               Type::Combinator.union(*key_types),
               Type::Combinator.union(*value_types)

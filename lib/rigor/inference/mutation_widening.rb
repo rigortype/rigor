@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
+require_relative "hash_lookup_mutation"
 require_relative "mutation_rejoin"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
@@ -104,9 +105,9 @@ module Rigor
 
       # Every method name {#widen_for_mutator} responds to — the one set a body scan asks "could an
       # in-place call on this name change its binding?" against (issue #587: the block-return
-      # threading gate). Derived from the two tables above rather than spelled out, so the scan and
-      # the widening it predicts cannot drift apart.
-      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | StringMutation::MUTATORS).freeze
+      # threading gate). Derived from the tables rather than spelled out, so the scan and the
+      # widening it predicts cannot drift apart.
+      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS).freeze
 
       # Methods that return the receiver (or a shallow copy) and cannot mutate it. They must not
       # trigger widening or any other receiver-fact invalidation. The list is intentionally
@@ -294,7 +295,7 @@ module Rigor
 
           join_added_elements(widen_tuple(type, values: values), method_name, arg_types, type.elements)
         when Type::HashShape
-          return nil unless HASH_MUTATORS.include?(method_name)
+          return HashLookupMutation.widen_shape(type, method_name) unless HASH_MUTATORS.include?(method_name)
 
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
@@ -337,10 +338,12 @@ module Rigor
       end
 
       # True when the mutator's own class stands for `member` — the absorbed side of
-      # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call.
+      # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call. A
+      # {HashLookupMutation} name stands for a Hash member as a Hash mutator does.
       def mutation_carrier?(member, method_name)
         (ARRAY_MUTATORS.include?(method_name) && ContentJoin.array_residue(member).empty?) ||
-          (HASH_MUTATORS.include?(method_name) && ContentJoin.hash_residue(member).empty?) ||
+          ((HASH_MUTATORS.include?(method_name) || HashLookupMutation::MUTATORS.include?(method_name)) &&
+            ContentJoin.hash_residue(member).empty?) ||
           (StringMutation::MUTATORS.include?(method_name) && StringMutation.constant?(member))
       end
 
@@ -541,16 +544,17 @@ module Rigor
         Type::Combinator.nominal_of("Array", type_args: [element_type])
       end
 
-      # `HashShape` (closed or open) → `Nominal[Hash, [Kunion, Vunion]]`. Empty / extra-keys-only
-      # shapes degrade to a fully-untyped Hash. Values widen their pinning the same way
-      # {#widen_tuple}'s elements do (issue #560): `opts = {headers: false}` then
-      # `opts[:encoding] = v` must not keep `false` as the whole value bound — redmine's
-      # `import.rb:274` read the stored key back through it and drew a false always-falsey.
+      # Closed `HashShape` → `Nominal[Hash, [Kunion, Vunion]]`. An empty or an open shape degrades to
+      # a fully-untyped Hash: an open shape's unseen keys may hold any value, and one {HashLookupMutation}
+      # opened reads its DEFAULT for a missing key, so a bound built from the known values alone would
+      # pin that read to one of them (`{ a: 1 }` under `default = 0` then `delete(:a)` read `h[:b]` as
+      # `1`). Values widen their pinning the same way {#widen_tuple}'s elements do (issue #560):
+      # `opts = {headers: false}` then `opts[:encoding] = v` must not keep `false` as the whole value
+      # bound — redmine's `import.rb:274` read the stored key back through it and drew a false
+      # always-falsey.
       def widen_hash_shape(shape, values: :widen)
-        if shape.pairs.empty?
-          return Type::Combinator.nominal_of("Hash",
-                                             type_args: [Type::Combinator.untyped,
-                                                         Type::Combinator.untyped])
+        if shape.pairs.empty? || shape.open?
+          return Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
         end
 
         key_type = key_union_for(shape.pairs.keys)

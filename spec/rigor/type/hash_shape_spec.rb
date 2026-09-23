@@ -130,6 +130,12 @@ RSpec.describe Rigor::Type::HashShape do
       expect(shape.erase_to_rbs).to eq("Hash[top, top]")
     end
 
+    it "marks an empty open shape, which is not the empty hash" do
+      shape = described_class.new({}, extra_keys: :open)
+      expect(shape.describe).to eq("{ ... }")
+      expect(shape.erase_to_rbs).to eq("Hash[top, top]")
+    end
+
     it "renders string-keyed shapes with quoted keys in describe" do
       shape = described_class.new("a" => int_nominal)
       expect(shape.describe).to eq("{ \"a\": Integer }")

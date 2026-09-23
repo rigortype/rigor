@@ -103,6 +103,18 @@ end
 assert_type("Array[bool]", nils)
 puts "true first" if nils.first == true
 
+# --- A moving collection keeps its seed arm on every pass: `maybe` can
+# still be nil on an iteration where `grow` has already grown, so
+# `grow`'s store reads both arms. ---
+maybe = gets ? [0] : nil
+grow = [0]
+[1, 2].each do |_x|
+  maybe << [grow].size if maybe
+  grow << (maybe.nil? ? grow.size : -1)
+end
+assert_type("Array[0 | Integer]", grow)
+puts "two" if grow.last == 2
+
 # --- Evidence that grows structurally on every pass never converges, and
 # the slot floors to its one-unknown-store answer: the seed's `[]` element
 # survives beside `Dynamic[top]`. ---

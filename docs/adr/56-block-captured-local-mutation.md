@@ -848,16 +848,19 @@ fixed at `String`, since its join ignores what it stored and already
 holds any String seed. The remaining names MOVE, and `BodyFixpoint`
 iterates their evidence slots (an Array's element union, a Hash's key
 union and value union), each seeded `bot`. Each pass re-types the
-moving stores with every moving collection bound to its seed joined
-with the evidence so far. The final pass value-pin widens the moving
-evidence, and a slot that still grows takes the one-unknown-store
-floor beside the seed's own arms. `h` reads `Hash[Symbol, 0 |
-Integer]`, and `nested << [nested.last]` floors to `Array[Dynamic[top]
-| []]`. The seed is never widened, because it is the zero-iteration
-contents. Neither is a fixed name's evidence, so `acc << 1` beside a
-self-reading store keeps `Array[1]` and the genuine fold it supports.
-This keeps to WD3 rather than adding a second mechanism: the moving
-evidence slots are simply the fixpoint's names.
+moving stores with every moving collection bound, like a fixed one, to
+the union of its seed and its join over the evidence so far, since a
+`nil` seed can still be `nil` on an iteration where another moving
+collection has already grown. The final pass value-pin widens the
+moving evidence, and a slot that still grows takes the
+one-unknown-store floor beside the seed's own arms. `h` reads
+`Hash[Symbol, 0 | Integer]`, and `nested << [nested.last]` floors to
+`Array[Dynamic[top] | []]`. The seed is never widened, because it is
+the zero-iteration contents. Neither is a fixed name's evidence, so
+`acc << 1` beside a self-reading store keeps `Array[1]` and the
+genuine fold it supports. This keeps to WD3 rather than adding a
+second mechanism: the moving evidence slots are simply the fixpoint's
+names.
 
 The fixed/moving split and the memo seam's captured names are the
 review's corrections of a first cut that iterated every name and gave
@@ -875,7 +878,9 @@ overwrote the parameter. Second, the join drops a seed's `nil`, so a
 fixed name bound to its join alone read `out << a.nil?; a ||= []; a <<
 v` as `Array[false]`. Both were new false positives against master,
 and both are why the joined set excludes the block's own names and a
-fixed name keeps its seed.
+fixed name keeps its seed. A moving name then kept its seed only on
+the first pass, which missed a `nil` that outlives another
+collection's growth; it now keeps it on every pass.
 
 A block with no moving name takes a single pass, so `acc = [];
 xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and
@@ -904,13 +909,14 @@ once.
 
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
-captured reads, a parameter shadowing a mutated outer local, and a
-lazily initialised capture (must-not-fire, each pinned by
-`assert_type`), the structural floor, and the #586 accumulator. It also has two controls
-whose always-falsey must still fire: the same counter storing a
-receiver-independent value, and `acc << 1` sharing a block with a
-self-reading store. The spec asserts the exact `flow.*` line set, so a
-seam that went gradual everywhere fails as loudly as the old pin did.
+captured reads, a parameter shadowing a mutated outer local, a lazily
+initialised capture, and a `nil` seed read by another moving store
+(must-not-fire, each pinned by `assert_type`), the structural floor,
+and the #586 accumulator. It also has two controls whose always-falsey
+must still fire: the same counter storing a receiver-independent
+value, and `acc << 1` sharing a block with a self-reading store. The
+spec asserts the exact `flow.*` line set, so a seam that went gradual
+everywhere fails as loudly as the old pin did.
 
 ### WD3 — One mechanism, shared
 

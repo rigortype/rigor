@@ -1648,8 +1648,9 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
-    # The fixpoint stops after `BodyFixpoint::CAP` passes, so a rebind a counter guards runs in none of them, and
-    # the widen on the capped pass erases a `Constant`'s value but leaves a `Tuple` / `HashShape` as it is. The
+    # The fixpoint stops after `BodyFixpoint::CAP` passes, so a rebind a counter guards past the third iteration
+    # runs in none of them, and the widen on the capped pass erases a `Constant`'s value but leaves a `Tuple` /
+    # `HashShape` as it is. The
     # name comes back on its seed, and only the unmoved-pin floor stands between that seed and every position of
     # the fold, so a shape carrier has to count as pinned there.
     describe "(1), a Tuple or HashShape seed the capped fixpoint never moves" do
@@ -1692,7 +1693,8 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "still widens a Constant seed the same fixpoint never moves" do
-        # The capped pass widens `0` to `Integer`, which moves it off its seed, so no floor is needed.
+        # The capped pass widens `0` to `Integer`, which moves it off its seed. That covers a later rebind of the same
+        # class only; a class-changing one (`m = nil if n == 5`) still escapes, issue #1260.
         expect(dumped_type(<<~RUBY)).to eq("[#{(['Integer'] * 6).join(', ')}]")
           n = 0
           m = 0

@@ -1,0 +1,1 @@
+- **[inference]** An instance variable a block rebinds no longer keeps its pre-call value after the call, so `@count = 0; items.each { @count += 1 }; puts "empty" if @count == 0` no longer reports an always-truthy condition, and neither does a flag a stored callback or a lambda sets (`button.on_click { @clicked = true }`). ([#1210](https://github.com/rigortype/rigor/pull/1210))

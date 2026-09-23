@@ -4674,10 +4674,10 @@ module Rigor
         types.empty? ? nil : CapturedLocals::Bindings.new(types: types, marks: marks)
       end
 
-      # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, an empty-witness
-      # refinement under `map!`) is still the entry binding, which says nothing about later iterations;
-      # recording it would make the arity-cap floor ({#unanswered_tail_dependency?}) treat the name as answered
-      # and type the tail from that stale binding. Left out, the name keeps the entry binding below the cap and
+      # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, a refinement under
+      # `sort!`) is still the entry binding, which says nothing about later iterations; recording it would make the
+      # arity-cap floor ({#unanswered_tail_dependency?}) treat the name as answered and type the tail from that
+      # stale binding. Left out, the name keeps the entry binding below the cap and
       # the floor above it, which is the fold's answer without this pass.
       def stored_capture_bindings(stores)
         stores.each_with_object({}) do |(name, sites), bindings|

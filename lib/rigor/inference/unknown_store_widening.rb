@@ -30,10 +30,12 @@ module Rigor
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
-    # that is no carrier, a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a method
-    # its class does not define), or an empty-witness refinement under a mutator that keeps the witness and joins
-    # nothing (`non-empty-array[String]` under `map!`). The caller MUST therefore not read an unchanged binding as
-    # describing later iterations.
+    # that is no carrier, or a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a method
+    # its class does not define). The caller MUST therefore not read an unchanged binding as describing later
+    # iterations. One decline is no claim and does not stand: an empty-witness refinement under a storing mutator
+    # that keeps the witness and joins nothing (`non-empty-array[String]` under `map!`) declines only because the
+    # widening's answer is the pre-state itself, so it takes the gradual arm like any other storing site
+    # ({.unchanged_refinement_store}).
     #
     # The per-element block fold is the consumer: it types every position from one entry scope, so the binding
     # it lays under each position has to hold whatever earlier iterations stored. Unknown evidence is the point,
@@ -63,9 +65,12 @@ module Rigor
 
       COLLECTION_CLASSES = %w[Array Hash].freeze
       FLOORED_CLASSES = %w[Array Hash String].freeze
+      REFINEMENT_MUTATORS = {
+        "Array" => MutationWidening::ARRAY_MUTATORS, "Hash" => MutationWidening::HASH_MUTATORS
+      }.freeze
 
       NO_ARG_NODES = [].freeze
-      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
+      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :REFINEMENT_MUTATORS, :NO_ARG_NODES
 
       module_function
 
@@ -91,10 +96,31 @@ module Rigor
 
       # The straight-line widening of `type` under `method_name`, with the gradual arm on every site that can store.
       def widen_store(type, method_name, arg_types)
+        value_preserving = VALUE_PRESERVING.include?(method_name)
         widened = MutationWidening.widen_for_mutator(type, method_name, arg_types: arg_types)
-        return nil if widened.nil?
+        return value_preserving ? nil : unchanged_refinement_store(type, method_name) if widened.nil?
 
-        VALUE_PRESERVING.include?(method_name) && !literal_carrier?(type) ? widened : gradual_content(widened)
+        value_preserving && !literal_carrier?(type) ? widened : gradual_content(widened)
+      end
+
+      # The gradual arm for a storing site whose straight-line widening declined only because it answered the
+      # pre-state itself: an empty-witness `Array` / `Hash` refinement under a mutator its base's table lists, which
+      # keeps the witness and joins nothing (`non-empty-array[String]` under `map!`). A `Union` takes it member by
+      # member, and `nil` when no member is such a refinement — a precise nominal on its own stays declined.
+      def unchanged_refinement_store(type, method_name)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        return nil unless members.any? { |member| rewritable_refinement?(member, method_name) }
+
+        Type::Combinator.union(
+          *members.map { |member| rewritable_refinement?(member, method_name) ? gradual_content(member) : member }
+        )
+      end
+
+      def rewritable_refinement?(type, method_name)
+        return false unless type.is_a?(Type::Difference) && type.removes_empty_witness?
+
+        table = REFINEMENT_MUTATORS[type.base.class_name]
+        !table.nil? && table.include?(method_name)
       end
 
       # Every `Array` / `Hash` / `String` carrier `type` can be as its bare carrier: `Array[Dynamic[top]]`,

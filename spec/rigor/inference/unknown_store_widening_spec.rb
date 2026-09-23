@@ -93,6 +93,55 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.removes_empty_witness?).to be(true)
     end
 
+    # `map!` keeps the witness and joins nothing, so the straight-line widening answers the refinement itself and
+    # declines. That is a stale answer, not a claim: the site rewrites every element, so the base takes the arm.
+    describe "an empty-witness refinement whose widening declines" do
+      let(:non_empty_strings) { Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String")) }
+
+      it "gives a class-changing site the gradual arm and keeps the witness" do
+        widened = described_class.widen(non_empty_strings, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
+        expect(widened.describe).to eq("non-empty-array[Dynamic[top] | String]")
+        expect(widened.removes_empty_witness?).to be(true)
+      end
+
+      it "gives a Hash refinement a value-rewriting site the gradual arm" do
+        seed = Rigor::Type::Combinator.non_empty_hash(
+          Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.nominal_of("String")
+        )
+        widened = described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h.transform_values!(&:to_sym) }\n"))
+        expect(widened.describe).to eq("non-empty-hash[Dynamic[top] | String, Dynamic[top] | String]")
+      end
+
+      it "gives the refinement member of a union the arm and keeps the other members" do
+        seed = Rigor::Type::Combinator.union(non_empty_strings, Rigor::Type::Combinator.constant_of(nil))
+        widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
+        expect(widened).to eq(
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.non_empty_array(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("String"),
+                                            Rigor::Type::Combinator.untyped)
+            ),
+            Rigor::Type::Combinator.constant_of(nil)
+          )
+        )
+      end
+
+      it "leaves the refinement unchanged under a site that only reorders" do
+        expect(described_class.widen(non_empty_strings, sites_of("a = []\n[1].each { |e| a.sort! }\n")))
+          .to eq(non_empty_strings)
+      end
+
+      it "leaves the refinement unchanged under a name its base's table does not list" do
+        expect(described_class.widen(non_empty_strings, sites_of("a = []\n[1].each { |e| a.store(e, e) }\n")))
+          .to eq(non_empty_strings)
+      end
+
+      it "leaves a precise nominal on its own unchanged under the same site" do
+        precise = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
+        expect(described_class.widen(precise, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))).to eq(precise)
+      end
+    end
+
     # `Hash#shift` removes a pair as `delete` does; before it was listed as a Hash mutator the widening declined it
     # and the site left the literal as it was.
     it "gives a literal Hash a `shift` closes the gradual arm, as `delete` does" do

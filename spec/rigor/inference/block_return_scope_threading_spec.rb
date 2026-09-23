@@ -1923,6 +1923,13 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(flow_rules("#{source}puts 'hit' if r")).to be_empty
     end
 
+    it "widens a parenthesised global the body mutates in place" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        $gp = []
+        dump_type([1, 2].find { |x| n = $gp.size; ($gp) << x; n == 1 })
+      RUBY
+    end
+
     it "keeps the fixpoint of a counter whose every rebind is threaded" do
       # The paired control: the same `||=` and `+=` as statements are both threaded, so the fixpoint is the
       # answer and nothing is floored.
@@ -2064,6 +2071,18 @@ RSpec.describe "block-return scope threading", type: :runner do
         buf = "abc"
         m = Mutex.new
         dump_type(m.synchronize { out = buf; buf = nil; out })
+      RUBY
+    end
+
+    it "keeps the entry binding under an iterator whose receiver holds at most one element" do
+      # One run at most, so `done` is still `false` when the guard reads it: runtime `[:only]` and `1`.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Symbol]")
+        done = false
+        dump_type([:only].each { |s| break if done; done = true })
+      RUBY
+      expect(dumped_type(<<~RUBY)).to eq("Integer")
+        done = false
+        dump_type(1.times { |i| break if done; done = true })
       RUBY
     end
 

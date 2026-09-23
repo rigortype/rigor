@@ -3662,10 +3662,35 @@ module Rigor
       # Every other call keeps the entry scope, which is exact for a block run once (`m.synchronize { out =
       # buf; buf = nil; out }` is `buf`'s value, and a cross-iteration binding would add the `nil` a second run
       # never reads) and remains the first-iteration pin for an iterator the catalogue does not know.
+      #
+      # A receiver that provably holds at most one element runs the block at most once however it iterates, so
+      # it keeps the entry scope too: `done = false; [:only].each { break if done; done = true }` is `[:only]`,
+      # and the cross-iteration `done` would have typed it `Array[Symbol]?`.
       def block_may_repeat?(call_node, receiver_type)
         return false if BlockCallTiming.candidate_name?(call_node.name)
+        return false if at_most_one_run?(call_node.name, receiver_type)
 
         ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name) == :non_escaping
+      end
+
+      def at_most_one_run?(method_name, receiver_type)
+        case receiver_type
+        when Type::Tuple then receiver_type.elements.size <= 1
+        when Type::HashShape then receiver_type.closed? && receiver_type.pairs.size <= 1
+        when Type::Constant then constant_at_most_one_run?(method_name, receiver_type.value)
+        else false
+        end
+      end
+
+      # `1.times` and a one-element integer range iterate once.
+      def constant_at_most_one_run?(method_name, value)
+        case value
+        when Integer then method_name == :times && value <= 1
+        when Range
+          value.begin.is_a?(Integer) && value.end.is_a?(Integer) &&
+            value.end - value.begin + (value.exclude_end? ? 0 : 1) <= 1
+        else false
+        end
       end
 
       EMPTY_BREAK_ARMS = [].freeze

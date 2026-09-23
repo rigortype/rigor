@@ -219,8 +219,8 @@ module Rigor
       # threading gate threads an index write, `@cache[:first] ||= e; @cache[:first] == 2` would otherwise type
       # every position from the empty entry hash, store THAT position's `e`, and fold `find` to `2` where Ruby,
       # keeping the first iteration's `1`, answers `nil`; `$seen << x; n == 1` after `n = $seen.size` folded
-      # `find` to `nil` the same way. A class variable or global counts only as the receiver itself, not through
-      # a branch that selects it.
+      # `find` to `nil` the same way. A class variable or global counts only as the receiver itself (parentheses
+      # aside), not through a branch that selects it.
       #
       # @param base_scope — the call-site scope the block closes over.
       # @param non_locals — also collect the instance variables, class variables and globals the body mutates
@@ -255,9 +255,11 @@ module Rigor
       private_constant :NON_ALIASED_READS
 
       # The variable reads a mutated receiver can evaluate to: {ReceiverAlias.candidates}' locals and instance
-      # variables, or the class variable or global the receiver reads directly.
+      # variables, or the class variable or global the receiver reads directly, parenthesised or not.
       def mutated_reads(receiver)
-        NON_ALIASED_READS.include?(receiver.class) ? [receiver] : ReceiverAlias.candidates(receiver)
+        direct = receiver
+        direct = direct.body.body.last while direct.is_a?(Prism::ParenthesesNode) && direct.body.is_a?(Prism::StatementsNode)
+        NON_ALIASED_READS.include?(direct.class) ? [direct] : ReceiverAlias.candidates(receiver)
       end
 
       # A local bound at the call site (the block's own names are excluded by the caller), or — under

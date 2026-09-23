@@ -44,15 +44,14 @@ module Rigor
       #
       # Remaining limitations:
       #
-      # * `block_type:` is ignored; method types that constrain the block return type are not yet honored.
-      # * Keyword arguments are not threaded through call_arg_types, so overloads with required keywords
-      #   are skipped (they cannot match the empty kwargs we send).
+      # * Keyword arguments reach `args` only as one trailing hash entry and are not matched against keyword
+      #   parameters, so overloads with required keywords are skipped.
       # * Method-level type parameters bind only from two positions: the block return type (Slice 6 phase C)
       #   and a positional parameter whose declared type is EXACTLY a type variable (issue #303 —
       #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
       #   such as `-> Array[T]`). A variable reachable only through a container position (`Array[T] arg`),
       #   a rest positional (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
-      #   A block-return variable that a parameter also names binds gradually once the call passes an
+      #   A block-return variable that a parameter also names stays unbound once the call passes an
       #   argument (see {compose_block_type_vars}).
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
@@ -1113,44 +1112,35 @@ module Rigor
           # passes an argument. `Enumerable#sum: [U] (?U) { (E) -> U } -> U` adds the block's values to the
           # argument, `Enumerable#inject: [A] (A initial) { (A, E) -> A } -> A` returns the argument for an
           # empty receiver, and `Hash#transform_keys: [K2] (hash[_Key, K2]) { (K) -> K2 } -> Hash[K2, V]`
-          # takes a mapping hit's value without yielding. The binding is then `Dynamic[block_type]`: the
-          # block's type stays the static facet, but no rule may treat it as exact, the reading
-          # {#join_candidate_returns} gives overloads it cannot tell apart. Unioning in the argument is not
-          # sound either, since `[1, 2].each.sum(0.0) { |x| x }` is `3.0`, which neither side contains.
+          # takes a mapping hit's value without yielding. The variable is then bound to `Dynamic[top]`.
+          # `Dynamic[block_type]` would not do: a `Dynamic` receiver dispatches through its static facet
+          # and answers exactly, so a facet that misses the runtime value is wrong one call later
+          # (`(h.sum(0.0) { |_k, v| v } / h.size).nan?` read `Integer#nan?`). Nor would joining in the
+          # argument as it stands, since `[1, 2].each.sum(0.0) { |x| x }` is `3.0`, which neither side
+          # contains. The key stays in the map so {#compose_arg_type_vars} does not bind the variable from
+          # the argument alone.
           def compose_block_type_vars(method_type, type_vars, block_type, args)
             return type_vars if block_type.nil?
 
             block_var_name = method_type_block_return_variable(method_type)
             return type_vars if block_var_name.nil?
 
-            gradual = argument_reaches_variable?(method_type, block_var_name, args)
-            type_vars.merge(block_var_name => gradual ? Type::Combinator.dynamic(block_type) : block_type)
+            shared = argument_reaches_variable?(method_type, block_var_name, args)
+            type_vars.merge(block_var_name => shared ? Type::Combinator.untyped : block_type)
           end
 
           # Whether an argument the call passes may land in a parameter whose type names `name`, anywhere
           # inside it (`hash[_Key, K2]` names `K2`). The argument count is not matched against the
           # parameter list: a `*splat` argument stands for any number of arguments, and keyword arguments
-          # arrive as one more entry in `args`, so any argument counts as reaching every parameter. A call
-          # with no argument reaches none, so `sum { … }` still binds from its block.
+          # arrive as one more entry in `args`, so any argument counts as reaching every parameter.
           def argument_reaches_variable?(method_type, name, args)
             return false if args.empty?
 
-            fun = method_type.type
-            return false unless fun.respond_to?(:required_positionals)
-
-            parameter_types(fun).any? { |type| mentions_variable?(type, name) }
-          end
-
-          def parameter_types(fun)
-            params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals +
-                     fun.required_keywords.values + fun.optional_keywords.values
-            params << fun.rest_positionals if fun.rest_positionals
-            params << fun.rest_keywords if fun.rest_keywords
-            params.map(&:type)
+            method_type.type.each_param.any? { |param| mentions_variable?(param.type, name) }
           end
 
           # A signature nested past {RETURN_TYPE_UNWRAP_DEPTH} counts as naming the variable, which is the
-          # gradual answer.
+          # untyped answer.
           def mentions_variable?(type, name, depth = 0)
             return true if depth > RETURN_TYPE_UNWRAP_DEPTH
             return type.name == name if type.is_a?(::RBS::Types::Variable)

@@ -6,8 +6,9 @@ require "spec_helper"
 # `Enumerable#inject` / `#reduce` (`[A] (A initial) { (A, E) -> A } -> A`), `Enumerable#sum`
 # (`[U] (?U) { (E) -> U } -> U`), `Enumerator.produce` (`[T] (T initial) { (T prev) -> T }`) and
 # `Hash#transform_keys`, whose own tier answers first. With an argument the result depends on it as well
-# as on the block, so a binding read from the block alone is not exact. Each false-positive example here fired on correct code before the binding went gradual; the
-# controls keep the exact answers the change must not touch.
+# as on the block, so the variable is left `Dynamic[top]` instead of taking the block's type. Each
+# false-positive example here fired on correct code while the block alone decided the variable; the ones
+# under "one call later" also fired while it was bound to `Dynamic[block_type]`.
 RSpec.describe "a block-return type variable that a parameter also names", type: :runner do
   def run(source)
     analyze(<<~RUBY)
@@ -32,7 +33,7 @@ RSpec.describe "a block-return type variable that a parameter also names", type:
       dump_type(s)
       puts "three" if s == 3.0
     RUBY
-    expect(dumped_types(result)).to eq(["Dynamic[1 | 2]"])
+    expect(dumped_types(result)).to eq(["Dynamic[top]"])
     expect(rules(result, "flow.always-truthy-condition")).to be_empty
   end
 
@@ -52,17 +53,44 @@ RSpec.describe "a block-return type variable that a parameter also names", type:
       dump_type(e)
       puts e.nan?
     RUBY
-    expect(dumped_types(result)).to eq(["Dynamic[Integer]"])
+    expect(dumped_types(result)).to eq(["Dynamic[top]"])
     expect(rules(result, "call.undefined-method")).to be_empty
   end
 
-  it "keeps Enumerator.produce's element gradual when the initial value differs from the block's" do
+  it "leaves Enumerator.produce's element untyped when the call passes an initial value" do
     # The first element is the initial value, 1; the block's `"a"` comes after it.
-    result = run(<<~RUBY)
-      w = Enumerator.produce(1) { "a" }
-      dump_type(w)
-    RUBY
-    expect(dumped_types(result)).to eq(['Enumerator[Dynamic["a"], bot]'])
+    expect(dumped_types(run('dump_type(Enumerator.produce(1) { "a" })'))).to eq(["Enumerator[Dynamic[top], bot]"])
+  end
+
+  describe "one call later" do
+    it "does not reject Float#nan? on an average over Hash#sum" do
+      # An empty ARGV makes `total` 0.0 and the average NaN.
+      result = run(<<~RUBY)
+        h = ARGV.to_h { |a| [a, a.size] }
+        total = h.sum(0.0) { |_k, v| v }
+        avg = total / h.size
+        puts avg.nan?
+      RUBY
+      expect(rules(result, "call.undefined-method")).to be_empty
+    end
+
+    it "does not fold a comparison against the seed's first element" do
+      # Runtime: `["s", 1, 2]`.
+      result = run(<<~RUBY)
+        x = [1, 2].each.sum(["s"]) { |i| [i] }
+        puts "hit" if x.first == "s"
+      RUBY
+      expect(rules(result, "flow.always-truthy-condition")).to be_empty
+    end
+
+    it "does not fold a predicate the inject seed answers differently" do
+      # An empty ARGV returns the seed, 0.0, whose `integer?` is false.
+      result = run(<<~RUBY)
+        e = ARGV.map(&:to_i).each.inject(0.0) { |_acc, i| i }
+        puts "empty" if e.integer? == false
+      RUBY
+      expect(rules(result, "flow.always-truthy-condition")).to be_empty
+    end
   end
 
   describe "controls" do
@@ -70,6 +98,11 @@ RSpec.describe "a block-return type variable that a parameter also names", type:
       expect(dumped_types(run("dump_type(Mutex.new.synchronize { 1 })"))).to eq(["1"])
     end
 
+    it "keeps an Enumerable#sum without an initial value on its parameterless overload" do
+      expect(dumped_types(run("dump_type(ARGV.each.sum { |s| s.to_f })"))).to eq(["Float | Integer"])
+    end
+
+    # Other tiers answer these ahead of RbsDispatch. They guard against the change rerouting them.
     it "keeps block-only transform_keys on its exact HashShape fold" do
       expect(dumped_types(run("dump_type({ a: 1, b: 2 }.transform_keys { |k| k.to_s })")))
         .to eq(['{ "a": 1, "b": 2 }'])
@@ -83,10 +116,6 @@ RSpec.describe "a block-return type variable that a parameter also names", type:
     it "keeps the mapping-and-block transform_keys answer" do
       expect(dumped_types(run("dump_type({ a: 1, b: 2 }.transform_keys({ a: :x }) { |k| k.to_s })")))
         .to eq(['Hash["a" | "b" | :x, 1 | 2]'])
-    end
-
-    it "keeps an Enumerable#sum without an initial value exact" do
-      expect(dumped_types(run("dump_type(ARGV.each.sum { |s| s.to_f })"))).to eq(["Float | Integer"])
     end
 
     it "keeps the Array#inject fold that joins the seed and the block" do

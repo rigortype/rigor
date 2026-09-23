@@ -447,9 +447,9 @@ module Rigor
       # less the caller-derived rungs a top-level body keeps for reads Ruby raises on. The memoization idiom
       # (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic constant
       # assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue reading
-      # exactly as an unbound variable does — unless another file writes it ({#foreign_constant_binding}). A
-      # path whose base renders no static name (`klass::X`, `self::X`) names no binding the resolver can look
-      # up, and reads as unbound too.
+      # exactly as an unbound variable does — unless a write other than a memo binds it
+      # ({#written_constant_binding}). A path whose base renders no static name (`klass::X`, `self::X`) names
+      # no binding the resolver can look up, and reads as unbound too, on the same condition.
       #
       # One exception is the index rule's: an unbound `||=` whose rvalue has no truthy part is a guard, not a
       # memo. `SETTINGS ||= raise "boot first"` returns only when something the analyzer did not see set
@@ -526,31 +526,48 @@ module Rigor
           rooted = false
         else
           full_name = Source::ConstantPath.qualified_name_or_nil(node.target)
-          return nil if full_name.nil?
+          return unnamed_path_binding(node.target) if full_name.nil?
 
           rooted = Source::ConstantPath.rooted?(node.target)
         end
         resolve_constant_name(full_name, rooted: rooted, caller_derived: false) ||
-          foreign_constant_binding(full_name, rooted)
+          written_constant_binding(full_name, rooted)
       end
 
-      # A constant the plain read cannot resolve may still be one another file writes: its value never
-      # published (`H = { x: 1 }`), or the compound write withdrew it by being the second writer the census
-      # counts. Either way the constant is bound whenever that file has loaded first, to a value the analyzer
-      # does not carry, so the binding is `Dynamic[top]` rather than the memo's unbound reading.
+      # A constant the plain read cannot resolve may still be bound: another file writes a value that never
+      # published (`H = { x: 1 }`), the compound write withdrew one by being the second writer the census
+      # counts, or this file writes it in a form its own table does not carry (`A, B = …`, `A = B = …`). The
+      # value is one the analyzer does not have, so the binding is `Dynamic[top]` rather than the memo's
+      # unbound reading. A `||=` alone never binds, in this file or another, so the memoization idiom keeps
+      # that reading however many files use it.
       #
       # Which name the write reads is the ladder's to decide, not the spelling's: the same resolution runs
-      # again with only the other files' names in the in-source table, so `Other::REGISTRY` elsewhere leaves
-      # a top-level `REGISTRY ||= {}` its memo reading. A write through a base nothing names (`k::X = 1`) may
-      # have written any of them, as the census's conflict rule reads it.
-      def foreign_constant_binding(full_name, rooted)
-        writes = scope.foreign_constant_writes(full_name)
-        return nil if writes.empty?
-        return dynamic_top if writes.each_key.any? { |name| name.start_with?(ScopeIndexer::DYNAMIC_TARGET_PREFIX) }
+      # again with only the census's binding names in the in-source table, so `Other::REGISTRY` elsewhere
+      # leaves a top-level `REGISTRY ||= {}` its memo reading. Two census spellings the ladder cannot reach
+      # still bind: a write through a base nothing names (`k::X = 1`), which may have written any of them,
+      # and a path the census keeps as written ([#690](https://github.com/rigortype/rigor/issues/690)), so
+      # `Foo::BAR = …` inside `module M` binds `M::Foo::BAR ||= 0`.
+      def written_constant_binding(full_name, rooted)
+        names = scope.bound_constant_names(full_name)
+        return nil if names.empty?
+        return dynamic_top if names.any? { |name| unladdered_census_name?(name, full_name) }
 
-        foreign = writes.transform_values { dynamic_top }
-        probe = scope.with_discovery(scope.discovery.with(in_source_constants: foreign))
+        written = names.to_h { |name| [name, dynamic_top] }
+        probe = scope.with_discovery(scope.discovery.with(in_source_constants: written))
         Reflection.resolve_constant_type(full_name, scope: probe, rooted: rooted, caller_derived: false)
+      end
+
+      def unladdered_census_name?(name, full_name)
+        return true if name.start_with?(ScopeIndexer::DYNAMIC_TARGET_PREFIX)
+
+        name.include?("::") && full_name.end_with?("::#{name}")
+      end
+
+      # `self::X ||= v` / `klass::X ||= v` name no constant the resolver can look up, so any binding write
+      # that shares the last segment may be the one the base reaches.
+      def unnamed_path_binding(target)
+        segment = target.name&.to_s
+        dynamic_top if segment && !scope.bound_constant_names(segment).empty?
       end
 
       def compound_operator_result(current, rhs, operator)

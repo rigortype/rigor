@@ -50,6 +50,13 @@ module Rigor
       # seed bundle through `Marshal` unchanged.
       CONSTANT_UNPUBLISHABLE = :unpublishable
 
+      # Issue #617 — the descriptor for a name a file writes ONLY through `||=`. It publishes nothing either,
+      # but it is the memoization idiom rather than a binding: a constant compound write elsewhere keeps its
+      # memo reading beside it ({Scope#bound_constant_names}), where every other form makes that write read
+      # the constant as bound. A second write of any other form in the same file retracts it to
+      # {CONSTANT_UNPUBLISHABLE}.
+      CONSTANT_MEMO = :memo
+
       # Issue #668 — the census key a constant write through a base no name reaches is filed under:
       # `*::LIMIT` for `k::LIMIT = 7`. `*` is not a constant character, so the key can never collide with a
       # name a program writes, while its LAST SEGMENT is the real one — which is what the ADR-46 `constant:`
@@ -6525,10 +6532,13 @@ module Rigor
         end)
       end
 
-      # `[literal]` renders its value; an unpublishable write renders as `?`. Both halves matter: a write
-      # appearing or vanishing moves the signature, and so does the same name's value changing.
+      # `[literal]` renders its value, a `||=`-only name `||`, and an unpublishable write `?`. All three halves
+      # matter: a write appearing or vanishing moves the signature, and so does the same name's value or
+      # memo status changing.
       def constant_descriptor_signature(descriptor)
-        descriptor.is_a?(Array) ? descriptor.first.inspect : "?"
+        return descriptor.first.inspect if descriptor.is_a?(Array)
+
+        descriptor == CONSTANT_MEMO ? "||" : "?"
       end
 
       # The class-declaration + ancestry + member-layout surface of the declaration signature (declared class
@@ -7124,7 +7134,8 @@ module Rigor
 
       # Issue #644 — the cross-file VALUE-constant pre-pass, the twin of {#record_class_sources} for plain
       # constant ASSIGNMENTS. Returns one file's **publication census**: `{qualified name => descriptor}`,
-      # where the descriptor is either `[literal]` (a publishable frozen scalar) or {CONSTANT_UNPUBLISHABLE}.
+      # where the descriptor is `[literal]` (a publishable frozen scalar), {CONSTANT_MEMO}, or
+      # {CONSTANT_UNPUBLISHABLE}.
       #
       # EVERY constant write is censused, whatever its rvalue and whatever its form, because the census is
       # four things at once and only the first cares about the value:
@@ -7134,8 +7145,8 @@ module Rigor
       # 2. the attribution the ADR-46 positive edge reads,
       # 3. the producer whose per-file DIFF re-checks readers on an incremental run
       #    ({Analysis::Incremental.changed_constant_publications}), and
-      # 4. the other files' writes a constant compound write finds its binding among when its plain read
-      #    resolves nothing ({Scope#foreign_constant_writes}).
+      # 4. the writes a constant compound write finds its binding among when its plain read resolves nothing
+      #    ({Scope#bound_constant_names}), which is why a `||=`-only name carries its own descriptor.
       #
       # A write the census cannot see does not merely lose precision — it silently bypasses the conflict rule
       # and publishes a value the program does not have. That is why the operator / multi-assign / chained /
@@ -7301,7 +7312,8 @@ module Rigor
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
           return if singleton_cref
 
-          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables)
+          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables,
+                                       memo: node.is_a?(Prism::ConstantOrWriteNode))
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
           census_path_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
         when Prism::MultiWriteNode
@@ -7313,7 +7325,9 @@ module Rigor
         return if singleton_cref && singleton_self_write?(node.target, self_owner)
 
         record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                     nil, tables, nameable: nameable_write_target?(node.target, self_owner))
+                                     nil, tables,
+                                     nameable: nameable_write_target?(node.target, self_owner),
+                                     memo: node.is_a?(Prism::ConstantPathOrWriteNode))
       end
 
       # A `self`-anchored write target under a self the walk cannot name — inside `class <<`
@@ -7420,13 +7434,22 @@ module Rigor
       # ([#710](https://github.com/rigortype/rigor/issues/710)). The two are separate tables rather than one
       # richer descriptor because a name can be written both ways in one file, and then the file DID declare
       # it however the two writes are ordered.
-      def record_constant_write_census(full, literal, tables, nameable: true, alias_of: nil)
+      #
+      # `memo` marks a `||=` write, which files {CONSTANT_MEMO} for as long as every write of the name in this
+      # file is one.
+      def record_constant_write_census(full, literal, tables, nameable: true, alias_of: nil, memo: false)
         return if full.nil?
 
         tables.declared << full if nameable
         first_write = tables.seen.add?(full)
-        tables.writes[full] = first_write ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+        tables.writes[full] = census_descriptor(tables.writes[full], first_write, literal, memo)
         record_constant_alias_census(full, alias_of, tables, first_write && nameable)
+      end
+
+      def census_descriptor(previous, first_write, literal, memo)
+        return literal || (memo ? CONSTANT_MEMO : CONSTANT_UNPUBLISHABLE) if first_write
+
+        memo && previous == CONSTANT_MEMO ? CONSTANT_MEMO : CONSTANT_UNPUBLISHABLE
       end
 
       # Issue #667 — a name written TWICE is not an alias of anything the walk can name, exactly as it is

@@ -2011,11 +2011,11 @@ module Rigor
 
       # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read only by the recording accessors
       # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
-      # for the constant-write map). A normal run carries neither. Extracted to keep
+      # for the constant-write map). A normal run carries neither of the two. Extracted to keep
       # {#project_scope_seed_tables} under the complexity budget.
       #
-      # Issue #617 — the constant-write map regrouped by last segment rides every run, because a constant
-      # compound write whose plain read resolves nothing reads its binding off it: a TYPE, not an edge.
+      # Issue #617 — the census's binding writes, grouped by last segment, ride every run instead: a constant
+      # compound write whose plain read resolves nothing reads its binding off them, a TYPE rather than an edge.
       def seed_dependency_attribution_tables(tables)
         writers = constant_writer_index
         tables[:constant_writers] = writers unless writers.empty?
@@ -2053,11 +2053,14 @@ module Rigor
         tables[:published_constant_names] = names unless names.empty?
       end
 
-      # Issue #617 — the constant attribution regrouped by last segment (`Scope#foreign_constant_writes`).
+      # Issue #617 — the censused names some write other than a memo `||=` binds, grouped by last segment
+      # (`Scope#bound_constant_names`).
       def constant_writer_index
         @constant_writer_index ||=
-          @project_constant_sources.each_with_object({}) do |(name, paths), index|
-            (index[name.split("::").last] ||= {})[name] = paths
+          @project_constant_writes.each_with_object({}) do |(name, by_path), index|
+            next if by_path.each_value.all?(Inference::ScopeIndexer::CONSTANT_MEMO)
+
+            (index[name.split("::").last] ||= []) << name
           end.each_value(&:freeze).freeze
       end
 

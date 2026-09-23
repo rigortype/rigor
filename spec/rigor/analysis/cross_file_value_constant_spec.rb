@@ -866,7 +866,7 @@ RSpec.describe "cross-file value constants" do
   # is withdrawn by the compound write itself, which the census counts as a second writer. Read as unbound,
   # the write took the memoization idiom's rvalue for a value Ruby stores only when the other file has not
   # loaded yet. Its binding is gradual instead. Each positive is paired with a control whose name nothing
-  # the write resolves to binds, where the ADR-5 memo reading stays.
+  # but a memo `||=` writes, or nothing the write resolves to, where the ADR-5 memo reading stays.
   describe "a compound write to a constant another file writes" do
     def call_rules(files)
       analysed(files, nil) do |result|
@@ -910,6 +910,34 @@ RSpec.describe "cross-file value constants" do
                    "b.rb" => "Rigor.dump_type(SLOT ||= \"s\")\n")).to eq([%("s" | Dynamic[top])])
     end
 
+    it "reads that wildcard as gradual where no census name the ladder reaches shares its segment" do
+      # A `class << self` write is censused under no name, so only the wildcard key carries `REG`.
+      files = {
+        "a.rb" => "class Foo; end\n[Foo].each { |k| k::REG = { x: 1 } }\n",
+        "b.rb" => "class Foo\n  class << self\n    def r = Rigor.dump_type(REG ||= 0)\n  end\nend\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]"])
+    end
+
+    it "reads a foreign write through a `self::` or dynamic base as gradual" do
+      # Runtime: `{ x: 1 }` for both once a.rb has loaded.
+      files = {
+        "a.rb" => "class Foo\n  H2 = { x: 1 }\nend\n",
+        "b.rb" => "class Foo\n  Rigor.dump_type(self::H2 ||= 0)\nend\n" \
+                  "def put(klass) = Rigor.dump_type(klass::H2 ||= 1)\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]", "1 | Dynamic[top]"])
+    end
+
+    it "reads a foreign path write the census keeps as written" do
+      # The census spells `Foo::BAR = …` inside `module M` as `Foo::BAR` (#690), a name the ladder never tries.
+      files = {
+        "a.rb" => "module M\n  module Foo; end\n  Foo::BAR = { x: 1 }\nend\n",
+        "b.rb" => "Rigor.dump_type(M::Foo::BAR ||= 0)\n"
+      }
+      expect(dumps(files)).to eq(["0 | Dynamic[top]"])
+    end
+
     it "keeps the memo reading for a name the ladder cannot reach from the write" do
       # Runtime: `{}`. `Other::REGISTRY` is not the top-level `REGISTRY` the memo writes.
       files = {
@@ -919,12 +947,41 @@ RSpec.describe "cross-file value constants" do
       expect(dumps(files)).to eq(["{}"])
     end
 
-    it "keeps the memo reading for a name only the writing file's compound writes touch" do
+    it "keeps a top-level memo off a foreign constant of the namespace that calls it" do
+      # Runtime: `{}`. The caller's `Plugin::REGISTRY` is written in a.rb, but Ruby resolves the top-level
+      # `def`'s `REGISTRY` at the top level, where only the memo writes it.
       files = {
-        "a.rb" => "UNRELATED = { x: 1 }\n",
-        "b.rb" => "def registry = Rigor.dump_type(REGISTRY ||= {})\ndef reset = (REGISTRY &&= {})\n"
+        "a.rb" => "class Plugin\n  REGISTRY = \"plugins\"\nend\n",
+        "b.rb" => "def registry = (REGISTRY ||= {})\n\nclass Plugin\n  def entries = Rigor.dump_type(registry)\nend\n"
       }
       expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "keeps a rooted memo off a nearer foreign constant" do
+      # Runtime: `0`. `::ROOT` is the top-level constant, which nothing but the memo writes.
+      files = {
+        "a.rb" => "module Mod\n  ROOT = { a: 1 }\nend\n",
+        "b.rb" => "module Mod\n  Rigor.dump_type(::ROOT ||= 0)\nend\n"
+      }
+      expect(dumps(files)).to eq(["0"])
+    end
+
+    it "keeps the memo reading beside other memos of the name, in this file or another" do
+      files = {
+        "a.rb" => "def other_registry = (REGISTRY ||= {})\n",
+        "b.rb" => "def registry = Rigor.dump_type(REGISTRY ||= {})\ndef again = (REGISTRY ||= {})\n"
+      }
+      expect(dumps(files)).to eq(["{}"])
+    end
+
+    it "keeps the memo reading at a call site in another file" do
+      # Runtime: `{}` at both calls. The callee body is typed with the caller's scope, so the memo's own write
+      # must not look like another file's.
+      files = {
+        "c.rb" => "class Reg\n  def self.all = (REGISTRY ||= {})\n  Rigor.dump_type(all)\nend\n",
+        "b.rb" => "Rigor.dump_type(Reg.all)\n"
+      }
+      expect(dumps(files)).to eq(["{}", "{}"])
     end
   end
 end

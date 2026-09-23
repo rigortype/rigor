@@ -1310,6 +1310,244 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # The HashShape per-pair fold (`try_hash_shape_block_fold`) types each pair's block from the call's entry
+  # scope, one pair at a time, and assembles an exact shape. Two runtime behaviours break that model, and each
+  # declined case below is paired with the fold it must leave alone.
+  describe "HashShape per-pair fold declines", type: :runner do
+    def dumped_types(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+    end
+
+    # `count` dumps, each the dispatcher's `Hash` nominal rather than a folded shape: `Hash[K, V]` for the
+    # non-bang forms, the bare `Hash` the bang forms' `-> self` projects. The count is part of the assertion:
+    # `all` alone passes a fixture whose dumps went missing.
+    def all_declined(count) = match(Array.new(count) { match(/\AHash(\[|\z)/) })
+
+    # Every error-severity rule plus the always-truthy / always-falsey family: what a wrong exact shape
+    # reports on correct code.
+    def reported_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.rule if diagnostic.severity == :error || diagnostic.rule.to_s.start_with?("flow.")
+      end
+    end
+
+    # `transform_keys(hash)` renames the keys the mapping names and hands only the rest to the block; the fold
+    # never read the argument, so it answered the block's keys for every pair.
+    describe "a transform_keys mapping-hash argument" do
+      it "declines instead of ignoring the mapping" do
+        # Runtime `{ z: 1, b: 2 }`; the fold answered `{ a: 1, b: 2 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(1)
+          dump_type({ a: 1, b: 2 }.transform_keys({ a: :z }) { |k| k })
+        RUBY
+      end
+
+      it "no longer reports a nil receiver on the renamed key" do
+        # THE REPORTED HAZARD: `r[:z]` read `nil` off the unrenamed shape, so `+` fired on correct code.
+        expect(reported_rules(<<~RUBY)).to be_empty
+          r = { a: 1, b: 2 }.transform_keys({ a: :z }) { |k| k }
+          r[:z] + 1
+        RUBY
+      end
+
+      it "declines the bang form and the &:symbol block alike" do
+        # Runtime `{ z: 1, b: 2 }` and `{ z: 1, "b" => 2 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(2)
+          h = { a: 1, b: 2 }
+          dump_type(h.transform_keys!({ a: :z }) { |k| k })
+          dump_type({ a: 1, b: 2 }.transform_keys({ a: :z }, &:to_s))
+        RUBY
+      end
+
+      it "still folds a block-only transform_keys" do
+        expect(dumped_types(<<~RUBY)).to eq(['{ "a": 1, "b": 2 }'])
+          dump_type({ a: 1, b: 2 }.transform_keys { |k| k.to_s })
+        RUBY
+      end
+    end
+
+    # `transform_values!` / `transform_keys!` rewrite the receiver pair by pair while they iterate, so a block
+    # that reads the receiver sees the pairs already rewritten; the fold typed every pair against the pre-call
+    # shape. The non-bang forms build a new hash and leave the receiver alone, so they keep the exact fold.
+    # The gate is `Inference::ReceiverBlindBlock`; its own spec covers each carrier and node kind.
+    describe "an in-place transform whose block reads the receiver" do
+      it "declines transform_values! when the block reads the receiver's local" do
+        # Runtime `{ x: 2, y: 4 }`: the second pair reads the rewritten `h[:x] == 2`. The fold answered
+        # `{ x: 2, y: 3 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(1)
+          h = { x: 1, y: 2 }
+          dump_type(h.transform_values! { |e| h[:x] + e })
+        RUBY
+      end
+
+      it "no longer reports the condition the pre-call shape used to fold" do
+        # `r[:y]` is `4` at runtime; the fold's `3` made `r[:y] == 3` always truthy.
+        expect(reported_rules(<<~RUBY)).to be_empty
+          h = { x: 1, y: 2 }
+          r = h.transform_values! { |e| h[:x] + e }
+          puts "x" if r[:y] == 3
+        RUBY
+      end
+
+      it "declines transform_keys! when the block reads the receiver" do
+        # Runtime `{ z: 1, w: 2 }`: `:a` is gone by the second pair. The fold answered `{ z: 1, b: 2 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(1)
+          h = { a: 1, b: 2 }
+          dump_type(h.transform_keys! { |k| k == :a ? :z : (h.key?(:a) ? :b : :w) })
+        RUBY
+      end
+
+      it "declines when the receiver is read through another local, a container, or a nested block" do
+        # The engine does not track which bindings name the same object, so the gate is what the read can
+        # carry, not the receiver's own name.
+        expect(dumped_types(<<~RUBY)).to all_declined(3)
+          g = { x: 1, y: 2 }
+          other = g
+          dump_type(g.transform_values! { |e| other[:x] + e })
+          holder = [{ x: 1, y: 2 }]
+          dump_type(holder[0].transform_values! { |e| holder[0][:x] + e })
+          n = { x: 1, y: 2 }
+          dump_type(n.transform_values! { |e| [1].map { n[:x] }.first + e })
+        RUBY
+      end
+
+      it "declines an instance-variable and a global-variable receiver" do
+        expect(dumped_types(<<~RUBY)).to all_declined(2)
+          def run
+            @h = { x: 1, y: 2 }
+            dump_type(@h.transform_values! { |e| @h[:x] + e })
+          end
+          $h = { x: 1, y: 2 }
+          dump_type($h.transform_values! { |e| $h[:x] + e })
+        RUBY
+      end
+
+      it "declines when the receiver is read through a constant" do
+        # Runtime `{ x: 2, y: 4 }` for the first two: `E` and `M::TABLE` name the hash being rewritten. The third
+        # stores `F` into itself, so each value is the rewritten hash, never the pre-call `{ x: 1, y: 2 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(3)
+          E = { x: 1, y: 2 }
+          h = E
+          dump_type(h.transform_values! { |e| E[:x] + e })
+          F = { x: 1, y: 2 }
+          f = F
+          dump_type(f.transform_values! { |e| F })
+          module M
+            TABLE = { x: 1, y: 2 }
+            def self.run
+              t = TABLE
+              dump_type(t.transform_values! { |e| M::TABLE[:x] + e })
+            end
+          end
+        RUBY
+      end
+
+      it "no longer reports the condition a constant read used to fold" do
+        expect(reported_rules(<<~RUBY)).to be_empty
+          E = { x: 1, y: 2 }
+          h = E
+          r = h.transform_values! { |e| E[:x] + e }
+          puts "x" if r[:y] == 3
+        RUBY
+      end
+
+      it "declines when the receiver is read through a bound method or a value-pinned Hash nominal" do
+        # `m` is `Method<{ x: 1, y: 2 }#[]>`, and `other` is `Hash[:x | :y, 1 | 2]`: both carry the pre-call
+        # contents of the object being rewritten. Runtime `{ x: 2, y: 4 }` and `{ x: 11, y: 112 }`.
+        expect(dumped_types(<<~RUBY)).to all_declined(2)
+          h = { x: 1, y: 2 }
+          m = h.method(:[])
+          dump_type(h.transform_values! { |e| m.call(:x) + e })
+          g = { x: 1, y: 2 }
+          other = g.then { it }
+          dump_type(g.transform_values! { |e| other[:x] * 10 + e })
+        RUBY
+      end
+
+      it "declines when the block reaches the receiver through a method call" do
+        # Runtime `{ x: 2, y: 4 }` for each: `Registry.store` and `tbl` return the hash being rewritten.
+        expect(dumped_types(<<~RUBY)).to all_declined(2)
+          module Registry
+            STORE = { x: 1, y: 2 }
+            def self.store = STORE
+          end
+          dump_type(Registry.store.transform_values! { |e| Registry.store[:x] + e })
+          TBL = { x: 1, y: 2 }
+          def tbl = TBL
+          dump_type(tbl.transform_values! { |e| tbl[:x] + e })
+        RUBY
+      end
+
+      it "no longer reports the condition a method-call read used to fold" do
+        expect(reported_rules(<<~RUBY)).to be_empty
+          module Registry
+            STORE = { x: 1, y: 2 }
+            def self.store = STORE
+          end
+          r = Registry.store.transform_values! { |e| Registry.store[:x] + e }
+          puts "3" if r[:y] == 3
+        RUBY
+      end
+
+      it "orders a transform_keys! fold the way the in-place rewrite leaves the pairs" do
+        # CRuby stores a new key that names an old key not yet reached in that old key's slot, so the bang form
+        # ends `{ c: 2, a: 1, b: 3 }` while the non-bang form builds `{ a: 1, c: 2, b: 3 }`.
+        expect(dumped_types(<<~RUBY)).to eq(["{ c: 2, a: 1, b: 3 }", "{ b: 1, z: 2, c: 3 }", "{ a: 1, c: 2, b: 3 }"])
+          h = { a: 1, b: 2, c: 3 }
+          dump_type(h.transform_keys! { |k| k == :b ? :c : (k == :c ? :b : k) })
+          g = { a: 1, b: 2, c: 3 }
+          dump_type(g.transform_keys! { |k| k == :a ? :b : (k == :b ? :z : k) })
+          dump_type({ a: 1, b: 2, c: 3 }.transform_keys { |k| k == :b ? :c : (k == :c ? :b : k) })
+        RUBY
+      end
+
+      it "reads the first key the in-place rewrite leaves, not the first key iterated" do
+        # `r.keys.first` is `:c` at runtime. The iteration order answered `:a`, so `r.keys.first == :a` was
+        # reported always truthy on correct code.
+        expect(dumped_types(<<~RUBY)).to eq([":c"])
+          h = { a: 1, b: 2, c: 3 }
+          r = h.transform_keys! { |k| k == :b ? :c : (k == :c ? :b : k) }
+          dump_type(r.keys.first)
+        RUBY
+      end
+
+      it "still folds the non-bang transform_values reading its receiver" do
+        # Runtime `{ x: 2, y: 3 }`: the receiver is not rewritten, so every pair reads `h[:x] == 1`.
+        expect(dumped_types(<<~RUBY)).to eq(["{ x: 2, y: 3 }"])
+          h = { x: 1, y: 2 }
+          dump_type(h.transform_values { |e| h[:x] + e })
+        RUBY
+      end
+
+      it "still folds an in-place transform whose block reads no hash contents" do
+        expect(dumped_types(<<~RUBY)).to eq(["{ x: 3, y: 6 }", "{ x: 2, y: 3 }", "{ x: 2, y: 3 }", "{ x: 2, y: 3 }"])
+          factor = 3
+          f = { x: 1, y: 2 }
+          dump_type(f.transform_values! { |e| e * factor })
+          g = { x: 1, y: 2 }
+          dump_type(g.transform_values!(&:succ))
+          h = { x: 1, y: 2 }
+          dump_type(h.transform_values! { |h| h + 1 })
+          i = { x: 1, y: 2 }
+          dump_type(i.transform_values! { it + 1 })
+        RUBY
+      end
+
+      it "still folds when a nested block parameter shadows the receiver, or a call is rooted at a literal" do
+        # The nested `|n|` is declared inside the block tree (Prism depth 0 there), so it is not the outer `n`.
+        expect(dumped_types(<<~RUBY)).to eq(["{ x: 2, y: 3 }", "{ a: 1, other: 2 }"])
+          n = { x: 1, y: 2 }
+          dump_type(n.transform_values! { |e| [e].map { |n| n + 1 }.first })
+          k = { a: 1, b: 2 }
+          dump_type(k.transform_keys! { |key| %i[a].include?(key) ? key : :other })
+        RUBY
+      end
+    end
+  end
+
   describe "control flow (Slice 3 phase 1)" do
     let(:tracer) { Rigor::Inference::FallbackTracer.new }
 

@@ -4650,9 +4650,10 @@ module Rigor
       end
 
       def fold_hash_shape_transform_values(shape, block_arg)
+        captured = hash_block_captured_bindings(block_arg, shape.pairs.values)
         new_pairs = {}
         shape.pairs.each do |key, value|
-          new_value = apply_hash_block(block_arg, value)
+          new_value = apply_hash_block(block_arg, value, captured: captured)
           return nil if new_value.nil?
 
           new_pairs[key] = new_value
@@ -4661,10 +4662,11 @@ module Rigor
       end
 
       def fold_hash_shape_transform_keys(shape, block_arg)
+        key_types = shape.pairs.keys.map { |key| Type::Combinator.constant_of(key) }
+        captured = hash_block_captured_bindings(block_arg, key_types)
         new_pairs = {}
-        shape.pairs.each do |key, value|
-          key_type = Type::Combinator.constant_of(key)
-          new_key_type = apply_hash_block(block_arg, key_type)
+        key_types.zip(shape.pairs.values).each do |key_type, value|
+          new_key_type = apply_hash_block(block_arg, key_type, captured: captured)
           return nil unless new_key_type.is_a?(Type::Constant)
 
           new_key = new_key_type.value
@@ -4676,12 +4678,30 @@ module Rigor
         Type::Combinator.hash_shape_of(new_pairs)
       end
 
+      # The per-pair twin of issue #587 (b)'s first-iteration pin. Every pair is typed from the SAME entry scope,
+      # so a body that rebinds a captured outer local answered the first pair's value at every pair: `total = 0;
+      # { x: 1, y: 2 }.transform_values { total += 1 }` folded to `{ x: 1, y: 1 }` (runtime `{ x: 1, y: 2 }`),
+      # and `r[:y] == 1` then fired always-truthy on correct code. The pairs take the per-element fold's
+      # captured-local entry binding ({#per_element_captured_bindings}) — the fixpoint's block parameter bound
+      # to the union of the values, or of the `Constant` keys — rather than a copy of it: issue #1198 is where
+      # the block-entry models consolidate. A captured local the body does not change keeps its exact per-pair
+      # fold, and a `&:symbol` block captures nothing.
+      #
+      # An empty shape has no pair to type, so it does not pay for the fixpoint.
+      def hash_block_captured_bindings(block_arg, param_types)
+        return nil unless block_arg.is_a?(Prism::BlockNode)
+        return nil if param_types.empty?
+
+        per_element_captured_bindings(block_arg, param_types)
+      end
+
       # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to
-      # `param_type` and returns the resulting type, or `nil` on failure.
-      def apply_hash_block(block_arg, param_type)
+      # `param_type` and returns the resulting type, or `nil` on failure. `captured:` is the pair-independent
+      # entry binding from {#hash_block_captured_bindings}.
+      def apply_hash_block(block_arg, param_type, captured: nil)
         case block_arg
         when Prism::BlockNode
-          type_block_body_with_param(block_arg, [param_type])
+          type_block_body_with_param(block_arg, [param_type], captured: captured)
         when Prism::BlockArgumentNode
           expression = block_arg.expression
           return nil unless expression.is_a?(Prism::SymbolNode)

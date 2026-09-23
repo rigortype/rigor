@@ -834,22 +834,35 @@ its `Dynamic` arm quiets every later read of the collection —
 `h[:a].upcase` goes silent — for a store whose value the engine can in
 fact bound. **Decision: iterate the evidence.** The block seam and
 `each_with_object` share one join
-(`StatementEvaluator#join_content_to_fixpoint`) that runs
-`BodyFixpoint` over the evidence slots — an Array's element union, a
-Hash's key union and value union — each seeded `bot`. Each pass
-re-types the stores with every mutated collection bound to its seed
-joined with the evidence so far; the final pass value-pin widens the
-evidence, and a slot that still grows takes the one-unknown-store
-floor beside the seed's own arms. `h` reads `Hash[Symbol, 0 |
-Integer]`, and `nested << [nested.last]` floors to
-`Array[Dynamic[top] | []]`. The seed is never widened: it is the
-zero-iteration contents. This is WD3 kept rather than a second
-mechanism — the evidence slots are simply the fixpoint's names.
+(`StatementEvaluator#join_content_to_fixpoint`), which binds each
+collection a store reads to what it holds at ANY iteration's entry.
+A name none of whose stores reads a mutated Array or Hash is FIXED:
+its evidence is the same on every iteration, so it is typed once and
+the name is bound to its own join. A String is always fixed at
+`String`, since its join ignores what it stored. The remaining names
+MOVE, and `BodyFixpoint` iterates their evidence slots (an Array's
+element union, a Hash's key union and value union), each seeded
+`bot`. Each pass re-types the moving stores with every moving
+collection bound to its seed joined with the evidence so far. The
+final pass value-pin widens the moving evidence, and a slot that
+still grows takes the one-unknown-store floor beside the seed's own
+arms. `h` reads `Hash[Symbol, 0 | Integer]`, and
+`nested << [nested.last]` floors to `Array[Dynamic[top] | []]`. The
+seed is never widened, because it is the zero-iteration contents.
+Neither is a fixed name's evidence, so `acc << 1` beside a
+self-reading store keeps `Array[1]` and the genuine fold it supports.
+This keeps to WD3 rather than adding a second mechanism: the moving
+evidence slots are simply the fixpoint's names.
 
-The iteration runs only when a store can read a collection the join
-moves: a local read of a mutated name among a mutator's arguments, or
-an Array-side compound index write, whose stored value reads the slot
-it overwrites. Every other block keeps the single pass, so `acc = [];
+The fixed/moving split is the review's correction of a first cut that
+iterated every name. A String has no evidence slot, so it never
+counted as having moved and stayed at its seed on every pass:
+`buf << w; lens << buf.length` read `Array[0]` and folded
+`lens.last == 4` always-falsey. `BodyFixpoint` also widens every name
+on its final pass, so a store that read nothing lost its constants
+whenever it shared a block with one that needed the widening.
+
+A block with no moving name keeps the single pass, so `acc = [];
 xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and
 the common block pays one walk over its mutators' arguments. The loop
 seam needed nothing: it types its evidence against `post_loop`, where
@@ -863,14 +876,21 @@ still reads a captured local the body REBINDS at its pre-call binding
 reads `Array[0]`), and slice A's rebind fixpoint reads a
 content-mutated capture at its pre-call contents (`last = nil; [1,
 2].each { |x| last = a.last; a << x }` leaves `last` at `0?` over
-`a = [0]`).
+`a = [0]`). The final-pass widening is also trusted without a
+further pass, which is `BodyFixpoint`'s own shape and so slice A's
+too. A store whose value only changes class after the widened bound
+(`h[k] = h[k] == 10 ? :done : h[k] + 1` over eleven iterations) still
+reads `0 | Integer` without its `:done`. Re-checking the widened
+assumption belongs to `BodyFixpoint`, for every slice at once.
 
 Gate: the `block_content_self_read` fixture carries the six
-self-reading shapes (must-not-fire, each pinned by `assert_type`), the
-structural floor, the #586 accumulator, and a same-shape control that
-stores a receiver-independent value and whose always-falsey must still
-fire. The spec asserts the exact `flow.*` line set, so a seam that went
-gradual everywhere fails as loudly as the old pin did.
+self-reading shapes and the String read (must-not-fire, each pinned by
+`assert_type`), the structural floor, and the #586 accumulator. It
+also has two controls whose always-falsey must still fire: the same
+counter storing a receiver-independent value, and `acc << 1` sharing a
+block with a self-reading store. The spec asserts the exact `flow.*`
+line set, so a seam that went gradual everywhere fails as loudly as
+the old pin did.
 
 ### WD3 — One mechanism, shared
 

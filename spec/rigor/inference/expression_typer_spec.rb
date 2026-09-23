@@ -1889,6 +1889,26 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(statement_type("h = { a: nil }\nh[:a] &&= 3\n", 1).describe).to eq("3?")
     end
 
+    it "reads a `||=` on an untracked slot as the rvalue (the memoization idiom)" do
+      # `def self.local(name) = @local_targets[name] ||= new(...)` — nothing wrote `@local_targets` on any
+      # path the analyzer saw. The variable rule's ADR-5 optimism; `Dynamic[top] | rhs` skipped the sig.
+      expect(scope.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+    end
+
+    it "reads the nested memo `(@m ||= {})[key] ||= v` as the rvalue" do
+      # `Effects::Registry.for_configuration`: the receiver is typed, but a non-literal key's slot is not.
+      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= 7")).describe).to eq("7")
+    end
+
+    it "reads a receiver bound to Dynamic the same way, since its slot is just as untracked" do
+      bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped)
+      expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+    end
+
+    it "gives an operator write on an untracked slot no optimistic reading (control)" do
+      expect(scope.type_of(parse_expression("@cache[:k] += 1")).describe).to eq("Dynamic[top]")
+    end
+
     it "agrees with the statement evaluator's answer for every operator" do
       ["h[:a] += 1", "h[:a] ||= 3", "h[:a] &&= 3"].each do |write|
         root = Prism.parse("h = { a: 1 }\n#{write}\n").value

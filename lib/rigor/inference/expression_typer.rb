@@ -438,6 +438,10 @@ module Rigor
       # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
       # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
       # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
+      #
+      # One exception carries over from {#type_of_compound_variable_write}: a memoizing `||=` / `&&=` whose slot
+      # the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it, because it
+      # is decided on the `[]` read the evaluator performs.
       def type_of_index_compound_write(node)
         StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
       end

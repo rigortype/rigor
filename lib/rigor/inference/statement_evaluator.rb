@@ -287,7 +287,20 @@ module Rigor
       # through `[]=` ({#index_write_stored_type}). The `[]=` widening and the indexed-narrowing record are scope
       # effects, so they stay with {#eval_index_or_write} / {#eval_index_write}. `ExpressionTyper` types a
       # value-position index compound write from here, so the two positions share one algebra.
+      #
+      # A `||=` / `&&=` whose `[]` read is gradual reads as the rvalue instead. That is the memoization idiom —
+      # `CACHE[key] ||= build(key)`, `(@memo ||= {})[[a, b]] ||= compute`, `@targets[name] ||= new(name)` on an
+      # ivar the method never writes — and the variable form's optimism for an unbound target
+      # (`ExpressionTyper#type_of_compound_variable_write`): with no evidence about the slot, the value the
+      # idiom returns is the one it stores. `Dynamic[top] | rhs` sent every such method to
+      # `sig.skipped.untyped-return` where the rvalue reading had typed it. An operator write has no such
+      # reading, for a variable target or an index one.
       def index_compound_write_value(node)
+        if (node.is_a?(Prism::IndexOrWriteNode) || node.is_a?(Prism::IndexAndWriteNode)) &&
+           index_read_type(node, scope).is_a?(Type::Dynamic)
+          return scope.type_of(node.value, tracer: tracer)
+        end
+
         index_write_stored_type(node, scope)
       end
 

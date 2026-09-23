@@ -29,6 +29,7 @@ require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
+require_relative "unknown_store_widening"
 require_relative "version_guard"
 
 module Rigor
@@ -2640,6 +2641,12 @@ module Rigor
       #
       # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
       # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
+      #
+      # Every pass reads a captured local the body mutates IN PLACE at its unknown-store widening
+      # ({#stored_capture_bindings}, {#stored_rebound_bindings}), never at the contents the collection held before the
+      # call: only the rebound names move between passes, so a rebind read from such a collection (`last = a.last; a
+      # << x`) would otherwise record the first iteration's answer on every pass and the fixpoint would close over it
+      # (ADR-56 WD2.13, second residue).
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -2648,15 +2655,50 @@ module Rigor
         names = CapturedLocals.writes(block, scope)
         return post_scope if names.empty?
 
+        stores = CapturedLocals.content_mutations(block, scope)
+        stored = stored_capture_bindings(stores, names)
         seed = names.to_h { |name| [name, scope.local(name)] }
         result = BodyFixpoint.converge(
           names: names,
           seed_bindings: seed,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
+          evaluate_body: lambda { |bindings|
+            block_exit_bindings(call_node, block, stored.merge(stored_rebound_bindings(stores, bindings)), names)
+          }
         )
 
         result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # The entry binding, in every rebind pass, of each captured local the body mutates in place without rebinding
+      # it: the call-site binding widened as the straight-line seam widens it for a store of UNKNOWN values at every
+      # mutation site ({UnknownStoreWidening.widen}), so it holds whatever any earlier iteration stored. The stored
+      # values are not typed: one computed from the collection's own entry contents is the same first-iteration
+      # answer. Empty for the common body that mutates nothing captured.
+      #
+      # The price is the gradual arm on a rebind that reads such a collection — `last = a.last; a << x` over `a =
+      # [0]` reads `0 | Dynamic[top] | nil`, not `0 | 1 | 2 | nil`. Precise evidence would mean iterating this
+      # fixpoint jointly with slice C's content join; ADR-56 WD2.13 records why that was not taken.
+      def stored_capture_bindings(stores, rebound)
+        stores.each_with_object({}) do |(name, sites), bindings|
+          next if rebound.include?(name)
+
+          seed = scope.local(name)
+          bindings[name] = UnknownStoreWidening.widen(seed, sites) unless seed.nil?
+        end
+      end
+
+      # A name the body both rebinds and mutates in place takes the same widening over the pass's running
+      # assumption, as the per-element fold widens the same name (#587 (b)). The assumption alone is not enough: it
+      # carries the exits of the body's own straight-line seam, which can close the collection without a gradual
+      # arm (`stack ||= [0]; top = stack.pop; stack.push(x)` kept `stack` at `Array[0]` and `top` at `0?`).
+      def stored_rebound_bindings(stores, bindings)
+        return bindings if stores.empty?
+
+        bindings.to_h do |name, type|
+          sites = stores[name]
+          [name, sites.nil? || type.nil? ? type : UnknownStoreWidening.widen(type, sites)]
+        end
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and

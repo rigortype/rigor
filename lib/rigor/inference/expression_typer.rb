@@ -3774,6 +3774,15 @@ module Rigor
       # every fixpoint pass entered through {#block_entry_scope}. The block is passed as a literal so the
       # overwhelmingly common body that rebinds nothing allocates no Proc for it.
       #
+      # The fixpoint describes iterations, so it runs only for a callee {ClosureEscapeAnalyzer} catalogues as
+      # iterating its block without retaining it (`:non_escaping`), the same gate the evaluator's own write-back
+      # applies. Any other callee may run the block once, many times, or later: `File.open` / `Mutex#synchronize`
+      # run it exactly once, where a joined binding invents values no run produces (`h = header; header =
+      # f.gets; h` would read `nil` into a block that returns `"none"`), and an uncatalogued iterator may run it
+      # many times, where the call-site binding is the pin. Neither binding is safe there, so the rebound names
+      # take the escaping-block floor `Dynamic[top]`, as `StatementEvaluator#drop_captured_narrowing` binds them
+      # for the continuation; that evaluates no body, and a `Dynamic` predicate folds nothing.
+      #
       # The in-place half (a captured collection the body mutates, widened as if every site had stored unknown
       # values) is left out, for two reasons. The binding becomes the entry scope of every fold nested in the
       # body, and a nested per-element or per-pair fold counts a mutated name as answered only when its OWN
@@ -3788,9 +3797,31 @@ module Rigor
         )
 
         block_node = call_node.block
+        unless iterates_block?(call_node, receiver_type)
+          names = CapturedLocals.writes(block_node, scope, ivars: true)
+          return names.empty? ? nil : captured_floor(names)
+        end
+
         captured_entry_bindings(block_node, content: false) do |base|
           block_entry_scope(block_node, expected, narrowed_self_type: narrowed_self_type, base: base)
         end
+      end
+
+      def iterates_block?(call_node, receiver_type)
+        ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name) == :non_escaping
+      end
+
+      # `type` without the value-pinned members a nominal member of the same union already covers: `0 | Integer`
+      # is `Integer`, `"a" | String | nil` is `String | nil`. Anything else is returned as it is.
+      def covered_pins_dropped(type)
+        return type unless type.is_a?(Type::Union)
+
+        members = type.members
+        kept = members.reject do |member|
+          widened = Type::Combinator.widen_value_pinned(member)
+          widened != member && members.include?(widened)
+        end
+        kept.size == members.size ? type : Type::Combinator.union(*kept)
       end
 
       # The scope a block body is typed under: `base` (the surrounding scope, or {#captured_block_entry_scope}'s
@@ -4390,6 +4421,13 @@ module Rigor
       # `content: false` leaves out the in-place half and binds the rebound names alone; the generic pass asks
       # for that ({#captured_block_bindings} says why). This runs for every block-bearing call the generic pass
       # types, so a body that rebinds nothing captured returns before allocating anything.
+      #
+      # A converged rebind can carry a value pin its own class already covers (`0 | Integer`, the join of the
+      # seed and the iterations). Laid into an entry scope, that pin reads to a fold or generic pass nested in the
+      # body as a first-iteration constant its own fixpoint cannot move, and the unmoved-pin floor erases the
+      # position ({#unmoved_pins_floored}): `b = 0; arr.map { [1, 2].map { |x| b += x; b } }` answered
+      # `Array[[Dynamic[top], Dynamic[top]]]`. The covered pins are dropped ({#covered_pins_dropped}); the union
+      # describes the same values without them.
       def captured_entry_bindings(block, content: true, &enter)
         stores = content ? CapturedLocals.content_mutations(block, scope, ivars: true) : NO_CONTENT_STORES
         names = CapturedLocals.writes(block, scope, ivars: true)
@@ -4398,7 +4436,8 @@ module Rigor
         stored = stored_capture_bindings(stores)
         bindings = stored.dup
         unless names.empty?
-          rebound_capture_bindings(block, names, stored, enter).each do |name, converged|
+          rebound_capture_bindings(block, names, stored, enter).each do |name, rebound|
+            converged = covered_pins_dropped(rebound)
             bindings[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
           end
         end

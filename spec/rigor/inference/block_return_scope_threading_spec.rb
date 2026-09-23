@@ -1289,8 +1289,11 @@ RSpec.describe "block-return scope threading", type: :runner do
   # a nominal `Array` / `Hash`, which neither fold takes.
   describe "captured outer locals the body rebinds under the generic block-return pass" do
     def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+      reported_rules(source).select { |rule| rule.start_with?("flow.") }
+    end
+
+    def reported_rules(source)
+      analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics.map { |d| d.rule.to_s }
     end
 
     it "widens a rebound counter the block's value reads" do
@@ -1463,6 +1466,95 @@ RSpec.describe "block-return scope threading", type: :runner do
             dump_type(arr.map { |e| @t += 1 })
           end
         end
+      RUBY
+    end
+
+    it "does not fold find off a pinned predicate over a Dynamic receiver" do
+      # A `Dynamic` receiver is no catalogued iterator, so the rebound name takes the `Dynamic[top]` floor rather
+      # than the fixpoint. `BlockFolding` still folds `find` over a `Dynamic` receiver, so the pinned
+      # `Constant[false]` used to fold the call to `nil` here too; a `Dynamic` predicate folds nothing.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        def run(d)
+          seen = 0
+          r = d.find do |e|
+            seen += 1
+            seen == 2
+          end
+          puts r if r
+        end
+      RUBY
+    end
+
+    it "keeps a rebind on a jumping path from folding find to nil" do
+      # The generic twin of #1215's per-element case: the `next` arm moves `seen` to `0 | 100` while the
+      # expression-nested `(seen += 1) == 2` is not threaded, so the unmoved-pin floor must still hold.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        arr = gets.to_s.chars
+        seen = 0
+        r = arr.find do |e|
+          if rand > 2.0
+            seen = 100
+            next false
+          end
+          (seen += 1) == 2
+        end
+        puts "found" if r
+      RUBY
+    end
+
+    it "does not invent iterations for a callee that runs its block once" do
+      # `File.open` yields exactly once but is no catalogued exactly-once yielder, so the joined binding would
+      # read `f.gets`'s `nil` into `h`, which is always `"none"` here, and `first.upcase` would report a
+      # possible-nil receiver on correct code. An uncatalogued callee takes the `Dynamic[top]` floor instead.
+      expect(reported_rules(<<~RUBY)).not_to include("call.possible-nil-receiver")
+        def with_file(path)
+          header = "none"
+          first = File.open(path) do |f|
+            h = header
+            header = f.gets
+            h
+          end
+          first.upcase
+        end
+      RUBY
+    end
+
+    it "does not invent iterations for Mutex#synchronize either" do
+      expect(reported_rules(<<~RUBY)).not_to include("call.possible-nil-receiver")
+        m = Mutex.new
+        cur = "a"
+        first = m.synchronize do
+          o = cur
+          cur = gets
+          o
+        end
+        first.upcase
+      RUBY
+    end
+
+    it "keeps a fold nested in the block precise over the converged binding" do
+      # The converged `0 | Integer` carries a pin `Integer` covers. Laid into the entry scope unchanged, it read to
+      # the nested fold as a first-iteration constant its own fixpoint could not move, and every position floored.
+      expect(dumped_type(<<~RUBY)).to eq("Array[[Integer, Integer]]")
+        arr = gets.to_s.chars
+        b = 0
+        dump_type(arr.map { |e| [1, 2].map { |x| b += x; b } })
+      RUBY
+    end
+
+    it "keeps a generic pass nested in a per-element fold precise" do
+      expect(dumped_type(<<~RUBY)).to eq("[Array[Integer], Array[Integer]]")
+        arr = gets.to_s.chars
+        t = 0
+        dump_type([1, 2].map { |x| arr.map { |e| t += 1; t } })
+      RUBY
+    end
+
+    it "keeps a per-pair fold nested in the block precise" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[{ k: Integer }]")
+        arr = gets.to_s.chars
+        g = 0
+        dump_type(arr.map { |e| { k: 1 }.transform_values { |v| g += v; g } })
       RUBY
     end
 

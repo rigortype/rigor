@@ -162,7 +162,7 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `Reflection` pair were already non-residue as `untyped`.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
-  # +2 net (#1181 slices): `effect_envelopes` is a newly-declared public reader that stays
+  # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
   # unrenderable residue — its body memoises through `effect_envelope_index(@run_environment)`, a
   # private helper sig-gen cannot infer. The collection-side slice then typed `effect_table`,
   # `effect_collection`, `effect_plugin_facts`, `effect_ancestry`,
@@ -205,8 +205,8 @@ SIG_PROVENANCE_RESIDUE = {
   # the five unmarked rows are `[]`/`keys`/`each`/`size`/`empty?` — unrenderable
   # (`sig.skipped.untyped-return`, all single-expression readers sig-gen declines).
   "sig/rigor/effects/effect_table.rbs" => 5,
-  # -1 (#1181 collection-side slice): `PluginFacts` being declared lets one row classify as earned
-  # now — sig-gen resolves a reference it previously could not name.
+  # -1 (#1181 collection-side slice): `Envelope#tolerates?` reads `Summary::TRIVIAL_BOUND`, and
+  # `Summary` being declared lets sig-gen resolve the reference it could not name before.
   "sig/rigor/effects/envelope.rbs" => 1,
   "sig/rigor/effects/envelope_index.rbs" => 2,
   # New file (#1181 collection-side slice): `Edge` members/constructors are #1150-marked and the

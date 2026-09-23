@@ -2738,16 +2738,26 @@ module Rigor
         end
       end
 
-      # Binds each fixed name to what it holds at any iteration's entry: its seed on the first, its join after. The
-      # join alone would lose what a store refutes — `ContentJoin` drops a seed's `nil`, which the first entry still
-      # holds, so `out << a.nil?; a ||= []; a << v` would read `Array[false]`. A String's join is `String`, which
-      # already holds any String seed, so it binds as its join and keeps `buf.length` a `non-negative-int`.
       def bind_content_joins(scope, kinds, seeds, evidence)
         kinds.reduce(scope) do |acc, (name, kind)|
-          seed = seeds[name]
-          join = join_content_evidence(seed, kind, name, evidence)
-          acc.with_local(name, kind == :string ? join : Type::Combinator.union(seed, join))
+          acc.with_local(name, content_entry_binding(seeds[name], kind, name, evidence))
         end
+      end
+
+      # What a collection holds at any iteration's entry, given the evidence so far: its join, plus the seed members
+      # that join refutes. The join already covers every other seed value — a `Tuple`, `HashShape` or `Difference`
+      # is absorbed into the rederived carrier and any other member survives beside it — but it drops a seed's
+      # `nil` ({ContentJoin::NON_SURVIVING_CLASSES}). The first iteration's entry still holds that `nil`, and it can
+      # outlive another collection's growth: without it `out << a.nil?; a ||= []; a << v` read `Array[false]`.
+      # Unioning the whole seed back would re-add its literal shape as well, and dispatch over `[] | Array[2]` is
+      # wider than over `Array[2]`, so `a[0, 1] ||= [2]` stopped converging.
+      def content_entry_binding(seed, kind, name, evidence)
+        join = join_content_evidence(seed, kind, name, evidence)
+        members = seed.is_a?(Type::Union) ? seed.members : [seed]
+        refuted = members.select do |member|
+          ContentJoin::NON_SURVIVING_CLASSES.include?(ContentJoin.evidence_class(member))
+        end
+        refuted.empty? ? join : Type::Combinator.union(join, *refuted)
       end
 
       # The block's captured content mutations — `collect_content_mutations` less the names the block itself
@@ -2778,11 +2788,10 @@ module Rigor
       end
 
       # The binding a fixpoint pass reads a moving collection at: its seed until any evidence exists, then — as for a
-      # fixed name — the union of its seed and its join over the evidence so far. The seed arm is not only the first
-      # pass's: a `nil` seed can still be `nil` on an iteration where another moving collection has already grown.
+      # fixed name — {#content_entry_binding} over the evidence so far.
       def content_carrier_under(seed, kind, name, evidence)
         no_evidence = CONTENT_EVIDENCE_SLOTS.fetch(kind).all? { |slot| present_evidence(evidence[[name, slot]]).empty? }
-        no_evidence ? seed : Type::Combinator.union(seed, join_content_evidence(seed, kind, name, evidence))
+        no_evidence ? seed : content_entry_binding(seed, kind, name, evidence)
       end
 
       # `{ [name, slot] => union }` for every collection name, typed in `evidence_scope`; a slot no store contributes

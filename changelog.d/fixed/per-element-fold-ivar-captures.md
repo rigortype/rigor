@@ -1,0 +1,1 @@
+- **[inference]** An instance variable that a `map` / `select` / `find` block over an array literal rebinds now reads as any iteration's value, not the first iteration's, so `@t = 0; [1, 2].map { @t += 1 }` types `[Integer, Integer]` instead of `[1, 1]` and `r.last == 1` no longer reports an always-truthy condition. ([#1204](https://github.com/rigortype/rigor/pull/1204))

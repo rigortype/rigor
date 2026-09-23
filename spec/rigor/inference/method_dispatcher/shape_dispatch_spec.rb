@@ -719,17 +719,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
       it "keeps a union of declared literal keys exact — no key in it can miss" do
         both = Rigor::Type::Combinator.union(constant(:a), constant(:b))
-        expect(dispatch(receiver: shape, method_name: :[], args: [both])).to eq(
-          Rigor::Type::Combinator.union(constant(1), constant("two"))
-        )
+        exact = Rigor::Type::Combinator.union(constant(1), constant("two"))
+        expect(dispatch(receiver: shape, method_name: :[], args: [both])).to eq(exact)
+        expect(dispatch(receiver: shape, method_name: :fetch, args: [both])).to eq(exact)
       end
 
-      it "adds nil for a union of literal keys only through the member that misses" do
+      it "reads a union with an undeclared member as a computed key, never as a lone Constant[nil]" do
+        # `counts = { total: 0 }; %i[a b a].each { |k| counts[k] = counts[k] ? counts[k] + 1 : 1 }` — the shape
+        # the loop body sees omits what earlier iterations stored, so the per-member answer is a stale `nil`.
         partial = Rigor::Type::Combinator.union(constant(:a), constant(:missing))
-        expect(dispatch(receiver: shape, method_name: :[], args: [partial])).to eq(
-          Rigor::Type::Combinator.union(constant(1), constant(nil))
-        )
+        expect(dispatch(receiver: shape, method_name: :[], args: [partial])).to eq(values_or_nil)
+        undeclared = Rigor::Type::Combinator.union(constant(:x), constant(:y))
+        expect(dispatch(receiver: shape, method_name: :[], args: [undeclared])).to eq(values_or_nil)
+        expect(dispatch(receiver: hash_shape({}), method_name: :[], args: [undeclared])).to be_nil
         expect(dispatch(receiver: shape, method_name: :fetch, args: [partial])).to be_nil
+      end
+
+      it "defers `fetch` on a union reaching an optional key, which may be absent" do
+        optional = Rigor::Type::Combinator.hash_shape_of({ a: constant(1), b: constant(2) }, optional_keys: [:b])
+        both = Rigor::Type::Combinator.union(constant(:a), constant(:b))
+        expect(dispatch(receiver: optional, method_name: :fetch, args: [both])).to be_nil
       end
     end
 

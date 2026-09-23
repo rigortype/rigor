@@ -6,6 +6,8 @@ the `if`/`unless` branch elision declines a certainty verdict carried by such a 
 eleven projects: 47 of 2,060 verdicts are affected, diagnostics are byte-identical on every target in
 both directions, and a reproducible false positive on correct code is removed.
 
+**Follow-up (2026-09-24, [PR #1278](https://github.com/rigortype/rigor/pull/1278)) — literal hashes are no longer the example.** The Context's `MAP = { a: "x", b: "y" }.freeze; MAP[key]` no longer produces an optimistic carrier: a closed, non-empty `HashShape` now answers a computed key itself with the values `| nil` (`docs/internal-spec/inference-engine.md`, shape tier), so the read is honestly nilable. The decision is unchanged and still binds the reads that stay optimistic — a `Hash[K, V]` nominal, an open or empty shape, `Array#first`, a computed-index `Array#[]` — and the guard specs now build their carrier from those.
+
 Grounding: the [shape census](../notes/20260805-issue-286-if-unless-truthiness-elision-census.md) that
 found the third consumer, and the [provenance census](../notes/20260806-issue-286-optimistic-carrier-provenance-census.md)
 that measured it and retired the carrier-shape option. Both for

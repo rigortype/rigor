@@ -1829,21 +1829,22 @@ module Rigor
           # On an `:open` shape neither applies — the key is unknown rather than missing, so both methods
           # answer the `untyped` step from {#hash_dig_step}.
           #
-          # A computed key reaches `[]` through the nil-bearing step {#hash_dig_step} gives it. `fetch` defers
-          # on anything but a single pinned key: its miss raises instead of reading nil, so the projection's
-          # nil-free value union is already the sound answer.
+          # `[]` takes whatever step {#hash_dig_step} gives a computed key. `fetch` answers only literal keys
+          # none of which can miss — a required declared key, or an undeclared one on an open shape — and
+          # defers otherwise: a miss raises instead of reading nil, so the projection's nil-free value union
+          # is already the sound answer.
           def hash_lookup(shape, method_name, args)
             return nil unless args.size == 1
-            return nil if method_name == :fetch && !args.first.is_a?(Type::Constant)
 
             step = hash_dig_step(shape, args.first)
             return nil if step.nil?
-            return nil if method_name == :fetch && optional_key_step?(shape, args.first)
-            return step unless missing_key_step?(shape, args.first)
-
             return step if method_name == :[]
 
-            nil
+            keys = literal_keys(args.first)
+            return nil if keys.nil?
+            return nil if keys.any? { |key| shape.optional_key?(key) || (shape.closed? && !shape.pairs.key?(key)) }
+
+            step
           end
 
           # `shape.dig(:a, :b, ...)` with a chain of static keys. Same recursion semantics as Tuple#`dig`:
@@ -1868,28 +1869,34 @@ module Rigor
           # of any type. Typing it `Constant[nil]` there would put `call.undefined-method` on the next line
           # of correct code (`payload[:undeclared].upcase`), so the open case answers `untyped`.
           #
-          # A union of value-pinned keys answers the union of its members' steps, so it stays exact and
-          # carries nil only through a member that misses. Any other key is computed: on a closed shape it
-          # may match any declared key or none, so the step is every value plus `Constant[nil]`. Deferring
-          # it instead let the projection answer the value union alone — nil-free, since `RbsDispatch`
-          # reads past `Hash#[]`'s `%a{implicitly-returns-nil}` — and `o = { a: 1 }; o[name] == 1` folded
-          # always-truthy. An open shape still defers: its undeclared keys may hold any value. So does the
-          # empty shape: a hash read by a computed key while it looks empty is one filled where the analysis
-          # did not see — a loop body's earlier iteration (`h = {}; xs.each { |x| h[x] = h[x] ? h[x] + 1 : 1 }`),
-          # a cache (`(@cache ||= {})[key]`), an `instance_eval`ed file — and answering `Constant[nil]` there
-          # folds its own guard always-falsey.
+          # A union of value-pinned keys that the shape all declares answers the union of their steps, which
+          # is exact. Any other key is computed — including a union with an undeclared member, whose per-member
+          # answer on a stale shape is the same lone `Constant[nil]` the empty-shape rule below refuses. On a
+          # closed shape a computed key may match any declared key or none, so the step is every value plus
+          # `Constant[nil]`. Deferring it instead let the projection answer the value union alone — nil-free,
+          # since `RbsDispatch` reads past `Hash#[]`'s `%a{implicitly-returns-nil}` — and
+          # `o = { a: 1 }; o[name] == 1` folded always-truthy. An open shape still defers: its undeclared keys
+          # may hold any value. So does the empty shape: a hash read by a computed key while it looks empty is
+          # one filled where the analysis did not see — a loop body's earlier iteration
+          # (`h = {}; xs.each { |x| h[x] = h[x] ? h[x] + 1 : 1 }`), a cache (`(@cache ||= {})[key]`), an
+          # `instance_eval`ed file — and answering `Constant[nil]` there folds its own guard always-falsey.
           def hash_dig_step(shape, arg)
-            return static_key_step(shape, arg.value) if static_key_arg?(arg)
-            if arg.is_a?(Type::Union) && arg.members.all? { |member| static_key_arg?(member) }
-              return Type::Combinator.union(*arg.members.map { |member| static_key_step(shape, member.value) })
+            keys = literal_keys(arg)
+            if keys && (keys.size == 1 || keys.all? { |key| shape.pairs.key?(key) })
+              return Type::Combinator.union(*keys.map { |key| static_key_step(shape, key) })
             end
             return nil if shape.open? || shape.pairs.empty?
 
             Type::Combinator.union(*shape.pairs.values, Type::Combinator.constant_of(nil))
           end
 
-          def static_key_arg?(arg)
-            arg.is_a?(Type::Constant) && static_shape_key?(arg.value)
+          # The value-pinned keys `arg` can take — one for a scalar `Constant`, one per member for a union of
+          # them — or `nil` when it can take any other value.
+          def literal_keys(arg)
+            members = arg.is_a?(Type::Union) ? arg.members : [arg]
+            return nil unless members.all? { |member| member.is_a?(Type::Constant) && static_shape_key?(member.value) }
+
+            members.map(&:value)
           end
 
           def static_key_step(shape, key)
@@ -1903,23 +1910,6 @@ module Rigor
             return Type::Combinator.untyped if shape.open?
 
             Type::Combinator.constant_of(nil)
-          end
-
-          def optional_key_step?(shape, arg)
-            return false unless arg.is_a?(Type::Constant)
-
-            shape.optional_key?(arg.value)
-          end
-
-          # Whether the key is provably ABSENT — which only a closed shape can establish. An open shape
-          # permits keys outside `pairs`, so a key it does not declare is unknown rather than missing, and
-          # `fetch` must not be deferred on the theory that Ruby would raise `KeyError`: the key may well
-          # be there. {#hash_dig_step} has already answered `untyped` for that case.
-          def missing_key_step?(shape, arg)
-            return false unless arg.is_a?(Type::Constant)
-            return false if shape.open?
-
-            !shape.pairs.key?(arg.value)
           end
 
           # `shape.values_at(:a, :b, ...)` with a list of static keys. Returns a `Tuple` whose per-position

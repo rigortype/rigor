@@ -92,11 +92,13 @@ module Rigor
       # only the receiver-mutating methods are listed. A name both classes define is listed in
       # both tables — being in `ARRAY_MUTATORS` does not put it here, and `shift`'s absence let
       # `k = { a: 1 }; k.shift` keep the literal shape of a hash that is empty at runtime.
+      # `default=` / `default_proc=` / `compare_by_identity` change no entry but change what a miss (or a
+      # declared String key) reads, which the shape's computed-key `values | nil` answer assumes.
       HASH_MUTATORS = %i[
         []= store
         shift delete delete_if reject! select! filter! keep_if
         clear compact! merge! update transform_keys! transform_values!
-        replace
+        replace default= default_proc= compare_by_identity
       ].to_set.freeze
 
       # Every method name {#widen_for_mutator} responds to — the one set a body scan asks "could an

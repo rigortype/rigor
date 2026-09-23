@@ -1141,6 +1141,36 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(truthy_diags(result)).to be_empty
         end
 
+        it "does not fire on a counter keyed by a union of literals the seed does not declare" do
+          result = analyze(<<~RUBY)
+            def counts
+              counts = { total: 0 }
+              %i[a b a].each { |k| counts[k] = counts[k] ? counts[k] + 1 : 1 }
+              counts
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+        end
+
+        it "does not report a nil receiver once a default answers the miss" do
+          result = analyze(<<~RUBY)
+            def with_default(name)
+              h = { a: 1 }
+              h.default = 0
+              v = h[name]
+              v + 1
+            end
+
+            def with_default_proc(name)
+              h = { a: 1 }
+              h.default_proc = proc { 0 }
+              v = h[name]
+              v + 1
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+        end
+
         it "still fires when every key the read can take is declared (the control)" do
           result = analyze(<<~RUBY)
             def union_read(flag)

@@ -3650,11 +3650,22 @@ module Rigor
         block_return_for(
           block_arg, expected,
           narrowed_self_type: block_body_self_narrowing(call_node, receiver_type),
-          repeats: block_may_repeat?(call_node, receiver_type)
+          repeats: !BLOCK_VALUE_DISCARDING.include?(call_node.name) && block_may_repeat?(call_node, receiver_type)
         )
       rescue StandardError
         nil
       end
+
+      # The catalogued iterators that discard their block's value — it selects the block-bearing overload and
+      # nothing more — so the value pass lays no captured binding under their block: the fixpoint would buy a
+      # type nothing reads, and `sum = 0; xs.each { |x| sum += x }` would pay it on top of the ADR-56
+      # write-back's own. The #853 break-arm scan still lays it, since a `break` value is the call's.
+      BLOCK_VALUE_DISCARDING = Set[
+        :each, :each_with_index, :each_with_object, :each_pair, :each_key, :each_value, :each_index,
+        :reverse_each, :each_entry, :each_slice, :each_cons, :each_char, :each_byte, :each_line,
+        :each_codepoint, :times, :upto, :downto, :step
+      ].freeze
+      private_constant :BLOCK_VALUE_DISCARDING
 
       # Whether the call may run its block more than once, so a later run reads a captured binding an earlier
       # run rebound — the premise of laying the #587 (b) binding ({#captured_block_bindings}) under the block.

@@ -74,25 +74,25 @@ module Rigor
       end
 
       # The rows whose `callee:` names a {CalleeRule::UNIT_RULES} rule — applied once per unit.
-      # sig-gen gap: #1154 — populated by `absorb_attribution`, not assigned from a parameter.
+      # Unmarked residue: populated by `absorb_attribution`, not assigned from an `initialize`
+      # parameter, so no gap issue covers it (same shape as `Registry#additional_initializers`).
       attr_reader unit_callee_rows: Array[Row]
 
       # Human-readable notes about contributions accepted only in part. Surfaced by `rigor effects`;
-      # never a diagnostic.
-      # sig-gen gap: #1154 — accumulated by `absorb`/`extend_registry`, not assigned from a parameter.
+      # never a diagnostic. Unmarked residue — accumulated by `absorb`/`extend_registry`.
       attr_reader warnings: Array[String]
 
       # `{owner => [labels]}` — what {#extend_registry} folds into the run's vocabulary.
-      # sig-gen gap: #1154 — built by `absorb`, not assigned from a parameter.
+      # Unmarked residue — built by `absorb`, not an `initialize` parameter.
       attr_reader labels_by_owner: Hash[String, Array[String]]
 
       # Every `effect_entry_points:` preset across the loaded set — `Plugin::EffectEntryPoints`
       # instances, whose class is still unsigned #1181 backlog, so `untyped` elements for now.
-      # sig-gen gap: #1154 — concatenated by `absorb`, not assigned from a parameter.
+      # Unmarked residue — concatenated by `absorb`, not an `initialize` parameter.
       attr_reader entry_points: Array[untyped]
 
       # A content digest of every compiled plugin fact; {Identity} folds it in.
-      # sig-gen gap: #1154 — computed by `compute_digest`, not assigned from a parameter.
+      # Unmarked residue — computed by `compute_digest`, not an `initialize` parameter.
       attr_reader digest: String
 
       def self.empty: () -> PluginFacts

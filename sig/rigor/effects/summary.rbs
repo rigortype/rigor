@@ -17,10 +17,10 @@ module Rigor
       attr_reader bundles: Hash[Origin, LabelSet]
       # sig-gen gap: #1154 — as above.
       attr_reader declared_bundles: Hash[Origin, LabelSet]
-      # sig-gen gap: #1154 — `proven`/`declared` are flattened from the bundle tables in `initialize`,
-      # not assigned from a parameter, so sig-gen proposes `untyped`.
+      # Unmarked residue — `proven`/`declared` are flattened from the bundle tables by `initialize`,
+      # not assigned from a parameter, so #1154 does not cover them (same shape as
+      # `Registry#additional_initializers`).
       attr_reader declared: LabelSet
-      # sig-gen gap: #1154
       attr_reader proven: LabelSet
       # sig-gen gap: #1154 — `causes` are `[cause, detail]` pairs normalized in `initialize`.
       attr_reader causes: Array[[String, String?]]

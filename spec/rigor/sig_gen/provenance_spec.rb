@@ -216,15 +216,20 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/method_key.rbs" => 3,
   "sig/rigor/effects/origin.rbs" => 0,
   # New file (#1181 collection-side slice): `Row`/`Edge` members and constructors are
-  # #1150-marked, the five attr_readers #1154-marked. Seven unmarked rows: `class_row` and
-  # `result_row` are declared-divergent (sig-gen infers `nil` — the `ancestry` memo helper is
-  # opaque to it), `edges_for` is declared-divergent (`Array[untyped]` from `select`), and
-  # `path_row`/`self_path_row`/`descends_from?`/`extend_registry` are unrenderable.
-  "sig/rigor/effects/plugin_facts.rbs" => 7,
-  # New file (#1181 collection-side slice): the five attr_readers are #1154-marked (`initialize`
-  # normalizes/flattens every one rather than assigning a parameter); the sole unmarked row is
-  # `trivial?` (unrenderable).
-  "sig/rigor/effects/summary.rbs" => 1,
+  # #1150-marked. Eleven unmarked rows: four attr_readers (`unit_callee_rows`, `warnings`,
+  # `labels_by_owner`, `digest`) are built by `absorb`/`compute_digest` rather than assigned
+  # from `initialize` parameters, so #1154 does not cover them (same shape as
+  # `Registry#additional_initializers`); `entry_points` is the fifth such reader but stays
+  # earned — sig-gen infers `Array[untyped]`, exactly what the declaration says.
+  # `class_row` and `result_row` are declared-divergent (sig-gen infers `nil` — the `ancestry`
+  # memo helper is opaque to it), `edges_for` is declared-divergent (`Array[untyped]` from
+  # `select`), and `path_row` / `self_path_row` / `descends_from?` / `extend_registry` are
+  # unrenderable.
+  "sig/rigor/effects/plugin_facts.rbs" => 11,
+  # New file (#1181 collection-side slice): `bundles`/`declared_bundles`/`causes` are
+  # #1154-marked (normalized `initialize` kwargs), while `declared`/`proven` are flattened from
+  # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
+  "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
   "sig/rigor/inference.rbs" => 85,

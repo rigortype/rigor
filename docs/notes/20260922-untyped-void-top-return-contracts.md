@@ -386,7 +386,10 @@ The remaining half of the namespace: `Summary`, `EffectTable` (+ `Entry`), `File
   same concept at different stages (per-selector table vs. the resolved retry list).
 - `class_row`/`result_row` pin as declared-divergent: sig-gen infers `nil` because the `ancestry`
   memo helper is opaque to it, and `edges_for` as declared-divergent (`Array[untyped]` from
-  `select`) — all three honest, all pinned.
+  `select`) — all three honest, all pinned. `PluginFacts`'s five attr_readers and `Summary`'s
+  `declared`/`proven` pin unmarked too: they are built by `absorb`/`compute_digest`/`flatten`,
+  not assigned from `initialize` parameters, so #1154 does not cover them (the same shape
+  `Registry#additional_initializers` already pinned unmarked).
 
 ## Two incidental findings
 

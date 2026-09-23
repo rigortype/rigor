@@ -1463,6 +1463,68 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  describe "a captured local the body mutates in place and rebinds as a statement" do
+    it "believes a statement rebind converging on the widened class" do
+      # `["abcc", "abcc"]` at runtime. The seed is the in-place widening's `String`, and the statement `s =
+      # s.strip` lands inside it; asking the call-site `"ab"` whether a pin was at stake floored it to
+      # `Dynamic[top]`, where the rebind-only fold answered `String` before the in-place binding existed.
+      expect(dumped_type(<<~RUBY)).to eq("[String, String]")
+        s = +"ab"
+        dump_type([1, 2].map { |e| s << "c"; s = s.strip; s })
+      RUBY
+    end
+
+    it "keeps a value read before the mutation and the rebind" do
+      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+        s = +"ab"
+        dump_type([1, 2].map { |e| v = s.size; s << "c"; s = s.dup; v })
+      RUBY
+    end
+
+    it "keeps the floor when a hidden rebind sits beside the statement rebind" do
+      # `[:abcc, :abcc]` at runtime: the `&&=` inside an array literal is the unthreaded rebind the
+      # UnthreadedRebinds floor takes, whatever the statement rebind converged to.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        s = +"ab"
+        dump_type([1, 2].map { |e| s << "c"; s = s.strip; [(s &&= s.to_sym)]; s })
+      RUBY
+    end
+
+    it "keeps the floor for a statement rebind of a name the body does not mutate" do
+      # The seed IS the call-site `5` here, so the unmoved-pin trade stands: a write restoring its entry value
+      # is indistinguishable from one the pass missed.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        x = 5
+        dump_type([1, 2].map { |e| v = x; x = 5; v })
+      RUBY
+    end
+  end
+
+  describe "a nested block's parameter shadowing a captured name" do
+    it "does not treat a write to the shadowing parameter as a rebind of the outer local" do
+      # `[1, 1]` at runtime: `a = k` rebinds the inner block's `|a|`. Counted as a rebind of the outer `a`, the
+      # fixpoint converged on the pinned `[1]` seed and the unmoved-pin floor took it.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |a| a = k }; a.first })
+      RUBY
+    end
+
+    it "does not treat a mutation of the shadowing parameter as a mutation of the outer local" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |a| a << k }; a.first })
+      RUBY
+    end
+
+    it "still widens the outer local a nested block without the shadow rebinds" do
+      expect(dumped_type(<<~RUBY)).not_to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |b| a = [k] }; a.first })
+      RUBY
+    end
+  end
+
   describe "declines — the answer must not move" do
     it "keeps a single-statement block body on the tail-only path" do
       expect(dumped_type("dump_type(Mutex.new.synchronize { 42 })")).to eq("42")

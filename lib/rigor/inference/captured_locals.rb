@@ -21,9 +21,9 @@ module Rigor
     # A write counts across every local-write form — plain `=` (`LocalVariableWriteNode`), the operator /
     # `||=` / `&&=` compound forms, and a multi-assign target (`x, y = …` → `LocalVariableTargetNode` under
     # a `MultiWriteNode`) — at ANY depth: a block is a closure, so a write inside a nested block binds the
-    # same outer variable. Block-introduced names (parameters, numbered parameters, `;`-locals) and names
-    # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
-    # variable.
+    # same outer variable. Block-introduced names (parameters, numbered parameters, `;`-locals), names
+    # not bound in the outer scope, and a write a nested block's own parameter or block-local shadows
+    # ({.outer_local?}) are excluded; a write to any of them is not a captured rebind of an outer variable.
     #
     # All three also ask for the instance variables the body rebinds (`ivars: true`). The per-element fold asks
     # for every other binding that outlives an iteration as well (`non_locals: true`): the class variables and
@@ -117,10 +117,10 @@ module Rigor
         introduced = nil
         names = nil
         outliving = non_locals || ivars
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           name =
             if LOCAL_WRITE_NODES.include?(descendant.class)
-              captured_local_write(descendant, base_scope) { introduced ||= introduced_locals(block_node) }
+              captured_local_write(descendant, ancestors, base_scope) { introduced ||= introduced_locals(block_node) }
             elsif outliving
               rebindable_outliving_write(descendant, base_scope, non_locals)
             end
@@ -134,11 +134,12 @@ module Rigor
         name if name && rebindable_non_local?(base_scope, name)
       end
 
-      # The outer local a local-write node rebinds, or nil when the call site does not bind it or the block
-      # introduces it (the block yields the introduced set, computed only when needed).
-      def captured_local_write(node, base_scope)
+      # The outer local a local-write node rebinds, or nil when the call site does not bind it, the write resolves
+      # inside a nested block ({.outer_local?}), or the block introduces it (the block yields the introduced set,
+      # computed only when needed).
+      def captured_local_write(node, ancestors, base_scope)
         name = node.name
-        return nil unless base_scope.locals.key?(name)
+        return nil unless base_scope.locals.key?(name) && outer_local?(node, ancestors)
 
         yield.include?(name) ? nil : name
       end
@@ -230,8 +231,8 @@ module Rigor
 
       # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
       # above) in source order. A site counts through every variable its receiver can evaluate to
-      # ({ReceiverAlias.candidates}), at any nesting depth as long as a local's read resolves past every nested
-      # block ({.outer_read?}), and a local is excluded on exactly the terms {.writes} excludes it.
+      # ({ReceiverAlias.candidates}), at any nesting depth as long as a local's read does not resolve inside a nested
+      # block ({.outer_local?}), and a local is excluded on exactly the terms {.writes} excludes it.
       #
       # Under `non_locals: true` the instance variables, class variables and globals the body mutates in place
       # count too, on the terms {.writes} takes a rebound one ({.rebindable_non_local?}). Since the block-return
@@ -323,13 +324,13 @@ module Rigor
       end
 
       # True when `read` names a variable {.content_mutations} collects: a {.content_target?} which, when it is a
-      # local, reaches past every nested block and is not one the block introduces (the block yields that set,
+      # local, does not resolve inside a nested block and is not one the block introduces (the block yields that set,
       # computed only when needed).
       def captured_target?(read, ancestors, base_scope, non_locals)
         return false unless content_target?(read, base_scope, non_locals)
         return true unless read.is_a?(Prism::LocalVariableReadNode)
 
-        outer_read?(read, ancestors) && !yield.include?(read.name)
+        outer_local?(read, ancestors) && !yield.include?(read.name)
       end
 
       # A local bound at the call site (the block's own names are excluded by the caller), or — under
@@ -340,13 +341,19 @@ module Rigor
         non_locals && rebindable_non_local?(base_scope, read.name)
       end
 
-      # True when `read` reaches past every block nested between the body and the mutation site. A read Prism
-      # resolves inside a nested block's own scope (`[[9]].each { |a| a << x }`) names that block's parameter,
-      # not the outer local that happens to share its name.
-      def outer_read?(read, ancestors)
-        nesting = ancestors.count { |node| node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) }
-        read.depth > nesting
+      # False when a local read or write resolves inside a block or lambda nested between the body and `node` — its
+      # Prism `depth` stops short of the body's own scope. Prism resolves a name in a nested block's own scope first,
+      # so `[[9]].each { |a| a << x }` mutates, and `[[9]].each { |a| a = x }` rebinds, that block's parameter, not
+      # the outer local that happens to share its name. {.writes} and {.content_mutations} both ask it, so the two
+      # sets cannot disagree about which `a` a site names. A name resolving in the body's own scope is left to the
+      # block-introduced exclusion: Prism puts an outer local there only when the parse never saw it declared, which
+      # a synthetic call-site scope can still bind.
+      def outer_local?(node, ancestors)
+        node.depth >= ancestors.count { |ancestor| NESTED_SCOPE_NODES.include?(ancestor.class) }
       end
+
+      NESTED_SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :NESTED_SCOPE_NODES
 
       def mutated_receiver(node)
         case node

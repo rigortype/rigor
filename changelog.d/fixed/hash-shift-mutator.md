@@ -1,0 +1,1 @@
+- **[inference]** `Hash#shift` now widens a literal hash's type the way `delete` does, so `k = { a: 1 }; k.shift` no longer keeps `{ a: 1 }` and `k.size == 1` no longer reports an always-truthy condition; a `non-empty-hash` refinement is likewise dropped after a `shift`. ([#1253](https://github.com/rigortype/rigor/pull/1253))

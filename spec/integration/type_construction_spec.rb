@@ -1997,6 +1997,38 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # The slice-C seam typed every stored value ONCE, in the block-entry scope, so a value computed
+    # from the receiver's own contents (`h[k] = h[k] + 1`) was the first iteration's answer and the
+    # join closed over it.
+    describe "fixtures/block_content_self_read.rb — a stored value that reads its own receiver" do
+      let(:harness) { harness_for("block_content_self_read") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion: every self-reading store's comparison is
+      # true at runtime, and the paired control storing a receiver-independent value still folds.
+      # Asserting the exact line set is what keeps the quiet half from passing because the rule
+      # stopped firing at all.
+      it "silences the first-iteration folds without silencing the genuine one" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      end
+
+      it "joins the converged, value-pin-widened evidence into the carrier" do
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        expect(harness.local(:counts)).to eq(
+          Rigor::Type::Combinator.nominal_of(
+            "Hash",
+            type_args: [Rigor::Type::Combinator.nominal_of("Symbol"),
+                        Rigor::Type::Combinator.union(constant(0), integer)]
+          )
+        )
+      end
+    end
+
     describe "fixtures/loop_body_fixpoint.rb — ADR-56 slice B loop-body fixpoint" do
       let(:harness) { harness_for("loop_body_fixpoint") }
 

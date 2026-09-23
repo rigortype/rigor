@@ -395,7 +395,10 @@ module Rigor
       # BLOCK path (ADR-56 slice C) on the other side: `content_writeback_block_captures` scans the
       # whole body and joins every mutator call in it before writing back, so its evidence IS
       # complete for that body and its precise join stays justified — `acc = []; xs.each { |x|
-      # acc.push(x) }` keeps reading `Array[Integer]`.
+      # acc.push(x) }` keeps reading `Array[Integer]`. Seeing every store is only half of that
+      # claim: a store computed from the collection's own contents (`h[k] = h[k] + 1`) is
+      # complete evidence only once it holds past the first iteration, which is why that seam
+      # iterates such a store to a fixpoint instead of typing it once (ADR-56 WD2.13).
       #
       # `Array[Integer | Dynamic[top]]` still does everything issue #560 needs: a union carrying
       # `Dynamic` cannot constant-fold, so every stale always-falsey the join was written to remove

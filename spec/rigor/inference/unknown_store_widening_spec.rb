@@ -94,7 +94,8 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     end
 
     # `map!` keeps the witness and joins nothing, so the straight-line widening answers the refinement itself and
-    # declines. That is a stale answer, not a claim: the site rewrites every element, so the base takes the arm.
+    # declines. The refinement is a carrier that seam already grows (issue #936), and the site rewrites every
+    # element, so the base takes the arm.
     describe "an empty-witness refinement whose widening declines" do
       let(:non_empty_strings) { Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String")) }
 
@@ -124,6 +125,26 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
             Rigor::Type::Combinator.constant_of(nil)
           )
         )
+      end
+
+      it "gives a precise member of the same union the arm too, as when another member widens" do
+        precise = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
+        seed = Rigor::Type::Combinator.union(precise, non_empty_strings)
+        widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
+        expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | non-empty-array[Dynamic[top] | String]")
+      end
+
+      it "leaves the refinement unchanged under an adder called with no argument" do
+        expect(described_class.widen(non_empty_strings, sites_of("a = []\n[1].each { |e| a.push }\n")))
+          .to eq(non_empty_strings)
+      end
+
+      it "gives a Hash refinement a merging site with an argument the arm" do
+        seed = Rigor::Type::Combinator.non_empty_hash(
+          Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.nominal_of("String")
+        )
+        widened = described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h.merge!(e) }\n"))
+        expect(widened.describe).to eq("non-empty-hash[Dynamic[top] | String, Dynamic[top] | String]")
       end
 
       it "leaves the refinement unchanged under a site that only reorders" do

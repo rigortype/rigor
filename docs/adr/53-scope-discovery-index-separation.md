@@ -233,6 +233,13 @@ fold in IvarWrite/DeadAssignment, then the main `NodeWalker.each` pass, then
 | Full generic-visitor rewrite of `scope_indexer.rb` (Theme B) | Deferred | Unchanged from the structural-repetition audit: highest-risk traversal surface. Track B's harness is its enabling asset; the rewrite itself stays demand-gated. |
 | Asserting discovery-index identity in `Scope#==` | Rejected | Behaviour change with FP-adjacent reach (scope-equality short-circuits); see WD3. |
 
+> **Partially superseded by [ADR-116 (WD5)](116-hot-file-restructuring.md#working-decisions--the-slices-in-order).**
+> The Theme B deferral above is lifted: #1135 applied one cref/self model change to 21
+> `ScopeIndexer` walkers (+2,817 lines), which is the demand this row waited for. ADR-116 ports
+> the walkers one at a time onto a shared declaration-context walk, behind this ADR's shadow
+> harness extended to discovery tables. It does not attempt a one-shot generic-visitor rewrite. The
+> row above rejecting a fold of the rule collectors into indexing still stands.
+
 ## Consequences
 
 Positive:

@@ -667,23 +667,28 @@ module Rigor
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
       # what the write put in the slot — for a compound write {#index_write_stored_type}'s
-      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for a multi-assign
-      # index target the slot {MultiTargetBinder} decomposed for it — which is the whole point: it
+      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for an index target
+      # the value its owner stores (the slot {MultiTargetBinder} decomposed, the `for` element, the
+      # rescued exception) — which is the whole point: it
       # is the value the retained element evidence provably no longer covers. Returns `[]` when the
       # key is unresolvable, which reproduces the pre-join widening.
+      # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
+      # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
+      # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
+      # them (each iteration, the moment of the catch).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
-      def index_write_arg_types(node, stored_type)
+      def index_write_arg_types(node, stored_type, type_scope: scope)
         args = node.arguments
         return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, type_scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
         # A splat argument is marked `nil` — its expansion decides the store's arity at
         # runtime, which an untyped index type could not express (issue #1140).
-        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : scope.type_of(arg, tracer: tracer) } + [stored_type]
+        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : type_scope.type_of(arg, tracer: tracer) } + [stored_type]
       end
 
       # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
@@ -691,8 +696,9 @@ module Rigor
       # `a[0, 1] += [2]` reads `a[0, 1] + [2]`, not `[2]` (issue #1140). It is also the node's value
       # outside {#index_compound_write_value}'s memoizing `||=`. That method passes the `current` read
       # and the `rhs` it already typed, so a nested `(a[i] ||= {})[j] ||= v` chain types each level's
-      # receiver once rather than doubling per level. Any other node falls back to its own type (a
-      # multi-assign index target keeps its untyped answer).
+      # receiver once rather than doubling per level. Any other node falls back to its own type (an
+      # index target — a multi-assign slot, a `for` index, a rescue reference — keeps its untyped
+      # answer).
       def index_write_stored_type(node, type_scope, current: nil, rhs: nil)
         case node
         when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode
@@ -822,12 +828,28 @@ module Rigor
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
-        post = bound.index_targets.reduce(bound.apply_to(post_rhs)) do |acc, (target, stored)|
-          widened = IndexWriteWidening.widen(node: target, current_scope: acc,
-                                             arg_types: index_write_arg_types(target, stored))
-          IndexedNarrowing.invalidate_indexed_write(target, widened)
+        [rhs_type, widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)]
+      end
+
+      # Widens the receiver of every index target a {MultiTargetBinder} result reports, over the scope its bindings
+      # were applied to — the multi-write and the `for a, h[:k] in pairs` index share it.
+      def widen_index_targets(bound, post, type_scope:)
+        bound.index_targets.reduce(post) do |acc, (target, stored)|
+          widen_index_target(target, stored, acc, type_scope: type_scope)
         end
-        [rhs_type, post]
+      end
+
+      # An index target (`Prism::IndexTargetNode`) stores `stored` through `[]=` on its receiver wherever it
+      # appears — a multi-assign slot, a `for` index, a rescue reference — so its receiver widens exactly as the
+      # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560), and drops the
+      # `h[:a] ||= default` narrowing on the slot it overwrote, as `eval_call` drops it after a `[]=` — the
+      # widening carries slot narrowings across the rebind, so without the drop `h[:a]` keeps reading the default.
+      # `type_scope` types the index arguments and gates the evidence (`joinable_receiver?`); `current_scope` is
+      # the one widened.
+      def widen_index_target(target, stored, current_scope, type_scope:)
+        widened = IndexWriteWidening.widen(node: target, current_scope: current_scope,
+                                           arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
+        IndexedNarrowing.invalidate_indexed_write(target, widened)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1567,8 +1589,8 @@ module Rigor
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
       # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
-      # expression itself types as `Constant[nil]` (the common case where no `break VALUE` is observed), matching the
-      # policy `eval_loop` uses for `while` / `until`.
+      # expression itself types as `Constant[nil]`, the policy `eval_loop` uses for `while` / `until` — a known gap for
+      # `for`, whose value in Ruby is the collection it iterated (issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
@@ -1614,15 +1636,36 @@ module Rigor
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`
       # (the per-iteration value the collection yields). A `MultiTargetNode` (`for a, b in pairs`) delegates to
       # {MultiTargetBinder}, which decomposes a tuple-shaped element into the inner slots.
+      #
+      # An index target — the whole index (`for h[:a] in xs`) or a slot of a multi-target one (`for h[:a], w in
+      # pairs`) — stores the element / its slot through `[]=` at the top of every iteration, so its receiver widens
+      # here, before the body, exactly as a multi-assign target's does; the body then reads the widened receiver and
+      # the post-loop join keeps it beside the zero-iteration literal, as it keeps a body store's `h[:a] = x`.
       def bind_for_index(index_node, element_type, scope)
         case index_node
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
+        when Prism::IndexTargetNode
+          widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind_marked(index_node, element_type, scope: scope).apply_to(scope)
+          bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
+          widen_index_targets(bound, bound.apply_to(scope), type_scope: scope)
+        when Prism::SplatNode
+          bind_for_splat_index(index_node, scope)
         else
           scope
         end
+      end
+
+      # `for *h[:a] in pairs` — Prism gives a bare splat index as a `SplatNode`, not a `MultiTargetNode`, so the
+      # binder never sees it. The store is `*h[:a] = element`, an array of the element's `to_ary` parts; the receiver
+      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. A bare `*name` target stays
+      # unbound here, as before.
+      def bind_for_splat_index(splat, scope)
+        target = splat.expression
+        return scope unless target.is_a?(Prism::IndexTargetNode)
+
+        widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
@@ -3053,7 +3096,7 @@ module Rigor
       def array_element_evidence(calls, entry_scope, shadows = NO_SHADOWS)
         calls.flat_map do |c|
           block_entry = site_evidence_scope(entry_scope, c, shadows)
-          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, an index target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
           # does (issue #1140).
@@ -3066,7 +3109,8 @@ module Rigor
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
       # block-entry scope — the stored value is what the write stores through `[]=`, which for a
       # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, the same
-      # compound result the node itself types as); a multi-assign target stays untyped.
+      # compound result the node itself types as); an index target (a multi-assign slot, a `for`
+      # index, a rescue reference) stays untyped.
       # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
       def index_write_block_arg_types(node, block_entry)
         args = node.arguments
@@ -3093,7 +3137,8 @@ module Rigor
         mutations
       end
 
-      # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
+      # Index-write forms (`h[k] ||= v`, `h[k] += v`, and an index target's `h[k] = v` — a multi-assign slot, a `for`
+      # index, a rescue reference) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
       INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
@@ -3785,17 +3830,24 @@ module Rigor
       # ---------------------------------------------------------------
 
       # Returns `scope` extended with the rescue reference variable bound to the exception instance type. Leaves scope
-      # unchanged when the node carries no reference (bare `rescue` without `=> var`).
+      # unchanged when the node carries no reference (bare `rescue` without `=> var`). An index-target reference
+      # (`rescue => h[:e]`) stores the exception through `[]=` instead, so its receiver widens with the exception
+      # instance type as the stored value, exactly as `rescue => e; h[:e] = e` widens it.
       def bind_rescue_reference(rescue_node, scope)
         ref = rescue_node.reference
-        return scope unless ref.is_a?(Prism::LocalVariableTargetNode)
-
-        scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        case ref
+        when Prism::LocalVariableTargetNode
+          scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        when Prism::IndexTargetNode
+          widen_index_target(ref, rescue_exception_type(rescue_node, scope), scope, type_scope: scope)
+        else
+          scope
+        end
       end
 
       # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. Falls back to
-      # `StandardError` for any class that cannot be resolved to a `Singleton` type.
+      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
+      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
       def rescue_exception_type(rescue_node, scope)
         exceptions = rescue_node.exceptions
         if exceptions.empty?

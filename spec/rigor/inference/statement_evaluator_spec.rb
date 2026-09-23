@@ -719,6 +719,47 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       # loop.
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
+
+    # A `for` index that is an index target (`for h[:a] in xs`) stores each element through `[]=` on its receiver at
+    # the top of every iteration, so it widens the receiver exactly as the body store `h[:a] = x` of the same element
+    # does — otherwise the literal survives and a later `h[:a] == 0` folds on its stale `0`.
+    it "for-loop with an index-target index widens the receiver the way a body `[]=` store of the element does" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a] in [1, 2]; end")
+      _, body = evaluate("h = { a: 0 }\nfor x in [1, 2]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+      expect(index.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+    end
+
+    it "for-loop with an index-target index joins the element itself into a seed that admits it" do
+      # An empty literal carries no class set to contradict the stored `Integer`, so the join keeps it.
+      _, index = evaluate("h = {}\nfor h[:a] in [1, 2]; end")
+      _, body = evaluate("h = {}\nfor x in [1, 2]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+    end
+
+    # The store runs before the body, on every iteration, so the body reads the widened receiver too.
+    it "for-loop body reads the receiver an index-target index widened" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a] in [1, 2]\n  seen = h\nend")
+      _, body = evaluate("h = { a: 0 }\nfor x in [1, 2]\n  h[:a] = x\n  seen = h\nend")
+      expect(index.local(:seen)).to eq(body.local(:seen))
+      expect(index.local(:seen).members).not_to include(a_kind_of(Rigor::Type::HashShape))
+    end
+
+    it "for-loop with a multi-target index widens an index target's receiver with the slot it stores" do
+      _, index = evaluate("h = { a: 0 }\nfor h[:a], w in [[1, 2]]; end")
+      _, body = evaluate("h = { a: 0 }\nfor x, w in [[1, 2]]; h[:a] = x; end")
+      expect(index.local(:h)).to eq(body.local(:h))
+      expect(index.local(:w)).to eq(body.local(:w))
+    end
+
+    it "for-loop with an index-target index leaves a collection it does not name at its literal shape" do
+      _, single = evaluate("h = { a: 0 }\ng = {}\nfor g[:a] in [1, 2]; end")
+      _, multi = evaluate("h = { a: 0 }\ng = {}\nfor g[:a], w in [[1, 2]]; end")
+      expect(single.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(multi.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(single.local(:g)).not_to be_a(Rigor::Type::HashShape)
+      expect(multi.local(:g)).not_to be_a(Rigor::Type::HashShape)
+    end
   end
 
   describe "and/or short-circuit" do
@@ -2338,6 +2379,28 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       nominal_members = post.local(:e).members.grep(Rigor::Type::Nominal)
       expect(nominal_members.map(&:class_name)).to contain_exactly("TypeError", "ArgumentError")
+    end
+
+    # A rescue reference that is an index target (`rescue => h[:e]`) stores the exception through `[]=` on its
+    # receiver, so it widens the receiver exactly as `rescue => e; h[:e] = e` does — otherwise the literal survives
+    # and a later `h[:e] == 0` folds on its stale `0`.
+    it "widens an index-target reference's receiver the way a `[]=` store of the exception does" do
+      _, index = evaluate("h = { e: 0 }\nbegin\n  risky\nrescue => h[:e]\nend")
+      _, plain = evaluate("h = { e: 0 }\nbegin\n  risky\nrescue => e\n  h[:e] = e\nend")
+      expect(index.local(:h)).to eq(plain.local(:h))
+      expect(index.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
+    end
+
+    it "joins the rescued exception class into a seed that admits it" do
+      _, index = evaluate("h = {}\nbegin\n  risky\nrescue TypeError => h[:e]\nend")
+      _, plain = evaluate("h = {}\nbegin\n  risky\nrescue TypeError => e\n  h[:e] = e\nend")
+      expect(index.local(:h)).to eq(plain.local(:h))
+    end
+
+    it "leaves a collection an index-target reference does not name at its literal shape" do
+      _, post = evaluate("h = { e: 0 }\ng = {}\nbegin\n  risky\nrescue => g[:e]\nend")
+      expect(post.local(:h)).to be_a(Rigor::Type::HashShape)
+      expect(post.local(:g)).not_to be_a(Rigor::Type::HashShape)
     end
   end
 

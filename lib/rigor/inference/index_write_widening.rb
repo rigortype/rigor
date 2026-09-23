@@ -21,7 +21,10 @@ module Rigor
     # is a multi-assign TARGET, and the value it stores is a slot of the right-hand side, which only the owning
     # `MultiWriteNode` can type. `StatementEvaluator#eval_multi_write` therefore observes the write there, passing each
     # target to {.widen} with the slot {MultiTargetBinder} decomposed for it, and `ScopeIndexer`'s pre-pass, which
-    # needs no stored value, names the class next to {NODE_CLASSES}.
+    # needs no stored value, names the class next to {NODE_CLASSES}. The same target is also a `for` index
+    # (`for h[:a] in xs`, alone or in a multi-target) and a rescue reference (`rescue => h[:e]`), with no
+    # `MultiWriteNode` around it; `StatementEvaluator#bind_for_index` and `#bind_rescue_reference` observe those,
+    # passing the element and the rescued exception as the stored value.
     module IndexWriteWidening
       NODE_CLASSES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
 

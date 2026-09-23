@@ -31,6 +31,31 @@ stored = { a: 0 }
 stored[:b], _stored_w = "s", 2
 stored[:b].upcase
 
+# An array slot (issue #1168): `slot.first` read the literal's `1`.
+slot = [1]
+slot[0], _slot_b = "s", 2
+puts "int" if slot.first.is_a?(Integer)
+
+# The store lands on the object `swap` ends up bound to: Ruby evaluates
+# the target's receiver before it assigns any target.
+swap = { a: 0 }
+swap, swap[:a] = swap, 1
+puts "zero" if swap[:a] == 0
+
+# The store overwrites the slot `||=` narrowed, so that narrowing goes.
+defaults = {}
+defaults[:a] ||= "default"
+defaults[:a], _defaults_y = 1, 2
+puts "default" if defaults[:a] == "default"
+
+# A correlated guard: `find` answers a pair or `nil`, so `:v` is nil
+# only when `:k` is. Joining the slot's `nil` into the value would fire
+# `possible-nil-receiver` on the guarded read.
+found = { x: "s" }
+found[:k], found[:v] = { "a" => "x" }.find { |k, _| k == "a" }
+found_v = found[:v]
+found_v.upcase if found[:k]
+
 # The must-fire control: the multi-assign stores into `other`, so
 # `kept` is still the literal and its condition genuinely always holds.
 kept = { a: 0 }

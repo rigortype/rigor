@@ -176,9 +176,9 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
     end
 
-    it "reads a foreign stored value quietly, since the store joins it as content evidence" do
-      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
-      expect(undefined).to be_empty
+    it "reads a foreign stored value and a correlated-guard slot quietly" do
+      calls = harness.diagnostics.select { |d| %w[call.undefined-method call.possible-nil-receiver].include?(d.rule) }
+      expect(calls).to be_empty
     end
 
     it "widens the straight-line, nested and splatted receivers and leaves the untouched one literal" do

@@ -666,10 +666,12 @@ module Rigor
       # call's argument list so the widening seam can join it the same way (issue #560) — a
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
-      # {#index_write_stored_type}'s compound result — for `t[0] += 5` the already-computed
-      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and
-      # the one the retained element evidence provably no longer covers. Returns `[]`
-      # when the key is unresolvable, which reproduces the pre-join widening.
+      # what the write put in the slot — for a compound write {#index_write_stored_type}'s
+      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for an index target
+      # the value its owner stores (the slot {MultiTargetBinder} decomposed, the `for` element, the
+      # rescued exception) — which is the whole point: it
+      # is the value the retained element evidence provably no longer covers. Returns `[]` when the
+      # key is unresolvable, which reproduces the pre-join widening.
       # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
       # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
       # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
@@ -811,6 +813,18 @@ module Rigor
       # `h, h[:a] = h, 1` stores into the object `h` is bound to afterwards, and widening first would let the
       # binding of `h` restore the literal. When a target rebinds the receiver's variable to another object
       # instead, widening that one only loses precision.
+      #
+      # The stored value is the slot the binder decomposed, softened as a local in the same position is. The
+      # ADR-57 softening that drops a slot's `nil` is honest for a local because of the optimistic mark, which a
+      # stored value never carries — but it does not need one here: the straight-line join always adds the
+      # `Dynamic[top]` floor ({MutationWidening#gradual_floor}), so no fold can rest on the dropped `nil`. Joining
+      # the `nil` instead would fire `call.possible-nil-receiver` on the correlated guard the softening exists for,
+      # `r[:k], r[:v] = h.find { … }; r[:v].upcase if r[:k]`.
+      #
+      # Each store then drops the indexed narrowing it overwrites, through the same
+      # {IndexedNarrowing.invalidate_indexed_write} a `[]=` call takes (it reads only `receiver` and `arguments`,
+      # which an index target shares): the widening carries a Nominal receiver's slot narrowings across its
+      # rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep reading `"d"`.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)

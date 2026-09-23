@@ -6,9 +6,9 @@ include Rigor::Testing
 # which binds such a local where the call found it: `out << total`
 # stored the pre-call `0` on every iteration as far as the join could
 # tell, `out` read `Array[0]`, and `out.last == 3` folded always-falsey
-# on a program whose `out` is `[1, 3]`. Each such store now reads the
-# local where it runs. Every comparison below is TRUE at runtime unless
-# it is marked, and nothing but the marked line may report.
+# on a program whose `out` is `[1, 3]`. Such a store now reads the local
+# as `Dynamic[top]`. Every comparison below is TRUE at runtime unless it
+# is marked, and nothing but the marked lines may report.
 
 # --- Array: the appended value is a running total. ---
 total = 0
@@ -17,7 +17,7 @@ out = []
   total += x
   out << total
 end
-assert_type("Array[Integer]", out)
+assert_type("Array[Dynamic[top]]", out)
 puts "three" if out.last == 3
 
 # --- Hash: the stored value is a running total. ---
@@ -27,7 +27,6 @@ latest = { a: 0 }
   run += x
   latest[:a] = run
 end
-assert_type("Hash[:a | Symbol, 0 | Integer]", latest)
 puts "three" if latest[:a] == 3
 
 # --- `each_with_object`: the memo stores a running total. ---
@@ -36,24 +35,18 @@ memo = [1, 2].each_with_object([]) do |x, m|
   sum += x
   m << sum
 end
-assert_type("Array[Integer]", memo)
+assert_type("Array[Dynamic[top]]", memo)
 puts "three" if memo.last == 3
 
-# --- The same memo on a receiver Rigor cannot prove non-escaping: the
-# rebound local enters at the escaping-block floor. ---
-def running(xs)
-  count = 0
-  r = xs.each_with_object([]) do |_x, m|
-    count += 1
-    m << count
-  end
-  puts "two" if r.last == 2
-end
-running([1, 2])
+# --- The write is the store's own argument. `count` itself still reads
+# `0` (runtime `3`); flip the golden when #1223 is fixed. ---
+count = 0
+ids = []
+%w[a b c].each { |_s| ids << (count += 1) }
+puts "three" if ids.last == 3
 
-# --- A read between two rebinds sees the value written just before it.
-# Slice A's continuation is `nil | :done`, under which `state.length`
-# would answer `4`. ---
+# --- A read between two rebinds: slice A's continuation is `nil | :done`,
+# under which `state.length` would answer `4`. ---
 state = nil
 lengths = []
 %w[a bb].each do |s|
@@ -61,11 +54,10 @@ lengths = []
   lengths << state.length
   state = :done
 end
-assert_type("Array[1 | 2]", lengths)
 puts "two" if lengths.last == 2
 
-# --- An exit value the store never reads stays out of the collection:
-# the continuation holds the reset `nil`, the store does not. ---
+# --- An exit value no store reads: the continuation holds the reset
+# `nil`, which would report on `v + 1`. ---
 prev = 0
 positives = []
 [1, -2, 3].each do |x|
@@ -76,21 +68,10 @@ positives = []
     prev = nil
   end
 end
-assert_type("Array[1 | 3]", positives)
 positives.each { |v| puts v + 1 }
 
-# --- A flow guard at the store narrows the local it reads. ---
-last = 0
-kept = []
-[1, nil, 3].each do |x|
-  kept << last if last
-  last = x
-end
-assert_type("Array[0 | 1 | 3]", kept)
-kept.each { |v| puts v + 1 }
-
-# --- A declared return type meets the stored value, not the `5` the
-# body resets the local to afterwards. ---
+# --- A declared return type meets the store, not the `5` the body resets
+# the local to afterwards. ---
 class ReboundCaptureReturn
   #: () -> Array[String]
   def successors
@@ -104,101 +85,7 @@ class ReboundCaptureReturn
     out
   end
 end
-
-# --- A local computed from the collection the block fills reads that
-# collection at its gradual floor, not at its pre-call contents. `size`
-# itself still reads `0` (runtime `1`): slice A reads `sizes` at its
-# pre-call contents, ADR-56 WD2.13's second residue. ---
-sizes = []
-size = 0
-[1, 2].each do
-  size = sizes.size
-  sizes << size
-end
-puts "one" if sizes.last == 1
-
-# --- A local that is nil until the collection it guards exists: the
-# walk floors that collection member by member, so the `nil` survives
-# and `pending ? :cont : :start` keeps both arms. ---
-phase = :none
-phases = []
-pending = nil
-[1, 2].each do |x|
-  phase = pending ? :cont : :start
-  phases << phase
-  pending ||= []
-  pending << x
-end
-assert_type("Array[:cont | :start]", phases)
-puts "start" if phases.first == :start
-
-# --- Shapes one more walk of the body cannot stand for keep the
-# block-entry reading, which reads the untyped parameter here. ---
-
-# A store inside a loop of its own: the walk sees the loop's capped
-# passes, never its widened answer.
-def counted(start)
-  i = start
-  counts = []
-  [1].each do
-    i = 0
-    while i < 10
-      i += 1
-      counts << i
-    end
-  end
-  puts "ten" if counts.last == 10
-end
-counted(0)
-
-# A `break` beside an `else`: `eval_if` joins the breaking branch's
-# `nil` into the scope after it.
-def upcased(start)
-  word = start
-  words = []
-  %w[a b c].each do |x|
-    if x == "c"
-      word = nil
-      break
-    else
-      word = x.upcase
-    end
-    words << word
-  end
-  words.each { |w| puts w.downcase }
-end
-upcased("")
-
-# A local written inside an argument, which no later scope carries (#1223).
-def marked(start)
-  mark = start
-  marks = []
-  seen = nil
-  [1, 2].each do |x|
-    mark = seen ? :later : :first
-    marks << mark
-    [seen = x].size
-  end
-  puts "later" if marks.last == :later
-end
-marked(nil)
-
-# An instance variable the body writes: the walk enters with it where the
-# call found it.
-class ReboundCaptureIvar
-  def run(start)
-    @count = 0
-    seen = start
-    counts = []
-    [1, 2].each do
-      @count += 1
-      seen = @count
-      counts << seen
-    end
-    puts "two" if counts.last == 2
-  end
-end
-ReboundCaptureIvar.new.run(nil)
+ReboundCaptureReturn.new.successors
 
 # --- A block parameter reassigned before the store. ---
 bumped = []
@@ -206,25 +93,23 @@ bumped = []
   n += 1
   bumped << n
 end
-assert_type("Array[2 | 3]", bumped)
 puts "three" if bumped.last == 3
 
-# --- A block parameter still shadows the outer local it names: the store
-# reads the yielded element, never the outer "s", though the body writes
-# the name. ---
-shadow = "s"
-got = []
-[1, 2].each do |shadow|
-  got << shadow
-  shadow = nil
+# --- An `inject` accumulator is not fresh on every iteration.
+# `acc_total` itself still reads `0 | 1 | 2` (runtime `3`); flip the
+# golden when #1232 is fixed. ---
+acc_total = 0
+sums = []
+[1, 2].inject(0) do |acc, x|
+  acc_total = acc + x
+  sums << acc_total
+  acc_total
 end
-assert_type("Array[1 | 2]", got)
-puts "two" if got.last == 2
+puts "three" if sums.last == 3
 
-# --- Residue: slice A drops the scope at `next` and keeps the dead reset
-# after it, so a body that jumps to its next iteration keeps the
-# block-entry reading rather than store a `nil` it never stores. Runtime
-# `stepped` is `[0, 1, 2]`. Flip this when #1214 is fixed. ---
+# --- A value carried into the next iteration only through `next`.
+# `step` itself still reads `0?` (runtime `3`); flip the golden when
+# #1214 is fixed. ---
 step = 0
 stepped = []
 [1, 2, 3].each do |x|
@@ -234,16 +119,34 @@ stepped = []
 
   step = nil
 end
-assert_type("Array[0]", stepped)
-stepped.each { |v| puts v + 1 }
+puts "two" if stepped.last == 2
 
-# --- Paired control: the store only ever reads `1`, so the evidence stays
-# precise and the comparison it rules out still folds. ---
-flag = 0
-seen = []
-[1, 2].each do
-  flag = 1
-  seen << flag
+# --- A store inside an inner block reads the outer rebound local too. ---
+outer = 0
+nested = []
+[1, 2].each do |x|
+  outer += x
+  [x].each { |_y| nested << outer }
 end
-assert_type("Array[1]", seen)
-puts "two" if seen.last == 2 # GENUINE-FALSEY
+puts "three" if nested.last == 3
+
+# --- Paired controls: a store reading a local the body does not write,
+# or a parameter it does not reassign, keeps its precise binding beside a
+# rebind, and the comparisons it rules out still fold. ---
+limit = 5
+tally = 0
+caps = []
+[1, 2].each do |x|
+  tally += x
+  caps << limit
+end
+assert_type("Array[5]", caps)
+puts "six" if caps.last == 6 # GENUINE-FALSEY
+
+picked = []
+[1, 2].each do |n|
+  tally += n
+  picked << n
+end
+assert_type("Array[1 | 2]", picked)
+puts "three" if picked.last == 3 # GENUINE-FALSEY

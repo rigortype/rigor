@@ -921,77 +921,57 @@ though `maybe` can stay nil), WD2.11's rule meeting a case its
 reasoning did not cover; that is #1219, and the fixture's golden
 carries the flip comment.
 
-*(The first residue is closed, 2026-09-23.)* A store that reads a
-local the body writes now reads it where the store runs
-(`StatementEvaluator#record_store_point_bindings`), so `out` reads
-`Array[Integer]`. The seam evaluates the block body once more with an
-`on_enter` recorder on its stores. On entry to that walk:
+*(The first residue is closed, 2026-09-23.)* The closure is
+conservative. A store that reads a local the body writes now types that
+local as `Dynamic[top]`
+(`StatementEvaluator#shadow_rebound_reads`), so `out` reads
+`Array[Dynamic[top]]` and `out.last == 3` no longer folds. The locals
+covered are an outer local the body rebinds, and a block parameter or
+`;`-local it reassigns. The binding joins the per-store `shadows`
+overlay, where an inner block's own names were already bound to
+`Dynamic[top]`. Joined collections keep the join's binding, and a local
+the body introduces already read `Dynamic[top]`. A store that reads
+only locals the body does not write keeps its precise binding, so a
+block that rebinds `tally` still stores `limit` as `5`. No extra walk
+runs, and the seam no longer depends on slice A.
 
-- every outer local the body rebinds is bound at slice A's
-  continuation, the pre-call value joined with every iteration's exit
-  value;
-- every other outer local, instance, class and global variable has each
-  collection member floored to `Array[untyped]`, `Hash[untyped,
-  untyped]` or `String`, and every other member kept. The body may
-  change a collection in place, and a value computed from one must not
-  be read off its pre-call contents. Flooring the whole type instead
-  would drop the `nil` of `nil | Array` and make a `cur ? :cont :
-  :start` guard fold.
+Three precise readings were built first. Adversarial review rejected
+each one for reporting on correct code (ADR-5):
 
-Each store's evidence is then typed with the locals it reads at their
-binding in the scope recorded at the store, joined over every visit.
-The rule covers block parameters and `;`-locals the body reassigns
-(`|s| s += 1; out << s`) as well as outer locals.
-`each_with_object_return` now runs after slice A in `eval_call`, and
-both seams take the continuation from the scope slice A leaves, before
-any post-call narrowing. The walk reports into no `return`, `next` or
-`break` sink, and into no tracer.
+1. **Slice A's continuation**, the pre-call value joined with every
+   iteration's exit value. It misses a value written between two
+   rebinds. A call on the union then drops the member it is undefined
+   on: `state = s; out << state.length; state = :done` typed the store
+   `4`, and `lengths.last == 2` folded.
+2. **That continuation joined with the block-entry typing.** This
+   stopped the fold, but it still stored exit values no store reads. A
+   reset to `nil` after the store became `call.possible-nil-receiver`
+   on an element, and a reset to `5` became `def.return-type-mismatch`
+   against a declared `Array[String]`.
+3. **One more walk of the body with an `on_enter` recorder at each
+   store.** The walk entered with rebound locals at the continuation and
+   with every outer collection floored. It was precise, with guards
+   narrowing, but it inherited every gap in the single-pass, in-body
+   flow, and so did every gate put around it. The gaps included:
+   - an `if` branch that exits beside an `else` still joins its writes
+     (#1230);
+   - a `rescue` arm reads the `begin`'s entry scope (#1231);
+   - an `inject` accumulator is treated as fresh on every iteration
+     (#1232);
+   - slice A drops the scope at `next` (#1214);
+   - a local written inside an argument reaches no later scope (#1223);
+   - ivars can be written through setters.
 
-The walk is one pass, so it stands for every iteration only under
-conditions it checks (`StatementEvaluator#store_point_reads`). Every
-other store keeps the block-entry reading:
+   Each gap surfaced as a new false positive the moment a store read
+   through it.
 
-- The store must be written in the body itself. Inside an inner block,
-  lambda or loop, the walk sees a fixpoint's capped intermediate passes
-  and never its widened answer: `while i < 10; i += 1; out << i` would
-  store `1 | 2 | 3`.
-- The body must hold no `next`, `redo`, `break` or `retry`. Slice A
-  reads no scope at a `next` (#1214). `eval_if` still joins a branch
-  that ends in `break` beside an `else` into the scope after it, so a
-  `nil` written before the `break` would reach the store.
-- Every local the body writes must be written as a statement of its
-  own. A write inside an argument, a receiver, parentheses or a
-  predicate reaches no scope after that statement (#1223), so neither
-  slice A nor the walk sees it.
-- The body must write no instance, class or global variable, since the
-  walk enters with those where the call found them.
+The cost is precision: such a collection gains a `Dynamic[top]`
+member, which quiets later reads of it. #1233 records how to return to
+reading (3) once those gaps close. Two shapes stay open:
 
-Two cheaper readings were tried first and rejected, because each adds
-false positives on correct code (ADR-5). Slice A's continuation alone
-covers the value an iteration enters with and the one it leaves with,
-and nothing in between. Under `state = nil`, the block `{ |s| state =
-s; out << state.length; state = :done }` then types the store as `4`,
-because a call on `nil | :done` drops the member it is undefined on.
-Joining that answer with the block-entry typing stops the fold, but it
-still stores every exit value no store reads. A reset to `nil` after
-the store becomes a `possible nil receiver` on an element, and a reset
-to `5` becomes a `def.return-type-mismatch` against a declared
-`Array[String]`. At the store, neither value is there: `out` reads
-`Array[1 | 2]`, and a guard at the store (`out << prev if prev`)
-narrows the local it reads as well.
-
-These stay recorded:
-
-- Every refused shape above keeps the first-iteration reading until
-  #1214, #1223 and the `eval_if` join are fixed. A store the walk never
-  enters, such as one nested in another call's argument, keeps it as
-  well.
 - A store that reads an instance variable directly (`out << @total`)
   is not covered.
-- A local the body introduces reads `Dynamic[top]` at a store, as
-  before.
-- A value computed from any outer collection reads through the floor:
-  sound, but it carries a `Dynamic` arm the pre-call contents did not.
+- The rebound local itself keeps whatever slice A gives it.
 
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
@@ -1005,30 +985,23 @@ fire: the same counter storing a receiver-independent value, and `acc
 exact `flow.*` line set, so a seam that went gradual everywhere fails
 as loudly as the old pin did.
 The `block_content_rebound_capture` fixture gates the first residue's
-closure. Its must-not-fire cases are:
+closure. Its must-not-fire cases each store a local the body writes:
 
-- the Array, Hash and `each_with_object` stores of a rebound local;
-- the memo on an unproven receiver;
-- the read between two rebinds;
+- the Array, Hash and `each_with_object` stores of a running total;
+- a write that is the store's own argument;
+- a read between two rebinds;
 - an exit value no store reads;
-- a guarded store;
 - a declared return type;
 - a reassigned parameter;
-- a local computed from the collection being filled;
-- a `nil` that the member-wise floor keeps.
+- an `inject` accumulator;
+- a `next`;
+- a store inside an inner block.
 
-Each refused shape also has a case that must not fire, one each for:
-
-- a store inside a loop;
-- a `break` beside an `else`;
-- a write inside an argument;
-- an instance-variable write.
-
-It also asserts that a parameter still shadows the local it names, and
-pins the #1214 shape. Its control is a store that only ever reads `1`,
-whose always-falsey must still fire. The spec asserts every rule, not
-only `flow.*`, because the continuation-only readings failed as nil
-receivers and return-type mismatches.
+Its two controls read a local the body does not write, and a parameter
+it does not reassign. Their always-falsey must still fire, so the seam
+has not gone gradual on every store. The spec asserts every rule, not
+only `flow.*`, because the rejected readings failed as nil receivers
+and return-type mismatches as well as folds.
 
 ### WD3 — One mechanism, shared
 

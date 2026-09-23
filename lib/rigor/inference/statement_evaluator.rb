@@ -1847,6 +1847,10 @@ module Rigor
       # evaluation order.
       def eval_call(node)
         call_type = scope.type_of(node, tracer: tracer)
+        # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
+        # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
+        # block-param and adopt it as the call's return type.
+        call_type = each_with_object_return(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like `private def`, `public def`, `module_function def`)
         # parse the def as the call's positional argument; the ExpressionTyper#type_of_def handler types it as
@@ -1862,13 +1866,6 @@ module Rigor
         # scope; the spec MUST in § "Fact stability and mutation" names captured locals a first-class invalidation
         # category. (The escaping / unknown path already widened to Dynamic[top] via `record_closure_escape_if_any`.)
         post_scope = write_back_block_captures(node, post_scope)
-        # Both slice-C seams read a local the block rebinds at this binding, before any post-call narrowing below: a
-        # fact about the continuation is no fact about each iteration (see {#record_store_point_bindings}).
-        rebound_scope = post_scope
-        # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
-        # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
-        # block-param and adopt it as the call's return type.
-        call_type = each_with_object_return(node, call_type, rebound_scope: rebound_scope)
         post_scope = apply_rbs_extended_assertions(node, post_scope)
         post_scope = apply_plugin_assertions(node, post_scope)
         post_scope = apply_rspec_matcher_narrowing(node, post_scope)
@@ -1902,8 +1899,7 @@ module Rigor
         # ADR-56 slice C — receiver-content element-type join. Joins appended / stored element / key / value types into
         # the continuation collection so `out = [0]; arr.each { |x| out << x }` types `Array[0 | Integer]`, not
         # `Array[0]`. Same always-safe rationale (only widens).
-        post_scope = content_writeback_block_captures(node, post_scope, seed_scope: pre_widen_scope,
-                                                                        rebound_scope: rebound_scope)
+        post_scope = content_writeback_block_captures(node, post_scope, seed_scope: pre_widen_scope)
         # Indexed-collection narrowing — drop any `receiver[key] ||= default` narrowing the analyzer recorded earlier
         # when an intervening `[]=` writes the same slot or any other mutator runs against the receiver. Always-safe
         # (only forgets; never invents).
@@ -2809,11 +2805,9 @@ module Rigor
       # post-call effect applied ahead of the widening; the pre-CALL `scope` would carry neither. The loop seam makes
       # the same choice with `pre_body`; see {#loop_content_writeback}.
       #
-      # The stored evidence is typed in the block-entry scope, with each local the body writes read where its store runs
-      # when one more walk of the body can stand for every iteration ({#record_store_point_bindings}), and iterated to a
-      # fixpoint when a store reads a collection the join moves — see {#join_content_to_fixpoint}. The join only ever
-      # widens the collection's pre-call binding.
-      def content_writeback_block_captures(call_node, post_scope, seed_scope:, rebound_scope:)
+      # The stored evidence is typed in the block-entry scope and iterated to a fixpoint when a store reads a
+      # collection the join moves — see {#join_content_to_fixpoint}. Always sound — only ever widens.
+      def content_writeback_block_captures(call_node, post_scope, seed_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
@@ -2825,189 +2819,39 @@ module Rigor
         mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        record_store_point_bindings(call_node, block, rebound_scope, mutations, shadows)
+        shadow_rebound_reads(block, mutations, shadows)
         seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
       end
 
-      # Lays over each store in `shadows` the binding, where the store runs, of every local it reads that the block body
-      # writes. The block-entry scope binds such a local where the call found it, so a store reading one recorded the
-      # first iteration's value: `total = 0; out = []; [1, 2].each { |x| total += x; out << total }` stored `0` as far
-      # as the join could tell, `out` read `Array[0]`, and `out.last == 3` folded always-falsey on a program whose `out`
-      # is `[1, 3]`. Read where the store runs, `total` is `Integer`, and `out` reads `Array[Integer]`.
+      # Adds to each store's `shadows` every local it reads that the block body writes and the block-entry scope binds:
+      # an outer local the body rebinds, or a block parameter or `;`-local it reassigns. Joined collections are left to
+      # the join, and a local the body introduces already reads `Dynamic[top]` there.
       #
-      # The binding at the store, not slice A's continuation: the continuation also holds exit values the store never
-      # reads (`state = s; out << state; state = nil` would store `nil`), and a flow guard at the store (`out << prev if
-      # prev`) narrows it. The reading is taken only where one more walk of the body can stand for every iteration
-      # ({#store_point_reads}); every other store keeps the block-entry binding.
-      def record_store_point_bindings(call_node, block, rebound_scope, sites, shadows)
-        reads = store_point_reads(block, sites)
-        return if reads.empty?
-
-        visits = store_point_scopes(call_node, block, rebound_scope, reads.keys)
-        reads.each do |site, names|
-          scopes = visits[site]
-          next if scopes.nil?
-
-          bindings = names.filter_map do |name|
-            types = scopes.filter_map { |visit| visit.local(name) }
-            [name, Type::Combinator.union(*types)] unless types.empty?
-          end
-          shadows[site] = bindings.to_h.merge(shadows.fetch(site, {})) unless bindings.empty?
-        end
-      end
-
-      # `{ site => names }`: the locals each store reads that the body writes and the block-entry scope binds — an outer
-      # local the body rebinds, or a block parameter or `;`-local it reassigns — less the joined collections, whose
-      # binding the join owns. A local the body introduces is left out: the block-entry scope reads it as
-      # `Dynamic[top]`, which a store cannot mistake for a value.
+      # The block-entry scope binds such a local where the call found it, so a store reading one recorded the first
+      # iteration's value: `total = 0; out = []; [1, 2].each { |x| total += x; out << total }` stored `0` as far as the
+      # join could tell, `out` read `Array[0]`, and `out.last == 3` folded always-falsey on a program whose `out` is
+      # `[1, 3]`. Typed as `Dynamic[top]`, the store is `out`'s one unknown member and nothing folds.
       #
-      # Only a store written in the body itself counts. Inside an inner block, lambda or loop, the walk sees a
-      # fixpoint's capped intermediate passes and never its widened answer (`while i < 10; i += 1; out << i` would store
-      # `1 | 2 | 3`). And the whole body is refused when one walk cannot stand for every iteration
-      # ({#store_point_trusted?}).
-      def store_point_reads(block, sites)
-        body = block.body
-        return {} unless store_point_trusted?(body)
-
+      # Every precise reading tried reported on correct code instead:
+      #
+      # - slice A's continuation misses a value written between two rebinds;
+      # - joined with the block-entry typing, it still stores exit values no store reads;
+      # - one more walk of the body to the store inherits every gap in the engine's in-body flow.
+      #
+      # See ADR-56 WD2.13.
+      def shadow_rebound_reads(block, sites, shadows)
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = (body_local_writes(body) & entry_names) - sites.keys
-        return {} if written.empty?
+        written = (body_local_writes(block.body) & entry_names) - sites.keys
+        return if written.empty?
 
-        direct_store_sites(body, sites).each_with_object({}.compare_by_identity) do |site, reads|
-          names = local_reads(site) & written
-          reads[site] = names unless names.empty?
+        sites.each_value do |nodes|
+          nodes.each do |site|
+            names = local_reads(site) & written
+            shadows[site] = shadows.fetch(site, []) | names unless names.empty?
+          end
         end
-      end
-
-      def direct_store_sites(body, sites)
-        wanted = sites.each_value.with_object({}.compare_by_identity) { |nodes, acc| nodes.each { |n| acc[n] = true } }
-        found = []
-        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          next unless wanted.key?(node)
-
-          found << node if ancestors.none? { |ancestor| ITERATION_BARRIERS.any? { |klass| ancestor.is_a?(klass) } }
-        end
-        found
-      end
-
-      # False when one more walk of the body cannot stand for every iteration, which the body shows by:
-      #
-      # - a `next`, `redo`, `break` or `retry` anywhere in it: slice A reads no scope at a `next` (#1214), and
-      #   `eval_if` still joins a branch that ends in `break` beside an `else` into the scope after it;
-      # - a local written anywhere but a statement of its own, which no scope after that statement carries (#1223);
-      # - an instance, class or global variable written: the walk enters with those where the call found them.
-      def store_point_trusted?(body)
-        Source::NodeWalker.each_with_ancestors(body).none? do |node, ancestors|
-          UNTRUSTED_STORE_POINT_NODES.any? { |klass| node.is_a?(klass) } ||
-            (CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) } && !statement_write?(node, ancestors))
-        end
-      end
-
-      UNTRUSTED_STORE_POINT_NODES = [
-        Prism::NextNode, Prism::RedoNode, Prism::BreakNode, Prism::RetryNode,
-        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode,
-        Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode, Prism::ClassVariableOrWriteNode,
-        Prism::ClassVariableAndWriteNode, Prism::ClassVariableTargetNode,
-        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableOrWriteNode,
-        Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
-      ].freeze
-      private_constant :UNTRUSTED_STORE_POINT_NODES
-
-      # The nodes whose own statements the evaluator walks, binding each local write in them.
-      STATEMENT_CONTAINERS = [
-        Prism::StatementsNode, Prism::IfNode, Prism::UnlessNode, Prism::ElseNode, Prism::CaseNode, Prism::CaseMatchNode,
-        Prism::WhenNode, Prism::InNode, Prism::BeginNode, Prism::RescueNode, Prism::EnsureNode, Prism::WhileNode,
-        Prism::UntilNode, Prism::ForNode, Prism::BlockNode, Prism::MultiWriteNode
-      ].freeze
-      private_constant :STATEMENT_CONTAINERS
-
-      # True when every node between `write` and the body is one the evaluator walks as statements: a statement list or
-      # branch (never its predicate), a multi-assign's targets (never its value), or a nested block whose call is itself
-      # such a statement. A write inside an argument, a receiver, parentheses or a predicate is typed as an expression,
-      # and its binding reaches no later scope. A method or class body is a scope of its own and ends the climb.
-      def statement_write?(write, ancestors)
-        child = write
-        ancestors.reverse_each do |ancestor|
-          return true if SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) }
-
-          contained =
-            if ancestor.is_a?(Prism::CallNode) then ancestor.block.equal?(child)
-            else STATEMENT_CONTAINERS.any? { |klass| ancestor.is_a?(klass) } && !condition_of?(ancestor, child)
-            end
-          return false unless contained
-
-          child = ancestor
-        end
-        true
-      end
-
-      SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :SCOPE_BODY_NODES
-
-      def condition_of?(container, child)
-        %i[predicate collection pattern value].any? do |reader|
-          container.respond_to?(reader) && container.public_send(reader).equal?(child)
-        end || (container.respond_to?(:conditions) && container.conditions.any? { |c| c.equal?(child) })
-      end
-
-      # Evaluates the block body once more, recording the scope each store runs in: `{ site => [scope, ...] }`, one per
-      # time the walk reached it. The walk reports into no `return`, `next` or `break` sink, and to no tracer, so the
-      # method, block and loop it runs inside see nothing of it.
-      def store_point_scopes(call_node, block, rebound_scope, sites)
-        wanted = sites.each_with_object({}.compare_by_identity) { |site, acc| acc[site] = true }
-        visits = {}.compare_by_identity
-        recorder = ->(node, node_scope) { (visits[node] ||= []) << node_scope if wanted.key?(node) }
-        entry = store_point_entry(call_node, block, rebound_scope)
-        with_detached_sinks do
-          StatementEvaluator.new(
-            scope: entry, on_enter: recorder, class_context: @class_context, lexical_nesting: @lexical_nesting
-          ).evaluate(block)
-        end
-        visits
-      end
-
-      STORE_POINT_SINK_KEYS = [RETURN_SINK_KEY, NEXT_SINK_KEY, BREAK_SINK_KEY, BREAK_VALUE_SINK_KEY].freeze
-      private_constant :STORE_POINT_SINK_KEYS
-
-      def with_detached_sinks
-        saved = STORE_POINT_SINK_KEYS.map { |key| Thread.current[key] }
-        STORE_POINT_SINK_KEYS.each { |key| Thread.current[key] = nil }
-        yield
-      ensure
-        STORE_POINT_SINK_KEYS.zip(saved) { |key, sink| Thread.current[key] = sink }
-      end
-
-      # The scope the walk enters the body with. Every outer local the body rebinds is at slice A's continuation in
-      # `rebound_scope`, what it can hold as any iteration starts. Every other outer local, instance, class and global
-      # variable has each collection member at its gradual floor: the body may change a collection in place, and a
-      # value computed from one must not be read off its pre-call contents. The block's own parameters are fresh on
-      # every iteration and keep their bindings.
-      def store_point_entry(call_node, block, rebound_scope)
-        entry = CapturedLocals.writes(block, scope).reduce(build_block_entry_scope(call_node, block)) do |acc, name|
-          binding = rebound_scope.local(name)
-          binding.nil? ? acc : acc.with_local(name, binding)
-        end
-        floor_store_point_collections(entry, scope.locals.keys - CapturedLocals.introduced_locals(block).to_a)
-      end
-
-      def floor_store_point_collections(entry, outer_locals)
-        entry = outer_locals.reduce(entry) { |acc, name| acc.with_local(name, store_point_floor(acc.local(name))) }
-        entry = entry.ivars.reduce(entry) { |acc, (name, type)| acc.with_ivar(name, store_point_floor(type)) }
-        entry = entry.cvars.reduce(entry) { |acc, (name, type)| acc.with_cvar(name, store_point_floor(type)) }
-        entry.globals.reduce(entry) { |acc, (name, type)| acc.with_global(name, store_point_floor(type)) }
-      end
-
-      # `type` with each collection member at its gradual floor and every other member kept, so `nil | Array[Integer]`
-      # floors to `nil | Array[untyped]`, never to `Array[untyped]`.
-      def store_point_floor(type)
-        return type if type.nil?
-
-        members = type.is_a?(Type::Union) ? type.members : [type]
-        floored = members.map { |member| content_floor_for(member) || member }
-        floored.zip(members).all? { |f, m| f.equal?(m) } ? type : Type::Combinator.union(*floored)
       end
 
       # Every local a body writes, at any depth.
@@ -3032,14 +2876,6 @@ module Rigor
           n.name if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
         end.uniq
       end
-
-      # The nodes that open a body a store inside is not written in: an inner block, lambda or method, a loop that owns
-      # its own iterations, or a class or module body.
-      ITERATION_BARRIERS = [
-        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
-        Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-      ].freeze
-      private_constant :ITERATION_BARRIERS
 
       # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
       # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
@@ -3072,11 +2908,11 @@ module Rigor
       # collection, where the converged `Integer` still reports `h[:a].upcase`. With no moving name — the `acc = [];
       # xs.each { |x| acc.push(x) }` accumulator — this is the single pass it always was.
       #
-      # `shadows` maps a site to the bindings its evidence is typed with on top of `entry`. A site nested in an inner
-      # block or lambda binds the names that block binds itself (parameters, `;`-locals) to `Dynamic[top]`: the entry
-      # scope is the seam block's, where such a name resolves to the OUTER local it shadows, and `|y| out << y.first`
-      # inside the block must not read an outer `y = [0]`. A store reading a local the body writes binds it where the
-      # store runs ({#record_store_point_bindings}); the inner block's names win over those.
+      # `shadows` maps a site to the names its evidence is typed with bound to `Dynamic[top]`. A site nested in an inner
+      # block or lambda lists the names that block binds itself (parameters, `;`-locals): the entry scope is the seam
+      # block's, where such a name resolves to the OUTER local it shadows, and `|y| out << y.first` inside the block
+      # must not read an outer `y = [0]`. Every site also lists the locals it reads that the body writes
+      # ({#shadow_rebound_reads}).
       def join_content_to_fixpoint(sites, seeds, entry, shadows = NO_SHADOWS)
         kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
         return {} if kinds.empty?
@@ -3174,15 +3010,16 @@ module Rigor
       def record_shadows(shadows, site, ancestors)
         names = ancestors.select { |a| scope_nesting_node?(a) }
                          .flat_map { |a| CapturedLocals.introduced_locals(a).to_a }
-        shadows[site] = names.to_h { |name| [name, Type::Combinator.untyped] } unless names.empty?
+        shadows[site] = names unless names.empty?
       end
 
-      # `scope` with a site's own bindings from `shadows` laid over it (see {#join_content_to_fixpoint}).
+      # `scope` with each name a site's enclosing inner blocks bind bound to `Dynamic[top]`: the seam's scope cannot
+      # see those bindings, and the name would otherwise resolve to the outer local it shadows.
       def site_evidence_scope(scope, site, shadows)
-        bindings = shadows[site]
-        return scope if bindings.nil?
+        names = shadows[site]
+        return scope if names.nil?
 
-        bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        names.reduce(scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
       end
 
       # `base` binds every fixed name to its join; the moving names are rebound on each pass.
@@ -3253,7 +3090,7 @@ module Rigor
       # mutations are joined: pre-state = the memo argument's type, added evidence = the content-mutator args on the
       # memo block param. Returns `call_type` unchanged for any other call, a missing block, or a memo whose pre-state
       # is not a collection.
-      def each_with_object_return(call_node, call_type, rebound_scope:)
+      def each_with_object_return(call_node, call_type)
         return call_type unless call_node.name == :each_with_object
 
         block = call_node.block
@@ -3274,24 +3111,21 @@ module Rigor
         calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        pre_state = scope.type_of(memo_arg, tracer: tracer)
-        joined = join_memo_content(call_node, memo_param, calls, pre_state, shadows, rebound_scope)
+        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
         joined || call_type
       end
 
       # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
       # memo's carrier is kept: a memo store reading one of them (`buf << w; m << buf.length`) must see it as it
       # stands at any iteration's entry, not at its pre-call contents. Their own continuation is the block seam's to
-      # write. A memo store reading a local the body writes reads it as the block seam does, which is why {#eval_call}
-      # runs this after slice A. The escape classification is not checked, so on a block Rigor cannot prove
-      # non-escaping, an outer local the body rebinds enters at the escaping-block floor, `Dynamic[top]`.
-      def join_memo_content(call_node, memo_param, calls, pre_state, shadows, rebound_scope)
+      # write.
+      def join_memo_content(call_node, memo_param, calls, pre_state, shadows)
         block = call_node.block
         captured = captured_content_mutations(block, shadows)
         seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
         seeds[memo_param] = pre_state
         sites = captured.merge(memo_param => calls)
-        record_store_point_bindings(call_node, block, rebound_scope, sites, shadows)
+        shadow_rebound_reads(block, sites, shadows)
         join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 
@@ -3363,7 +3197,7 @@ module Rigor
         ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
       end
 
-      # No site carries bindings of its own — the loop seam's answer, and the default.
+      # No site sits under an inner block that shadows a name — the loop seam's answer, and the default.
       NO_SHADOWS = {}.freeze
       private_constant :NO_SHADOWS
 

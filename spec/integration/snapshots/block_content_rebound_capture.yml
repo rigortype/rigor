@@ -1,38 +1,30 @@
 ---
 locals:
-  bumped: Array[2 | 3]
-  flag: 0 | 1
-  got: Array[1 | 2]
-  kept: Array[0 | 1 | 3]
-  last: 0 | 1 | 3 | nil
-  latest: Hash[:a | Symbol, 0 | Integer]
-  lengths: Array[1 | 2]
-  memo: Array[Integer]
-  out: Array[Integer]
-  pending: Array[1 | 2 | Dynamic[top] | Integer]
-  phase: Symbol
-  phases: Array[:cont | :start]
-  positives: Array[1 | 3]
+  acc_total: 0 | 1 | 2
+  bumped: Array[Dynamic[top]]
+  caps: Array[5]
+  count: '0'
+  ids: Array[Dynamic[top]]
+  latest: Hash[:a | Symbol, 0 | Dynamic[top]]
+  lengths: Array[Dynamic[top]]
+  limit: '5'
+  memo: Array[Dynamic[top]]
+  nested: Array[Dynamic[top]]
+  out: Array[Dynamic[top]]
+  outer: Integer
+  picked: Array[1 | 2]
+  positives: Array[Dynamic[top]]
   prev: 0 | 1 | 3 | nil
   run: Integer
-  seen: Array[1]
-  shadow: '"s"'
-  size: '0'
-  sizes: Array[non-negative-int]
   state: ":done?"
   step: 0?
-  stepped: Array[0]
+  stepped: Array[Dynamic[top]]
   sum: Integer
+  sums: Array[Dynamic[top]]
+  tally: Integer
   total: Integer
 assertions:
-  '1': Array[Integer]
-  '2': Hash[:a | Symbol, 0 | Integer]
-  '3': Array[Integer]
+  '1': Array[Dynamic[top]]
+  '2': Array[Dynamic[top]]
+  '3': Array[5]
   '4': Array[1 | 2]
-  '5': Array[1 | 3]
-  '6': Array[0 | 1 | 3]
-  '7': Array[:cont | :start]
-  '8': Array[2 | 3]
-  '9': Array[1 | 2]
-  '10': Array[0]
-  '11': Array[1]

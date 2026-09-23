@@ -4,9 +4,11 @@ require "prism"
 
 require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
+require_relative "element_read_widening"
 require_relative "index_write_widening"
 require_relative "mutation_widening"
 require_relative "receiver_alias"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -239,6 +241,14 @@ module Rigor
       # `find` to `nil` the same way. A class variable or global counts only as the receiver itself (parentheses
       # aside), not through a branch that selects it.
       #
+      # A local also counts through the two routes straight-line code widens it by without reading it as the
+      # receiver. A mutator on an element read rooted at it (`a[0] << e`, the local {ElementReadWidening}
+      # widens) is a site of that local. A self-call whose callee content-mutates the parameter a local is passed
+      # to (`add_to(a, e)`, the local `StatementEvaluator#content_mutated_arguments` reports) is a
+      # {UnknownStoreWidening::CalleeStore} site of it. Both were invisible here, so every position of the fold
+      # read the local at its entry contents: `a = [[1]]; [1, 2].map { |e| v = a[0].size; a[0] << e; v }`
+      # folded to `[1, 1]` where Ruby answers `[1, 2]`.
+      #
       # @param base_scope — the call-site scope the block closes over.
       # @param non_locals — also collect the instance variables, class variables and globals the body mutates
       #   in place.
@@ -250,21 +260,18 @@ module Rigor
 
         introduced = nil
         sites = nil
+        evaluator = nil
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
-          receiver = mutated_receiver(descendant)
-          next if receiver.nil?
+          # A callee is resolved in the call-site scope, as the straight-line callee floor resolves it.
+          site, reads = mutation_site(descendant) { evaluator ||= StatementEvaluator.new(scope: base_scope) }
+          next if site.nil?
 
-          mutated_reads(receiver).each do |read|
-            next unless content_target?(read, base_scope, non_locals)
-
-            if read.is_a?(Prism::LocalVariableReadNode)
-              next unless outer_read?(read, ancestors)
-
+          reads.each do |read|
+            next unless captured_target?(read, ancestors, base_scope, non_locals) do
               introduced ||= introduced_locals(block_node)
-              next if introduced.include?(read.name)
             end
 
-            ((sites ||= {})[read.name] ||= []) << descendant
+            ((sites ||= {})[read.name] ||= []) << site
           end
         end
         sites || NO_SITES
@@ -273,12 +280,50 @@ module Rigor
       NON_ALIASED_READS = [Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode].freeze
       private_constant :NON_ALIASED_READS
 
+      # The variable reads a mutation site's receiver reaches: the local an element read is rooted at, or else
+      # {.mutated_reads}.
+      def site_reads(receiver)
+        path = ElementReadWidening.element_read_path(receiver)
+        path ? [path.first] : mutated_reads(receiver)
+      end
+
+      # `[site, reads]` when `node` changes the contents of the variables `reads` names, or nil. A self-call is
+      # resolved by the `StatementEvaluator` the block yields, which the caller builds only when one is needed.
+      def mutation_site(node)
+        receiver = mutated_receiver(node)
+        return [node, site_reads(receiver)] if receiver
+        return nil unless callee_call?(node)
+
+        reads = yield.content_mutated_arguments(node)
+        reads.empty? ? nil : [UnknownStoreWidening::CalleeStore.new(node), reads]
+      end
+
+      # A call to a method on `self` (implicit or explicit) that passes a local as an argument — the only kind
+      # the callee floor can report a site for, so the only kind worth resolving.
+      def callee_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+        return false unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+
+        arguments = node.arguments&.arguments
+        !arguments.nil? && arguments.any?(Prism::LocalVariableReadNode)
+      end
+
       # The variable reads a mutated receiver can evaluate to: {ReceiverAlias.candidates}' locals and instance
       # variables, or the class variable or global the receiver reads directly, parenthesised or not.
       def mutated_reads(receiver)
         direct = receiver
         direct = direct.body.body.last while direct.is_a?(Prism::ParenthesesNode) && direct.body.is_a?(Prism::StatementsNode)
         NON_ALIASED_READS.include?(direct.class) ? [direct] : ReceiverAlias.candidates(receiver)
+      end
+
+      # True when `read` names a variable {.content_mutations} collects: a {.content_target?} which, when it is a
+      # local, reaches past every nested block and is not one the block introduces (the block yields that set,
+      # computed only when needed).
+      def captured_target?(read, ancestors, base_scope, non_locals)
+        return false unless content_target?(read, base_scope, non_locals)
+        return true unless read.is_a?(Prism::LocalVariableReadNode)
+
+        outer_read?(read, ancestors) && !yield.include?(read.name)
       end
 
       # A local bound at the call site (the block's own names are excluded by the caller), or — under

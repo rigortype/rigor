@@ -52,6 +52,25 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.describe).to eq("Array[Dynamic[top] | Integer]")
     end
 
+    it "gives every Array member of a union seed the gradual arm" do
+      # `flag ? xs : [1]` under `map!`: the precise member is declined by the widening itself, but the site
+      # still rewrites whichever array the local holds, so each member takes the arm.
+      union = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")]),
+        one_pinned_tuple
+      )
+      widened = described_class.widen(union, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
+      expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | Array[Dynamic[top] | String]")
+    end
+
+    it "keeps an empty-witness refinement while giving its base the gradual arm" do
+      # An append cannot empty the receiver, so the rebuilt `Difference` must still remove the empty witness.
+      seed = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a << e }\n"))
+      expect(widened.describe).to eq("non-empty-array[Dynamic[top] | String]")
+      expect(widened.removes_empty_witness?).to be(true)
+    end
+
     it "leaves the binding unchanged when the carrier's table does not list the mutator" do
       widened = described_class.widen(zero_pinned_hash, sites_of("h = {}\n[1].each { |k| h.shift }\n"))
       expect(widened).to eq(zero_pinned_hash)

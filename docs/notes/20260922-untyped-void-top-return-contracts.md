@@ -393,6 +393,39 @@ The remaining half of the namespace: `Summary`, `EffectTable` (+ `Entry`), `File
   `Registry#additional_initializers` already pinned unmarked). `entry_points` is the exception
   that stays earned — sig-gen infers `Array[untyped]`, exactly what the declaration says.
 
+## Eighth sweep: the effect vocabulary — `Effects::Registry`, `Plugin::Effect*`, `Contribution`
+
+The stragglers the two `Effects::*` sweeps deferred: the label-vocabulary value object and the
+plugin-side effect row classes.
+
+- `Effects::Registry` is declared with `#1154`-marked normalized readers (`vocabulary_version`,
+  `labels`, `roots`, `descriptions`); `known?`/`suggest`/`retired` pin unrenderable — private
+  helpers build their answers. Factories (`default`, `for_configuration`, `load_file`) and
+  `with` are earned.
+- `Plugin::EffectAttribution` / `EffectEdge` / `EffectAncestry` / `EffectEntryPoints` are new
+  files. Closed-union members are spelled closed (`EffectEdge#target` over `TARGETS`,
+  `EffectAncestry` keeps `child`/`parent`/`why`). `EffectAttribution`'s computed predicates
+  (`receiver_path?`/`self_path?`) are the only unmarked rows; the edge/ancestry/entry-points
+  files classify fully.
+- `Plugin::Registry::Contribution` is declared as a nested `Data` subclass — the members and
+  the kwargs-only `new`/`initialize` are [#1150]-marked. The positional `self.[]` arm is left
+  undeclared because the custom `initialize(ancestry: [], **rest)` takes keywords only, so the
+  positional constructor is not callable.
+- `Manifest` gains the six `effect_*` readers (each #1154 — `validate_effect_*!` proves the
+  element types), `effect_owner`, `effect_discharge_allowed?`, `effects?`, and the five
+  validated `effect_*` initialize kwargs. `Base` gains the five `effect_*` manifest delegates
+  (generated — sig-gen proves them through the manifest readers). `Registry` gains
+  `effect_contributions` (unmarked residue: a memoised `filter_map` aggregate, not an
+  initialize-parameter read).
+- The seventh sweep's remaining `untyped` cells close: `PluginFacts`'s `contributions:` is
+  `Array[Plugin::Registry::Contribution]`, `entry_points` is `Array[Plugin::EffectEntryPoints]`
+  (joining residue as declared-divergent — sig-gen still infers `Array[untyped]` from `absorb`),
+  and `extend_registry` is `Effects::Registry` in and out, leaving residue as parameter intent.
+- `Manifest#effect_owner` is declared `String` against sig-gen's `String?`: the
+  `return id if effect_root.nil?` guard narrows the last line, but the engine does not narrow a
+  repeated reader call, so the def site carries `# rigor:disable def.return-type-mismatch` — the
+  same engine-limitation suppression `gem_resolver.rb` already uses for `undefined-method`.
+
 ## Two incidental findings
 
 Recorded here so the next sweep does not rediscover them:

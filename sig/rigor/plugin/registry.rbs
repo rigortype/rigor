@@ -28,4 +28,48 @@ class Rigor::Plugin::Registry
 
   # The subset of `protocol_contracts` whose `path_glob` matches `path` (memoised per path).
   def contracts_for_path: (untyped path) -> Array[Rigor::Plugin::ProtocolContract]
+
+  # ADR-103 WD2/WD6/WD10/WD14 — every loaded plugin's effect contribution, in registration order.
+  # Lazy and memoised like `contracts_for_path`: computing it can force a plugin's project-facts
+  # read, which a run with effects off must never pay. Unmarked residue — a memoised flat_map
+  # aggregate, not an `initialize`-parameter read.
+  def effect_contributions: () -> Array[Contribution]
+
+  # One plugin's effect contribution, flattened off whichever surface answered it. Carries the two
+  # authority answers — `owner`, the label root this plugin may open, and `discharge_allowed`,
+  # whether its attributions may discharge — so nothing downstream re-derives who is first-party.
+  class Contribution < ::Data
+    # sig-gen gap: #1150 — a `Data.define` member; sig-gen proposes `untyped`.
+    attr_reader id: String
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader owner: String
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader requested_root: String?
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader discharge_allowed: bool
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader labels: Array[String]
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader attributions: Array[EffectAttribution]
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader edges: Array[EffectEdge]
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader entry_points: Array[EffectEntryPoints]
+    # sig-gen gap: #1150 — a `Data.define` member.
+    attr_reader ancestry: Array[EffectAncestry]
+
+    # sig-gen gap: #1150 — `ancestry:` defaults so pre-#465 callers keep working; the custom
+    # initialize takes keywords only, so the positional `self.[]` constructor is not callable.
+    def self.new: (id: String, owner: String, requested_root: String?, discharge_allowed: bool,
+                   labels: Array[String], attributions: Array[EffectAttribution],
+                   edges: Array[EffectEdge], entry_points: Array[EffectEntryPoints],
+                   ?ancestry: Array[EffectAncestry]) -> instance
+    def initialize: (id: String, owner: String, requested_root: String?, discharge_allowed: bool,
+                     labels: Array[String], attributions: Array[EffectAttribution],
+                     edges: Array[EffectEdge], entry_points: Array[EffectEntryPoints],
+                     ?ancestry: Array[EffectAncestry]) -> void
+
+    # Whether the row carries nothing — no labels, attributions, edges, entry points, or ancestry.
+    def empty?: () -> bool
+  end
 end

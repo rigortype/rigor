@@ -266,7 +266,7 @@ module Rigor
       # framework root it models for a first-party bundled plugin that declares one, and the plugin id
       # otherwise. A third-party plugin's `effect_root:` is ignored here (and warned about by the registry),
       # so it opens only the root named after itself.
-      def effect_owner
+      def effect_owner # rigor:disable def.return-type-mismatch — the nil guard above narrows `effect_root`, but the engine cannot narrow across a repeated reader call, so it infers String? on a path that is always String
         return id if effect_root.nil?
         return id unless FirstParty.bundled?(id)
 

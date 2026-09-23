@@ -1,0 +1,64 @@
+module Rigor
+  module Plugin
+    # One `effect_attributions:` row: the receiver spelling, the selector, and the labels the call
+    # contributes to the declared lane — plus the optional `narrow:`/`callee:`/`taint:`/`responds:`
+    # modifiers the engine owns the strategy for (#393/#1048/#1065). Frozen value object.
+    class EffectAttribution
+      # A receiver spelled as a `Constant::Path` — the class-name form.
+      CLASS_NAME: Regexp
+      # A receiver path: a constant head followed by one or more sends (`Rails.cache`).
+      RECEIVER_PATH: Regexp
+      # A self path: implicit self followed by one or more receiver-less sends (`self.flash.now`).
+      SELF_PATH: Regexp
+      # What a self path is rooted at, once the `self.` head is stripped.
+      SELF_HEAD: String
+      # The taint causes a plugin row may name — a closed subset of `Effects::TaintCause::ALL`.
+      TAINT_CAUSES: Array[String]
+
+      # sig-gen gap: #1154 — normalized/validated in `initialize` from the parameter of the same
+      # name (`to_s`-coerced, frozen), so sig-gen proposes the raw parameter shape.
+      attr_reader receiver: String
+      # sig-gen gap: #1154 — `to_sym`-normalized from the `method:` parameter.
+      attr_reader method: Symbol
+      attr_reader singleton: bool
+      # sig-gen gap: #1154 — `Array()`-normalized, deduplicated and frozen from `labels:`.
+      attr_reader labels: Array[String]
+      # sig-gen gap: #1154 — `to_s`-normalized from the `narrow:` parameter.
+      attr_reader narrow: String?
+      attr_reader discharge: bool
+      # sig-gen gap: #1154 — `to_s`-normalized from the `within:` parameter.
+      attr_reader within: String?
+      attr_reader on_result: bool
+      # sig-gen gap: #1154 — `to_s`-normalized from the `taint:` parameter.
+      attr_reader taint: String?
+      # sig-gen gap: #1154 — `to_s`-normalized from the `callee:` parameter.
+      attr_reader callee: String?
+      # sig-gen gap: #1154 — normalized from the `callee_fallbacks:` parameter.
+      attr_reader callee_fallbacks: Hash[String, Array[String]]?
+      attr_reader responds: bool
+      # sig-gen gap: #1154 — `to_s`-normalized from the `why:` parameter.
+      attr_reader why: String
+
+      # The coercion-facing constructor: every parameter is `to_s`/`to_sym`/`Array()`-normalized,
+      # so `untyped` is the honest parameter type throughout.
+      def initialize: (receiver: untyped, method: untyped, labels: untyped, why: untyped,
+                       ?singleton: untyped, ?narrow: untyped, ?discharge: untyped,
+                       ?within: untyped, ?on_result: untyped, ?taint: untyped, ?callee: untyped,
+                       ?callee_fallbacks: untyped, ?responds: untyped) -> void
+
+      # Whether {#receiver} is a receiver path (`Rails.cache`) rather than a class name or a
+      # self path.
+      def receiver_path?: () -> bool
+      # Whether {#receiver} is a self path (`self.flash.now`).
+      def self_path?: () -> bool
+
+      # The key an origin and a report spell this row as.
+      def key: () -> String
+      def to_h: () -> Hash[String, untyped]
+
+      def ==: (untyped other) -> bool
+      alias eql? ==
+      def hash: () -> Integer
+    end
+  end
+end

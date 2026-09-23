@@ -1,0 +1,31 @@
+module Rigor
+  module Plugin
+    # One `effect_edges:` row: a framework-edge strategy naming the base `receiver` a plugin points
+    # the engine at, the `target` strategy slot, and an optional method-level `selector`. Frozen
+    # value object.
+    class EffectEdge
+      # The closed set of framework-edge strategies the engine implements.
+      TARGETS: Array[Symbol]
+
+      # sig-gen gap: #1154 — validated/normalized in `initialize` from the parameter of the same
+      # name, so sig-gen proposes the raw parameter shape.
+      attr_reader receiver: String
+      # sig-gen gap: #1154 — `to_sym`-normalized from the `method:` parameter.
+      attr_reader method: Symbol?
+      attr_reader singleton: bool
+      # sig-gen gap: #1154 — validated against `TARGETS` in `initialize`.
+      attr_reader target: (:activerecord_callbacks | :perform_now | :mailer_body)
+      # sig-gen gap: #1154 — `to_s`-normalized from the `why:` parameter.
+      attr_reader why: String
+
+      def initialize: (receiver: untyped, target: untyped, why: untyped, ?method: untyped,
+                       ?singleton: untyped) -> void
+
+      def to_h: () -> Hash[String, untyped]
+
+      def ==: (untyped other) -> bool
+      alias eql? ==
+      def hash: () -> Integer
+    end
+  end
+end

@@ -216,16 +216,21 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/method_key.rbs" => 3,
   "sig/rigor/effects/origin.rbs" => 0,
   # New file (#1181 collection-side slice): `Row`/`Edge` members and constructors are
-  # #1150-marked. Eleven unmarked rows: four attr_readers (`unit_callee_rows`, `warnings`,
-  # `labels_by_owner`, `digest`) are built by `absorb`/`compute_digest` rather than assigned
-  # from `initialize` parameters, so #1154 does not cover them (same shape as
-  # `Registry#additional_initializers`); `entry_points` is the fifth such reader but stays
-  # earned — sig-gen infers `Array[untyped]`, exactly what the declaration says.
-  # `class_row` and `result_row` are declared-divergent (sig-gen infers `nil` — the `ancestry`
-  # memo helper is opaque to it), `edges_for` is declared-divergent (`Array[untyped]` from
-  # `select`), and `path_row` / `self_path_row` / `descends_from?` / `extend_registry` are
-  # unrenderable.
+  # #1150-marked. Eleven unmarked rows: five attr_readers (`unit_callee_rows`, `warnings`,
+  # `labels_by_owner`, `digest`, `entry_points`) are built by `absorb`/`compute_digest` rather
+  # than assigned from `initialize` parameters, so #1154 does not cover them (same shape as
+  # `Registry#additional_initializers`); `entry_points` joined residue in the vocabulary slice
+  # when its element type was typed (`Array[EffectEntryPoints]` vs the `Array[untyped]` sig-gen
+  # proves — declared-divergent). `class_row` and `result_row` are declared-divergent (sig-gen
+  # infers `nil` — the `ancestry` memo helper is opaque to it), `edges_for` is
+  # declared-divergent (`Array[untyped]` from `select`), and `path_row` / `self_path_row` /
+  # `descends_from?` are unrenderable. `extend_registry` left residue the same slice — typed
+  # `Effects::Registry` in and out makes it parameter-intent.
   "sig/rigor/effects/plugin_facts.rbs" => 11,
+  # New file (#1181 vocabulary slice): the four attr_readers are #1154-marked (normalized
+  # `initialize` kwargs) and the factories/`with` are earned; `known?`, `suggest`, `retired`
+  # are unrenderable — their bodies route through private helpers sig-gen declines.
+  "sig/rigor/effects/registry.rbs" => 3,
   # New file (#1181 collection-side slice): `bundles`/`declared_bundles`/`causes` are
   # #1154-marked (normalized `initialize` kwargs), while `declared`/`proven` are flattened from
   # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
@@ -238,6 +243,11 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin.rbs" => 3,
   # New file (#1181 slice): the `alias eql? ==` row has no sig-gen shape — the sole residue.
   "sig/rigor/plugin/additional_initializer.rbs" => 1,
+  # New file (#1181 vocabulary slice): the init-parameter readers are #1154-marked; the two
+  # unmarked rows are the computed predicates `receiver_path?`/`self_path?` (unrenderable —
+  # `match?` calls sig-gen declines). `effect_edge`, `effect_ancestry`, `effect_entry_points`
+  # classify fully and pin nothing.
+  "sig/rigor/plugin/effect_attribution.rbs" => 2,
   # -1 (#1181 slice): `protocol_contracts` tightened to `Array[ProtocolContract]` — sig-gen
   # already inferred that exact type through `manifest.protocol_contracts`, so the row is
   # generated-equivalent now.
@@ -251,16 +261,22 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/plugin/loader.rbs" => 2,
   # -2 (#1181 slices): `additional_initializers` and `protocol_contracts` tightened to
   # `Array[Plugin::AdditionalInitializer]` / `Array[Plugin::ProtocolContract]` and marked #1154.
-  "sig/rigor/plugin/manifest.rbs" => 21,
+  # +2 (#1181 vocabulary slice): the six `effect_*` readers are #1154-marked and `effects?`
+  # earned; `effect_owner` is declared-divergent (declared `String`, inferred `String?` — the
+  # nil guard's narrowing does not reach a repeated reader call; the site warning is suppressed
+  # in `lib/`) and `effect_discharge_allowed?` is unrenderable.
+  "sig/rigor/plugin/manifest.rbs" => 23,
   # New file (#1181 slice): `to_h` is declared-divergent (sig-gen infers a string-literal-keyed
   # union; `Hash[String, untyped]` matches the manifest `to_h` convention) and `eql?` is an alias
   # row with no sig-gen shape.
   "sig/rigor/plugin/protocol_contract.rbs" => 2,
-  # +3 (#1181 slices): `additional_initializers` and `protocol_contracts` readers are unmarked
-  # residue — `compile_aggregates` builds both ivars with `flat_map`, not from `initialize`
-  # parameters, so no gap issue covers them; `contracts_for_path` is declared-divergent
-  # (sig-gen infers the `path.nil?` `[]` arm separately).
-  "sig/rigor/plugin/registry.rbs" => 12,
+  # +4 (#1181 slices): `additional_initializers`, `protocol_contracts` and
+  # `effect_contributions` readers are unmarked residue — `compile_aggregates` /
+  # `compile_effect_contributions` build the ivars with `flat_map`/`filter_map` (memoised for the
+  # latter), not from `initialize` parameters, so no gap issue covers them;
+  # `contracts_for_path` is declared-divergent (sig-gen infers the `path.nil?` `[]` arm
+  # separately). `Contribution`'s members and constructors are #1150-marked.
+  "sig/rigor/plugin/registry.rbs" => 13,
   # -1 (#1181 slice): `read_effect_envelope` now returns `Effects::Envelope?`, which sig-gen proves
   # through the `build_*_envelope` helpers — no longer residue.
   "sig/rigor/rbs_extended.rbs" => 22,

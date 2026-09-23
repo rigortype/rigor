@@ -1,0 +1,25 @@
+module Rigor
+  module Plugin
+    # One `effect_ancestry:` row: an ancestry edge the plugin's own gem introduces and the project's
+    # source never writes down (ADR-103 WD17, #465). `parent:` need only be a true ancestor, not the
+    # immediate superclass. Bundled plugins only — `Effects::PluginFacts` enforces it. Frozen value
+    # object.
+    class EffectAncestry
+      # sig-gen gap: #1154 — validated in `initialize` from the parameter of the same name
+      # (`to_s`-normalized, frozen), so sig-gen proposes the raw parameter shape.
+      attr_reader child: String
+      # sig-gen gap: #1154 — same shape as `child`.
+      attr_reader parent: String
+      # sig-gen gap: #1154 — same shape; `why:` is required and validated non-empty.
+      attr_reader why: String
+
+      def initialize: (child: untyped, parent: untyped, why: untyped) -> void
+
+      def to_h: () -> Hash[String, untyped]
+
+      def ==: (untyped other) -> bool
+      alias eql? ==
+      def hash: () -> Integer
+    end
+  end
+end

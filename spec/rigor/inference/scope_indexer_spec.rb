@@ -56,6 +56,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    it "shadows an outer local inside a block the evaluator never entered" do
+      program, idx = index_for(<<~RUBY)
+        o = "s"
+        k = 2
+        show([1].map { |o| o + k })
+        [1].map { |o| o }
+      RUBY
+      value_block = program.statements.body[2].arguments.arguments.first.block
+      sum = value_block.body.body.first
+      statement_read = program.statements.body[3].block.body.body.first
+
+      # The argument's block reaches the index only through `propagate`. Its parameter is a new variable, so the
+      # outer `o` MUST NOT be visible inside it, while the captured `k` keeps its enclosing binding.
+      expect(idx[sum.receiver].local(:o)).to eq(Rigor::Type::Combinator.untyped)
+      expect(idx[sum.arguments.arguments.first].local(:k)).to eq(Rigor::Type::Combinator.constant_of(2))
+      # A statement-level block is entered, and its parameter keeps the signature's element type.
+      expect(idx[statement_read].local(:o)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
     it "binds locals visible to children inside an rvalue expression" do
       program, idx = index_for(<<~RUBY)
         x = 1

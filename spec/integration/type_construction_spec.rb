@@ -242,6 +242,29 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # A block in a value position — a call argument, a receiver chain, another block's tail — is never
+  # entered by the statement evaluator, so its body takes the enclosing statement's scope from the
+  # scope index's fallback. That scope still binds the outer local a block parameter shadows, and
+  # `show([1, 2].map { |o| o + 1 })` after `o = { x: 1 }` reported `undefined method '+' for { x: 1 }`.
+  describe "fixtures/value_position_block_shadowing.rb — a block parameter shadows the outer local" do
+    let(:harness) { harness_for("value_position_block_shadowing") }
+
+    # Must-not-fire and must-still-fire in one assertion: every shadowing parameter, `;`-local and
+    # lambda parameter in a value position goes quiet, while a statement-level block's misused
+    # parameter and a value-position block's CAPTURED outer read still fire.
+    it "reads a shadowing parameter as the block's own, not the outer local" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    # The shadowing parameter reads `Dynamic[top]` (the block's own, never-evaluated variable), and a
+    # captured read inside the same kind of block still reads the enclosing `{ x: 1 }`.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   # Issue #645 — the straight-line seam's UNION half. `widen_for_mutator` declined a `Union`
   # receiver outright, so a literal member kept the arity a mutation had just falsified.
   describe "fixtures/mutation_widening_union_receiver.rb — a Union receiver widens memberwise" do

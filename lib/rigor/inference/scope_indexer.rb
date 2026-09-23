@@ -8281,11 +8281,15 @@ module Rigor
       # scope before recursing. This handles expression-position conditionals (e.g. `cache[k] = if cond; t; else; e;
       # end` and conditionals nested as call arguments) which are typed by ExpressionTyper without going through
       # `eval_if`'s narrowing path.
+      #
+      # A block or lambda the evaluator never entered is special-cased too ({#closure_scope}): its own locals shadow
+      # the enclosing bindings of the same names.
       def propagate(node, table, parent_scope)
         return unless node.is_a?(Prism::Node)
 
+        recorded = table.key?(node)
         current_scope =
-          if table.key?(node)
+          if recorded
             table[node]
           else
             table[node] = parent_scope
@@ -8297,8 +8301,31 @@ module Rigor
           propagate_if_branches(node, table, current_scope)
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
+        when Prism::BlockNode, Prism::LambdaNode
+          child_scope = recorded ? current_scope : closure_scope(node, current_scope)
+          node.rigor_each_child { |child| propagate(child, table, child_scope) }
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
+        end
+      end
+
+      # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level
+      # call's block ({StatementEvaluator#evaluate_block_if_present}), an assignment's rvalue and a statement-level
+      # `->`, but not a closure in a value position — a call argument (`show(xs.map { |o| o + 1 })`), a receiver
+      # chain (`xs.map { |o| o + 1 }.sum`), a literal element — so its body falls to this walk and would inherit the
+      # enclosing statement's scope verbatim. That scope still binds an outer `o` the block parameter shadows, and a
+      # read of the parameter typed as the outer local: `o = { x: 1 }` made `o + 1` an undefined-method error.
+      #
+      # Every name in the closure's own local table (Prism's `locals`: its parameters, `;`-locals and the locals
+      # its body introduces — exactly the names a depth-0 read inside it resolves to) is a new variable, so an
+      # enclosing binding of that name is replaced with `Dynamic[top]`. Not the signature's parameter type: this
+      # walk evaluates nothing, and a body write to the name is never threaded, so any narrower claim could be
+      # stale. A name the enclosing scope does not bind is left unbound, which reads the same `Dynamic[top]`.
+      # Captured names — outer locals the body reads or rebinds without redeclaring them — keep the enclosing
+      # binding.
+      def closure_scope(closure, scope)
+        closure.locals.reduce(scope) do |acc, name|
+          acc.local(name).nil? ? acc : acc.with_local(name, Type::Combinator.untyped)
         end
       end
 

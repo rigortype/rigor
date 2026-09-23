@@ -130,9 +130,9 @@ module Rigor
         Prism::LocalVariableOperatorWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableOrWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableAndWriteNode => :type_of_compound_variable_write,
-        Prism::IndexOperatorWriteNode => :type_of_assignment_write,
-        Prism::IndexOrWriteNode => :type_of_assignment_write,
-        Prism::IndexAndWriteNode => :type_of_assignment_write,
+        Prism::IndexOperatorWriteNode => :type_of_index_compound_write,
+        Prism::IndexOrWriteNode => :type_of_index_compound_write,
+        Prism::IndexAndWriteNode => :type_of_index_compound_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
         # LHS-only target nodes (destructuring assignment, pattern matching, `for x in xs`, block parameter
         # `|a, (b, c)|`). They have no value to extract — the type-of pass acknowledges the node class so the
@@ -403,9 +403,8 @@ module Rigor
       # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
       # inventing the rvalue.
       #
-      # Constant and index targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body,
-      # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
-      # `StatementEvaluator#eval_index_write`.
+      # Constant targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body. Index
+      # targets have their own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
         current = compound_write_current_binding(node)
         rhs = type_of(node.value)
@@ -428,6 +427,24 @@ module Rigor
         else
           compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end
+      end
+
+      # `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` as an EXPRESSION. Like a variable compound write, its value is
+      # what it stores through `[]=` — the dispatched `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — which
+      # reads the slot's current type, recorded indexed narrowing included. Typed as the rvalue alone it answered
+      # `1` for `counts[w] += 1`, so `r = words.map { |w| counts[w] += 1 }` pinned every position to `1` and
+      # `r.last == 1` drew a false `flow.always-truthy-condition`.
+      #
+      # The statement evaluator already owned that algebra for the straight-line write and the `[]=` widening
+      # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
+      # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
+      # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
+      #
+      # One exception carries over, narrowed, from {#type_of_compound_variable_write}: a memoizing `||=` whose
+      # slot the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it,
+      # because it is decided on the `[]` read the evaluator performs.
+      def type_of_index_compound_write(node)
+        StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
       end
 
       def compound_write_current_binding(node)
@@ -4226,6 +4243,12 @@ module Rigor
       # fixpoint takes the same floor rather than the seed — a seed that reaches a position is the pin this
       # exists to remove.
       #
+      # An instance variable pins the same way — the block shares the caller's `self`, so `@t = 0; [1,
+      # 2].map { @t += 1 }` folded to `[1, 1]` too — and takes the same treatment under every rule above: the
+      # ivars the body rebinds ({CapturedLocals.writes} with `ivars: true`) join the name set. They keep their
+      # `@`, so the one map cannot confuse `@t` with a local `t`, and the arity-cap floor
+      # ({#unanswered_tail_dependency?}), which compares names sigil-and-all, counts a rebound ivar as answered.
+      #
       # The same pin has a CONTENT half the rebind set cannot see: a captured receiver the body mutates in place
       # is never rebound, so `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }` read `h` at its entry
       # contents at every position and folded to `[1, 1]` (runtime `[1, 2]`). Each such local
@@ -4237,7 +4260,7 @@ module Rigor
       # over it, and a local the body both rebinds and mutates takes the same widening over its converged
       # type — the rebind can bring a fresh literal back, which the next iteration then mutates. An unmutated
       # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
-      # `[0, 0]`).
+      # `[0, 0]`). This half covers locals only: an instance variable mutated in place is not collected yet.
       #
       # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds and mutates nothing
       # captured.
@@ -4245,7 +4268,7 @@ module Rigor
         stores = CapturedLocals.content_mutations(block, scope)
         stored = stored_capture_bindings(stores)
         bindings = stored.dup
-        names = CapturedLocals.writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         unless names.empty?
           rebound_capture_bindings(block, names, element_types, stored).each do |name, converged|
             bindings[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
@@ -4261,7 +4284,7 @@ module Rigor
       # it, which is the fold's answer without this pass.
       def stored_capture_bindings(stores)
         stores.each_with_object({}) do |(name, sites), bindings|
-          seed = scope.local(name)
+          seed = CapturedLocals.bound_type(scope, name)
           next if seed.nil?
 
           widened = UnknownStoreWidening.widen(seed, sites)
@@ -4285,8 +4308,8 @@ module Rigor
 
       def converged_captured_bindings(block, names, element_types, stored)
         param_types = [Type::Combinator.union(*element_types)]
-        base = stored.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
-        seeds = names.to_h { |name| [name, base.local(name)] }
+        base = stored.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+        seeds = names.to_h { |name| [name, CapturedLocals.bound_type(base, name)] }
         converged = BodyFixpoint.converge(
           names: names,
           seed_bindings: seeds,
@@ -4314,15 +4337,21 @@ module Rigor
       # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
       # `Nominal` here would only lose a class for nothing.
       #
+      # The pin test reads a binding as a whole and nothing else. A `0 | Integer` seed is floored too, although a
+      # threaded `x += 1` only joins back into it: an unthreaded write storing another class (`log(x = nil)`)
+      # converges on the same seed, and only the floor keeps `x.nil?` from folding to `false`. Nor does a pass
+      # whose exit binding moved prove the rebind was threaded — a narrowing (`next false unless x`) or a
+      # threaded prefix (`x ||= 0`) moves it while `(x += 1) == 2` stays unthreaded.
+      #
       # "Unmoved" compares against the fixpoint's own seed, but "pinned" is asked of the CALL-SITE binding. For a
       # name the body also mutates in place the seed is already the in-place widening of that binding
       # ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for: `s = +"ab"`
       # seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot see (`(s &&=
       # s.to_sym)` inside an expression) converge on `String` and be believed, where the local really holds a
-      # Symbol from the second iteration on.
+      # Symbol from the second iteration on. For every other name the two bindings are the same.
       def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
-          next [name, type] unless type == seeds[name] && value_pinned?(scope.local(name))
+          next [name, type] unless type == seeds[name] && value_pinned?(CapturedLocals.bound_type(scope, name))
 
           [name, Type::Combinator.untyped]
         end
@@ -4336,10 +4365,10 @@ module Rigor
       # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
       # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
       def captured_exit_bindings(block, param_types, base, bindings, names)
-        entry = bindings.reduce(base) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = bindings.reduce(base) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
         _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
       def per_element_symbol_results(block_arg, element_types)
@@ -4768,11 +4797,11 @@ module Rigor
         end
       end
 
-      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local the body rebinds
-      # or mutates in place ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter
-      # still shadows.
+      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local and instance
+      # variable the body rebinds, and of every captured local it mutates in place
+      # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
       def type_block_body_with_param(block_node, expected_param_types, captured: nil)
-        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope)

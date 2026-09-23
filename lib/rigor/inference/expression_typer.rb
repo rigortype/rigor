@@ -4294,8 +4294,14 @@ module Rigor
       # `Array[union]`.
       #
       # Declines (returns nil) when the receiver is not a `Tuple` with at least one element, when the call
-      # has no `Prism::BlockNode`, when the method is outside the supported set, when block typing raises
-      # mid-loop, or when the block has no body. The decline path leaves the dispatch chain untouched.
+      # has no `Prism::BlockNode`, when the method is outside the supported set, when the call carries an
+      # argument, when block typing raises mid-loop, or when the block has no body. The decline path leaves the
+      # dispatch chain untouched.
+      #
+      # The walk reads only the block, so an argument declines: `index(value)` / `find_index(value)` search by
+      # `==` without running the block, and `find(ifnone)` / `detect(ifnone)` answer `ifnone.call` when no
+      # position matches. `r = [1, 2].find(-> { 0 }) { |e| e > 5 }` is `0` at runtime; the walk answered `nil`,
+      # and `r + 1` then reported a nil receiver on correct code. The other supported methods take no argument.
       PER_ELEMENT_TUPLE_METHODS = Set[
         :map, :collect, :filter_map, :flat_map,
         :select, :filter, :reject,
@@ -4321,7 +4327,7 @@ module Rigor
 
       def try_per_element_block_fold(call_node, receiver_type)
         return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
-        return nil if find_family_with_args?(call_node)
+        return nil unless call_node.arguments.nil?
 
         element_types = per_element_elements_of(receiver_type)
         return nil if element_types.nil? || element_types.empty?
@@ -4949,15 +4955,6 @@ module Rigor
           end
         )
         converged[:__inject_acc__] || seed_acc
-      end
-
-      # `index(value)` and `find_index(value)` carry a positional argument and search by `==` rather than
-      # running the block. Decline so the RBS tier owns those forms.
-      def find_family_with_args?(call_node)
-        return false unless %i[find_index index].include?(call_node.name)
-
-        args = call_node.arguments
-        !args.nil? && !args.arguments.empty?
       end
 
       def assemble_per_element_result(method_name, per_position, element_types)

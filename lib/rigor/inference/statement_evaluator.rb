@@ -2661,7 +2661,7 @@ module Rigor
         body = block.body
         return post_scope if body.nil?
 
-        mutations = collect_content_mutations(body)
+        mutations = captured_content_mutations(block)
         return post_scope if mutations.empty?
 
         seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
@@ -2738,10 +2738,27 @@ module Rigor
         end
       end
 
+      # Binds each fixed name to what it holds at any iteration's entry: its seed on the first, its join after. The
+      # join alone would lose what a store refutes — `ContentJoin` drops a seed's `nil`, which the first entry still
+      # holds, so `out << a.nil?; a ||= []; a << v` would read `Array[false]`. A String's join is `String`, which
+      # already holds any String seed, so it binds as its join and keeps `buf.length` a `non-negative-int`.
       def bind_content_joins(scope, kinds, seeds, evidence)
         kinds.reduce(scope) do |acc, (name, kind)|
-          acc.with_local(name, join_content_evidence(seeds[name], kind, name, evidence))
+          seed = seeds[name]
+          join = join_content_evidence(seed, kind, name, evidence)
+          acc.with_local(name, kind == :string ? join : Type::Combinator.union(seed, join))
         end
+      end
+
+      # The block's captured content mutations — `collect_content_mutations` less the names the block itself
+      # introduces. That walk counts any receiver read at depth >= 1, so a block PARAMETER mutated inside a nested
+      # block (`|y| [9].each { y << 9 }`) would otherwise pass for the outer local it shadows, and the join would
+      # rebind the parameter to that local's contents.
+      def captured_content_mutations(block)
+        mutations = collect_content_mutations(block.body)
+        return mutations if mutations.empty?
+
+        mutations.except(*CapturedLocals.introduced_locals(block))
       end
 
       # `base` binds every fixed name to its join; the moving names are rebound on each pass.
@@ -2842,7 +2859,7 @@ module Rigor
       # write.
       def join_memo_content(call_node, memo_param, calls, pre_state)
         block = call_node.block
-        captured = collect_content_mutations(block.body)
+        captured = captured_content_mutations(block)
         seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
         seeds[memo_param] = pre_state
         sites = captured.merge(memo_param => calls)

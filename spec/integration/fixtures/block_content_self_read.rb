@@ -77,6 +77,32 @@ end
 assert_type("Array[Integer]", seen)
 puts "two" if seen.last == 2
 
+# --- A block PARAMETER mutated inside a nested block is not the outer
+# local it shadows: the stores read the parameter, never the outer `[0]`,
+# and the outer local's element joins none of the parameter's stores
+# (the arity-forget still widens it, which only loses precision). ---
+shade = [0]
+firsts = []
+[[1], [2]].each do |shade|
+  [9].each { shade << 9 }
+  firsts << shade.first
+end
+assert_type("Array[1 | 2]", firsts)
+assert_type("Array[0]", shade)
+puts "two" if firsts.last == 2
+
+# --- A lazily initialised capture is still `nil` at the first
+# iteration's entry, though the join drops that arm afterwards. ---
+lazy = gets ? [0] : nil
+nils = []
+[1, 2].each do |v|
+  nils << lazy.nil?
+  lazy ||= []
+  lazy << v
+end
+assert_type("Array[bool]", nils)
+puts "true first" if nils.first == true
+
 # --- Evidence that grows structurally on every pass never converges, and
 # the slot floors to its one-unknown-store answer: the seed's `[]` element
 # survives beside `Dynamic[top]`. ---

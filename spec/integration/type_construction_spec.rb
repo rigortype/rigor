@@ -1340,6 +1340,13 @@ RSpec.describe "Rigor type construction (integration)" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
+
+    it "accepts each non-empty literal body against its refined return" do
+      # `[1, 2, 3]` and `{ name: 1 }` exclude the empty witness their refinement removes, so the
+      # declaration-side comparison must agree with the call-site one asserted above.
+      mismatches = harness.diagnostics.select { |d| d.rule == "def.return-type-mismatch" }
+      expect(mismatches).to be_empty
+    end
   end
 
   describe "fixtures/intersection_refinement/ — composite Intersection-backed refinements" do

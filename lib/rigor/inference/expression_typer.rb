@@ -15,6 +15,7 @@ require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "captured_locals"
+require_relative "closure_escape_analyzer"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
 require_relative "external_ancestor_resolution"
@@ -3664,9 +3665,16 @@ module Rigor
       #
       # A failure yields no arms rather than propagating, matching {#block_return_type_for}: a call typed
       # without its break arms is the pre-#853 answer, while a raise here would take out the whole call.
+      #
+      # A call that wraps its block in a Proc instead of yielding to it has no arms at all: the block never runs
+      # while the call is active, so its `break` cannot end the call. `lambda { |t| break if t; 1 }` is a `Proc`,
+      # not `Proc?`, and `f.call` on it is no possible-nil receiver. That is Kernel's `lambda` / `proc`
+      # ({BlockCallTiming.proc_constructor_call?}) and every call {ClosureEscapeAnalyzer} catalogues as
+      # retaining its block (`Proc.new`, `Thread.new`, …).
       def call_break_arm_types(node, receiver_override: nil)
         block_node = node.block
         return EMPTY_BREAK_ARMS unless block_node.is_a?(Prism::BlockNode)
+        return EMPTY_BREAK_ARMS if BlockCallTiming.proc_constructor_call?(node)
 
         body = block_node.body
         return EMPTY_BREAK_ARMS if body.nil? || !block_level_jump?(body, Prism::BreakNode)
@@ -3684,6 +3692,7 @@ module Rigor
         targets = block_level_jump_nodes(body, Prism::BreakNode)
         receiver = receiver_override || call_receiver_type_for(call_node)
         return EMPTY_BREAK_ARMS if receiver.nil?
+        return EMPTY_BREAK_ARMS if retains_block?(call_node, receiver)
 
         block_scope = block_entry_scope(
           block_node, break_arm_param_types(call_node, receiver),
@@ -3693,6 +3702,10 @@ module Rigor
           without_block_body_threading { block_scope.evaluate(body) }
         end
         collected.filter_map { |jump, type| type if targets.key?(jump) }
+      end
+
+      def retains_block?(call_node, receiver)
+        ClosureEscapeAnalyzer.classify(receiver_type: receiver, method_name: call_node.name) == :escaping
       end
 
       # The block body's narrowed `self_type`, or `nil` to leave the scope contract unchanged.

@@ -70,6 +70,12 @@ module Rigor
       ].freeze
       private_constant :STOP_ITERATION_FREE_NODES
 
+      # Kernel's block-to-Proc constructors. The call wraps its block in a Proc and returns it without running
+      # it, so the block never runs while the call is active: a lambda's `break` returns from the lambda's own
+      # invocation, and a proc's raises `LocalJumpError` once `proc` has returned.
+      PROC_CONSTRUCTORS = %i[lambda proc].freeze
+      private_constant :PROC_CONSTRUCTORS
+
       module_function
 
       # Issue #1107 — whether a `loop` call can complete normally although its declared return is `bot`.
@@ -103,6 +109,13 @@ module Rigor
         return true unless STOP_ITERATION_FREE_NODES.any? { |klass| node.is_a?(klass) }
 
         node.compact_child_nodes.any? { |child| may_raise_stop_iteration?(child) }
+      end
+
+      # Whether `call_node` is a `lambda { }` / `proc { }` reaching Kernel's constructor ({PROC_CONSTRUCTORS}),
+      # spelled the ways that reach a Kernel function. A `break` in its block can never be the call's value, so
+      # issue #853's break-arm union MUST NOT collect one there. `obj.lambda { }` is some other method.
+      def proc_constructor_call?(call_node)
+        PROC_CONSTRUCTORS.include?(call_node.name) && kernel_spelled_receiver?(call_node.receiver)
       end
 
       # Cheap name-only pre-gate, so a call that cannot be catalogued pays nothing further.

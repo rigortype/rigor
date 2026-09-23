@@ -157,6 +157,66 @@ RSpec.describe "block `break` arm union", type: :runner do
       RUBY
     end
 
+    # A call that wraps its block in a Proc never runs the block while it is active, so a `break` in that block
+    # can never be its value — a lambda's `break` returns from the lambda's own invocation, a proc's raises
+    # `LocalJumpError`. The union used to give `lambda do … break … end` a nil arm, and `f.call` then reported a
+    # possible-nil receiver on correct code (kramdown's `parser/html.rb` `check_nr_cells`).
+    it "leaves a `break` in a `lambda do … end` block out of the lambda call" do
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        flag = [true, false].sample
+        f = lambda do |t|
+          break if t
+          1
+        end
+        dump_type(f)
+      RUBY
+    end
+
+    it "no longer reports the lambda's call as a possible-nil receiver" do
+      result = analyze(<<~RUBY)
+        def run(flag)
+          f = lambda do |t|
+            break if t
+            1
+          end
+          f.call(flag)
+        end
+      RUBY
+      expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+    end
+
+    it "leaves a `break` in a `proc` block out of the proc call" do
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        flag = [true, false].sample
+        dump_type(proc do |t|
+          break 5 if t
+          1
+        end)
+      RUBY
+    end
+
+    it "leaves a `break` in a `Proc.new` block out of the constructor call" do
+      # `Proc.new` is in the closure-escape catalogue's retaining set, which is what declines it.
+      expect(dumped_type(<<~RUBY)).to eq("Proc")
+        flag = [true, false].sample
+        dump_type(Proc.new do |t|
+          break 5 if t
+          1
+        end)
+      RUBY
+    end
+
+    it "still unions the arm of a call that yields to the block while it runs" do
+      # The sibling that must keep its arm: `tap` runs the block before returning, so its `break` IS the call's.
+      expect(dumped_type(<<~RUBY)).to eq("5 | Integer")
+        flag = [true, false].sample
+        dump_type(1.tap do |t|
+          break 5 if flag
+          t
+        end)
+      RUBY
+    end
+
     it "leaves an early `return` out of the union" do
       # A `return` exits the enclosing METHOD and joins that method's return type; the call is unaffected.
       expect(dumped_type(<<~RUBY)).to eq("42")

@@ -30,6 +30,9 @@ module Rigor
     # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
     # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
     module CapturedLocals
+      NO_WRITES = [].freeze
+      private_constant :NO_WRITES
+
       LOCAL_WRITE_NODES = Set[
         Prism::LocalVariableWriteNode,
         Prism::LocalVariableOperatorWriteNode,
@@ -58,25 +61,33 @@ module Rigor
       #   A nested block that rebinds `self` (`o.instance_eval`) writes another object's
       #   ivar, and a nested `def` runs only when called; both still count, because an `instance_eval` without
       #   a receiver, or a call to that `def` inside the body, does write this one.
-      # @return the captured names the body writes, each once, in first-write order.
+      # @return the captured names the body writes, each once, in first-write order (frozen and shared when
+      #   there are none).
       def writes(block_node, base_scope, ivars: false)
         body = block_node.body
-        return [] if body.nil?
+        return NO_WRITES if body.nil?
 
-        introduced = introduced_locals(block_node)
-        names = []
+        # Built on the first write to an outer-bound local: most block bodies have none, and this runs for every
+        # block-bearing call the expression typer types as well as for every one the evaluator steps over.
+        introduced = nil
+        names = nil
         Source::NodeWalker.each(body) do |descendant|
           if LOCAL_WRITE_NODES.include?(descendant.class)
-            next if introduced.include?(descendant.name)
             next unless base_scope.locals.key?(descendant.name)
+
+            introduced ||= introduced_locals(block_node)
+            next if introduced.include?(descendant.name)
           else
-            next unless ivars && IVAR_WRITE_NODES.include?(descendant.class)
-            next unless rebindable_ivar?(base_scope, descendant.name)
+            next unless ivars && rebound_ivar_write?(descendant, base_scope)
           end
 
-          names << descendant.name
+          (names ||= []) << descendant.name
         end
-        names.uniq
+        names ? names.uniq : NO_WRITES
+      end
+
+      def rebound_ivar_write?(node, base_scope)
+        IVAR_WRITE_NODES.include?(node.class) && rebindable_ivar?(base_scope, node.name)
       end
 
       def rebindable_ivar?(scope, name)

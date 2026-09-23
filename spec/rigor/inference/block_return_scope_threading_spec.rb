@@ -1280,6 +1280,210 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The generic twin of #587 (b). Outside the per-element and per-pair folds, the block-return pass
+  # (`block_return_type_for`) types the block body once, from the call's entry scope, so a captured local the
+  # body rebinds was read at its first-iteration value: `Array[true]` for a block whose runtime values are
+  # `[true, false, …]`. That one answer is also what `BlockFolding` reads, so a predicate over the rebound
+  # local could short-circuit a whole `find` to `nil`. The pass now binds the rebound names to the per-element
+  # fold's converged binding, the fixpoint's block parameters bound to the declared ones. Every receiver here is
+  # a nominal `Array` / `Hash`, which neither fold takes.
+  describe "captured outer locals the body rebinds under the generic block-return pass" do
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    it "widens a rebound counter the block's value reads" do
+      # THE REPORTED PROBE. Before the fix this answered `Array[true]`.
+      expect(dumped_type(<<~RUBY)).to eq("Array[bool]")
+        arr = gets.to_s.chars
+        i = 0
+        dump_type(arr.map do |e|
+          i += 1
+          i == 1
+        end)
+      RUBY
+    end
+
+    it "no longer folds find to nil off the first iteration's predicate" do
+      # THE HAZARD: `seen == 2` read `1 == 2`, `BlockFolding` folded `find` to `nil` on that `Constant[false]`,
+      # and `if r` fired always-falsey. At runtime the second element matches.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        arr = gets.to_s.chars
+        seen = 0
+        r = arr.find do |e|
+          seen += 1
+          seen == 2
+        end
+        puts r if r
+      RUBY
+    end
+
+    it "still folds find to nil when the block rebinds nothing" do
+      # The must-fire sibling: a body-local `v` is no captured rebind, so the predicate still decides.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        arr = gets.to_s.chars
+        r = arr.find do |e|
+          v = 1
+          v == 2
+        end
+        puts r if r
+      RUBY
+    end
+
+    it "still folds find to nil when the predicate ignores the rebound counter" do
+      # Why this is not a blanket decline: only the rebound name moves, and `false` is false in every iteration.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        arr = gets.to_s.chars
+        seen = 0
+        r = arr.find do |e|
+          seen += 1
+          false
+        end
+        puts r if r
+      RUBY
+    end
+
+    it "answers the one-liner form too" do
+      # `(seen += 1) == 2` rebinds inside an expression, so the fixpoint converges on its seed; the unmoved-pin
+      # floor keeps that seed from reaching the predicate.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        arr = gets.to_s.chars
+        seen = 0
+        r = arr.find { |e| (seen += 1) == 2 }
+        puts r if r
+      RUBY
+    end
+
+    it "binds the fixpoint's block parameter to its declared type" do
+      # The previous-element idiom: `prev` is `nil` in the first iteration and an element afterwards. Before the
+      # fix this answered `Array[nil]`; a fixpoint that left the parameter unbound would answer a `Dynamic` arm.
+      expect(dumped_type(<<~RUBY)).to eq("Array[String?]")
+        arr = gets.to_s.chars
+        prev = nil
+        dump_type(arr.map do |e|
+          r = prev
+          prev = e
+          r
+        end)
+      RUBY
+    end
+
+    it "destructures a yielded pair for the fixpoint as it does for the body" do
+      # `Hash#map` yields one `[K, V]` pair that `|k, v|` destructures; `prev` must read `V`, not the pair.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Integer?]")
+        h = gets.to_s.chars.to_h { |c| [c, c.size] }
+        prev = nil
+        dump_type(h.map do |k, v|
+          r = prev
+          prev = v
+          r
+        end)
+      RUBY
+    end
+
+    it "widens a rebound counter under transform_values over a nominal hash" do
+      # `{ "a" => 1, "b" => 2, … }` at runtime; the pin answered `Hash[String, 1]`.
+      expect(dumped_type(<<~RUBY)).to eq("Hash[String, Integer]")
+        h = gets.to_s.chars.to_h { |c| [c, c] }
+        total = 0
+        dump_type(h.transform_values do |v|
+          total += 1
+          total
+        end)
+      RUBY
+    end
+
+    it "floors a structurally compounding rebind instead of pinning the first shape" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[[Dynamic[top]]]")
+        arr = gets.to_s.chars
+        x = 1
+        dump_type(arr.map do
+          x = [x]
+          x
+        end)
+      RUBY
+    end
+
+    it "keeps a block whose tail reads a captured local the body does not rebind" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[5]")
+        arr = gets.to_s.chars
+        i = 0
+        k = 5
+        dump_type(arr.map do |e|
+          i += 1
+          k
+        end)
+      RUBY
+    end
+
+    it "keeps a block that rebinds nothing captured" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[true]")
+        arr = gets.to_s.chars
+        dump_type(arr.map do |e|
+          v = 1
+          v == 1
+        end)
+      RUBY
+    end
+
+    it "types a break arm with the rebound local's any-iteration binding" do
+      # The `break` arms are collected in the pass's entry scope, so they took the same pin: `1 | Array[String]`,
+      # where the call can break out with any count.
+      expect(dumped_type(<<~RUBY)).to eq("Array[String] | Integer")
+        arr = gets.to_s.chars
+        i = 0
+        dump_type(arr.each do |e|
+          i += 1
+          break i if e.empty?
+        end)
+      RUBY
+    end
+
+    it "keeps the exact entry binding for a block the callee yields exactly once" do
+      # `then` runs its block once, so the call-site binding is not a first-iteration pin: `x` is `1` when the
+      # block returns it, and widening it to `Integer` would only lose that.
+      expect(dumped_type(<<~RUBY)).to eq("1")
+        x = 0
+        dump_type(5.then do |n|
+          x += 1
+          x
+        end)
+      RUBY
+    end
+
+    it "widens a rebound instance variable, which the shared binding covers" do
+      # The block shares the caller's `self`, so `@t` pins exactly as a captured local does. Runtime `[1, 2, …]`;
+      # the pin answered `Array[1]`.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+        class Counter
+          def run
+            arr = gets.to_s.chars
+            @t = 0
+            dump_type(arr.map { |e| @t += 1 })
+          end
+        end
+      RUBY
+    end
+
+    it "floors the rebound local when the call is nested inside a threaded body" do
+      # Under threading suppression the fixpoint's body evaluations are refused, as they are for the per-element
+      # fold, and the rebound name takes the escaping-block floor instead of the `Array[1]` pin.
+      expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top]]")
+        m = Mutex.new
+        arr = gets.to_s.chars
+        total = 0
+        dump_type(m.synchronize do
+          v = 1
+          arr.map do
+            total += v
+            total
+          end
+        end)
+      RUBY
+    end
+  end
+
   # Issue #617 — the four block-return residues #587 left behind. Each pair is a residue plus the arm that
   # must keep folding, because every decline here is bought with precision somewhere adjacent.
   describe "issue #617 block-return residues" do
@@ -2126,10 +2330,10 @@ RSpec.describe "block-return scope threading", type: :runner do
     it "declines a key fold whose new keys the pinned counter spelled" do
       # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1": 1,
       # "b1": 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
-      # no single `Constant`, so the tier declines to the dispatcher. Only the decline is asserted: the
-      # dispatcher's key argument comes from the generic block-return pass, which types the body from the
-      # call's entry scope and still reads `i` as `1` there.
-      expect(dumped_type(<<~RUBY)).to start_with("Hash[")
+      # no single `Constant`, so the tier declines to the dispatcher, whose key argument comes from the generic
+      # block-return pass. That pass binds the rebound counter too, so the key is `String`; before it, the
+      # pass read `i` as `1` and answered `Hash["a1" | "b1", 1 | 2]`, which has no `"b2"`.
+      expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1 | 2]")
         i = 0
         dump_type({ a: 1, b: 2 }.transform_keys do |k|
           i += 1

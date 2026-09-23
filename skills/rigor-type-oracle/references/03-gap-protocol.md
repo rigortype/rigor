@@ -123,6 +123,3 @@ more to the project than any annotation. File it at
 Also say `rigor --version`, and note whether `sig/` and the relevant
 plugins were in play — a gap that only appears without community RBS is a
 different bug from one that survives it.
-
-Inside Rigor's own tree the same report is the deliverable: the gap is
-the reason not to hand-write the RBS there.

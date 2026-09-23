@@ -14,6 +14,8 @@ require "spec_helper"
 # A `next` ends the invocation, so its scope is one of the invocation's exits and feeds the next iteration. A
 # `break` ends the CALL, so its scope feeds the continuation only — never another iteration.
 #
+# A jump inside `begin … ensure` leaves only after the `ensure` clause has run, so its scope is carried through it.
+#
 # Every "widens" example is paired with a control: a rebind on the fall-through path still widens, a jump that
 # rebinds nothing leaves the binding exact, and a jump belonging to a nested construct is not this block's.
 RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
@@ -30,11 +32,14 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
   # Every fixture here is written with exactly one `dump_type`.
   def dumped_type(source) = dumped_types(source).first
 
-  # The rule id of every diagnostic a stale binding draws — `call.undefined-method` and the always-truthy family.
+  STALE_BINDING_RULES = %w[call.undefined-method call.possible-nil-receiver].freeze
+
+  # The rule id of every diagnostic a stale binding draws — an undefined method, a nil receiver, and the
+  # always-truthy family.
   def reported_rules(source)
     analyzed(source).diagnostics.filter_map do |diagnostic|
       rule = diagnostic.rule.to_s
-      rule if rule == "call.undefined-method" || rule.start_with?("flow.")
+      rule if STALE_BINDING_RULES.include?(rule) || rule.start_with?("flow.")
     end
   end
 
@@ -90,15 +95,73 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
       RUBY
     end
 
-    it "keeps the exact binding of a local no path rebinds" do
+    it "keeps the exact binding when a block with a `next` rebinds nothing" do
       expect(dumped_type(<<~RUBY)).to eq("5")
-        k = 5
-        n = 0
+        n = 5
         [1, 2].each do |e|
           next if e.odd?
-          n += e
+          puts e
         end
-        dump_type(k)
+        dump_type(n)
+      RUBY
+    end
+
+    it "joins a flag a `rescue` arm sets before `next`" do
+      # The commonest real shape: before the fix `failed` read `false` and `if failed` folded always-falsey.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        failed = false
+        ["1", "x"].each do |s|
+          begin
+            Integer(s)
+          rescue ArgumentError
+            failed = true
+            next
+          end
+        end
+        puts "bad input" if failed
+      RUBY
+    end
+
+    it "joins a rebind on a `next` inside a value-position `||`" do
+      expect(dumped_type(<<~RUBY)).to eq("0 | 1 | 2")
+        n = 0
+        [1, 2].each do |e|
+          e.even? || (n = e; next)
+        end
+        dump_type(n)
+      RUBY
+    end
+
+    it "joins a rebind on a `next` inside a `case` / `in` arm" do
+      expect(dumped_type(<<~RUBY)).to eq("0 | :one")
+        n = 0
+        [1, 2].each do |e|
+          case e
+          in 1
+            n = :one
+            next
+          else
+            nil
+          end
+        end
+        dump_type(n)
+      RUBY
+    end
+
+    it "carries a `next` scope through an enclosing `ensure`" do
+      # The `ensure` runs before the `next` leaves, so `buf` is never `nil` after the call; read at the jump, the
+      # `nil` arm drew `possible nil receiver` on correct code.
+      expect(dumped_type(<<~RUBY)).to eq('"init" | "reset"')
+        buf = +"init"
+        [1, 2].each do |e|
+          begin
+            buf = nil
+            next if e.odd?
+          ensure
+            buf = +"reset"
+          end
+        end
+        dump_type(buf)
       RUBY
     end
 
@@ -108,7 +171,8 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
       # inner call's own write-back, which the outer fall-through then overwrites.
       expect(dumped_type(<<~RUBY)).to eq("0 | :sym")
         n = 0
-        [1].each do |a|
+        [1, 2].each do |a|
+          next if a > 5
           [2].each do |b|
             if b.even?
               n = "s"
@@ -186,13 +250,55 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
       RUBY
     end
 
-    it "keeps the exact binding when a `break` rebinds nothing" do
-      expect(dumped_type(<<~RUBY)).to eq("5")
-        n = 5
+    it "adds nothing from a `break` that leaves a fall-through rebind untouched" do
+      # The `break` arm carries the running assumption, which the fixpoint already holds.
+      expect(dumped_type(<<~RUBY)).to eq('"s" | 0')
+        n = 0
         [1, 2].each do |e|
           break if e > 1
+          n = "s"
         end
         dump_type(n)
+      RUBY
+    end
+
+    it "carries a `break` scope through an enclosing `ensure`" do
+      expect(dumped_type(<<~RUBY)).to eq(":done | :idle")
+        state = :idle
+        [1, 2].each do |e|
+          begin
+            state = 1
+            break if e > 1
+          ensure
+            state = :done
+          end
+        end
+        dump_type(state)
+      RUBY
+    end
+
+    it "keeps reporting inside the block what the fixpoint's own passes see" do
+      # A capped fixpoint reads its `break` arms from one more pass, which must not overwrite the per-node scope
+      # index: re-recorded from the floored `x`, the real `undefined method 'upcase'` for Integer vanished.
+      expect(reported_rules(<<~RUBY)).to include("call.undefined-method")
+        x = 1
+        [1, 2].each do |e|
+          x.upcase
+          x = [x]
+          break if e > 1
+        end
+      RUBY
+    end
+
+    it "records a loop `break`'s argument writes" do
+      # `break(flag = true)` leaves with the write; the loop join read the scope before the argument and kept
+      # `false`.
+      expect(dumped_type(<<~RUBY)).to eq("bool")
+        flag = false
+        while gets
+          break(flag = true) if rand > 0.5
+        end
+        dump_type(flag)
       RUBY
     end
 
@@ -245,10 +351,10 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
       RUBY
     end
 
-    it "moves a value-pinned seed off the floor it took when the `next` path was invisible" do
-      # Before the fix the fixpoint came back on the pinned `0` and #617's unmoved-pin rule floored it, so the
-      # second position read `Dynamic[top]`.
-      expect(dumped_type(<<~RUBY)).to eq("[\"s\" | 0 | 1, \"s\" | 0]")
+    it "still floors a value-pinned seed the fall-through never moves" do
+      # #617's unmoved-pin floor is judged on the fall-through alone, so a pinned seed that only a `next` arm
+      # rebinds is floored as before — the cheaper side of the trade in the example below.
+      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], Dynamic[top]]")
         m = 0
         dump_type([1, 2].map do |e|
           if e.odd?
@@ -257,6 +363,24 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
           end
           m
         end)
+      RUBY
+    end
+
+    it "keeps the unmoved-pin floor when a `next` arm moves a name the fall-through writes unthreaded" do
+      # `(seen += 1) == 2` is a write the evaluator does not thread. The `next` arm moved `seen` to `0 | 100`, so a
+      # converged-binding test believed it and folded `find` to `nil`: `r.succ` became `undefined method` for
+      # nil and `if r` always-falsey, on a program whose `r` is `2`.
+      expect(reported_rules(<<~RUBY)).to eq(["call.possible-nil-receiver"])
+        seen = 0
+        r = [1, 2].find do |e|
+          if rand > 2.0
+            seen = 100
+            next false
+          end
+          (seen += 1) == 2
+        end
+        puts "found" if r
+        r.succ
       RUBY
     end
 

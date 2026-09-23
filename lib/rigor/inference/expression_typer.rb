@@ -23,6 +23,7 @@ require_relative "../effects/collector"
 require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "indexed_narrowing"
+require_relative "jump_targets"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
@@ -3812,39 +3813,14 @@ module Rigor
         block_level_jump_nodes(body, Prism::NextNode)
       end
 
-      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it.
-      # Allocation-free and early-exiting: this is the scan every block body pays, and the overwhelming
-      # majority of them answer false on it.
-      def block_level_jump?(node, klass)
-        return false if node.nil?
-        return true if node.is_a?(klass)
+      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it
+      # ({JumpTargets.any?}, allocation-free and early-exiting: this is the scan every block body pays).
+      def block_level_jump?(node, klass) = JumpTargets.any?(node, klass)
 
-        node.rigor_each_child do |child|
-          next if JUMP_BOUNDARY_NODES.include?(child.class)
-
-          return true if block_level_jump?(child, klass)
-        end
-        false
-      end
-
-      # The identity-keyed set of `klass` jumps that target THIS block — every one {#block_level_jump?} would
-      # answer true for, rather than the first. The sinks in `StatementEvaluator` also collect jumps from
-      # nested blocks / loops / defs evaluated under the same installation, so the consumer filters against
-      # this set by node identity.
-      def block_level_jump_nodes(body, klass)
-        found = {}.compare_by_identity
-        collect_block_level_jumps(body, klass, found)
-        found
-      end
-
-      def collect_block_level_jumps(node, klass, found)
-        found[node] = true if node.is_a?(klass)
-        node.rigor_each_child do |child|
-          next if JUMP_BOUNDARY_NODES.include?(child.class)
-
-          collect_block_level_jumps(child, klass, found)
-        end
-      end
+      # The identity-keyed set of `klass` jumps that target THIS block ({JumpTargets.of}). The sinks in
+      # `StatementEvaluator` also collect jumps from nested blocks / loops / defs evaluated under the same
+      # installation, so the consumer filters against this set by node identity.
+      def block_level_jump_nodes(body, klass) = JumpTargets.of(body, klass)
 
       # Re-typing the whole body would be wrong to do unconditionally: this path runs for EVERY block-bearing
       # call, and the statements ahead of the tail are pure cost whenever the tail does not depend on them.
@@ -3954,11 +3930,9 @@ module Rigor
       # nothing about our block's value — it neither triggers the decline nor joins as an arm. A nested
       # `BlockNode` / `LambdaNode` is the jump's own block (`do xs.each { next 1 }; v = 42; v end` threads
       # soundly — the inner `next` ends the inner iteration); a loop consumes both forms (`while … next 5 …
-      # end` continues the loop); a `DefNode` body is a different method entirely.
-      JUMP_BOUNDARY_NODES = Set[
-        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
-        Prism::WhileNode, Prism::UntilNode, Prism::ForNode
-      ].freeze
+      # end` continues the loop); a `DefNode` body is a different method entirely. The set is
+      # {JumpTargets::BOUNDARY_NODES}, shared with `StatementEvaluator`'s loop and block joins.
+      JUMP_BOUNDARY_NODES = JumpTargets::BOUNDARY_NODES
       private_constant :JUMP_BOUNDARY_NODES
 
       # True when the tail statement observes a variable name one of the earlier statements binds OR mutates
@@ -4243,13 +4217,14 @@ module Rigor
       def converged_captured_bindings(block, names, element_types)
         param_types = [Type::Combinator.union(*element_types)]
         seeds = names.to_h { |name| [name, scope.local(name)] }
+        moved = {}
         converged = BodyFixpoint.converge(
           names: names,
           seed_bindings: seeds,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names) }
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names, moved) }
         )
-        unmoved_pins_floored(converged, seeds)
+        unmoved_pins_floored(converged, seeds, moved)
       end
 
       # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
@@ -4269,10 +4244,18 @@ module Rigor
       # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
       # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
       # `Nominal` here would only lose a class for nothing.
-      def unmoved_pins_floored(converged, seeds)
+      #
+      # "Unmoved" is judged on the FALL-THROUGH alone (`moved`, filled by {#captured_exit_bindings}): a pass's
+      # exit binding also joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), and a
+      # rebind on a `next` arm moves the binding while the unthreaded write on the fall-through stays
+      # invisible — `if c; seen = 100; next false; end; (seen += 1) == 2` converged on `0 | 100` and folded
+      # `find` to `nil`. Without a `next` the two tests agree: a binding every pass's fall-through leaves where
+      # it entered is exactly one the fixpoint returns on its seed. A value-pinned seed rebound ONLY on a `next`
+      # arm is floored too — the far cheaper side, as above.
+      def unmoved_pins_floored(converged, seeds, moved)
         converged.to_h do |name, type|
           seed = seeds[name]
-          next [name, type] unless type == seed && value_pinned?(seed)
+          next [name, type] if moved[name] || !value_pinned?(seed)
 
           [name, Type::Combinator.untyped]
         end
@@ -4283,15 +4266,27 @@ module Rigor
       end
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
-      # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
-      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
-      def captured_exit_bindings(block, param_types, bindings, names)
+      # same layering as {#type_block_body_with_param}), returning the per-name exit binding — the invocation's
+      # exit, which joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), so a rebind on a
+      # jumping path reaches the fixpoint. Each name the FALL-THROUGH moves off this pass's entry is recorded in
+      # `moved` for {#unmoved_pins_floored}. Threading is suppressed for the pass, as it is for every full body
+      # evaluation the block-return pass runs.
+      def captured_exit_bindings(block, param_types, bindings, names, moved)
         entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
-        # The BlockNode, not its body: `StatementEvaluator#eval_block` joins every `next` that ends the invocation
-        # into the exit scope, so a rebind on a jumping path reaches the fixpoint.
-        _type, exit_scope = without_block_body_threading { entry.evaluate(block) }
+        _type, fall_through, exit_scope = without_block_body_threading do
+          StatementEvaluator.new(scope: entry).evaluate_invocation(block)
+        end
+        names.each { |name| moved[name] = true if moved_off?(bindings[name], fall_through.local(name)) }
         names.to_h { |name| [name, exit_scope.local(name)] }
+      end
+
+      # True when `after` is not already contained in `before` — the same stability test `BodyFixpoint` applies.
+      def moved_off?(before, after)
+        return false if after.nil?
+        return true if before.nil?
+
+        Type::Combinator.union(before, after) != before
       end
 
       def per_element_symbol_results(block_arg, element_types)

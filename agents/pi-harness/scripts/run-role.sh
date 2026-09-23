@@ -24,7 +24,6 @@ Environment:
   PI_BIN        Path to pi (default: pi on PATH)
 
 Model defaults (patterns; first match from `pi --list-models` wins):
-  reviewer (rigor-reviewer-grok agent): xai/grok-4.6 — use xai/grok-4.7 only for deep RCA
   architect / orchestrator
     patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
     preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.7 (deep RCA; review default is 4.6)
@@ -32,8 +31,9 @@ Model defaults (patterns; first match from `pi --list-models` wins):
     patterns: opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
     preferred ids: opencode-go/deepseek-v4.1-flash
   reviewer
-    patterns: claude-bridge/*fable*  anthropic/*fable*  *fable*  *opus*  grok*
-    preferred: claude-bridge/claude-fable-5 (Fable); else Opus/Grok-class
+    patterns: xai/grok-4.6  xai/grok  grok  claude-bridge/claude-opus-5  anthropic/claude-opus-5
+    preferred: xai/grok-4.6 (default pass; xai/grok-4.7 only for deep RCA);
+      Opus/Fable only via MODEL= per roles/reviewer.md
   docs
     patterns: antigravity/gemini*flash*  opencode/gemini*flash*  google/gemini*flash*  *gemini*flash*
     preferred ids: antigravity/gemini-3.8-flash
@@ -115,20 +115,16 @@ case "$ROLE" in
     CYCLE="opencode-go/*deepseek*flash*,opencode/*deepseek*flash*,*deepseek*flash*"
     ;;
   reviewer)
-    PREFERRED="claude-bridge/claude-fable-5"
+    # Default adversarial pass (roles/reviewer.md). Opus / Fable passes: pin MODEL= explicitly.
+    PREFERRED="xai/grok-4.6"
     PATTERNS=(
-      "claude-bridge/claude-fable-5"
-      "claude-bridge/claude-fable"
-      "anthropic/claude-fable-5"
-      "anthropic/claude-fable"
-      "fable"
+      "xai/grok-4.6"
+      "xai/grok"
+      "grok"
       "claude-bridge/claude-opus-5"
       "anthropic/claude-opus-5"
-      "anthropic/claude-opus"
-      "xai/grok"
-      "opus"
     )
-    CYCLE="claude-bridge/*fable*,*fable*,claude-bridge/*opus*,*opus*,grok*,anthropic/claude-fable*,anthropic/claude-opus*,xai/grok*"
+    CYCLE="xai/grok*,grok*,claude-bridge/*opus*,anthropic/claude-opus*,claude-bridge/*fable*,anthropic/claude-fable*"
     ;;
   docs)
     # Prefer Google AI Pro via pi-antigravity (subscription), then OpenCode Gemini, then google API.
@@ -278,7 +274,6 @@ RESOLVED="$(resolve_model)" || exit 1
 
 APPEND=$(cat <<APPEND
 [rigor-pi-harness] Role binding: ${ROLE}
-- You MUST stay on model band for this role; do not demote via /model to a cheaper band.
 - Load skill rigor-${ROLE} (path: ${SKILL_DIR}/SKILL.md) and obey its finish phrases.
 - Hard constraints: no parallel host make verify; lanes do not CI-watch; Issues = backlog (ADR-98).
 - See agents/pi-harness/roles/${ROLE}.md and agents/pi-harness/contracts/README.md.

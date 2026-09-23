@@ -71,7 +71,7 @@ if [[ ! -f "$SKILL_DIR/SKILL.md" ]]; then
 fi
 
 # Orchestrator band: claude-bridge opus first, then anthropic opus, then grok.
-PREFERRED="anthropic/claude-opus-5"
+PREFERRED="claude-bridge/claude-opus-5"
 PATTERNS=(
   "claude-bridge/*opus*"
   "claude-bridge/opus"

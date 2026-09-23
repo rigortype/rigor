@@ -54,7 +54,7 @@ Do NOT trigger for:
   `rigor-baseline-reduce` skill.
 - **Writing a Rigor plugin** for the project's own DSL /
   metaprogramming — that is the `rigor-plugin-author` skill. (This
-  skill *points at* plugin authoring as an escalation in Phase 7;
+  skill *points at* plugin authoring as an escalation in Phase 8;
   it does not do it.)
 - **Tweaking an already-configured project** — ordinary edits to an
   existing `.rigor.yml`; no onboarding pipeline needed.
@@ -79,7 +79,7 @@ adoption entirely.
 
 So **before writing any config, present the user with two modes**
 and let them choose. The mode drives the severity profile, whether a
-baseline is generated, and how Phase 7 frames the leftover
+baseline is generated, and how Phase 8 frames the leftover
 diagnostics.
 
 | | **Acknowledge mode** (baseline adoption) | **Strict mode** (no compromise) |
@@ -156,7 +156,7 @@ committed `sig/` directory.
 | 5 | [`references/06-agent-contract.md`](references/06-agent-contract.md) | **Phase 8a.** The one paragraph the project's `AGENTS.md` / `CLAUDE.md` keeps so every agent session sources types from Rigor rather than guessing them. Where to append it, when to create the file, and what never to overwrite. |
 | — (optional) | [`references/05-jit-performance.md`](references/05-jit-performance.md) | **Operational, not a phase.** Run speed via a Ruby JIT: Rigor auto-enables YJIT for long runs (~5 s break-even), how to detect JIT support in your install, the override env vars, and why YJIT beats ZJIT for Rigor on Ruby 4.0. Read only when a large project's `rigor check` wall time matters. |
 
-## Escalation paths (Phase 7 preview)
+## Escalation paths (Phase 8 preview)
 
 Some diagnostic clusters are neither a quick fix nor honest baseline
 material. Two of them have a dedicated answer this skill hands off to:
@@ -185,7 +185,7 @@ material. Two of them have a dedicated answer this skill hands off to:
   support, **open an issue on the Rigor project** asking for it:
   <https://github.com/rigortype/rigor/issues>.
 
-Neither is a Phase 7 obligation — they are options to *offer* the
+Neither is a Phase 8 obligation — they are options to *offer* the
 user when the triage report points at one of these causes. The
 project-DSL handoff is detailed in
 [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md)

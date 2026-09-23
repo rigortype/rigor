@@ -37,8 +37,7 @@ The script runs `git worktree add`, then populates the bundle:
 
 No `.git/info/exclude` entry is needed: the real `vendor/bundle/`
 directory matches the stock `.gitignore` `/vendor/bundle/`, so
-`git status` stays clean. (The old symlink approach needed a `vendor`
-exclude because a symlink named `vendor` does not match that pattern.)
+`git status` stays clean.
 
 The main clone must have a populated `vendor/bundle` first — the script
 refuses otherwise. Run `make setup` there once if needed.
@@ -66,7 +65,7 @@ when only the fixture arm did. Options:
 Verify a reference-reading gate actually **executed** (not `pending` /
 `skipped`) before believing it.
 
-**`.git` is shared across all worktrees.** From the fleet rules:
+**`.git` is shared across all worktrees.**
 
 - **Never `git stash`** in a worktree — the stash stack is per-repo, so a
   `stash`/`pop` can pop another session's WIP into your tree. Take
@@ -107,13 +106,11 @@ rather than symlinking.
 
 The clone is pinned to the main clone's `vendor/bundle` at creation time.
 If `master` later bumps a gem, an existing worktree keeps the old gems
-until you `bundle install` in it — which is safer than the symlink
-behaviour, where the branch would silently start running against
-whatever the main clone was last install'd to.
+until you `bundle install` in it.
 
 ## Running gates in a worktree
 
-Per the fleet rules — foreground, generous timeout, never
+Foreground, generous timeout, never
 `run_in_background` (a backgrounded `make verify` is the known stall and
 a detached wait cannot always be woken); and **one full-suite / corpus
 job on the machine at a time** — four concurrent `make verify` runs

@@ -166,6 +166,49 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/multi_write_index_target_widening.rb — a multi-assign `h[k], x = …` widens like `h[k] = v`" do
+    let(:harness) { harness_for("multi_write_index_target_widening") }
+
+    # The must-not-fire / must-fire pair in one assertion: every stored-then-read condition folded to `true`
+    # on the stale literal before the fix, and the two conditions on a hash nothing stores into must still fold.
+    it "silences the stale folds without silencing the genuine ones" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+
+    it "reads a foreign stored value and a correlated-guard slot quietly" do
+      calls = harness.diagnostics.select { |d| %w[call.undefined-method call.possible-nil-receiver].include?(d.rule) }
+      expect(calls).to be_empty
+    end
+
+    it "widens the straight-line, nested and splatted receivers and leaves the untouched one literal" do
+      expect(harness.local(:multi)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:nested)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:splat)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:kept)).to be_a(Rigor::Type::HashShape)
+    end
+  end
+
+  describe "fixtures/for_rescue_index_target_widening.rb — `for h[k] in` and `rescue => h[k]` widen like `h[k] = v`" do
+    let(:harness) { harness_for("for_rescue_index_target_widening") }
+
+    # The must-not-fire / must-fire pair in one assertion: every stored-then-read condition folded to `true`
+    # on the stale literal before the fix, and the conditions on a hash nothing stores into must still fold.
+    it "silences the stale folds without silencing the genuine ones" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+
+    it "widens every stored-into receiver and leaves the untouched ones literal" do
+      %i[looped pair rescued].each do |name|
+        expect(harness.local(name).members).to include(a_kind_of(Rigor::Type::Nominal)), name.to_s
+      end
+      %i[kept_for kept_pair kept_rescue].each do |name|
+        expect(harness.local(name)).to be_a(Rigor::Type::HashShape), name.to_s
+      end
+    end
+  end
+
   # Issue #560 — the ADDED-value half of the mutation widening. PR #561 widened the value pinning a
   # slot-REWRITING mutator falsifies; this pins the join that covers what the mutation stored.
   describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do

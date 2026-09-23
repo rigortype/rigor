@@ -17,9 +17,14 @@ module Rigor
     # `||=` / `&&=` are conditional at runtime, but a widening may only LOSE precision, so answering on the branch that
     # does not store is safe.
     #
-    # `Prism::IndexTargetNode` (a multi-assign, `rescue =>` or `for` target) is absent from {NODE_CLASSES} because no
-    # straight-line seam widens it yet; {CONTENT_WRITE_NODE_CLASSES} adds it for the nested-block write-back, which
-    # does.
+    # `Prism::IndexTargetNode` stores through `[]=` too, but it is absent from {NODE_CLASSES}: it is a TARGET, and the
+    # value it stores comes from the construct that owns it — a multi-assign slot (`h[:a], z = 1, 2`), a `for` index
+    # (`for h[:a] in xs`, alone, splatted or in a multi-target) or a rescue reference (`rescue => h[:e]`). Only that
+    # construct can type the value, so `StatementEvaluator#eval_multi_write`, `#bind_for_index` and
+    # `#bind_rescue_reference` observe the straight-line write, passing each target to {.widen} with the slot
+    # {MultiTargetBinder} decomposed for it, the element or the rescued exception. {CONTENT_WRITE_NODE_CLASSES} adds
+    # it for the nested-block write-back, and `ScopeIndexer`'s pre-pass, which needs no stored value, names the class
+    # next to {NODE_CLASSES}.
     module IndexWriteWidening
       NODE_CLASSES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
 
@@ -43,7 +48,7 @@ module Rigor
       # the widening joins the stored value into the carrier's content evidence exactly as a real `[]=` does
       # (issue #560). Empty means "no evidence" and widens without joining.
       #
-      # @param node — one of {NODE_CLASSES}
+      # @param node — one of {NODE_CLASSES}, or a `Prism::IndexTargetNode`
       def widen(node:, current_scope:, arg_types: MutationWidening::NO_ARG_TYPES)
         MutationWidening.widen_receiver_aliases(node.receiver, MUTATOR, current_scope, arg_types: arg_types)
       end

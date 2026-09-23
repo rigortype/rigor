@@ -123,8 +123,7 @@ surfaced-count delta attributable to the project's code.
 paths: [app, lib]            # the project's source roots
 exclude: [vendor, tmp]
 severity_profile: lenient    # acknowledge-mode default for a large project
-signature_paths:
-  - /abs/path/to/rigor/plugins/rigor-activesupport-core-ext/sig
+plugins: [rigor-activesupport-core-ext]
 cache:
   path: /abs/path/to/rigor-survey/_<name>-sweep/cache
 ```
@@ -136,11 +135,9 @@ Rules that keep the sweep clean:
   `_<name>-sweep/` directory. `cache.path` is set absolute for the
   same reason. Then `git checkout <tag>` only ever changes the
   project's own files.
-- **Plugin-gem caveat (v0.1.x).** The `rigor-*` plugin gems are not
-  RubyGems-published yet, so a faithful external-user config omits
-  them; wire RBS bundles (`rigor-activesupport-core-ext`) by
-  absolute `sig/` path. The frozen-config methodology is unaffected
-  — just record which plugins were and were not active.
+- **Plugins.** Bundled plugins ship inside `rigortype`; activate
+  them with `plugins:` in the frozen config and record which were
+  and were not active.
 - The content-hashed cache is **safe to share across tags** — a
   changed file misses, an unchanged file hits. Keep it; it makes the
   sweep fast.
@@ -241,7 +238,7 @@ and pass `BUNDLE_GEMFILE=<rigor>/Gemfile` so `bundle exec
 is the working directory (diagnostic paths then resolve
 target-relative, keeping baseline keys stable across tags).
 
-## Corpus-gating gotchas (each cost a wrong conclusion first)
+## Corpus-gating gotchas
 
 - **A worktree isolates the ENGINE, never a PLUGIN.** `exe/rigor` unshifts its
   own tree's `lib/`, so `$worktree/exe/rigor` measures that worktree's engine —
@@ -256,17 +253,15 @@ target-relative, keeping baseline keys stable across tags).
   exposes false positives** from receivers Rigor mistypes. Never widen a union /
   nilable-receiver diagnostic (or promote any default) on a clean `make verify`
   alone; run this sweep, or at minimum a before/after corpus diff, first.
-- **Adjudicate against the framework's own source, not the symptom.** A GENUINE
-  verdict on a hot production code path is presumptively-FP until confirmed
-  against the library's source — two GitLab "bugs" overturned to FP that way.
+- **Adjudicate against the framework's own source, not the symptom.** Treat a
+  GENUINE verdict on a hot production code path as a presumptive FP until the
+  library's source confirms it.
 - **`dump_type`-via-`check` is the ground truth** — single-file `dump_type`
   probes are wrong for cross-file symbols. Analyze the whole directory.
 - **Prove the path is exercised before trusting a green run.** A clean corpus
-  result proves nothing until you instrument it (29 real `Void` translations in
-  kramdown; 61 mail files matching `#:nodoc:` — twice, that instrumentation is
-  what separated a real no-op from a vacuous one). Measure the layer, not the
-  aggregate: a `--depth 1` clone collapses every commit to one author/date, and
-  a vendored directory can inflate a grep count 3×.
+  result proves nothing until you count what the changed layer actually did.
+  Measure the layer, not the aggregate: a `--depth 1` clone collapses every
+  commit to one author/date, and a vendored directory inflates grep counts.
 - **Survey checkouts**: `mise.toml` needs `mise trust` first; `git stash push --
   <tracked files>` (an untracked pathspec errors and stashes nothing); never run
   two `rigor` processes against one target — cache-lock contention corrupts the

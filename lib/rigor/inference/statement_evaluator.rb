@@ -642,10 +642,11 @@ module Rigor
       # call's argument list so the widening seam can join it the same way (issue #560) — a
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
-      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's
-      # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
-      # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
-      # when the key is unresolvable, which reproduces the pre-join widening.
+      # what the write put in the slot — for a compound write the compound machinery's
+      # already-computed result (`t[0] += 5` stores `t[0] + 5`), for a multi-assign index target
+      # the slot {MultiTargetBinder} decomposed for it — which is the whole point: it is the value
+      # the retained element evidence provably no longer covers. Returns `[]` when the key is
+      # unresolvable, which reproduces the pre-join widening.
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
@@ -781,14 +782,41 @@ module Rigor
       # `h, h[:a] = h, 1` stores into the object `h` is bound to afterwards, and widening first would let the
       # binding of `h` restore the literal. When a target rebinds the receiver's variable to another object
       # instead, widening that one only loses precision.
+      #
+      # The stored values come from a second, `soften_slots: false` decomposition. The binder's ADR-57 softening
+      # drops a slot's `nil` only because the optimistic mark it records keeps the drop honest, and a stored value
+      # carries no mark — so, as for the class-ivar seed, the store joins what the slot can really hold, which is
+      # what the plain store of the same value joins. The second walk runs only for a destructure that has an
+      # index target.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
         post = bound.apply_to(post_rhs)
-        post = bound.index_targets.reduce(post) do |acc, (target, stored)|
-          IndexWriteWidening.widen(node: target, current_scope: acc, arg_types: index_write_arg_types(target, stored))
+        return [rhs_type, post] if bound.index_targets.empty?
+
+        stores = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs, soften_slots: false).index_targets
+        post = stores.reduce(post) do |acc, (target, stored)|
+          widened = IndexWriteWidening.widen(node: target, current_scope: acc,
+                                             arg_types: index_write_arg_types(target, stored))
+          forget_stored_slots(target, widened)
         end
         [rhs_type, post]
+      end
+
+      # The plain `h[k] = v` call drops the indexed narrowing its store overwrote
+      # ({IndexedNarrowing.invalidate_after_call}), and an index target must too: the widening carries a Nominal
+      # receiver's slot narrowings across its rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep
+      # reading `"d"`. A single literal key forgets its own slot; any other index — a variable key, a splice, a
+      # splat — can land on any slot, so it forgets every narrowing on the receiver.
+      def forget_stored_slots(target, current_scope)
+        receiver = IndexedNarrowing.stable_receiver(target.receiver)
+        return current_scope if receiver.nil?
+
+        key_node = single_index_argument(target)
+        address = key_node && IndexedNarrowing.stable_address(target.receiver, key_node)
+        return current_scope.without_indexed_narrowing(*address) if address
+
+        current_scope.without_indexed_narrowings_for(*receiver)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks

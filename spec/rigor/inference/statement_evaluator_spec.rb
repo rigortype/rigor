@@ -1446,6 +1446,42 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(multi.local(:q)).to eq(Rigor::Type::Combinator.constant_of(2))
     end
 
+    it "widens an array slot target and a splice target as the plain stores do (issue #1168)" do
+      _, slot = evaluate("a = [1]\na[0], b = \"s\", 2")
+      _, plain_slot = evaluate("a = [1]\na[0] = \"s\"")
+      expect(slot.local(:a)).to be_a(Rigor::Type::Nominal)
+      expect(slot.local(:a)).to eq(plain_slot.local(:a))
+
+      _, splice = evaluate("a = []\na[0, 1], b = [2], 3")
+      _, plain_splice = evaluate("a = []\na[0, 1] = [2]")
+      expect(splice.local(:a)).to eq(plain_splice.local(:a))
+    end
+
+    it "widens after the bindings, so a target that rebinds the receiver to itself cannot restore the literal" do
+      # Ruby evaluates `h` (the receiver) before assigning any target, so the store lands on the object `h` is
+      # bound to afterwards. Widening before the bindings let `h`'s own binding bring `{ a: 0 }` back.
+      _, post = evaluate("h = { a: 0 }\nh, h[:a] = h, 1")
+      expect(post.local(:h)).to be_a(Rigor::Type::Nominal)
+    end
+
+    it "forgets the indexed narrowing its store overwrites, as a plain `[]=` store does" do
+      multi, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:a], y = 1, 2\nm[:a]")
+      plain, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:a] = 1\nm[:a]")
+      expect(multi).not_to eq(Rigor::Type::Combinator.constant_of("d"))
+      expect(multi).to eq(plain)
+    end
+
+    it "keeps a narrowing on a slot the store does not name" do
+      type, = evaluate("m = {}\nm[:a] ||= \"d\"\nm[:b], y = 1, 2\nm[:a]")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("d"))
+    end
+
+    it "joins a nil-bearing slot's nil, since a stored value carries no optimistic mark to soften it" do
+      _, multi = evaluate("t = {}\nopt = [true, false].sample ? \"s\" : nil\nt[:a], d = [opt, 1]")
+      _, plain = evaluate("t = {}\nopt = [true, false].sample ? \"s\" : nil\nt[:a] = opt")
+      expect(multi.local(:t)).to eq(plain.local(:t))
+    end
+
     it "leaves a collection the index target does not name at its literal shape" do
       _, post = evaluate("h = { a: 0 }\ng = {}\ng[:a], z = 1, 2")
       expect(post.local(:h)).to be_a(Rigor::Type::HashShape)

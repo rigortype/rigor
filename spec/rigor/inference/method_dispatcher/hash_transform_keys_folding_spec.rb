@@ -93,7 +93,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
 
       # `{ **o, b: :y }` types as `Hash[:b, :y]`: the literal's type leaves the splatted entries out.
       it "adds a Dynamic[top] key arm for a mapping literal with a **splat entry" do
-        ["h.transform_keys(**o, b: :y)", "h.transform_keys({ **o, b: :y })"].each do |source|
+        ["h.transform_keys(**o, b: :y)", "h.transform_keys({ **o, b: :y })",
+         "h.send(:transform_keys, { **o, b: :y })", "h.public_send(:transform_keys, **o, b: :y)"].each do |source|
           result = dispatch(receiver: pair_shape, args: [shape({ b: constant(:y) })], call_node: call_node(source))
           expect(result).to eq(hash_of(union(constant(:a), constant(:b), constant(:y), untyped),
                                        union(constant(1), constant(2)))), "for #{source}"

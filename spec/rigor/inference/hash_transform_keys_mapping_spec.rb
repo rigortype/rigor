@@ -114,6 +114,16 @@ RSpec.describe "Hash#transform_keys with a mapping argument", type: :runner do
       RUBY
     end
 
+    it "does not trust the same literal passed through send" do
+      # `send` reaches the tier with the `send` node, whose first argument is the method name.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        H = { a: 1, b: 2, c: 3 }
+        o = { a: :z }
+        r = H.send(:transform_keys, { **o, b: :y })
+        puts "z" if r.keys.first == :z
+      RUBY
+    end
+
     it "does not trust an empty mapping filled through an alias" do
       # Runtime `{ z: 1, b: 2 }`; the engine records no aliasing, so `m` still reads `{}`.
       expect(reported_rules(<<~RUBY)).to be_empty

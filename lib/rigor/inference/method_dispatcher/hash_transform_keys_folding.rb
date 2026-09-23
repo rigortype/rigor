@@ -22,9 +22,11 @@ module Rigor
       #
       # A mapping the analysis cannot read contributes a `Dynamic[top]` key arm instead of nothing. That covers an
       # untyped argument, a `to_hash`-convertible object, a Hash subclass, the unlisted entries of an open shape,
-      # a literal with a `**splat` entry (the literal's own type leaves the splat out), and an empty closed shape,
-      # which is what a mapping filled through an alias the engine does not track still reads as. A block the
-      # call carries but the block pass could not type contributes `Dynamic[top]` too.
+      # a literal with a `**splat` entry written as the call's argument (the literal's own type leaves the splat
+      # out), and an empty closed shape, which is what a mapping filled through an alias the engine does not track
+      # still reads as. A block the call carries but the block pass could not type contributes `Dynamic[top]` too.
+      # A splatted literal that arrives through a local or a method return, and a non-empty shape filled through
+      # an alias, still read narrower than they are: those are gaps in the literal's and the binding's own types.
       #
       # Declines, leaving the RBS answer, when:
       #
@@ -115,7 +117,7 @@ module Rigor
           return nil unless context.args.size == 1
 
           renamed = mapping_value_type(context.args.first)
-          splatted_literal?(arguments.first) ? Type::Combinator.union(renamed, unknown) : renamed
+          arguments.any? { |argument| splatted_literal?(argument) } ? Type::Combinator.union(renamed, unknown) : renamed
         end
 
         # The mapping's value type. Anything whose value type cannot be read contributes `Dynamic[top]`,
@@ -182,7 +184,9 @@ module Rigor
         end
 
         # A hash literal or keyword arguments with a `**splat` entry. The literal's type lists only its own pairs
-        # (`{ **o, b: :y }` reads `Hash[:b, :y]`), so the splatted mapping's values are missing from it.
+        # (`{ **o, b: :y }` reads `Hash[:b, :y]`), so the splatted mapping's values are missing from it. Any
+        # argument is checked, not only the first: `h.send(:transform_keys, { **o, b: :y })` reaches this tier
+        # with the `send` node, whose first argument is the method name.
         def splatted_literal?(argument)
           (argument.is_a?(Prism::HashNode) || argument.is_a?(Prism::KeywordHashNode)) &&
             argument.elements.any?(Prism::AssocSplatNode)

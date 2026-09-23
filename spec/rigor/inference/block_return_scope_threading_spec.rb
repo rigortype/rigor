@@ -25,6 +25,12 @@ RSpec.describe "block-return scope threading", type: :runner do
   # exactly one; "reports exactly one dump per fixture" below is the assertion that keeps it honest.
   def dumped_type(source) = dumped_types(source).first
 
+  # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
+  def flow_rules(source)
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+  end
+
   describe "the tail reads a name the body binds" do
     it "types a block-local tail through a generic block-return signature" do
       # The reported repro: `Mutex#synchronize` is `[X] () { () -> X } -> X`, so the block's return type IS
@@ -220,20 +226,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # tail reads the honest `Array[…]`. The gate now also fires on a receiver of any name the widening responds
   # to (`MutationWidening::SHAPE_MUTATORS`), through every variable the receiver can evaluate to.
   describe "a prefix that mutates a captured collection in place" do
-    # Whether the prefix scan counts a compound index write as an in-place mutation — #1205's gate, which a
-    # multi-assign index target needs too. Probed rather than assumed so the example below runs by itself the
-    # moment that gate lands.
-    def index_write_gate?
-      dumped_type(<<~RUBY).start_with?("Hash[")
-        m = Mutex.new
-        h = { a: 0 }
-        dump_type(m.synchronize do
-          h[:a] += 1
-          h
-        end)
-      RUBY
-    end
-
     it "threads through a content adder on a captured local" do
       # THE ISSUE'S PROBE. Before the fix this answered `[]`.
       type = dumped_type(<<~RUBY)
@@ -274,6 +266,88 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(type).not_to eq("{}")
     end
 
+    # The index-write forms store through `[]=` without being a `[]=` call: Prism gives `h[k] += v`,
+    # `h[k] ||= v`, `h[k] &&= v` and a multi-assign `h[k], x = …` target their own node classes, so a scan
+    # keyed on call names saw none of them and the tail read the entry literal's slot.
+    it "threads through a compound index write" do
+      # THE REPORTED PROBE. Before the fix `v` read the literal's `0`, and `v == 0` folded to always-truthy
+      # on a program whose runtime `v` is `1`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        m = Mutex.new
+        h = { a: 0 }
+        v = m.synchronize do
+          h[:a] += 1
+          h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "still reports the condition when the index write lands on another hash" do
+      # The must-fire control: the tail reads `h`, which the prefix never touches, so its `0` is still the
+      # truth and the condition genuinely always holds.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        v = m.synchronize do
+          g[:a] += 1
+          h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "threads through an or-assigning index write" do
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          h[:b] ||= 1
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "threads through an and-assigning index write" do
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 1 }
+        dump_type(m.synchronize do
+          h[:a] &&= 2
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "threads through a multi-assign index target inside a nested block" do
+      # The captured-local write-back widens a receiver stored into through an `IndexTargetNode`, so the
+      # nested `each` really does forget `h`'s literal — once the gate lets the body thread.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          [1].each { |e| h[:a], _w = e, 2 }
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "leaves a tail reading a hash the index write does not touch unchanged" do
+      expect(dumped_type(<<~RUBY)).to eq("{ a: 0 }")
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          g[:a] += 1
+          h
+        end)
+      RUBY
+    end
+
     it "threads through an adder on a selected receiver" do
       # The issue #277 receiver shape: the mutation lands on whichever of `a` / `b` the ternary picked, so
       # both are possible targets and a tail reading either must thread.
@@ -305,12 +379,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "threads through a straight-line multi-assign index target" do
-      # `h[:a], y = 1, 2` stores through `[]=` on `h`, and `eval_multi_write` widens the receiver, so a threaded
-      # tail reads the widened hash rather than the literal's `{ a: 0 }`. The body threads only once the prefix
-      # scan counts an index write as an in-place mutation (#1205); without that it binds just `y`, the tail
-      # never reads it, and the answer stays the entry literal whatever the widening does. Drop the guard once
-      # #1205 is on master.
-      skip "needs the index-write threading gate of #1205" unless index_write_gate?
+      # `h[:a], y = 1, 2` stores through `[]=` on `h`. The prefix scan counts the index target as an in-place
+      # mutation, so the body threads, and `eval_multi_write` widens the receiver, so the threaded tail reads the
+      # widened hash rather than the literal's `{ a: 0 }`. Either half alone leaves the literal.
       type = dumped_type(<<~RUBY)
         m = Mutex.new
         h = { a: 0 }
@@ -380,12 +451,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # `true`. The fold now runs the ADR-56 `BodyFixpoint` over the rebound names up front and types every
   # position with them bound to the converged (widened) type — what the local can be in ANY iteration.
   describe "captured outer locals the body rebinds under the per-element fold" do
-    # Every diagnostic a flow rule produced for `source` — the always-truthy / always-falsey family.
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     it "widens a rebound counter to its continuation binding at every position" do
       # THE ISSUE'S PROBE. Before the fix this answered `[1, 1]` (and `[0, 0]` before #584 — a pin either way).
       expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
@@ -465,6 +530,21 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "keeps the optimistic nil-freeness mark on a rebound local" do
+      # `xs.first` reads nil-free only because RBS dispatch reads past `%a{implicitly-returns-nil}`, and the
+      # local carries that mark so `v.nil?` stays undecided. Rebinding the local for the fold must carry the
+      # mark too, or every position folds `v.nil?` to `false`; at runtime `r` is `[false, false]`.
+      expect(dumped_type(<<~RUBY)).to eq("[bool, bool]")
+        xs = Array.new(rand(0)) { |i| i }
+        v = xs.first
+        dump_type([1, 2].map do |e|
+          out = v.nil? ? false : true
+          v = xs.first
+          out
+        end)
+      RUBY
+    end
+
     it "still widens past the per-element threading cap" do
       # The fixpoint binds the parameter to the union of the elements, so its cost does not scale with the
       # arity and the cap is no reason to keep the stale seed: nine positions read `Integer`, not `0`.
@@ -490,6 +570,290 @@ RSpec.describe "block-return scope threading", type: :runner do
             total += v
             total
           end
+        end)
+      RUBY
+    end
+  end
+
+  # The shapes the #587 (a) gate newly threads. Once an index write in the prefix threads the body, each
+  # position of the per-element fold stored its OWN element through `||=` into the empty entry hash, where
+  # Ruby keeps the first iteration's — unless the in-place widening below binds the captured carrier first.
+  # A mutator NAME on a value it does not move (an Integer shift, a String copy) must stay exact.
+  describe "index writes the #587 (a) gate threads under the per-element fold" do
+    it "does not pin a captured hash an or-assigning index write fills" do
+      # THE HAZARD: the second position answered `2 == 2`, so `find` folded to `2` (runtime `nil`) and
+      # `found == 2` reported always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = [1, 2].find do |e|
+          cache[:first] ||= e
+          cache[:first] == 2
+        end
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "answers element-or-nil for the same find" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        cache = {}
+        dump_type([1, 2].find do |e|
+          cache[:first] ||= e
+          cache[:first] == 2
+        end)
+      RUBY
+    end
+
+    it "does not pin the same hash under a Range receiver" do
+      # Runtime `[1, 1]`; the pin answered `[1, 2]`, and `r.last == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = (1..2).map do |e|
+          cache[:k] ||= e
+          cache[:k]
+        end
+        puts "x" if r.last == 2
+      RUBY
+    end
+
+    it "does not pin an instance-variable hash either" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Memo
+          def run
+            @cache = {}
+            dump_type([1, 2].find do |e|
+              @cache[:first] ||= e
+              @cache[:first] == 2
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "keeps a position whose tail ignores the collection it mutates" do
+      # The control: `log` joins the fixpoint, but the tail reads only the element, so the fold stays exact.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2]")
+        log = []
+        dump_type([1, 2].map do |e|
+          log << e
+          e
+        end)
+      RUBY
+    end
+
+    it "keeps an Integer shift exact although `<<` is a mutator name" do
+      # `base` never moves, so admitting it would hand its value-pinned seed to the unmoved-pin floor and
+      # answer `Dynamic[top]` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2, 4]")
+        base = 1
+        dump_type([0, 1, 2].map { |i| base << i })
+      RUBY
+    end
+
+    it "keeps a non-mutating String call exact although `delete` is a mutator name" do
+      expect(dumped_type(<<~RUBY)).to eq('["heo", "heo"]')
+        word = "hello"
+        dump_type([1, 2].map { |e| word.delete("l") })
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_values fold fills" do
+      # The per-pair fold shares the fixpoint: runtime `{ x: 1, y: 1 }`, and the pin answered `{ x: 1, y: 2 }`
+      # so `r[:y] == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = { x: 1, y: 2 }.transform_values do |v|
+          cache[:first] ||= v
+          cache[:first]
+        end
+        puts "y" if r[:y] == 2
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_keys fold fills" do
+      # Runtime `{ "a" => 2 }` — both keys collide on the first iteration's `"a"` — and the pin answered two
+      # distinct keys, so `t.keys.size == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        first = {}
+        t = { a: 1, b: 2 }.transform_keys do |k|
+          first[:k] ||= k.to_s
+          first[:k]
+        end
+        puts "k" if t.keys.size == 2
+      RUBY
+    end
+  end
+
+  # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured
+  # receiver the body only mutates IN PLACE (`h[k] = …`, `h[k] += …`, `seen[x] = true`) is never rebound, so
+  # every position still read it at its ENTRY contents: `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }`
+  # folded to `[1, 1]` where Ruby answers `[1, 2]`, and `r.last == 1` fired always-truthy on correct code.
+  describe "captured outer locals the body mutates in place under the per-element fold" do
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    it "widens a captured hash the body stores into at every position" do
+      # THE REPORTED PROBE. Before the fix this answered `[1, 1]`. The widened value slot carries the one-store
+      # `Dynamic[top]` arm, and `+` over `Dynamic[top] | Integer` answers `Dynamic[top]` here exactly as it does
+      # on straight-line code.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        h = { a: 0 }
+        dump_type([:a, :a].map { |k| h[k] = h[k] + 1 })
+      RUBY
+    end
+
+    it "no longer reports the condition the entry contents folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        h = { a: 0 }
+        r = [:a, :a].map { |k| h[k] = h[k] + 1 }
+        puts "y" if r.last == 1
+      RUBY
+    end
+
+    it "widens a captured hash read back after an index compound write" do
+      # `[1, 2]` at runtime. The index-write node is no variable write, so the tail was typed from the entry
+      # scope and answered `[0, 0]` — the contents before either iteration ran.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        h = { a: 0 }
+        dump_type([:a, :a].map do |k|
+          h[k] += 1
+          h[k]
+        end)
+      RUBY
+    end
+
+    it "widens a captured array the body stores into" do
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        a = [0]
+        dump_type([0, 0].map { |i| a[i] = a[i] + 1 })
+      RUBY
+    end
+
+    it "keeps the element class of a captured array read back after a store" do
+      # Widening, not a floor: the slot loses its `0` pin and gains the gradual arm, but the Integer the
+      # literal proved is still there.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        a = [0]
+        dump_type([0, 0].map do |i|
+          a[i] += 1
+          a[i]
+        end)
+      RUBY
+    end
+
+    it "leaves a membership test over a hash the body fills undecided" do
+      # `[:new, :new, :dup]` at runtime; the entry `{}` made every `key?` provably false.
+      expect(dumped_type(<<~RUBY)).to eq("[:dup | :new, :dup | :new, :dup | :new]")
+        seen = {}
+        dump_type([1, 2, 1].map { |x| seen.key?(x) ? :dup : (seen[x] = true; :new) })
+      RUBY
+    end
+
+    it "answers a mutated captured local above the per-element threading cap" do
+      # The widened binding holds at any point of any iteration, so it answers the tail-only read the cap
+      # falls back to, where the #617 floor used to answer `Dynamic[top]` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['non-negative-int'] * 9).join(', ')}]")
+        out = []
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+          out << e
+          out.size
+        end)
+      RUBY
+    end
+
+    it "widens the mutated local when the fold is nested inside a threaded body" do
+      # The widening evaluates no body, so threading suppression is no reason to skip it.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          v = 1
+          [:a, :a].map do |k|
+            h[k] += v
+            h[k]
+          end
+        end)
+      RUBY
+    end
+
+    it "gives a class-changing site the gradual arm its arguments cannot supply" do
+      # `map!` joins no argument evidence, so the widening alone kept `Array[Integer]` and `r.last.upcase` drew
+      # `undefined method` on a slot that holds `"1"` from the first iteration on.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        a = [1]
+        dump_type([1, 2].map do |e|
+          a.map!(&:to_s)
+          a.first
+        end)
+      RUBY
+    end
+
+    it "lays the widened contents under the rebind fixpoint" do
+      # `[nil, 0, "s"]` at runtime. The fixpoint for `total` reads `h[:a]`, so it must see `h` as the body leaves
+      # it; seeded from the entry `{ a: 0 }` it converged on `0?` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer | nil'] * 3).join(', ')}]")
+        h = { a: 0 }
+        total = nil
+        dump_type([1, 2, 3].map do |i|
+          v = total
+          total = h[:a]
+          h[:a] = "s"
+          v
+        end)
+      RUBY
+    end
+
+    it "widens a local the body both rebinds and mutates over its converged type" do
+      # The rebind brings a fresh `{ a: 0 }` back each iteration and a store the evaluator does not thread (it
+      # sits inside an array literal) rewrites it, so the next iteration reads `{ a: "s" }`. The converged
+      # `{ a: 0 }?` alone would pin that.
+      widened = "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]?"
+      expect(dumped_type(<<~RUBY)).to eq("[#{([widened] * 3).join(', ')}]")
+        h = nil
+        dump_type([1, 2, 3].map do |i|
+          v = h
+          h = { a: 0 }
+          [h[:a] = "s"]
+          v
+        end)
+      RUBY
+    end
+
+    it "keeps the unmoved-pin floor for a local both mutated and rebound inside an expression" do
+      # `["abc", :abc]` at runtime. The nested `s &&= …` is invisible to the fixpoint, which converges on its
+      # seed; the seed is the widened `String`, so the #617 floor has to ask the call-site `"ab"` whether a pin
+      # is at stake, or `String` is believed and `r.last.to_proc` draws `undefined method`.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        s = +"ab"
+        dump_type([1, 2].map { |i| [s, (s << "c" if s.is_a?(String)), (s &&= s.to_sym).size].first })
+      RUBY
+    end
+
+    it "keeps an unmutated captured hash read by key exact" do
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        h = { a: 0 }
+        dump_type([:a, :a].map { |k| h[k] })
+      RUBY
+    end
+
+    it "still reports the condition over an unmutated captured hash" do
+      # The must-fire sibling: nothing writes `h`, so `r.last == 0` really is always true.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        h = { a: 0 }
+        r = [:a, :a].map { |k| h[k] }
+        puts "y" if r.last == 0
+      RUBY
+    end
+
+    it "keeps a captured hash exact when only a sibling is mutated" do
+      # Only the mutated receiver moves; `p` is read, never written.
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        q = { a: 0 }
+        p = { a: 0 }
+        dump_type([:a, :a].map do |k|
+          q[k] = 1
+          p[k]
         end)
       RUBY
     end
@@ -522,6 +886,254 @@ RSpec.describe "block-return scope threading", type: :runner do
       # exact per-position values at any arity.
       expect(dumped_type("dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map { |e| e })"))
         .to eq("[1, 2, 3, 4, 5, 6, 7, 8, 9]")
+    end
+  end
+
+  # The same first-iteration pin on an instance variable. An ivar is not captured — the block shares the
+  # method's `self` — but it persists across iterations exactly as a captured local does, and every position
+  # read it at its entry binding: `@t = 0; [1, 2].map { @t += 1 }` folded to `[1, 1]` (runtime `[1, 2]`). The
+  # fold runs the captured-local fixpoint over the ivars the body rebinds too, under the same #617 residue
+  # rules, and every ivar the body leaves alone keeps its exact binding.
+  describe "instance variables the body rebinds under the per-element fold" do
+    # `source` as the body of an instance method, where the ivar under test is bound.
+    def in_method(source) = "class Counter\ndef run\n#{source}\nend\nend\n"
+
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{in_method(source)}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    it "widens a rebound ivar counter at every position" do
+      # The reported probe: the compound write is the whole body, so each position's value is the stored `@t`.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[Integer, Integer]")
+        @t = 0
+        dump_type([1, 2].map { |k| @t += 1 })
+      RUBY
+    end
+
+    it "widens an ivar tail read back after the rebind" do
+      # Runtime `[1, 3]`; the pin answered `[1, 2]`.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[Integer, Integer]")
+        @t = 0
+        dump_type([1, 2].map do |e|
+          @t += e
+          @t
+        end)
+      RUBY
+    end
+
+    it "no longer reports the condition the first-iteration pin used to fold" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        @t = 0
+        r = [1, 2].map { @t += 1 }
+        puts "x" if r.last == 1
+      RUBY
+    end
+
+    it "still reports the condition over an ivar the body does not rebind" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        @t = 0
+        r = [1, 2].map { |e| @t }
+        puts "x" if r.last == 0
+      RUBY
+    end
+
+    it "keeps a position whose tail reads an ivar the body does not rebind" do
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[5, 5]")
+        @t = 0
+        @u = 5
+        dump_type([1, 2].map do |e|
+          @t += e
+          @u
+        end)
+      RUBY
+    end
+
+    it "keeps an ivar the body writes before reading it back exact" do
+      # Each position reads the value its own iteration stored, whatever the fixpoint binds on entry.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[1, 2]")
+        @last = 0
+        dump_type([1, 2].map do |e|
+          @last = e
+          @last
+        end)
+      RUBY
+    end
+
+    it "widens an `||=` memo the first iteration fills" do
+      # Runtime `[1, 1]`: the second iteration finds `@q` already set. The pin answered `[1, 2]`.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[1 | 2, 1 | 2]")
+        @q = nil
+        dump_type([1, 2].map { |e| @q ||= e })
+      RUBY
+    end
+
+    it "keeps a local that shares the rebound ivar's bare name" do
+      # Locals and ivars share one name map, told apart by the `@` Ruby spells every ivar with.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[5, 5]")
+        t = 5
+        @t = 0
+        dump_type([1, 2].map do |e|
+          @t += e
+          t
+        end)
+      RUBY
+    end
+
+    it "widens a local and an ivar the same body rebinds" do
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[[Integer, Integer], [Integer, Integer]]")
+        total = 0
+        @t = 0
+        dump_type([1, 2].map do |e|
+          total += e
+          @t += 1
+          [total, @t]
+        end)
+      RUBY
+    end
+
+    it "keeps a predicate fold that ignores the rebound ivar" do
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[2]")
+        @seen = 0
+        dump_type([1, 2].select do |e|
+          @seen += 1
+          e > 1
+        end)
+      RUBY
+    end
+
+    it "answers find's element-or-nil floor over a rebound-ivar predicate" do
+      # Issue #617 residue (1) on an ivar: runtime `2`, and the pin answered `nil`.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("1 | 2 | nil")
+        @seen = 0
+        dump_type([1, 2].find do |e|
+          @seen += 1
+          @seen == 2
+        end)
+      RUBY
+    end
+
+    it "floors the unmoved pin of a rebind nested inside an expression" do
+      # `(@seen += 1) == 2` is no statement, so the fixpoint's body evaluation never threads it and converges
+      # on the `Constant[0]` seed; the residue rule floors that seed rather than believing it.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("1 | 2 | nil")
+        @seen = 0
+        dump_type([1, 2].find { |e| (@seen += 1) == 2 })
+      RUBY
+    end
+
+    it "keeps the class-seeded binding of an ivar another method initializes" do
+      # `@n` enters `run` on its class-wide binding, `0 | Integer` — the union of every write in the class,
+      # this body's included — so it is no first-iteration pin and the fold leaves it alone.
+      expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
+        class Counter
+          def initialize
+            @n = 0
+          end
+
+          def run
+            dump_type([1, 2].map { @n += 1 })
+          end
+        end
+      RUBY
+    end
+
+    it "keeps the class-wide binding when a nested block rebinds the ivar" do
+      # The nested `each` write is never threaded back into the fold's exit scope, so the fixpoint converges
+      # on `:fast | :slow` — a literal union the unmoved-pin floor would take. It needs no floor: that union
+      # is every value the class ever stores.
+      expect(dumped_type(<<~RUBY)).to eq("[:fast | :slow, :fast | :slow]")
+        class Mode
+          def initialize
+            @mode = :fast
+          end
+
+          def run
+            dump_type([1, 2].map do |x|
+              [x].each { @mode = :slow }
+              @mode
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "keeps a class-seeded `||=` memo exact" do
+      # `@mode` only ever holds `:fast`, so the memo answers `:fast` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[:fast, :fast]")
+        class Mode
+          def initialize
+            @mode = :fast
+          end
+
+          def run
+            dump_type([1, 2].map { @mode ||= :fast })
+          end
+        end
+      RUBY
+    end
+
+    it "floors an unthreaded ivar rebind behind a narrowing guard" do
+      # Runtime `2`; the entry-scope pin answered `nil`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run(flag)
+            @s = flag ? 0 : nil
+            dump_type([1, 2].find { |e| next false unless @s; (@s += 1) == 2 })
+          end
+        end
+      RUBY
+    end
+
+    it "keeps the optimistic nil-freeness mark on a rebound ivar" do
+      # Runtime `[false, false]`: `xs` is empty. Dropping the mark folded `@v.nil?` to `false`.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[bool, bool]")
+        xs = Array.new(rand(0)) { |i| i }
+        @v = xs.first
+        dump_type([1, 2].map do |e|
+          out = @v.nil? ? false : true
+          @v = xs.first
+          out
+        end)
+      RUBY
+    end
+
+    it "reports nothing on the optimistic ivar's fold" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        xs = Array.new(rand(0)) { |i| i }
+        @v = xs.first
+        r = [1, 2].map do |e|
+          out = @v.nil? ? false : true
+          @v = xs.first
+          out
+        end
+        puts "missing" unless r.first
+      RUBY
+    end
+
+    it "still reads the fixpoint above the per-element threading cap" do
+      # A rebound ivar is answered at any arity, so the arity-cap floor must not take it.
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[#{(['Integer'] * 9).join(', ')}]")
+        @t = 0
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+          @t += e
+          @t
+        end)
+      RUBY
+    end
+
+    it "floors the rebound ivar when the fold is nested inside a threaded body" do
+      expect(dumped_type(in_method(<<~RUBY))).to eq("[Dynamic[top], Dynamic[top]]")
+        m = Mutex.new
+        @t = 0
+        dump_type(m.synchronize do
+          v = 1
+          [1, 2].map do
+            @t += v
+            @t
+          end
+        end)
+      RUBY
     end
   end
 
@@ -652,11 +1264,6 @@ RSpec.describe "block-return scope threading", type: :runner do
   # Issue #617 — the four block-return residues #587 left behind. Each pair is a residue plus the arm that
   # must keep folding, because every decline here is bought with precision somewhere adjacent.
   describe "issue #617 block-return residues" do
-    def flow_rules(source)
-      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
-      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
-    end
-
     describe "(1) find / detect / index / find_index over a rebound-capture predicate" do
       it "answers an element-or-nil where the entry-scope predicate short-circuited to nil" do
         # Runtime answer is `2`. The per-position predicates do not fold, so the walk floors instead of
@@ -690,6 +1297,52 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "still floors an unthreaded rebind behind a narrowing guard" do
+        # `next false unless seen` narrows `seen` on the way out of the body, so the exit binding differs
+        # from the entry one although `(seen += 1) == 2` is never threaded. The floor must still take the
+        # `0 | nil` seed; believing it answered `nil` where Ruby answers `2`.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def run(flag)
+            seen = flag ? 0 : nil
+            dump_type([1, 2].find { |e| next false unless seen; (seen += 1) == 2 })
+          end
+        RUBY
+      end
+
+      it "no longer reports the always-falsey condition the narrowed pin folded" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          def run(flag)
+            seen = flag ? 0 : nil
+            r = [1, 2].find { |e| next false unless seen; (seen += 1) == 2 }
+            puts "found" if r
+          end
+        RUBY
+      end
+
+      it "still floors an unthreaded rebind that an `||=` prefix threads" do
+        # The threaded `seen ||= 0` moves the exit binding to `0`; the counter itself never moves.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def run(flag)
+            seen = flag ? 0 : nil
+            dump_type([1, 2].find { |e| seen ||= 0; (seen += 1) == 2 })
+          end
+        RUBY
+      end
+
+      it "still floors a union seed that an unthreaded write of another class escapes" do
+        # `log(seen = nil)` stores nil inside an argument, which the body evaluator does not thread, so the
+        # fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
+        # it folded `seen.nil?` to `false` at both positions, and `find` to `nil` where Ruby answers `1`.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def log(x) = x
+
+          def run(flag)
+            seen = flag ? 0 : rand(10)
+            dump_type([1, 2].find { |e| log(seen = nil); seen.nil? })
+          end
+        RUBY
+      end
+
       it "still folds find to the matching element when the predicate decides" do
         expect(dumped_type("dump_type([1, 2].find { |e| e == 2 })")).to eq("2")
       end
@@ -705,8 +1358,9 @@ RSpec.describe "block-return scope threading", type: :runner do
 
     describe "(2) the content-mutation family above the per-element threading cap" do
       it "floors a position whose tail reads a parameter the body mutated in place" do
-        # Nine slots each holding `[1]`; the walk answered nine provably-empty `[]`. The cap withholds the
-        # per-position body evaluation, so the honest answer above it is "unknown", not the pre-state.
+        # `[[]] * 9` is nine references to ONE array, which the nine `<<` leave holding nine `1`s; the walk
+        # answered nine provably-empty `[]`. The cap withholds the per-position body evaluation, so the honest
+        # answer above it is "unknown", not the pre-state.
         expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
           dump_type(([[]] * 9).map do |a|
             a << 1
@@ -716,10 +1370,31 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "keeps threading the same shape at the cap" do
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Array[Dynamic[top] | Integer]'] * 3).join(', ')}]")
-          dump_type(([[]] * 3).map do |a|
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Array[Dynamic[top] | Integer]'] * 8).join(', ')}]")
+          dump_type(([[]] * 8).map do |a|
             a << 1
             a
+          end)
+        RUBY
+      end
+
+      it "floors a position whose tail reads a parameter the body stored into through an index write" do
+        # The same floor for the index-write forms, which the prefix scan used to miss. `[{ a: 0 }] * 9` is
+        # nine references to one hash, which ends as `{ a: 9 }`; the walk answered nine stale `{ a: 0 }`.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          dump_type(([{ a: 0 }] * 9).map do |h|
+            h[:a] += 1
+            h
+          end)
+        RUBY
+      end
+
+      it "threads the index-write shape at the cap" do
+        widened = "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]"
+        expect(dumped_type(<<~RUBY)).to eq("[#{([widened] * 8).join(', ')}]")
+          dump_type(([{ a: 0 }] * 8).map do |h|
+            h[:a] += 1
+            h
           end)
         RUBY
       end
@@ -732,6 +1407,51 @@ RSpec.describe "block-return scope threading", type: :runner do
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             total += e
             total
+          end)
+        RUBY
+      end
+
+      it "floors a captured local whose in-place widening declines" do
+        # `Hash#shift` is no Hash mutator to the widening, so `h` would stay the entry literal. Counting it as
+        # answered typed nine `9`s (runtime `8, 7, …, 0`) and fired always-truthy on `r.last == 9`.
+        source = <<~RUBY
+          h = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9 }
+          r = [1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            h.shift
+            h.size
+          end
+        RUBY
+        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        expect(flow_rules("#{source}puts 'nine' if r.last == 9")).to be_empty
+      end
+
+      it "floors a captured precise nominal the body appends to" do
+        # `Array[String]` is a claim the widening may not grow, so it declines and the name stays unanswered.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          ks = ENV.keys
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            ks << e
+            ks.last
+          end)
+        RUBY
+      end
+
+      it "reads a class-changing site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          a = [1]
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            a.map!(&:to_s)
+            a.first
+          end)
+        RUBY
+      end
+
+      it "reads a merging site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          m = { k: 1 }
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            m.merge!(k: "s")
+            m[:k]
           end)
         RUBY
       end
@@ -767,6 +1487,66 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
+    # The index sibling of (3). The expression typer read `h[k] += v` / `||=` / `&&=` as the rvalue alone, so
+    # a block whose tail is one answered `v` at every position whatever the slot held.
+    describe "an index compound write as the block's tail" do
+      it "types a counter-hash tally as the stored sum, not the increment" do
+        # Runtime `[1, 1, 2]`. The rvalue answer was `[1, 1, 1]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer, Integer]")
+          counts = Hash.new(0)
+          dump_type(%w[a b a].map { |w| counts[w] += 1 })
+        RUBY
+      end
+
+      it "stops the always-truthy firing on the tally" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          counts = Hash.new(0)
+          r = %w[a b a].map { |w| counts[w] += 1 }
+          puts "x" if r.last == 1
+        RUBY
+      end
+
+      it "keeps a truthy slot's value in a `||=` tail" do
+        # Runtime `["x"]`: the slot is truthy, so `||=` stores nothing and answers it. The slot's `String` stays
+        # in the answer; its `"x"` pin does not, because the block stores into `seen` and every position reads
+        # the in-place widening of it (the same binding a longer receiver's later positions need).
+        expect(dumped_type(<<~RUBY)).to eq("[3 | Dynamic[top] | String]")
+          seen = { a: "x" }
+          dump_type([:a].map { |k| seen[k] ||= 3 })
+        RUBY
+      end
+
+      it "stops the always-truthy firing on a `||=` tail that keeps the slot" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          seen = { a: "x" }
+          r = [:a].map { |k| seen[k] ||= 3 }
+          puts "x" if r.first == 3
+        RUBY
+      end
+
+      it "types a straight-line index compound write in argument position as the stored value" do
+        expect(dumped_type("h = { a: 1 }\ndump_type(h[:a] += 1)")).to eq("2")
+      end
+
+      it "types an untracked slot's `+=` tail as untyped, not the increment" do
+        # `c` is a parameter, so nothing is known of `c[x]`; the rvalue answer pinned both positions to `1`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          def tally(c)
+            dump_type([1, 2].map { |x| c[x] += 1 })
+          end
+        RUBY
+      end
+
+      it "stops the always-truthy firing on an untracked slot's `+=` tail" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          def tally(c)
+            r = [1, 2].map { |x| c[x] += 1 }
+            puts "x" if r.last == 1
+          end
+        RUBY
+      end
+    end
+
     describe "(4) straight-line String mutation" do
       it "widens a mutated string literal binding" do
         expect(dumped_type("s = +\"ab\"\ns << \"c\"\ndump_type(s)")).to eq("String")
@@ -788,6 +1568,178 @@ RSpec.describe "block-return scope threading", type: :runner do
         # `upcase` returns a new String; only the bang form rewrites the receiver.
         expect(dumped_type("s = +\"ab\"\ns.upcase\ndump_type(s)")).to eq("\"ab\"")
       end
+    end
+  end
+
+  # The HashShape twin of #587 (b). `transform_values` / `transform_keys` over a closed `HashShape` type the
+  # block once per pair, every pair from the same entry scope, so a captured local the body rebinds was read at
+  # its first-iteration value at every pair: `{ x: 1, y: 1 }` for a block whose runtime values are `{ x: 1,
+  # y: 2 }`. The per-pair fold now takes the per-element fold's entry binding, the parameter bound to the
+  # union of the values (or keys) for the fixpoint.
+  describe "captured outer locals the body rebinds under the HashShape per-pair fold" do
+    it "widens a rebound counter at every value pair" do
+      # THE REPORTED PROBE. Before the fix this answered `{ x: 1, y: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        dump_type({ x: 1, y: 2 }.transform_values { |e| total += 1 })
+      RUBY
+    end
+
+    it "no longer reports the condition the first-iteration pin used to fold" do
+      # THE HAZARD: `r[:y] == 1` folded to `Constant[true]` off the pinned `{ x: 1, y: 1 }`; it is `2 == 1`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        total = 0
+        r = { x: 1, y: 2 }.transform_values { |e| total += 1 }
+        puts "x" if r[:y] == 1
+      RUBY
+    end
+
+    it "still reports the condition when the per-pair fold is exact" do
+      # The must-fire sibling: a body that rebinds nothing keeps its exact per-pair values.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        r = { x: 1, y: 2 }.transform_values { |e| e }
+        puts "x" if r[:y] == 2
+      RUBY
+    end
+
+    it "widens an accumulator fed by the block parameter" do
+      # `{ x: 1, y: 3 }` at runtime; the pin answered `{ x: 1, y: 2 }`, the value itself.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "widens past the Tuple fold's arity cap, which the per-pair fold does not have" do
+      # `45` at `:k9` at runtime; the pin answered `9`. No cap means no above-the-cap floor either: every pair
+      # threads its full body, and the fixpoint's cost does not scale with the pair count.
+      pairs = (1..9).map { |n| "k#{n}: #{n}" }.join(", ")
+      expected = (1..9).map { |n| "k#{n}: Integer" }.join(", ")
+      expect(dumped_type(<<~RUBY)).to eq("{ #{expected} }")
+        total = 0
+        dump_type({ #{pairs} }.transform_values do |e|
+          total += e
+          total
+        end)
+      RUBY
+    end
+
+    it "widens the bang form through the same fold" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        total = 0
+        h = { x: 1, y: 2 }
+        dump_type(h.transform_values! { |e| total += 1 })
+      RUBY
+    end
+
+    it "widens a captured hash the body stores into at every pair" do
+      # The in-place half of the same entry binding. `{ x: 1, y: 2 }` at runtime; the entry `{ a: 0 }` answered
+      # `{ x: 0, y: 0 }` for the read-back at every pair.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top] | Integer, y: Dynamic[top] | Integer }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          g[:a] += 1
+          g[:a]
+        end)
+      RUBY
+    end
+
+    it "keeps an unmutated captured hash read by key exact at every pair" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 0, y: 0 }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values { |e| g[:a] })
+      RUBY
+    end
+
+    it "keeps a pair whose tail reads a captured local the body does not rebind" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 5, y: 5 }")
+        total = 0
+        k = 5
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          total += e
+          k
+        end)
+      RUBY
+    end
+
+    it "keeps a value fold that ignores the rebound counter" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 10, y: 20 }")
+        seen = 0
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          seen += 1
+          e * 10
+        end)
+      RUBY
+    end
+
+    it "declines a key fold whose new keys the pinned counter spelled" do
+      # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1": 1,
+      # "b1": 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
+      # no single `Constant`, so the tier declines to the dispatcher. Only the decline is asserted: the
+      # dispatcher's key argument comes from the generic block-return pass, which types the body from the
+      # call's entry scope and still reads `i` as `1` there.
+      expect(dumped_type(<<~RUBY)).to start_with("Hash[")
+        i = 0
+        dump_type({ a: 1, b: 2 }.transform_keys do |k|
+          i += 1
+          k.to_s + i.to_s
+        end)
+      RUBY
+    end
+
+    it "keeps a key fold that ignores the rebound counter" do
+      expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+        seen = 0
+        dump_type({ a: 1, b: 2 }.transform_keys do |k|
+          seen += 1
+          k.to_s
+        end)
+      RUBY
+    end
+
+    it "floors the rebound local when the fold is nested inside a threaded body" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top], y: Dynamic[top] }")
+        m = Mutex.new
+        total = 0
+        dump_type(m.synchronize do
+          v = 1
+          { x: 1, y: 2 }.transform_values do |e|
+            total += v
+            total
+          end
+        end)
+      RUBY
+    end
+
+    it "widens a rebound instance variable at every value pair" do
+      # The instance variables the per-element binding covers move per pair too; the pin answered `{ x: 1,
+      # y: 1 }`.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Integer, y: Integer }")
+        class Counter
+          def run
+            @t = 0
+            dump_type({ x: 1, y: 2 }.transform_values { |e| @t += 1 })
+          end
+        end
+      RUBY
+    end
+
+    it "keeps an instance variable the body does not rebind exact at every value pair" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 5, y: 5 }")
+        class Counter
+          def run
+            @t = 0
+            @u = 5
+            dump_type({ x: 1, y: 2 }.transform_values do |e|
+              @t += e
+              @u
+            end)
+          end
+        end
+      RUBY
     end
   end
 end

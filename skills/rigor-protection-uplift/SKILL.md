@@ -42,10 +42,6 @@ copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
 
 ## When NOT to use
 
-- **Rigor's own `lib/`, or the bundled `plugins/` / `examples/`** — the
-  self-check tree. Hand-authoring types there collides with the
-  sig-gen-first ethos; run `rigor sig-gen` directly and treat residual
-  gaps as engine signal to report, not a private fix.
 - **"Make my code more precise" with no protection goal** — that is
   `rigor coverage` (precision), not `--protection`.
 - **A project with no Rigor config yet** — onboard first with

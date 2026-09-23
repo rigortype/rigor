@@ -49,7 +49,8 @@ module Rigor
       RECURSION_FIXPOINT_CAP = :recursion_fixpoint_cap
       # `BodyFixpoint#converge` (ADR-56 slice A — non-escaping block captured-local write-back) ran its
       # 3-evaluation cap without the written local's join converging and collapsed that local to
-      # `Dynamic[top]` (the escaping-block floor). Shared by slice B's loop-body fixpoint.
+      # `Dynamic[top]` (the escaping-block floor). Shared by slice B's loop-body fixpoint and by slice C's
+      # content-evidence fixpoint, where the collapsed name is one element / key / value slot of a collection join.
       BLOCK_WRITEBACK_CAP = :block_writeback_cap
 
       # ADR-57 return-memo profile counters (not cutoffs — see the module doc). All bumped by

@@ -17,13 +17,21 @@ module Rigor
     # `||=` / `&&=` are conditional at runtime, but a widening may only LOSE precision, so answering on the branch that
     # does not store is safe.
     #
-    # `Prism::IndexTargetNode` (`h[:a], z = 1, 2`) stores through `[]=` too, but it is absent from {NODE_CLASSES}: it
-    # is a multi-assign TARGET, and the value it stores is a slot of the right-hand side, which only the owning
-    # `MultiWriteNode` can type. `StatementEvaluator#eval_multi_write` therefore observes the write there, passing each
-    # target to {.widen} with the slot {MultiTargetBinder} decomposed for it, and `ScopeIndexer`'s pre-pass, which
-    # needs no stored value, names the class next to {NODE_CLASSES}.
+    # `Prism::IndexTargetNode` (a multi-assign, `rescue =>` or `for` target) stores through `[]=` too, but it is absent
+    # from {NODE_CLASSES}: the value it stores comes from what it is assigned from, which only its owner can type. For
+    # a multi-assign that owner is the `MultiWriteNode`, and `StatementEvaluator#eval_multi_write` passes each target
+    # to {.widen} with the slot {MultiTargetBinder} decomposed for it; the `rescue =>` and `for` forms have no
+    # straight-line seam yet. {CONTENT_WRITE_NODE_CLASSES} adds it for the nested-block write-back, and
+    # `ScopeIndexer`'s pre-pass, which needs no stored value, names it next to {NODE_CLASSES}.
     module IndexWriteWidening
       NODE_CLASSES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
+
+      # Every node that stores through `[]=` without being a `[]=` call: {NODE_CLASSES} plus the index TARGET a
+      # multi-assign, `rescue =>` or `for` writes through. `StatementEvaluator`'s captured-local write-back widens
+      # a receiver a nested block stores into through any of them, `ExpressionTyper`'s block-return threading
+      # gate predicts that widening, and `CapturedLocals.content_mutations` finds the per-element fold's in-place
+      # captures by it, so all three read this one list.
+      CONTENT_WRITE_NODE_CLASSES = [*NODE_CLASSES, Prism::IndexTargetNode].freeze
 
       # The method these forms store through — the name the mutator tables are keyed on.
       MUTATOR = :[]=

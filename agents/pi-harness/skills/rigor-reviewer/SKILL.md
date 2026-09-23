@@ -20,7 +20,6 @@ Load and follow:
    both must `Approved`.
 3. **Complex design:** `rigor-reviewer` (Fable:medium) — reserve for
    architecture / API / inference-shape work; do not use on routine tidies.
-4. No pollable claude-bridge usage % — do not stall waiting for one.
 
 ## Hard constraints (always)
 

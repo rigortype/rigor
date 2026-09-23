@@ -1121,12 +1121,12 @@ module Rigor
       #
       # `@h[k] ||= v` and its `&&=` / `+=` siblings store through `[]=` but are not `[]=` CallNodes; missing them left
       # an `@h = {}` mutated only that way carrying its empty `HashShape` into every sibling method, so `@h.empty?`
-      # folded to `Constant[true]` on a hash the class fills. `IndexWriteWidening::NODE_CLASSES` owns that list; it is
-      # spelled out here as an explicit disjunction because that is what narrows `node` to something with a
-      # `#receiver` — `NODE_CLASSES.any? { … }` reads as a call on `Prism::Node` and Rigor rejects it, correctly.
-      # A `Prism::IndexTargetNode` stores the same way wherever it appears — a multi-assign `@h[k], x = …`, a
-      # `for @h[k] in` index, a `rescue => @h[k]` reference. It is outside `NODE_CLASSES` only because the
-      # straight-line seam types its stored value at the owning `MultiWriteNode`, and this widening takes no value.
+      # folded to `Constant[true]` on a hash the class fills. A `Prism::IndexTargetNode` stores the same way wherever
+      # it appears — a multi-assign `@h[k], x = …`, a `for @h[k] in` index, a `rescue => @h[k]` reference — and this
+      # widening takes no stored value, so it counts in every position. `IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES`
+      # owns that list; it is spelled out here as an explicit disjunction because that is what narrows `node` to
+      # something with a `#receiver` — `CONTENT_WRITE_NODE_CLASSES.any? { … }` reads as a call on `Prism::Node` and
+      # Rigor rejects it, correctly.
       def mutation_target(node)
         return [node.name, node.receiver] if node.is_a?(Prism::CallNode)
 

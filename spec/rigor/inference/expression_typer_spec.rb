@@ -1860,6 +1860,86 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  # The index compound-write family (`h[k] += v` / `||=` / `&&=`) as an EXPRESSION. Its value is what
+  # it stores through `[]=` — `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — not the rvalue
+  # alone. The statement evaluator already computed that; the expression typer answered `v`, so a
+  # value position (an argument, a block's tail, a method's tail) disagreed with the statement form.
+  describe "index compound writes" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    it "types `h[k] += v` as the dispatched `h[k] + v`" do
+      expect(statement_type("h = { a: 1 }\nh[:a] += 1\n", 1).describe).to eq("2")
+    end
+
+    it "types a tuple slot's `t[i] += v` as the stored sum" do
+      expect(statement_type("t = [1, 2]\nt[0] += 5\n", 1).describe).to eq("6")
+    end
+
+    it "keeps a truthy slot's current value in `h[k] ||= v`" do
+      expect(statement_type("h = { a: \"x\" }\nh[:a] ||= 3\n", 1).describe).to eq('"x" | 3')
+    end
+
+    it "keeps a falsey slot's current value in `h[k] &&= v`" do
+      # `3?` is `3 | nil`: the `nil` slot survives the `&&=` that does not store.
+      expect(statement_type("h = { a: nil }\nh[:a] &&= 3\n", 1).describe).to eq("3?")
+    end
+
+    it "reads a `||=` on an untracked slot as the rvalue (the memoization idiom)" do
+      # `def self.local(name) = @local_targets[name] ||= new(...)` — nothing wrote `@local_targets` on any
+      # path the analyzer saw. The variable rule's ADR-5 optimism; `Dynamic[top] | rhs` skipped the sig.
+      expect(scope.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+    end
+
+    it "reads the nested memo `(@m ||= {})[key] ||= v` as the rvalue" do
+      # `Effects::Registry.for_configuration`: the receiver is typed, but a non-literal key's slot is not.
+      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= 7")).describe).to eq("7")
+    end
+
+    it "reads a receiver bound to Dynamic the same way, since its slot is just as untracked" do
+      bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped)
+      expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+    end
+
+    it "gives an operator write on an untracked slot no optimistic reading (control)" do
+      expect(scope.type_of(parse_expression("@cache[:k] += 1")).describe).to eq("Dynamic[top]")
+    end
+
+    it "keeps the untracked slot in a `&&=`, which is no memo (control)" do
+      # `@h[:x] &&= "y"` on an absent slot is `nil` at runtime, so the rvalue alone would drop it.
+      expect(scope.type_of(parse_expression("@cache[:k] &&= 7")).describe).to eq("7 | Dynamic[top]")
+    end
+
+    it "never answers `bot` for a `||= raise` guard on an untracked slot" do
+      # `def fetch(k) = @opts[k] ||= raise(KeyError)` returns the slot whenever it is set.
+      expect(scope.type_of(parse_expression("@opts[:k] ||= raise(KeyError)")).describe).to eq("Dynamic[top]")
+    end
+
+    it "keeps the untracked slot when the rvalue is never truthy" do
+      # `@flags[n] ||= false` answers `true` once another method stored `true`; it never stores a truthy value.
+      expect(scope.type_of(parse_expression("@flags[:k] ||= false")).describe).to eq("Dynamic[top] | false")
+    end
+
+    it "keeps the gradual arm when the read is only partly gradual (control)" do
+      # The read is `Dynamic[top]?`, not a lone `Dynamic`: the slot may hold the untyped `x`.
+      type = statement_type("x = foo\nh = { a: x, b: nil }\nk = rand.to_s\nh[k] ||= \"s\"\n", 3)
+      expect(type.describe).to eq('"s" | Dynamic[top]')
+    end
+
+    it "agrees with the statement evaluator's answer for every operator" do
+      ["h[:a] += 1", "h[:a] ||= 3", "h[:a] &&= 3"].each do |write|
+        root = Prism.parse("h = { a: 1 }\n#{write}\n").value
+        node = root.statements.body[1]
+        entry = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)[node]
+        expect(entry.type_of(node)).to eq(entry.evaluate(node).first), write
+      end
+    end
+  end
+
   # Issue #533 — a refinement (`Refined`) or subtraction (`Difference` — `non-empty-string` is
   # `String − \"\"`) erases to its base for RBS method lookup, so a method the catalog tier does not
   # promote still resolves instead of declining the whole dispatch to Dynamic.

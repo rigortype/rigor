@@ -4,6 +4,9 @@ require "prism"
 
 require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
+require_relative "index_write_widening"
+require_relative "mutation_widening"
+require_relative "receiver_alias"
 
 module Rigor
   module Inference
@@ -23,6 +26,9 @@ module Rigor
     # The per-element fold also asks for the instance variables the body rebinds (`ivars: true`). Their
     # names keep their `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each
     # name through its own kind of binding.
+    #
+    # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
+    # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
     module CapturedLocals
       LOCAL_WRITE_NODES = Set[
         Prism::LocalVariableWriteNode,
@@ -95,6 +101,53 @@ module Rigor
 
       # Ruby spells every instance variable with a leading `@` and no local with one.
       def ivar_name?(name) = name.start_with?("@")
+
+      # The nodes that change a receiver's CONTENT without rebinding it: a call to a name the straight-line
+      # widening responds to ({MutationWidening::SHAPE_MUTATORS}), and the index writes that store through
+      # `[]=` without being a `[]=` call — the compound forms ({IndexWriteWidening::NODE_CLASSES}) and a
+      # multi-assign index target.
+      INDEX_STORE_NODES = [*IndexWriteWidening::NODE_CLASSES, Prism::IndexTargetNode].freeze
+      private_constant :INDEX_STORE_NODES
+
+      # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
+      # above) in source order. A site counts through every variable its receiver can evaluate to
+      # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
+      # excludes it. Instance variables are not collected yet, although {.writes} takes them under `ivars: true`:
+      # an ivar the body mutates in place without rebinding it keeps its entry binding below the arity cap and
+      # the floor above it.
+      #
+      # @param base_scope — the call-site scope the block closes over.
+      # @return `{ name => [site, ...] }`, empty for the overwhelmingly common body that mutates nothing
+      #   captured.
+      def content_mutations(block_node, base_scope)
+        body = block_node.body
+        return {} if body.nil?
+
+        introduced = nil
+        sites = {}
+        Source::NodeWalker.each(body) do |descendant|
+          receiver = mutated_receiver(descendant)
+          next if receiver.nil?
+
+          ReceiverAlias.candidates(receiver).each do |read|
+            next unless read.is_a?(Prism::LocalVariableReadNode)
+            next unless base_scope.locals.key?(read.name)
+
+            introduced ||= introduced_locals(block_node)
+            next if introduced.include?(read.name)
+
+            (sites[read.name] ||= []) << descendant
+          end
+        end
+        sites
+      end
+
+      def mutated_receiver(node)
+        case node
+        when Prism::CallNode then node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
+        when *INDEX_STORE_NODES then node.receiver
+        end
+      end
 
       # Names the block itself introduces: parameters (numbered parameters included, via
       # `BlockParameterBinder`) plus the explicit `;`-prefixed block-locals on `BlockParametersNode`.

@@ -466,6 +466,182 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured
+  # receiver the body only mutates IN PLACE (`h[k] = …`, `h[k] += …`, `seen[x] = true`) is never rebound, so
+  # every position still read it at its ENTRY contents: `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }`
+  # folded to `[1, 1]` where Ruby answers `[1, 2]`, and `r.last == 1` fired always-truthy on correct code.
+  describe "captured outer locals the body mutates in place under the per-element fold" do
+    def flow_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?("flow.") }
+    end
+
+    it "widens a captured hash the body stores into at every position" do
+      # THE REPORTED PROBE. Before the fix this answered `[1, 1]`. The widened value slot carries the one-store
+      # `Dynamic[top]` arm, and `+` over `Dynamic[top] | Integer` answers `Dynamic[top]` here exactly as it does
+      # on straight-line code.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        h = { a: 0 }
+        dump_type([:a, :a].map { |k| h[k] = h[k] + 1 })
+      RUBY
+    end
+
+    it "no longer reports the condition the entry contents folded" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        h = { a: 0 }
+        r = [:a, :a].map { |k| h[k] = h[k] + 1 }
+        puts "y" if r.last == 1
+      RUBY
+    end
+
+    it "widens a captured hash read back after an index compound write" do
+      # `[1, 2]` at runtime. The index-write node is no variable write, so the tail was typed from the entry
+      # scope and answered `[0, 0]` — the contents before either iteration ran.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        h = { a: 0 }
+        dump_type([:a, :a].map do |k|
+          h[k] += 1
+          h[k]
+        end)
+      RUBY
+    end
+
+    it "widens a captured array the body stores into" do
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        a = [0]
+        dump_type([0, 0].map { |i| a[i] = a[i] + 1 })
+      RUBY
+    end
+
+    it "keeps the element class of a captured array read back after a store" do
+      # Widening, not a floor: the slot loses its `0` pin and gains the gradual arm, but the Integer the
+      # literal proved is still there.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        a = [0]
+        dump_type([0, 0].map do |i|
+          a[i] += 1
+          a[i]
+        end)
+      RUBY
+    end
+
+    it "leaves a membership test over a hash the body fills undecided" do
+      # `[:new, :new, :dup]` at runtime; the entry `{}` made every `key?` provably false.
+      expect(dumped_type(<<~RUBY)).to eq("[:dup | :new, :dup | :new, :dup | :new]")
+        seen = {}
+        dump_type([1, 2, 1].map { |x| seen.key?(x) ? :dup : (seen[x] = true; :new) })
+      RUBY
+    end
+
+    it "answers a mutated captured local above the per-element threading cap" do
+      # The widened binding holds at any point of any iteration, so it answers the tail-only read the cap
+      # falls back to, where the #617 floor used to answer `Dynamic[top]` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['non-negative-int'] * 9).join(', ')}]")
+        out = []
+        dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+          out << e
+          out.size
+        end)
+      RUBY
+    end
+
+    it "widens the mutated local when the fold is nested inside a threaded body" do
+      # The widening evaluates no body, so threading suppression is no reason to skip it.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          v = 1
+          [:a, :a].map do |k|
+            h[k] += v
+            h[k]
+          end
+        end)
+      RUBY
+    end
+
+    it "gives a class-changing site the gradual arm its arguments cannot supply" do
+      # `map!` joins no argument evidence, so the widening alone kept `Array[Integer]` and `r.last.upcase` drew
+      # `undefined method` on a slot that holds `"1"` from the first iteration on.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+        a = [1]
+        dump_type([1, 2].map do |e|
+          a.map!(&:to_s)
+          a.first
+        end)
+      RUBY
+    end
+
+    it "lays the widened contents under the rebind fixpoint" do
+      # `[nil, 0, "s"]` at runtime. The fixpoint for `total` reads `h[:a]`, so it must see `h` as the body leaves
+      # it; seeded from the entry `{ a: 0 }` it converged on `0?` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer | nil'] * 3).join(', ')}]")
+        h = { a: 0 }
+        total = nil
+        dump_type([1, 2, 3].map do |i|
+          v = total
+          total = h[:a]
+          h[:a] = "s"
+          v
+        end)
+      RUBY
+    end
+
+    it "widens a local the body both rebinds and mutates over its converged type" do
+      # The rebind brings a fresh `{ a: 0 }` back each iteration and a store the evaluator does not thread (it
+      # sits inside an array literal) rewrites it, so the next iteration reads `{ a: "s" }`. The converged
+      # `{ a: 0 }?` alone would pin that.
+      widened = "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]?"
+      expect(dumped_type(<<~RUBY)).to eq("[#{([widened] * 3).join(', ')}]")
+        h = nil
+        dump_type([1, 2, 3].map do |i|
+          v = h
+          h = { a: 0 }
+          [h[:a] = "s"]
+          v
+        end)
+      RUBY
+    end
+
+    it "keeps the unmoved-pin floor for a local both mutated and rebound inside an expression" do
+      # `["abc", :abc]` at runtime. The nested `s &&= …` is invisible to the fixpoint, which converges on its
+      # seed; the seed is the widened `String`, so the #617 floor has to ask the call-site `"ab"` whether a pin
+      # is at stake, or `String` is believed and `r.last.to_proc` draws `undefined method`.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        s = +"ab"
+        dump_type([1, 2].map { |i| [s, (s << "c" if s.is_a?(String)), (s &&= s.to_sym).size].first })
+      RUBY
+    end
+
+    it "keeps an unmutated captured hash read by key exact" do
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        h = { a: 0 }
+        dump_type([:a, :a].map { |k| h[k] })
+      RUBY
+    end
+
+    it "still reports the condition over an unmutated captured hash" do
+      # The must-fire sibling: nothing writes `h`, so `r.last == 0` really is always true.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        h = { a: 0 }
+        r = [:a, :a].map { |k| h[k] }
+        puts "y" if r.last == 0
+      RUBY
+    end
+
+    it "keeps a captured hash exact when only a sibling is mutated" do
+      # Only the mutated receiver moves; `p` is read, never written.
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        q = { a: 0 }
+        p = { a: 0 }
+        dump_type([:a, :a].map do |k|
+          q[k] = 1
+          p[k]
+        end)
+      RUBY
+    end
+  end
+
   describe "the per-element Tuple fold's arity cap" do
     it "threads every position at the cap" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 2, 3, 4, 5, 6, 7, 8]")
@@ -996,6 +1172,51 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "floors a captured local whose in-place widening declines" do
+        # `Hash#shift` is no Hash mutator to the widening, so `h` would stay the entry literal. Counting it as
+        # answered typed nine `9`s (runtime `8, 7, …, 0`) and fired always-truthy on `r.last == 9`.
+        source = <<~RUBY
+          h = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9 }
+          r = [1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            h.shift
+            h.size
+          end
+        RUBY
+        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        expect(flow_rules("#{source}puts 'nine' if r.last == 9")).to be_empty
+      end
+
+      it "floors a captured precise nominal the body appends to" do
+        # `Array[String]` is a claim the widening may not grow, so it declines and the name stays unanswered.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          ks = ENV.keys
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            ks << e
+            ks.last
+          end)
+        RUBY
+      end
+
+      it "reads a class-changing site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          a = [1]
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            a.map!(&:to_s)
+            a.first
+          end)
+        RUBY
+      end
+
+      it "reads a merging site through its gradual arm" do
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+          m = { k: 1 }
+          dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+            m.merge!(k: "s")
+            m[:k]
+          end)
+        RUBY
+      end
+
       it "leaves a tail that ignores its prefix precise above the cap" do
         expect(dumped_type(<<~RUBY)).to eq("[#{(['5'] * 9).join(', ')}]")
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
@@ -1047,8 +1268,10 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "keeps a truthy slot's value in a `||=` tail" do
-        # Runtime `["x"]`: the slot is truthy, so `||=` stores nothing and answers it.
-        expect(dumped_type(<<~RUBY)).to eq('["x" | 3]')
+        # Runtime `["x"]`: the slot is truthy, so `||=` stores nothing and answers it. The slot's `String` stays
+        # in the answer; its `"x"` pin does not, because the block stores into `seen` and every position reads
+        # the in-place widening of it (the same binding a longer receiver's later positions need).
+        expect(dumped_type(<<~RUBY)).to eq("[3 | Dynamic[top] | String]")
           seen = { a: "x" }
           dump_type([:a].map { |k| seen[k] ||= 3 })
         RUBY
@@ -1170,6 +1393,25 @@ RSpec.describe "block-return scope threading", type: :runner do
         total = 0
         h = { x: 1, y: 2 }
         dump_type(h.transform_values! { |e| total += 1 })
+      RUBY
+    end
+
+    it "widens a captured hash the body stores into at every pair" do
+      # The in-place half of the same entry binding. `{ x: 1, y: 2 }` at runtime; the entry `{ a: 0 }` answered
+      # `{ x: 0, y: 0 }` for the read-back at every pair.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top] | Integer, y: Dynamic[top] | Integer }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          g[:a] += 1
+          g[:a]
+        end)
+      RUBY
+    end
+
+    it "keeps an unmutated captured hash read by key exact at every pair" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 0, y: 0 }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values { |e| g[:a] })
       RUBY
     end
 

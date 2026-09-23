@@ -328,9 +328,9 @@ RSpec.describe "rebinds on a loop's jump paths", type: :runner do
       RUBY
     end
 
-    it "reads a stabilised fixpoint's `break` arms from its last pass" do
+    it "joins a `break` only a stabilised fixpoint's later pass reaches" do
       # `seen` is `false` on the first pass and `bool` from the second on, where the fixpoint stabilises; that pass
-      # ran from the converged binding and reaches the `break`.
+      # ran from the converged binding and reaches the `break`, so its arms are the converged ones.
       expect(dumped_type(<<~RUBY)).to eq(":second?")
         found = nil
         seen = false
@@ -376,6 +376,93 @@ RSpec.describe "rebinds on a loop's jump paths", type: :runner do
           end
         end
         dump_type(found)
+      RUBY
+    end
+
+    it "reads a `break` arm through the predicate's loop-entry edge" do
+      # The body of a pre-tested loop only runs with `line` truthy. The old first pass read the arm from the
+      # un-narrowed post-predicate scope, so `found` carried `nil` and `found.upcase` drew `possible nil receiver`.
+      expect(reported_rules(<<~RUBY)).to be_empty
+        found = ""
+        line = gets
+        while line
+          found = line
+          break
+        end
+        found.upcase
+      RUBY
+    end
+
+    it "joins a `break` a `begin … end while` body takes on its first iteration" do
+      # The first iteration runs before `state != :idle` is tested, so every fixpoint pass (entered through the
+      # predicate's truthy edge) finds `state == :idle` false. Read from the converged pass alone, `done` stayed
+      # `false` and `if done` folded always-falsey; at runtime the method answers `:finished`.
+      expect(dumped_type(<<~RUBY)).to eq("bool")
+        def finish
+          state = :idle
+          done = false
+          begin
+            if state == :idle
+              done = true
+              break
+            end
+            state = :busy
+          end while state != :idle
+          dump_type(done)
+        end
+      RUBY
+    end
+
+    it "no longer folds the condition a first-iteration `break` of a `begin … end until` decides" do
+      expect(reported_rules(<<~RUBY)).to be_empty
+        def finish
+          state = :idle
+          done = false
+          begin
+            if state == :idle
+              done = true
+              break
+            end
+            state = :busy
+          end until state == :idle
+          return :finished if done
+
+          :pending
+        end
+      RUBY
+    end
+
+    it "does not take a nested block's `break` for the loop's" do
+      # The inner `break` ends the `each` call; the loop body rebinds `n` to `:sym` after it.
+      expect(dumped_type(<<~RUBY)).to eq("Integer | Symbol")
+        n = 0
+        i = 0
+        while i < 2
+          i += 1
+          break if i > 5
+          [1, 2].each do |b|
+            if b.even?
+              n = "s"
+              break
+            end
+          end
+          n = :sym
+        end
+        dump_type(n)
+      RUBY
+    end
+
+    it "does not take a lambda literal's `break` for the loop's" do
+      expect(dumped_type(<<~RUBY)).to eq("Integer | Symbol")
+        n = 0
+        i = 0
+        while i < 2
+          i += 1
+          break if i > 5
+          f = -> { n = "s"; break }
+          n = :sym
+        end
+        dump_type(n)
       RUBY
     end
 

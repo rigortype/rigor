@@ -1388,10 +1388,10 @@ module Rigor
         # Tuple), body-introduced locals' nil-injection, an instance variable's rebind, and the loop value itself. The
         # fixpoint then OVERLAYS only the rebound-local bindings it corrects.
         #
-        # The pass ends with its `next` exits as well as its fall-through ({#loop_iteration}). Its `break` scopes are
-        # not the continuation's: the fixpoint's converged pass supersedes them ({#loop_break_arms}).
+        # The pass ends with its `next` exits as well as its fall-through ({#loop_iteration}). Its `break` arms are
+        # superseded by the fixpoint's converged pass ({#loop_break_arms}) except in a `begin … end while` loop, below.
         jumps = loop_jumps(node.statements)
-        body_scope, = loop_iteration(node.statements, post_pred, jumps)
+        body_scope, first_breaks = loop_iteration(node.statements, post_pred, jumps)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
         rebound, body_first = loop_body_local_writes(node.statements, post_pred)
@@ -1406,6 +1406,11 @@ module Rigor
         end
 
         post_loop = converged_loop_scope(node, post_pred, base_scope, names, body_first, jumps)
+        # A `begin … end while` / `until` body runs once before the predicate is first tested, so that iteration's
+        # entry lies outside every fixpoint pass's predicate-narrowed one, and a `break` only it can take (`if state ==
+        # :idle` under `end while state != :idle`) is dead in every converged pass. The single pass runs from the
+        # un-narrowed post-predicate scope, so its arms stand in for that first iteration.
+        post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
         post_loop = narrow_loop_exit_edge(node, post_loop)
         [Type::Combinator.constant_of(nil), post_loop]
       end
@@ -1425,7 +1430,7 @@ module Rigor
         # Display-path re-record: the fixpoint's body re-evaluations fire `on_enter` with the cap-N INTERMEDIATE
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
         # constants. One extra pass from the converged bindings (result discarded) re-records the body's entry scopes.
-        record_converged_loop_body(node, post_pred, result, names, body_first, jumps)
+        record_converged_loop_body(node, post_pred, result, names, body_first, jumps, break_pass)
         post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
         # ADR-56 slice C — loop-body receiver-content element-type join. A loop that content-mutates a collection (`acc
         # << n`) keeps only the seed's element types after the single-pass widen; join the appended/stored types into
@@ -1545,8 +1550,14 @@ module Rigor
       # The fixpoint's last pass is usually one — a fixpoint that stabilised ran it from the binding it returns — so
       # its arms are reused ({#loop_body_exit_bindings}). A capped fixpoint's widened binding was never evaluated, so
       # only then does one more pass run, without recording into the per-node scope index: that index keeps the
-      # fixpoint's own last pass, which the check path's diagnostics read. The block write-back reads its `break` arms
-      # the same way ({#join_block_break_bindings}).
+      # fixpoint's own last pass, which the check path's diagnostics read. On the display path the re-record pass
+      # ({#record_converged_loop_body}) already ran from the converged binding and leaves its arms here, so no
+      # unrecorded pass follows it. The block write-back reads its `break` arms the same way
+      # ({#join_block_break_bindings}).
+      #
+      # The unrecorded pass is otherwise an ordinary evaluation: a `return` it reaches joins the enclosing method's
+      # inferred return type, as one any other pass reaches does. That only widens the return, toward values a capped
+      # fixpoint's own passes never evaluated.
       def loop_break_arms(node, post_pred, converged, body_first, jumps, break_pass)
         return NO_BREAK_ARMS if break_pass.nil?
         return break_pass[:arms] if break_pass[:entry] == converged.except(*body_first)
@@ -1558,9 +1569,9 @@ module Rigor
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
       # fall-through dropped is recovered (`flag = true; break` -> `flag` becomes `false | true`). Only
       # loop-body-written names are joined — an unchanged local unions to itself; a break-only-written local is already
-      # present via the fixpoint / nil-injection seed, so the union reflects its break value. A name the fixpoint
-      # floored to `Dynamic[top]` keeps the floor: a precise arm unioned into it would read as knowledge the analysis
-      # does not have.
+      # present via the fixpoint / nil-injection seed, so the union reflects its break value. A name whose continuation
+      # binding is `Dynamic[top]` — the fixpoint's floor on non-convergence, or a local that was untyped already —
+      # keeps it: a precise arm unioned into it would read as knowledge the analysis does not have.
       def join_break_scopes(continuation, breaks, names)
         return continuation if breaks.empty? || names.empty?
 
@@ -1624,11 +1635,12 @@ module Rigor
 
       # Re-evaluates the loop body once from the converged fixpoint bindings, solely for the `on_enter` side effect of
       # re-recording the body's per-node entry scopes. Gated behind the display-path-only `converged_loop_recording`
-      # flag so the check path neither pays the extra body evaluation nor risks any diagnostic drift.
-      def record_converged_loop_body(node, post_pred, bindings, names, body_first, jumps)
+      # flag so the check path neither pays the extra body evaluation nor risks any diagnostic drift. The pass leaves
+      # its `break` arms in `break_pass`, which {#loop_break_arms} then reuses instead of running a pass of its own.
+      def record_converged_loop_body(node, post_pred, bindings, names, body_first, jumps, break_pass)
         return unless @converged_loop_recording && @on_enter
 
-        loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps)
+        loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass)
         nil
       end
 

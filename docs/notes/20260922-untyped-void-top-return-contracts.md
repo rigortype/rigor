@@ -372,8 +372,10 @@ The remaining half of the namespace: `Summary`, `EffectTable` (+ `Entry`), `File
   `adopt_effect_summary` and `effects_served_from_cache?` classify as earned (generated or return
   intent) — the residue the `untyped` rows carried shrank rather than moving.
 - Newly declared where absent: `effect_ancestry` (`Hash[String, String]` — the as-written
-  superclass table `effect.liskov-widened` reads), `forced_file_effects`,
-  `adopt_effect_collections`, `adopt_effect_summary`, `effects_served_from_cache?`.
+  superclass table `effect.liskov-widened` reads), `adopt_effect_collections`,
+  `adopt_effect_summary`, `effects_served_from_cache?`. `forced_file_effects` was typed and then
+  dropped on review — the method is `private` (`runner.rb`'s `private :…` list) and private API is
+  not declared in `sig/`.
 - `EnvelopeIndex.build`'s `plugin_facts:` tightens to `PluginFacts?`, closing the deferral the
   bound-side sweep left open.
 - Honest `untyped` residue kept: `PluginFacts`'s `contributions:`/`entry_points` elements

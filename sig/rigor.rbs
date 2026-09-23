@@ -146,8 +146,6 @@ module Rigor
       def effect_ancestry: () -> Hash[String, String]
       # `{ "lib/a.rb" => FileCollection, … }` — the per-file collections the caches persist (#382).
       def effect_collections_by_path: () -> Hash[String, Effects::FileCollection]
-      # Lazily loads the persisted collections on a served run; the identity on an analyzing one.
-      def forced_file_effects: () -> Hash[String, Effects::FileCollection]
       # Issue #382 — adopt persisted collections as this run's own (the warm-hit half of the
       # whole-run effects slot).
       def adopt_effect_collections: (Hash[String, Effects::FileCollection] collections,

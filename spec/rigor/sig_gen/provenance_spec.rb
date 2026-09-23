@@ -166,13 +166,15 @@ SIG_PROVENANCE_RESIDUE = {
   # unrenderable residue — its body memoises through `effect_envelope_index(@run_environment)`, a
   # private helper sig-gen cannot infer. The collection-side slice then typed `effect_table`,
   # `effect_collection`, `effect_plugin_facts`, `effect_ancestry`,
-  # `effect_collections_by_path`, `forced_file_effects`, `adopt_effect_collections`,
-  # `adopt_effect_summary` and `effects_served_from_cache?`: `effect_collection`,
-  # `effect_plugin_facts`, `adopt_effect_summary` and `effects_served_from_cache?` classify as
-  # earned (generated or return intent), `effect_collections_by_path` pins as declared-divergent
-  # (sig-gen infers the `pooled.empty?` `base.dup` arm as a separate union member), and the rest
-  # stay unrenderable — net +1 row over the `untyped` declarations they replaced.
-  "sig/rigor.rbs" => 52,
+  # `effect_collections_by_path`, `adopt_effect_collections`, `adopt_effect_summary` and
+  # `effects_served_from_cache?`: `effect_collection`, `effect_plugin_facts`,
+  # `adopt_effect_summary` and `effects_served_from_cache?` classify as earned (generated or
+  # return intent), `effect_collections_by_path` pins as declared-divergent (sig-gen infers the
+  # `pooled.empty?` `base.dup` arm as a separate union member), and the rest stay unrenderable —
+  # net 0 residue rows over the `untyped` declarations they replaced. `forced_file_effects` was typed and
+  # then dropped on review: the method is `private` (runner.rb's `private :…` list) and private
+  # API is not declared in this sig.
+  "sig/rigor.rbs" => 51,
   # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.

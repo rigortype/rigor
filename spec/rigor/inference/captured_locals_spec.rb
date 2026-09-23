@@ -7,21 +7,72 @@ require "rigor/inference/captured_locals"
 require "rigor/scope"
 require "rigor/type"
 
-# Unit-level coverage for the content half of {Rigor::Inference::CapturedLocals}. The consumer — the
-# per-element block fold's entry bindings — is exercised end-to-end by
-# `spec/rigor/inference/block_return_scope_threading_spec.rb`; this file pins which nodes count as a site.
+# Unit-level coverage for {Rigor::Inference::CapturedLocals}. The consumer — the per-element block fold's entry
+# bindings — is exercised end-to-end by `spec/rigor/inference/block_return_scope_threading_spec.rb`; this file
+# pins which nodes count as a rebind or a site.
 RSpec.describe Rigor::Inference::CapturedLocals do
+  # The fixture binds its locals first so Prism parses them as reads, not method calls; the block under test
+  # is the one on the LAST statement.
+  def block_of(source)
+    Prism.parse(source).value.statements.body.last.block
+  end
+
+  def scope_binding(*names)
+    names.reduce(Rigor::Scope.empty) { |acc, name| acc.with_local(name, Rigor::Type::HashShape.new) }
+  end
+
+  describe ".writes" do
+    def written(source, *names)
+      described_class.writes(block_of(source), scope_binding(*names))
+    end
+
+    it "collects a captured local rebound in the body and inside a nested block" do
+      source = "a = 1\nb = 2\n[1].each { |k| a = k; [2].each { |j| b += j } }\n"
+      expect(written(source, :a, :b)).to eq(%i[a b])
+    end
+
+    it "excludes a name the block's own parameter shadows" do
+      expect(written("a = 1\n[1].each { |a| a = 2 }\n", :a)).to be_empty
+    end
+
+    it "excludes a write a nested block's parameter shadows" do
+      # `a = k` rebinds the inner block's `|a|`, not the outer `a`; `.content_mutations` excludes `a << k` there
+      # on the same terms.
+      source = "a = [1]\n[1].each { |k| [[]].each { |a| a = k; a << k } }\n"
+      expect(written(source, :a)).to be_empty
+      expect(described_class.content_mutations(block_of(source), scope_binding(:a))).to be_empty
+    end
+
+    it "excludes a write a nested block-local or lambda parameter shadows" do
+      source = "a = 1\n[1].each { |k| [2].each { |j; a| a = j }; ->(a) { a = k } }\n"
+      expect(written(source, :a)).to be_empty
+    end
+
+    it "excludes a write inside a nested def or class body" do
+      source = "z = 0\n[1].each { |k| def helper; z = 5; end; class Foo; z = 1; end; class << self; z = 2; end }\n"
+      expect(written(source, :z)).to be_empty
+    end
+
+    it "still collects a write in a def receiver, a superclass or a singleton-class target" do
+      # Each runs in the enclosing scope, not the one the `def` or class body opens.
+      source = "a = 1\nb = 2\nc = 3\n[1].each { |k| def (a = k).m; end; class Foo < (b = Object); end; " \
+               "class << (c = k); end }\n"
+      expect(written(source, :a, :b, :c)).to eq(%i[a b c])
+    end
+
+    it "excludes a mutation inside a nested def, but not one in its receiver" do
+      source = "h = {}\n[1].each { |k| def helper; h = {}; h[:a] = 1; end; def (h[:b] = k).m; end }\n"
+      expect(described_class.content_mutations(block_of(source), scope_binding(:h)).transform_values(&:size))
+        .to eq(h: 1)
+    end
+
+    it "still collects the outer local a sibling write reaches past the shadowing block" do
+      source = "a = 1\n[1].each { |k| [2].each { |a| a = k }; a = k }\n"
+      expect(written(source, :a)).to eq(%i[a])
+    end
+  end
+
   describe ".content_mutations" do
-    # The fixture binds its locals first so Prism parses them as reads, not method calls; the block under test
-    # is the one on the LAST statement.
-    def block_of(source)
-      Prism.parse(source).value.statements.body.last.block
-    end
-
-    def scope_binding(*names)
-      names.reduce(Rigor::Scope.empty) { |acc, name| acc.with_local(name, Rigor::Type::HashShape.new) }
-    end
-
     def site_classes(source, *names)
       described_class.content_mutations(block_of(source), scope_binding(*names))
                      .transform_values { |sites| sites.map(&:class) }

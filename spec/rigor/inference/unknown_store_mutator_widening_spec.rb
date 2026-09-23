@@ -31,8 +31,8 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
   def undefined_method_rules(source) = rules(source, "call.undefined-method")
 
   describe "the straight-line seam on a literal Array" do
-    it "gives `map!`'s rewritten element the gradual arm" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[1 | Dynamic[top]]"])
+    it "replaces `map!`'s rewritten element with the gradual type" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]"])
         a = [1]
         a.map!(&:to_s)
         dump_type(a)
@@ -44,8 +44,6 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
-    # The seed's pinning survives beside the arm (see the #561 boundary below), so this pins that keeping it
-    # does not bring back the stale fold issue #560 erased it for: a union carrying `Dynamic` never folds.
     it "does not fold a comparison against the rewritten element, and still folds one after `sort!`" do
       expect(rules(<<~RUBY, "flow.")).to be_empty
         a = [1]
@@ -80,8 +78,8 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
 
     # A union of tuples dispatches quietly, so this pair compares the carriers rather than a diagnostic.
-    it "gives `flatten!`'s element the gradual arm, and not `reverse!`'s" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | [1] | [2]]", "Array[[1] | [2]]"])
+    it "replaces `flatten!`'s element, and keeps `reverse!`'s" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Array[[1] | [2]]"])
         f = [[1], [2]]
         f.flatten!
         dump_type(f)
@@ -128,16 +126,16 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
   end
 
   describe "the straight-line seam on a literal Hash" do
-    it "gives `transform_values!`'s value side, and only it, the gradual arm" do
-      expect(dumped_types(<<~RUBY)).to eq(["Hash[Symbol, 1 | Dynamic[top]]"])
+    it "replaces `transform_values!`'s value side, and only it" do
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[Symbol, Dynamic[top]]"])
         h = { a: 1 }
         h.transform_values!(&:to_s)
         dump_type(h)
       RUBY
     end
 
-    it "gives `transform_keys!`'s key side, and only it, the gradual arm" do
-      expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top] | Symbol, 1]"])
+    it "replaces `transform_keys!`'s key side, and only it" do
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], 1]"])
         h = { a: 1 }
         h.transform_keys!(&:to_s)
         dump_type(h)
@@ -157,8 +155,10 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
-    it "gives `merge!` / `update` / `replace` both sides the gradual arm, with or without a block" do
-      expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]]"] * 4)
+    # `merge!` / `update` keep every key the argument lacks, so they join; `replace` keeps nothing.
+    it "joins the gradual arm into both sides under `merge!` / `update`, and replaces both under `replace`" do
+      expected = (["Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]]"] * 3) + ["Hash[Dynamic[top], Dynamic[top]]"]
+      expect(dumped_types(<<~RUBY)).to eq(expected)
         h = { a: 1 }
         h.merge!({ a: 2 }) { |_k, o, _n| o.to_s }
         dump_type(h)
@@ -178,9 +178,9 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
 
     # `Hash.new(0)` proves its value side, and an ADDER's re-join keeps that proof (#580's
-    # `keep_precise_parameters`); a rewriter falsifies it, so the arm lands on the side it rewrites.
-    it "gives a re-opened carrier's proven value side the arm under `transform_values!`" do
-      expected = ["Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]", "Hash[Dynamic[top] | Symbol, Integer]"]
+    # `keep_precise_parameters`); a rewriter falsifies it, so the side it rewrites goes gradual.
+    it "replaces a re-opened carrier's proven value side under `transform_values!`" do
+      expected = ["Hash[Dynamic[top] | Symbol, Dynamic[top]]", "Hash[Dynamic[top] | Symbol, Integer]"]
       expect(dumped_types(<<~RUBY)).to eq(expected)
         h = Hash.new(0)
         h[:x] += 1
@@ -204,6 +204,24 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
+    # The slice-C join rebuilds the capture from its seed to add `"x"`, which dropped the rewrite.
+    it "keeps the rewrite when the same block also appends, and does not fold on it" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Array[\"x\" | 1]"])
+        a = [1]
+        [0].each { a.map!(&:to_s); a << "x" }
+        dump_type(a)
+
+        b = [1]
+        [0].each { b.sort!; b << "x" }
+        dump_type(b)
+      RUBY
+      expect(rules(<<~RUBY, "flow.")).to be_empty
+        a = [1]
+        [0].each { a.map!(&:to_s); a << "x" }
+        puts "one" if a[0] == "1"
+      RUBY
+    end
+
     it "keeps the captured literal's element under a value-preserving mutator" do
       expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
         a = [1]
@@ -213,10 +231,40 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
   end
 
+  describe "the loop seam" do
+    it "keeps the rewrite when the same loop body also appends" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Array[\"x\" | 1]"])
+        a = [1]
+        i = 0
+        while i < 2
+          a.map!(&:to_s)
+          a << "x"
+          i += 1
+        end
+        dump_type(a)
+
+        b = [1]
+        j = 0
+        while j < 2
+          b.sort!
+          b << "x"
+          j += 1
+        end
+        dump_type(b)
+      RUBY
+    end
+  end
+
   # The #561 boundary. A precise nominal's element set is a claim a declaration made, so the rewrite does not
-  # grow it (RBS's own `map!` is `{ (Elem) -> Elem } -> self`); what the arm adds to a literal seed must also
-  # keep the seed accepted by a hand-written signature that pins it, haml's `-> Array[:multi]`.
-  describe "the precise-nominal boundary" do
+  # grow it (RBS's own `map!` is `{ (Elem) -> Elem } -> self`). What a rewrite leaves on a literal seed must stay
+  # accepted by a hand-written return type: gradual where the old values are gone, the seed kept beside the arm
+  # (haml's `-> Array[:multi]`) where they may survive.
+  describe "the signature boundary" do
+    def return_rules(body, sig_line)
+      sig = { "maker.rbs" => "class Maker\n  def call: () -> #{sig_line}\nend\n" }
+      rules("class Maker\n  def call\n#{body.gsub(/^/, '    ')}  end\nend\n", "def.", sig: sig)
+    end
+
     it "leaves a precise nominal as it is" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[String]"])
         s = gets.to_s.split(",")
@@ -225,29 +273,21 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
-    it "keeps a rewritten literal accepted by a hand-written return type" do
-      sig = { "temple.rbs" => "class Temple\n  def call: () -> Array[:multi]\nend\n" }
-      expect(rules(<<~RUBY, "def.", sig: sig)).to be_empty
-        class Temple
-          def call
-            temple = [:multi]
-            temple.map!(&:itself)
-            temple
-          end
-        end
-      RUBY
+    it "accepts a literal a class-changing rewrite turned into the declared element" do
+      expect(return_rules("a = [1, 2]\na.map!(&:to_s)\na\n", "Array[String]")).to be_empty
+      expect(return_rules("h = { a: 1 }\nh.transform_values!(&:to_s)\nh\n", "Hash[Symbol, String]")).to be_empty
+      expect(return_rules("h = { a: 1 }\nh.transform_keys!(&:to_s)\nh\n", "Hash[String, Integer]")).to be_empty
     end
 
-    it "still checks the return type against a seed the signature rejects" do
-      sig = { "temple.rbs" => "class Temple\n  def call: () -> Array[:multi]\nend\n" }
-      expect(rules(<<~RUBY, "def.", sig: sig)).to eq(["def.return-type-mismatch"])
-        class Temple
-          def call
-            temple = [:other]
-            temple
-          end
-        end
-      RUBY
+    it "still rejects the literal under a value-preserving mutator in the same position" do
+      expect(return_rules("a = [1, 2]\na.sort!\na\n", "Array[String]")).to eq(["def.return-type-mismatch"])
+      expect(return_rules("h = { a: 1 }\nh.compact!\nh\n", "Hash[String, Integer]"))
+        .to eq(["def.return-type-mismatch"])
+    end
+
+    it "keeps a partially rewritten literal's pinning, which the hand-written type accepts" do
+      expect(return_rules("t = [:multi, :multi]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to be_empty
+      expect(return_rules("t = [:other]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to eq(["def.return-type-mismatch"])
     end
   end
 end

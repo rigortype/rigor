@@ -278,7 +278,7 @@ module Rigor
       # nominal, whose element set is a claim this seam may not grow — see {MutationRejoin.regrowable_carrier?}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
-        values = RewriteMutation.pinning(type, method_name, values)
+        values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
 

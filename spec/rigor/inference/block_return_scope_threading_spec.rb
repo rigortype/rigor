@@ -799,7 +799,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     it "gives a class-changing site the gradual arm its arguments cannot supply" do
       # `map!` joins no argument evidence, so the widening alone kept `Array[Integer]` and `r.last.upcase` drew
       # `undefined method` on a slot that holds `"1"` from the first iteration on.
-      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 1 | Dynamic[top]]")
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
         a = [1]
         dump_type([1, 2].map do |e|
           a.map!(&:to_s)
@@ -809,8 +809,8 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     describe "an empty-witness refinement the body rewrites" do
-      # `map!` keeps the `non-empty-array` witness and joins nothing, so the straight-line widening declines, and a
-      # declined site left `xs` the entry `non-empty-array[String]`: every position read `String` for an element
+      # `map!` keeps the `non-empty-array` witness and joins nothing, so the straight-line widening used to decline,
+      # and a declined site left `xs` the entry `non-empty-array[String]`: every position read `String` for an element
       # the first iteration already turned into a Symbol, and `r.last.to_proc` drew `undefined method`.
       def rewriting(site, tail)
         <<~RUBY
@@ -827,7 +827,7 @@ RSpec.describe "block-return scope threading", type: :runner do
 
       it "reads the rewritten contents through the gradual arm" do
         expect(dumped_type(rewriting("map!(&:to_sym)", "dump_type(r)")))
-          .to eq("[Dynamic[top] | String, Dynamic[top] | String]")
+          .to eq("[Dynamic[top], Dynamic[top]]")
       end
 
       it "does not report a method the rewritten element defines" do
@@ -1974,9 +1974,9 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "answers a captured empty-witness refinement a class-changing site rewrites" do
-        # `map!` keeps a `non-empty-array` witness and joins nothing, so the straight-line widening declines. The
-        # site still takes the gradual arm, so `xs` moves and is answered rather than floored.
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | String'] * 9).join(', ')}]")
+        # `map!` keeps a `non-empty-array` witness and rewrites every element, so `xs` moves and is answered
+        # rather than floored.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
           xs = ENV.keys
           unless xs.empty?
             dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
@@ -2014,7 +2014,7 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "reads a class-changing site through its gradual arm" do
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['1 | Dynamic[top]'] * 9).join(', ')}]")
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
           a = [1]
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             a.map!(&:to_s)

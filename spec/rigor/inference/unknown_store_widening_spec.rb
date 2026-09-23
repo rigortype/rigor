@@ -69,10 +69,9 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     end
 
     it "gives a site whose arguments describe no stored value the gradual arm" do
-      # The widening joins nothing for `map!`, so without the arm the class the block rewrites to is missing. The
-      # seed's pinning stays beside it, as the straight-line seam keeps it (the #561 accepting form).
+      # The widening joins nothing for `map!`; the element it rewrites is gradual, as the straight-line seam answers.
       widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
-      expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
+      expect(widened.describe).to eq("Array[Dynamic[top]]")
     end
 
     it "gives every Array member of a union seed the gradual arm" do
@@ -83,7 +82,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
         one_pinned_tuple
       )
       widened = described_class.widen(union, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
-      expect(widened.describe).to eq("Array[1 | Dynamic[top]] | Array[Dynamic[top] | String]")
+      expect(widened.describe).to eq("Array[Dynamic[top] | String] | Array[Dynamic[top]]")
     end
 
     it "keeps an empty-witness refinement while giving its base the gradual arm" do
@@ -97,12 +96,13 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     # `map!` keeps the witness and joins nothing, so the straight-line widening answers the refinement itself and
     # declines. The refinement is a carrier that seam already grows (issue #936), and the site rewrites every
     # element, so the base takes the arm.
-    describe "an empty-witness refinement whose widening declines" do
+    # The straight-line widening used to decline these (its answer was the pre-state); it rewrites them now.
+    describe "an empty-witness refinement under a rewrite" do
       let(:non_empty_strings) { Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String")) }
 
       it "gives a class-changing site the gradual arm and keeps the witness" do
         widened = described_class.widen(non_empty_strings, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
-        expect(widened.describe).to eq("non-empty-array[Dynamic[top] | String]")
+        expect(widened.describe).to eq("non-empty-array[Dynamic[top]]")
         expect(widened.removes_empty_witness?).to be(true)
       end
 
@@ -111,7 +111,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
           Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.nominal_of("String")
         )
         widened = described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h.transform_values!(&:to_sym) }\n"))
-        expect(widened.describe).to eq("non-empty-hash[Dynamic[top] | String, Dynamic[top] | String]")
+        expect(widened.describe).to eq("non-empty-hash[Dynamic[top] | String, Dynamic[top]]")
       end
 
       it "gives the refinement member of a union the arm and keeps the other members" do
@@ -119,10 +119,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
         widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
         expect(widened).to eq(
           Rigor::Type::Combinator.union(
-            Rigor::Type::Combinator.non_empty_array(
-              Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("String"),
-                                            Rigor::Type::Combinator.untyped)
-            ),
+            Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.untyped),
             Rigor::Type::Combinator.constant_of(nil)
           )
         )
@@ -132,7 +129,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
         precise = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
         seed = Rigor::Type::Combinator.union(precise, non_empty_strings)
         widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
-        expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | non-empty-array[Dynamic[top] | String]")
+        expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | non-empty-array[Dynamic[top]]")
       end
 
       it "leaves the refinement unchanged under an adder called with no argument" do
@@ -206,7 +203,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
 
       it "gives the element the gradual arm a class-changing site needs" do
         widened = described_class.widen(nested_tuple, sites_of("a = []\n[1].each { |e| a.last.map!(&:to_s) }\n"))
-        expect(widened.describe).to eq("[[1], Array[2 | Dynamic[top]]]")
+        expect(widened.describe).to eq("[[1], Array[Dynamic[top]]]")
       end
 
       it "declines a path the straight-line widening cannot follow" do

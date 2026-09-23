@@ -904,9 +904,9 @@ gradual arm.
 
 Three residues are recorded rather than fixed here. All are the same
 first-iteration pin reached through a binding this join does not own.
-The evidence still reads a captured local the body REBINDS at its
-pre-call binding (`total = 0; out = []; [1, 2].each { |x| total += x;
-out << total }` reads `Array[0]`), and slice A's rebind fixpoint reads
+The evidence read a captured local the body REBINDS at its pre-call
+binding (`total = 0; out = []; [1, 2].each { |x| total += x; out <<
+total }` read `Array[0]`; closed below), and slice A's rebind fixpoint reads
 a content-mutated capture at its pre-call contents (`last = nil; [1,
 2].each { |x| last = a.last; a << x }` leaves `last` at `0?` over `a =
 [0]`). And a collection the block changes only through a remover
@@ -924,6 +924,77 @@ though `maybe` can stay nil), WD2.11's rule meeting a case its
 reasoning did not cover; that is #1219, and the fixture's golden
 carries the flip comment.
 
+*(The first residue is closed, 2026-09-23.)* The closure is
+conservative. A store that reads a local the body writes now types that
+local as `Dynamic[top]`
+(`StatementEvaluator#shadow_rebound_reads`), so `out` reads
+`Array[Dynamic[top]]` and `out.last == 3` no longer folds. The locals
+covered are an outer local the body rebinds, and a block parameter or
+`;`-local it reassigns. A write in a parameter's default counts. A write
+inside an inner block to a name that block introduces does not count,
+because it is a different variable, and neither does a write in a
+method body the block defines. A joined collection the body also
+rebinds counts too, because the join's seed carries slice A's
+continuation. A local the body introduces already read `Dynamic[top]`.
+
+The binding joins the per-store `shadows` overlay, where an inner
+block's own names were already bound to `Dynamic[top]`. An Array index
+write is the exception: its index arguments, and every name they read,
+keep the block-entry binding. The join classifies such a store as an
+element or a splice from the index's type. A `Dynamic` index reads as
+both, so `grid[i] = [x, x]` would join `x` itself beside the pair and
+draw `def.return-type-mismatch` against a declared
+`Array[Array[Integer]]`. A Hash key is not an index, so it is covered.
+A store that reads only locals the body does not write keeps its
+precise binding, so a block that rebinds `tally` still stores `limit`
+as `5`. No extra evaluation pass runs, and the evidence no longer reads
+slice A's continuation.
+
+Three precise readings were built first. Adversarial review rejected
+each one for reporting on correct code (ADR-5):
+
+1. **Slice A's continuation**, the pre-call value joined with every
+   iteration's exit value. It misses a value written between two
+   rebinds. A call on the union then drops the member it is undefined
+   on: `state = s; out << state.length; state = :done` typed the store
+   `4`, and `lengths.last == 2` folded.
+2. **That continuation joined with the block-entry typing.** This
+   stopped the fold, but it still stored exit values no store reads. A
+   reset to `nil` after the store became `call.possible-nil-receiver`
+   on an element, and a reset to `5` became `def.return-type-mismatch`
+   against a declared `Array[String]`.
+3. **One more walk of the body with an `on_enter` recorder at each
+   store.** The walk entered with rebound locals at the continuation and
+   with every outer collection floored. It was precise, with guards
+   narrowing, but it inherited every gap in the single-pass, in-body
+   flow, and so did every gate put around it. The gaps included:
+   - an `if` branch that exits beside an `else` still joins its writes
+     (#1230);
+   - a `rescue` arm reads the `begin`'s entry scope (#1231);
+   - an `inject` accumulator is treated as fresh on every iteration
+     (#1232);
+   - slice A dropped the scope at `next` (#1214, since joined by #1215);
+   - a local written inside an argument reaches no later scope (#1223);
+   - ivars can be written through setters.
+
+   Each gap surfaced as a new false positive the moment a store read
+   through it.
+
+The cost is precision: such a collection gains a `Dynamic[top]`
+member, which quiets later reads of it. #1233 records how to return to
+reading (3) once those gaps close. These shapes stay open:
+
+- A store that reads an instance variable the body writes
+  (`out << @total`) is not covered (#1235).
+- The index of an Array index write keeps its first-iteration reading,
+  as on master. So does a stored value that reads the same name:
+  `ids[n] = n; n += 1` still stores `0`, and `ids.last == 1` still
+  folds. An index the body rebinds to a Range is still classified as an
+  element store.
+- A local written through a proc defined outside the block is not seen
+  as written, as everywhere in the engine.
+- The rebound local itself keeps whatever slice A gives it.
+
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
 captured reads, a parameter shadowing a mutated outer local, a nested
@@ -935,6 +1006,32 @@ fire: the same counter storing a receiver-independent value, and `acc
 << 1` sharing a block with a self-reading store. The spec asserts the
 exact `flow.*` line set, so a seam that went gradual everywhere fails
 as loudly as the old pin did.
+The `block_content_rebound_capture` fixture gates the first residue's
+closure. Its must-not-fire cases each store a local the body writes:
+
+- the Array, Hash and `each_with_object` stores of a running total;
+- a write that is the store's own argument;
+- a read between two rebinds;
+- an exit value no store reads;
+- a declared return type;
+- a reassigned parameter;
+- an `inject` accumulator;
+- a `next`;
+- a store inside an inner block;
+- a collection the body both rebinds and grows;
+- an index the body increments, under a declared return in the
+  fixture's `sig/`;
+- a Hash key the body rebinds;
+- a local a parameter's default rebinds.
+
+A precision case keeps an index store's value exact. Its four controls
+read a local the body does not write, a parameter it does not reassign,
+a name only an inner block's own parameter writes, and a name only a
+method body the block defines writes. Their
+always-falsey must still fire, so the seam has not gone gradual on
+every store. The spec asserts every rule, not
+only `flow.*`, because the rejected readings failed as nil receivers
+and return-type mismatches as well as folds.
 
 *(The second residue is closed, 2026-09-23.)* Slice A's passes now
 read every captured local the body mutates in place at its call-site

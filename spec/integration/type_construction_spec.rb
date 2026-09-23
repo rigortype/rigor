@@ -2072,6 +2072,28 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # The same seam bound a local the body WRITES at its block-entry value, so a store reading it
+    # (`total += x; out << total`) recorded the first iteration's answer. Such a store now reads the
+    # local as `Dynamic[top]`, through the block seam and `each_with_object` alike.
+    describe "fixtures/block_content_rebound_capture/ — a stored value that reads a local the body writes" do
+      let(:harness) { harness_for("block_content_rebound_capture") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion, over every rule rather than `flow.*` alone: the
+      # precise readings this replaced failed as nil receivers and return-type mismatches as well as
+      # folds. The controls read a local the body does not write, and still fold. The harness loads no
+      # `Rigor::Testing` signatures, so its toplevel helpers resolve nowhere.
+      it "reports nothing but the genuine folds" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
+      end
+    end
+
     # The slice-A rebind fixpoint re-ran the body with only the REBOUND locals moving, so a captured
     # collection the body mutates in place re-entered every pass at its pre-call contents, and a
     # rebind read from it (`last = a.last; a << x`) closed over the first iteration's answer.

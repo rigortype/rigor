@@ -75,9 +75,32 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
+      # Whether `param` contains a record (at any depth: `Array[{ a: Integer }]`, a tuple, a union) and `arg` a
+      # `Hash` with a gradual arm ({#gradual_hash?}). That pair is where a record answers `maybe` because it cannot
+      # read the entries, and the `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict
+      # pass reads it as no evidence for the overload.
+      def record_against_gradual_hash?(param, arg)
+        contains_type?(param) { |type| type.is_a?(Type::HashShape) } && contains_type?(arg) { |type| gradual_hash?(type) }
+      end
+
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
+
+        def contains_type?(type, &)
+          return true if yield(type)
+
+          components =
+            case type
+            when Type::Union then type.members
+            when Type::Nominal then type.type_args
+            when Type::Tuple then type.elements
+            when Type::HashShape then type.pairs.values
+            when Type::Difference then [type.base]
+            else return false
+            end
+          components.any? { |component| contains_type?(component, &) }
+        end
 
         def accepts_one(self_type, other_type, mode)
           handler = TYPE_HANDLERS[self_type.class]

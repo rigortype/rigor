@@ -420,20 +420,12 @@ module Rigor
             return false if untyped_arg?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
-            return false if strict && result.maybe? && shape_param_against_nominal?(param_type, arg)
+            # A record's `maybe` for a `Hash` with a gradual arm is no evidence for the overload: with
+            # `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
+            # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.
+            return false if strict && result.maybe? && Acceptance.record_against_gradual_hash?(param_type, arg)
 
             result.yes? || result.maybe?
-          end
-
-          # A record parameter answers `maybe` for a `Hash` argument with a gradual arm (`{ **o, b: 2 }`, a raw
-          # `Hash`, a declared `Hash[Symbol, untyped]`) because it cannot read the entries. That is no evidence
-          # for the record overload, so the strict pass MUST NOT take it: with `({ a: Integer }) -> Integer |
-          # (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the closed record forbids, yet the
-          # first overload won by list position. The gradual pass still takes it when nothing proves a match.
-          def shape_param_against_nominal?(param_type, arg)
-            return false if arg.is_a?(Type::HashShape)
-
-            ContentJoin.union_members(param_type).any?(Type::HashShape)
           end
 
           # A type that admits only specific VALUES rather than a class of values: a `Constant` carrier

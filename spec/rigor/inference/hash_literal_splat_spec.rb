@@ -119,6 +119,8 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
           def control: () -> { a: Integer, b: Integer }
           def pick: ({ a: Integer }) -> Integer
                   | (Hash[Symbol, untyped]) -> String
+          def pick_all: (Array[{ a: Integer }]) -> Integer
+                      | (Array[Hash[Symbol, untyped]]) -> String
         end
       RBS
     end
@@ -189,6 +191,22 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
           def picks
             self.pick({ **BASE, b: 2 }).upcase
             self.pick({ a: 1 }).upcase
+          end
+        end
+      RUBY
+    end
+
+    it "does not let a record nested in a parameter win a splatted literal by position" do
+      # Only the control on line 8 (`Integer#upcase`) fires.
+      expect(errors(<<~RUBY)).to eq([["call.undefined-method", 8]])
+        class Rec
+          BASE = { a: 1 }.freeze
+
+          def pick_all(values) = values.all? { |value| value.size == 1 } ? 1 : "s"
+
+          def picks
+            self.pick_all([{ **BASE, b: 2 }]).upcase
+            self.pick_all([{ a: 1 }]).upcase
           end
         end
       RUBY

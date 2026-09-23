@@ -17,7 +17,8 @@ module Rigor
     # fixpoint left the seed, and every predicate read `0 + 1 == 2`. A name this scan returns takes the floor
     # whatever the fixpoint converged to.
     #
-    # The evaluator threads a write from these positions only, measured against it rather than read off it:
+    # The scan admits a write from these positions only, each one the evaluator threads, measured against it
+    # rather than read off it:
     #
     # - a statement, and the body of `(…)`, `begin` / `rescue` / `else` / `ensure`;
     # - an assignment's value — every variable-write form, and an index `||=` / `&&=` / `op=`, but not its
@@ -32,10 +33,12 @@ module Rigor
     #   joins the block's `next` and `break` paths, or the escaping-block floor covers both, and nothing covers
     #   a class variable or global there.
     #
-    # Every other position is unthreaded: a call's receiver and arguments, an array or hash literal, an
+    # Every other position counts as unthreaded: a call's receiver and arguments, an array or hash literal, an
     # interpolation, a `return` / `next` / `break` value, `rescue` modifier, `self.w =` (which rebinds `@w` with
     # no write node at all), a `def` or class body. The list is a whitelist, so a position the evaluator gains
-    # later floors a name needlessly rather than letting a pin through.
+    # later floors a name needlessly rather than letting a pin through. Issue #1223 is such a gain: the evaluator
+    # threads a call's receiver and arguments, the literals, the interpolations and a `rescue` modifier
+    # ({StatementEvaluator#eval_call}), and the scan does not admit them yet.
     #
     # A threaded rebind can still miss the exit binding when a jump leaves after it. The fold's pass and a
     # nested block's write-back join every block-level `next` (and the write-back every `break`) into the exit

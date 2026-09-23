@@ -4,7 +4,7 @@ locals:
   bumped: Array[Dynamic[top]]
   by_key: Hash[Dynamic[top], 1 | 2]
   caps: Array[5]
-  count: '0'
+  count: Integer
   firsts: Array[Dynamic[top]]
   ids: Array[Dynamic[top]]
   key: ":a | :b"

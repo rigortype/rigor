@@ -3112,4 +3112,176 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(out.describe).not_to match(/\bnil\b/)
     end
   end
+
+  # Issue #1223 — a call's receiver and arguments, a literal, an interpolation and a `rescue` modifier were typed as
+  # pure expressions, so a write nested in one left the post-statement scope on the pre-write binding. Each shape pairs
+  # with a control that must keep its answer.
+  describe "writes inside call operands and literals (issue #1223)" do
+    def local_after(source, name)
+      _, post = evaluate(source)
+      post.local(name)
+    end
+
+    def const(value)
+      Rigor::Type::Combinator.constant_of(value)
+    end
+
+    def union(*values)
+      Rigor::Type::Combinator.union(*values.map { |value| const(value) })
+    end
+
+    it "threads a compound write in a call's argument" do
+      expect(local_after("n = 0\nout = []\nout << (n += 1)\n", :n)).to eq(const(1))
+    end
+
+    it "binds a plain write in a call's argument" do
+      expect(local_after("puts(m = 5)\n", :m)).to eq(const(5))
+    end
+
+    it "threads a write in the receiver" do
+      expect(local_after("s = 0\n(s += 1) == 2\n", :s)).to eq(const(1))
+    end
+
+    it "threads an index argument, a keyword argument and a splat" do
+      expect(local_after("h = {}\ns = 0\nh[s = 1]\n", :s)).to eq(const(1))
+      expect(local_after("s = 0\nputs(k: (s = 1))\n", :s)).to eq(const(1))
+      expect(local_after("s = 0\nputs(*(s = [1]))\n", :s)).to eq(Rigor::Type::Combinator.tuple_of(const(1)))
+    end
+
+    it "threads the operands in evaluation order" do
+      expect(local_after("a = 0\nputs(a = 1, a = :b)\n", :a)).to eq(const(:b))
+      expect(local_after("a = 0\n(a = 1).then(a = :b)\n", :a)).to eq(const(:b))
+    end
+
+    it "threads a write in an array literal and an interpolation, as a statement and as a value" do
+      expect(local_after("s = 0\n[s = 1]\n", :s)).to eq(const(1))
+      expect(local_after("s = 0\nx = [:a, s += 1]\n", :s)).to eq(const(1))
+      expect(local_after("s = 0\n\"\#{s = 1}\"\n", :s)).to eq(const(1))
+      expect(local_after("s = 0\nh = { k: (s = 1) }\n", :s)).to eq(const(1))
+    end
+
+    it "threads a write in an instance-variable assignment's right-hand side call" do
+      expect(local_after("s = 0\n@x = format(\"%d\", s = 1)\n", :s)).to eq(const(1))
+    end
+
+    it "threads an instance-variable write in an argument" do
+      _, post = evaluate("@v = nil\nputs(@v ||= 1)\n")
+      expect(post.ivar(:@v)).to eq(const(1))
+    end
+
+    it "joins a `rescue` modifier's arm with the path that did not raise" do
+      expect(local_after("s = 0\nx = foo rescue (s = 1)\n", :s)).to eq(union(0, 1))
+    end
+
+    it "joins the arguments of a safe-navigation call with the path that skipped them" do
+      expect(local_after("s = 0\nr = nil\nr&.foo(s = 1)\n", :s)).to eq(union(0, 1))
+    end
+
+    it "carries a write in an argument's block through that call's write-back" do
+      expect(local_after("t = 0\nputs([1].each { |x| t = :w })\n", :t)).to eq(union(0, :w))
+    end
+
+    it "carries an argument's write into ADR-56's block write-back" do
+      expect(local_after("g = :init\n[1, 2].each { |e| puts(g = e) }\n", :g)).to eq(union(:init, 1, 2))
+    end
+
+    it "runs the call's own block from the scope after its arguments" do
+      expect(local_after("g = nil\nh = nil\n1.upto(g = 2) { |_i| h = g }\n", :h)).to eq(union(nil, 2))
+      expect(local_after("g = nil\n1.upto(g = 2) { |_i| g = :z }\n", :g)).to eq(union(2, :z))
+      expect(local_after("1.upto(g = 2) { |_i| g = :z }\n", :g)).to eq(union(2, :z))
+    end
+
+    it "joins a block-level `next` inside an argument into the block's exit" do
+      g = local_after(<<~RUBY, :g)
+        g = :init
+        [1, 2].each do |e|
+          puts((g = e).odd? && next)
+          g = :tail
+        end
+      RUBY
+      expect(g).to eq(union(:init, :tail, 1, 2))
+    end
+
+    it "joins a block-level `break` inside an argument into the continuation" do
+      hit = local_after(<<~RUBY, :hit)
+        hit = nil
+        [1, 2].each do |e|
+          puts((hit = e).even? && break)
+          hit = :missed
+        end
+      RUBY
+      expect(hit).to eq(union(nil, :missed, 1, 2))
+    end
+
+    context "with operands that write nothing the scope keeps" do
+      it "leaves the scope unchanged for an argument that only reads" do
+        base = scope.with_local(:m, const(1))
+        _, post = evaluate("puts(m + 1)\n", base_scope: base)
+        expect(post).to eq(base)
+      end
+
+      it "keeps a block-local write in an argument's block out of the outer scope" do
+        expect(local_after("puts([1].map { |x| y = x })\n", :y)).to be_nil
+      end
+
+      it "keeps a write inside a `def` argument out of the enclosing scope" do
+        expect(local_after("private def helper\n  q = 1\nend\n", :q)).to be_nil
+      end
+
+      it "types the call's value and its argument's value at the entry scope" do
+        type, = evaluate("n = 0\n[n += 1].first\n")
+        expect(type).to eq(const(1))
+      end
+    end
+  end
+
+  # An `&&` predicate's truthy edge, and an `||` predicate's falsey edge, is a path on which the right operand ran, so a
+  # write in it is certain there; narrowing the joined scope after the operator read such a local as `nil` too. Issue
+  # #1223 made the shape common by threading writes nested in a call's operands.
+  describe "and/or predicate edges read the scope the right operand left" do
+    let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:no) { Rigor::Type::Combinator.constant_of(:no) }
+    let(:nil_type) { Rigor::Type::Combinator.constant_of(nil) }
+    let(:base) do
+      bool = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(true), Rigor::Type::Combinator.constant_of(false)
+      )
+      scope.with_local(:flag, bool).with_local(:k, integer)
+    end
+
+    # `flag` and `k` are bound in `base`; `scopes:` makes Prism parse them as the locals they are.
+    def local_after(source, name)
+      _, post = base.evaluate(Prism.parse(source, scopes: [%i[flag k]]).value)
+      post.local(name)
+    end
+
+    def union(*types)
+      Rigor::Type::Combinator.union(*types)
+    end
+
+    it "binds a write in an `&&` predicate's right operand on the truthy edge" do
+      r = local_after("r = if flag && limit(n = k) then n else :no end\n", :r)
+      expect(r).to eq(union(integer, no))
+    end
+
+    it "binds a statement-position write in the right operand on the truthy edge" do
+      r = local_after("r = if flag && (n = k; flag) then n else :no end\n", :r)
+      expect(r).to eq(union(integer, no))
+    end
+
+    it "carries the truthy edge into a later `&&` operand" do
+      r = local_after("r = if flag && limit(n = k) && n.to_s then n else :no end\n", :r)
+      expect(r).to eq(union(integer, no))
+    end
+
+    it "binds a write in an `||` predicate's right operand on the falsey edge" do
+      r = local_after("r = unless flag || limit(n = k) then n else :no end\n", :r)
+      expect(r).to eq(union(integer, no))
+    end
+
+    it "keeps the path that skipped the right operand on the other edge" do
+      r = local_after("r = if flag && limit(n = k) then :no else n end\n", :r)
+      expect(r).to eq(union(no, integer, nil_type))
+    end
+  end
 end

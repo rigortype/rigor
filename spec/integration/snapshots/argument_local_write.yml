@@ -1,0 +1,28 @@
+---
+locals:
+  bound: Integer
+  count: Integer
+  fresh: ":ran | Integer"
+  hit: 1 | 2 | :missed | nil
+  kept: Array[Dynamic[top]]
+  last: 1 | 2 | :init
+  level: Integer
+  lines: Integer
+  "n": Integer
+  out: Array[Dynamic[top] | Integer]
+  pair: "[:x, Integer]"
+  parsed: ":fallback | :none"
+  picked: ":c"
+  seen: Integer
+  seen_bound: Integer?
+  slot: Integer
+  step: Integer
+  stepped: bool
+  stop: ":ran | Integer"
+  switched: ":c"
+  table: "{ 1 => :a }"
+  tag: ":off | :on"
+  tail: 1 | 2 | :fell | :init
+  total: Integer
+  unchanged: '0'
+assertions: {}

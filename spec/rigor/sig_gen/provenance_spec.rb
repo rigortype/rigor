@@ -228,9 +228,10 @@ SIG_PROVENANCE_RESIDUE = {
   # `Effects::Registry` in and out makes it parameter-intent.
   "sig/rigor/effects/plugin_facts.rbs" => 11,
   # New file (#1181 vocabulary slice): `vocabulary_version`, `labels` and `descriptions` are
-  # #1154-marked (normalized `initialize` kwargs); `roots` is computed from `@known` — not a
-  # parameter — so it pins unmarked. The factories/`with` are earned; `known?`, `suggest`,
-  # `retired` are unrenderable — their bodies route through private helpers sig-gen declines.
+  # #1154-marked — the issue covers any ivar assigned in `initialize` from a parameter,
+  # normalized or verbatim; `roots` is computed from `@known` — not a parameter — so it pins
+  # unmarked. The factories/`with` are earned; `known?`, `suggest`, `retired` are unrenderable —
+  # their bodies route through private helpers sig-gen declines.
   "sig/rigor/effects/registry.rbs" => 4,
   # New file (#1181 collection-side slice): `bundles`/`declared_bundles`/`causes` are
   # #1154-marked (normalized `initialize` kwargs), while `declared`/`proven` are flattened from

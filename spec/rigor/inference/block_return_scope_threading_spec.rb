@@ -3069,6 +3069,40 @@ RSpec.describe "block-return scope threading", type: :runner do
         expect(dumped_type("[+\"ab\"].each do\n  it << \"c\"\n  dump_type(it)\nend")).to eq("String")
       end
 
+      # A write evaluates to the variable it writes, so `(@@c ||= []) << 1` mutates `@@c`. The local and
+      # instance-variable spellings were aliased first; the class-variable and global ones kept the `[]` the `||=`
+      # stored, and `@@c.first.succ` then reported a nil receiver on code whose `@@c.first` is `1`.
+      it "widens a class variable and a global written in the mutated receiver itself" do
+        expect(undefined_method_rules(<<~RUBY)).to be_empty
+          class Reg
+            def add_cvar
+              @@c = nil
+              (@@c ||= []) << 1
+              @@c.first.succ
+            end
+
+            def add_global
+              $gc = nil
+              ($gc ||= []) << 1
+              $gc.first.succ
+            end
+          end
+        RUBY
+      end
+
+      it "still reports the nil receiver when the write lands on another class variable" do
+        expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+          class Reg
+            def add_cvar
+              @@c = nil
+              @@d = nil
+              (@@d ||= []) << 1
+              @@c.first
+            end
+          end
+        RUBY
+      end
+
       # The widening joins the pushed value only when it knows the receiver names a carrier it will grow
       # (`MutationWidening.joinable_receiver?`); a kind that check skipped widened to a bare `Array[Dynamic[top]]`.
       it "joins the pushed value into a mutated global, class variable and `it` parameter" do

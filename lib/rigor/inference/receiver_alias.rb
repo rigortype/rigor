@@ -48,7 +48,15 @@ module Rigor
         Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
         Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode
       ].freeze
-      private_constant :LOCAL_WRITE_NODES, :INSTANCE_WRITE_NODES
+      CLASS_VARIABLE_WRITE_NODES = Set[
+        Prism::ClassVariableWriteNode, Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode, Prism::ClassVariableOperatorWriteNode
+      ].freeze
+      GLOBAL_WRITE_NODES = Set[
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableOperatorWriteNode
+      ].freeze
+      private_constant :LOCAL_WRITE_NODES, :INSTANCE_WRITE_NODES, :CLASS_VARIABLE_WRITE_NODES, :GLOBAL_WRITE_NODES
 
       module_function
 
@@ -78,8 +86,9 @@ module Rigor
       end
 
       # The variable reads an in-place mutation of `receiver` changes: {.candidates}' locals and instance
-      # variables, or the class variable or global the receiver reads directly, parenthesised or not. A class
-      # variable or global counts only as the receiver itself, not through a branch that selects it. This is the
+      # variables, or the class variable or global the receiver reads or writes directly, parenthesised or not
+      # (`(@@c ||= []) << x` mutates `@@c`, as `(buf ||= []) << x` mutates `buf`). A class variable or global counts
+      # only as the receiver itself, not through a branch that selects it. This is the
       # one answer the straight-line widening ({MutationWidening.widen_receiver_aliases}), the block-return
       # threading gate that predicts it (`ExpressionTyper#prefix_statement_jump_free?`) and the per-element fold's
       # content-mutation scan ({CapturedLocals.content_mutations}) all read, so "the scan says the body changed
@@ -87,7 +96,14 @@ module Rigor
       def mutated_reads(receiver)
         direct = receiver
         direct = direct.body.body.last while direct.is_a?(Prism::ParenthesesNode) && direct.body.is_a?(Prism::StatementsNode)
-        NON_ALIASED_READS.include?(direct.class) ? [direct] : candidates(receiver)
+        return [direct] if NON_ALIASED_READS.include?(direct.class)
+        return [read_of(direct)] if non_aliased_write?(direct)
+
+        candidates(receiver)
+      end
+
+      def non_aliased_write?(node)
+        CLASS_VARIABLE_WRITE_NODES.include?(node.class) || GLOBAL_WRITE_NODES.include?(node.class)
       end
 
       # The binding a read from {.candidates} or {.mutated_reads} names.
@@ -105,13 +121,22 @@ module Rigor
       end
 
       # A read of the variable `write` writes, at the write's name, for the analysers that key a receiver on a
-      # read node. `Prism` 1.x constructs every node from `source, node_id, location, flags` and its fields.
+      # read node — a local, instance-variable, class-variable or global write. `Prism` 1.x constructs every node
+      # from `source, node_id, location, flags` and its fields.
       def read_of(write)
         source = write.send(:source)
         if LOCAL_WRITE_NODES.include?(write.class)
           Prism::LocalVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name, write.depth)
         else
-          Prism::InstanceVariableReadNode.new(source, write.node_id, write.name_loc, 0, write.name)
+          named_read_class(write.class).new(source, write.node_id, write.name_loc, 0, write.name)
+        end
+      end
+
+      # The read node class for an instance-variable, class-variable or global write class.
+      def named_read_class(write_class)
+        if INSTANCE_WRITE_NODES.include?(write_class) then Prism::InstanceVariableReadNode
+        elsif CLASS_VARIABLE_WRITE_NODES.include?(write_class) then Prism::ClassVariableReadNode
+        else Prism::GlobalVariableReadNode
         end
       end
     end

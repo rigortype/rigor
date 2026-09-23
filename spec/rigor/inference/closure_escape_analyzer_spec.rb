@@ -120,4 +120,38 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
       expect(result).to eq(:non_escaping)
     end
   end
+
+  describe ".discards_block_value?" do
+    def discards?(type, method) = described_class.discards_block_value?(receiver_type: type, method_name: method)
+
+    it "answers true for iterators that return the receiver, a memo or nil" do
+      expect(discards?(array_nominal, :each)).to be(true)
+      expect(discards?(array_nominal, :each_with_object)).to be(true)
+      expect(discards?(hash_nominal, :each_pair)).to be(true)
+      expect(discards?(range_nominal, :step)).to be(true)
+      expect(discards?(integer_nominal, :times)).to be(true)
+      expect(discards?(Rigor::Type::Combinator.singleton_of("File"), :foreach)).to be(true)
+    end
+
+    it "resolves shape receivers through their class, as classify does" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1))
+      expect(discards?(tuple, :each)).to be(true)
+    end
+
+    it "answers false for iterators whose result is built from the block's values" do
+      expect(discards?(array_nominal, :map)).to be(false)
+      expect(discards?(array_nominal, :find)).to be(false)
+      expect(discards?(hash_nominal, :transform_values)).to be(false)
+    end
+
+    it "answers false for Enumerator#each, whose result is the underlying method's" do
+      expect(discards?(Rigor::Type::Combinator.nominal_of("Enumerator"), :each)).to be(false)
+    end
+
+    it "answers false for receivers it cannot resolve" do
+      expect(discards?(nil, :each)).to be(false)
+      expect(discards?(Rigor::Type::Combinator.untyped, :each)).to be(false)
+      expect(discards?(string_nominal, :each)).to be(false)
+    end
+  end
 end

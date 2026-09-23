@@ -3687,15 +3687,18 @@ module Rigor
       # Evaluates the block body once under a `break`-value sink, in the same entry scope the block-return pass
       # uses, so each arm is typed in the scope that actually reaches it — a `break v` after `v = "s"`
       # contributes `"s"`, not the entry binding — and an arm on a branch the analysis proved dead is never
-      # reached at all. That includes the captured-rebind binding ({#captured_block_entry_scope}): `i += 1;
-      # break i if i > 3` breaks with whatever `i` has reached, not the `1` of the first iteration.
+      # reached at all. Under a catalogued iterator that includes the captured-rebind binding
+      # ({#captured_block_entry_scope}): `i += 1; break i if i > 3` breaks with whatever `i` has reached, not the
+      # `1` of the first iteration.
       def collect_break_arm_types(call_node, body, receiver_override)
         targets = block_level_jump_nodes(body, Prism::BreakNode)
         receiver = receiver_override || call_receiver_type_for(call_node)
         return EMPTY_BREAK_ARMS if receiver.nil?
         return EMPTY_BREAK_ARMS if retains_block?(call_node, receiver)
 
-        block_scope = captured_block_entry_scope(call_node, receiver, break_arm_param_types(call_node, receiver))
+        expected = break_arm_param_types(call_node, receiver)
+        iterated = block_capture_mode(call_node, receiver) == :iterations
+        block_scope = captured_block_entry_scope(call_node, receiver, expected, iterated)
         _result, collected = StatementEvaluator.with_break_value_sink do
           without_block_body_threading { block_scope.evaluate(body) }
         end
@@ -3738,50 +3741,110 @@ module Rigor
         block_arg = call_node.block
         case block_arg
         when Prism::BlockNode
-          type_block_body(block_arg, captured_block_entry_scope(call_node, receiver_type, expected))
+          block_body_return_type(call_node, receiver_type, expected)
         when Prism::BlockArgumentNode
           symbol_block_return_type(block_arg, expected)
         end
       end
 
-      # {#block_entry_scope} with every captured outer local and instance variable the body rebinds bound to what
-      # it can hold in ANY iteration rather than at the call site — issue #587 (b)'s entry binding, applied to the
-      # one-pass typing every other block-bearing call gets.
+      # The block body's value type, with every captured outer local and instance variable the body rebinds read
+      # as what it can hold in the runs the callee makes rather than at the call site — issue #587 (b)'s entry
+      # binding, applied to the one-pass typing every other block-bearing call gets.
       #
       # This pass types the body once, so before it a body that rebinds a captured local answered its FIRST
       # iteration: `i = 0; arr.map do i += 1; i == 1 end` typed `Array[true]` (runtime `[true, false, …]`), and
       # that one block type is also what `BlockFolding` reads, so `seen += 1; seen == 2` under `find` folded the
-      # whole call to `nil` and `if r` reported an always-falsey condition on correct code. The binding is the
-      # per-element fold's own ({#captured_entry_bindings}): the same rebound names, the same fixpoint and the
-      # same floors, with each pass entered the way this pass enters the body, so the fixpoint's parameters are
-      # the DECLARED ones — a `|k, v|` pair destructures for it as it does for the body.
+      # whole call to `nil` and `if r` reported an always-falsey condition on correct code. What the right
+      # binding is depends on how often the callee runs the block ({#block_capture_mode}):
+      #
+      # - A catalogued iterator (`:iterations`) takes the per-element fold's own binding
+      #   ({#captured_entry_bindings}): the same rebound names, fixpoint and floors, each pass entered the way
+      #   this pass enters the body, so the fixpoint's parameters are the DECLARED ones — a `|k, v|` pair
+      #   destructures for it as it does for the body. One whose result never reads the block's value (`each`,
+      #   `times`, … — {ClosureEscapeAnalyzer.discards_block_value?}) skips it: the evaluator's write-back already
+      #   runs the same fixpoint for the continuation, and a second one here would buy nothing.
+      # - A catalogued exactly-once yielder (`tap` / `then` / `yield_self`) keeps the call-site binding, which is
+      #   exact: there is no second run.
+      # - Any other callee (`:unknown`) may run the block once (`File.open`, `Mutex#synchronize`), where the
+      #   call-site binding is exact and a joined one invents values no run produces — `h = header; header =
+      #   f.gets; h` would read `nil` — or many times, where it is the pin; and the `Dynamic[top]` floor is no way
+      #   out, because it revives branches the only run never takes (`if loaded then nil else …`). So the body is
+      #   typed from the call-site binding, and when it can observe that binding of a name it rebinds
+      #   ({#entry_binding_observed?}) its value pins are widened instead ({Type::Combinator.widen_value_pinned}):
+      #   a `Constant[false]` predicate reads `bool` and folds nothing, while `"value"` becomes a String.
       #
       # Cost is bounded the way the per-element fold's is: a body that rebinds nothing captured pays one name
       # walk and allocates nothing, and a call nested inside a threaded body takes the floor without evaluating
-      # anything. A catalogued exactly-once yielder (`tap` / `then` / `yield_self`) has no second iteration for
-      # the call site to misdescribe, so it keeps the exact entry binding and skips the walk.
-      #
-      # The `break`-arm collection enters the body through here too, so its arms are typed in the same scope as
-      # the value they are unioned with ({#collect_break_arm_types}).
-      def captured_block_entry_scope(call_node, receiver_type, expected)
-        narrowed_self_type = block_body_self_narrowing(call_node, receiver_type)
-        captured = captured_block_bindings(call_node, receiver_type, expected, narrowed_self_type)
-        base = captured ? bind_captured(scope, captured) : scope
-        block_entry_scope(call_node.block, expected, narrowed_self_type: narrowed_self_type, base: base)
+      # anything.
+      def block_body_return_type(call_node, receiver_type, expected)
+        block_node = call_node.block
+        mode = block_capture_mode(call_node, receiver_type)
+        iterated = mode == :iterations && !discards_block_value?(call_node, receiver_type)
+        type = type_block_body(block_node, captured_block_entry_scope(call_node, receiver_type, expected, iterated))
+        return type unless mode == :unknown && entry_binding_observed?(block_node)
+
+        Type::Combinator.widen_value_pinned(type)
       end
 
-      # `nil` (keep the call-site binding) for an exactly-once yielder, else the shared binding's rebind half with
-      # every fixpoint pass entered through {#block_entry_scope}. The block is passed as a literal so the
-      # overwhelmingly common body that rebinds nothing allocates no Proc for it.
-      #
-      # The fixpoint describes iterations, so it runs only for a callee {ClosureEscapeAnalyzer} catalogues as
-      # iterating its block without retaining it (`:non_escaping`), the same gate the evaluator's own write-back
-      # applies. Any other callee may run the block once, many times, or later: `File.open` / `Mutex#synchronize`
-      # run it exactly once, where a joined binding invents values no run produces (`h = header; header =
-      # f.gets; h` would read `nil` into a block that returns `"none"`), and an uncatalogued iterator may run it
-      # many times, where the call-site binding is the pin. Neither binding is safe there, so the rebound names
-      # take the escaping-block floor `Dynamic[top]`, as `StatementEvaluator#drop_captured_narrowing` binds them
-      # for the continuation; that evaluates no body, and a `Dynamic` predicate folds nothing.
+      # The nodes that read a variable's current binding: the plain reads and the compound writes, which read
+      # their target before rebinding it.
+      OBSERVING_NODES = Set[
+        Prism::LocalVariableReadNode, Prism::LocalVariableOperatorWriteNode,
+        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
+        Prism::InstanceVariableReadNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode
+      ].freeze
+      private_constant :OBSERVING_NODES
+
+      # Whether the body can read the CALL-SITE binding of a name it rebinds — the only way that binding, a pin
+      # for every run after the first, reaches the block's value. A name counts as observed when a statement reads
+      # it (or compound-writes it, which reads) before a statement-level plain write replaces it:
+      # `y = "s"; next y if flag; 42` never observes `y`'s entry, `seen += 1; seen == 2` does. The walk is
+      # conservative: a write inside a branch, loop or nested block replaces nothing, and a body that is not a
+      # plain statement list (`do … rescue … end`) counts as observing.
+      def entry_binding_observed?(block_node)
+        names = CapturedLocals.writes(block_node, scope, ivars: true)
+        return false if names.empty?
+
+        body = block_node.body
+        return true unless body.is_a?(Prism::StatementsNode)
+
+        pending = names.dup
+        body.body.each do |statement|
+          return true if observes_any?(statement, pending)
+
+          pending.delete(statement.name) if plain_variable_write?(statement)
+          return false if pending.empty?
+        end
+        false
+      end
+
+      def observes_any?(node, names)
+        Source::NodeWalker.each(node) do |descendant|
+          return true if OBSERVING_NODES.include?(descendant.class) && names.include?(descendant.name)
+        end
+        false
+      end
+
+      def plain_variable_write?(node)
+        node.is_a?(Prism::LocalVariableWriteNode) || node.is_a?(Prism::InstanceVariableWriteNode)
+      end
+
+      # How often the callee is known to run the block: `:once` for a catalogued exactly-once yielder
+      # ({BlockCallTiming.exactly_once_call?}), `:iterations` for a callee {ClosureEscapeAnalyzer} catalogues as
+      # iterating it without retaining it (the gate the evaluator's own write-back applies), `:unknown` otherwise.
+      def block_capture_mode(call_node, receiver_type)
+        return :once if BlockCallTiming.exactly_once_call?(
+          receiver_type: receiver_type, method_name: call_node.name, scope: scope
+        )
+        return :iterations if iterates_block?(call_node, receiver_type)
+
+        :unknown
+      end
+
+      # {#block_entry_scope}, with the #587 (b) rebind binding laid under the parameters when `iterated`. The
+      # `break`-arm collection enters the body through here too ({#collect_break_arm_types}), iterated for every
+      # catalogued iterator, since a `break` ends the call from whichever iteration reaches it.
       #
       # The in-place half (a captured collection the body mutates, widened as if every site had stored unknown
       # values) is left out, for two reasons. The binding becomes the entry scope of every fold nested in the
@@ -3791,17 +3854,17 @@ module Rigor
       # ({#unanswered_tail_dependency?}). And it is the expensive half: far more block bodies mutate a capture in
       # place (`out << x` under `each`) than rebind one. The one-pass typing therefore still reads such a
       # collection at its entry contents, as it did before.
-      def captured_block_bindings(call_node, receiver_type, expected, narrowed_self_type)
-        return nil if BlockCallTiming.exactly_once_call?(
-          receiver_type: receiver_type, method_name: call_node.name, scope: scope
-        )
-
+      def captured_block_entry_scope(call_node, receiver_type, expected, iterated)
         block_node = call_node.block
-        unless iterates_block?(call_node, receiver_type)
-          names = CapturedLocals.writes(block_node, scope, ivars: true)
-          return names.empty? ? nil : captured_floor(names)
-        end
+        narrowed_self_type = block_body_self_narrowing(call_node, receiver_type)
+        captured = iterated ? iteration_bindings(block_node, expected, narrowed_self_type) : nil
+        base = captured ? bind_captured(scope, captured) : scope
+        block_entry_scope(block_node, expected, narrowed_self_type: narrowed_self_type, base: base)
+      end
 
+      # The shared binding's rebind half, every fixpoint pass entered through {#block_entry_scope}. The block is
+      # passed as a literal so the overwhelmingly common body that rebinds nothing allocates no Proc for it.
+      def iteration_bindings(block_node, expected, narrowed_self_type)
         captured_entry_bindings(block_node, content: false) do |base|
           block_entry_scope(block_node, expected, narrowed_self_type: narrowed_self_type, base: base)
         end
@@ -3809,6 +3872,10 @@ module Rigor
 
       def iterates_block?(call_node, receiver_type)
         ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name) == :non_escaping
+      end
+
+      def discards_block_value?(call_node, receiver_type)
+        ClosureEscapeAnalyzer.discards_block_value?(receiver_type: receiver_type, method_name: call_node.name)
       end
 
       # `type` without the value-pinned members a nominal member of the same union already covers: `0 | Integer`
@@ -4419,7 +4486,7 @@ module Rigor
       # block-return pass ({#captured_block_entry_scope}) the declared parameter list.
       #
       # `content: false` leaves out the in-place half and binds the rebound names alone; the generic pass asks
-      # for that ({#captured_block_bindings} says why). This runs for every block-bearing call the generic pass
+      # for that ({#captured_block_entry_scope} says why). This runs for every block-bearing call the generic pass
       # types, so a body that rebinds nothing captured returns before allocating anything.
       #
       # A converged rebind can carry a value pin its own class already covers (`0 | Integer`, the join of the

@@ -125,6 +125,7 @@ module Rigor
 
     module ClosureEscapeAnalyzer
       def self?.classify: (receiver_type: Type::t?, method_name: Symbol, ?environment: Environment?) -> closure_classification
+      def self?.discards_block_value?: (receiver_type: Type::t?, method_name: Symbol) -> bool
     end
 
     module Acceptance

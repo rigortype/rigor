@@ -69,6 +69,17 @@ module Rigor
         :unknown
       end
 
+      # Whether a catalogued iterator's result never reads its block's value ({VALUE_DISCARDING}): `each`,
+      # `times` and the like return the receiver, a memo or `nil` whatever the block answers. A pure query, like
+      # {.classify}; anything it cannot resolve answers false.
+      def discards_block_value?(receiver_type:, method_name:)
+        class_name = receiver_type && receiver_class_name(receiver_type)
+        return false if class_name.nil?
+
+        methods = VALUE_DISCARDING[class_name]
+        methods ? methods.include?(method_name.to_sym) : false
+      end
+
       class << self
         private
 
@@ -162,6 +173,22 @@ module Rigor
         "Integer" => INTEGER_EXTRA,
         "Enumerator" => ENUMERABLE_NON_ESCAPING,
         "Enumerator::Lazy" => ENUMERABLE_NON_ESCAPING,
+        "IO" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
+        "File" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
+        "StringIO" => IO_ITERATION
+      }.freeze
+
+      # The catalogued iterators whose return value is the receiver, a memo, or `nil` — never built from the block's
+      # values. `Enumerator` / `Enumerator::Lazy` are left out: `arr.map.each { … }` returns what the underlying
+      # `map` builds from them.
+      VALUE_DISCARDING_ITERATION = %i[each each_with_index each_with_object].freeze
+
+      VALUE_DISCARDING = {
+        "Array" => (VALUE_DISCARDING_ITERATION + ARRAY_EXTRA).freeze,
+        "Hash" => (VALUE_DISCARDING_ITERATION + %i[each_pair each_key each_value]).freeze,
+        "Range" => (VALUE_DISCARDING_ITERATION + RANGE_EXTRA).freeze,
+        "Set" => VALUE_DISCARDING_ITERATION,
+        "Integer" => INTEGER_EXTRA,
         "IO" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
         "File" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
         "StringIO" => IO_ITERATION

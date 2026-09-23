@@ -1470,9 +1470,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "does not fold find off a pinned predicate over a Dynamic receiver" do
-      # A `Dynamic` receiver is no catalogued iterator, so the rebound name takes the `Dynamic[top]` floor rather
-      # than the fixpoint. `BlockFolding` still folds `find` over a `Dynamic` receiver, so the pinned
-      # `Constant[false]` used to fold the call to `nil` here too; a `Dynamic` predicate folds nothing.
+      # A `Dynamic` receiver is no catalogued iterator, so the fixpoint does not run, but `BlockFolding` still
+      # folds `find` over one: the pinned `Constant[false]` used to fold the call to `nil`. The body is typed from
+      # the call-site binding and its value pins are widened, so the predicate reads `bool` and folds nothing.
       expect(flow_rules(<<~RUBY)).to be_empty
         def run(d)
           seen = 0
@@ -1505,7 +1505,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     it "does not invent iterations for a callee that runs its block once" do
       # `File.open` yields exactly once but is no catalogued exactly-once yielder, so the joined binding would
       # read `f.gets`'s `nil` into `h`, which is always `"none"` here, and `first.upcase` would report a
-      # possible-nil receiver on correct code. An uncatalogued callee takes the `Dynamic[top]` floor instead.
+      # possible-nil receiver on correct code. An uncatalogued callee keeps the call-site binding instead.
       expect(reported_rules(<<~RUBY)).not_to include("call.possible-nil-receiver")
         def with_file(path)
           header = "none"
@@ -1530,6 +1530,41 @@ RSpec.describe "block-return scope threading", type: :runner do
         end
         first.upcase
       RUBY
+    end
+
+    # The `Dynamic[top]` floor is no way out for such a callee either: a condition on a flag or counter the block
+    # rebinds can no longer be decided, and a branch the only run never takes revives. Each of these returns a
+    # String on its one run.
+    {
+      "a flag guarding a nil branch" => <<~BODY,
+        if loaded then nil else loaded = true; "value" end
+      BODY
+      "a counter guarding a nil branch" => <<~BODY,
+        loaded = !loaded
+        loaded ? "data" : nil
+      BODY
+      "a `next nil` behind the flag" => <<~BODY,
+        next nil if loaded
+        loaded = true
+        "value"
+      BODY
+      "a `break nil` behind the flag" => <<~BODY
+        break nil if loaded
+        loaded = true
+        "value"
+      BODY
+    }.each do |shape, body|
+      it "does not revive #{shape} a once-run callee never takes" do
+        expect(reported_rules(<<~RUBY)).not_to include("call.possible-nil-receiver")
+          def guarded
+            lock = Mutex.new
+            loaded = false
+            v = lock.synchronize do
+          #{body.lines.map { |line| "    #{line}" }.join}  end
+            v.upcase
+          end
+        RUBY
+      end
     end
 
     it "keeps a fold nested in the block precise over the converged binding" do

@@ -2695,11 +2695,16 @@ module Rigor
       # drop matches the spec line "facts about locals it can write become unstable after the escape point": rather than
       # synthesise the union of the block's write types (which the current pass does not yet expose), we discard the
       # narrowed binding altogether. A future sub-phase MAY refine this to the union of the block's actual writes.
+      #
+      # An instance variable the body rebinds is dropped the same way: the block shares the caller's `self`, so a
+      # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
+      # @clicked = true }` left `if @clicked` folding always-falsey). One still on its ADR-58 declaration seed is
+      # left alone ({CapturedLocals.writes}): that seed already holds whatever the callback stores.
       def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope, ivars: true)
         return base_scope if names.empty?
 
-        names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+        names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2708,25 +2713,79 @@ module Rigor
       # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
-      # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
-      # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
+      # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
+      # way — `@n = 0; [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set,
+      # seeded from their pre-call binding. See {#converge_captures_by_kind} for how a block that rebinds both kinds is
+      # answered.
+      #
+      # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
+      # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        seed = names.to_h { |name| [name, scope.local(name)] }
-        result = BodyFixpoint.converge(
+        result = converge_captures_by_kind(call_node, block, names)
+        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
+
+      # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
+      def converge_block_captures(call_node, block, names)
+        BodyFixpoint.converge(
           names: names,
-          seed_bindings: seed,
+          seed_bindings: names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] },
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
         )
+      end
 
-        result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      # The continuation of a block's rebound names. One {BodyFixpoint} over locals and ivars together is the wrong
+      # answer for most of them: its final pass widens every name while any name still moves, so an ivar counter beside
+      # `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol` — and a local counter beside `@mode = :b` did the
+      # same to `@mode` — and `take(mode)` against `(:a | :b) -> void` fired on code each kind's own fixpoint accepts.
+      #
+      # So each kind converges on its own first, with the other at its pre-call binding; for a block that rebinds one
+      # kind that is the only fixpoint, and for the locals it is exactly the one a block rebinding no ivar has always
+      # had. A name converged that way is wrong when it reads the other kind (`last = @n; @n += 1`, `@last = count`),
+      # so one more pass under the settled bindings checks every name, and one whose exit leaves its settled binding
+      # takes its answer from a joint fixpoint over both kinds, computed only then. The check repeats, because a name
+      # read off a moved one (`first = last`) may move in turn; every round moves a name to its joint answer or stops.
+      #
+      # The body's last evaluation is therefore a pass under the settled bindings, so the scopes recorded inside the
+      # block read those rather than a pass that pinned one kind to its pre-call value.
+      def converge_captures_by_kind(call_node, block, names)
+        kinds = names.partition { |name| !CapturedLocals.ivar_name?(name) }
+        return converge_block_captures(call_node, block, names) if kinds.any?(&:empty?)
+
+        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind) }.reduce(:merge)
+        joint = nil
+        loop do
+          moved = escaped_captures(settled, block_exit_bindings(call_node, block, settled, names), joint)
+          return settled if moved.empty?
+
+          joint ||= converge_block_captures(call_node, block, names)
+          moved.each { |name| settled[name] = joint[name] }
+        end
+      end
+
+      # The names whose `exits` leave their `settled` binding, less those already on their `joint` answer.
+      def escaped_captures(settled, exits, joint)
+        settled.keys.select do |name|
+          exit_type = exits[name]
+          next false if exit_type.nil? || (joint && settled[name] == joint[name])
+
+          Type::Combinator.union(settled[name], exit_type) != settled[name]
+        end
+      end
+
+      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
+      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
+      # rebinds no ivar leaves the locals exactly as before.
+      def bind_capture(scope, name, type)
+        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and
@@ -3254,14 +3313,14 @@ module Rigor
         []
       end
 
-      # Evaluates `block`'s body once with each written outer local bound to the supplied `bindings` (block params /
-      # `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the `BodyFixpoint`
-      # body-evaluator.
+      # Evaluates `block`'s body once with each written outer local or ivar bound to the supplied `bindings` (block
+      # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
+      # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
         entry = build_block_entry_scope(call_node, block)
-        entry = bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
         _type, exit_scope = sub_eval(block, entry)
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller

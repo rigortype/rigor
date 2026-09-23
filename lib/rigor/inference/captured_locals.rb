@@ -23,9 +23,9 @@ module Rigor
     # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
     # variable.
     #
-    # The per-element fold also asks for the instance variables the body rebinds (`ivars: true`). Their
-    # names keep their `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each
-    # name through its own kind of binding.
+    # All three also ask for the instance variables the body rebinds (`ivars: true`). Their names keep their
+    # `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each name through its
+    # own kind of binding.
     #
     # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
     # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
@@ -49,12 +49,13 @@ module Rigor
       module_function
 
       # @param base_scope — the call-site scope the block closes over.
-      # @param ivars — also collect the instance variables the body rebinds, for the per-element fold. An
-      #   ivar is not captured — the block shares the caller's `self` — but it outlives an iteration exactly
-      #   as a captured local does. It counts on the same terms as a local (every write form, any depth, bound
-      #   in `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration
-      #   seed is the union of every write in the class, this body's included, so there is no first-iteration
-      #   pin in it to remove. A nested block that rebinds `self` (`o.instance_eval`) writes another object's
+      # @param ivars — also collect the instance variables the body rebinds. An ivar is not captured — the
+      #   block shares the caller's `self` — but it outlives an iteration, and the call, exactly as a captured
+      #   local does. It counts on the same terms as a local (every write form, any depth, bound in
+      #   `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration seed is
+      #   the union of every write in the class, this body's included, so nothing the body stores can move it,
+      #   and rebinding it would only drop the declaration mark that keeps its nil from being diagnostic fuel.
+      #   A nested block that rebinds `self` (`o.instance_eval`) writes another object's
       #   ivar, and a nested `def` runs only when called; both still count, because an `instance_eval` without
       #   a receiver, or a call to that `def` inside the body, does write this one.
       # @return the captured names the body writes, each once, in first-write order.

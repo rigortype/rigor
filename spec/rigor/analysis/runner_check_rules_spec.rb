@@ -1162,15 +1162,36 @@ RSpec.describe Rigor::Analysis::Runner do
               pair.last
             end
 
-            def after_identity
+            def after_identity(name)
               h = { "a" => 1, "b" => 2 }
               h.compare_by_identity
+              puts "one" if h[name] == 1
               pair = h.first
               pair.last
             end
           RUBY
           expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
           expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not elide a branch on a non-empty-hash's `first`, a refinement an alias can falsify" do
+          sig = <<~RBS
+            class Pairs
+              %a{rigor:v1:param: h is non-empty-hash[Symbol, Integer]}
+              def first_or_none: (Hash[Symbol, Integer] h) -> untyped
+            end
+          RBS
+          result = analyze(<<~RUBY, sig: { "pairs.rbs" => sig })
+            class Pairs
+              def first_or_none(h)
+                g = h
+                g.clear
+                n = h.first ? 1 : "none"
+                n.upcase
+              end
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
         end
 
         it "does not report a nil receiver once a default answers the miss" do

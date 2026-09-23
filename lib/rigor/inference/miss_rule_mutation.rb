@@ -32,7 +32,7 @@ module Rigor
         return nil unless type.is_a?(Type::HashShape)
 
         key = type.pairs.empty? ? Type::Combinator.untyped : ContentJoin.key_union_for(type.pairs.keys)
-        values = type.pairs.empty? ? [Type::Combinator.untyped] : type.pairs.values
+        values = type.pairs.empty? ? [Type::Combinator.untyped] : type.pairs.values.map { |v| Type::Combinator.widen_value_pinned(v) }
         value = Type::Combinator.union(*values, *miss_values(method_name, arg_types))
         widened = Type::Combinator.nominal_of("Hash", type_args: [key, value])
         return widened unless type.pairs.keys.any? { |k| !type.optional_key?(k) }

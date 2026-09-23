@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "call_context"
+require_relative "../optimistic_origin"
 
 module Rigor
   module Inference
@@ -219,7 +220,18 @@ module Rigor
           handler = RECEIVER_HANDLERS[receiver.class]
           return nil unless handler
 
-          send(handler, receiver, method_name, args)
+          result = send(handler, receiver, method_name, args)
+          record_refinement_bet(context) if result && method_name == :first && receiver.is_a?(Type::Difference)
+          result
+        end
+
+        # `non-empty-hash#first`'s nil-freeness rests on the refinement, which the analysis does not keep
+        # current through an alias or a callee (`g = h; g.clear`) — the same bet `Array#first` makes on a
+        # `non-empty-array`, whose answer `RbsDispatch` marks. Unmarked, the branch elision read it as proof.
+        def record_refinement_bet(context)
+          return unless context.scope && context.call_node
+
+          context.scope.record_optimistic_origin(context.call_node, OptimisticOrigin::NON_EMPTY_REFINEMENT)
         end
 
         # Tightens `Array#size` / `Array#length` / `String#length` / `String#bytesize` / `Hash#size` etc.

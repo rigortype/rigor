@@ -315,27 +315,24 @@ RSpec.describe Rigor::Inference::MutationWidening do
       let(:symbol) { Rigor::Type::Combinator.nominal_of("Symbol") }
       let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
 
-      it "joins the default's widened class into the value side and keeps the shape non-empty" do
+      it "widens the values off their pins, joins a typed default's class, and keeps the shape non-empty" do
         widened = described_class.widen_for_mutator(
-          shape, :default=, arg_types: [Rigor::Type::Combinator.constant_of(0)]
+          shape, :default=, arg_types: [Rigor::Type::Combinator.constant_of("x")]
         )
-        expect(widened).to eq(
-          Rigor::Type::Combinator.non_empty_hash(
-            symbol, Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1), integer)
-          )
-        )
+        string = Rigor::Type::Combinator.nominal_of("String")
+        value = Rigor::Type::Combinator.union(integer, string)
+        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, value))
       end
 
-      it "adds an untyped arm for a default proc, whose result is unknown" do
-        widened = described_class.widen_for_mutator(shape, :default_proc=, arg_types: [Rigor::Type::Combinator.untyped])
-        expect(widened.base.type_args.last).to eq(
-          Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.untyped)
-        )
+      it "joins an untyped arm for a default the seam did not type, and for a default proc" do
+        with_untyped = Rigor::Type::Combinator.union(integer, Rigor::Type::Combinator.untyped)
+        expect(described_class.widen_for_mutator(shape, :default=).base.type_args.last).to eq(with_untyped)
+        expect(described_class.widen_for_mutator(shape, :default_proc=).base.type_args.last).to eq(with_untyped)
       end
 
-      it "keeps the value side for `compare_by_identity`" do
+      it "only widens the value pins for `compare_by_identity`, under which a declared key can still miss" do
         widened = described_class.widen_for_mutator(shape, :compare_by_identity)
-        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, Rigor::Type::Combinator.constant_of(1)))
+        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, integer))
       end
 
       it "leaves a Hash nominal and a non-empty-hash refinement untouched" do

@@ -755,10 +755,14 @@ module Rigor
         # `Difference[base, removed]` accepts another type X when the base accepts X *and* X's value set is
         # provably disjoint from `removed`. The disjointness test is the subtle part — it is NOT the same as
         # `removed.accepts(X)`, because `Nominal[String]` includes `""` even though `Constant[""]` does not
-        # "accept" `Nominal[String]`. The conservative rule here: we can prove disjointness only when X is
-        # itself a `Constant` carrier (compare values directly) or another `Difference` with the same
-        # removed value (already exhibits the disjointness). Any other shape — Nominal, Union, IntegerRange
-        # — could overlap the removed value, so the difference rejects it under gradual mode.
+        # "accept" `Nominal[String]`. The conservative rule here: we can prove disjointness only when X is a
+        # carrier whose value set is visibly apart from `removed` — a `Constant` (compare values directly),
+        # another `Difference` with the same removed value (already exhibits the disjointness), an
+        # `IntegerRange` that skips an Integer removed value, a `Tuple` whose fixed arity differs from a
+        # removed `Tuple`, or a `HashShape` with a required key a closed removed `HashShape` cannot hold. The
+        # last three cover the empty witnesses of `non-zero-int`, `non-empty-array[T]` and
+        # `non-empty-hash[K, V]`. Any other shape — Nominal, or a Union whose member is none of these — could
+        # overlap the removed value, so the difference rejects it under gradual mode.
         def accepts_difference(self_type, other_type, mode)
           base_result = accepts(self_type.base, other_type, mode: mode)
           return base_result if base_result.no?
@@ -787,7 +791,25 @@ module Rigor
             # Disjointness is monotonic over Intersection: if any member is provably disjoint from
             # `removed`, the meet is too.
             other_type.members.any? { |m| provably_disjoint_from_removed?(m, removed) }
+          when Type::IntegerRange
+            removed.is_a?(Type::Constant) && removed.value.is_a?(Integer) && !other_type.covers?(removed.value)
+          when Type::Tuple
+            # A Tuple's arity is fixed, so it shares no inhabitant with a Tuple of another arity — the
+            # zero-arity witness `non-empty-array[T]` removes included.
+            removed.is_a?(Type::Tuple) && removed.elements.size != other_type.elements.size
+          when Type::HashShape
+            hash_shape_excludes_removed?(other_type, removed)
           end
+        end
+
+        # Every inhabitant of `shape` holds each of its required keys, and a closed `removed` shape holds no
+        # key outside its pairs, so one required key `removed` does not list makes the two disjoint. Against
+        # the closed `{}` witness `non-empty-hash[K, V]` removes, that is any required key; an optional key
+        # proves nothing, since the shape is inhabited without it.
+        def hash_shape_excludes_removed?(shape, removed)
+          return false unless removed.is_a?(Type::HashShape) && removed.closed?
+
+          shape.required_keys.any? { |key| !removed.pairs.key?(key) }
         end
 
         # `Refined[base, predicate]` accepts another type X when the base accepts the *base* of X *and* X is

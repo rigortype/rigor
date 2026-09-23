@@ -332,6 +332,49 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(diag.message).to include("declared Integer")
       end
     end
+
+    # An `RBS::Extended` return override to an empty-witness refinement compares the body against a
+    # `Difference`, which accepts a literal only once it proves the literal excludes the removed value.
+    # A non-empty array or hash literal, or a range that skips zero, is that proof; the empty literal is
+    # the removed value itself and must still fire.
+    describe "empty-witness refinement overrides" do
+      let(:refinement_sig) do
+        { "catalog.rbs" => <<~RBS }
+          class Catalog
+            %a{rigor:v1:return: non-empty-array[Integer]}
+            def ids: (bool) -> Array[Integer]
+
+            %a{rigor:v1:return: non-empty-hash[Symbol, Integer]}
+            def attributes: () -> Hash[Symbol, Integer]
+
+            %a{rigor:v1:return: non-zero-int}
+            def count: (Array[Integer]) -> Integer
+          end
+        RBS
+      end
+
+      it "stays silent on non-empty array and hash literals and a range that skips zero" do
+        result = analyze(<<~RUBY, sig: refinement_sig)
+          class Catalog
+            def ids(flag) = flag ? [1] : [2, 3]
+            def attributes = { name: 1 }
+            def count(xs) = xs.size + 1
+          end
+        RUBY
+        expect(return_diags(result)).to be_empty
+      end
+
+      it "still fires on the empty literal each refinement removes" do
+        result = analyze(<<~RUBY, sig: refinement_sig)
+          class Catalog
+            def ids(flag) = flag ? [1] : []
+            def attributes = {}
+            def count(xs) = xs.size
+          end
+        RUBY
+        expect(return_diags(result).map(&:method_name)).to contain_exactly("ids", "attributes", "count")
+      end
+    end
   end
 
   describe "def.override-visibility-reduced" do

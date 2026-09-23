@@ -460,7 +460,37 @@ RSpec.describe Rigor::Inference::Acceptance do
 
     it "rejects non-HashShape values" do
       a = shape(a: int_nominal)
-      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Hash))).to be_no
+      expect(accepts(a, str_nominal)).to be_no
+    end
+
+    it "rejects a Hash[K, V] whose type arguments carry no Dynamic arm" do
+      a = shape(a: int_nominal)
+      precise = Rigor::Type::Combinator.nominal_of(Hash,
+                                                   type_args: [Rigor::Type::Combinator.nominal_of(Symbol), int_nominal])
+      expect(accepts(a, precise)).to be_no
+    end
+
+    # A `Hash` nominal that carries a gradual arm, or no type arguments at all, says the analysis could not read
+    # the entries — a hash literal's `**splat` adds that arm by design — so it cannot prove a record's keys either
+    # way. `{ **BASE, b: 2 }` against `-> { a: Integer, b: Integer }` reported a mismatch on correct code.
+    it "cannot decide a raw Hash or a Hash[K, V] carrying a Dynamic arm" do
+      c = Rigor::Type::Combinator
+      a = shape(a: int_nominal, b: int_nominal)
+      splat_keys = c.union(c.constant_of(:a), c.constant_of(:b), dyn_top)
+      splatted = c.nominal_of(Hash, type_args: [splat_keys, c.union(int_constant, c.constant_of(2), dyn_top)])
+      untyped_values = c.nominal_of(Hash, type_args: [c.nominal_of(Symbol), dyn_top])
+
+      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Hash))).to be_maybe
+      expect(accepts(a, splatted)).to be_maybe
+      expect(accepts(a, untyped_values)).to be_maybe
+      expect(accepts(a, Rigor::Type::Combinator.non_empty_hash(dyn_top, dyn_top))).to be_maybe
+    end
+
+    it "still rejects a Hash subclass carrying a Dynamic arm" do
+      a = shape(a: int_nominal)
+      subclass = Rigor::Type::Combinator.nominal_of("ActiveSupport::HashWithIndifferentAccess",
+                                                    type_args: [dyn_top, dyn_top])
+      expect(accepts(a, subclass)).to be_no
     end
 
     it "Nominal[Hash] accepts a HashShape via projection" do

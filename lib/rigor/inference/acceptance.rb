@@ -948,10 +948,18 @@ module Rigor
         # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
         # the other side and Ti accepts Ui (depth covariant). Optional keys may be absent on the other side;
         # when present, their values are checked. A closed self rejects known or possible extra keys. Other
-        # types are rejected; the converse direction (a Nominal accepting a HashShape) is handled by
+        # types are rejected, except a `Hash` whose entries the analysis could not read (see
+        # {#unread_hash_entries?}); the converse direction (a Nominal accepting a HashShape) is handled by
         # `accepts_nominal` via projection.
         def accepts_hash_shape(self_type, other_type, mode)
           unless other_type.is_a?(Type::HashShape)
+            if unread_hash_entries?(other_type)
+              return Type::AcceptsResult.maybe(
+                mode: mode,
+                reasons: "HashShape cannot check the entries of #{other_type.describe(:short)}"
+              )
+            end
+
             return Type::AcceptsResult.no(
               mode: mode,
               reasons: "HashShape does not accept #{other_type.class}"
@@ -972,6 +980,25 @@ module Rigor
 
           per_entry = hash_shape_entry_results(self_type, other_type, mode)
           combine_arg_results(per_entry, mode)
+        end
+
+        # A `Hash` nominal — directly or as the base of a `Difference` (`non-empty-hash[K, V]`) — whose type
+        # arguments are absent or carry a `Dynamic` arm. Either says the analysis could not read every entry: a
+        # hash literal with a `**splat` entry carries the arm by design, and a raw `Hash` is what `Hash.new`
+        # filled key by key reads as. The runtime value may then hold exactly the record's keys, so a shape
+        # cannot reject it, mirroring `Hash[K, V]` accepting a raw `Hash` as maybe. A `Hash` subclass is not
+        # read: its entries need not be the record's (`HashWithIndifferentAccess` stores String keys).
+        def unread_hash_entries?(type)
+          case type
+          when Type::Difference then unread_hash_entries?(type.base)
+          when Type::Nominal
+            type.class_name == "Hash" && (type.type_args.empty? || type.type_args.any? { |arg| gradual_arm?(arg) })
+          else false
+          end
+        end
+
+        def gradual_arm?(type)
+          type.is_a?(Type::Dynamic) || (type.is_a?(Type::Union) && type.members.any?(Type::Dynamic))
         end
 
         def hash_shape_entry_results(self_type, other_type, mode)

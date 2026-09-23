@@ -106,6 +106,63 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
     RUBY
   end
 
+  # The literal's `Dynamic[top]` arm says the analysis could not read every entry, so a record the runtime value
+  # satisfies is not a mismatch. `{ **BASE, b: 2 }` reported `def.return-type-mismatch` against
+  # `-> { a: Integer, b: Integer }` both before the splat was read and after.
+  describe "against a declared record" do
+    let(:rec_sig) do
+      { "rec.rbs" => <<~RBS }
+        class Rec
+          def rec: () -> { a: Integer, b: Integer }
+          def rec_nominal: (Hash[Symbol, Integer]) -> { a: Integer, b: Integer }
+          def take: ({ a: Integer, b: Integer }) -> void
+          def control: () -> { a: Integer, b: Integer }
+        end
+      RBS
+    end
+
+    def mismatch_rules(source)
+      analyze(source, sig: rec_sig).diagnostics.map(&:rule).grep(/mismatch/)
+    end
+
+    it "does not report a splatted literal the record describes" do
+      expect(mismatch_rules(<<~RUBY)).to be_empty
+        class Rec
+          BASE = { a: 1 }.freeze
+
+          def rec
+            { **BASE, b: 2 }
+          end
+
+          def rec_nominal(opts)
+            { **opts, b: 2 }
+          end
+
+          def take(record); end
+
+          def caller_site
+            take({ **BASE, b: 2 })
+          end
+
+          def control
+            { a: 1, b: 2 }
+          end
+        end
+      RUBY
+    end
+
+    it "still reports a splat-free literal the record rejects" do
+      # The positive control: the exact shape keeps its verdict.
+      expect(mismatch_rules(<<~RUBY)).to eq(["def.return-type-mismatch"])
+        class Rec
+          def control
+            { a: "x", b: 2 }
+          end
+        end
+      RUBY
+    end
+  end
+
   it "still folds the splat-free literal's impossible comparison" do
     # The positive control for the silence above. The rule id names the family, not the direction: its
     # message says "always falsey".

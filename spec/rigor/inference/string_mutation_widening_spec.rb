@@ -7,8 +7,8 @@ require "yaml"
 # `delete_suffix!`, `encode!`, `scrub!`, `unicode_normalize!`, `setbyte`, `bytesplice` or `append_as_bytes`, so every
 # seam that widens a String literal declined them and the literal outlived the mutation: `s = +"ab";
 # s.delete_prefix!("a")` kept `"ab"` for a receiver holding `"b"`, and `s == "ab"` folded always-truthy on correct
-# code. The class-level ivar and constant censuses and the indexed-narrowing invalidation read only the Array and Hash
-# tables, so they missed even the names the String table did list.
+# code. The class-level ivar and constant censuses, the indexed-narrowing invalidation and the callee and
+# escaping-closure floors read only the Array and Hash tables, so they missed even the names the String table did list.
 #
 # Every mutating example is paired with a control that makes a non-mutating call in the same position, and the control
 # must keep the literal — without it, a seam that stopped folding altogether would pass the mutating half too. Each
@@ -202,6 +202,78 @@ RSpec.describe "String mutation widening", type: :runner do
         dump_type(t[0])
       RUBY
     end
+
+    # The mutator rewrites the element a narrowing records in place rather than replacing it, so the slot is still
+    # non-nil: the narrowing stays, floored to `String`. Dropping it read `h[:name]` back as the declared `String?` and
+    # reported a nil receiver on the next call.
+    it "keeps a slot's non-nil proof when a String mutator rewrites the element" do
+      sig = { "opts.rbs" => "class Opts\n  def table: () -> Hash[Symbol, String?]\n  def default: () -> String\nend\n" }
+      expect(dumped_types(<<~RUBY, sig: sig)).to eq(["String", "String?"])
+        h = Opts.new.table
+        h[:name] ||= Opts.new.default
+        h[:name].strip!
+        dump_type(h[:name])
+        g = Opts.new.table
+        g[:name].strip! if g[:name]
+        dump_type(g[:name])
+      RUBY
+    end
+
+    it "floors a pinned or refined slot to String under a String mutator" do
+      expect(run("12", 'tr!("1", "x")')).to eq("x2")
+      expect(dumped_types(<<~RUBY)).to eq(%w[String String])
+        k = {}
+        k[:a] ||= +"x"
+        k[:a].upcase!
+        dump_type(k[:a])
+        m = {}
+        m[:n] ||= 12.to_s
+        m[:n].tr!("1", "x")
+        dump_type(m[:n])
+      RUBY
+      expect(flow_rules(<<~RUBY)).to be_empty
+        k = {}
+        k[:a] ||= +"x"
+        k[:a].upcase!
+        puts "same" if k[:a] == "x"
+      RUBY
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        k = {}
+        k[:a] ||= +"x"
+        k[:a].upcase
+        puts "same" if k[:a] == "x"
+      RUBY
+    end
+  end
+
+  # ADR-56's callee and escaping-closure floors count a content mutation by name. They counted the Array and Hash adders
+  # only, so a String mutator made by a callee or an escaping closure left the caller's literal pinned.
+  describe "the callee and escaping-closure floors" do
+    it "floors a literal a callee mutates, and keeps one a callee only reads" do
+      expect(dumped_types(<<~RUBY)).to eq(["String", '"ab"'])
+        def strip_a(s) = s.delete_prefix!("a")
+        def peek_a(s) = s.delete_prefix("a")
+        b = +"ab"
+        strip_a(b)
+        dump_type(b)
+        c = +"ab"
+        peek_a(c)
+        dump_type(c)
+      RUBY
+    end
+
+    it "floors a literal an escaping closure mutates, and keeps one a closure only reads" do
+      expect(dumped_types(<<~RUBY)).to eq(["String", '"ab"'])
+        x = +"ab"
+        strip = -> { x.upcase! }
+        strip.call
+        dump_type(x)
+        y = +"ab"
+        peek = -> { y.upcase }
+        peek.call
+        dump_type(y)
+      RUBY
+    end
   end
 
   # Issue #936: an empty-witness refinement keeps its witness only under a mutator that cannot empty the receiver.
@@ -212,6 +284,7 @@ RSpec.describe "String mutation widening", type: :runner do
           class Label
             %a{rigor:v1:return: non-empty-string}
             def text: () -> String
+            def plain: () -> String
           end
         RBS
       }
@@ -241,11 +314,26 @@ RSpec.describe "String mutation widening", type: :runner do
       end
     end
 
-    # Each appends, or rewrites the buffer without being able to shorten it to nothing.
-    ["setbyte(0, 98)", 'append_as_bytes("c")', "unicode_normalize!(:nfd)", 'force_encoding("BINARY")'].each do |call|
+    # Each appends, or rewrites the buffer without being able to shorten it to nothing. `squeeze!` keeps one character
+    # of every run it squeezes.
+    ["setbyte(0, 98)", 'append_as_bytes("c")', "unicode_normalize!(:nfd)", 'force_encoding("BINARY")',
+     "squeeze!"].each do |call|
       it "keeps the witness under `#{call}`, which cannot empty the buffer" do
         expect(dumped_types(label("s.#{call}\ndump_type(s)"), sig: sig)).to eq(["non-empty-string"])
       end
+    end
+
+    # `tr!` / `tr_s!` map every matched character to one character of the replacement, so only an empty replacement
+    # empties the buffer, and the witness turns on whether the second argument is provably a non-empty String.
+    it "keeps the witness under a translator whose replacement is provably non-empty" do
+      expect(run("a", 'tr!("a", "_")')).to eq("_")
+      expect(run("aa", 'tr_s!("a", "_")')).to eq("_")
+      expect(dumped_types(label(%(s.tr!("-", "_")\ndump_type(s))), sig: sig)).to eq(["non-empty-string"])
+      expect(dumped_types(label(%(s.tr_s!("-", Label.new.text)\ndump_type(s))), sig: sig)).to eq(["non-empty-string"])
+    end
+
+    it "retracts the witness under a translator whose replacement may be empty" do
+      expect(dumped_types(label(%(s.tr!("-", Label.new.plain)\ndump_type(s))), sig: sig)).to eq(["String"])
     end
 
     it "keeps the witness, and the genuine fold, under a non-mutating call" do
@@ -261,23 +349,31 @@ RSpec.describe "String mutation widening", type: :runner do
     let(:mutators) { Rigor::Inference::StringMutation::MUTATORS }
     let(:bang_methods) { String.public_instance_methods(false).grep(/!\z/) }
 
-    # Receiver mutators whose names carry no `!`, so reflection cannot find them. A method Ruby adds to this family
-    # (as 3.4 added `append_as_bytes`) has to be added here and to the table by hand.
-    let(:non_bang_mutators) do
-      %i[<< concat insert prepend replace clear []= setbyte bytesplice force_encoding append_as_bytes]
-    end
-
     # Every bang method String defines rewrites the receiver in place, so none is exempt.
     it "lists every bang method String defines" do
       expect(bang_methods - mutators.to_a).to be_empty
     end
 
-    it "lists every non-bang receiver mutator" do
-      expect(non_bang_mutators - mutators.to_a).to be_empty
-    end
+    # An oracle that needs no list of names: every public String method is called on a frozen receiver under a handful
+    # of argument shapes, and the ones that raise `FrozenError` are the receiver mutators. A mutator Ruby adds without a
+    # `!` (as 3.4 added `append_as_bytes`) shows up here unprompted. The invalid-byte receiver is for `scrub!`, which
+    # checks for frozenness only when it has something to replace.
+    it "lists exactly the methods that refuse a frozen receiver" do
+      argument_shapes = [[], ["a"], [0], %w[a b], [0, "a"], [0, 1], [0, 1, "a"], [:nfd]]
+      refusing = String.public_instance_methods(false).select do |name|
+        ["ab", "a\xFF"].any? do |receiver|
+          argument_shapes.any? do |arguments|
+            receiver.dup.freeze.public_send(name, *arguments) { "" }
+            false
+          rescue FrozenError
+            true
+          rescue StandardError, NotImplementedError
+            false
+          end
+        end
+      end
 
-    it "lists nothing but those" do
-      expect(mutators.to_a - bang_methods - non_bang_mutators).to be_empty
+      expect(refusing).to match_array(mutators.to_a)
     end
 
     # `data/builtins/ruby_core/string.yml` tags a C body that checks `rb_check_frozen` as `c_effects: mutate`: an

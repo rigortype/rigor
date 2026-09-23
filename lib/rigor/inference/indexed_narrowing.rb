@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "mutation_widening"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -167,10 +168,24 @@ module Rigor
         recorded = current_scope.indexed_narrowing(*address)
         return current_scope if recorded.nil?
 
-        widened = MutationWidening.widen_for_mutator(recorded, call_node.name)
+        widened = MutationWidening.widen_for_mutator(recorded, call_node.name) ||
+                  string_slot_floor(recorded, call_node.name)
         return current_scope.without_indexed_narrowing(*address) if widened.nil?
 
         current_scope.with_indexed_narrowing(*address, widened)
+      end
+
+      # A String mutator the widening declines on a String slot — a `String` nominal it may not grow, a refinement it
+      # does not model — still leaves the same object in the slot, so the `||=` proof that the slot is non-nil stands.
+      # The narrowing is kept, floored to `String` so no value or refinement pin outlives the rewrite. Dropping it read
+      # `h[:name]` back as the declared `String?` after `h[:name].strip!` and reported a nil receiver on correct code.
+      def string_slot_floor(recorded, method_name)
+        return nil unless StringMutation::MUTATORS.include?(method_name)
+
+        members = recorded.is_a?(Type::Union) ? recorded.members : [recorded]
+        return nil unless members.all? { |member| UnknownStoreWidening.carrier_class(member) == "String" }
+
+        Type::Combinator.nominal_of("String")
       end
 
       ELEMENT_WRITE_NODES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze

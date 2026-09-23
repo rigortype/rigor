@@ -40,23 +40,25 @@ module Rigor
       # The block receives the refinement's BASE and answers the base with the mutator's added
       # content joined in, or a falsey value to decline (the mutator is not in that base's table).
       # A String base is answered here instead: it carries no content parameter, so the only
-      # question it has is the witness one.
-      def widen(difference, method_name)
+      # question it has is the witness one, which for `tr!` / `tr_s!` turns on `arg_types`.
+      def widen(difference, method_name, arg_types = StringMutation::NO_ARG_TYPES)
         return nil unless difference.removes_empty_witness?
 
         base = difference.base
-        joined = base.class_name == "String" ? string_base(base, method_name) : yield(base)
+        joined = base.class_name == "String" ? string_base(base, method_name, arg_types) : yield(base)
         return nil unless joined
 
         widened = preserves_witness?(base.class_name, method_name) ? refine(joined, difference) : joined
         widened == difference ? nil : widened
       end
 
-      # A `non-empty-string` survives every mutator that cannot empty the buffer, and those are
-      # exactly the ones {StringMutation} does not list as emptying — so this arm declines them
-      # and the refinement stands, rather than widening to `String` and dropping it.
-      def string_base(base, method_name)
-        StringMutation::EMPTYING_MUTATORS.include?(method_name) ? base : nil
+      # A `non-empty-string` survives every mutator call that cannot empty the buffer
+      # ({StringMutation.may_empty?}), so this arm declines those and the refinement stands, rather
+      # than widening to `String` and dropping it. A name that is not a String mutator declines too.
+      def string_base(base, method_name, arg_types)
+        return nil unless StringMutation::MUTATORS.include?(method_name)
+
+        StringMutation.may_empty?(method_name, arg_types) ? base : nil
       end
 
       def preserves_witness?(class_name, method_name)

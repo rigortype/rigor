@@ -863,8 +863,11 @@ module Rigor
         ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
       end
 
+      # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
       def mutator_arg_types(call_node, current_scope)
-        return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
+        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name)
+          return MutationWidening::NO_ARG_TYPES
+        end
         unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||
                ElementReadWidening.joinable_element_read?(call_node.receiver, current_scope)
           return MutationWidening::NO_ARG_TYPES
@@ -3701,7 +3704,7 @@ module Rigor
         calls = []
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
-          next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
+          next unless CONTENT_MUTATORS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
@@ -3807,6 +3810,17 @@ module Rigor
       INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
+      # Every call name a content scan counts: the adders the joins read evidence from, and the String mutators no
+      # Array or Hash table lists. A String carries no element parameter, so a join answers a String pre-state with the
+      # bare `String` whatever the name, and a floor floors it; without them `def strip(s) = s.delete_prefix!("a")` and
+      # an escaping `-> { s.upcase! }` left the caller's `+"ab"` pinned. A name an Array or Hash table also lists stays
+      # with those tables' adders: a scan cannot see the receiver's class, and the Array join reads a non-adder's
+      # arguments as appended elements (`slice!(0)`'s index).
+      CONTENT_MUTATORS = (ContentJoin::CONTENT_ADDERS |
+                          (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
+                           MutationWidening::HASH_MUTATORS)).freeze
+      private_constant :CONTENT_MUTATORS
+
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh
       # `[nil, nil]` per decline was one of the largest allocation sites in the evaluator.
@@ -3817,7 +3831,7 @@ module Rigor
       # (depth predicate), else the frozen `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node
       # forms.
       def content_mutation_target(node)
-        is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
+        is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
         return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver

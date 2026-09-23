@@ -33,18 +33,22 @@ module Rigor
 
       # The {MUTATORS} that CANNOT leave a non-empty receiver empty, and so keep a `non-empty-string` refinement:
       # appenders (`<<`, `concat`, `insert`, `prepend`, `append_as_bytes`), and rewrites that keep at least one
-      # character (`setbyte`, `force_encoding`, the case mappings, `reverse!`, `succ!` / `next!`,
+      # character (`setbyte`, `force_encoding`, the case mappings, `reverse!`, `succ!` / `next!`, `squeeze!`,
       # `unicode_normalize!`). A whitelist, as `RefinementMutation::EMPTY_PRESERVING` is for Array and Hash: a mutator
       # missing here retracts the witness, which costs precision, where a mutator missing from a list of emptiers kept
       # the witness of a string it had just emptied — `tr!` and `tr_s!` did, since `"a".tr!("a", "")` is `""`.
       EMPTY_PRESERVING = %i[
         << concat insert prepend append_as_bytes
         setbyte force_encoding
-        upcase! downcase! capitalize! swapcase! reverse! succ! next! unicode_normalize!
+        upcase! downcase! capitalize! swapcase! reverse! succ! next! squeeze! unicode_normalize!
       ].to_set.freeze
 
-      # The {MUTATORS} that can leave the receiver EMPTY, and so retract a `non-empty-string` refinement.
-      EMPTYING_MUTATORS = (MUTATORS - EMPTY_PRESERVING).freeze
+      # `tr!` / `tr_s!` map every character they match to one character of the replacement (padded with its last), so
+      # they empty the buffer only through an EMPTY replacement: `"a".tr!("a", "")` is `""`, `"a".tr!("a", "_")` is
+      # `"_"`. They keep the witness when their second argument is provably a non-empty String.
+      TRANSLATORS = %i[tr! tr_s!].to_set.freeze
+
+      NO_ARG_TYPES = [].freeze
 
       module_function
 
@@ -68,6 +72,25 @@ module Rigor
 
       def constant?(type)
         type.is_a?(Type::Constant) && type.value.is_a?(String)
+      end
+
+      # Whether `method_name`, called with `arg_types` (the call's positional argument types, possibly none), can leave
+      # a non-empty receiver empty, and so retract a `non-empty-string` refinement. Every mutator outside
+      # {EMPTY_PRESERVING} can, except a {TRANSLATORS} call whose replacement is provably non-empty.
+      def may_empty?(method_name, arg_types = NO_ARG_TYPES)
+        return false if EMPTY_PRESERVING.include?(method_name)
+        return true unless TRANSLATORS.include?(method_name)
+
+        !non_empty_string?(arg_types[1])
+      end
+
+      def non_empty_string?(type)
+        case type
+        when Type::Constant then constant?(type) && !type.value.empty?
+        when Type::Difference then type.removes_empty_witness? && type.base.class_name == "String"
+        when Type::Union then type.members.all? { |member| non_empty_string?(member) }
+        else false
+        end
       end
     end
   end

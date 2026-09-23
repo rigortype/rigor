@@ -480,10 +480,23 @@ RSpec.describe Rigor::Inference::Acceptance do
       splatted = c.nominal_of(Hash, type_args: [splat_keys, c.union(int_constant, c.constant_of(2), dyn_top)])
       untyped_values = c.nominal_of(Hash, type_args: [c.nominal_of(Symbol), dyn_top])
 
-      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Hash))).to be_maybe
+      expect(accepts(a, c.nominal_of(Hash))).to be_maybe
       expect(accepts(a, splatted)).to be_maybe
       expect(accepts(a, untyped_values)).to be_maybe
-      expect(accepts(a, Rigor::Type::Combinator.non_empty_hash(dyn_top, dyn_top))).to be_maybe
+      expect(accepts(a, c.non_empty_hash(dyn_top, dyn_top))).to be_maybe
+    end
+
+    # The gradual arm excuses only what it covers: a precise `K` or `V` that rules the record out still does.
+    it "rejects a gradual Hash whose precise key or value argument rules the record out" do
+      c = Rigor::Type::Combinator
+      a = shape(a: int_nominal)
+      string_keys = c.nominal_of(Hash, type_args: [str_nominal, dyn_top])
+      string_values = c.nominal_of(Hash, type_args: [dyn_top, str_nominal])
+      mixed_values = c.nominal_of(Hash, type_args: [dyn_top, int_or_str])
+
+      expect(accepts(a, string_keys)).to be_no
+      expect(accepts(a, string_values)).to be_no
+      expect(accepts(a, mixed_values)).to be_maybe
     end
 
     it "still rejects a Hash subclass carrying a Dynamic arm" do

@@ -117,12 +117,18 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
           def rec_nominal: (Hash[Symbol, Integer]) -> { a: Integer, b: Integer }
           def take: ({ a: Integer, b: Integer }) -> void
           def control: () -> { a: Integer, b: Integer }
+          def pick: ({ a: Integer }) -> Integer
+                  | (Hash[Symbol, untyped]) -> String
         end
       RBS
     end
 
     def mismatch_rules(source)
       analyze(source, sig: rec_sig).diagnostics.map(&:rule).grep(/mismatch/)
+    end
+
+    def errors(source)
+      analyze(source, sig: rec_sig).diagnostics.select { |d| d.severity == :error }.map { |d| [d.rule, d.line] }
     end
 
     it "does not report a splatted literal the record describes" do
@@ -141,7 +147,8 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
           def take(record); end
 
           def caller_site
-            take({ **BASE, b: 2 })
+            # An explicit receiver: the argument check does not run on an implicit-self call.
+            self.take({ **BASE, b: 2 })
           end
 
           def control
@@ -152,11 +159,36 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
     end
 
     it "still reports a splat-free literal the record rejects" do
-      # The positive control: the exact shape keeps its verdict.
-      expect(mismatch_rules(<<~RUBY)).to eq(["def.return-type-mismatch"])
+      # The positive controls: the exact shape keeps its verdict, as a return and as an argument.
+      expect(mismatch_rules(<<~RUBY)).to eq(%w[def.return-type-mismatch call.argument-type-mismatch])
         class Rec
           def control
             { a: "x", b: 2 }
+          end
+
+          def take(record); end
+
+          def caller_site
+            self.take({ a: "x", b: 2 })
+          end
+        end
+      RUBY
+    end
+
+    # A record parameter's `maybe` is no evidence for its overload: the strict pass must not take it over a
+    # `Hash` overload that answers yes. `{ **BASE, b: 2 }` has a key the closed record forbids, and the runtime
+    # takes the `Hash[Symbol, untyped]` overload.
+    it "does not let a record overload listed first win a splatted literal by position" do
+      # Only the control on line 8 (`Integer#upcase`) fires.
+      expect(errors(<<~RUBY)).to eq([["call.undefined-method", 8]])
+        class Rec
+          BASE = { a: 1 }.freeze
+
+          def pick(value) = value.is_a?(Hash) && value.size == 1 ? 1 : "s"
+
+          def picks
+            self.pick({ **BASE, b: 2 }).upcase
+            self.pick({ a: 1 }).upcase
           end
         end
       RUBY

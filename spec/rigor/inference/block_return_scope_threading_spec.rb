@@ -1572,6 +1572,94 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  describe "a captured local the body mutates in place and rebinds as a statement" do
+    # The unmoved-pin floor asks the call-site binding, not the in-place widened seed, even when the body rebinds
+    # the name as a statement: converging on the widened seed next to a statement rebind does not show that the
+    # rebind was all there was. These fixtures are the two routes that would otherwise report on correct code.
+    it "keeps the floor for a statement rebind that lands inside the widened seed" do
+      # `["abcc", "abcc"]` at runtime; `String` is right here, but nothing the fixpoint sees tells this body from
+      # the two below.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+        s = +"ab"
+        dump_type([1, 2].map { |e| s << "c"; s = s.strip; s })
+      RUBY
+    end
+
+    it "does not report a rebind the capped fixpoint never runs" do
+      # Runtime `r.last` is `[5, "c"]`: `n` reaches the cap before the guarded `s = [e]` runs in any pass, so `s`
+      # converges on its widened `String` seed.
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        s = +"ab"
+        n = 0
+        r = [1, 2, 3, 4, 5, 6].map { |e| t = s; s << "c"; s = s.dup; n += 1; s = [e] if n > 3; t }
+        r.last.push(0)
+      RUBY
+    end
+
+    it "does not report a rebind a lambda defined outside the body makes" do
+      # Runtime `[false, false, true]`: `close.call` rebinds `cur` where no write node in the body shows it.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cur = nil
+        close = -> { cur = nil }
+        cur = +""
+        flags = %w[a b. c].map do |w|
+          was_nil = cur.nil?
+          cur ||= +""
+          cur << w
+          cur = cur.strip
+          close.call if w.end_with?(".")
+          was_nil
+        end
+        puts "restarted" if flags.last
+      RUBY
+    end
+  end
+
+  describe "a nested block's parameter shadowing a captured name" do
+    it "does not treat a write to the shadowing parameter as a rebind of the outer local" do
+      # `[1, 1]` at runtime: `a = k` rebinds the inner block's `|a|`. Counted as a rebind of the outer `a`, the
+      # fixpoint converged on the pinned `[1]` seed and the unmoved-pin floor took it.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |a| a = k }; a.first })
+      RUBY
+    end
+
+    it "does not treat a mutation of the shadowing parameter as a mutation of the outer local" do
+      expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |a| a << k }; a.first })
+      RUBY
+    end
+
+    it "does not treat a nested def's local as a rebind of the outer local" do
+      # `[0, 0]` at runtime: the `def`'s `z` is the method's own local.
+      expect(dumped_type(<<~RUBY)).to eq("[0, 0]")
+        z = 0
+        dump_type([1, 2].map { |k| def helper; z = 5; end; z })
+      RUBY
+    end
+
+    it "still floors a rebind in a singleton-class target, which runs in the enclosing scope" do
+      # `[nil, #<Object>]` at runtime; `r.last.tag` must not read a stale `nil`.
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        def sclass_real
+          target = nil
+          objs = [Object.new, Object.new]
+          r = [1, 2].map { |k| prev = target; class << (target = objs[k - 1]); def tag = :t; end; prev }
+          r.last.tag
+        end
+      RUBY
+    end
+
+    it "still widens the outer local a nested block without the shadow rebinds" do
+      expect(dumped_type(<<~RUBY)).not_to eq("[1, 1]")
+        a = [1]
+        dump_type([1, 2].map { |k| [[]].each { |b| a = [k] }; a.first })
+      RUBY
+    end
+  end
+
   describe "declines — the answer must not move" do
     it "keeps a single-statement block body on the tail-only path" do
       expect(dumped_type("dump_type(Mutex.new.synchronize { 42 })")).to eq("42")

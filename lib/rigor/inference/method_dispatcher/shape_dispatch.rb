@@ -1612,14 +1612,18 @@ module Rigor
             Type::Combinator.constant_of(found)
           end
 
-          # `shape.default` / `default_proc` — a literal `HashShape` carries no default value or proc, so
-          # both fold to `Constant[nil]`. `default` accepts an optional key argument (still returns the
+          # `shape.default` / `default_proc` — a closed literal `HashShape` carries no default value or proc,
+          # so both fold to `Constant[nil]`. `default` accepts an optional key argument (still returns the
           # default), `default_proc` takes none — the `args.size <= 1` guard covers both.
-          def hash_default(shape, _method_name, args)
+          #
+          # An open shape's `default` is `untyped`. The default is what an unseen key reads, which the known
+          # values do not bound — the RBS answer `V?` would bound it by them, so `h = { a: 1 }; h.default = 0`
+          # (which opens the shape, see `HashLookupMutation`) read `h.default` as `1?`. `default_proc` defers.
+          def hash_default(shape, method_name, args)
             return nil unless args.size <= 1
-            return nil unless shape.closed?
+            return Type::Combinator.constant_of(nil) if shape.closed?
 
-            Type::Combinator.constant_of(nil)
+            Type::Combinator.untyped if method_name == :default
           end
 
           # `shape < other` / `<=` / `>` / `>=` — Hash containment comparison. Both sides must be closed

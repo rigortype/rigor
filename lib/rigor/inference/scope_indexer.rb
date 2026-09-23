@@ -12,6 +12,7 @@ require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
@@ -578,12 +579,26 @@ module Rigor
 
           Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::HashShape
-          return member unless observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+          if observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+            return Type::Combinator.nominal_of("Hash",
+                                               type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          end
 
-          Type::Combinator.nominal_of("Hash",
-                                      type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          widen_member_for_lookup_mutators(member, observed_methods)
         else
           member
+        end
+      end
+
+      # A `HashShape` ivar seed some method gave a default, a default proc or identity keys, and no method stored
+      # into, removed from or rewrote: its pairs are the seed's own, so it takes the per-method {HashLookupMutation}
+      # widening rather than the untyped floor above — a present key keeps its value across methods, a missing one
+      # stops reading `nil`.
+      def widen_member_for_lookup_mutators(member, observed_methods)
+        observed_methods.reduce(member) do |acc, method_name|
+          next acc unless acc.is_a?(Type::HashShape)
+
+          HashLookupMutation.widen_shape(acc, method_name) || acc
         end
       end
 
@@ -1101,16 +1116,17 @@ module Rigor
         end
       end
 
-      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
-      # The class-ivar pre-pass uses the resulting set to widen the post-collected accumulator entries (see
-      # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
-      # ignored at finalization.
+      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::ARRAY_MUTATORS`, `HASH_MUTATORS` or
+      # `HashLookupMutation::MUTATORS`. The class-ivar pre-pass uses the resulting set to widen the post-collected
+      # accumulator entries (see {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the
+      # widening primitive declines is ignored at finalization.
       def record_ivar_mutator_call(node, class_name, mutated_ivars)
         method_name, receiver = mutation_target(node)
         return if method_name.nil?
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
         return unless MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
-                      MutationWidening::HASH_MUTATORS.include?(method_name)
+                      MutationWidening::HASH_MUTATORS.include?(method_name) ||
+                      HashLookupMutation::MUTATORS.include?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
@@ -2147,7 +2163,8 @@ module Rigor
           return nil if node.receiver.nil?
           return node.receiver if node.attribute_write?
           return node.receiver if MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
-                                  MutationWidening::HASH_MUTATORS.include?(node.name)
+                                  MutationWidening::HASH_MUTATORS.include?(node.name) ||
+                                  HashLookupMutation::MUTATORS.include?(node.name)
 
           nil
         end

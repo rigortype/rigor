@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "hash_lookup_mutation"
 require_relative "mutation_widening"
 
 module Rigor
@@ -35,9 +36,9 @@ module Rigor
     # - The receiver variable is rebound (handled inside `Scope#with_local` / `Scope#with_ivar`).
     # - An intervening `receiver[key] = value` writes the same slot — `:[]=` could rebind the
     #   slot to nil; conservative drop.
-    # - An intervening mutator from {MutationWidening::HASH_MUTATORS} or
-    #   {MutationWidening::ARRAY_MUTATORS} runs against the receiver (e.g. `params.delete(:f)`,
-    #   `params.clear`).
+    # - An intervening mutator from {MutationWidening::HASH_MUTATORS},
+    #   {MutationWidening::ARRAY_MUTATORS} or {HashLookupMutation::MUTATORS} runs against the
+    #   receiver (e.g. `params.delete(:f)`, `params.clear`, `params.default = 0`).
     #
     # All three are implemented in `StatementEvaluator#eval_call`'s post-dispatch path through
     # {.invalidate_after_call}.
@@ -117,7 +118,9 @@ module Rigor
       # - `receiver[key] = value` (a `:[]=` against a stable address): drop the specific
       #   `(receiver, key)` entry.
       # - Any mutator from `HASH_MUTATORS` / `ARRAY_MUTATORS` against a stable receiver: drop
-      #   EVERY entry rooted at that receiver, because the mutator could rebind any slot.
+      #   EVERY entry rooted at that receiver, because the mutator could rebind any slot. A
+      #   {HashLookupMutation} name rebinds none, but it changes what a read of one answers — a
+      #   missing slot's default, or whether a literal key still finds its pair — so it drops them too.
       #
       # Returns the updated scope. Always-safe (only forgets; never invents).
       def invalidate_after_call(call_node:, current_scope:)
@@ -134,7 +137,8 @@ module Rigor
 
       def mutator?(method_name)
         MutationWidening::HASH_MUTATORS.include?(method_name) ||
-          MutationWidening::ARRAY_MUTATORS.include?(method_name)
+          MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
+          HashLookupMutation::MUTATORS.include?(method_name)
       end
 
       def invalidate_indexed_write(call_node, current_scope)

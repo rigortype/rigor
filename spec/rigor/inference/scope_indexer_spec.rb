@@ -1189,7 +1189,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             end
 
             def reset
-              @data = "x"
+              @data = :x
             end
 
             def push!
@@ -1203,7 +1203,32 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).to be_a(Rigor::Type::Union)
         array_member = type.members.grep(Rigor::Type::Nominal).find { |m| m.class_name == "Array" }
         expect(array_member.type_args.first).to be_a(Rigor::Type::Dynamic)
-        expect(type.members).to include(Rigor::Type::Combinator.constant_of("x"))
+        expect(type.members).to include(Rigor::Type::Combinator.constant_of(:x))
+      end
+
+      # `<<` is a String mutator as well as an Array one, and `"x" << 2` appends a codepoint at runtime, so the
+      # String member widens beside the Tuple one rather than keeping a value the append falsified.
+      it "widens a String-literal member of a Union-seeded ivar under a mutator both classes share" do
+        program = parse(<<~RUBY)
+          class Multi
+            def initialize
+              @data = [1]
+            end
+
+            def reset
+              @data = "x"
+            end
+
+            def push!
+              @data << 2
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("Multi")[:@data]
+        expect(type.members).to include(Rigor::Type::Combinator.nominal_of("String"))
+        expect(type.members).not_to include(Rigor::Type::Combinator.constant_of("x"))
       end
     end
 

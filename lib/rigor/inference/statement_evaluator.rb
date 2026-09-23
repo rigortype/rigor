@@ -873,8 +873,11 @@ module Rigor
         ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
       end
 
+      # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
       def mutator_arg_types(call_node, current_scope)
-        return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
+        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name)
+          return MutationWidening::NO_ARG_TYPES
+        end
         unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||
                ElementReadWidening.joinable_element_read?(call_node.receiver, current_scope)
           return MutationWidening::NO_ARG_TYPES
@@ -3105,8 +3108,18 @@ module Rigor
           next acc unless acc.locals.key?(argument.name)
 
           floored = content_floor_for(acc.local(argument.name))
-          floored.nil? ? acc : acc.with_local(argument.name, floored)
+          floored.nil? ? acc : with_floored_local(acc, argument.name, floored)
         end
+      end
+
+      # A floor rebinds a local to the same object with its contents forgotten, which is not a flow-live write, so the
+      # marks a write drops stay: ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark.
+      # With a plain `with_local`, a `String?` copied from a declaration-seeded ivar and floored after a closure or
+      # callee mutated it (`r = @name; -> { r.upcase! }.call`) lost the first, and `r.size` reported a nil receiver.
+      def with_floored_local(scope, name, floored)
+        rebound = scope.with_local(name, floored)
+        rebound = rebound.with_local_declaration_mark(name) if scope.declaration_sourced?(:local, name)
+        rebound.with_optimistic_local(name, scope.optimistic_local(name))
       end
 
       # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
@@ -3293,7 +3306,7 @@ module Rigor
 
         mutations.keys.reduce(post_scope) do |acc, name|
           floored = content_floor_for(acc.local(name))
-          floored.nil? ? acc : acc.with_local(name, floored)
+          floored.nil? ? acc : with_floored_local(acc, name, floored)
         end
       end
 
@@ -3321,6 +3334,10 @@ module Rigor
       # accept: the mutation can empty or rewrite it as it can a plain `String`.
       def content_floor_for(type)
         return nil if type.nil?
+        # A union with a String member floors member by member, so neither carrier swallows the other and a member no
+        # mutation can fill (`nil`) stays: taken whole, `Array | String` floored to `Array[untyped]` and `String?` to
+        # nothing at all.
+        return UnknownStoreWidening.content_floor(type) if string_union?(type)
 
         if UnknownStoreWidening.carrier_class(type) == "String"
           Type::Combinator.nominal_of("String")
@@ -3869,7 +3886,14 @@ module Rigor
         end
       end
 
+      # A collection seed with a String member (`[1] | "ab"`) joins that member as `String` and the rest as the
+      # collection it is ({#join_string_members}); joined whole, the String member survived with its value pinned
+      # although a String mutator in the body is what put the name here.
       def join_content_evidence(seed, kind, name, evidence)
+        if kind != :string && string_union?(seed)
+          return join_string_members(seed) { |others| join_content_evidence(others, kind, name, evidence) }
+        end
+
         case kind
         when :string
           Type::Combinator.nominal_of("String")
@@ -3983,7 +4007,7 @@ module Rigor
         calls = []
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
-          next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
+          next unless CONTENT_MUTATORS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
@@ -4003,6 +4027,7 @@ module Rigor
       # Dynamic out: a shapeless pre-state falls through to `join_array_param`, which declines it.
       def join_content_for_param(calls, pre_state, block_entry)
         return nil if pre_state.nil?
+        return join_string_union(calls, pre_state, block_entry) if string_union?(pre_state)
 
         if stringish?(pre_state)
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
@@ -4013,6 +4038,33 @@ module Rigor
         else
           join_array_param(calls, pre_state, block_entry)
         end
+      end
+
+      # A union with a String member (`Array | String`, `String?`) joins member by member: the String members widen to
+      # `String`, which has no element evidence to join, and the rest join as a union of their own. Joined whole, the
+      # union reached the Array or Hash join, which dropped the String member and read a String mutator's arguments as
+      # elements — `x.force_encoding(e)` on an `Array | String` capture typed it `Array[1 | Encoding]`.
+      def join_string_union(calls, union, block_entry)
+        join_string_members(union) { |others| join_content_for_param(calls, others, block_entry) }
+      end
+
+      # `String` for the String members of `union`, beside what the block answers for the rest (as a union of their
+      # own), or the rest unchanged when the block answers nil.
+      def join_string_members(union)
+        rest = union.members.reject { |member| string_member?(member) }
+        string = Type::Combinator.nominal_of("String")
+        return string if rest.empty?
+
+        others = Type::Combinator.union(*rest)
+        Type::Combinator.union(string, yield(others) || others)
+      end
+
+      def string_union?(type)
+        type.is_a?(Type::Union) && type.members.any? { |member| string_member?(member) }
+      end
+
+      def string_member?(type)
+        UnknownStoreWidening.carrier_class(type) == "String"
       end
 
       def join_hash_param(calls, pre_state, block_entry)
@@ -4089,6 +4141,17 @@ module Rigor
       INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
+      # Every call name a content scan counts: the adders the joins read evidence from, and the String mutators no
+      # Array or Hash table lists. A String carries no element parameter, so a join answers a String pre-state with the
+      # bare `String` whatever the name, and a floor floors it; without them `def strip(s) = s.delete_prefix!("a")` and
+      # an escaping `-> { s.upcase! }` left the caller's `+"ab"` pinned. A name an Array or Hash table also lists stays
+      # with those tables' adders: a scan cannot see the receiver's class, and the Array join reads a non-adder's
+      # arguments as appended elements (`slice!(0)`'s index).
+      CONTENT_MUTATORS = (ContentJoin::CONTENT_ADDERS |
+                          (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
+                           MutationWidening::HASH_MUTATORS)).freeze
+      private_constant :CONTENT_MUTATORS
+
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh
       # `[nil, nil]` per decline was one of the largest allocation sites in the evaluator.
@@ -4099,7 +4162,7 @@ module Rigor
       # (depth predicate), else the frozen `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node
       # forms.
       def content_mutation_target(node)
-        is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
+        is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
         return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver
@@ -4152,6 +4215,10 @@ module Rigor
 
           return [[key, Type::Combinator.untyped]]
         end
+
+        # Only a Hash adder stores a pair; a String mutator a content scan counted (`x.sub!("a", "b")` on a
+        # `Hash | String` capture) stores none.
+        return [] unless ContentJoin::HASH_CONTENT_ADDERS.include?(node.name)
 
         args = content_arg_types(node, block_entry)
         return [] if args.size < 2

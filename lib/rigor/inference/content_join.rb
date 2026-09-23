@@ -35,15 +35,11 @@ module Rigor
       # argument and the value the last.
       HASH_CONTENT_ADDERS = %i[[]= store].to_set.freeze
 
-      # String content-mutators that append to the buffer. String carries no element parameter, so
-      # these contribute nothing to a join — they are listed so the orchestrator recognises them as
-      # content mutators (the binding already widens to `String` via normal typing); the join
-      # helpers below short-circuit on a non-collection pre-state.
-      STRING_CONTENT_ADDERS = %i[<< concat prepend insert replace].to_set.freeze
-
-      # Every method name that mutates a collection's CONTENT — the union the orchestrators scan a
-      # block body for, and the gate the straight-line path types its arguments behind.
-      CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
+      # Every method name that adds to a collection's CONTENT — the evidence the joins read, and the
+      # gate the straight-line path types its arguments behind. A String carries no element
+      # parameter, so it has no adders of its own; `StatementEvaluator::CONTENT_MUTATORS` adds the
+      # String mutators to what its scans count.
+      CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS).freeze
 
       # The probes {#could_be_range?} passes to `accepts` — interned because the questions are
       # asked once per `[]=` index member.
@@ -86,8 +82,12 @@ module Rigor
           # `fill(value)` — only the no-block single-value form adds a concrete element; block /
           # range forms are conservatively ignored (the arity-forget already widened the binding).
           arg_types.size == 1 ? arg_types : []
-        else # << push append prepend unshift
+        when :<<, :push, :append, :prepend, :unshift
           arg_types
+        else
+          # Not an Array adder — a String mutator a content scan counted (`x.sub!("a", "b")` on an
+          # `Array | String` capture): its arguments are not elements.
+          []
         end
       end
 

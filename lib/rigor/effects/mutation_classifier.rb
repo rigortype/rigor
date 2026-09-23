@@ -26,15 +26,6 @@ module Rigor
       # The only selectors a mutation may be claimed from without knowing the receiver's class.
       UNIVERSAL_MUTATORS = %i[[]=].to_set.freeze
 
-      # `String`'s receiver-mutating surface. `Array` / `Hash` reuse the hand-audited sets the widening
-      # rules already maintain, cited rather than re-derived (ADR-103 WD3).
-      STRING_MUTATORS = %i[
-        << concat replace insert prepend clear
-        upcase! downcase! capitalize! swapcase! reverse!
-        strip! lstrip! rstrip! chomp! chop! squeeze! succ! next!
-        sub! gsub! tr! tr_s! delete! slice! []=
-      ].to_set.freeze
-
       # `foo=`, and deliberately not `==` / `<=` / `!=` / `===`.
       ATTRIBUTE_WRITER = /\A[a-z_][A-Za-z0-9_]*=\z/
 
@@ -57,10 +48,12 @@ module Rigor
         name = node.name
         return true if UNIVERSAL_MUTATORS.include?(name) || ATTRIBUTE_WRITER.match?(name.to_s)
 
+        # The per-class sets are the hand-audited ones the widening rules maintain, cited rather than re-derived
+        # (ADR-103 WD3): a list kept here drifted from the widening's, and missed `force_encoding`.
         case receiver_class
         when "Array" then Inference::MutationWidening::ARRAY_MUTATORS.include?(name)
         when "Hash" then Inference::MutationWidening::HASH_MUTATORS.include?(name)
-        when "String" then STRING_MUTATORS.include?(name)
+        when "String" then Inference::StringMutation::MUTATORS.include?(name)
         else false
         end
       end

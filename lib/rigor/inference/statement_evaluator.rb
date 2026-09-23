@@ -1199,25 +1199,7 @@ module Rigor
       # observable.
       def eval_begin(node)
         jump_marks = ensure_jump_marks(node)
-        entry = scope
-        raise_scopes = [] if retrying_rescue_chain?(node.rescue_clause)
-        primary_type, primary_scope = eval_begin_primary_under(node, entry, raise_scopes: raise_scopes)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
-
-        # B2.1 — retry-edge widening. When any rescue body contains `Prism::RetryNode`, control re-enters the primary
-        # body with the rescue arm's rebinds visible. Today's flow loses that effect, so a counter like `tries = 0; ...;
-        # rescue; tries += 1; retry; end` observes `tries: Constant[0]` inside the body and any `tries > 100` predicate
-        # folds to always-falsey. The primary body's own rebinds cross the same edge: it can raise after any prefix of
-        # itself, so `begin; tries += 1; raise if tries < 3; rescue; retry; end` re-enters with `tries` already
-        # incremented. The fix: widen the locals / ivars a retry-emitting arm rebinds, and those bound on entry that the
-        # primary body rebinds at any point it could raise from, to their Nominal envelope (Constant → Nominal[<class>],
-        # Tuple → Array, HashShape → Hash), then re-evaluate primary body AND rescue chain once under the widened entry.
-        # Nominal envelope is the maximally widened form so the re-evaluation converges in one step.
-        widened_entry = widen_entry_for_retry(entry, rescue_chain, raise_scopes)
-        if widened_entry
-          primary_type, primary_scope = eval_begin_primary_under(node, widened_entry)
-          rescue_chain = collect_rescue_chain_results(node.rescue_clause, widened_entry)
-        end
+        primary_type, primary_scope, rescue_chain = eval_begin_paths(node, scope)
 
         # Rescue arms whose body unconditionally exits (`return`, `next`, `break`, `raise`, `throw`, `exit`, `abort`,
         # `fail`) contribute neither a type fragment NOR a scope to the post-begin flow — control left the `begin` via
@@ -1243,6 +1225,28 @@ module Rigor
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The primary path's `[type, scope]` and the rescue chain's results, from `entry`.
+      #
+      # B2.1 — retry-edge widening. When any rescue body contains `Prism::RetryNode`, control re-enters the primary body
+      # with the rescue arm's rebinds visible. Today's flow loses that effect, so a counter like `tries = 0; ...;
+      # rescue; tries += 1; retry; end` observes `tries: Constant[0]` inside the body and any `tries > 100` predicate
+      # folds to always-falsey. The primary body's own rebinds cross the same edge: it can raise after any prefix of
+      # itself, so `begin; tries += 1; raise if tries < 3; rescue; retry; end` re-enters with `tries` already
+      # incremented. The fix: widen the locals / ivars a retry-emitting arm rebinds, and those bound on entry that the
+      # primary body rebinds at any point it could raise from, to their Nominal envelope (Constant → Nominal[<class>],
+      # Tuple → Array, HashShape → Hash), then re-evaluate primary body AND rescue chain once under the widened entry.
+      # Nominal envelope is the maximally widened form so the re-evaluation converges in one step.
+      def eval_begin_paths(node, entry)
+        raise_scopes = [] if retrying_rescue_chain?(node.rescue_clause)
+        primary = eval_begin_primary_under(node, entry, raise_scopes: raise_scopes)
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
+        widened_entry = widen_entry_for_retry(entry, rescue_chain, raise_scopes)
+        return [*primary, rescue_chain] unless widened_entry
+
+        widened_primary = eval_begin_primary_under(node, widened_entry)
+        [*widened_primary, collect_rescue_chain_results(node.rescue_clause, widened_entry)]
       end
 
       # The jump sinks' sizes as a `begin … ensure` starts, or nil for a `begin` without `ensure`: every `next` /
@@ -1385,25 +1389,27 @@ module Rigor
       # Widens against the accumulator's binding rather than the entry's, so a name rebound differently by two arms, or
       # at two points of the primary body, keeps the envelope of every rebind instead of only the last one absorbed.
       def absorb_retry_rebinds(accumulator, entry_scope, post_scope, bound_on_entry: false)
-        scope_acc = accumulator
-        # Walk every local visible in either side, compare types, widen to Nominal envelope on a difference.
-        local_keys = bound_on_entry ? entry_scope.locals.keys : post_scope.locals.keys | entry_scope.locals.keys
-        local_keys.each do |name|
-          pre = entry_scope.local(name)
-          post = post_scope.local(name)
+        scope_acc = absorb_retry_kind_rebinds(accumulator, entry_scope, post_scope, :local, bound_on_entry)
+        absorb_retry_kind_rebinds(scope_acc, entry_scope, post_scope, :ivar, bound_on_entry)
+      end
+
+      RETRY_KIND_TABLES = { local: :locals, ivar: :ivars }.freeze
+      private_constant :RETRY_KIND_TABLES
+
+      # Walk every name of `kind` visible on either side (only the entry's under `bound_on_entry`), compare types, widen
+      # to Nominal envelope on a difference.
+      def absorb_retry_kind_rebinds(scope_acc, entry_scope, post_scope, kind, bound_on_entry)
+        getter = VAR_KIND_GETTERS.fetch(kind)
+        table = RETRY_KIND_TABLES.fetch(kind)
+        names = entry_scope.public_send(table).keys
+        names |= post_scope.public_send(table).keys unless bound_on_entry
+        names.each do |name|
+          pre = entry_scope.public_send(getter, name)
+          post = post_scope.public_send(getter, name)
           next if pre == post || post.nil?
 
-          widened = retry_widened_type(scope_acc.local(name), post)
-          scope_acc = scope_acc.with_local(name, widened)
-        end
-        ivar_keys = bound_on_entry ? entry_scope.ivars.keys : post_scope.ivars.keys | entry_scope.ivars.keys
-        ivar_keys.each do |name|
-          pre = entry_scope.ivar(name)
-          post = post_scope.ivar(name)
-          next if pre == post || post.nil?
-
-          widened = retry_widened_type(scope_acc.ivar(name), post)
-          scope_acc = scope_acc.with_ivar(name, widened)
+          widened = retry_widened_type(scope_acc.public_send(getter, name), post)
+          scope_acc = rebind_variable(scope_acc, kind, name, widened)
         end
         scope_acc
       end

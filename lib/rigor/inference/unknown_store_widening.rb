@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "element_read_widening"
 require_relative "mutation_widening"
+require_relative "refinement_mutation"
 
 module Rigor
   module Inference
@@ -30,10 +31,14 @@ module Rigor
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
-    # that is no carrier, a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a method
-    # its class does not define), or an empty-witness refinement under a mutator that keeps the witness and joins
-    # nothing (`non-empty-array[String]` under `map!`). The caller MUST therefore not read an unchanged binding as
-    # describing later iterations.
+    # that is no carrier, or a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a method
+    # its class does not define). The caller MUST therefore not read an unchanged binding as describing later
+    # iterations. One decline does not stand: an empty-witness refinement under a storing mutator that keeps the
+    # witness and joins nothing (`non-empty-array[String]` under `map!`). The straight-line seam already treats such
+    # a refinement as a carrier it may grow (issue #936: `if xs.any?; xs << 1` reads
+    # `non-empty-array[Dynamic[top] | String]`), and its widening declines here only because the answer it
+    # computes is the pre-state itself, so the site takes the gradual arm like any other storing site
+    # ({.refinement_store?}).
     #
     # The per-element block fold is the consumer: it types every position from one entry scope, so the binding
     # it lays under each position has to hold whatever earlier iterations stored. Unknown evidence is the point,
@@ -61,11 +66,14 @@ module Rigor
       # a parameter the callee content-mutates.
       CalleeStore = Data.define(:call, :arguments)
 
+      # Mutators whose block, not their arguments, computes what they store: they store even with no argument.
+      BLOCK_STORES = %i[map! collect! transform_keys! transform_values!].to_set.freeze
+
       COLLECTION_CLASSES = %w[Array Hash].freeze
       FLOORED_CLASSES = %w[Array Hash String].freeze
 
       NO_ARG_NODES = [].freeze
-      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
+      private_constant :BLOCK_STORES, :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
 
       module_function
 
@@ -91,10 +99,31 @@ module Rigor
 
       # The straight-line widening of `type` under `method_name`, with the gradual arm on every site that can store.
       def widen_store(type, method_name, arg_types)
+        value_preserving = VALUE_PRESERVING.include?(method_name)
         widened = MutationWidening.widen_for_mutator(type, method_name, arg_types: arg_types)
-        return nil if widened.nil?
+        if widened.nil?
+          return nil if value_preserving || !refinement_store?(type, method_name, arg_types)
 
-        VALUE_PRESERVING.include?(method_name) && !literal_carrier?(type) ? widened : gradual_content(widened)
+          return gradual_content(type)
+        end
+
+        value_preserving && !literal_carrier?(type) ? widened : gradual_content(widened)
+      end
+
+      # True when a storing site's widening declined only because it answered the pre-state itself: `type` is, or
+      # has as a `Union` member, an empty-witness `Array` / `Hash` refinement under a mutator that keeps the witness
+      # ({RefinementMutation::EMPTY_PRESERVING}) and joins nothing (`non-empty-array[String]` under `map!`). The
+      # whole binding then takes the gradual arm, a precise `Union` member included, as it does when any other
+      # member widens; a precise nominal on its own still declines. An adder called with no argument stores nothing
+      # (`xs.push()`), so its decline stands.
+      def refinement_store?(type, method_name, arg_types)
+        return false if arg_types.empty? && !BLOCK_STORES.include?(method_name)
+
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.any? do |member|
+          member.is_a?(Type::Difference) && member.removes_empty_witness? &&
+            RefinementMutation.preserves_witness?(member.base.class_name, method_name)
+        end
       end
 
       # Every `Array` / `Hash` / `String` carrier `type` can be as its bare carrier: `Array[Dynamic[top]]`,

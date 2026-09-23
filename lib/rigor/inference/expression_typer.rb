@@ -4273,30 +4273,25 @@ module Rigor
       # (`x = 5; xs.each { x = 5 }`), so the floor gives that shape up too. It is the far cheaper side: a
       # value-pinned seed the block rebinds is the exact pre-state this fold exists to stop trusting, and
       # `Dynamic[top]` is the same escaping-block floor {#captured_floor} already uses. Seeds that carry no
-      # first-iteration pin ({#first_iteration_pin?}) are left alone — there is no constant in them for a later
-      # iteration to escape, and widening a `Nominal` here would only lose a class for nothing.
+      # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
+      # `Nominal` here would only lose a class for nothing.
+      #
+      # The test reads the seed as a whole and nothing else. A `0 | Integer` seed is floored too, although a
+      # threaded `x += 1` only joins back into it: an unthreaded write storing another class (`log(x = nil)`)
+      # converges on the same seed, and only the floor keeps `x.nil?` from folding to `false`. Nor does a pass
+      # whose exit binding moved prove the rebind was threaded — a narrowing (`next false unless x`) or a
+      # threaded prefix (`x ||= 0`) moves it while `(x += 1) == 2` stays unthreaded.
       def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
           seed = seeds[name]
-          next [name, type] unless type == seed && first_iteration_pin?(seed)
+          next [name, type] unless type == seed && value_pinned?(seed)
 
           [name, Type::Combinator.untyped]
         end
       end
 
-      # True when some value-pinned member of `type` is not already joined with its own widened base. `0`
-      # and `0 | nil` are pins; `0 | Integer` is not, since every `Integer` a later iteration stores is
-      # already in it. The difference is precision, not soundness: `x = flag ? 0 : n; [1, 2].map { x += 1 }`
-      # converges on that seed because the threaded write joins back into it, and flooring it would trade the
-      # correct `[Integer, Integer]` for `Dynamic[top]`.
-      def first_iteration_pin?(type)
-        return false if type.nil?
-
-        members = type.is_a?(Type::Union) ? type.members : [type]
-        members.any? do |member|
-          widened = Type::Combinator.widen_value_pinned(member)
-          widened != member && !members.include?(widened)
-        end
+      def value_pinned?(type)
+        !type.nil? && Type::Combinator.widen_value_pinned(type) != type
       end
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the

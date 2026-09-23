@@ -680,13 +680,6 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "keeps a threaded rebind whose union seed already holds what it stores" do
-      expect(dumped_type(in_method(<<~RUBY))).to eq("[Integer, Integer]")
-        @n = rand(2) == 0 ? 0 : rand(10)
-        dump_type([1, 2].map { @n += 1 })
-      RUBY
-    end
-
     it "floors an unthreaded ivar rebind behind a narrowing guard" do
       # Runtime `2`; the entry-scope pin answered `nil`.
       expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
@@ -948,13 +941,17 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "keeps a threaded rebind whose union seed already holds what it stores" do
-        # The floor is for a write the body evaluator never threaded. `x += 1` IS threaded — it exits
-        # `Integer` — and only joins back to the `0 | Integer` seed, so flooring it would trade the correct
-        # `Integer` for `Dynamic[top]`.
-        expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer]")
-          x = rand(2) == 0 ? 0 : rand(10)
-          dump_type([1, 2].map { x += 1 })
+      it "still floors a union seed that an unthreaded write of another class escapes" do
+        # `log(seen = nil)` stores nil inside an argument, which the body evaluator does not thread, so the
+        # fixpoint converges on the `0 | Integer` seed. That seed holds every Integer, but not the nil: keeping
+        # it folded `seen.nil?` to `false` at both positions, and `find` to `nil` where Ruby answers `1`.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          def log(x) = x
+
+          def run(flag)
+            seen = flag ? 0 : rand(10)
+            dump_type([1, 2].find { |e| log(seen = nil); seen.nil? })
+          end
         RUBY
       end
 

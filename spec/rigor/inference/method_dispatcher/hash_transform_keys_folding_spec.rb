@@ -72,6 +72,19 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
         .to eq(hash_of(union(constant(:a), constant(:b), constant(:z)), union(constant(1), constant(2))))
     end
 
+    # The literal's own type joins its splatted entries (`{ **o, b: :y }` is `Hash[:a | :b, :z | :y]` for
+    # `o = { a: :z }`), so its call node adds no arm of its own.
+    it "reads a mapping literal with a **splat entry by its argument type alone" do
+      mapping = hash_of(union(constant(:a), constant(:b)), union(constant(:z), constant(:y)))
+      ["h.transform_keys(**o, b: :y)", "h.transform_keys({ **o, b: :y })",
+       "h.send(:transform_keys, { **o, b: :y })", "h.transform_keys((x; { **o, b: :y }))"].each do |source|
+        expect(dispatch(receiver: pair_shape, args: [mapping], call_node: call_node(source)))
+          .to eq(hash_of(union(constant(:a), constant(:b), constant(:y), constant(:z)),
+                         union(constant(1), constant(2)))),
+              "for #{source}"
+      end
+    end
+
     describe "an argument it cannot read" do
       it "adds a Dynamic[top] key arm for a mapping whose value type is unknown" do
         # A generic that is not `Hash` keeps its second type argument to itself: `Pair[String, Integer]`'s
@@ -89,20 +102,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::HashTransformKeysFolding do
       it "adds a Dynamic[top] key arm for an empty mapping, not a bot one" do
         expect(dispatch(receiver: pair_shape, args: [shape({})], block_type: nominal("String")))
           .to eq(hash_of(union(nominal("String"), untyped), union(constant(1), constant(2))))
-      end
-
-      # `{ **o, b: :y }` types as `Hash[:b, :y]`: the literal's type leaves the splatted entries out.
-      it "adds a Dynamic[top] key arm for a mapping literal with a **splat entry" do
-        ["h.transform_keys(**o, b: :y)", "h.transform_keys({ **o, b: :y })",
-         "h.send(:transform_keys, { **o, b: :y })", "h.public_send(:transform_keys, **o, b: :y)",
-         "h.transform_keys(({ **o, b: :y }))", "h.transform_keys((x; { **o, b: :y }))"].each do |source|
-          result = dispatch(receiver: pair_shape, args: [shape({ b: constant(:y) })], call_node: call_node(source))
-          expect(result).to eq(hash_of(union(constant(:a), constant(:b), constant(:y), untyped),
-                                       union(constant(1), constant(2)))), "for #{source}"
-        end
-        expect(dispatch(receiver: pair_shape, args: [shape({ b: constant(:y) })],
-                        call_node: call_node("h.transform_keys(b: :y)")))
-          .to eq(hash_of(union(constant(:a), constant(:b), constant(:y)), union(constant(1), constant(2))))
       end
 
       # A splat may expand to no argument (the block form) or to one mapping: `Dynamic[top]` covers both.

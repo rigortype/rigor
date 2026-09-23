@@ -94,6 +94,7 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
     end
 
     it "keeps the exact binding when a block with a `next` rebinds nothing" do
+      # The write-back's fast path: with no captured write the join is never reached, and the local stays exact.
       expect(dumped_type(<<~RUBY)).to eq("5")
         n = 5
         [1, 2].each do |e|
@@ -257,6 +258,42 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
           n = "s"
         end
         dump_type(n)
+      RUBY
+    end
+
+    it "carries a `next` scope through every enclosing `ensure`, innermost first" do
+      expect(dumped_type(<<~RUBY)).to eq(":done | :idle")
+        state = :idle
+        [1, 2].each do |e|
+          begin
+            begin
+              state = 1
+              next if e.odd?
+            ensure
+              state = 2
+            end
+          ensure
+            state = :done
+          end
+        end
+        dump_type(state)
+      RUBY
+    end
+
+    it "reads a capped fixpoint's `break` arms from its converged binding" do
+      # `i` is still moving when the fixpoint's cap widens it to `Integer`, so no pass ran from the converged binding
+      # and one more (unrecorded) pass reads the arm: `found` is any `i`, never only the first passes' `2 | 3`.
+      expect(dumped_type(<<~RUBY)).to eq("Integer?")
+        found = nil
+        i = 0
+        [1, 2, 3].each do |x|
+          i += 1
+          if x > 1
+            found = i
+            break
+          end
+        end
+        dump_type(found)
       RUBY
     end
 

@@ -2505,8 +2505,13 @@ module Rigor
         acc
       end
 
+      # Runs for every call of every body it walks, and nearly every call reports no argument, so that case returns
+      # before `reduce`: `Enumerable#inject` allocates its iteration state even over an empty array.
       def floor_callee_escaped_args_for_call(node, base_scope)
-        content_mutated_arguments(node).reduce(base_scope) do |acc, argument|
+        arguments = content_mutated_arguments(node)
+        return base_scope if arguments.empty?
+
+        arguments.reduce(base_scope) do |acc, argument|
           next acc unless acc.locals.key?(argument.name)
 
           floored = content_floor_for(acc.local(argument.name))

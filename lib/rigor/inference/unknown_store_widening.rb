@@ -56,9 +56,9 @@ module Rigor
         sort! sort_by! reverse! rotate! shuffle!
       ].to_set.freeze
 
-      # A site that mutates the binding through a callee: `call` passes the variable to a parameter the callee
-      # content-mutates.
-      CalleeStore = Data.define(:call)
+      # A site that mutates a binding through a callee: `call` passes the variable, read by one of `arguments`, to
+      # a parameter the callee content-mutates.
+      CalleeStore = Data.define(:call, :arguments)
 
       COLLECTION_CLASSES = %w[Array Hash].freeze
 

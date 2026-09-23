@@ -137,7 +137,8 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
 
     describe "a callee store" do
       let(:store) do
-        [described_class::CalleeStore.new(Prism.parse("add(a)").value.statements.body.first)]
+        call = Prism.parse("add(a)").value.statements.body.first
+        [described_class::CalleeStore.new(call, call.arguments.arguments)]
       end
 
       it "floors each collection member of a union and keeps the others" do

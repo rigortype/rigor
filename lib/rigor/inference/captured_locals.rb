@@ -263,10 +263,10 @@ module Rigor
         evaluator = nil
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           # A callee is resolved in the call-site scope, as the straight-line callee floor resolves it.
-          site, reads = mutation_site(descendant) { evaluator ||= StatementEvaluator.new(scope: base_scope) }
+          site = mutation_site(descendant) { evaluator ||= StatementEvaluator.new(scope: base_scope) }
           next if site.nil?
 
-          reads.each do |read|
+          site_reads(site).each do |read|
             next unless captured_target?(read, ancestors, base_scope, non_locals) do
               introduced ||= introduced_locals(block_node)
             end
@@ -280,22 +280,25 @@ module Rigor
       NON_ALIASED_READS = [Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode].freeze
       private_constant :NON_ALIASED_READS
 
-      # The variable reads a mutation site's receiver reaches: the local an element read is rooted at, or else
-      # {.mutated_reads}.
-      def site_reads(receiver)
-        path = ElementReadWidening.element_read_path(receiver)
-        path ? [path.first] : mutated_reads(receiver)
-      end
-
-      # `[site, reads]` when `node` changes the contents of the variables `reads` names, or nil. A self-call is
-      # resolved by the `StatementEvaluator` the block yields, which the caller builds only when one is needed.
+      # The mutation site `node` is — the node itself, or a {UnknownStoreWidening::CalleeStore} for a self-call
+      # whose callee content-mutates a local it is passed — or nil. A self-call is resolved by the
+      # `StatementEvaluator` the block yields, which the caller builds only when one is needed.
       def mutation_site(node)
-        receiver = mutated_receiver(node)
-        return [node, site_reads(receiver)] if receiver
+        return node if mutated_receiver(node)
         return nil unless callee_call?(node)
 
-        reads = yield.content_mutated_arguments(node)
-        reads.empty? ? nil : [UnknownStoreWidening::CalleeStore.new(node), reads]
+        arguments = yield.content_mutated_arguments(node)
+        arguments.empty? ? nil : UnknownStoreWidening::CalleeStore.new(node, arguments)
+      end
+
+      # The variable reads a mutation site reaches: a callee store's arguments, the local an element read is
+      # rooted at, or else {.mutated_reads} of the receiver.
+      def site_reads(site)
+        return site.arguments if site.is_a?(UnknownStoreWidening::CalleeStore)
+
+        receiver = mutated_receiver(site)
+        path = ElementReadWidening.element_read_path(receiver)
+        path ? [path.first] : mutated_reads(receiver)
       end
 
       # A call to a method on `self` (implicit or explicit) that passes a local as an argument — the only kind

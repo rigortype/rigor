@@ -928,6 +928,17 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "leaves a find over an element the body fills undecided" do
+      # `2` at runtime. Both predicates read the entry `[]`, so each was provably false and `find` folded to `nil`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        a = [[]]
+        dump_type([1, 2].find do |e|
+          a[0] << e
+          a[0].size == 2
+        end)
+      RUBY
+    end
+
     it "keeps a captured tuple exact when the body only reads its element" do
       expect(dumped_type(<<~RUBY)).to eq("[1, 1]")
         a = [[1]]
@@ -1017,6 +1028,21 @@ RSpec.describe "block-return scope threading", type: :runner do
           copy_size(a, b)
           v
         end)
+      RUBY
+    end
+
+    it "widens a callee-mutated capture a rebind reads across an each loop" do
+      # `"s"` at runtime. The ADR-56 write-back's fixpoint pass read `a` at its entry `[:x]` every iteration, so
+      # `last` left the loop as `:x?`.
+      expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]?")
+        #{add_to}
+        a = [:x]
+        last = nil
+        [1, 2].each do |e|
+          last = a.last
+          add_to(a, "s")
+        end
+        dump_type(last)
       RUBY
     end
 

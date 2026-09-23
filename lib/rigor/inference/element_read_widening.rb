@@ -62,7 +62,12 @@ module Rigor
       # `[<local read>, [step, …]]` for a chain of element reads rooted at a local variable, or
       # `nil` when the expression is anything else. A step is an Integer position (negative counts
       # from the end, as Ruby's own indexing does) or `:all` when the index is not a literal.
+      #
+      # Every mutation site's receiver is asked, and nearly every one is a plain variable read, so a
+      # receiver that is no call answers before the step list is allocated.
       def element_read_path(node)
+        return nil unless node.is_a?(Prism::CallNode)
+
         steps = []
         cursor = node
         while cursor.is_a?(Prism::CallNode)

@@ -33,6 +33,7 @@ require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
+require_relative "unthreaded_rebinds"
 require_relative "version_guard"
 
 module Rigor
@@ -3736,11 +3737,21 @@ module Rigor
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
       def block_entry_scope(block_node, expected, narrowed_self_type: nil)
-        block_scope = BlockParameterBinder.new(expected_param_types: expected)
-                                          .bind_onto(block_node, scope.entering_opaque_block)
+        entry = scope.entering_opaque_block
+        captured = generic_captured_bindings(block_node, expected)
+        entry = captured.lay(entry) if captured
+        block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowed_self_type
 
         block_scope.with_self_type(narrowed_self_type)
+      end
+
+      # The #587 (b) captured binding for the generic pass — or nil, which keeps the entry scope, when computing
+      # it fails: a raise here would otherwise take out the whole block-return pass.
+      def generic_captured_bindings(block_node, expected)
+        captured_block_bindings(block_node, expected)
+      rescue StandardError
+        nil
       end
 
       # `&:symbol` desugars to a one-arg Proc that dispatches `symbol` against its argument. When the param
@@ -4214,7 +4225,7 @@ module Rigor
         return false unless body.is_a?(Prism::StatementsNode)
         return false if body.body.size < 2
 
-        answered = captured&.keys || []
+        answered = captured&.names || []
         tail_dependent_body_names(body.body).any? { |name| !answered.include?(name) }
       end
 
@@ -4244,10 +4255,15 @@ module Rigor
       # exists to remove.
       #
       # An instance variable pins the same way — the block shares the caller's `self`, so `@t = 0; [1,
-      # 2].map { @t += 1 }` folded to `[1, 1]` too — and takes the same treatment under every rule above: the
-      # ivars the body rebinds ({CapturedLocals.writes} with `ivars: true`) join the name set. They keep their
-      # `@`, so the one map cannot confuse `@t` with a local `t`, and the arity-cap floor
+      # 2].map { @t += 1 }` folded to `[1, 1]` too — and so do a class variable and a global. Each takes the
+      # same treatment under every rule above: the ones the body rebinds ({CapturedLocals.writes} with
+      # `non_locals: true`, which also counts `self.w = …` as a rebind of `@w`) join the name set. They keep
+      # their sigil, so the one map cannot confuse `@t` with a local `t`, and the arity-cap floor
       # ({#unanswered_tail_dependency?}), which compares names sigil-and-all, counts a rebound ivar as answered.
+      #
+      # A name the body rebinds where the fixpoint's pass cannot see it ({UnthreadedRebinds}) takes the floor
+      # outright; see {#converged_captured_bindings}. The optimistic nil-freeness mark a pass's exit binding
+      # carries is kept with the converged type ({CapturedLocals::Bindings}).
       #
       # The same pin has a CONTENT half the rebind set cannot see: a captured receiver the body mutates in place
       # is never rebound, so `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }` read `h` at its entry
@@ -4262,19 +4278,30 @@ module Rigor
       # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
       # `[0, 0]`). This half covers locals only: an instance variable mutated in place is not collected yet.
       #
+      # The generic block-return pass lays the same binding ({#block_entry_scope}), with the fixpoint's block
+      # parameters bound to the signature's instead of to the elements' union.
+      #
       # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds and mutates nothing
       # captured.
       def per_element_captured_bindings(block, element_types)
+        captured_block_bindings(block, [Type::Combinator.union(*element_types)])
+      end
+
+      # The #587 (b) binding for `block`, with the fixpoint's block parameters bound to `param_types`.
+      def captured_block_bindings(block, param_types)
         stores = CapturedLocals.content_mutations(block, scope)
+        names = CapturedLocals.writes(block, scope, non_locals: true)
+        return nil if stores.empty? && names.empty?
+
         stored = stored_capture_bindings(stores)
-        bindings = stored.dup
-        names = CapturedLocals.writes(block, scope, ivars: true)
+        types = stored.dup
+        marks = {}
         unless names.empty?
-          rebound_capture_bindings(block, names, element_types, stored).each do |name, converged|
-            bindings[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
+          rebound_capture_bindings(block, names, param_types, stored, marks).each do |name, converged|
+            types[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
           end
         end
-        bindings.empty? ? nil : bindings
+        types.empty? ? nil : CapturedLocals::Bindings.new(types: types, marks: marks)
       end
 
       # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, `Hash#shift` on a
@@ -4293,11 +4320,11 @@ module Rigor
       end
 
       # `stored` is laid under every fixpoint pass, so the rebind converges over the widened contents rather
-      # than the entry ones.
-      def rebound_capture_bindings(block, names, element_types, stored)
+      # than the entry ones. `marks` collects the optimistic nil-freeness mark a pass's exit binding carries.
+      def rebound_capture_bindings(block, names, param_types, stored, marks)
         return captured_floor(names) if block_body_threading_suppressed?
 
-        converged_captured_bindings(block, names, element_types, stored)
+        converged_captured_bindings(block, names, param_types, stored, marks)
       rescue StandardError
         captured_floor(names)
       end
@@ -4306,17 +4333,23 @@ module Rigor
         names.to_h { |name| [name, Type::Combinator.untyped] }
       end
 
-      def converged_captured_bindings(block, names, element_types, stored)
-        param_types = [Type::Combinator.union(*element_types)]
+      # A name the body rebinds somewhere the pass's exit scope never sees ({UnthreadedRebinds}) takes the floor
+      # without running the fixpoint, and is bound to it under every pass, so a name that reads it converges over
+      # the floor rather than over the pin: `t = s` after an unthreaded `s` rebind would otherwise converge on
+      # the first iteration's `s`. The unmoved-pin test below still runs over every other name.
+      def converged_captured_bindings(block, names, param_types, stored, marks)
+        floored = UnthreadedRebinds.names(block, names)
+        moving = names.reject { |name| floored.include?(name) }
         base = stored.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
-        seeds = names.to_h { |name| [name, CapturedLocals.bound_type(base, name)] }
+        base = floored.reduce(base) { |acc, name| CapturedLocals.bind(acc, name, Type::Combinator.untyped) }
+        seeds = moving.to_h { |name| [name, CapturedLocals.bound_type(base, name)] }
         converged = BodyFixpoint.converge(
-          names: names,
+          names: moving,
           seed_bindings: seeds,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, base, bindings, names) }
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, base, bindings, marks) }
         )
-        unmoved_pins_floored(converged, seeds)
+        unmoved_pins_floored(converged, seeds).merge(captured_floor(floored))
       end
 
       # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
@@ -4351,6 +4384,12 @@ module Rigor
       # Symbol from the second iteration on. For every other name the two bindings are the same. The price is
       # the trade the paragraph above already makes: a name the body mutates and VISIBLY rebinds to the widened
       # class (`t << "c"; t = t.strip`) converges on that seed as well, and is floored with the hidden case.
+      #
+      # {UnthreadedRebinds} now floors every name it can show is rebound out of the pass's sight, whatever the
+      # fixpoint converged to, so this test only ever sees a name whose rebinds the scan found threaded. It stays
+      # as the backstop for what the scan cannot see — a nested construct's own write-back missing a path the
+      # scan's position list did not anticipate — and so the `0 | Integer` seed above keeps its floor: skipping it
+      # for a scan-clean name would trade that backstop for precision.
       def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
           next [name, type] unless type == seeds[name] && value_pinned?(CapturedLocals.bound_type(scope, name))
@@ -4365,12 +4404,19 @@ module Rigor
 
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
       # same layering as {#type_block_body_with_param}), returning the per-name exit binding. Threading is
-      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
-      def captured_exit_bindings(block, param_types, base, bindings, names)
-        entry = bindings.reduce(base) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+      # suppressed for the pass, as it is for every full body evaluation the block-return pass runs. An exit mark
+      # is recorded into `marks` and carried into later passes, since the next iteration enters on that binding.
+      def captured_exit_bindings(block, param_types, base, bindings, marks)
+        entry = bindings.reduce(base) do |acc, (name, type)|
+          CapturedLocals.bind(acc, name, type, optimistic: marks[name])
+        end
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
         _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
-        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
+        bindings.to_h do |name, _type|
+          mark = CapturedLocals.optimistic_mark(exit_scope, name)
+          marks[name] ||= mark if mark
+          [name, CapturedLocals.bound_type(exit_scope, name)]
+        end
       end
 
       def per_element_symbol_results(block_arg, element_types)
@@ -4803,7 +4849,7 @@ module Rigor
       # variable the body rebinds, and of every captured local it mutates in place
       # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
       def type_block_body_with_param(block_node, expected_param_types, captured: nil)
-        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+        block_scope = captured ? captured.lay(scope) : scope
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope)

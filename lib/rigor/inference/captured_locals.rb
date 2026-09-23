@@ -23,9 +23,10 @@ module Rigor
     # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
     # variable.
     #
-    # The per-element fold also asks for the instance variables the body rebinds (`ivars: true`). Their
-    # names keep their `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each
-    # name through its own kind of binding.
+    # The per-element fold also asks for the other bindings that outlive an iteration (`non_locals: true`):
+    # the instance variables, class variables and globals the body rebinds, and the instance variable behind an
+    # attribute setter it calls on `self`. Their names keep their sigil, so a map over every kind never collides,
+    # and {.bound_type} / {.bind} reach each name through its own kind of binding.
     #
     # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
     # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
@@ -38,69 +39,161 @@ module Rigor
         Prism::LocalVariableTargetNode
       ].freeze
 
-      IVAR_WRITE_NODES = Set[
+      # The write forms of the bindings other than locals that outlive an iteration: instance variables, class
+      # variables and globals.
+      NON_LOCAL_WRITE_NODES = Set[
         Prism::InstanceVariableWriteNode,
         Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode,
         Prism::InstanceVariableAndWriteNode,
-        Prism::InstanceVariableTargetNode
+        Prism::InstanceVariableTargetNode,
+        Prism::ClassVariableWriteNode,
+        Prism::ClassVariableOperatorWriteNode,
+        Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode,
+        Prism::ClassVariableTargetNode,
+        Prism::GlobalVariableWriteNode,
+        Prism::GlobalVariableOperatorWriteNode,
+        Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode,
+        Prism::GlobalVariableTargetNode
       ].freeze
+
+      # The call forms that invoke an attribute setter: `self.w = v`, the compound `self.w += v` / `||=` / `&&=`,
+      # and a multi-assign target `self.w, x = …`.
+      SETTER_CALL_NODES = Set[
+        Prism::CallNode, Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode,
+        Prism::CallTargetNode
+      ].freeze
+      private_constant :SETTER_CALL_NODES
+
+      # An attribute writer's name: an identifier followed by `=`. `==`, `!=`, `<=`, `>=`, `===` and `[]=` are
+      # not setters.
+      SETTER_NAME = /\A[A-Za-z_]\w*=\z/
+      private_constant :SETTER_NAME
+
+      # The binding the per-element fold lays under a block's parameters: each name's type across iterations, and
+      # the optimistic nil-freeness mark an iteration's own rebind gave it, which {.bind} adds to the one the
+      # call site already holds — as `Scope#join` unions the marks of the scopes it joins.
+      Bindings = Data.define(:types, :marks) do
+        def names = types.keys
+
+        def lay(scope)
+          types.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type, optimistic: marks[name]) }
+        end
+      end
+
+      # The empty answers, shared: every block-bearing call's return pass asks both questions, and nearly every
+      # body answers nothing to either.
+      NO_NAMES = [].freeze
+      NO_SITES = {}.freeze
+      private_constant :NO_NAMES, :NO_SITES
 
       module_function
 
       # @param base_scope — the call-site scope the block closes over.
-      # @param ivars — also collect the instance variables the body rebinds, for the per-element fold. An
-      #   ivar is not captured — the block shares the caller's `self` — but it outlives an iteration exactly
-      #   as a captured local does. It counts on the same terms as a local (every write form, any depth, bound
-      #   in `base_scope`), except that one still on its class-wide binding does not: ADR-58's declaration
-      #   seed is the union of every write in the class, this body's included, so there is no first-iteration
-      #   pin in it to remove. A nested block that rebinds `self` (`o.instance_eval`) writes another object's
-      #   ivar, and a nested `def` runs only when called; both still count, because an `instance_eval` without
-      #   a receiver, or a call to that `def` inside the body, does write this one.
+      # @param non_locals — also collect, for the per-element fold, the other bindings the body rebinds that
+      #   outlive an iteration: instance variables, class variables and globals. None is captured — the block
+      #   shares the caller's `self`, its class and the process — but each outlives an iteration exactly as a
+      #   captured local does. Each counts on the same terms as a local (every write form, any depth, bound in
+      #   `base_scope`), except that an instance variable still on its class-wide binding does not: ADR-58's
+      #   declaration seed is the union of every write in the class, this body's included, so there is no
+      #   first-iteration pin in it to remove. A nested block that rebinds `self` (`o.instance_eval`) writes
+      #   another object's ivar, and a nested `def` runs only when called; both still count, because an
+      #   `instance_eval` without a receiver, or a call to that `def` inside the body, does write this one. An
+      #   attribute setter called on `self` (`self.w = v`) counts as a rebind of the instance variable it is
+      #   named after, `@w`: the `attr_writer` / `attr_accessor` convention stores there, and no write node
+      #   shows it. A hand-written setter storing elsewhere is not seen.
       # @return the captured names the body writes, each once, in first-write order.
-      def writes(block_node, base_scope, ivars: false)
+      def writes(block_node, base_scope, non_locals: false)
         body = block_node.body
-        return [] if body.nil?
+        return NO_NAMES if body.nil?
 
-        introduced = introduced_locals(block_node)
-        names = []
+        introduced = nil
+        names = nil
         Source::NodeWalker.each(body) do |descendant|
           if LOCAL_WRITE_NODES.include?(descendant.class)
-            next if introduced.include?(descendant.name)
             next unless base_scope.locals.key?(descendant.name)
-          else
-            next unless ivars && IVAR_WRITE_NODES.include?(descendant.class)
-            next unless rebindable_ivar?(base_scope, descendant.name)
-          end
 
-          names << descendant.name
+            introduced ||= introduced_locals(block_node)
+            next if introduced.include?(descendant.name)
+
+            (names ||= []) << descendant.name
+          elsif non_locals
+            name = non_local_write_name(descendant)
+            (names ||= []) << name if name && rebindable_non_local?(base_scope, name)
+          end
         end
-        names.uniq
+        names ? names.uniq : NO_NAMES
       end
 
-      def rebindable_ivar?(scope, name)
-        !scope.ivar(name).nil? && !scope.declaration_sourced?(:ivar, name)
+      # The instance, class or global variable `node` rebinds, or nil when it rebinds none of them.
+      def non_local_write_name(node)
+        return node.name if NON_LOCAL_WRITE_NODES.include?(node.class)
+
+        setter_ivar_name(node)
+      end
+
+      # `@w` for an attribute setter called on `self` (`self.w = …` and its compound and target forms), else nil.
+      def setter_ivar_name(node)
+        return nil unless SETTER_CALL_NODES.include?(node.class) && node.receiver.is_a?(Prism::SelfNode)
+
+        setter = node.respond_to?(:write_name) ? node.write_name : node.name
+        return nil unless SETTER_NAME.match?(setter)
+
+        :"@#{setter.to_s.delete_suffix('=')}"
+      end
+
+      def rebindable_non_local?(scope, name)
+        return false if bound_type(scope, name).nil?
+
+        variable_kind(name) != :ivar || !scope.declaration_sourced?(:ivar, name)
       end
 
       # The binding `scope` holds for a name from {.writes}.
       def bound_type(scope, name)
-        ivar_name?(name) ? scope.ivar(name) : scope.local(name)
+        case variable_kind(name)
+        when :ivar then scope.ivar(name)
+        when :cvar then scope.cvar(name)
+        when :global then scope.global(name)
+        else scope.local(name)
+        end
       end
 
       # `scope` with a name from {.writes} bound to `type`, keeping the name's optimistic nil-freeness mark
       # (issue #286). `Scope#with_local` / `#with_ivar` drop it as a fresh write should, but here `type`
       # stands for the binding across iterations, and a value that was nil-free only optimistically still is:
-      # without the mark `x.nil?` folds to `false` where the runtime answers `true`.
-      def bind(scope, name, type)
-        if ivar_name?(name)
-          scope.with_ivar(name, type).with_optimistic_ivar(name, scope.optimistic_ivar(name))
+      # without the mark `x.nil?` folds to `false` where the runtime answers `true`. `optimistic` is a mark the
+      # binding carries besides the one `scope` already holds — one an iteration's own rebind made. Class
+      # variables and globals carry no mark.
+      def bind(scope, name, type, optimistic: nil)
+        case variable_kind(name)
+        when :ivar
+          scope.with_ivar(name, type).with_optimistic_ivar(name, scope.optimistic_ivar(name) || optimistic)
+        when :cvar then scope.with_cvar(name, type)
+        when :global then scope.with_global(name, type)
         else
-          scope.with_local(name, type).with_optimistic_local(name, scope.optimistic_local(name))
+          scope.with_local(name, type).with_optimistic_local(name, scope.optimistic_local(name) || optimistic)
         end
       end
 
-      # Ruby spells every instance variable with a leading `@` and no local with one.
-      def ivar_name?(name) = name.start_with?("@")
+      # The optimistic nil-freeness mark `scope` holds for a name from {.writes}, or nil.
+      def optimistic_mark(scope, name)
+        case variable_kind(name)
+        when :ivar then scope.optimistic_ivar(name)
+        when :local then scope.optimistic_local(name)
+        end
+      end
+
+      # Ruby spells a global with a leading `$`, a class variable with `@@`, an instance variable with a single
+      # `@`, and a local with none of them.
+      def variable_kind(name)
+        if name.start_with?("$") then :global
+        elsif name.start_with?("@@") then :cvar
+        elsif name.start_with?("@") then :ivar
+        else :local
+        end
+      end
 
       # The nodes that change a receiver's CONTENT without rebinding it: a call to a name the straight-line
       # widening responds to ({MutationWidening::SHAPE_MUTATORS}), and the index writes that store through
@@ -112,7 +205,7 @@ module Rigor
       # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
       # above) in source order. A site counts through every variable its receiver can evaluate to
       # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
-      # excludes it. Instance variables are not collected yet, although {.writes} takes them under `ivars: true`:
+      # excludes it. Instance variables are not collected yet, although {.writes} takes them under `non_locals: true`:
       # an ivar the body mutates in place without rebinding it keeps its entry binding below the arity cap and
       # the floor above it.
       #
@@ -121,10 +214,10 @@ module Rigor
       #   captured.
       def content_mutations(block_node, base_scope)
         body = block_node.body
-        return {} if body.nil?
+        return NO_SITES if body.nil?
 
         introduced = nil
-        sites = {}
+        sites = nil
         Source::NodeWalker.each(body) do |descendant|
           receiver = mutated_receiver(descendant)
           next if receiver.nil?
@@ -136,10 +229,10 @@ module Rigor
             introduced ||= introduced_locals(block_node)
             next if introduced.include?(read.name)
 
-            (sites[read.name] ||= []) << descendant
+            ((sites ||= {})[read.name] ||= []) << descendant
           end
         end
-        sites
+        sites || NO_SITES
       end
 
       def mutated_receiver(node)

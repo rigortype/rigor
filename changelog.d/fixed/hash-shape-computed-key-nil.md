@@ -1,0 +1,1 @@
+- **[inference]** Reading a literal hash with a computed key (`o = { a: 1 }; o[name]`) now includes `nil` for the keys it does not declare, so `o[name] == 1` is no longer reported as an always-truthy condition; a union of declared literal keys still reads exactly, and `fetch` is unchanged. [#1278](https://github.com/rigortype/rigor/pull/1278)

@@ -2029,10 +2029,10 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
-    # The same seam bound a captured local the body REBINDS at its pre-call value, so a store reading
-    # it (`total += x; out << total`) recorded the first iteration's answer. The evidence is now also
-    # typed at slice A's continuation binding, through the block seam and `each_with_object` alike.
-    describe "fixtures/block_content_rebound_capture.rb — a stored value that reads a rebound capture" do
+    # The same seam bound a local the body WRITES at its block-entry value, so a store reading it
+    # (`total += x; out << total`) recorded the first iteration's answer. Each such store now reads
+    # the local where it runs, through the block seam and `each_with_object` alike.
+    describe "fixtures/block_content_rebound_capture.rb — a stored value that reads a local the body writes" do
       let(:harness) { harness_for("block_content_rebound_capture") }
 
       it "produces no assert_type mismatches" do
@@ -2040,12 +2040,15 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
 
-      # Must-not-fire / must-still-fold in one assertion: every store of a rebound capture compares
-      # true at runtime — including the read between two rebinds, which the continuation binding
-      # alone would fold — and the control whose rebound local only ever holds 0 or 1 still folds.
-      it "silences the first-iteration folds without silencing the genuine one" do
-        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
-        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      # Must-not-fire / must-still-fold in one assertion, over every rule rather than `flow.*` alone:
+      # slice A's continuation would also carry exit values no store reads (a reset `nil`, a `5`), and
+      # those report as a nil receiver or a return-type mismatch, not as a fold. The control whose
+      # store only ever reads `1` still folds. The harness loads no `Rigor::Testing` signatures, so
+      # its toplevel helpers resolve nowhere.
+      it "reports nothing but the genuine fold" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
       end
     end
 

@@ -20,9 +20,11 @@ module Rigor
     module RefinementMutation
       # Mutators that CANNOT leave a non-empty receiver empty. Whitelists rather than a table of
       # emptiers: a name missing from these retracts the witness, which is the conservative answer
-      # every mutator got before. The listed ones either only add (`<< push …`) or only permute a
-      # fixed number of slots (`sort! map! …`); `replace`, `compact!`, `flatten!`, `uniq!` and every
-      # remover are deliberately absent, since each has an input that empties the receiver.
+      # every mutator got before. The listed ones either only add (`<< push …`) or only reorder or
+      # rewrite a fixed number of slots (`sort! map! …`); `replace`, `compact!`, `flatten!`, `uniq!`
+      # and every remover are deliberately absent, since each has an input that empties the receiver.
+      # Keeping the witness is all this table decides: what a rewrite leaves in those slots is
+      # {RewriteMutation}'s answer, so `map!` keeps `non-empty-array` but not its element.
       EMPTY_PRESERVING = {
         "Array" => %i[
           << push append prepend unshift concat insert

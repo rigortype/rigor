@@ -93,9 +93,19 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.removes_empty_witness?).to be(true)
     end
 
+    # `Hash#shift` removes a pair as `delete` does; before it was listed as a Hash mutator the widening declined it
+    # and the site left the literal as it was.
+    it "gives a literal Hash a `shift` closes the gradual arm, as `delete` does" do
+      shifted = described_class.widen(zero_pinned_hash, sites_of("h = {}\n[1].each { |k| h.shift }\n"))
+      deleted = described_class.widen(zero_pinned_hash, sites_of("h = {}\n[1].each { |k| h.delete(k) }\n"))
+      expect(shifted.describe).to eq("Hash[Dynamic[top] | Symbol, 0 | Dynamic[top]]")
+      expect(shifted).to eq(deleted)
+    end
+
     it "leaves the binding unchanged when the carrier's table does not list the mutator" do
-      widened = described_class.widen(zero_pinned_hash, sites_of("h = {}\n[1].each { |k| h.shift }\n"))
-      expect(widened).to eq(zero_pinned_hash)
+      # `store` is a Hash mutator only, so an Array literal's table does not list it.
+      widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.store(e, e) }\n"))
+      expect(widened).to eq(one_pinned_tuple)
     end
 
     it "leaves a binding no site's widening applies to unchanged" do

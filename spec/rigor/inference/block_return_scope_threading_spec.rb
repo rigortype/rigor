@@ -1886,8 +1886,24 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "floors a captured local whose in-place widening declines" do
-        # `Hash#shift` is no Hash mutator to the widening, so `h` would stay the entry literal. Counting it as
-        # answered typed nine `9`s (runtime `8, 7, …, 0`) and fired always-truthy on `r.last == 9`.
+        # `map!` keeps a `non-empty-array` witness and joins nothing, so the widening declines and `xs` stays the
+        # entry `non-empty-array[String]`. Counted as answered, every position would read `String` for an element
+        # the first iteration already turned into a Symbol.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          xs = ENV.keys
+          unless xs.empty?
+            dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
+              xs.map!(&:to_sym)
+              xs.first
+            end)
+          end
+        RUBY
+      end
+
+      it "answers a captured literal Hash the body shifts" do
+        # `Hash#shift` was missing from the Hash mutator table, so the widening declined and this was floored; when
+        # it was counted as answered instead, `h` stayed the entry literal, typed nine `9`s (runtime `8, 7, …, 0`)
+        # and fired always-truthy on `r.last == 9`. It now widens as `delete` does.
         source = <<~RUBY
           h = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9 }
           r = [1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
@@ -1895,7 +1911,7 @@ RSpec.describe "block-return scope threading", type: :runner do
             h.size
           end
         RUBY
-        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        expect(dumped_type("#{source}dump_type(r)")).to eq("[#{(['non-negative-int'] * 9).join(', ')}]")
         expect(flow_rules("#{source}puts 'nine' if r.last == 9")).to be_empty
       end
 

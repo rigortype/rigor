@@ -124,7 +124,7 @@ module Rigor
         return current_scope unless call_node.is_a?(Prism::CallNode)
 
         if call_node.name == :[]=
-          invalidate_indexed_write(call_node, current_scope)
+          widen_mutated_slot(call_node, invalidate_indexed_write(call_node, current_scope))
         elsif mutator?(call_node.name)
           invalidate_mutator(call_node, current_scope)
         else
@@ -149,9 +149,45 @@ module Rigor
 
       def invalidate_mutator(call_node, current_scope)
         receiver = stable_receiver(call_node.receiver)
-        return current_scope if receiver.nil?
+        return widen_mutated_slot(call_node, current_scope) if receiver.nil?
 
         current_scope.without_indexed_narrowings_for(*receiver)
+      end
+
+      # A mutator whose receiver is the element a `(receiver, key)` narrowing records — `h[k] << x`,
+      # `h[k][:x] = v`, or `(h[k] ||= []) << x`, whose value is that element — changes the object the
+      # narrowing holds, so the narrowing is widened as the mutator widens that value, or dropped when the
+      # widening declines.
+      # Without it `groups[:a] ||= []; groups[:a] << 1` kept reading `groups[:a]` as `[]` and folded
+      # `groups[:a].size == 0`; issue #1223's threading of a receiver's write made the parenthesised spelling
+      # record the same narrowing.
+      def widen_mutated_slot(call_node, current_scope)
+        address = element_address(call_node.receiver)
+        return current_scope if address.nil?
+
+        recorded = current_scope.indexed_narrowing(*address)
+        return current_scope if recorded.nil?
+
+        widened = MutationWidening.widen_for_mutator(recorded, call_node.name)
+        return current_scope.without_indexed_narrowing(*address) if widened.nil?
+
+        current_scope.with_indexed_narrowing(*address, widened)
+      end
+
+      ELEMENT_WRITE_NODES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze
+      private_constant :ELEMENT_WRITE_NODES
+
+      # The `(receiver, key)` address of a single-key element read `h[k]`, or of an index compound write
+      # (`h[k] ||= v`) whose value is that element, bare or parenthesised on its own; nil otherwise.
+      def element_address(node)
+        while node.is_a?(Prism::ParenthesesNode) && node.body.is_a?(Prism::StatementsNode) && node.body.body.size == 1
+          node = node.body.body.first
+        end
+        return nil unless (node.is_a?(Prism::CallNode) && node.name == :[] && node.block.nil?) ||
+                          ELEMENT_WRITE_NODES.include?(node.class)
+
+        args = node.arguments&.arguments
+        args&.size == 1 ? stable_address(node.receiver, args.first) : nil
       end
 
       # Companion invalidator for single-hop method-chain narrowings (ROADMAP § Future cycles —

@@ -38,8 +38,8 @@ end
 assert_type("Array[Dynamic[top]]", memo)
 puts "three" if memo.last == 3
 
-# --- The write is the store's own argument. `count` itself still reads
-# `0` (runtime `3`); flip the golden when #1223 is fixed. ---
+# --- The write is the store's own argument. `count` itself reads
+# `Integer` since #1223; the store still reads it as `Dynamic[top]`. ---
 count = 0
 ids = []
 %w[a b c].each { |_s| ids << (count += 1) }

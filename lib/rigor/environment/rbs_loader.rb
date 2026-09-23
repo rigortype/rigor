@@ -1207,6 +1207,15 @@ module Rigor
         }.freeze
         private_constant :LIBRARY_SUPPLEMENT_CORE_OVERLAYS
 
+        # `data/core_overlay/` files that fill a hole only one `rbs` release line has, keyed by file basename
+        # to the `rbs` versions they load under. Each carries an `| ...` continuation of overloads a later
+        # line declares upstream, so loading it there would add a second copy of them. The env-cache key
+        # already carries `RBS::VERSION` ({Cache::RbsDescriptor.rbs_gem_entry}), so switching lines re-keys.
+        RBS_LINE_CORE_OVERLAYS = {
+          "hash_rbs3.rbs" => Gem::Requirement.new("< 4.0")
+        }.freeze
+        private_constant :RBS_LINE_CORE_OVERLAYS
+
         # Adds the Rigor-shipped signature sources to `rbs_loader`: every `data/vendored_gem_sigs/<gem>/`
         # directory, then the `data/core_overlay/` files — the overlay LAST so an upstream declaration
         # always wins on conflict (these reopenings only fill genuine holes, e.g. `Numeric#to_f`/`to_i`/
@@ -1228,6 +1237,7 @@ module Rigor
             dir.children.sort.each do |file|
               next unless file.file? && file.extname == ".rbs"
               next unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_CORE_OVERLAYS, file, loaded_library_names)
+              next unless rbs_line_matches?(file)
 
               rbs_loader.add(path: file)
             end
@@ -1241,6 +1251,13 @@ module Rigor
         def supplement_dependency_loaded?(supplements, path, loaded_library_names)
           library = supplements[path.basename.to_s]
           library.nil? || loaded_library_names.include?(library)
+        end
+
+        # @param path — a `data/core_overlay/` file.
+        # @return true when `path` is not tied to an `rbs` release line, or the running `rbs` is on its line.
+        def rbs_line_matches?(path)
+          requirement = RBS_LINE_CORE_OVERLAYS[path.basename.to_s]
+          requirement.nil? || requirement.satisfied_by?(Gem::Version.new(::RBS::VERSION))
         end
 
         # Rigor-owned per-gem RBS overlays (`data/gem_overlay/<gem>/`), ADR-72. Unlike the unconditional

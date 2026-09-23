@@ -16,9 +16,9 @@ module Rigor
       # Neither RBS line says that. rbs 4.2 declares `[K2] (hash[_Key, K2] replacements) { (K old_key) -> K2 }
       # -> Hash[K2, V]`, and {RbsDispatch} binds `K2` from the block return alone: it binds an argument position
       # only when the parameter is a bare type variable, so the mapping's values drop out of the key. The
-      # blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound. rbs 3.10 declares no mapping
-      # overload at all and answers an `Enumerator`. This tier answers ahead of both, so the forms it accepts
-      # get one answer on either RBS line.
+      # blockless `[K2] (hash[_Key, K2]) -> Hash[K | K2, V]` leaves `K2` unbound. rbs 3.x declares no mapping
+      # overload at all; `data/core_overlay/hash_rbs3.rbs` supplies rbs 4.2's on that line, with the same gaps.
+      # This tier answers ahead of both, so the forms it accepts get one answer on either RBS line.
       #
       # A mapping the analysis cannot read contributes a `Dynamic[top]` key arm instead of nothing. That covers an
       # untyped argument, a `to_hash`-convertible object, a Hash subclass, the unlisted entries of an open shape,
@@ -58,9 +58,9 @@ module Rigor
         end
 
         # The mapping form's block parameter: the receiver's key type, as rbs 4.2's `{ (K old_key) -> K2 }`
-        # declares it. rbs 3.10 has no mapping overload for the block-parameter probe to select, so without this
-        # rule the parameter is `Dynamic[top]` there, and so is every key the block returns. Reached through
-        # {IteratorDispatch.block_param_types}; nil falls through to the RBS probe.
+        # declares it, and as `data/core_overlay/hash_rbs3.rbs` restates it on the rbs 3.x line, which has no
+        # mapping overload of its own. Reached through {IteratorDispatch.block_param_types}; nil falls through to
+        # the RBS probe.
         def block_param_types(context)
           return nil unless context.args.size == 1
 

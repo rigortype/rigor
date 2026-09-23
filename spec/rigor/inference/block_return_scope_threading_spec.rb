@@ -1848,6 +1848,81 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "floors a global a multi-assign target rebinds" do
+      # The evaluator binds a multi-assign's locals and instance variables only: `_, $last = x, x` leaves `$last`
+      # on `nil`, which carries no value pin for the unmoved-pin floor to see. Runtime `2`.
+      source = <<~RUBY
+        $last = nil
+        r = [1, 2].find { |x| prev = $last; _, $last = x, x; prev == 1 }
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'hit' if r")).to be_empty
+    end
+
+    it "floors an instance variable a `rescue =>` reference rebinds" do
+      # It binds a local only. Runtime `2`.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run
+            @err = nil
+            dump_type([1, 2].find do |x|
+              prev = @err
+              begin
+                raise ArgumentError, "x"
+              rescue => @err
+              end
+              prev
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors an instance variable a `for` index rebinds" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Counter
+          def run
+            @cur = nil
+            dump_type([1, 2].find do |x|
+              prev = @cur
+              for @cur in [x]; end
+              prev
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "floors a local a `while` loop rebinds before its `break`" do
+      # The loop's continuation does not join the scope its `break` left with. Runtime `1`.
+      source = <<~RUBY
+        seen = nil
+        r = [1, 2].find do |e|
+          i = 0
+          while i < 3
+            i += 1
+            if i == 2
+              seen = e
+              break
+            end
+          end
+          seen == 1
+        end
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'found' if r")).to be_empty
+    end
+
+    it "widens a global the body mutates in place" do
+      # `$seen << x` is never a rebind, so the global needs the in-place half. Runtime `2`.
+      source = <<~RUBY
+        $seen = []
+        r = [1, 2].find { |x| n = $seen.size; $seen << x; n == 1 }
+      RUBY
+      expect(dumped_type("#{source}dump_type(r)")).to eq("1 | 2 | nil")
+      expect(flow_rules("#{source}puts 'hit' if r")).to be_empty
+    end
+
     it "keeps the fixpoint of a counter whose every rebind is threaded" do
       # The paired control: the same `||=` and `+=` as statements are both threaded, so the fixpoint is the
       # answer and nothing is floored.
@@ -1960,6 +2035,35 @@ RSpec.describe "block-return scope threading", type: :runner do
         xs = Array.new(rand(3)) { |i| i }
         r = xs.all? { |x| k = 1; k == 1 }
         puts "all" if r
+      RUBY
+    end
+
+    it "keeps the entry binding of a block `then` runs exactly once" do
+      # No second run exists, so a rebind never reaches a read: runtime `5`, and `w + 1` is fine.
+      source = <<~RUBY
+        first = true
+        w = 5.then { |n| was = first; first = false; was ? n : nil }
+        dump_type(w)
+        w + 1
+      RUBY
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      expect(dumped_type(source)).to eq("Integer")
+      expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+    end
+
+    it "keeps the call type of a `tap` block whose `break` only a second run could take" do
+      expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+        done = false
+        dump_type([1].tap { |a| break if done; done = true })
+      RUBY
+    end
+
+    it "keeps the entry binding of a block a method outside the iteration catalogue runs" do
+      # `synchronize` runs its block once; the take-and-clear idiom answers the taken value.
+      expect(dumped_type(<<~RUBY)).to eq('"abc"')
+        buf = "abc"
+        m = Mutex.new
+        dump_type(m.synchronize { out = buf; buf = nil; out })
       RUBY
     end
 

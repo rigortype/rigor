@@ -191,6 +191,27 @@ RSpec.describe "block `break` arm union", type: :runner do
       RUBY
     end
 
+    it "leaves a `break` in a block a definer or a constructor stores out of the call's value" do
+      # `define_method`'s `break` returns from the defined method; a thread, enumerator or default-proc block
+      # raises `LocalJumpError` on it. None of them is ever the call's value.
+      expect(dumped_type(<<~RUBY)).to eq("Symbol")
+        class Counter
+          def self.build(flag)
+            dump_type(define_method(:go) { |x| break if flag; x })
+          end
+        end
+      RUBY
+      {
+        "Thread.new" => "Thread", "Enumerator.new" => "Enumerator", "Hash.new" => "Hash"
+      }.each do |call, type|
+        expect(dumped_type(<<~RUBY)).to start_with(type), call
+          def run(flag)
+            dump_type(#{call} { |*a| break if flag; 1 })
+          end
+        RUBY
+      end
+    end
+
     it "does not report a recursive lambda whose body breaks" do
       source = <<~RUBY
         def run(el)

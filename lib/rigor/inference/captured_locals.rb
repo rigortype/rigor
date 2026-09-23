@@ -214,17 +214,20 @@ module Rigor
       # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
       # excludes it.
       #
-      # Under `ivars: true` the instance variables the body mutates in place count too, on the terms {.writes}
-      # takes a rebound one ({.rebindable_ivar?}). Since the block-return threading gate threads an index write,
-      # `@cache[:first] ||= e; @cache[:first] == 2` would otherwise type every position from the empty entry
-      # hash, store THAT position's `e`, and fold `find` to `2` where Ruby, keeping the first iteration's `1`,
-      # answers `nil`.
+      # Under `non_locals: true` the instance variables, class variables and globals the body mutates in place
+      # count too, on the terms {.writes} takes a rebound one ({.rebindable_non_local?}). Since the block-return
+      # threading gate threads an index write, `@cache[:first] ||= e; @cache[:first] == 2` would otherwise type
+      # every position from the empty entry hash, store THAT position's `e`, and fold `find` to `2` where Ruby,
+      # keeping the first iteration's `1`, answers `nil`; `$seen << x; n == 1` after `n = $seen.size` folded
+      # `find` to `nil` the same way. A class variable or global counts only as the receiver itself, not through
+      # a branch that selects it.
       #
       # @param base_scope — the call-site scope the block closes over.
-      # @param ivars — also collect the instance variables the body mutates in place.
+      # @param non_locals — also collect the instance variables, class variables and globals the body mutates
+      #   in place.
       # @return `{ name => [site, ...] }`, empty for the overwhelmingly common body that mutates nothing
       #   captured.
-      def content_mutations(block_node, base_scope, ivars: false)
+      def content_mutations(block_node, base_scope, non_locals: false)
         body = block_node.body
         return NO_SITES if body.nil?
 
@@ -234,8 +237,8 @@ module Rigor
           receiver = mutated_receiver(descendant)
           next if receiver.nil?
 
-          ReceiverAlias.candidates(receiver).each do |read|
-            next unless content_target?(read, base_scope, ivars)
+          mutated_reads(receiver).each do |read|
+            next unless content_target?(read, base_scope, non_locals)
 
             if read.is_a?(Prism::LocalVariableReadNode)
               introduced ||= introduced_locals(block_node)
@@ -248,12 +251,21 @@ module Rigor
         sites || NO_SITES
       end
 
-      # A local bound at the call site (the block's own names are excluded by the caller), or — under `ivars:` —
-      # an instance variable {.rebindable_ivar?} accepts.
-      def content_target?(read, base_scope, ivars)
+      NON_ALIASED_READS = [Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode].freeze
+      private_constant :NON_ALIASED_READS
+
+      # The variable reads a mutated receiver can evaluate to: {ReceiverAlias.candidates}' locals and instance
+      # variables, or the class variable or global the receiver reads directly.
+      def mutated_reads(receiver)
+        NON_ALIASED_READS.include?(receiver.class) ? [receiver] : ReceiverAlias.candidates(receiver)
+      end
+
+      # A local bound at the call site (the block's own names are excluded by the caller), or — under
+      # `non_locals:` — an instance variable, class variable or global {.rebindable_non_local?} accepts.
+      def content_target?(read, base_scope, non_locals)
         return base_scope.locals.key?(read.name) if read.is_a?(Prism::LocalVariableReadNode)
 
-        ivars && rebindable_ivar?(base_scope, read.name)
+        non_locals && rebindable_non_local?(base_scope, read.name)
       end
 
       def mutated_receiver(node)

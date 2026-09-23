@@ -99,23 +99,6 @@ module Rigor
         may_raise_stop_iteration?(block.body)
       end
 
-      # Kernel functions that wrap their literal block in a Proc and return it without running it.
-      BLOCK_STORING_KERNEL_METHODS = %i[lambda proc].freeze
-      private_constant :BLOCK_STORING_KERNEL_METHODS
-
-      # Whether `call_node` stores its block and returns without running it: `lambda { … }` / `proc { … }` on a
-      # spelling that reaches `Kernel`, or `Proc.new { … }`. A `break` in such a block never becomes the call's
-      # value — in a lambda it returns from the lambda when that is called, in a proc it raises
-      # `LocalJumpError` — so the #853 break-arm union MUST NOT read it. A project redefinition of `lambda`
-      # itself is not excluded: dropping the arm there loses a `break` value, never invents one.
-      def stores_block?(call_node)
-        if BLOCK_STORING_KERNEL_METHODS.include?(call_node.name)
-          kernel_spelled_receiver?(call_node.receiver)
-        else
-          call_node.name == :new && proc_constant?(call_node.receiver)
-        end
-      end
-
       def may_raise_stop_iteration?(node)
         return true unless STOP_ITERATION_FREE_NODES.any? { |klass| node.is_a?(klass) }
 
@@ -210,14 +193,6 @@ module Rigor
           when nil, Prism::SelfNode then true
           when Prism::ConstantReadNode then receiver.name == :Kernel
           when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Kernel
-          else false
-          end
-        end
-
-        def proc_constant?(receiver)
-          case receiver
-          when Prism::ConstantReadNode then receiver.name == :Proc
-          when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Proc
           else false
           end
         end

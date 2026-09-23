@@ -69,9 +69,10 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     end
 
     it "gives a site whose arguments describe no stored value the gradual arm" do
-      # The widening joins nothing for `map!`, so without the arm the class the block rewrites to is missing.
+      # The widening joins nothing for `map!`, so without the arm the class the block rewrites to is missing. The
+      # seed's pinning stays beside it, as the straight-line seam keeps it (the #561 accepting form).
       widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
-      expect(widened.describe).to eq("Array[Dynamic[top] | Integer]")
+      expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
     end
 
     it "gives every Array member of a union seed the gradual arm" do
@@ -82,7 +83,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
         one_pinned_tuple
       )
       widened = described_class.widen(union, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
-      expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | Array[Dynamic[top] | String]")
+      expect(widened.describe).to eq("Array[1 | Dynamic[top]] | Array[Dynamic[top] | String]")
     end
 
     it "keeps an empty-witness refinement while giving its base the gradual arm" do
@@ -205,7 +206,7 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
 
       it "gives the element the gradual arm a class-changing site needs" do
         widened = described_class.widen(nested_tuple, sites_of("a = []\n[1].each { |e| a.last.map!(&:to_s) }\n"))
-        expect(widened.describe).to eq("[[1], Array[Dynamic[top] | Integer]]")
+        expect(widened.describe).to eq("[[1], Array[2 | Dynamic[top]]]")
       end
 
       it "declines a path the straight-line widening cannot follow" do

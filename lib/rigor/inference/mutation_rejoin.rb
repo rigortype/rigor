@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "content_join"
+require_relative "rewrite_mutation"
 
 module Rigor
   module Inference
@@ -48,7 +49,9 @@ module Rigor
             MutationWidening.join_added_pairs(pre_state, method_name, arg_types,
                                               [pinned_evidence(seed_keys), pinned_evidence(seed_values)])
           end
-        rejoined = keep_precise_parameters(pre_state, rejoined)
+        # The arm lands after the precise parameters are restored: a rewriter falsifies a proven side too
+        # (`Hash.new(0)` under `transform_values!(&:to_s)` holds Strings), which an adder's one store cannot.
+        rejoined = RewriteMutation.arm(keep_precise_parameters(pre_state, rejoined), method_name)
         rejoined == nominal ? nil : rejoined
       end
 

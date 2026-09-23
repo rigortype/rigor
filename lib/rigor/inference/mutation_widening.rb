@@ -8,6 +8,7 @@ require_relative "content_join"
 require_relative "mutation_rejoin"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
+require_relative "rewrite_mutation"
 require_relative "string_mutation"
 
 module Rigor
@@ -115,9 +116,7 @@ module Rigor
 
       # True when `method_name` is a pure self-returner that must
       # not invalidate the receiver's facts.
-      def pure_self_returner?(method_name)
-        PURE_SELF_RETURNERS.include?(method_name)
-      end
+      def pure_self_returner?(method_name) = PURE_SELF_RETURNERS.include?(method_name)
 
       # Returns a scope with the call's receiver widened, for every variable the receiver expression
       # can evaluate to ({ReceiverAlias.candidates}) whose current binding is a literal-shape carrier
@@ -279,6 +278,7 @@ module Rigor
       # nominal, whose element set is a claim this seam may not grow — see {MutationRejoin.regrowable_carrier?}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
+        values = RewriteMutation.pinning(type, method_name, values)
 
         return nil if type.nil?
 
@@ -362,7 +362,11 @@ module Rigor
       # **The join records what it saw; it never CLOSES the parameter.** That is
       # {#gradual_floor}'s job, and the reason is the seam this method sits on rather than anything
       # about Array or Hash.
+      #
+      # A mutator whose arguments do not describe what it stores ({RewriteMutation}) takes that module's gradual
+      # arm first, on every path that reaches this join: the literal arms, the refinement arm, and the re-join.
       def join_added_elements(widened, method_name, arg_types, seed_elements)
+        widened = RewriteMutation.arm(widened, method_name)
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
@@ -411,8 +415,10 @@ module Rigor
 
       # The Hash-side twin of {#join_added_elements}: `h[k] = v` / `h.store(k, v)` join the stored
       # key and value into the widened `Hash[K, V]` carrier, each admitted against its OWN side's
-      # seed evidence (a foreign key does not make the value gradual, or the reverse).
+      # seed evidence (a foreign key does not make the value gradual, or the reverse). {RewriteMutation}'s arm lands
+      # first, as it does in {#join_added_elements}.
       def join_added_pairs(widened, method_name, arg_types, seed_pairs)
+        widened = RewriteMutation.arm(widened, method_name)
         return widened unless ContentJoin::HASH_CONTENT_ADDERS.include?(method_name)
         return widened if arg_types.size < 2
 
@@ -554,9 +560,7 @@ module Rigor
       # `key_union_for` is delegated rather than duplicated: {#widen_hash_shape} and
       # `ContentJoin.hash_shape_key_values` must map a literal key set the SAME way, or a widened
       # carrier and the join that reads it back disagree about the key parameter.
-      def key_union_for(keys)
-        ContentJoin.key_union_for(keys)
-      end
+      def key_union_for(keys) = ContentJoin.key_union_for(keys)
     end
   end
 end

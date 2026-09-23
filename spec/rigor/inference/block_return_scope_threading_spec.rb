@@ -799,7 +799,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     it "gives a class-changing site the gradual arm its arguments cannot supply" do
       # `map!` joins no argument evidence, so the widening alone kept `Array[Integer]` and `r.last.upcase` drew
       # `undefined method` on a slot that holds `"1"` from the first iteration on.
-      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")
+      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 1 | Dynamic[top]]")
         a = [1]
         dump_type([1, 2].map do |e|
           a.map!(&:to_s)
@@ -2014,7 +2014,7 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "reads a class-changing site through its gradual arm" do
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['1 | Dynamic[top]'] * 9).join(', ')}]")
           a = [1]
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             a.map!(&:to_s)
@@ -2024,7 +2024,7 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "reads a merging site through its gradual arm" do
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | Integer'] * 9).join(', ')}]")
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['1 | Dynamic[top]'] * 9).join(', ')}]")
           m = { k: 1 }
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             m.merge!(k: "s")

@@ -1393,6 +1393,24 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "widens a range receiver's elements, which carry no pin the program wrote" do
+        # The RBS answer the floor replaces had no pin; keeping the enumerated `1 | 2 | 3 | 4` would leave an
+        # Array a later `<<` cannot widen.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Integer]")
+          i = rand(2)
+          dump_type((1..4).filter { |e| e.even? == (i > 0) })
+        RUBY
+      end
+
+      it "does not fold a comparison against a value appended to the range's floor" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          i = rand(2)
+          q = (1..4).filter { |e| e.even? == (i > 0) }
+          q << 9
+          puts "nine" if q.last == 9
+        RUBY
+      end
+
       it "still folds select to the kept elements when the predicate decides" do
         expect(dumped_type("dump_type([1, 2].select { |e| e > 1 })")).to eq("[2]")
       end
@@ -1508,12 +1526,13 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
-    # The same pre-state at ANY arity. A fold nested inside a body that is itself being threaded runs under the
-    # suppression that keeps the threading from re-entering, so every position is typed tail-only exactly as it
-    # is above the cap — and the per-pair HashShape fold, which has no cap, reaches tail-only this way alone.
-    # The outer body threads only when its own tail reads a name its prefix binds, which is why every fixture
-    # routes the outer `w` into the inner block; the last example drops it to show the floor follows the
-    # suppression, not the lexical nesting.
+    # The same pre-state at ANY arity. A fold nested inside a body another pass is evaluating whole runs under
+    # the suppression that keeps the threading from re-entering, so every position is typed tail-only exactly as
+    # it is above the cap — and the per-pair HashShape fold, which has no cap, reaches a pair the dependency scan
+    # can flag only this way. The outer body threads only when its own tail reads a name its prefix binds: most
+    # fixtures route the outer `w` into the inner block, one assigns the fold's result and reads it back
+    # (`y = fold; y`), and "threads the same body when the outer tail does not read its own prefix" does
+    # neither, to show the floor follows the suppression rather than the lexical nesting.
     describe "(2), nested: the same family under block-body threading suppression" do
       it "floors a Tuple position whose tail reads a parameter the body mutated in place" do
         # Runtime `[[1], [1]]`; the nested walk answered two provably-empty `[]`.
@@ -1721,6 +1740,20 @@ RSpec.describe "block-return scope threading", type: :runner do
           dump_type(m.synchronize do
             w = v
             { a: 1, b: 2 }.transform_keys do |k|
+              k = "\#{k}\#{w}"
+              k
+            end
+          end)
+        RUBY
+      end
+
+      it "keeps an empty shape's exact fold, since no pair is typed" do
+        expect(dumped_type(<<~RUBY)).to eq("{}")
+          m = Mutex.new
+          v = 1
+          dump_type(m.synchronize do
+            w = v
+            {}.transform_keys do |k|
               k = "\#{k}\#{w}"
               k
             end

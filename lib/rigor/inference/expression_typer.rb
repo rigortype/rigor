@@ -4124,12 +4124,13 @@ module Rigor
         return nil if per_position.nil? || per_position.any?(&:nil?)
 
         assemble_per_element_result(call_node.name, per_position, element_types) ||
-          undecided_fold_floor(call_node.name, element_types)
+          undecided_fold_floor(call_node.name, element_types, receiver_type)
       end
 
-      # The honest answer for `find` / `detect` / `find_index` / `index` when this fold walked every position
-      # and the assembler still could not decide — which happens for exactly one reason: some position's
-      # predicate is not a `Constant`, so "the first matching one" is not a static fact.
+      # The honest answer for the find family (`find` / `detect` / `find_index` / `index`) and the filter family
+      # (`select` / `filter` / `reject`) when this fold walked every position and the assembler still could not
+      # decide — which happens for exactly one reason: some position's predicate is not a `Constant`, so "the
+      # first matching one" or "the ones kept" is not a static fact.
       #
       # Falling through to the dispatcher was WRONG for this family, and issue #617 residue (1) is the bill:
       # `seen = 0; [1, 2].find do |e| seen += 1; seen == 2 end` answered `nil` where the runtime answers `2`.
@@ -4150,19 +4151,31 @@ module Rigor
       # where Ruby answers `[2]`. Nested inside a threaded body, where a position can be typed tail-only
       # ({#tail_only_body_floor}), `[[], []].select do |a| a << w; a.any? end` did the same. Their floor is an
       # Array of the receiver's own elements: which of them survive is undecided, and what they are is not.
+      # A range receiver's elements are widened first ({#filter_family_floor}).
       #
       # Nothing else in {PER_ELEMENT_TUPLE_METHODS} takes a floor. `map`'s assembler cannot decline, and
       # `BlockFolding` never folds `filter_map` / `flat_map`, so their fall-through is the RBS `Array[U]`
       # projection.
-      def undecided_fold_floor(method_name, element_types)
+      def undecided_fold_floor(method_name, element_types, receiver_type)
         case method_name
         when :find, :detect
           Type::Combinator.union(*element_types, Type::Combinator.constant_of(nil))
         when :select, :filter, :reject
-          Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.union(*element_types)])
+          filter_family_floor(element_types, receiver_type)
         when :find_index, :index
           Type::Combinator.union(Type::Combinator.nominal_of("Integer"), Type::Combinator.constant_of(nil))
         end
+      end
+
+      # A `Constant<Range>` receiver's elements are values this walk enumerated, not ones the program wrote, and
+      # the RBS answer the floor replaces carried no pin. Kept, the pins would make `(1..4).filter { … }` an
+      # `Array[1 | 2 | 3 | 4]` that a later `q << 9` cannot widen (#580 leaves a precise Array without a
+      # gradual arm alone), so `q.last == 9` would fold always-falsey on correct code. A Tuple receiver's pins
+      # are the literal's own and stay, as the RBS projection kept them.
+      def filter_family_floor(element_types, receiver_type)
+        element = Type::Combinator.union(*element_types)
+        element = Type::Combinator.widen_value_pinned(element) if receiver_type.is_a?(Type::Constant)
+        Type::Combinator.nominal_of("Array", type_args: [element])
       end
 
       # Evaluates the call's block once per receiver element. Two block shapes are supported:
@@ -4208,10 +4221,11 @@ module Rigor
       # A position is typed tail-only in two cases: above {PER_ELEMENT_THREADING_LIMIT}, where this walk
       # suppresses the threading itself, and anywhere the walk runs nested inside a body some other pass is
       # already evaluating whole. {#threaded_block_body_type}, the `next` join
-      # ({#block_body_type_joining_nexts}), the break-arm collection ({#collect_break_arm_types}) and the
-      # captured-local fixpoint ({#captured_exit_bindings}) all suppress the threading while they do, so a
-      # fold never re-enters. The second case has no arity in it: `[[], []].map do |a| a << w; a end` inside a
-      # threaded `m.synchronize do w = v; … end` is typed tail-only at two positions.
+      # ({#block_body_type_joining_nexts}), the break-arm collection ({#collect_break_arm_types}), the
+      # captured-local fixpoint ({#captured_exit_bindings}) and an enclosing walk of this fold above the cap
+      # all suppress the threading while they run, so a fold never re-enters. The second case has no arity in
+      # it: `[[], []].map do |a| a << w; a end` inside a threaded `m.synchronize do w = v; … end` is typed
+      # tail-only at two positions.
       def tail_only_walk?(element_types)
         element_types.size > PER_ELEMENT_THREADING_LIMIT || block_body_threading_suppressed?
       end
@@ -4234,9 +4248,9 @@ module Rigor
       #
       # The names come from the scan the threading gate uses ({#tail_depends_on_body_binding?}), so "would
       # threading have changed this tail" and "is tail-only untrustworthy here" stay one question. A body
-      # {#unanswered_tail_dependency?} answers false for keeps its exact tail-only fold: every single-statement
-      # block, and every multi-statement block whose tail ignores its prefix, reads only its own body-locals,
-      # or leaves through a `next`.
+      # {#unanswered_tail_dependency?} answers false for keeps its exact fold: every single-statement block,
+      # and every multi-statement block whose tail ignores its prefix, reads only its own body-locals, or
+      # leaves through a `next` (the last is evaluated whole, never tail-only).
       def tail_only_body_floor(element_types)
         Array.new(element_types.size) { Type::Combinator.untyped }
       end

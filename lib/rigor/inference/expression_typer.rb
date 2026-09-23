@@ -129,9 +129,9 @@ module Rigor
         Prism::LocalVariableOperatorWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableOrWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableAndWriteNode => :type_of_compound_variable_write,
-        Prism::IndexOperatorWriteNode => :type_of_assignment_write,
-        Prism::IndexOrWriteNode => :type_of_assignment_write,
-        Prism::IndexAndWriteNode => :type_of_assignment_write,
+        Prism::IndexOperatorWriteNode => :type_of_index_compound_write,
+        Prism::IndexOrWriteNode => :type_of_index_compound_write,
+        Prism::IndexAndWriteNode => :type_of_index_compound_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
         # LHS-only target nodes (destructuring assignment, pattern matching, `for x in xs`, block parameter
         # `|a, (b, c)|`). They have no value to extract — the type-of pass acknowledges the node class so the
@@ -402,9 +402,8 @@ module Rigor
       # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
       # inventing the rvalue.
       #
-      # Constant and index targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body,
-      # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
-      # `StatementEvaluator#eval_index_write`.
+      # Constant targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body. Index
+      # targets have their own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
         current = compound_write_current_binding(node)
         rhs = type_of(node.value)
@@ -427,6 +426,24 @@ module Rigor
         else
           compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end
+      end
+
+      # `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` as an EXPRESSION. Like a variable compound write, its value is
+      # what it stores through `[]=` — the dispatched `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — which
+      # reads the slot's current type, recorded indexed narrowing included. Typed as the rvalue alone it answered
+      # `1` for `counts[w] += 1`, so `r = words.map { |w| counts[w] += 1 }` pinned every position to `1` and
+      # `r.last == 1` drew a false `flow.always-truthy-condition`.
+      #
+      # The statement evaluator already owned that algebra for the straight-line write and the `[]=` widening
+      # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
+      # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
+      # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
+      #
+      # One exception carries over, narrowed, from {#type_of_compound_variable_write}: a memoizing `||=` whose
+      # slot the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it,
+      # because it is decided on the `[]` read the evaluator performs.
+      def type_of_index_compound_write(node)
+        StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
       end
 
       def compound_write_current_binding(node)
@@ -4650,9 +4667,10 @@ module Rigor
       end
 
       def fold_hash_shape_transform_values(shape, block_arg)
+        captured = hash_block_captured_bindings(block_arg, shape.pairs.values)
         new_pairs = {}
         shape.pairs.each do |key, value|
-          new_value = apply_hash_block(block_arg, value)
+          new_value = apply_hash_block(block_arg, value, captured: captured)
           return nil if new_value.nil?
 
           new_pairs[key] = new_value
@@ -4661,10 +4679,11 @@ module Rigor
       end
 
       def fold_hash_shape_transform_keys(shape, block_arg)
+        key_types = shape.pairs.keys.map { |key| Type::Combinator.constant_of(key) }
+        captured = hash_block_captured_bindings(block_arg, key_types)
         new_pairs = {}
-        shape.pairs.each do |key, value|
-          key_type = Type::Combinator.constant_of(key)
-          new_key_type = apply_hash_block(block_arg, key_type)
+        key_types.zip(shape.pairs.values).each do |key_type, value|
+          new_key_type = apply_hash_block(block_arg, key_type, captured: captured)
           return nil unless new_key_type.is_a?(Type::Constant)
 
           new_key = new_key_type.value
@@ -4676,12 +4695,30 @@ module Rigor
         Type::Combinator.hash_shape_of(new_pairs)
       end
 
+      # The per-pair twin of issue #587 (b)'s first-iteration pin. Every pair is typed from the SAME entry scope,
+      # so a body that rebinds a captured outer local answered the first pair's value at every pair: `total = 0;
+      # { x: 1, y: 2 }.transform_values { total += 1 }` folded to `{ x: 1, y: 1 }` (runtime `{ x: 1, y: 2 }`),
+      # and `r[:y] == 1` then fired always-truthy on correct code. The pairs take the per-element fold's
+      # captured-local entry binding ({#per_element_captured_bindings}) — the fixpoint's block parameter bound
+      # to the union of the values, or of the `Constant` keys — rather than a copy of it: issue #1198 is where
+      # the block-entry models consolidate. A captured local the body does not change keeps its exact per-pair
+      # fold, and a `&:symbol` block captures nothing.
+      #
+      # An empty shape has no pair to type, so it does not pay for the fixpoint.
+      def hash_block_captured_bindings(block_arg, param_types)
+        return nil unless block_arg.is_a?(Prism::BlockNode)
+        return nil if param_types.empty?
+
+        per_element_captured_bindings(block_arg, param_types)
+      end
+
       # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to
-      # `param_type` and returns the resulting type, or `nil` on failure.
-      def apply_hash_block(block_arg, param_type)
+      # `param_type` and returns the resulting type, or `nil` on failure. `captured:` is the pair-independent
+      # entry binding from {#hash_block_captured_bindings}.
+      def apply_hash_block(block_arg, param_type, captured: nil)
         case block_arg
         when Prism::BlockNode
-          type_block_body_with_param(block_arg, [param_type])
+          type_block_body_with_param(block_arg, [param_type], captured: captured)
         when Prism::BlockArgumentNode
           expression = block_arg.expression
           return nil unless expression.is_a?(Prism::SymbolNode)

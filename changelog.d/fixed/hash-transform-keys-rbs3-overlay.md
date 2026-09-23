@@ -1,0 +1,1 @@
+- **[check]** Under the `rbs` 3.x line, `Hash#transform_keys` and `#transform_keys!` now accept a replacements hash (`h.transform_keys({ a: :z })`) without a false `call.wrong-arity`, and the bang form answers the receiver instead of an `Enumerator`, as they already did under rbs 4.x. [#1266](https://github.com/rigortype/rigor/pull/1266)

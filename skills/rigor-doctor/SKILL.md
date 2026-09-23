@@ -13,12 +13,13 @@ metadata:
 # Rigor Doctor
 
 `rigor skill describe` reports what *exists* (presence checks). This skill
-goes a level deeper: it *runs* Rigor's own validators to confirm the setup
-is actually working — the difference between "a `.rigor.yml` is present"
-and "it parses, loads its plugins, and analyses the right files." Reach for
-it when the diagnostics look wrong (suspiciously zero, or suspiciously
-many) or after editing the config. It needs no special command — it
-orchestrates checks Rigor already ships and interprets the results.
+goes a level deeper: `rigor doctor` *runs* Rigor's own setup validators
+(config audit, RBS environment, plugin loading, baseline drift, plugin
+gaps, install layout) and this skill interprets the result — the
+difference between "a `.rigor.yml` is present" and "it parses, loads its
+plugins, and analyses the right files." Reach for it when the diagnostics
+look wrong (suspiciously zero, or suspiciously many) or after editing the
+config.
 
 ## First: load the version-current copy
 
@@ -46,25 +47,24 @@ header names). If `rigor` is not on `PATH`, this task needs it: run
 
 ## What it validates
 
-Four validators, each a check Rigor already ships. The exact commands and
-how to read each output live in the version-current
+`rigor doctor` runs the setup checks in one pass (`--format json` gives
+each finding's `checks[].id` and `status`) and exits non-zero when any
+check fails. It does not check whether the analysis sees the right
+files; that is a separate look at `stats.target_files` in
+`rigor check --format json`. What each check id means and how to act on
+it live in the version-current
 [`references/01-checks.md`](references/01-checks.md) (loaded per the
-directive above):
-
-1. **Config resolves with nothing silently inert** — no `config_warnings`.
-2. **Every configured plugin loads** — `rigor plugins --strict` is clean.
-3. **The baseline is not stale** (if one exists) — no large drift.
-4. **The analysis is actually seeing your code** — the source-file count
-   matches the project.
+directive above).
 
 ## Interpreting the result
 
-- **All clean** → the setup is healthy; any diagnostics are about the
-  code, not the configuration. Move on to `rigor-baseline-reduce` or
+- **All clean** (no `fail` or `warn` finding, and the file count matches
+  the project) → the setup is healthy; any diagnostics are about the code,
+  not the configuration. Move on to `rigor-baseline-reduce` or
   `rigor-protection-uplift`.
-- **A `config_warning` or a plugin failure** → that is the real problem;
-  fixing it usually clears a whole cluster of confusing downstream
-  diagnostics at once.
+- **A `config_audit`, `rbs_environment`, or `plugins` failure** → that is
+  the real problem; fixing it usually clears a whole cluster of confusing
+  downstream diagnostics at once.
 
 For deeper symptoms (hover shows `untyped` everywhere, completion empty,
 LSP silent) read the manual's troubleshooting chapter — offline and

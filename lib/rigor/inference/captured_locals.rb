@@ -112,19 +112,24 @@ module Rigor
         introduced = nil
         names = nil
         Source::NodeWalker.each(body) do |descendant|
-          if LOCAL_WRITE_NODES.include?(descendant.class)
-            next unless base_scope.locals.key?(descendant.name)
-
-            introduced ||= introduced_locals(block_node)
-            next if introduced.include?(descendant.name)
-
-            (names ||= []) << descendant.name
-          elsif non_locals
-            name = non_local_write_name(descendant)
-            (names ||= []) << name if name && rebindable_non_local?(base_scope, name)
-          end
+          name =
+            if LOCAL_WRITE_NODES.include?(descendant.class)
+              captured_local_write(descendant, base_scope) { introduced ||= introduced_locals(block_node) }
+            elsif non_locals
+              non_local_write_name(descendant)&.then { |n| n if rebindable_non_local?(base_scope, n) }
+            end
+          (names ||= []) << name if name
         end
         names ? names.uniq : NO_NAMES
+      end
+
+      # The outer local a local-write node rebinds, or nil when the call site does not bind it or the block
+      # introduces it (the block yields the introduced set, computed only when needed).
+      def captured_local_write(node, base_scope)
+        name = node.name
+        return nil unless base_scope.locals.key?(name)
+
+        yield.include?(name) ? nil : name
       end
 
       # The instance, class or global variable `node` rebinds, or nil when it rebinds none of them.
@@ -145,9 +150,11 @@ module Rigor
       end
 
       def rebindable_non_local?(scope, name)
-        return false if bound_type(scope, name).nil?
+        variable_kind(name) == :ivar ? rebindable_ivar?(scope, name) : !bound_type(scope, name).nil?
+      end
 
-        variable_kind(name) != :ivar || !scope.declaration_sourced?(:ivar, name)
+      def rebindable_ivar?(scope, name)
+        !scope.ivar(name).nil? && !scope.declaration_sourced?(:ivar, name)
       end
 
       # The binding `scope` holds for a name from {.writes}.
@@ -197,22 +204,27 @@ module Rigor
 
       # The nodes that change a receiver's CONTENT without rebinding it: a call to a name the straight-line
       # widening responds to ({MutationWidening::SHAPE_MUTATORS}), and the index writes that store through
-      # `[]=` without being a `[]=` call — the compound forms ({IndexWriteWidening::NODE_CLASSES}) and a
-      # multi-assign index target.
-      INDEX_STORE_NODES = [*IndexWriteWidening::NODE_CLASSES, Prism::IndexTargetNode].freeze
+      # `[]=` without being a `[]=` call ({IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES}, the one list the
+      # block-return threading gate and the captured-local write-back read too).
+      INDEX_STORE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_STORE_NODES
 
       # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
       # above) in source order. A site counts through every variable its receiver can evaluate to
       # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
-      # excludes it. Instance variables are not collected yet, although {.writes} takes them under `non_locals: true`:
-      # an ivar the body mutates in place without rebinding it keeps its entry binding below the arity cap and
-      # the floor above it.
+      # excludes it.
+      #
+      # Under `ivars: true` the instance variables the body mutates in place count too, on the terms {.writes}
+      # takes a rebound one ({.rebindable_ivar?}). Since the block-return threading gate threads an index write,
+      # `@cache[:first] ||= e; @cache[:first] == 2` would otherwise type every position from the empty entry
+      # hash, store THAT position's `e`, and fold `find` to `2` where Ruby, keeping the first iteration's `1`,
+      # answers `nil`.
       #
       # @param base_scope — the call-site scope the block closes over.
+      # @param ivars — also collect the instance variables the body mutates in place.
       # @return `{ name => [site, ...] }`, empty for the overwhelmingly common body that mutates nothing
       #   captured.
-      def content_mutations(block_node, base_scope)
+      def content_mutations(block_node, base_scope, ivars: false)
         body = block_node.body
         return NO_SITES if body.nil?
 
@@ -223,16 +235,25 @@ module Rigor
           next if receiver.nil?
 
           ReceiverAlias.candidates(receiver).each do |read|
-            next unless read.is_a?(Prism::LocalVariableReadNode)
-            next unless base_scope.locals.key?(read.name)
+            next unless content_target?(read, base_scope, ivars)
 
-            introduced ||= introduced_locals(block_node)
-            next if introduced.include?(read.name)
+            if read.is_a?(Prism::LocalVariableReadNode)
+              introduced ||= introduced_locals(block_node)
+              next if introduced.include?(read.name)
+            end
 
             ((sites ||= {})[read.name] ||= []) << descendant
           end
         end
         sites || NO_SITES
+      end
+
+      # A local bound at the call site (the block's own names are excluded by the caller), or — under `ivars:` —
+      # an instance variable {.rebindable_ivar?} accepts.
+      def content_target?(read, base_scope, ivars)
+        return base_scope.locals.key?(read.name) if read.is_a?(Prism::LocalVariableReadNode)
+
+        ivars && rebindable_ivar?(base_scope, read.name)
       end
 
       def mutated_receiver(node)

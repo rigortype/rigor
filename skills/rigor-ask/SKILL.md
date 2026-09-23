@@ -53,8 +53,9 @@ rigor --help                   # the live command + flag list
 rigor skill --full rigor-ask   # the current version of this skill itself
 ```
 
-Never cite a page, flag, or rule id you have not just seen in one of these
-— that is this skill's whole discipline. If `rigor` is not installed, you
+Cite a page, flag, or rule id only after you have seen it in this
+install — `rigor docs`, `rigor --help`, `rigor explain`, or the gem's own
+files (see "If the docs don't cover it"). If `rigor` is not installed, you
 can still answer high-level "what is Rigor?" questions from the web
 <https://rigor.typedduck.fail/llms.txt>, but for anything version-specific
 install it first (see `rigor-next-steps`).
@@ -82,7 +83,7 @@ Everything here is read-only and needs no network.
 | `rigor triage` | Cluster the project's diagnostics by rule / receiver / method — for "what's the shape of my errors?". |
 | `rigor coverage [--protection]` | Type / type-protection coverage — for "how well-typed is this?" and "where are the holes?". |
 | `rigor plugins` | Which plugins are installed and enabled *here* — the honest answer to "does Rigor support <gem/framework>?". |
-| `rigor sig-gen <path>` | Generate RBS for code — for "how do I type this?". Offer it and show the result; this project prefers sig-gen over hand-written RBS. |
+| `rigor sig-gen <path>` | Generate RBS for code — for "how do I type this?". Offer it and show the result — generated RBS is derived; hand-written RBS is a guess until `rigor check` agrees (see `rigor-type-oracle`). |
 
 ## Where the answer lives
 

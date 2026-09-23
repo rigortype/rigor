@@ -266,6 +266,88 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(type).not_to eq("{}")
     end
 
+    # The index-write forms store through `[]=` without being a `[]=` call: Prism gives `h[k] += v`,
+    # `h[k] ||= v`, `h[k] &&= v` and a multi-assign `h[k], x = …` target their own node classes, so a scan
+    # keyed on call names saw none of them and the tail read the entry literal's slot.
+    it "threads through a compound index write" do
+      # THE REPORTED PROBE. Before the fix `v` read the literal's `0`, and `v == 0` folded to always-truthy
+      # on a program whose runtime `v` is `1`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        m = Mutex.new
+        h = { a: 0 }
+        v = m.synchronize do
+          h[:a] += 1
+          h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "still reports the condition when the index write lands on another hash" do
+      # The must-fire control: the tail reads `h`, which the prefix never touches, so its `0` is still the
+      # truth and the condition genuinely always holds.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        v = m.synchronize do
+          g[:a] += 1
+          h[:a]
+        end
+        puts "one" if v == 0
+      RUBY
+    end
+
+    it "threads through an or-assigning index write" do
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          h[:b] ||= 1
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "threads through an and-assigning index write" do
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 1 }
+        dump_type(m.synchronize do
+          h[:a] &&= 2
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "threads through a multi-assign index target inside a nested block" do
+      # The captured-local write-back widens a receiver stored into through an `IndexTargetNode`, so the
+      # nested `each` really does forget `h`'s literal — once the gate lets the body thread.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          [1].each { |e| h[:a], _w = e, 2 }
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "leaves a tail reading a hash the index write does not touch unchanged" do
+      expect(dumped_type(<<~RUBY)).to eq("{ a: 0 }")
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          g[:a] += 1
+          h
+        end)
+      RUBY
+    end
+
     it "threads through an adder on a selected receiver" do
       # The issue #277 receiver shape: the mutation lands on whichever of `a` / `b` the ternary picked, so
       # both are possible targets and a tail reading either must thread.
@@ -462,6 +544,114 @@ RSpec.describe "block-return scope threading", type: :runner do
             total
           end
         end)
+      RUBY
+    end
+  end
+
+  # The shapes the #587 (a) gate newly threads. Once an index write in the prefix threads the body, each
+  # position of the per-element fold stored its OWN element through `||=` into the empty entry hash, where
+  # Ruby keeps the first iteration's — unless the in-place widening below binds the captured carrier first.
+  # A mutator NAME on a value it does not move (an Integer shift, a String copy) must stay exact.
+  describe "index writes the #587 (a) gate threads under the per-element fold" do
+    it "does not pin a captured hash an or-assigning index write fills" do
+      # THE HAZARD: the second position answered `2 == 2`, so `find` folded to `2` (runtime `nil`) and
+      # `found == 2` reported always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = [1, 2].find do |e|
+          cache[:first] ||= e
+          cache[:first] == 2
+        end
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "answers element-or-nil for the same find" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        cache = {}
+        dump_type([1, 2].find do |e|
+          cache[:first] ||= e
+          cache[:first] == 2
+        end)
+      RUBY
+    end
+
+    it "does not pin the same hash under a Range receiver" do
+      # Runtime `[1, 1]`; the pin answered `[1, 2]`, and `r.last == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = (1..2).map do |e|
+          cache[:k] ||= e
+          cache[:k]
+        end
+        puts "x" if r.last == 2
+      RUBY
+    end
+
+    it "does not pin an instance-variable hash either" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Memo
+          def run
+            @cache = {}
+            dump_type([1, 2].find do |e|
+              @cache[:first] ||= e
+              @cache[:first] == 2
+            end)
+          end
+        end
+      RUBY
+    end
+
+    it "keeps a position whose tail ignores the collection it mutates" do
+      # The control: `log` joins the fixpoint, but the tail reads only the element, so the fold stays exact.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2]")
+        log = []
+        dump_type([1, 2].map do |e|
+          log << e
+          e
+        end)
+      RUBY
+    end
+
+    it "keeps an Integer shift exact although `<<` is a mutator name" do
+      # `base` never moves, so admitting it would hand its value-pinned seed to the unmoved-pin floor and
+      # answer `Dynamic[top]` at every position.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2, 4]")
+        base = 1
+        dump_type([0, 1, 2].map { |i| base << i })
+      RUBY
+    end
+
+    it "keeps a non-mutating String call exact although `delete` is a mutator name" do
+      expect(dumped_type(<<~RUBY)).to eq('["heo", "heo"]')
+        word = "hello"
+        dump_type([1, 2].map { |e| word.delete("l") })
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_values fold fills" do
+      # The per-pair fold shares the fixpoint: runtime `{ x: 1, y: 1 }`, and the pin answered `{ x: 1, y: 2 }`
+      # so `r[:y] == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = { x: 1, y: 2 }.transform_values do |v|
+          cache[:first] ||= v
+          cache[:first]
+        end
+        puts "y" if r[:y] == 2
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_keys fold fills" do
+      # Runtime `{ "a" => 2 }` — both keys collide on the first iteration's `"a"` — and the pin answered two
+      # distinct keys, so `t.keys.size == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        first = {}
+        t = { a: 1, b: 2 }.transform_keys do |k|
+          first[:k] ||= k.to_s
+          first[:k]
+        end
+        puts "k" if t.keys.size == 2
       RUBY
     end
   end
@@ -1141,8 +1331,9 @@ RSpec.describe "block-return scope threading", type: :runner do
 
     describe "(2) the content-mutation family above the per-element threading cap" do
       it "floors a position whose tail reads a parameter the body mutated in place" do
-        # Nine slots each holding `[1]`; the walk answered nine provably-empty `[]`. The cap withholds the
-        # per-position body evaluation, so the honest answer above it is "unknown", not the pre-state.
+        # `[[]] * 9` is nine references to ONE array, which the nine `<<` leave holding nine `1`s; the walk
+        # answered nine provably-empty `[]`. The cap withholds the per-position body evaluation, so the honest
+        # answer above it is "unknown", not the pre-state.
         expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
           dump_type(([[]] * 9).map do |a|
             a << 1
@@ -1152,10 +1343,31 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "keeps threading the same shape at the cap" do
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Array[Dynamic[top] | Integer]'] * 3).join(', ')}]")
-          dump_type(([[]] * 3).map do |a|
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Array[Dynamic[top] | Integer]'] * 8).join(', ')}]")
+          dump_type(([[]] * 8).map do |a|
             a << 1
             a
+          end)
+        RUBY
+      end
+
+      it "floors a position whose tail reads a parameter the body stored into through an index write" do
+        # The same floor for the index-write forms, which the prefix scan used to miss. `[{ a: 0 }] * 9` is
+        # nine references to one hash, which ends as `{ a: 9 }`; the walk answered nine stale `{ a: 0 }`.
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+          dump_type(([{ a: 0 }] * 9).map do |h|
+            h[:a] += 1
+            h
+          end)
+        RUBY
+      end
+
+      it "threads the index-write shape at the cap" do
+        widened = "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]"
+        expect(dumped_type(<<~RUBY)).to eq("[#{([widened] * 8).join(', ')}]")
+          dump_type(([{ a: 0 }] * 8).map do |h|
+            h[:a] += 1
+            h
           end)
         RUBY
       end

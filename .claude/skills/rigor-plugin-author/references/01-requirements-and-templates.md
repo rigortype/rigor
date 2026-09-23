@@ -1,6 +1,6 @@
 # Phases 1–2 — Requirements gathering & template selection
 
-Before any code, get the user to commit to answers for **all five** questions below. Ask them in a single message; do NOT scaffold anything yet. The answers narrow the architecture choice in [Phase 2](02-template-selection.md).
+Before any code, get the user to commit to answers for **all five** questions below. Ask them in a single message; do NOT scaffold anything yet. The answers narrow the architecture choice in Phase 2 below.
 
 ## Q1. Trigger surface — what call shape activates the plugin?
 
@@ -43,10 +43,10 @@ Before any code, get the user to commit to answers for **all five** questions be
 
 ---
 
-Two authoring paths exist as of v0.1.x:
+Two authoring paths exist:
 
-1. **Macro expansion substrate** (ADR-16) — declarative `manifest` entries; substrate handles AST walking, name-interpolation, and synthesis. Use this when the plugin's job fits one of the three ADR-16 tiers below. (Note: ADR-60 WD2 renamed `BlockAsMethod`'s `verbs:` → `method_names:` and `NestedClassTemplate`'s `name_arg_position:` → `symbol_arg_position:`; the old keywords raise `ArgumentError`.)
-2. **Node rules + narrow contribution DSLs** (ADR-37) — `node_rule` for per-call diagnostics (the engine owns the walk), `node_file_context` for same-file two-pass, `dynamic_return(receivers:)` for call-site return types, `narrowing_facts(methods:)` for post-return narrowing facts (truthy/falsey/type guards — used by `rigor-rspec`/`rigor-sorbet`/`rigor-minitest`; `narrowing_facts` was renamed from `type_specifier` in ADR-80, with `type_specifier` kept as a deprecating alias removed in 0.3.0), and `type_node_resolvers:` (ADR-13) for custom `%a{rigor:v1:…}` type vocabulary (`rigor-typescript-utility-types`). `diagnostics_for_file(path:, scope:, root:)` is the **file-rule** surface — keep it for diagnostics a per-node walk can't express (discovery load-error reporting, cross-file aggregation), not as a legacy node-rule. **`flow_contribution_for` was removed in ADR-52 WD3 (2026-06-11)** — a plugin that still defines it raises `ArgumentError` at load time. Use `dynamic_return` instead: `dynamic_return receivers: ["MyClass"] do |call_node, scope| T end` (add `methods: [...]` to narrow); a `receivers:` entry names the receiver KIND — `"MyClass"` matches an instance, `"singleton(MyClass)"` the class object, and a rule that wants both lists both (#701); `receivers:` and `methods:` each accept a callable for sets only known after `#prepare`; `file_methods: ->(path) { names }` handles per-file name sets; `narrowing_facts methods: [...]` contributes post-return narrowing facts. Map a violation array to diagnostics with `diagnostics_for(violations, path:, node:)` (ADR-60 WD4) rather than a hand-rolled `.map { diagnostic(...) }`.
+1. **Macro expansion substrate** (ADR-16) — declarative `manifest` entries; substrate handles AST walking, name-interpolation, and synthesis. Use this when the plugin's job fits one of the three ADR-16 tiers below.
+2. **Node rules + narrow contribution DSLs** (ADR-37) — `node_rule` for per-call diagnostics (the engine owns the walk), `node_file_context` for same-file two-pass, `dynamic_return(receivers:)` for call-site return types, `narrowing_facts(methods:)` for post-return narrowing facts (truthy/falsey/type guards — used by `rigor-rspec`/`rigor-sorbet`/`rigor-minitest`), and `type_node_resolvers:` (ADR-13) for custom `%a{rigor:v1:…}` type vocabulary (`rigor-typescript-utility-types`). `diagnostics_for_file(path:, scope:, root:)` is the **file-rule** surface — keep it for diagnostics a per-node walk can't express (discovery load-error reporting, cross-file aggregation), not as a legacy node-rule. There is no `flow_contribution_for` hook; use `dynamic_return`: `dynamic_return receivers: ["MyClass"] do |call_node, scope| T end` (add `methods: [...]` to narrow); a `receivers:` entry names the receiver KIND — `"MyClass"` matches an instance, `"singleton(MyClass)"` the class object, and a rule that wants both lists both; `receivers:` and `methods:` each accept a callable for sets only known after `#prepare`; `file_methods: ->(path) { names }` handles per-file name sets; `narrowing_facts methods: [...]` contributes post-return narrowing facts. Map a violation array to diagnostics with `diagnostics_for(violations, path:, node:)` (ADR-60 WD4) rather than a hand-rolled `.map { diagnostic(...) }`.
 
 ## Step 2A — Try the macro substrate first
 
@@ -62,11 +62,11 @@ If the target DSL fits one of these shapes, ship a **declarative manifest only**
 
 The substrate floor (per ADR-16 § WD13) is "synthetic methods emit by name, return types degrade to `Dynamic[T]`." Precise return-type promotion via ADR-13's resolver chain is the **ceiling**, deferred to a future slice — declare `returns:` strings in the manifest today, unlock precision later without changes to the plugin gem.
 
-If the DSL fits a substrate tier, skip the rest of this phase and jump to [Phase 5](05-demo.md). The plugin's `lib/rigor/plugin/<id>.rb` is a 20-line manifest declaration — no walker.
+If the DSL fits a substrate tier, skip the rest of this phase and jump to [Phase 5](02-scaffold-walker-demo.md). The plugin's `lib/rigor/plugin/<id>.rb` is a 20-line manifest declaration — no walker.
 
 ## Step 2B — Hand-rolled walker (when the substrate does not fit)
 
-Map the [Phase 1](01-requirements.md) answers to one of the six existing hand-rolled examples. Use the chosen example as the **structural template** — copy the directory layout and adapt the analyser body.
+Map the Phase 1 answers to one of the six existing hand-rolled examples. Use the chosen example as the **structural template** — copy the directory layout and adapt the analyser body.
 
 | If the answers look like… | Use template | Why |
 | --- | --- | --- |
@@ -77,4 +77,4 @@ Map the [Phase 1](01-requirements.md) answers to one of the six existing hand-ro
 | Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
 | Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
 
-If the requirement fits neither the substrate tiers nor the six hand-rolled templates, **stop and ask the user**. The v0.1.x plugin contract may not yet expose what they need; don't invent a workaround. The [per-library survey](../../../../docs/notes/20260515-macro-expansion-library-survey.md) records which Ruby libraries the substrate covers and which fall outside (GraphQL-Ruby is the canonical "schema-graph recorder" case that the substrate does NOT fit).
+If the requirement fits neither the substrate tiers nor the six hand-rolled templates, **stop and ask the user**. The current plugin contract may not yet expose what they need; don't invent a workaround. The [per-library survey](../../../../docs/notes/20260515-macro-expansion-library-survey.md) records which Ruby libraries the substrate covers and which fall outside (GraphQL-Ruby is the canonical "schema-graph recorder" case that the substrate does NOT fit).

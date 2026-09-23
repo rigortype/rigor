@@ -205,7 +205,8 @@ and put that in a CHANGELOG / migration note, not the class docstring.
 
 - `rigor check <plugin>/lib` — the ADR-43 contract self-check resolves
   the plugin's inherited `Plugin::Base` calls and warns on contract
-  misuse. MUST be clean; fix the cause, never disable the rule.
+  misuse. It must be clean; fix the cause rather than disabling the
+  rule.
 - `rigor plugins --strict` — the plugin still activates.
 - `rigor plugins --capabilities` — `node_rule_types` /
   `dynamic_return_receivers` / `narrowing_facts_methods` reflect the

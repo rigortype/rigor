@@ -21,7 +21,7 @@ Load and follow:
 
 - **No parallel full-suite `make verify` on the host**
 - **Do not own long CI watchers / sleep-poll loops** — push and stop
-- **No full survey corpus `check` twice inside this session** — timeout trap;
+- **No full survey corpus `check` loops inside this session** — timeout trap;
   record residual risk / leave measurement to orchestrator
 - **Issues remain the backlog** (consume the architect contract; do not file a parallel queue)
 - Do not `pkill` by pattern

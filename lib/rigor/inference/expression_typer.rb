@@ -22,6 +22,7 @@ require_relative "origin_lookup"
 require_relative "../effects/collector"
 require_relative "fallback"
 require_relative "flow_tracer"
+require_relative "index_write_widening"
 require_relative "indexed_narrowing"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
@@ -4005,6 +4006,9 @@ module Rigor
       # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
       # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
       # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
+      # The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call, so a name-keyed
+      # scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their receiver the
+      # same way.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
@@ -4052,9 +4056,9 @@ module Rigor
       private_constant :EMPTY_NAME_SET
 
       # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
-      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call, through
-      # every variable its receiver can evaluate to) on the way down. `retargeted` is true once the descent
-      # has passed a boundary.
+      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call or an
+      # {INDEX_WRITE_NODES} store, through every variable its receiver can evaluate to) on the way down.
+      # `retargeted` is true once the descent has passed a boundary.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
@@ -4062,7 +4066,7 @@ module Rigor
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
-        collect_mutated_receivers(node, written) if node.is_a?(Prism::CallNode)
+        collect_mutated_receivers(node, written) if in_place_mutation?(node)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
@@ -4072,10 +4076,22 @@ module Rigor
         true
       end
 
-      def collect_mutated_receivers(call_node, written)
-        return unless MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
+      # The forms that store through `[]=` without being a `[]=` call ({IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES}).
+      # `StatementEvaluator` widens the three compound writes in straight-line code, and its captured-local
+      # write-back widens all four when a nested block stores through one. A straight-line index TARGET (a
+      # multi-assign, `rescue =>` or `for` target) is not widened yet, so threading on it spends the fold
+      # without moving the answer.
+      INDEX_WRITE_NODES = Set.new(IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES).freeze
+      private_constant :INDEX_WRITE_NODES
 
-        ReceiverAlias.candidates(call_node.receiver).each { |read| written << read.name }
+      def in_place_mutation?(node)
+        return MutationWidening::SHAPE_MUTATORS.include?(node.name) if node.is_a?(Prism::CallNode)
+
+        INDEX_WRITE_NODES.include?(node.class)
+      end
+
+      def collect_mutated_receivers(node, written)
+        ReceiverAlias.candidates(node.receiver).each { |read| written << read.name }
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
@@ -4198,9 +4214,9 @@ module Rigor
       # 9].map do v = e; v end` has no entry binding for `v`, so tail-only lands on `Dynamic[top]` by itself.
       # A mutated PARAMETER has one, and issue #617 residue (2) is what it buys: `([[]] * 9).map do |a| a <<
       # 1; a end` answered nine stale `[]`, a provably-empty array at every position of a result whose slots
-      # each hold `[1]`. Flooring the whole walk restores the promise for both shapes — the cost the cap
-      # refuses to pay is the per-position body evaluation, and declining to pay it means declining to know,
-      # not answering the pre-state.
+      # all hold the one array the nine `<<` filled. Flooring the whole walk restores the promise for both
+      # shapes — the cost the cap refuses to pay is the per-position body evaluation, and declining to pay it
+      # means declining to know, not answering the pre-state.
       #
       # {#tail_depends_on_body_binding?} is the same predicate the threading gate uses, so "would threading
       # have changed this tail" and "is tail-only untrustworthy here" stay one question. A body it answers
@@ -4276,7 +4292,9 @@ module Rigor
       # over it, and a local the body both rebinds and mutates takes the same widening over its converged
       # type — the rebind can bring a fresh literal back, which the next iteration then mutates. An unmutated
       # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
-      # `[0, 0]`). This half covers locals only: an instance variable mutated in place is not collected yet.
+      # `[0, 0]`). An instance variable the body mutates in place takes the same binding
+      # ({CapturedLocals.content_mutations} with `ivars: true`, on the rebind set's terms): once the #587 (a)
+      # gate threads an index write, `@cache[:first] ||= e` pins the same way.
       #
       # The generic block-return pass lays the same binding ({#block_entry_scope}), with the fixpoint's block
       # parameters bound to the signature's instead of to the elements' union.
@@ -4289,7 +4307,7 @@ module Rigor
 
       # The #587 (b) binding for `block`, with the fixpoint's block parameters bound to `param_types`.
       def captured_block_bindings(block, param_types)
-        stores = CapturedLocals.content_mutations(block, scope)
+        stores = CapturedLocals.content_mutations(block, scope, ivars: true)
         names = CapturedLocals.writes(block, scope, non_locals: true)
         return nil if stores.empty? && names.empty?
 

@@ -1027,6 +1027,25 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "widens a captured hash the body stores into at every pair" do
+      # The in-place half of the same entry binding. `{ x: 1, y: 2 }` at runtime; the entry `{ a: 0 }` answered
+      # `{ x: 0, y: 0 }` for the read-back at every pair.
+      expect(dumped_type(<<~RUBY)).to eq("{ x: Dynamic[top] | Integer, y: Dynamic[top] | Integer }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values do |e|
+          g[:a] += 1
+          g[:a]
+        end)
+      RUBY
+    end
+
+    it "keeps an unmutated captured hash read by key exact at every pair" do
+      expect(dumped_type(<<~RUBY)).to eq("{ x: 0, y: 0 }")
+        g = { a: 0 }
+        dump_type({ x: 1, y: 2 }.transform_values { |e| g[:a] })
+      RUBY
+    end
+
     it "keeps a pair whose tail reads a captured local the body does not rebind" do
       expect(dumped_type(<<~RUBY)).to eq("{ x: 5, y: 5 }")
         total = 0

@@ -28,7 +28,10 @@ module Rigor
           << push append prepend unshift concat insert
           map! collect! sort! sort_by! reverse! rotate! shuffle!
         ].to_set.freeze,
-        "Hash" => %i[[]= store merge! update transform_keys! transform_values!].to_set.freeze
+        "Hash" => %i[
+          []= store merge! update transform_keys! transform_values!
+          default= default_proc= compare_by_identity
+        ].to_set.freeze
       }.freeze
 
       module_function

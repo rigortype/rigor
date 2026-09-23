@@ -126,7 +126,15 @@ RSpec.describe Rigor::Inference::MutationWidening do
     # The drift guard for the defect above: a name that mutates an Array in place and that Hash also
     # defines mutates a Hash in place too, so the Hash table must not be missing it.
     it "lists every Array mutator that Hash also defines as a Hash mutator" do
-      shared = described_class::ARRAY_MUTATORS.to_a.select { |name| Hash.method_defined?(name) }
+      # Core's own definitions only: a gem another spec loads into this process (ActiveSupport's
+      # `Hash#slice!`) reopens `Hash` in Ruby, which made the answer depend on which specs shared the worker.
+      core = lambda do |name|
+        next false unless Hash.method_defined?(name)
+
+        location = Hash.instance_method(name).source_location
+        location.nil? || location.first.start_with?("<internal:")
+      end
+      shared = described_class::ARRAY_MUTATORS.to_a.select { |name| core.call(name) }
       expect(shared.reject { |name| described_class::HASH_MUTATORS.include?(name) }).to be_empty
     end
 
@@ -296,6 +304,45 @@ RSpec.describe Rigor::Inference::MutationWidening do
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
           eq(non_empty.base), "expected #{mutator} to widen non-empty-hash to its base"
         )
+      end
+    end
+
+    # `default=` / `default_proc=` / `compare_by_identity` change what a miss reads and nothing else, so a
+    # literal shape widens (its computed-key `values | nil` no longer holds) but keeps its key and value
+    # evidence and its non-emptiness, and a nominal — already optimistic about a miss — is left alone.
+    describe "a miss-rule mutator" do
+      let(:shape) { Rigor::Type::Combinator.hash_shape_of(a: Rigor::Type::Combinator.constant_of(1)) }
+      let(:symbol) { Rigor::Type::Combinator.nominal_of("Symbol") }
+      let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+      it "joins the default's widened class into the value side and keeps the shape non-empty" do
+        widened = described_class.widen_for_mutator(
+          shape, :default=, arg_types: [Rigor::Type::Combinator.constant_of(0)]
+        )
+        expect(widened).to eq(
+          Rigor::Type::Combinator.non_empty_hash(
+            symbol, Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1), integer)
+          )
+        )
+      end
+
+      it "adds an untyped arm for a default proc, whose result is unknown" do
+        widened = described_class.widen_for_mutator(shape, :default_proc=, arg_types: [Rigor::Type::Combinator.untyped])
+        expect(widened.base.type_args.last).to eq(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.untyped)
+        )
+      end
+
+      it "keeps the value side for `compare_by_identity`" do
+        widened = described_class.widen_for_mutator(shape, :compare_by_identity)
+        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, Rigor::Type::Combinator.constant_of(1)))
+      end
+
+      it "leaves a Hash nominal and a non-empty-hash refinement untouched" do
+        nominal = Rigor::Type::Combinator.nominal_of("Hash", type_args: [symbol, integer])
+        expect(described_class.widen_for_mutator(nominal, :default=, arg_types: [integer])).to be_nil
+        non_empty = Rigor::Type::Combinator.non_empty_hash(symbol, integer)
+        expect(described_class.widen_for_mutator(non_empty, :compare_by_identity)).to be_nil
       end
     end
 

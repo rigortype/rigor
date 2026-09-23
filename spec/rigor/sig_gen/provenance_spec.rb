@@ -160,6 +160,9 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # declaration fire `flow.always-truthy-condition` on three live `lib/` guards — matches what sig-gen
 # already proved, so both rows leave residue for generated-equivalent (`environment.rbs` -2). The
 # `Reflection` pair were already non-residue as `untyped`.
+# 711 since #1278. A closed, non-empty `HashShape` now reads a computed key as its values `| nil` instead of
+# deferring to the nil-free projection, so `SkipReasonCatalog.resolve`'s `ENTRIES[token.to_s]` infers the
+# `Entry?` its declaration states and the row leaves residue (`skip_reason_catalog.rbs` -1).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -286,7 +289,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/rbs_extended.rbs" => 22,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,
-  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 9,
+  "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,

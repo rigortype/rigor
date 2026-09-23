@@ -1152,6 +1152,27 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
         end
 
+        it "keeps the entries a miss-rule mutator leaves in place, and folds nothing on the default" do
+          result = analyze(<<~RUBY)
+            def after_default(name)
+              h = { a: 1 }
+              h.default = 0
+              puts "zero" if h[name] == 0
+              pair = h.first
+              pair.last
+            end
+
+            def after_identity
+              h = { "a" => 1, "b" => 2 }
+              h.compare_by_identity
+              pair = h.first
+              pair.last
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+          expect(truthy_diags(result)).to be_empty
+        end
+
         it "does not report a nil receiver once a default answers the miss" do
           result = analyze(<<~RUBY)
             def with_default(name)

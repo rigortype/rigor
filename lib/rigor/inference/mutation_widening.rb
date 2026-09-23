@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
 require_relative "mutation_rejoin"
+require_relative "miss_rule_mutation"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
 require_relative "string_mutation"
@@ -94,14 +95,14 @@ module Rigor
       # only the receiver-mutating methods are listed. A name both classes define is listed in
       # both tables — being in `ARRAY_MUTATORS` does not put it here, and `shift`'s absence let
       # `k = { a: 1 }; k.shift` keep the literal shape of a hash that is empty at runtime.
-      # `default=` / `default_proc=` / `compare_by_identity` change no entry but change what a miss (or a
-      # declared String key) reads, which the shape's computed-key `values | nil` answer assumes.
+      # {MissRuleMutation::MUTATORS} change no entry but change what a miss reads, which a closed shape's
+      # computed-key `values | nil` answer assumes; that module owns what they widen a shape to.
       HASH_MUTATORS = %i[
         []= store
         shift delete delete_if reject! select! filter! keep_if
         clear compact! merge! update transform_keys! transform_values!
-        replace default= default_proc= compare_by_identity
-      ].to_set.freeze
+        replace
+      ].to_set.merge(MissRuleMutation::MUTATORS).freeze
 
       # Every method name {#widen_for_mutator} responds to — the one set a body scan asks "could an
       # in-place call on this name change its binding?" against (issue #587: the block-return
@@ -288,6 +289,7 @@ module Rigor
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
 
         return nil if type.nil?
+        return MissRuleMutation.widen(type, method_name, arg_types) if MissRuleMutation.applies?(type, method_name)
 
         case type
         when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
@@ -301,8 +303,7 @@ module Rigor
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
         when Type::Constant then StringMutation.widen_constant(type, method_name)
-        when Type::Difference
-          widen_difference(type, method_name, arg_types: arg_types)
+        when Type::Difference then widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
           widen_union(type, method_name, values: values, arg_types: arg_types)
         end

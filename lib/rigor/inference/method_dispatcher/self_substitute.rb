@@ -52,13 +52,19 @@ module Rigor
           when Type::Tuple
             projected_self("Array", receiver_args) unless MutationWidening::ARRAY_MUTATORS.include?(method_name)
           when Type::HashShape
-            projected_self("Hash", receiver_args) unless MutationWidening::HASH_MUTATORS.include?(method_name)
+            projected_self("Hash", receiver_args) unless shape_mutator?(MutationWidening::HASH_MUTATORS, method_name)
           when Type::Refined, Type::Difference
             self.for(receiver.base, receiver_args, method_name, args, block_type)
           when Type::Dynamic
             inner = self.for(receiver.static_facet, receiver_args, method_name, args, block_type)
             inner && Type::Combinator.dynamic(inner)
           end
+        end
+
+        # A mutator on a shape falsifies the shape's projection unless it cannot change the element, key or
+        # value types — `{ "a" => 1 }.compare_by_identity` is still a `Hash[String, Integer]`.
+        def shape_mutator?(table, method_name)
+          table.include?(method_name) && !TYPE_PRESERVING.include?(method_name)
         end
 
         def nominal_self(class_name, receiver_args, method_name, args, block_type)

@@ -552,8 +552,18 @@ module Rigor
 
             return difference if base.class_name == "String" &&
                                  NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
+            return non_empty_hash_first(base) if method_name == :first && base.class_name == "Hash"
 
             non_zero_int_unary_projection(difference, base, method_name)
+          end
+
+          # `non-empty-hash[K, V]#first` is a `[K, V]` pair. The RBS answer is `Enumerable#first`'s `Elem?`,
+          # which spells the empty case as `?` rather than as the annotation `Array#first` carries, so without
+          # this the witness is lost on the read that most often relies on it.
+          def non_empty_hash_first(base)
+            return nil unless base.type_args.size == 2
+
+            Type::Combinator.tuple_of(*base.type_args)
           end
 
           def non_zero_int_unary_projection(difference, base, method_name)

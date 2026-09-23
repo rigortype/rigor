@@ -4348,7 +4348,9 @@ module Rigor
       # ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for: `s = +"ab"`
       # seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot see (`(s &&=
       # s.to_sym)` inside an expression) converge on `String` and be believed, where the local really holds a
-      # Symbol from the second iteration on. For every other name the two bindings are the same.
+      # Symbol from the second iteration on. For every other name the two bindings are the same. The price is
+      # the trade the paragraph above already makes: a name the body mutates and VISIBLY rebinds to the widened
+      # class (`t << "c"; t = t.strip`) converges on that seed as well, and is floored with the hidden case.
       def unmoved_pins_floored(converged, seeds)
         converged.to_h do |name, type|
           next [name, type] unless type == seeds[name] && value_pinned?(CapturedLocals.bound_type(scope, name))

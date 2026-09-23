@@ -23,8 +23,9 @@ module Rigor
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
-    # that is no carrier, or a name the mutator tables do not list for that carrier (`Hash#shift`). The caller
-    # MUST therefore not read an unchanged binding as describing later iterations.
+    # that is no carrier, a name the mutator tables do not list for that carrier (`Hash#shift`), or an
+    # empty-witness refinement under a mutator that keeps the witness and joins nothing (`non-empty-array[String]`
+    # under `map!`). The caller MUST therefore not read an unchanged binding as describing later iterations.
     #
     # The per-element block fold is the consumer: it types every position from one entry scope, so the binding
     # it lays under each position has to hold whatever earlier iterations stored. Unknown evidence is the point,

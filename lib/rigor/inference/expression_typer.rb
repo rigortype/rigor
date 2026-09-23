@@ -749,9 +749,8 @@ module Rigor
       # or `nil` (covering `{ a: 1, "b" => 2 }` and `{ 1 => 2, 1.0 => 4 }` alike) — falling back to the
       # generic `Hash[K, V]` form otherwise. Splatted entries (`{ **other }`) and dynamic keys widen to the
       # underlying `Hash[K, V]` form by unioning the types each entry exposes — a splat exposes the `[K, V]`
-      # of the hash it copies plus a `Dynamic[top]` arm (see {#hash_splat_pair}); when no concrete pair survives
-      # we fall back to the raw `Hash` so callers stay backward compatible. A splat never keeps a shape, even
-      # over an exact closed one.
+      # of the hash it copies plus a `Dynamic[top]` arm (see {#hash_splat_pair}), so every entry contributes a
+      # pair. A splat never keeps a shape, even over an exact closed one.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
         # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
@@ -763,8 +762,6 @@ module Rigor
         return shape if shape
 
         keys, values = generic_hash_pairs_for(elements)
-        return Type::Combinator.nominal_of(Hash) if keys.empty? || values.empty?
-
         Type::Combinator.nominal_of(
           Hash,
           type_args: [Type::Combinator.union(*keys), Type::Combinator.union(*values)]
@@ -837,7 +834,7 @@ module Rigor
       # The `Dynamic[top]` arm is there even when the copy is read exactly. The literal builds a new hash that no
       # declaration describes, while `MutationRejoin` regrows a `Hash[K, V]` after `[]=` / `merge!` only when it
       # already carries a gradual arm, because it reads a precise one as a declared claim. Without the arm
-      # `h = { **o }; h[:b] = 2; h[:b] == 2` folded always-falsey and `h[:e] = "s"; h[:e].upcase` fired
+      # `h = { **o }; h[:b] = 2; h[:b] == 2` would fold always-falsey and `h[:e] = "s"; h[:e].upcase` would fire
       # `call.undefined-method`, where the `Hash` a splat-only literal used to type as had stayed quiet. The same
       # arm stands in for what the analysis cannot read: an anonymous `**`, an untyped value, a nominal other than
       # `Hash`, an open shape's unlisted entries, and a hash filled through an alias the engine does not track,

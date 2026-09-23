@@ -1,0 +1,15 @@
+---
+locals:
+  _multi_z: '2'
+  _nested_q: '2'
+  _nested_r: '3'
+  _other_w: '2'
+  _splat_head: '1'
+  _stored_w: '2'
+  kept: "{ a: 0 }"
+  multi: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  nested: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  other: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  splat: Array[Array[Integer] | Dynamic[top] | [0]]
+  stored: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+assertions: {}

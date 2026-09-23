@@ -836,31 +836,30 @@ fact bound. **Decision: iterate the evidence.** The block seam and
 `each_with_object` share one join
 (`StatementEvaluator#join_content_to_fixpoint`), which binds each name
 it joins to what that collection holds at ANY iteration's entry. The
-joined names are the block's captured content-mutated locals, less
-every name the block itself introduces, and for `each_with_object` the
-memo as well; that seam keeps only the memo's carrier, so a memo store
-reading a captured collection the same block appends to (`buf << w; m
-<< buf.length`) reads `String` and not the pre-call value. A name none
-of whose stores reads a mutated Array or Hash is FIXED: its evidence
-is the same on every iteration, so it is typed once and the name is
-bound to its own join plus the seed members that join refutes (its
-`nil`). A String is always fixed at `String`, since its join ignores
-what it stored. The remaining names MOVE, and `BodyFixpoint` iterates
-their evidence slots (an Array's element union, a Hash's key union and
-value union), each seeded `bot`. Each pass re-types the moving stores
-with every moving collection bound, like a fixed one, to its join over
-the evidence so far plus the seed members that join refutes, since a
-`nil` seed can still be `nil` on an iteration where another moving
-collection has already grown. The final pass value-pin widens the
-moving evidence, and a slot that still grows takes the
-one-unknown-store floor beside the seed's own arms. `h` reads
-`Hash[Symbol, 0 | Integer]`, and `nested << [nested.last]` floors to
-`Array[Dynamic[top] | []]`. The seed is never widened, because it is
-the zero-iteration contents. Neither is a fixed name's evidence, so
-`acc << 1` beside a self-reading store keeps `Array[1]` and the
-genuine fold it supports. This keeps to WD3 rather than adding a
-second mechanism: the moving evidence slots are simply the fixpoint's
-names.
+joined names are the block's captured content-mutated locals, and for
+`each_with_object` the memo as well; that seam keeps only the memo's
+carrier, so a memo store reading a captured collection the same block
+appends to (`buf << w; m << buf.length`) reads `String` and not the
+pre-call value. A name none of whose stores reads a mutated Array or
+Hash is FIXED: its evidence is the same on every iteration, so it is
+typed once and the name is bound to its own join plus the seed members
+that join refutes (its `nil`). A String is always fixed at `String`,
+since its join ignores what it stored. The remaining names MOVE, and
+`BodyFixpoint` iterates their evidence slots (an Array's element
+union, a Hash's key union and value union), each seeded `bot`. Each
+pass re-types the moving stores with every moving collection bound,
+like a fixed one, to its join over the evidence so far plus the seed
+members that join refutes, since a `nil` seed can still be `nil` on an
+iteration where another moving collection has already grown. The final
+pass value-pin widens the moving evidence, and a slot that still grows
+takes the one-unknown-store floor beside the seed's own arms. `h`
+reads `Hash[Symbol, 0 | Integer]`, and `nested << [nested.last]`
+floors to `Array[Dynamic[top] | []]`. The seed is never widened,
+because it is the zero-iteration contents. Neither is a fixed name's
+evidence, so `acc << 1` beside a self-reading store keeps `Array[1]`
+and the genuine fold it supports. This keeps to WD3 rather than adding
+a second mechanism: the moving evidence slots are simply the
+fixpoint's names.
 
 The fixed/moving split and the memo seam's captured names are the
 review's corrections of a first cut that iterated every name and gave
@@ -877,13 +876,21 @@ nested block passed for the outer local it shadows, and binding it
 overwrote the parameter. Second, the join drops a seed's `nil`, so a
 fixed name bound to its join alone read `out << a.nil?; a ||= []; a <<
 v` as `Array[false]`. Both were new false positives against master,
-and both are why the joined set excludes the block's own names and a
-fixed name keeps its seed. A moving name then kept its seed only on
-the first pass, which missed a `nil` that outlives another
-collection's growth; it now keeps it on every pass. Only the refuted
-members come back, not the whole seed: re-adding a seed's literal
-shape widened dispatch enough that `a = []; [1].each { a[0, 1] ||= [2]
-}` stopped converging and lost its `Array[2]`.
+and both are why a fixed name keeps its seed and why the walk that
+finds captured names now compares a read's `depth` with the blocks and
+lambdas it is nested in, instead of testing `depth >= 1`, which is
+right only directly in the body. The same comparison exposed one more
+route, present on master too: a store nested in an inner block that
+binds its own parameter had its evidence typed in the seam's entry
+scope, where that name is the outer local it shadows, so `|inner|
+picks << inner.first` read an outer `inner = [0]`. Such a store's
+evidence is now typed with its inner blocks' names bound to
+`Dynamic[top]`. A moving name then kept its seed only on the first
+pass, which missed a `nil` that outlives another collection's growth;
+it now keeps it on every pass. Only the refuted members come back, not
+the whole seed: re-adding a seed's literal shape widened dispatch
+enough that `a = []; [1].each { a[0, 1] ||= [2] }` stopped converging
+and lost its `Array[2]`.
 
 A block with no moving name takes a single pass, so `acc = [];
 xs.each { |x| acc.push(x) }` still reads `Array[Integer]` (WD2.9) and
@@ -908,18 +915,23 @@ slice A's too. A store whose value only changes class after the
 widened bound (`h[k] = h[k] == 10 ? :done : h[k] + 1` over eleven
 iterations) still reads `0 | Integer` without its `:done`. Re-checking
 the widened assumption belongs to `BodyFixpoint`, for every slice at
-once.
+once, and is #1220. Separately, the join still drops a seed's `nil`
+after a guarded mutation (`maybe << v if maybe` leaves `Array[…]`
+though `maybe` can stay nil), WD2.11's rule meeting a case its
+reasoning did not cover; that is #1219, and the fixture's golden
+carries the flip comment.
 
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
-captured reads, a parameter shadowing a mutated outer local, a lazily
-initialised capture, and a `nil` seed read by another moving store
-(must-not-fire, each pinned by `assert_type`), the structural floor,
-and the #586 accumulator. It also has two controls whose always-falsey
-must still fire: the same counter storing a receiver-independent
-value, and `acc << 1` sharing a block with a self-reading store. The
-spec asserts the exact `flow.*` line set, so a seam that went gradual
-everywhere fails as loudly as the old pin did.
+captured reads, a parameter shadowing a mutated outer local, a nested
+block's own parameter read one level deeper, a lazily initialised
+capture, and a `nil` seed read by another moving store (must-not-fire,
+each pinned by `assert_type`), the structural floor, and the #586
+accumulator. It also has two controls whose always-falsey must still
+fire: the same counter storing a receiver-independent value, and `acc
+<< 1` sharing a block with a self-reading store. The spec asserts the
+exact `flow.*` line set, so a seam that went gradual everywhere fails
+as loudly as the old pin did.
 
 ### WD3 — One mechanism, shared
 

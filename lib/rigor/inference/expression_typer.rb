@@ -4823,16 +4823,41 @@ module Rigor
 
         new_pairs = {}
         key_types.zip(shape.pairs.values).each do |key_type, value|
-          new_key_type = apply_hash_block(block_arg, key_type, captured: captured)
-          return nil unless new_key_type.is_a?(Type::Constant)
-
-          new_key = new_key_type.value
-          return nil unless new_key.is_a?(Symbol) || new_key.is_a?(String)
-          return nil if new_pairs.key?(new_key)
+          new_key = new_shape_key(apply_hash_block(block_arg, key_type, captured: captured), new_pairs)
+          return undecided_keys_floor(shape, block_arg, key_types, captured) if new_key.nil?
 
           new_pairs[new_key] = value
         end
         Type::Combinator.hash_shape_of(new_pairs)
+      end
+
+      # The key a pair's block result can index the new `HashShape` with — a `Constant` Symbol or String that no
+      # earlier pair already took — or nil.
+      def new_shape_key(new_key_type, new_pairs)
+        return nil unless new_key_type.is_a?(Type::Constant)
+
+        new_key = new_key_type.value
+        return nil unless new_key.is_a?(Symbol) || new_key.is_a?(String)
+
+        new_pairs.key?(new_key) ? nil : new_key
+      end
+
+      # A key fold that cannot build a `HashShape` declines to the dispatcher — except under the suppression, where
+      # the dispatcher's block-return pass is typed tail-only too and reads a captured value the body mutates in
+      # place at its entry contents: `buf = +"k"; … { a: 1 }.transform_keys { |k| buf << w.to_s; buf }` answered
+      # `Hash["k", 1]` for `{ "k1" => 1 }`, though the pairs themselves were typed over the #587 (b) binding that
+      # answers `buf`. There the fold answers from the keys it typed, `Hash[union(<new keys>), union(<values>)]`,
+      # and takes the plain floor ({#hash_keys_floor}) when a pair could not be typed at all. The pairs are
+      # re-typed for it, which only a suppressed, undecided key fold pays.
+      def undecided_keys_floor(shape, block_arg, key_types, captured)
+        return nil unless block_body_threading_suppressed?
+
+        new_key_types = key_types.map { |key_type| apply_hash_block(block_arg, key_type, captured: captured) }
+        return hash_keys_floor(shape) if new_key_types.any?(&:nil?)
+
+        Type::Combinator.nominal_of(
+          "Hash", type_args: [Type::Combinator.union(*new_key_types), Type::Combinator.union(*shape.pairs.values)]
+        )
       end
 
       # The per-pair twin of issue #587 (b)'s first-iteration pin. Every pair is typed from the SAME entry scope,

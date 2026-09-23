@@ -1747,6 +1747,39 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
+      it "answers an undecided key fold from the keys it typed instead of declining into a tail-only pass" do
+        # Runtime `{ "k1" => 1 }`. `buf` is answered by its in-place widening, so no floor fires, but the key is
+        # no single `Constant`; a decline handed it to the dispatcher, whose tail-only pass read `buf` as `"k"`.
+        expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1]")
+          m = Mutex.new
+          v = 1
+          buf = +"k"
+          dump_type(m.synchronize do
+            w = v
+            { a: 1 }.transform_keys do |k|
+              buf << w.to_s
+              buf
+            end
+          end)
+        RUBY
+      end
+
+      it "answers a key a rebound counter spells from the keys it typed too" do
+        # Runtime `{ "a1" => 1, "b2" => 2 }`; the dispatcher's tail-only pass read `i` as `0`.
+        expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1 | 2]")
+          m = Mutex.new
+          v = 1
+          i = 0
+          dump_type(m.synchronize do
+            w = v
+            { a: 1, b: 2 }.transform_keys do |k|
+              i += w
+              k.to_s + i.to_s
+            end
+          end)
+        RUBY
+      end
+
       it "keeps an empty shape's exact fold, since no pair is typed" do
         expect(dumped_type(<<~RUBY)).to eq("{}")
           m = Mutex.new

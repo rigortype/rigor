@@ -1,0 +1,1 @@
+- **[inference]** `c[k] += v`, `c[k] ||= v` and `c[k] &&= v` on an object whose class defines `[]` in the project without a signature now read `c[k]` from that method's body, as a plain `c[k]` already did, instead of typing the whole write as `untyped` — `class C; def [](k) = 0; end; c[:a] += 1` is `1`. ([#1236](https://github.com/rigortype/rigor/pull/1236))

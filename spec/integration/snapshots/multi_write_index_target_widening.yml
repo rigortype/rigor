@@ -9,6 +9,8 @@ locals:
   _splat_head: '1'
   _stored_w: '2'
   defaults: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer | String]
+  found: Hash[Dynamic[top] | Symbol, Dynamic[top] | String]
+  found_v: Dynamic[top] | String
   kept: "{ a: 0 }"
   multi: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
   nested: Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]

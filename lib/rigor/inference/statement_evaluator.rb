@@ -783,40 +783,26 @@ module Rigor
       # binding of `h` restore the literal. When a target rebinds the receiver's variable to another object
       # instead, widening that one only loses precision.
       #
-      # The stored values come from a second, `soften_slots: false` decomposition. The binder's ADR-57 softening
-      # drops a slot's `nil` only because the optimistic mark it records keeps the drop honest, and a stored value
-      # carries no mark — so, as for the class-ivar seed, the store joins what the slot can really hold, which is
-      # what the plain store of the same value joins. The second walk runs only for a destructure that has an
-      # index target.
+      # The stored value is the slot the binder decomposed, softened as a local in the same position is. The
+      # ADR-57 softening that drops a slot's `nil` is honest for a local because of the optimistic mark, which a
+      # stored value never carries — but it does not need one here: the straight-line join always adds the
+      # `Dynamic[top]` floor ({MutationWidening#gradual_floor}), so no fold can rest on the dropped `nil`. Joining
+      # the `nil` instead would fire `call.possible-nil-receiver` on the correlated guard the softening exists for,
+      # `r[:k], r[:v] = h.find { … }; r[:v].upcase if r[:k]`.
+      #
+      # Each store then drops the indexed narrowing it overwrites, through the same
+      # {IndexedNarrowing.invalidate_indexed_write} a `[]=` call takes (it reads only `receiver` and `arguments`,
+      # which an index target shares): the widening carries a Nominal receiver's slot narrowings across its
+      # rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep reading `"d"`.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
-        post = bound.apply_to(post_rhs)
-        return [rhs_type, post] if bound.index_targets.empty?
-
-        stores = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs, soften_slots: false).index_targets
-        post = stores.reduce(post) do |acc, (target, stored)|
+        post = bound.index_targets.reduce(bound.apply_to(post_rhs)) do |acc, (target, stored)|
           widened = IndexWriteWidening.widen(node: target, current_scope: acc,
                                              arg_types: index_write_arg_types(target, stored))
-          forget_stored_slots(target, widened)
+          IndexedNarrowing.invalidate_indexed_write(target, widened)
         end
         [rhs_type, post]
-      end
-
-      # The plain `h[k] = v` call drops the indexed narrowing its store overwrote
-      # ({IndexedNarrowing.invalidate_after_call}), and an index target must too: the widening carries a Nominal
-      # receiver's slot narrowings across its rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep
-      # reading `"d"`. A single literal key forgets its own slot; any other index — a variable key, a splice, a
-      # splat — can land on any slot, so it forgets every narrowing on the receiver.
-      def forget_stored_slots(target, current_scope)
-        receiver = IndexedNarrowing.stable_receiver(target.receiver)
-        return current_scope if receiver.nil?
-
-        key_node = single_index_argument(target)
-        address = key_node && IndexedNarrowing.stable_address(target.receiver, key_node)
-        return current_scope.without_indexed_narrowing(*address) if address
-
-        current_scope.without_indexed_narrowings_for(*receiver)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks

@@ -1476,9 +1476,17 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to eq(Rigor::Type::Combinator.constant_of("d"))
     end
 
-    it "joins a nil-bearing slot's nil, since a stored value carries no optimistic mark to soften it" do
+    it "keeps the narrowings a variable key leaves, as a plain `[]=` store does" do
+      multi, = evaluate("m = {}\nm[:a] ||= \"d\"\nk = [:a, :b].sample\nm[k], y = 1, 2\nm[:a]")
+      plain, = evaluate("m = {}\nm[:a] ||= \"d\"\nk = [:a, :b].sample\nm[k] = 1\nm[:a]")
+      expect(multi).to eq(plain)
+    end
+
+    it "softens a nil-bearing slot as a local in the same position is softened" do
+      # The stored value carries no optimistic mark, but the join's `Dynamic[top]` floor keeps any fold off the
+      # dropped `nil`; joining it would fire `possible-nil-receiver` on the correlated guard the fixture pins.
       _, multi = evaluate("t = {}\nopt = [true, false].sample ? \"s\" : nil\nt[:a], d = [opt, 1]")
-      _, plain = evaluate("t = {}\nopt = [true, false].sample ? \"s\" : nil\nt[:a] = opt")
+      _, plain = evaluate("t = {}\nt[:a] = \"s\"")
       expect(multi.local(:t)).to eq(plain.local(:t))
     end
 

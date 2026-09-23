@@ -48,6 +48,14 @@ defaults[:a] ||= "default"
 defaults[:a], _defaults_y = 1, 2
 puts "default" if defaults[:a] == "default"
 
+# A correlated guard: `find` answers a pair or `nil`, so `:v` is nil
+# only when `:k` is. Joining the slot's `nil` into the value would fire
+# `possible-nil-receiver` on the guarded read.
+found = { x: "s" }
+found[:k], found[:v] = { "a" => "x" }.find { |k, _| k == "a" }
+found_v = found[:v]
+found_v.upcase if found[:k]
+
 # The must-fire control: the multi-assign stores into `other`, so
 # `kept` is still the literal and its condition genuinely always holds.
 kept = { a: 0 }

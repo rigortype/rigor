@@ -86,8 +86,8 @@ module Rigor
     #   stores in {Result#index_targets}, keyed by the target node itself, so
     #   `StatementEvaluator#eval_multi_write` can widen the receiver's literal shape with that
     #   value as content evidence, exactly as a plain `h[:a] = 1` does. It carries no optimistic
-    #   mark: there is no binding for one to qualify, so a consumer that joins it reads it with
-    #   `soften_slots: false`, the rule for every consumer that drops the marks.
+    #   mark: there is no binding for one to qualify. Its slot is softened as a local's is;
+    #   `eval_multi_write` documents why that stays honest without the mark.
     #
     # Other target kinds (`ClassVariableTargetNode`, `GlobalVariableTargetNode`,
     # `ConstantTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`, `ImplicitRestNode`, ...)

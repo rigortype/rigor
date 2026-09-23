@@ -512,7 +512,7 @@ module Rigor
       # here, so a refinement joins the mutator's added content on exactly the terms the `Tuple` /
       # `HashShape` arms above do (issue #936, ADR-56 WD2.9's deferred branch).
       def widen_difference(difference, method_name, arg_types: NO_ARG_TYPES)
-        RefinementMutation.widen(difference, method_name) do |base|
+        RefinementMutation.widen(difference, method_name, arg_types) do |base|
           if base.class_name == "Array"
             ARRAY_MUTATORS.include?(method_name) &&
               join_added_elements(base, method_name, arg_types, ContentJoin.collection_element_types(base))

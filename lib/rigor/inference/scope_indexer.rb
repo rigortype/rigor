@@ -538,9 +538,9 @@ module Rigor
         per_class[receiver.name]
       end
 
-      # Walks the post-collected accumulator and widens any Tuple / HashShape entry for an ivar that observed a mutator
-      # call anywhere in the same class body. The mutation evidence comes from `gather_ivar_writes` recording every
-      # `@ivar.<method>(...)` call whose method is in `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      # Walks the post-collected accumulator and widens any Tuple / HashShape / String-literal entry for an ivar that
+      # observed a mutator call anywhere in the same class body. The mutation evidence comes from `gather_ivar_writes`
+      # recording every `@ivar.<method>(...)` call whose method is in `MutationWidening::SHAPE_MUTATORS`.
       #
       # The widening uses `MutationWidening.widen_for_mutator` — the same primitive
       # `Inference::StatementEvaluator#eval_call` applies for per-method-body widening on a local / ivar receiver. The
@@ -565,8 +565,9 @@ module Rigor
         end
       end
 
-      # Walks a class-ivar accumulator entry (which may be a `Union` of multiple write rvalues) and widens any `Tuple`
-      # or `HashShape` member whose corresponding mutator family was observed against the ivar somewhere in the class.
+      # Walks a class-ivar accumulator entry (which may be a `Union` of multiple write rvalues) and widens any `Tuple`,
+      # `HashShape` or String-valued `Constant` member whose corresponding mutator family was observed against the ivar
+      # somewhere in the class.
       # Class-level widening is more aggressive than the per-method-body `MutationWidening` primitive: it widens both
       # the SHAPE carrier (Tuple → Array, HashShape → Hash) AND the element types to `Dynamic[Top]`. The justification —
       # once any method mutates the ivar, its post-mutation contents are statically unknown across method boundaries, so
@@ -589,6 +590,13 @@ module Rigor
 
           Type::Combinator.nominal_of("Hash",
                                       type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        when Type::Constant
+          # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every
+          # other method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`.
+          return member unless StringMutation.constant?(member) &&
+                               observed_methods.any? { |m| StringMutation::MUTATORS.include?(m) }
+
+          Type::Combinator.nominal_of("String")
         else
           member
         end
@@ -1108,7 +1116,7 @@ module Rigor
         end
       end
 
-      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS`.
       # The class-ivar pre-pass uses the resulting set to widen the post-collected accumulator entries (see
       # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
       # ignored at finalization.
@@ -1116,8 +1124,7 @@ module Rigor
         method_name, receiver = mutation_target(node)
         return if method_name.nil?
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return unless MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
-                      MutationWidening::HASH_MUTATORS.include?(method_name)
+        return unless MutationWidening::SHAPE_MUTATORS.include?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
@@ -2153,8 +2160,7 @@ module Rigor
         when Prism::CallNode
           return nil if node.receiver.nil?
           return node.receiver if node.attribute_write?
-          return node.receiver if MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
-                                  MutationWidening::HASH_MUTATORS.include?(node.name)
+          return node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
 
           nil
         end

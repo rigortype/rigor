@@ -4288,7 +4288,9 @@ module Rigor
       def captured_exit_bindings(block, param_types, bindings, names)
         entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
-        _type, exit_scope = without_block_body_threading { entry.evaluate(block.body) }
+        # The BlockNode, not its body: `StatementEvaluator#eval_block` joins every `next` that ends the invocation
+        # into the exit scope, so a rebind on a jumping path reaches the fixpoint.
+        _type, exit_scope = without_block_body_threading { entry.evaluate(block) }
         names.to_h { |name| [name, exit_scope.local(name)] }
       end
 

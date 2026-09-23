@@ -112,6 +112,24 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(described_class.widen_for_mutator(shape, :<<)).to be_nil
     end
 
+    # `Hash#shift` removes a pair exactly as `delete` does, but the name reached `SHAPE_MUTATORS` only
+    # through the Array table, so this arm declined it: `k = { a: 1 }; k.shift` kept `{ a: 1 }` for a
+    # hash that is empty at runtime, and `k.size == 1` folded always-truthy.
+    it "widens a HashShape under `shift` as it widens it under `delete`" do
+      shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.constant_of(1))
+      widened = described_class.widen_for_mutator(shape, :shift)
+      expect(widened).to be_a(Rigor::Type::Nominal)
+      expect(widened.class_name).to eq("Hash")
+      expect(widened).to eq(described_class.widen_for_mutator(shape, :delete))
+    end
+
+    # The drift guard for the defect above: a name that mutates an Array in place and that Hash also
+    # defines mutates a Hash in place too, so the Hash table must not be missing it.
+    it "lists every Array mutator that Hash also defines as a Hash mutator" do
+      shared = described_class::ARRAY_MUTATORS.to_a.select { |name| Hash.method_defined?(name) }
+      expect(shared.reject { |name| described_class::HASH_MUTATORS.include?(name) }).to be_empty
+    end
+
     # Issue #645 — a straight-line mutator on a `Union` binding used to record NOTHING: the
     # `[2]` Tuple kept its arity after the mutation falsified it, so a later `out.size == 1`
     # would fold on a value the program never holds.
@@ -151,6 +169,15 @@ RSpec.describe Rigor::Inference::MutationWidening do
         widened = described_class.widen_for_mutator(seed, :clear)
         expect(widened.members).to include(non_empty.base)
         expect(widened.members).to include(Rigor::Type::Combinator.constant_of(5))
+      end
+
+      # `shift` is in both tables, so each member widens through its own class's arm — neither
+      # literal survives a removal the program really made.
+      it "widens both the Tuple and the HashShape member under `shift`" do
+        shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.constant_of(1))
+        widened = described_class.widen_for_mutator(Rigor::Type::Combinator.union(tuple, shape), :shift)
+        expect(widened.members).to all(be_a(Rigor::Type::Nominal))
+        expect(widened.members.map(&:class_name)).to contain_exactly("Array", "Hash")
       end
 
       it "declines a Union with no carrier member for that mutator" do
@@ -253,6 +280,23 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(widened).to be_a(Rigor::Type::Nominal)
       expect(widened.class_name).to eq("Hash")
       expect(widened.type_args.map(&:class_name)).to eq(%w[Symbol Integer])
+    end
+
+    # The Hash twin of the Array list above, read off the tables so a name added to either is covered.
+    # `shift` is the case that matters: it removes a pair, and a witness kept past it folds
+    # `h.size == 0` to `false` on a hash the shift may have emptied.
+    it "widens a non-empty-hash refinement under every Hash mutator that can empty it" do
+      non_empty = Rigor::Type::Combinator.non_empty_hash(
+        Rigor::Type::Combinator.nominal_of("Symbol"),
+        Rigor::Type::Combinator.nominal_of("Integer")
+      )
+      emptying = described_class::HASH_MUTATORS.to_a - Rigor::Inference::RefinementMutation::EMPTY_PRESERVING["Hash"].to_a
+      expect(emptying).to include(:shift)
+      emptying.each do |mutator|
+        expect(described_class.widen_for_mutator(non_empty, mutator)).to(
+          eq(non_empty.base), "expected #{mutator} to widen non-empty-hash to its base"
+        )
+      end
     end
 
     it "does not cross the mutator tables between the Array and Hash refinements" do

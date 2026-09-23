@@ -24,18 +24,20 @@ improvements across Rigor's method-dispatch pipeline. The flow has three phases:
 ## Background
 
 Rigor's method-dispatch pipeline resolves `receiver.method(args)` through ordered tiers. For a
-given call site, the first tier that returns a non-`nil` type wins:
+given call site, the first tier that returns a non-`nil` type wins. The order is defined by
+`dispatch_precise_tiers` in `lib/rigor/inference/method_dispatcher.rb`; read it before relying on
+this summary:
 
 ```
-ConstantFolding       — scalar constant receivers (String, Integer, Float, bool, nil, Regexp, Symbol)
-LiteralStringFolding  — mutable literal-string concatenation
-ShapeDispatch         — structural types (Tuple, HashShape, Difference, Size-carrying Nominals)
-FileFolding           — File.basename / .dirname / .extname / .join / .split / .absolute_path?
-ShellwordsFolding     — Shellwords.escape / .split / .join  (new: same pattern as FileFolding)
-KernelDispatch        — Kernel / Object methods (puts, pp, raise, …)
-MethodFolding         — per-class specialised folds (Pathname, Range, …)
-BlockFolding          — block-parameterised iteration (map, select, inject, …)
-RbsDispatch           — RBS envelope (fallback, always non-nil)
+DataFolding / StructFolding — Data / Struct value objects
+meta-introspection          — `Singleton[*].new` and other class-object lifts
+ConstantFolding             — scalar constant receivers (String, Integer, Float, bool, nil, Regexp, Symbol)
+LiteralStringFolding        — mutable literal-string concatenation
+ShapeDispatch               — structural types (Tuple, HashShape, Difference, Size-carrying Nominals)
+STDLIB_SINGLETON_FOLDERS    — one folder per stdlib singleton receiver (File, Shellwords, Math, …)
+Kernel intrinsics           — Kernel / Object methods (puts, pp, raise, …)
+MethodFolding, ReduceFolding, ArrayToHFolding, BlockFolding
+RbsDispatch                 — RBS envelope (fallback, always non-nil)
 ```
 
 A "coverage gap" is any method where the RBS fallback gives a wide type (`String`, `Integer`,
@@ -92,11 +94,9 @@ For **structural types** (Tuple, HashShape, Size-carrying Nominals), inspect:
 - `lib/rigor/inference/method_dispatcher/shape_dispatch.rb`
   — `TUPLE_HANDLERS`, `HASH_SHAPE_HANDLERS`, `SIZE_RETURNING_NOMINALS`, `dispatch_difference`.
 
-For **stdlib module functions**, look for a dedicated `*_folding.rb` sibling:
-
-- `file_folding.rb` — `Singleton["File"]` receiver
-- `shellwords_folding.rb` — `Singleton["Shellwords"]` receiver
-- (none yet for Math, CGI, URI, Regexp — these are the gap.)
+For **stdlib module functions**, look for a dedicated `*_folding.rb` sibling registered in
+`STDLIB_SINGLETON_FOLDERS` (e.g. `file_folding.rb` for `Singleton["File"]`,
+`shellwords_folding.rb` for `Singleton["Shellwords"]`).
 
 For **block-based methods**, inspect:
 
@@ -245,9 +245,9 @@ it only when the block return type is genuinely needed for a downstream narrowin
 as a singleton, and the folding logic cannot be expressed as a simple UNARY/BINARY set entry.
 
 **Receiver identification**: at dispatch time, `Math` in `Math.sqrt(4.0)` resolves to a
-`Type::Singleton` object. Check:
+`Type::Singleton` object. Guard with:
 ```ruby
-receiver.is_a?(Type::Singleton) && receiver.class_name == "Math"
+SingletonFolding.receiver?(receiver, "Math")
 ```
 
 **Pattern to follow**: `ShellwordsFolding` is the canonical reference
@@ -260,11 +260,12 @@ module MathFolding
 
   module_function
 
-  def try_dispatch(receiver:, method_name:, args:)
-    return nil unless receiver.is_a?(Type::Singleton) && receiver.class_name == "Math"
+  def try_dispatch(context)
+    method_name = context.method_name
+    return nil unless SingletonFolding.receiver?(context.receiver, "Math")
     return nil unless MATH_UNARY_METHODS.include?(method_name) ||
                       MATH_BINARY_METHODS.include?(method_name)
-    fold_math(method_name, args)
+    fold_math(method_name, context.args)
   end
 
   def fold_math(method_name, args)
@@ -277,23 +278,10 @@ end
 
 **To wire a new Tier D module**:
 
-1. Create `lib/rigor/inference/method_dispatcher/<name>_folding.rb`.
+1. Create `lib/rigor/inference/method_dispatcher/<name>_folding.rb` exposing `try_dispatch(context)`.
 2. Add `require_relative "method_dispatcher/<name>_folding"` in `method_dispatcher.rb`.
-3. Insert `<Name>Folding.try_dispatch(…) ||` into `dispatch_precise_tiers` **after** `FileFolding`
-   and **after** `ShellwordsFolding`:
-
-```ruby
-def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
-  ConstantFolding.try_dispatch(…) ||
-  LiteralStringFolding.try_dispatch(…) ||
-  ShapeDispatch.try_dispatch(…) ||
-  FileFolding.try_dispatch(…) ||
-  ShellwordsFolding.try_dispatch(…) ||
-  NewModuleFolding.try_dispatch(…) ||     # ← insert here
-  KernelDispatch.try_dispatch(…) ||
-  …
-end
-```
+3. Register it in `STDLIB_SINGLETON_FOLDERS` as `"<ClassName>" => <Name>Folding`. The table is
+   consulted only for `Singleton` receivers, so no ordering decision is needed.
 
 ---
 
@@ -421,8 +409,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
   bundle exec exe/rigor coverage lib
 ```
 
-The baseline for `lib/` is ≈43.8 % precision (calibrated 2026-05-26).
-`make coverage` enforces this as a 43 % floor — any slice that regresses precision fails CI.
+`make coverage` enforces the precision floor set by its `--threshold` in the `Makefile` — any
+slice that regresses precision below it fails CI.
 
 ---
 
@@ -435,7 +423,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ve
 nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
 ```
 
-`make verify` chains `make test` → `make lint` → `make check`.  
+`make verify` is the CI-equivalent gate (tests, lint, `check`, `check-plugins`).
 `make check` runs `bundle exec exe/rigor check lib` — Rigor's self-check must stay clean.
 
 If `make check` surfaces new diagnostics in `lib/`, the cause is almost always:
@@ -465,7 +453,7 @@ Before declaring a coverage-uplift slice done:
 - [ ] Tier A additions: Symbol added to the correct UNARY/BINARY Set; no other code change needed.
 - [ ] Tier B additions: `HANDLERS` entry + private handler method in `shape_dispatch.rb`.
 - [ ] Tier D additions: new `*_folding.rb` file following the `ShellwordsFolding` pattern;
-      `require_relative` added to `method_dispatcher.rb`; tier inserted in `dispatch_precise_tiers`.
+      `require_relative` added to `method_dispatcher.rb`; registered in `STDLIB_SINGLETON_FOLDERS`.
 - [ ] Unit spec for each new method / module in `spec/rigor/inference/method_dispatcher/`.
 - [ ] Integration fixture in `spec/integration/fixtures/<name>/demo.rb` (directory form for
       stdlib modules; flat form for core types). **Create together with the describe block
@@ -475,8 +463,8 @@ Before declaring a coverage-uplift slice done:
       Run this whenever you add or modify a fixture — the golden files in `spec/integration/snapshots/`
       must reflect the new precise types or the CI snapshot gate will fail.
 - [ ] `make verify` clean.
-- [ ] `make coverage` clean (precision ratio ≥ 43 % on `lib/`).
-- [ ] `CHANGELOG.md` `[Unreleased]` entry (user-visible description of the new folds).
+- [ ] `make coverage` clean.
+- [ ] Changelog fragment under `changelog.d/<section>/` (user-visible description of the new folds).
 - [ ] Implemented 🔲 entries updated to ✅ in the coverage doc.
 
 ---
@@ -493,11 +481,11 @@ module is the canonical worked example of Tier D (new singleton-folding module):
 
 2. **Module file**:
    `lib/rigor/inference/method_dispatcher/shellwords_folding.rb`  
-   — `dispatch_target?` checks `receiver.is_a?(Type::Singleton) && receiver.class_name == "Shellwords"`.  
+   — `try_dispatch(context)` guards with `SingletonFolding.receiver?(receiver, "Shellwords")`.
    — `fold_escape`, `fold_split`, `fold_join` each validate argument count and type before
      calling the real `Shellwords` method and wrapping the result.
 
-3. **Wired** in `method_dispatcher.rb` immediately after `FileFolding`.
+3. **Registered** in `STDLIB_SINGLETON_FOLDERS` in `method_dispatcher.rb`.
 
 4. **Unit spec**:
    `spec/rigor/inference/method_dispatcher/shellwords_folding_spec.rb`  

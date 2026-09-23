@@ -34,9 +34,8 @@ plugins/rigor-<id>/   # or examples/rigor-<id>/ for a walkthrough
 
 **Skip this for a bundled plugin** (under `plugins/` or `examples/` in
 this repo) — bundled plugins have no gemspec; they ship inside the single
-`rigortype` gem (ADR-31, per-plugin gemspecs dropped in commit
-`9769f5fa`). This template is for a **third-party** plugin authored in
-its own repo (ADR-31 WD4), depending on `gem "rigortype"`:
+`rigortype` gem (ADR-31). This template is for a **third-party** plugin
+authored in its own repo (ADR-31 WD4), depending on `gem "rigortype"`:
 
 ```ruby
 # rigor-<id>.gemspec
@@ -58,7 +57,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "prism", ">= 1.0", "< 2.0"
-  spec.add_dependency "rigortype", ">= 0.1.0", "< 0.2.0"
+  spec.add_dependency "rigortype", "~> <x.y>" # the Rigor minor you build against
 end
 ```
 
@@ -138,7 +137,7 @@ These bundled plugins are all migrated onto `node_rule` — read one as a worked
 
 ## Phase 4.5 — IoBoundary + cache producer (rigor-routes only)
 
-If [Phase 1](01-requirements.md) Q2=E (external file), the plugin uses slice 2 + slice 6. Since ADR-60 WD3 (`cache_for` is record-and-validate) the old "read BEFORE `cache_for`" trap is gone: the producer reads its inputs *inside* the block, and `cache_for` captures those reads into the dependency descriptor *after* the block runs. For a producer that globs a directory, declare `watch:` so a file *addition* invalidates too (an in-block read can't see a file that wasn't read). Use `producer_value` / `producer_error` for the lazy-load + error surface:
+If [Phase 1](01-requirements-and-templates.md) Q2=E (external file), the plugin uses `IoBoundary` and a cache producer. The producer reads its inputs *inside* the block, and `cache_for` captures those reads into the dependency descriptor *after* the block runs (ADR-60 WD3 record-and-validate). For a producer that globs a directory, declare `watch:` so a file *addition* invalidates too (an in-block read can't see a file that wasn't read). Use `producer_value` / `producer_error` for the lazy-load + error surface:
 
 ```ruby
 # Single named file — the in-block read is captured; no watch: needed.
@@ -204,7 +203,7 @@ Verify the demo runs (substitute `examples/` for `plugins/` if Phase 0 placed th
 ```sh
 cd plugins/rigor-<id>/demo
 nix --extra-experimental-features 'nix-command flakes' develop --command \
-  env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../Gemfile \
+  env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```
 

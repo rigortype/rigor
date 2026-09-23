@@ -64,7 +64,7 @@ a plugin pre-emptively.
 | Does the high-level wrapper class layer add semantics richer than what the FFI primitive return type captures (e.g. "this `:pointer` is always a 32-byte signing-key buffer")? | no — wrapper is a thin pass-through | core suffices |
 | | yes — wrapper carries domain invariants the FFI types don't | **plugin recommended** for RBS refinement (the wrapper still types correctly without the plugin, just less precisely) |
 | Does the gem use `typedef :pointer, :handle_name` aliases for opaque pointers? | yes — names follow `_ptr` / `_handle` / `Ptr` / `Handle` | core suffices (heuristic per [ADR-30 WD4](../../../docs/adr/30-rigor-ffi-plugin-shape.md)) |
-| | yes — names diverge from the regex | core suffices but the project should add the alias to the `nominal_typedef_exceptions` list in `.rigor.yml` if it false-positives |
+| | yes — a name matches the pattern but should stay a plain `:pointer` | core suffices; add the alias to the `rigor-ffi` plugin's `exceptions:` config in `.rigor.yml` |
 
 **Vanilla case (most common).** The gem just declares
 `attach_function :acme_open, [:string], :pointer` plus a thin
@@ -143,7 +143,8 @@ The procedural shape is gem-type-agnostic. Use the existing
 - Gemspec, `Plugin::Base` subclass skeleton.
 - Spec layout — under `spec/integration/` for an in-repo plugin or
   under your gem's own `spec/` tree for the standalone case.
-- IoBoundary + cache-producer pattern (read BEFORE `cache_for`).
+- IoBoundary + cache-producer pattern (read inputs inside the producer
+  block; declare `watch:` for directory globs).
 - Demo directory with `tmp/`-anchored cache + per-demo `.gitignore`.
 - `make verify` expectations + commit subject convention.
 
@@ -168,13 +169,9 @@ The FFI-specific divergences are documented in Phase 4 below.
 
 ## Phase 4 — FFI-specific extension points
 
-> **Status note (2026-05-25).** Core `rigor-ffi` slice 1 has not
-> shipped at the time this SKILL was authored. Step 4 below describes
-> the *intended* extension points per [ADR-30](../../../docs/adr/30-rigor-ffi-plugin-shape.md);
-> the concrete API surface stabilises once slice 1 lands and slice 2
-> (`rigor-sassc`) provides the first reference implementation. Until
-> then, treat Step 4 as a design sketch — check the ADR for the
-> current state before relying on specific method names.
+> The extension points live in `plugins/rigor-ffi/lib/rigor/plugin/ffi/`;
+> `plugins/rigor-rbnacl` is the reference DSL recognizer. Read them for
+> current signatures before relying on the sketches below.
 
 ### 4a — DSL recognizer (only if your gem has a custom DSL wrapping `attach_function`)
 
@@ -184,14 +181,15 @@ If Phase 1 row 1 said "needs plugin — custom DSL", register a
 `attach_function` facts:
 
 ```ruby
-class Rigor::Plugins::RigorAcme < Rigor::Plugin::Base
-  ffi_binding_recognizer :acme_function do |node, scope|
+class Rigor::Plugin::Acme < Rigor::Plugin::Base
+  ffi_binding_recognizer :acme_function do |node, module_name|
     # node: Prism::CallNode for `acme_function :foo, :c_foo, [:int]`
+    # module_name: the enclosing module's name, or nil
     # Return Array<AttachFunctionFact> or [] if not a match.
     next [] unless node.name == :acme_function
     args = node.arguments&.arguments || []
     next [] if args.size != 3
-    AttachFunctionFact.new(
+    Rigor::Plugin::FFI::AttachFunctionFact.new(
       ruby_name: args[0].unescaped.to_sym,
       c_name: args[1].unescaped.to_sym,
       arg_types: args[2].elements.map(&:unescaped).map(&:to_sym),
@@ -210,8 +208,9 @@ For domain-invariant returns the FFI primitive type can't express,
 ship hand-authored RBS via `signature_paths:` (ADR-25):
 
 ```ruby
-class Rigor::Plugins::RigorAcme < Rigor::Plugin::Base
-  signature_paths ["sig/rigor-acme.rbs"]
+class Rigor::Plugin::Acme < Rigor::Plugin::Base
+  manifest(id: "acme", version: "0.1.0", description: "Rigor support for acme",
+           signature_paths: ["sig"])
 end
 ```
 
@@ -319,11 +318,6 @@ minor direct PRs per ADR-31's direct-PR path.)
   prevent this. If every row of the table says "core suffices", the
   plugin adds noise and maintenance burden for zero precision gain.
   Stop.
-- **Mistaking core absence for plugin opportunity.** "Rigor doesn't
-  type my wrapper class precisely" might mean "core hasn't shipped
-  yet" rather than "I need a plugin." Check the
-  [CHANGELOG](../../../CHANGELOG.md) for `rigor-ffi` slice status
-  before authoring.
 - **Attempting to open a PR to this repo for a new bundled plugin.**
   New bundled plugins are sweeping changes under
   [ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md)

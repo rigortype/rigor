@@ -3069,12 +3069,7 @@ module Rigor
       # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
-      INDEX_WRITE_NODES = [
-        Prism::IndexOrWriteNode,
-        Prism::IndexAndWriteNode,
-        Prism::IndexOperatorWriteNode,
-        Prism::IndexTargetNode
-      ].freeze
+      INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and

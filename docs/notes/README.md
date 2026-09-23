@@ -158,6 +158,13 @@ comparison) appears nowhere else in this index.
 | 2026-09-09 | [ADR corpus audit — buried work, implementation drift, and obsolescence](20260909-adr-corpus-audit.md) |
 | 2026-09-21 | [v0.4.0 pre-clear batch — four lane implementation notes (#1011, #1130, #1071, #1089)](20260921-queue-release-lane-experience.md) |
 
+## Code structure
+
+| Date | Note |
+| --- | --- |
+| 2026-06-04 | [Structural code repetition audit (non-catalog, non-plugin)](20260604-structural-repetition-audit.md) |
+| 2026-09-23 | [Hot-file churn audit — where the engine's change pressure lands (grounds ADR-116)](20260923-hot-file-churn-audit.md) |
+
 ## Adding a note
 
 1. Name the file `YYYYMMDD-<slug>.md` using the authorship date.

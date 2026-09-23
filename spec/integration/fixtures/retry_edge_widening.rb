@@ -41,3 +41,25 @@ class Counter
     end
   end
 end
+
+# The primary body's own rebind crosses the retry edge too: it
+# can raise after any prefix of itself, so the retry re-enters
+# with `tries` already incremented and `tries < 3` is false on
+# the third attempt. The rescue arm's guard reads the counter a
+# raising branch incremented.
+def with_counted_attempts(flaky)
+  tries = 0
+
+  begin
+    tries += 1
+    raise ArgumentError, "flaky" if tries < 3
+
+    if flaky
+      tries += 1
+      raise ArgumentError, "still flaky"
+    end
+  rescue ArgumentError
+    warn "retrying" if tries < 5
+    retry
+  end
+end

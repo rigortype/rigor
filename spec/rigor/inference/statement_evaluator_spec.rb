@@ -605,6 +605,143 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       )
       expect(post.local(:tries)).to eq(type)
     end
+
+    # The primary body can raise after any prefix of itself, so what it rebinds before raising is what the rescue arm
+    # sees and what the retry re-enters with — whether or not the arm rebinds anything itself.
+    context "when the primary body rebinds before a retried raise" do
+      # The binding of `name` on entry to every `node_class` node, last visit winning as in `ScopeIndexer`, so the
+      # retry pass's re-evaluation overwrites the first pass's entry.
+      def entry_bindings(source, node_class, name)
+        entries = {}.compare_by_identity
+        on_enter = ->(node, s) { entries[node] = s.local(name) || s.ivar(name) if node.is_a?(node_class) }
+        described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(source))
+        entries.values
+      end
+
+      let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+      it "widens the counter the retried predicate reads" do
+        source = <<~RUBY
+          tries = 0
+          begin
+            tries += 1
+            raise "boom" if tries < 3
+          rescue
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :tries)).to eq([integer])
+      end
+
+      it "widens an ivar counter the same way" do
+        source = <<~RUBY
+          @tries = 0
+          begin
+            @tries += 1
+            raise "boom" if @tries < 3
+          rescue
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :@tries)).to eq([integer])
+      end
+
+      it "widens a rebind on a raising branch for the rescue arm's guard" do
+        # `eval_if` drops the raising branch's scope from the fall-through, so only a scope observed at the raise
+        # carries `tries += 1` — the arm's `tries < 3` otherwise folds from the entry's `0`. The guard is not
+        # `retry if tries < 3`: narrowing the counter there changes the arm's post-scope, which the arm's own
+        # rebind widening already picks up.
+        source = <<~RUBY
+          tries = 0
+          begin
+            if work
+              tries += 1
+              raise "boom"
+            end
+          rescue
+            warn "retrying" if tries < 3
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :tries).last).to eq(integer)
+      end
+
+      it "keeps every class the primary body rebinds a local to before raising" do
+        # The raise can follow either rebind, so the arm sees `x` as a String as well as the Symbol the body exits with.
+        source = <<~RUBY
+          x = 0
+          begin
+            x = "a"
+            work
+            x = :b
+            work
+          rescue
+            warn "retrying" if work
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :x)).to eq(
+          [Rigor::Type::Combinator.union(integer, *%w[String Symbol].map { Rigor::Type::Combinator.nominal_of(it) })]
+        )
+      end
+
+      it "ignores a block parameter that shadows the counter" do
+        source = <<~RUBY
+          line = 0
+          begin
+            %w[a b].each { |line| line.upcase }
+            line += 1
+            raise "boom" if line < 3
+          rescue
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :line)).to eq([integer])
+      end
+
+      it "leaves a local the primary body introduces unbound on the retry edge" do
+        # An unbound local reads as `Dynamic[top]`, which is what it is on the first entry. Binding the body's type
+        # instead would make the arm's `if conn` always truthy, when `conn` is nil whenever the assignment raised.
+        source = <<~RUBY
+          begin
+            conn = Object.new
+            conn.frozen?
+          rescue
+            conn.freeze if conn
+            retry
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :conn)).to eq([nil])
+      end
+
+      it "does NOT widen what the else-clause rebinds" do
+        # An exception the else-clause raises is not rescued by this `begin`, so no retry follows it.
+        _type, post = evaluate(<<~RUBY)
+          tries = 0
+          begin
+            work
+          rescue
+            retry
+          else
+            tries = 5
+          end
+        RUBY
+        expect(post.local(:tries).members.map(&:value)).to contain_exactly(0, 5)
+      end
+
+      it "keeps the counter folded when no arm retries" do
+        source = <<~RUBY
+          tries = 0
+          begin
+            tries += 1
+            raise "boom" if tries < 3
+          rescue
+            nil
+          end
+        RUBY
+        expect(entry_bindings(source, Prism::IfNode, :tries)).to eq([Rigor::Type::Combinator.constant_of(1)])
+      end
+    end
   end
 
   describe "loops" do

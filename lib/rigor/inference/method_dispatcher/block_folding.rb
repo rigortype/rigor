@@ -16,7 +16,9 @@ module Rigor
       #
       # - **Filter-shaped** (`select` / `filter` / `reject` / `take_while` / `drop_while`): the block's
       #   truthiness selects the all-or-nothing endpoints — either the receiver's full shape (when every
-      #   element is kept) or the empty-tuple carrier (when every element is dropped).
+      #   element is kept) or the empty collection (when every element is dropped). The empty collection
+      #   is the empty HashShape for `Hash#select` / `#filter` / `#reject` and the empty-tuple carrier
+      #   everywhere else, because every other combination is Enumerable's and returns an Array.
       # - **Predicate-shaped** (`all?` / `any?` / `none?`): the block's truthiness combined with the
       #   receiver's emptiness collapses the call to a `Constant[bool]` in the cases where Ruby's actual
       #   semantics make it unconditional. Non-empty + truthy `any?` is `true`; non-empty + falsey `all?` is
@@ -31,6 +33,16 @@ module Rigor
 
         FILTER_KEEP_ON_TRUTHY = Set[:select, :filter, :take_while].freeze
         FILTER_KEEP_ON_FALSEY = Set[:reject, :drop_while].freeze
+
+        # The filter methods `Hash` defines itself, returning a Hash. `take_while` / `drop_while` on a Hash
+        # are Enumerable's and return an Array of `[key, value]` pairs; `Set` and `Range` define none of the
+        # five, so all of theirs return an Array too.
+        HASH_RETURNING_FILTERS = Set[:select, :filter, :reject].freeze
+
+        # `filter_receiver_kind`'s answer for a nominal receiver; an unlisted class declines.
+        FILTER_NOMINAL_KINDS = {
+          "Array" => :array, "Hash" => :hash, "Set" => :enumerable, "Range" => :enumerable
+        }.freeze
 
         PREDICATE_METHODS = Set[:all?, :any?, :none?].freeze
 
@@ -85,15 +97,28 @@ module Rigor
           block_type.value ? :truthy : :falsey
         end
 
-        # Filter-shaped methods collapse to either the receiver (every element kept) or the empty tuple
-        # (every element dropped). Tuple-shaped receivers widen to `Array[union of elements]` on the
-        # all-kept side because we cannot prove WHICH positional subset survives — Tuple's per-position
-        # semantics do not carry over to a filtered Array.
+        # Filter-shaped methods collapse to either the receiver (every element kept) or the empty collection
+        # (every element dropped), and the collection's class is the method's result class, not the
+        # receiver's: `{ a: 1 }.reject { true }` is `{}`, `{ a: 1 }.take_while { false }` is `[]`.
+        #
+        # The all-kept side answers the receiver only when the result class matches it — an Array for an
+        # Array receiver, a Hash for a Hash receiver's own filters. Otherwise (`Set[1].select { true }` is
+        # `[1]`, `{ a: 1 }.take_while { true }` is `[[:a, 1]]`) it declines so the RBS tier's
+        # `Array[Elem]` projection answers. Tuple-shaped receivers widen to `Array[union of elements]`
+        # on the all-kept side because we cannot prove WHICH positional subset survives — Tuple's
+        # per-position semantics do not carry over to a filtered Array.
         def fold_filter(receiver, method_name, truthiness)
-          return nil unless filter_receiver_known?(receiver)
+          kind = filter_receiver_kind(receiver)
+          return nil if kind.nil?
 
-          keep_all = filter_keeps_all?(method_name, truthiness)
-          keep_all ? receiver_as_kept_array(receiver) : Type::Combinator.tuple_of
+          hash_result = kind == :hash && HASH_RETURNING_FILTERS.include?(method_name)
+          unless filter_keeps_all?(method_name, truthiness)
+            return hash_result ? Type::Combinator.hash_shape_of({}) : Type::Combinator.tuple_of
+          end
+          return receiver if hash_result
+          return receiver_as_kept_array(receiver) if kind == :array
+
+          nil
         end
 
         def filter_keeps_all?(method_name, truthiness)
@@ -216,14 +241,18 @@ module Rigor
           type.is_a?(Type::Nominal) && %w[Array Hash Set].include?(type.class_name)
         end
 
-        # Filter folds need at least a recognised collection carrier; `Top` / `Dynamic` / arbitrary nominals
-        # decline so the RBS tier answers (its `Array#select { … } -> Array[T]` projection is correct, just
-        # less precise on the empty endpoint).
-        def filter_receiver_known?(receiver)
+        # Classifies a filter receiver as `:array`, `:hash`, or `:enumerable` (a `Set` or `Range`, whose
+        # filters are all Enumerable's). Filter folds need at least a recognised collection carrier, so
+        # `Top` / `Dynamic` / arbitrary nominals answer `nil` and decline so the RBS tier answers (its
+        # `Array#select { … } -> Array[T]` projection is correct, just less precise on the empty endpoint).
+        # A `Difference` (`non-empty-array[T]`, `non-empty-hash[K, V]`) classifies by its base.
+        def filter_receiver_kind(receiver)
           case receiver
-          when Type::Tuple, Type::HashShape, Type::Constant, Type::Difference then true
-          when Type::Nominal then %w[Array Hash Set Range].include?(receiver.class_name)
-          else false
+          when Type::Tuple then :array
+          when Type::HashShape then :hash
+          when Type::Constant then :enumerable
+          when Type::Difference then filter_receiver_kind(receiver.base)
+          when Type::Nominal then FILTER_NOMINAL_KINDS[receiver.class_name]
           end
         end
 

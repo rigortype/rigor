@@ -1015,6 +1015,10 @@ RSpec.describe "Rigor type construction (integration)" do
     it "folds `[1,2,3].all? { true }` to Constant[true]" do
       expect(harness.local(:all_truthy)).to eq(constant(true))
     end
+
+    it "accepts an index write into the all-dropped Hash" do
+      expect(harness.diagnostics.map(&:rule)).not_to include("call.argument-type-mismatch")
+    end
   end
 
   describe "fixtures/block_map.rb — per-position Tuple uplift on Array#map" do

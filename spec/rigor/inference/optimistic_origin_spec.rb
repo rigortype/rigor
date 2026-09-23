@@ -28,6 +28,14 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
   end
 
+  # `Hash[Symbol, V]`, whose computed-key `[]` is the read `RbsDispatch` types past the annotation. A literal
+  # hash cannot stand in for it: its closed shape answers a computed key itself, with the nil arm the miss
+  # produces, so a fixture built on one would pass these declines with no mark recorded at all.
+  def hash_of(*values)
+    value = Rigor::Type::Combinator.union(*values.map { |v| Rigor::Type::Combinator.constant_of(v) })
+    Rigor::Type::Combinator.nominal_of("Hash", type_args: [Rigor::Type::Combinator.nominal_of("Symbol"), value])
+  end
+
   def arms_of(type)
     return [type.value] if type.is_a?(Rigor::Type::Constant)
 
@@ -43,8 +51,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
 
   describe "declines the elision when nil-freeness is a bet" do
     it "keeps both arms on a Union from a dynamic-key Hash read" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         if v then 1 else "none" end
       RUBY
@@ -55,8 +62,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     it "keeps both arms when the read yields a single Constant, which no carrier-shape gate can see" do
       # Every value of the hash shares one type, so `V` is a lone `Constant["x"]` — exactly as optimistic
       # as the union above, and indistinguishable from a genuine constant without provenance.
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "x" }
+      type, = evaluate_with({ h: hash_of("x") }, <<~RUBY)
         v = h[key]
         if v then 1 else "none" end
       RUBY
@@ -87,8 +93,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     it "declines when the predicate is the read itself, with no intervening binding" do
       # A distinct path from the cases around it: the mark is read off the call node rather than off a
       # binding, so this pins the node-keyed side of the channel.
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         if h[key] then 1 else "none" end
       RUBY
 
@@ -96,8 +101,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "propagates the mark through an instance variable" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         @v = h[key]
         if @v then 1 else "none" end
       RUBY
@@ -106,8 +110,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "propagates the mark through a local-to-local copy" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         w = v
         if w then 1 else "none" end
@@ -117,8 +120,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "declines `unless` on the same carrier" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         unless v then 1 else "none" end
       RUBY
@@ -132,8 +134,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   # unmarked `Constant` before the derivation, so the elision deleted the branch the program takes on a miss.
   describe "derives the mark through the predicate fold" do
     it "declines through `.nil?`" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         if v.nil? then "none" else 1 end
       RUBY
@@ -142,8 +143,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "declines through a `||` composition of two `.nil?` guards" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         w = h[other]
         if v.nil? || w.nil? then "none" else 1 end
@@ -153,8 +153,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "declines through a `&&` composition of two negated `.nil?` guards" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         w = h[other]
         if !v.nil? && !w.nil? then 1 else "none" end
@@ -164,8 +163,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "declines when only one operand of the composition is optimistic" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         s = "abc".upcase
         if s.nil? || v.nil? then "none" else 1 end
@@ -175,8 +173,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "declines through a parenthesised guard" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         if (v.nil?) then "none" else 1 end
       RUBY
@@ -185,8 +182,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "carries the derived mark onto a local bound to the guard's result" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         missing = v.nil?
         if missing then "none" else 1 end
@@ -240,8 +236,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     # operator. Paired with the proof-carrying control below and the non-nil comparison that must not derive.
     it "declines through a comparison with the nil literal, either side and every equality spelling" do
       ["v == nil", "nil == v", "v != nil", "nil != v", "v.eql?(nil)", "v.equal?(nil)", "nil === v"].each do |guard|
-        type, = evaluate(<<~RUBY)
-          h = { a: "x", b: "y" }
+        type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
           v = h[key]
           if #{guard} then "none" else 1 end
         RUBY
@@ -285,8 +280,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   # proof-shaped crosses the boundary.
   describe "the predicate's own type answer does not fold on a marked carrier" do
     it "answers `bool`, not `false`, for `.nil?` on an optimistically nil-free carrier" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         v.nil?
       RUBY
@@ -295,8 +289,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "answers `bool`, not `true`, for `!` applied to a marked carrier's `.nil?`" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         !v.nil?
       RUBY
@@ -304,16 +297,12 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(type.describe).to eq("bool")
     end
 
-    it "does not let the fold reach a caller through a method's return summary" do
+    it "does not let the fold reach a caller through a method's return summary", type: :runner do
       # `Scope#evaluate` alone does not run inter-procedural inference, so the boundary case needs the
       # Runner: the helper's `!h[k].nil?` published `Constant[true]` before the fix, and the caller's
-      # `if duck?(...)` reported `flow.always-truthy-condition` on a guard a missing key makes live.
-      runner = Rigor::Analysis::Runner.new(
-        configuration: Rigor::Configuration.new("paths" => []),
-        cache_store: nil
-      )
-      diagnostics = guarded_run_source(runner, source: <<~RUBY, path: "mem.rb").diagnostics
-        TABLE = { a: 1, b: 2 }
+      # `if duck?(...)` reported `flow.always-truthy-condition` on a guard a missing key makes live. The
+      # table is declared rather than assigned a literal, whose shape would answer the read with its nil arm.
+      diagnostics = analyze(<<~RUBY, sig: { "table.rbs" => "TABLE: Hash[Symbol, Integer]\n" }).diagnostics
         def duck?(k)
           !TABLE[k].nil?
         end
@@ -338,9 +327,10 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   # The `&&` / `||` value-position gate, the second of the three consumers the spec binds. Its failure mode
   # is not a diagnostic but a discarded operand: `MAP[key] || key` is written because the lookup can miss.
   describe "the `&&` / `||` value-polarity gate" do
-    def type_of_last_write(source)
-      ast = Prism.parse(source).value
-      _type, after = scope.evaluate(ast)
+    def type_of_last_write(source, locals = {})
+      ast = Prism.parse(source, scopes: [locals.keys]).value
+      base = locals.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+      _type, after = base.evaluate(ast)
       target = nil
       collect = lambda do |node|
         return unless node.is_a?(Prism::Node)
@@ -353,10 +343,9 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "keeps the author's fallback when the left operand is optimistically nil-free" do
-      # A uniform-valued literal hash reads as a lone `Constant`, so the `Constant`-only gate cannot see the
+      # A uniform-valued hash reads as a lone `Constant`, so the `Constant`-only gate cannot see the
       # difference — this is the `MAP[key] || key` counter-example the spec names.
-      type = type_of_last_write(<<~RUBY)
-        h = { a: 1, b: 1 }
+      type = type_of_last_write(<<~RUBY, { h: hash_of(1) })
         probe = h[key] || 5
       RUBY
 
@@ -425,8 +414,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
 
     it "rebinding a local to a proof-carrying value clears the mark" do
-      type, = evaluate(<<~RUBY)
-        h = { a: "x", b: "y" }
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
         v = h[key]
         v = "abc".upcase
         if v then 1 else "none" end

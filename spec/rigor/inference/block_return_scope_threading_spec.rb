@@ -378,6 +378,33 @@ RSpec.describe "block-return scope threading", type: :runner do
       expect(type).to start_with("Array[")
     end
 
+    it "threads through a straight-line multi-assign index target" do
+      # `h[:a], y = 1, 2` stores through `[]=` on `h`. The prefix scan counts the index target as an in-place
+      # mutation, so the body threads, and `eval_multi_write` widens the receiver, so the threaded tail reads the
+      # widened hash rather than the literal's `{ a: 0 }`. Either half alone leaves the literal.
+      type = dumped_type(<<~RUBY)
+        m = Mutex.new
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          h[:a], y = 1, 2
+          h
+        end)
+      RUBY
+      expect(type).to start_with("Hash[")
+    end
+
+    it "leaves a tail reading a hash the multi-assign does not store into at its literal" do
+      expect(dumped_type(<<~RUBY)).to eq("{ a: 0 }")
+        m = Mutex.new
+        g = { a: 0 }
+        h = { a: 0 }
+        dump_type(m.synchronize do
+          g[:a], y = 1, 2
+          h
+        end)
+      RUBY
+    end
+
     it "threads a mutated block parameter at every per-element position" do
       type = dumped_type(<<~RUBY)
         dump_type([[], []].map do |a|

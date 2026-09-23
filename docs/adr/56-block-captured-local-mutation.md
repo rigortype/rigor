@@ -963,19 +963,24 @@ without changing any rebound binding, and the final change moves no
 diagnostic. It costs +3,775 allocated objects out of 33.7M on the
 `lib` self-check.
 
-Adversarial review found three routes the first cut still pinned, all
-closed here. A lone remover or a remover written before an adder
-(`p = s.pop; s.push(x)`) closed a literal to a nominal with no gradual
-arm. The adder then declined that nominal, and `{ a: 0 }` under
+Adversarial review found four routes the first cut still pinned, all
+closed here. A lone remover or a remover written before an adder (`p =
+s.pop; s.push(x)`) closed a literal to a nominal with no gradual arm.
+The adder then declined that nominal, and `{ a: 0 }` under
 `h.delete(:a)` read `h[:b]` as `0` where Ruby answers `nil`.
 `UnknownStoreWidening` now gives the gradual arm to the site that
-closes a `Tuple` or `HashShape`, whatever kind of site it is, so the
-answer no longer depends on the order the sites are written in. A
-rebound-and-mutated name was the second route, covered above. The
-third was a nested block's own parameter sharing the outer name
-(`[[9]].each { |a| a << x }`), which `CapturedLocals.content_mutations`
-counted as a mutation of the outer local. It now counts a read only
-when it resolves past every nested block.
+closes a `Tuple` or `HashShape`, whatever kind of site it is, so for a
+`Tuple` or `HashShape` seed the answer no longer depends on the order
+the sites are written in. A rebound-and-mutated name was the second
+route, covered above. The third was a nested block's own parameter
+sharing the outer name (`[[9]].each { |a| a << x }`), which
+`CapturedLocals.content_mutations` counted as a mutation of the outer
+local. It now counts a read only when it resolves past every nested
+block. The fourth was a seed closed before the call: `s = [0, 9];
+s.pop` leaves the value-pinned `Array[0 | 9]`, which the widening
+declines like a declared nominal, so every pass read its pins. A
+declined widening over a value-pinned collection now takes the gradual
+arm instead.
 
 What stays open is the same pin through a binding slice A does not
 own. An instance variable read before an in-place mutation
@@ -985,14 +990,15 @@ rebinds nothing and returns the read (`xs.map { v = a.last; a << x;
 v }` on a nominal receiver) goes through the block-return pass, which
 is WD2.10's generic `Array[U]` residue.
 
-Gate: the `block_rebind_reads_mutated_capture` fixture carries eight
+Gate: the `block_rebind_reads_mutated_capture` fixture carries nine
 must-not-fire shapes: tail, Hash slot, emptiness, String size,
-remover-before-adder, slot rewriter, lone remover, and
-rebound-and-mutated. The first five are pinned by `assert_type`. Two
-controls must still fire: a collection the body does not mutate, and
-an inner block parameter sharing the outer name. The spec asserts the
-exact `flow.*` line set, that no error fires on a value the body
-stored, and the accumulator's pass count.
+remover-before-adder, slot rewriter, lone remover,
+rebound-and-mutated, and a seed closed before the call. The first five
+are pinned by `assert_type`. Two controls must still fire: a
+collection the body does not mutate, and an inner block parameter
+sharing the outer name. The spec asserts the exact `flow.*` line set,
+that no error fires on a value the body stored, and the accumulator's
+pass count.
 
 ### WD3 — One mechanism, shared
 

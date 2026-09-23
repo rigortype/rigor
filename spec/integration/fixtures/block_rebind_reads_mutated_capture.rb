@@ -97,6 +97,18 @@ head = nil
 end
 puts "one" if head == 1
 
+# --- A collection already closed before the call: the straight-line
+# `pop` left `Array[0 | 9]`, a value-pinned nominal the `push` in the body
+# declines, so the rebind read the pins on every pass. ---
+pinned = [0, 9]
+pinned.pop
+peeked = nil
+[1, 2].each do |x|
+  peeked = pinned.last
+  pinned.push(x)
+end
+puts "one" if peeked == 1
+
 # --- Paired control: the same rebind shape over a collection the body
 # does NOT mutate. Only `out` moves, so `base` keeps its exact contents and
 # the comparison it rules out still folds — `base.last` is only ever 0. ---

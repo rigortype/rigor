@@ -2684,7 +2684,7 @@ module Rigor
           next if rebound.include?(name)
 
           seed = scope.local(name)
-          bindings[name] = UnknownStoreWidening.widen(seed, sites) unless seed.nil?
+          bindings[name] = unknown_store_binding(seed, sites) unless seed.nil?
         end
       end
 
@@ -2697,7 +2697,31 @@ module Rigor
 
         bindings.to_h do |name, type|
           sites = stores[name]
-          [name, sites.nil? || type.nil? ? type : UnknownStoreWidening.widen(type, sites)]
+          [name, sites.nil? || type.nil? ? type : unknown_store_binding(type, sites)]
+        end
+      end
+
+      # `type` widened through `sites` for a store of unknown values. A widening that declines leaves the entry
+      # binding, which says nothing about later iterations ({UnknownStoreWidening} warns its callers not to read it
+      # so); when that binding is a collection whose contents are still value-pinned — `s = [0, 9]; s.pop` leaves
+      # `Array[0 | 9]`, a nominal the `push` in the body then declines — the pins are exactly the first-iteration
+      # answer, so the contents take the gradual arm instead (`top = s.last; s.push(x)` would keep `top` at `0 | 9`).
+      def unknown_store_binding(type, sites)
+        widened = UnknownStoreWidening.widen(type, sites)
+        return widened unless widened == type && value_pinned_collection?(type)
+
+        UnknownStoreWidening.gradual_content(type)
+      end
+
+      # An `Array` / `Hash` nominal (alone or as a `Union` member) with a value-pinned type argument.
+      # `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on its own.
+      def value_pinned_collection?(type)
+        case type
+        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
+        when Type::Nominal
+          %w[Array Hash].include?(type.class_name) &&
+            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
+        else false
         end
       end
 

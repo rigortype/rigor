@@ -49,9 +49,15 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
     end
 
-    it "keeps a remover's content when the carrier is already a nominal" do
-      nominal = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
-      expect(described_class.widen(nominal, sites_of("a = []\n[1].each { |e| a.pop }\n"))).to eq(nominal)
+    # The exception is for the site that closes a literal only: a refinement is no literal, so a remover keeps
+    # its element types exactly and adds no arm.
+    it "keeps a remover's content when the carrier is no literal" do
+      refined = Rigor::Type::Combinator.difference(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")]),
+        Rigor::Type::Tuple.new([])
+      )
+      widened = described_class.widen(refined, sites_of("a = []\n[1].each { |e| a.pop }\n"))
+      expect(widened.describe).to eq("Array[Integer]")
     end
 
     # A remover written first closed the literal to `Array[1]`, which the adder after it then declined as a

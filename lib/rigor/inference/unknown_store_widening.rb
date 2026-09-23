@@ -24,7 +24,8 @@ module Rigor
     # missing, so it takes the gradual arm too: `{ a: 0 }` under a lone `h.delete(:a)` read `Hash[Symbol, 0]`,
     # whose `h[:b]` answered `0` where Ruby answers `nil`, and `s = [0]` under `p = s.pop; s.push(x)` closed to
     # `Array[0]`, a precise nominal the `push` after it then declined, so `p` stayed `0?`. With the arm the
-    # answer no longer depends on the order the sites are written in.
+    # answer for a `Tuple` / `HashShape` seed (alone or in a `Union`) no longer depends on the order the sites are
+    # written in; a refinement seed (`non-empty-array[0]`) still can, since its remover does not close a literal.
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver

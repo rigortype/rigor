@@ -11,6 +11,8 @@ locals:
   missing: 0 | 1 | Dynamic[top]
   out: Array[1 | 2]
   peek: 0?
+  peeked: 0 | 9 | Dynamic[top] | nil
+  pinned: Array[0 | 1 | 2 | 9]
   prev: 0 | Dynamic[top] | nil
   pruned: Hash[Symbol, 0]
   queue: Array[0 | 1 | 2 | Dynamic[top] | Integer]

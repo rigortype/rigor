@@ -25,8 +25,9 @@ module Rigor
       # a literal with a `**splat` entry written as the call's argument (the literal's own type leaves the splat
       # out), and an empty closed shape, which is what a mapping filled through an alias the engine does not track
       # still reads as. A block the call carries but the block pass could not type contributes `Dynamic[top]` too.
-      # A splatted literal that arrives through a local or a method return, and a non-empty shape filled through
-      # an alias, still read narrower than they are: those are gaps in the literal's and the binding's own types.
+      # A splatted literal that arrives through a binding (a local, a constant, an inline assignment) or a method
+      # return, and a non-empty shape filled through an alias, still read narrower than they are: those are gaps in
+      # the literal's and the binding's own types.
       #
       # Declines, leaving the RBS answer, when:
       #
@@ -186,10 +187,16 @@ module Rigor
         # A hash literal or keyword arguments with a `**splat` entry. The literal's type lists only its own pairs
         # (`{ **o, b: :y }` reads `Hash[:b, :y]`), so the splatted mapping's values are missing from it. Any
         # argument is checked, not only the first: `h.send(:transform_keys, { **o, b: :y })` reaches this tier
-        # with the `send` node, whose first argument is the method name.
+        # with the `send` node, whose first argument is the method name. Parentheses are looked through to the
+        # value they yield, their last statement.
         def splatted_literal?(argument)
-          (argument.is_a?(Prism::HashNode) || argument.is_a?(Prism::KeywordHashNode)) &&
-            argument.elements.any?(Prism::AssocSplatNode)
+          case argument
+          when Prism::HashNode, Prism::KeywordHashNode then argument.elements.any?(Prism::AssocSplatNode)
+          when Prism::ParenthesesNode
+            body = argument.body
+            body.is_a?(Prism::StatementsNode) && splatted_literal?(body.body.last)
+          else false
+          end
         end
 
         def unknown

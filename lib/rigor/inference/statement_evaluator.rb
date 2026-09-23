@@ -320,6 +320,31 @@ module Rigor
         callee_content_mutated_parameters(def_node).values.uniq.sort
       end
 
+      # The value `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` evaluates to in this evaluator's scope: what it stores
+      # through `[]=` ({#index_write_stored_type}). The `[]=` widening and the indexed-narrowing record are scope
+      # effects, so they stay with {#eval_index_or_write} / {#eval_index_write}. `ExpressionTyper` types a
+      # value-position index compound write from here.
+      #
+      # One reading departs from the statement's: a `||=` whose `[]` read is wholly gradual (`Dynamic`, not a
+      # union with a `Dynamic` member) reads as the rvalue. That is the memoization idiom — `CACHE[key] ||=
+      # build(key)`, `(@memo ||= {})[[a, b]] ||= compute`, `@targets[name] ||= new(name)` on an ivar the method
+      # never writes — where the value the idiom returns is the one it stores, and `Dynamic[top] | rhs` sent
+      # every such method to `sig.skipped.untyped-return`. It is the variable form's optimism for an unbound
+      # target (`ExpressionTyper#type_of_compound_variable_write`) keyed on the slot, and narrower: `&&=` is no
+      # memo (`h[k] &&= v` on an absent slot is `nil`), an operator write has no such reading, and an rvalue
+      # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
+      # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
+      # `@flags[n] = true` elsewhere, never provably `false`.
+      def index_compound_write_value(node)
+        return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
+
+        current = index_read_type(node, scope)
+        rhs = scope.type_of(node.value, tracer: tracer)
+        return rhs if current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+
+        index_write_stored_type(node, scope, current: current, rhs: rhs)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -665,8 +690,7 @@ module Rigor
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
       # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
-      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone, which the
-      # expression typer's `type_of_assignment_write` answer would join as if it were what got stored.
+      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       def eval_index_write(node)
         _rhs_type, post_rhs = sub_eval(node.value, scope)
         stored = index_write_stored_type(node, scope)
@@ -679,41 +703,49 @@ module Rigor
       # call's argument list so the widening seam can join it the same way (issue #560) — a
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
-      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's
-      # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
-      # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
-      # when the key is unresolvable, which reproduces the pre-join widening.
+      # what the write put in the slot — for a compound write {#index_write_stored_type}'s
+      # compound result (`t[0] += 5` stores the already-computed `t[0] + 5`), for an index target
+      # the value its owner stores (the slot {MultiTargetBinder} decomposed, the `for` element, the
+      # rescued exception) — which is the whole point: it
+      # is the value the retained element evidence provably no longer covers. Returns `[]` when the
+      # key is unresolvable, which reproduces the pre-join widening.
+      # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
+      # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
+      # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
+      # them (each iteration, the moment of the catch).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
-      def index_write_arg_types(node, stored_type)
+      def index_write_arg_types(node, stored_type, type_scope: scope)
         args = node.arguments
         return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, scope)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, type_scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
         # A splat argument is marked `nil` — its expansion decides the store's arity at
         # runtime, which an untyped index type could not express (issue #1140).
-        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : scope.type_of(arg, tracer: tracer) } + [stored_type]
+        list.map { |arg| arg.is_a?(Prism::SplatNode) ? nil : type_scope.type_of(arg, tracer: tracer) } + [stored_type]
       end
 
       # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
-      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`.
-      # `type_of(node)` cannot answer it: every index-write node types as its rvalue, so a `+=`
-      # would join the RHS as if it were the stored value — `a[0, 1] += [2]` reads `a[0, 1] + [2]`,
-      # not `[2]` (issue #1140). Any other node falls back to its own type (a multi-assign index
-      # target keeps its untyped answer).
-      def index_write_stored_type(node, type_scope)
+      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`:
+      # `a[0, 1] += [2]` reads `a[0, 1] + [2]`, not `[2]` (issue #1140). It is also the node's value
+      # outside {#index_compound_write_value}'s memoizing `||=`. That method passes the `current` read
+      # and the `rhs` it already typed, so a nested `(a[i] ||= {})[j] ||= v` chain types each level's
+      # receiver once rather than doubling per level. Any other node falls back to its own type (an
+      # index target — a multi-assign slot, a `for` index, a rescue reference — keeps its untyped
+      # answer).
+      def index_write_stored_type(node, type_scope, current: nil, rhs: nil)
         case node
         when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode
-          current = index_read_type(node, type_scope)
+          current ||= index_read_type(node, type_scope)
           narrowed = if node.is_a?(Prism::IndexOrWriteNode)
                        Narrowing.narrow_truthy(current)
                      else
                        Narrowing.narrow_falsey(current)
                      end
-          Type::Combinator.union(narrowed, type_scope.type_of(node.value, tracer: tracer))
+          Type::Combinator.union(narrowed, rhs || type_scope.type_of(node.value, tracer: tracer))
         when Prism::IndexOperatorWriteNode
           MethodDispatcher.dispatch(
             receiver_type: index_read_type(node, type_scope), method_name: node.binary_operator,
@@ -810,9 +842,51 @@ module Rigor
       # other carriers fall back to `Dynamic[Top]` per slot. Instance-variable targets bind by the same rules, with the
       # optimistic mark recorded per ivar (issue #1110). The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
+      #
+      # An index target (`h[:a], z = 1, 2`, nested or splatted too) stores its slot through `[]=`, so its receiver
+      # widens here exactly as the plain store `h[:a] = 1` widens it, joining the slot's value as content evidence
+      # (issue #560) — otherwise the literal survives and a later `h[:a] == 0` folds on its stale `0`. The widening
+      # runs AFTER the bindings: Ruby evaluates a target's receiver before any target is assigned, so
+      # `h, h[:a] = h, 1` stores into the object `h` is bound to afterwards, and widening first would let the
+      # binding of `h` restore the literal. When a target rebinds the receiver's variable to another object
+      # instead, widening that one only loses precision.
+      #
+      # The stored value is the slot the binder decomposed, softened as a local in the same position is. The
+      # ADR-57 softening that drops a slot's `nil` is honest for a local because of the optimistic mark, which a
+      # stored value never carries — but it does not need one here: the straight-line join always adds the
+      # `Dynamic[top]` floor ({MutationWidening#gradual_floor}), so no fold can rest on the dropped `nil`. Joining
+      # the `nil` instead would fire `call.possible-nil-receiver` on the correlated guard the softening exists for,
+      # `r[:k], r[:v] = h.find { … }; r[:v].upcase if r[:k]`.
+      #
+      # Each store then drops the indexed narrowing it overwrites, through the same
+      # {IndexedNarrowing.invalidate_indexed_write} a `[]=` call takes (it reads only `receiver` and `arguments`,
+      # which an index target shares): the widening carries a Nominal receiver's slot narrowings across its
+      # rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep reading `"d"`.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        [rhs_type, MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs).apply_to(post_rhs)]
+        bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
+        [rhs_type, widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)]
+      end
+
+      # Widens the receiver of every index target a {MultiTargetBinder} result reports, over the scope its bindings
+      # were applied to — the multi-write and the `for a, h[:k] in pairs` index share it.
+      def widen_index_targets(bound, post, type_scope:)
+        bound.index_targets.reduce(post) do |acc, (target, stored)|
+          widen_index_target(target, stored, acc, type_scope: type_scope)
+        end
+      end
+
+      # An index target (`Prism::IndexTargetNode`) stores `stored` through `[]=` on its receiver wherever it
+      # appears — a multi-assign slot, a `for` index, a rescue reference — so its receiver widens exactly as the
+      # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560), and drops the
+      # `h[:a] ||= default` narrowing on the slot it overwrote, as `eval_call` drops it after a `[]=` — the
+      # widening carries slot narrowings across the rebind, so without the drop `h[:a]` keeps reading the default.
+      # `type_scope` types the index arguments and gates the evidence (`joinable_receiver?`); `current_scope` is
+      # the one widened.
+      def widen_index_target(target, stored, current_scope, type_scope:)
+        widened = IndexWriteWidening.widen(node: target, current_scope: current_scope,
+                                           arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
+        IndexedNarrowing.invalidate_indexed_write(target, widened)
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
@@ -1559,8 +1633,8 @@ module Rigor
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
       # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
-      # expression itself types as `Constant[nil]` (the common case where no `break VALUE` is observed), matching the
-      # policy `eval_loop` uses for `while` / `until`.
+      # expression itself types as `Constant[nil]`, the policy `eval_loop` uses for `while` / `until` — a known gap for
+      # `for`, whose value in Ruby is the collection it iterated (issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
@@ -1606,15 +1680,36 @@ module Rigor
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`
       # (the per-iteration value the collection yields). A `MultiTargetNode` (`for a, b in pairs`) delegates to
       # {MultiTargetBinder}, which decomposes a tuple-shaped element into the inner slots.
+      #
+      # An index target — the whole index (`for h[:a] in xs`) or a slot of a multi-target one (`for h[:a], w in
+      # pairs`) — stores the element / its slot through `[]=` at the top of every iteration, so its receiver widens
+      # here, before the body, exactly as a multi-assign target's does; the body then reads the widened receiver and
+      # the post-loop join keeps it beside the zero-iteration literal, as it keeps a body store's `h[:a] = x`.
       def bind_for_index(index_node, element_type, scope)
         case index_node
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
+        when Prism::IndexTargetNode
+          widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind_marked(index_node, element_type, scope: scope).apply_to(scope)
+          bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
+          widen_index_targets(bound, bound.apply_to(scope), type_scope: scope)
+        when Prism::SplatNode
+          bind_for_splat_index(index_node, scope)
         else
           scope
         end
+      end
+
+      # `for *h[:a] in pairs` — Prism gives a bare splat index as a `SplatNode`, not a `MultiTargetNode`, so the
+      # binder never sees it. The store is `*h[:a] = element`, an array of the element's `to_ary` parts; the receiver
+      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. A bare `*name` target stays
+      # unbound here, as before.
+      def bind_for_splat_index(splat, scope)
+        target = splat.expression
+        return scope unless target.is_a?(Prism::IndexTargetNode)
+
+        widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
@@ -2644,11 +2739,16 @@ module Rigor
       # drop matches the spec line "facts about locals it can write become unstable after the escape point": rather than
       # synthesise the union of the block's write types (which the current pass does not yet expose), we discard the
       # narrowed binding altogether. A future sub-phase MAY refine this to the union of the block's actual writes.
+      #
+      # An instance variable the body rebinds is dropped the same way: the block shares the caller's `self`, so a
+      # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
+      # @clicked = true }` left `if @clicked` folding always-falsey). One still on its ADR-58 declaration seed is
+      # left alone ({CapturedLocals.writes}): that seed already holds whatever the callback stores.
       def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope, ivars: true)
         return base_scope if names.empty?
 
-        names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+        names.reduce(base_scope) { |acc, name| bind_capture(acc, name, Type::Combinator.untyped) }
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2657,39 +2757,98 @@ module Rigor
       # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
-      # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
-      # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
+      # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
+      # way — `@n = 0; [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set,
+      # seeded from their pre-call binding. See {#converge_captures_by_kind} for how a block that rebinds both kinds is
+      # answered.
+      #
+      # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
+      # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope)
+        names = CapturedLocals.writes(block, scope, ivars: true)
         return post_scope if names.empty?
 
-        seed = names.to_h { |name| [name, scope.local(name)] }
         break_pass = block_break_pass(block)
-        result = BodyFixpoint.converge(
+        result = converge_captures_by_kind(call_node, block, names, break_pass)
+        result = join_block_break_bindings(call_node, block, result, break_pass)
+        result.reduce(post_scope) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
+
+      # The {BodyFixpoint} continuation of `names`, seeded from their pre-call bindings.
+      def converge_block_captures(call_node, block, names, break_pass)
+        BodyFixpoint.converge(
           names: names,
-          seed_bindings: seed,
+          seed_bindings: names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] },
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: ->(bindings) { block_pass_exit_bindings(call_node, block, bindings, names, break_pass) }
         )
-        result = join_block_break_bindings(call_node, block, result, break_pass)
+      end
 
-        result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      # The continuation of a block's rebound names. One {BodyFixpoint} over locals and ivars together is the wrong
+      # answer for most of them: its final pass widens every name while any name still moves, so an ivar counter beside
+      # `mode = :b` turned `mode`'s converged `:a | :b` into `Symbol` — and a local counter beside `@mode = :b` did the
+      # same to `@mode` — and `take(mode)` against `(:a | :b) -> void` fired on code each kind's own fixpoint accepts.
+      #
+      # So each kind converges on its own first, with the other at its pre-call binding; for a block that rebinds one
+      # kind that is the only fixpoint, and for the locals it is exactly the one a block rebinding no ivar has always
+      # had. A name converged that way is wrong when it reads the other kind (`last = @n; @n += 1`, `@last = count`),
+      # so one more pass under the settled bindings checks every name, and one whose exit leaves its settled binding
+      # takes its answer from a joint fixpoint over both kinds, computed only then. The check repeats, because a name
+      # read off a moved one (`first = last`) may move in turn; every round moves a name to its joint answer or stops.
+      #
+      # The body's last evaluation is therefore a pass under the settled bindings, so the scopes recorded inside the
+      # block read those rather than a pass that pinned one kind to its pre-call value.
+      #
+      # `break_pass` ({#block_break_pass}) rides along so every pass — a fixpoint's or a check's — leaves its `break`
+      # scopes for {#join_block_break_bindings}.
+      def converge_captures_by_kind(call_node, block, names, break_pass)
+        kinds = names.partition { |name| !CapturedLocals.ivar_name?(name) }
+        return converge_block_captures(call_node, block, names, break_pass) if kinds.any?(&:empty?)
+
+        settled = kinds.map { |kind| converge_block_captures(call_node, block, kind, break_pass) }.reduce(:merge)
+        joint = nil
+        loop do
+          exits = block_pass_exit_bindings(call_node, block, settled, names, break_pass)
+          moved = escaped_captures(settled, exits, joint)
+          return settled if moved.empty?
+
+          joint ||= converge_block_captures(call_node, block, names, break_pass)
+          moved.each { |name| settled[name] = joint[name] }
+        end
+      end
+
+      # The names whose `exits` leave their `settled` binding, less those already on their `joint` answer.
+      def escaped_captures(settled, exits, joint)
+        settled.keys.select do |name|
+          exit_type = exits[name]
+          next false if exit_type.nil? || (joint && settled[name] == joint[name])
+
+          Type::Combinator.union(settled[name], exit_type) != settled[name]
+        end
+      end
+
+      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
+      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
+      # rebinds no ivar leaves the locals exactly as before.
+      def bind_capture(scope, name, type)
+        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
       end
 
       # A block-level `break` ends the CALL, so the binding it leaves with starts no further iteration and is no input
-      # to the fixpoint above — feeding it back would type the next pass's body under a value the body never sees
+      # to the write-back fixpoint — feeding it back would type the next pass's body under a value the body never sees
       # (`acc = "s"; break` reaching the next pass's `acc`). It IS the continuation's binding on that path, though, and
       # without this join `found = nil; xs.each { |x| if x > 1; found = x; break; end }` left `found` on `nil` and
       # folded `if found` always-falsey.
       #
       # The arms must come from a pass whose entry is the CONVERGED binding, which contains every iteration's entry.
-      # A fixpoint that stabilised already ran one — its last pass — so its arms are reused
+      # The write-back's last pass usually is one — a fixpoint that stabilised, and every by-kind check pass
+      # ({#converge_captures_by_kind}), ran from the binding it returns — so its arms are reused
       # ({#block_pass_exit_bindings}). A capped fixpoint's widened binding was never evaluated, so only then does one
-      # more pass run, without recording into the per-node scope index: that index keeps the fixpoint's own last
+      # more pass run, without recording into the per-node scope index: that index keeps the write-back's own last
       # pass, which the check path's diagnostics read, exactly as the loop fixpoint's converged re-record is
       # display-only ({#record_converged_loop_body}). A name the fixpoint floored to `Dynamic[top]` keeps the floor; a
       # precise arm unioned into it would read as knowledge the analysis does not have.
@@ -2708,7 +2867,7 @@ module Rigor
         converged.to_h do |name, type|
           next [name, type] if type == floor
 
-          [name, Type::Combinator.union(type, *arms.filter_map { |arm| arm.local(name) })]
+          [name, Type::Combinator.union(type, *arms.filter_map { |arm| CapturedLocals.bound_type(arm, name) })]
         end
       end
 
@@ -2759,8 +2918,8 @@ module Rigor
       # post-call effect applied ahead of the widening; the pre-CALL `scope` would carry neither. The loop seam makes
       # the same choice with `pre_body`; see {#loop_content_writeback}.
       #
-      # The block body is typed once for argument evidence; the floor is `Array[Dynamic[top]]` /
-      # `Hash[untyped, untyped]` (the sound empty-seed behaviour). Always sound — only ever widens.
+      # The stored evidence is typed in the block-entry scope and iterated to a fixpoint when a store reads a
+      # collection the join moves — see {#join_content_to_fixpoint}. Always sound — only ever widens.
       def content_writeback_block_captures(call_node, post_scope, seed_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -2769,14 +2928,220 @@ module Rigor
         body = block.body
         return post_scope if body.nil?
 
-        mutations = collect_content_mutations(body)
+        shadows = {}.compare_by_identity
+        mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        entry = build_block_entry_scope(call_node, block)
-        mutations.reduce(post_scope) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, seed_scope, entry)
-          joined.nil? ? acc : acc.with_local(name, joined)
+        seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
+        joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
+      # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
+      CONTENT_EVIDENCE_SLOTS = { array: %i[element].freeze, hash: %i[key value].freeze, string: [].freeze }.freeze
+      private_constant :CONTENT_EVIDENCE_SLOTS
+
+      # The joined continuation carrier of each content-mutated name, shared by the block seam and
+      # {#each_with_object_return}. `sites` maps each name to its mutation nodes, `seeds` to its pre-state; the answer
+      # omits a name whose pre-state is no collection.
+      #
+      # The evidence is typed in the block-entry scope, where each mutated collection still holds its PRE-CALL
+      # contents. A store whose evidence reads one of them therefore records the FIRST iteration's answer: `h = { a:
+      # 0 }; [:a, :a, :a].each { |k| h[k] = h[k] + 1 }` stored `1` as far as a single pass could tell, the join read
+      # `Hash[:a | Symbol, 0 | 1]`, and `h[:a] == 3` folded always-falsey on a program that prints.
+      #
+      # So each collection a store reads is bound to what it holds at ANY iteration's entry. A name none of whose
+      # stores reads a mutated Array or Hash is FIXED: its evidence is the same on every iteration, so it is typed
+      # once and the name is bound to its own join — a String to `String`, whatever it stored, so `lens << buf.length`
+      # after `buf << w` reads `Integer`, not the length of `buf`'s pre-call value. Every other name MOVES, and its
+      # evidence is iterated to a fixpoint through {BodyFixpoint}: each of its evidence slots is one fixpoint name,
+      # and each pass re-types its stores with every moving collection bound to its seed joined with the evidence so
+      # far. The join above widens to `Hash[Symbol, 0 | Integer]` on the final pass, and evidence that keeps growing
+      # structurally floors to `Dynamic[top]`, the slot's one-unknown-store answer. Only moving slots are ever
+      # widened, so `acc << 1` beside such a store keeps `Array[1]`.
+      #
+      # That is what keeps this seam's claim to complete evidence ({MutationWidening#gradual_floor} rests on it): the
+      # scan sees every store in the body, and no store's evidence is read off a first-iteration binding. The final
+      # pass trusts its widening without re-checking it, exactly as slice A's fixpoint does (ADR-56 WD3). A gradual
+      # arm on every self-reading store would be sound too, but its `Dynamic` would quiet every later read of the
+      # collection, where the converged `Integer` still reports `h[:a].upcase`. With no moving name — the `acc = [];
+      # xs.each { |x| acc.push(x) }` accumulator — this is the single pass it always was.
+      #
+      # `shadows` maps a site nested in an inner block or lambda to the names that block binds itself (parameters,
+      # `;`-locals). The entry scope is the seam block's, where such a name resolves to the OUTER local it shadows, so
+      # the site's evidence is typed with those names bound to `Dynamic[top]` instead: `|y| out << y.first` inside
+      # the block must not read an outer `y = [0]`.
+      def join_content_to_fixpoint(sites, seeds, entry, shadows = NO_SHADOWS)
+        kinds = seeds.filter_map { |name, seed| (kind = content_kind(seed)) && [name, kind] }.to_h
+        return {} if kinds.empty?
+
+        moving = moving_content_names(sites, kinds)
+        fixed = kinds.except(*moving)
+        strings, settled = fixed.partition { |_name, kind| kind == :string }.map(&:to_h)
+        fixed_entry = bind_content_joins(entry, strings, seeds, {})
+        evidence = content_evidence(sites, fixed, fixed_entry, shadows)
+        unless moving.empty?
+          base = bind_content_joins(fixed_entry, settled, seeds, evidence)
+          evidence = evidence.merge(converge_content_evidence(sites, seeds, kinds.slice(*moving), base, shadows))
         end
+        kinds.to_h { |name, kind| [name, join_content_evidence(seeds[name], kind, name, evidence)] }
+      end
+
+      # The pre-state's collection kind, or nil when the join has no carrier to rederive — the dispatch
+      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states.
+      def content_kind(pre_state)
+        return nil if pre_state.nil?
+        return :string if stringish?(pre_state)
+        return :hash if hashish?(pre_state)
+
+        :array if arrayish?(pre_state)
+      end
+
+      # The names whose evidence can differ between iterations: a store that reads a mutated Array or Hash among its
+      # arguments (a `[]=` call's stored value is one), or an Array-side compound index write (`a[i] += v`), whose
+      # stored value is computed from the slot it overwrites. A String never moves — its join is `String` whatever it
+      # stored — and the Hash side floors an index write's value, so there only the key arguments are typed.
+      def moving_content_names(sites, kinds)
+        movable = kinds.reject { |_name, kind| kind == :string }.keys
+        movable.select do |name|
+          sites[name].any? do |node|
+            (kinds[name] == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
+          end
+        end
+      end
+
+      def bind_content_joins(scope, kinds, seeds, evidence)
+        kinds.reduce(scope) do |acc, (name, kind)|
+          acc.with_local(name, content_entry_binding(seeds[name], kind, name, evidence))
+        end
+      end
+
+      # What a collection holds at any iteration's entry, given the evidence so far: its join, plus the seed members
+      # that join refutes. The join already covers every other seed value — a `Tuple`, `HashShape` or `Difference`
+      # is absorbed into the rederived carrier and any other member survives beside it — but it drops a seed's
+      # `nil` ({ContentJoin::NON_SURVIVING_CLASSES}). The first iteration's entry still holds that `nil`, and it can
+      # outlive another collection's growth: without it `out << a.nil?; a ||= []; a << v` read `Array[false]`.
+      # Unioning the whole seed back would re-add its literal shape as well, and dispatch over `[] | Array[2]` is
+      # wider than over `Array[2]`, so `a[0, 1] ||= [2]` stopped converging.
+      def content_entry_binding(seed, kind, name, evidence)
+        join = join_content_evidence(seed, kind, name, evidence)
+        members = seed.is_a?(Type::Union) ? seed.members : [seed]
+        refuted = members.select do |member|
+          ContentJoin::NON_SURVIVING_CLASSES.include?(ContentJoin.evidence_class(member))
+        end
+        refuted.empty? ? join : Type::Combinator.union(join, *refuted)
+      end
+
+      # The nodes that open a local scope a read's `depth` counts.
+      SCOPE_NESTING_NODES = [Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :SCOPE_NESTING_NODES
+
+      # The block's captured content mutations: `{ name => [node, ...] }` for every content mutator whose receiver is
+      # a local from OUTSIDE the block. A read's `depth` counts the scopes it climbs, so it reaches past the seam's
+      # block only when it climbs more scopes than the blocks and lambdas nested between it and the block's body.
+      # `collect_content_mutations` tests `depth >= 1`, which is that rule only directly in the body: it took a block
+      # PARAMETER mutated inside a nested block (`|y| [9].each { y << 9 }`), or a nested block's own parameter one
+      # level deeper, for the outer local it shadows, and the join rebound the parameter to that local's contents.
+      #
+      # Each site nested in an inner block or lambda is recorded in `shadows` with the names those blocks bind
+      # themselves (see {#join_content_to_fixpoint}).
+      def captured_content_mutations(block, shadows)
+        mutations = Hash.new { |h, k| h[k] = [] }
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
+          next if name.nil?
+
+          mutations[name] << site
+          record_shadows(shadows, site, ancestors)
+        end
+        mutations
+      end
+
+      def scope_nesting(ancestors)
+        ancestors.count { |ancestor| scope_nesting_node?(ancestor) }
+      end
+
+      def scope_nesting_node?(node)
+        SCOPE_NESTING_NODES.any? { |klass| node.is_a?(klass) }
+      end
+
+      def record_shadows(shadows, site, ancestors)
+        names = ancestors.select { |a| scope_nesting_node?(a) }
+                         .flat_map { |a| CapturedLocals.introduced_locals(a).to_a }
+        shadows[site] = names unless names.empty?
+      end
+
+      # `scope` with each name a site's enclosing inner blocks bind bound to `Dynamic[top]`: the seam's scope cannot
+      # see those bindings, and the name would otherwise resolve to the outer local it shadows.
+      def site_evidence_scope(scope, site, shadows)
+        names = shadows[site]
+        return scope if names.nil?
+
+        names.reduce(scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+      end
+
+      # `base` binds every fixed name to its join; the moving names are rebound on each pass.
+      def converge_content_evidence(sites, seeds, kinds, base, shadows)
+        slots = kinds.flat_map { |name, kind| CONTENT_EVIDENCE_SLOTS.fetch(kind).map { |slot| [name, slot] } }
+        BodyFixpoint.converge(
+          names: slots,
+          seed_bindings: slots.to_h { |slot| [slot, Type::Combinator.bot] },
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: lambda do |assumption|
+            pass_entry = kinds.reduce(base) do |acc, (name, kind)|
+              acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
+            end
+            content_evidence(sites, kinds, pass_entry, shadows)
+          end
+        )
+      end
+
+      # The binding a fixpoint pass reads a moving collection at: its seed until any evidence exists, then — as for a
+      # fixed name — {#content_entry_binding} over the evidence so far.
+      def content_carrier_under(seed, kind, name, evidence)
+        no_evidence = CONTENT_EVIDENCE_SLOTS.fetch(kind).all? { |slot| present_evidence(evidence[[name, slot]]).empty? }
+        no_evidence ? seed : content_entry_binding(seed, kind, name, evidence)
+      end
+
+      # `{ [name, slot] => union }` for every collection name, typed in `evidence_scope`; a slot no store contributes
+      # to reads `bot`.
+      def content_evidence(sites, kinds, evidence_scope, shadows)
+        kinds.each_with_object({}) do |(name, kind), evidence|
+          case kind
+          when :hash
+            pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
+            evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
+            evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+          when :array
+            evidence[[name, :element]] =
+              Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
+          end
+        end
+      end
+
+      def join_content_evidence(seed, kind, name, evidence)
+        case kind
+        when :string
+          Type::Combinator.nominal_of("String")
+        when :hash
+          key = present_evidence(evidence[[name, :key]]).first
+          value = present_evidence(evidence[[name, :value]]).first
+          ContentJoin.join_hash_content(seed, key.nil? && value.nil? ? [] : [[key, value]])
+        else
+          ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
+        end
+      end
+
+      def present_evidence(type)
+        type.nil? || type.is_a?(Type::Bot) ? [] : [type]
+      end
+
+      def store_arguments_read?(node, names)
+        arguments = node.arguments
+        return false if arguments.nil?
+
+        Source::NodeWalker.each(arguments).any? { |n| n.is_a?(Prism::LocalVariableReadNode) && names.include?(n.name) }
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
@@ -2801,13 +3166,25 @@ module Rigor
 
         # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
         # captured-local walk.
-        calls = body_content_mutations_on(body, memo_param)
+        shadows = {}.compare_by_identity
+        calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        pre_state = scope.type_of(memo_arg, tracer: tracer)
-        entry = build_block_entry_scope(call_node, block)
-        joined = join_content_for_param(calls, pre_state, entry)
+        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
         joined || call_type
+      end
+
+      # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
+      # memo's carrier is kept: a memo store reading one of them (`buf << w; m << buf.length`) must see it as it
+      # stands at any iteration's entry, not at its pre-call contents. Their own continuation is the block seam's to
+      # write.
+      def join_memo_content(call_node, memo_param, calls, pre_state, shadows)
+        block = call_node.block
+        captured = captured_content_mutations(block, shadows)
+        seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
+        seeds[memo_param] = pre_state
+        sites = captured.merge(memo_param => calls)
+        join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 
       # The name of the memo block parameter (the SECOND positional param of an `each_with_object` block), or nil when
@@ -2826,18 +3203,21 @@ module Rigor
         second.respond_to?(:name) ? second.name : nil
       end
 
-      # Content-mutator calls on a block-local receiver `var_name` (depth 0) within `body`.
-      def body_content_mutations_on(body, var_name)
+      # Content-mutator calls on the block-local `var_name` within `body` — directly, or from a nested block that
+      # reaches it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a
+      # different variable and does not count.
+      def body_content_mutations_on(body, var_name, shadows)
         calls = []
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
           next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
-          next unless receiver.name == var_name
+          next unless receiver.name == var_name && receiver.depth == scope_nesting(ancestors)
 
           calls << descendant
+          record_shadows(shadows, descendant, ancestors)
         end
         calls
       end
@@ -2863,7 +3243,7 @@ module Rigor
       end
 
       def join_hash_param(calls, pre_state, block_entry)
-        pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
+        pairs = hash_pair_evidence(calls, block_entry)
         return nil if pairs.empty? && !hashish?(pre_state)
 
         ContentJoin.join_hash_content(pre_state, pairs)
@@ -2872,8 +3252,23 @@ module Rigor
       def join_array_param(calls, pre_state, block_entry)
         return nil unless arrayish?(pre_state)
 
-        added = calls.flat_map do |c|
-          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, a multi-assign target) stores
+        ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
+      end
+
+      # No site sits under an inner block that shadows a name — the loop seam's answer, and the default.
+      NO_SHADOWS = {}.freeze
+      private_constant :NO_SHADOWS
+
+      # The `[key, value]` pairs `calls` store into a Hash, typed in `block_entry`.
+      def hash_pair_evidence(calls, block_entry, shadows = NO_SHADOWS)
+        calls.flat_map { |c| hash_pair_types(c, site_evidence_scope(block_entry, c, shadows)) }
+      end
+
+      # The elements `calls` add to an Array, typed in `block_entry`.
+      def array_element_evidence(calls, entry_scope, shadows = NO_SHADOWS)
+        calls.flat_map do |c|
+          block_entry = site_evidence_scope(entry_scope, c, shadows)
+          # An index-write in the block (`a[i] += v`, `a[i] ||= v`, an index target) stores
           # through `[]=` the same way — emit its index arguments ahead of the node's own stored
           # type so the join classifies the same splice / element forms the straight-line path
           # does (issue #1140).
@@ -2881,13 +3276,13 @@ module Rigor
 
           ContentJoin.array_added_elements(c.name, content_arg_types(c, block_entry))
         end
-        ContentJoin.join_array_content(pre_state, added)
       end
 
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
       # block-entry scope — the stored value is what the write stores through `[]=`, which for a
-      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, not the
-      # rvalue the node itself types as); a multi-assign target stays untyped.
+      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, the same
+      # compound result the node itself types as); an index target (a multi-assign slot, a `for`
+      # index, a rescue reference) stays untyped.
       # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
       def index_write_block_arg_types(node, block_entry)
         args = node.arguments
@@ -2914,15 +3309,11 @@ module Rigor
         mutations
       end
 
-      # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a multi-assign target) that mutate a collection's
+      # Index-write forms (`h[k] ||= v`, `h[k] += v`, and an index target's `h[k] = v` — a multi-assign slot, a `for`
+      # index, a rescue reference) that mutate a collection's
       # CONTENT without a `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the OrWrite even though the
       # appended values land on the nested array — leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
-      INDEX_WRITE_NODES = [
-        Prism::IndexOrWriteNode,
-        Prism::IndexAndWriteNode,
-        Prism::IndexOperatorWriteNode,
-        Prism::IndexTargetNode
-      ].freeze
+      INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
@@ -3035,18 +3426,19 @@ module Rigor
         []
       end
 
-      # Evaluates `block`'s body once with each written outer local bound to the supplied `bindings` (block params /
-      # `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the `BodyFixpoint`
-      # body-evaluator.
+      # Evaluates `block`'s body once with each written outer local or ivar bound to the supplied `bindings` (block
+      # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
+      # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
         _type, exit_scope = sub_eval(block, block_pass_entry(call_node, block, bindings))
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
-      # The entry scope of one write-back pass: the block's entry with each written outer local bound to `bindings`.
+      # The entry scope of one write-back pass: the block's entry with each written outer local or ivar bound to
+      # `bindings`.
       def block_pass_entry(call_node, block, bindings)
         entry = build_block_entry_scope(call_node, block)
-        bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller
@@ -3643,17 +4035,24 @@ module Rigor
       # ---------------------------------------------------------------
 
       # Returns `scope` extended with the rescue reference variable bound to the exception instance type. Leaves scope
-      # unchanged when the node carries no reference (bare `rescue` without `=> var`).
+      # unchanged when the node carries no reference (bare `rescue` without `=> var`). An index-target reference
+      # (`rescue => h[:e]`) stores the exception through `[]=` instead, so its receiver widens with the exception
+      # instance type as the stored value, exactly as `rescue => e; h[:e] = e` widens it.
       def bind_rescue_reference(rescue_node, scope)
         ref = rescue_node.reference
-        return scope unless ref.is_a?(Prism::LocalVariableTargetNode)
-
-        scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        case ref
+        when Prism::LocalVariableTargetNode
+          scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+        when Prism::IndexTargetNode
+          widen_index_target(ref, rescue_exception_type(rescue_node, scope), scope, type_scope: scope)
+        else
+          scope
+        end
       end
 
       # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. Falls back to
-      # `StandardError` for any class that cannot be resolved to a `Singleton` type.
+      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
+      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
       def rescue_exception_type(rescue_node, scope)
         exceptions = rescue_node.exceptions
         if exceptions.empty?

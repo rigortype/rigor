@@ -19,7 +19,8 @@ module Rigor
     # The mechanism is parameterized over an `evaluate_body` callable so slice B can reuse it: given the
     # current per-name bindings it returns the per-name exit bindings produced by one body evaluation from
     # those bindings (names the body leaves unwritten in a given pass simply do not appear in the returned
-    # hash).
+    # hash). Slice C's content join reuses it too, with each "name" one evidence slot of a collection
+    # (`StatementEvaluator#join_content_to_fixpoint`) and a `bot` seed standing for "nothing stored yet".
     module BodyFixpoint
       # One body evaluation per iteration; ADR-55's shape (cap 3).
       CAP = 3

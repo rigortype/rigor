@@ -22,6 +22,7 @@ require_relative "origin_lookup"
 require_relative "../effects/collector"
 require_relative "fallback"
 require_relative "flow_tracer"
+require_relative "index_write_widening"
 require_relative "indexed_narrowing"
 require_relative "jump_targets"
 require_relative "define_method_block_self"
@@ -33,6 +34,7 @@ require_relative "optimistic_origin"
 require_relative "receiver_alias"
 require_relative "singleton_object_constant"
 require_relative "struct_fold_safety"
+require_relative "unknown_store_widening"
 require_relative "version_guard"
 
 module Rigor
@@ -130,9 +132,9 @@ module Rigor
         Prism::LocalVariableOperatorWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableOrWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableAndWriteNode => :type_of_compound_variable_write,
-        Prism::IndexOperatorWriteNode => :type_of_assignment_write,
-        Prism::IndexOrWriteNode => :type_of_assignment_write,
-        Prism::IndexAndWriteNode => :type_of_assignment_write,
+        Prism::IndexOperatorWriteNode => :type_of_index_compound_write,
+        Prism::IndexOrWriteNode => :type_of_index_compound_write,
+        Prism::IndexAndWriteNode => :type_of_index_compound_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
         # LHS-only target nodes (destructuring assignment, pattern matching, `for x in xs`, block parameter
         # `|a, (b, c)|`). They have no value to extract — the type-of pass acknowledges the node class so the
@@ -403,9 +405,8 @@ module Rigor
       # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
       # inventing the rvalue.
       #
-      # Constant and index targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body,
-      # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
-      # `StatementEvaluator#eval_index_write`.
+      # Constant targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body. Index
+      # targets have their own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
         current = compound_write_current_binding(node)
         rhs = type_of(node.value)
@@ -428,6 +429,24 @@ module Rigor
         else
           compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end
+      end
+
+      # `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` as an EXPRESSION. Like a variable compound write, its value is
+      # what it stores through `[]=` — the dispatched `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — which
+      # reads the slot's current type, recorded indexed narrowing included. Typed as the rvalue alone it answered
+      # `1` for `counts[w] += 1`, so `r = words.map { |w| counts[w] += 1 }` pinned every position to `1` and
+      # `r.last == 1` drew a false `flow.always-truthy-condition`.
+      #
+      # The statement evaluator already owned that algebra for the straight-line write and the `[]=` widening
+      # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
+      # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
+      # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
+      #
+      # One exception carries over, narrowed, from {#type_of_compound_variable_write}: a memoizing `||=` whose
+      # slot the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it,
+      # because it is decided on the `[]` read the evaluator performs.
+      def type_of_index_compound_write(node)
+        StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
       end
 
       def compound_write_current_binding(node)
@@ -3835,8 +3854,10 @@ module Rigor
       # - the fold is not re-entrant. `StatementEvaluator#eval_call` already evaluates each nested block body
       #   once, plus up to three more times under the ADR-56 `BodyFixpoint` when the block rebinds a captured
       #   local, so a fold nested inside a fold would multiply that work per block-nesting level. Inside a
-      #   threaded body a nested block-bearing call reverts to the tail-only path — a wider answer in a rare
-      #   shape, never a new false positive.
+      #   threaded body a nested block-bearing call reverts to the tail-only path. That is a wider answer only
+      #   while the nested tail ignores its own prefix: a tail reading a parameter or captured local the prefix
+      #   mutated gets the ENTRY binding back, so the per-element and per-pair folds floor that shape
+      #   ({#tail_only_body_floor}). The generic block-return pass still answers it tail-only.
       #
       # ADR-56 interaction: the fold cannot double-apply or fight the captured-local write-back. That
       # write-back is `StatementEvaluator#write_back_block_captures`, computed from the CALLER's scope into
@@ -3950,6 +3971,9 @@ module Rigor
       # ({ReceiverAlias.candidates} — the ternary-selected receiver of issue #277 included) whenever its name
       # is one the widening responds to ({MutationWidening::SHAPE_MUTATORS}); keying on the widening's own
       # tables is what keeps "the scan says thread" and "threading changes something" the same predicate.
+      # The index-write nodes ({INDEX_WRITE_NODES}) store through `[]=` without being a call, so a name-keyed
+      # scan missed them and `h[:a] += 1; h[:a]` kept the literal's `0`; they contribute their receiver the
+      # same way.
       #
       # Cost is two walks of the body, the second only when the first found a write and no jump — the same
       # order of cost `StatementEvaluator`'s own per-call captured-write scan already pays, and far below
@@ -3968,9 +3992,9 @@ module Rigor
       end
 
       # WHICH names the predicate above answers YES on — every name the tail observes that the prefix binds
-      # or mutates in place. Only the arity-cap floor ({#unanswered_tail_dependency?}) needs them, which is
+      # or mutates in place. Only the tail-only floor ({#unanswered_tail_dependency?}) needs them, which is
       # why the predicate is not written over this method: the predicate runs for every multi-statement block
-      # body and short-circuits on the first hit, the floor runs for a handful of calls. Sharing
+      # body and short-circuits on the first hit, the floor runs only for a walk typed tail-only. Sharing
       # {#prefix_written_names} is what keeps the two from drifting about what the prefix binds.
       def tail_dependent_body_names(statements)
         written = prefix_written_names(statements)
@@ -3997,9 +4021,9 @@ module Rigor
       private_constant :EMPTY_NAME_SET
 
       # True when `node` cannot jump out of the block with a value, collecting into `written` the names it
-      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call, through
-      # every variable its receiver can evaluate to) on the way down. `retargeted` is true once the descent
-      # has passed a boundary.
+      # binds (a variable-write node) or mutates in place (a {MutationWidening::SHAPE_MUTATORS} call or an
+      # {INDEX_WRITE_NODES} store, through every variable its receiver can evaluate to) on the way down.
+      # `retargeted` is true once the descent has passed a boundary.
       #
       # A `Prism::DefinedNode`'s operand is never evaluated, so it is not descended into — the same rule
       # {Source::NodeWalker} applies, for the same reason: neither a write nor a jump under `defined?` runs.
@@ -4007,7 +4031,7 @@ module Rigor
         return false if !retargeted && JUMP_NODES.include?(node.class)
 
         written << node.name if VARIABLE_WRITE_NODES.include?(node.class)
-        collect_mutated_receivers(node, written) if node.is_a?(Prism::CallNode)
+        collect_mutated_receivers(node, written) if in_place_mutation?(node)
         return true if node.is_a?(Prism::DefinedNode)
 
         child_retargeted = retargeted || JUMP_BOUNDARY_NODES.include?(node.class)
@@ -4017,10 +4041,22 @@ module Rigor
         true
       end
 
-      def collect_mutated_receivers(call_node, written)
-        return unless MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
+      # The forms that store through `[]=` without being a `[]=` call ({IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES}).
+      # `StatementEvaluator` widens the three compound writes in straight-line code, and its captured-local
+      # write-back widens all four when a nested block stores through one. A straight-line index TARGET widens
+      # too, at the multi-assign, `for` index or `rescue =>` reference that owns it (`eval_multi_write`,
+      # `bind_for_index`, `bind_rescue_reference`).
+      INDEX_WRITE_NODES = Set.new(IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES).freeze
+      private_constant :INDEX_WRITE_NODES
 
-        ReceiverAlias.candidates(call_node.receiver).each { |read| written << read.name }
+      def in_place_mutation?(node)
+        return MutationWidening::SHAPE_MUTATORS.include?(node.name) if node.is_a?(Prism::CallNode)
+
+        INDEX_WRITE_NODES.include?(node.class)
+      end
+
+      def collect_mutated_receivers(node, written)
+        ReceiverAlias.candidates(node.receiver).each { |read| written << read.name }
       end
 
       # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
@@ -4062,12 +4098,13 @@ module Rigor
         return nil if per_position.nil? || per_position.any?(&:nil?)
 
         assemble_per_element_result(call_node.name, per_position, element_types) ||
-          find_family_floor(call_node.name, element_types)
+          undecided_fold_floor(call_node.name, element_types, receiver_type)
       end
 
-      # The honest answer for `find` / `detect` / `find_index` / `index` when this fold walked every position
-      # and the assembler still could not decide — which happens for exactly one reason: some position's
-      # predicate is not a `Constant`, so "the first matching one" is not a static fact.
+      # The honest answer for the find family (`find` / `detect` / `find_index` / `index`) and the filter family
+      # (`select` / `filter` / `reject`) when this fold walked every position and the assembler still could not
+      # decide — which happens for exactly one reason: some position's predicate is not a `Constant`, so "the
+      # first matching one" or "the ones kept" is not a static fact.
       #
       # Falling through to the dispatcher was WRONG for this family, and issue #617 residue (1) is the bill:
       # `seen = 0; [1, 2].find do |e| seen += 1; seen == 2 end` answered `nil` where the runtime answers `2`.
@@ -4082,17 +4119,37 @@ module Rigor
       # back an element, it does not compute one. `find_index` / `index` answer a position in the receiver, so
       # `Integer?` is their floor.
       #
-      # Nothing else in {PER_ELEMENT_TUPLE_METHODS} takes a floor: `map`'s assembler cannot decline,
-      # and `select` / `reject` / `filter_map` / `flat_map` fall through to an RBS projection that is merely
-      # wider, never wrong — `BlockFolding`'s filter folds decline on a non-Constant block instead of
-      # answering.
-      def find_family_floor(method_name, element_types)
+      # `select` / `filter` / `reject` take a floor for the same reason. Their fall-through is not merely
+      # wider: `BlockFolding`'s filter folds DO answer on a `Constant` block, and the entry-scope pin hands
+      # them one, so `seen = 0; [1, 2].select do |e| seen += 1; seen == 2 end` answered a provably-empty `[]`
+      # where Ruby answers `[2]`. Nested inside a threaded body, where a position can be typed tail-only
+      # ({#tail_only_body_floor}), `[[], []].select do |a| a << w; a.any? end` did the same. Their floor is an
+      # Array of the receiver's own elements: which of them survive is undecided, and what they are is not.
+      # A range receiver's elements are widened first ({#filter_family_floor}).
+      #
+      # Nothing else in {PER_ELEMENT_TUPLE_METHODS} takes a floor. `map`'s assembler cannot decline, and
+      # `BlockFolding` never folds `filter_map` / `flat_map`, so their fall-through is the RBS `Array[U]`
+      # projection.
+      def undecided_fold_floor(method_name, element_types, receiver_type)
         case method_name
         when :find, :detect
           Type::Combinator.union(*element_types, Type::Combinator.constant_of(nil))
+        when :select, :filter, :reject
+          filter_family_floor(element_types, receiver_type)
         when :find_index, :index
           Type::Combinator.union(Type::Combinator.nominal_of("Integer"), Type::Combinator.constant_of(nil))
         end
+      end
+
+      # A `Constant<Range>` receiver's elements are values this walk enumerated, not ones the program wrote, and
+      # the RBS answer the floor replaces carried no pin. Kept, the pins would make `(1..4).filter { … }` an
+      # `Array[1 | 2 | 3 | 4]` that a later `q << 9` cannot widen (#580 leaves a precise Array without a
+      # gradual arm alone), so `q.last == 9` would fold always-falsey on correct code. A Tuple receiver's pins
+      # are the literal's own and stay, as the RBS projection kept them.
+      def filter_family_floor(element_types, receiver_type)
+        element = Type::Combinator.union(*element_types)
+        element = Type::Combinator.widen_value_pinned(element) if receiver_type.is_a?(Type::Constant)
+        Type::Combinator.nominal_of("Array", type_args: [element])
       end
 
       # Evaluates the call's block once per receiver element. Two block shapes are supported:
@@ -4129,47 +4186,80 @@ module Rigor
         results = lambda do
           element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
         end
-        return results.call if element_types.size <= PER_ELEMENT_THREADING_LIMIT
-        return uncapped_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
+        return results.call unless tail_only_walk?(element_types)
+        return tail_only_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
 
         without_block_body_threading(&results)
       end
 
-      # Above {PER_ELEMENT_THREADING_LIMIT} the threading is suppressed, and a position is typed tail-only.
-      # For a tail that reads what the body's own prefix wrote or mutated, tail-only is not a wider answer —
-      # it is the ENTRY binding, which the prefix has already falsified.
+      # A position is typed tail-only in two cases: above {PER_ELEMENT_THREADING_LIMIT}, where this walk
+      # suppresses the threading itself, and anywhere the walk runs nested inside a body some other pass is
+      # already evaluating whole. {#threaded_block_body_type}, the `next` join
+      # ({#block_body_type_joining_nexts}), the break-arm collection ({#collect_break_arm_types}), the
+      # captured-local fixpoint ({#captured_exit_bindings}) and an enclosing walk of this fold above the cap
+      # all suppress the threading while they run, so a fold never re-enters. The second case has no arity in
+      # it: `[[], []].map do |a| a << w; a end` inside a threaded `m.synchronize do w = v; … end` is typed
+      # tail-only at two positions.
+      def tail_only_walk?(element_types)
+        element_types.size > PER_ELEMENT_THREADING_LIMIT || block_body_threading_suppressed?
+      end
+
+      # Wherever a position is typed tail-only ({#tail_only_walk?}), a tail that reads what the body's own
+      # prefix wrote or mutated does not get a wider answer. It gets the ENTRY binding, which the prefix has
+      # already falsified.
       #
       # #584's cliff comment promised `Dynamic[top]` above the cap, and that held for a body-LOCAL: `[1, …,
-      # 9].map do v = e; v end` has no entry binding for `v`, so tail-only lands on `Dynamic[top]` by itself.
-      # A mutated PARAMETER has one, and issue #617 residue (2) is what it buys: `([[]] * 9).map do |a| a <<
-      # 1; a end` answered nine stale `[]`, a provably-empty array at every position of a result whose slots
-      # each hold `[1]`. Flooring the whole walk restores the promise for both shapes — the cost the cap
-      # refuses to pay is the per-position body evaluation, and declining to pay it means declining to know,
-      # not answering the pre-state.
+      # 9].map do v = e; v end` has no entry binding for `v`, so tail-only lands on `Dynamic[top]` by itself,
+      # which is why a body-local alone does not call for the floor. A mutated PARAMETER has one, and issue
+      # #617 residue (2) is what it buys: `([[]] * 9).map do |a| a << 1; a end` answered nine stale `[]`, a
+      # provably-empty array at every position of a result whose slots all hold the one array the nine `<<`
+      # filled. Nested under the suppression the same body did it at two positions, and a `transform_values`
+      # over `{ x: [], y: [] }` did it at every pair ({#tail_only_pairs_floored?}). Flooring every position
+      # restores the promise for the positions; the assembler still decides the call from them, and a method
+      # whose fall-through could read a pin again takes its own floor ({#undecided_fold_floor}). What the cap
+      # and the suppression refuse to pay is the per-position body evaluation, and refusing to pay it means
+      # declining to know, not answering the pre-state.
       #
-      # {#tail_depends_on_body_binding?} is the same predicate the threading gate uses, so "would threading
-      # have changed this tail" and "is tail-only untrustworthy here" stay one question. A body it answers
-      # false for keeps its exact tail-only fold above the cap, which is every single-statement block and
-      # every multi-statement block whose tail ignores its prefix.
-      def uncapped_body_floor(element_types)
+      # The names come from the scan the threading gate uses ({#tail_depends_on_body_binding?}), so "would
+      # threading have changed this tail" and "is tail-only untrustworthy here" stay one question. A body
+      # {#unanswered_tail_dependency?} answers false for keeps its exact fold: every single-statement block,
+      # and every multi-statement block whose tail ignores its prefix, reads only its own body-locals, or
+      # leaves through a `next` (the last is evaluated whole, never tail-only).
+      def tail_only_body_floor(element_types)
         Array.new(element_types.size) { Type::Combinator.untyped }
       end
 
       # True when the tail reads something the prefix changed that NOTHING has re-answered for this walk.
       #
-      # `captured` is the converged binding of every outer local the block rebinds ({#per_element_captured_bindings}),
-      # and its cost is independent of the arity, so it keeps working above the cap: `total = 0; [1, …,
-      # 9].map do total += e; total end` reads `total` as the fixpoint's `Integer` at every position and needs
-      # no floor. What the cap actually withholds is the per-position body evaluation, so the names it leaves
-      # unanswered are the ones the fixpoint does not cover — a mutated block PARAMETER (issue #617 residue
-      # (2)'s `|a| a << 1; a`) or a mutated outer local the block never rebinds.
+      # `captured` is the #587 (b) any-iteration binding of every outer local and instance variable the block
+      # rebinds or mutates in place ({#per_element_captured_bindings}), and its cost is independent of the
+      # arity, so it keeps working above the cap: `total = 0; [1, …, 9].map do total += e; total end` reads
+      # `total` as the fixpoint's `Integer` at every position and needs no floor, and `out = []; … do out << e;
+      # out.size end` reads `out` as the widened `Array[Dynamic[top]]`, whose content carries a gradual arm and
+      # whose arity is open. Under the nesting suppression a rebound name takes the escaping-block floor name by
+      # name, so `[total, e]` keeps its `Tuple` rather than collapsing whole, and the in-place widening, which
+      # evaluates no body, applies as it does anywhere. What a tail-only walk withholds is the per-position body
+      # evaluation, so the names left unanswered are the ones neither binding covers — a mutated block
+      # PARAMETER (issue #617 residue (2)'s `|a| a << 1; a`), and a captured local whose in-place widening
+      # declined, which is left out of `captured` for exactly this reason.
+      #
+      # Two tails are answered without it. A name with no ENTRY binding — a body-local such as `key = k.to_s;
+      # [key, n + w]` — reads as `Dynamic[top]` under tail-only by itself, which is sound, so flooring the
+      # whole position would only erase the structure around it. Instance and global variables always count,
+      # since the scope may still hold a pre-state for them. And a body with a block-level `next` is never
+      # typed tail-only at all: {#block_body_type_joining_nexts} evaluates the whole body whatever the
+      # suppression says.
       def unanswered_tail_dependency?(block, captured)
         body = block.body
         return false unless body.is_a?(Prism::StatementsNode)
         return false if body.body.size < 2
+        return false if block_level_jump?(body, Prism::NextNode)
 
-        answered = captured&.keys || []
-        tail_dependent_body_names(body.body).any? { |name| !answered.include?(name) }
+        names = tail_dependent_body_names(body.body) - (captured&.keys || EMPTY_NAME_SET)
+        return false if names.empty?
+
+        entry = BlockParameterBinder.new.bind_onto(block, scope)
+        names.any? { |name| name.start_with?("@", "$") || !entry.local(name).nil? }
       end
 
       # Issue #587 (b) — first-iteration pinning. Every position of this fold is typed from the SAME entry
@@ -4184,12 +4274,12 @@ module Rigor
       # position's entry scope, so a position answers what the local can be in ANY iteration
       # (`[Integer, Integer]`), never what it was in the first.
       #
-      # Only the rebound names move. A position whose tail reads an untouched captured local or a block-local
-      # keeps its exact fold (`[5, 5]`, `[42, 42]`), and a predicate that ignores the rebound counter still
-      # decides (`select do seen += 1; e > 1 end` still folds to `[2]`); a blanket decline would have lost all
-      # three for nothing. The fixpoint binds the block parameter to the union of the elements, so its cost
-      # is independent of the arity — which is why the per-element threading cap is NOT a reason to floor: a
-      # ninth element keeps `Integer` where it would otherwise keep the stale `0`.
+      # Only the names the body changes move. A position whose tail reads an untouched captured local or a
+      # block-local keeps its exact fold (`[5, 5]`, `[42, 42]`), and a predicate that ignores the rebound
+      # counter still decides (`select do seen += 1; e > 1 end` still folds to `[2]`); a blanket decline would
+      # have lost all three for nothing. The fixpoint binds the block parameter to the union of the elements,
+      # so its cost is independent of the arity — which is why the per-element threading cap is NOT a reason to
+      # floor: a ninth element keeps `Integer` where it would otherwise keep the stale `0`.
       #
       # Under threading suppression — this fold nested inside another threaded body — the fixpoint's body
       # evaluations are exactly the re-entrant cost the suppression exists to refuse, so the names take the
@@ -4197,32 +4287,81 @@ module Rigor
       # fixpoint takes the same floor rather than the seed — a seed that reaches a position is the pin this
       # exists to remove.
       #
-      # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds nothing captured.
+      # An instance variable pins the same way — the block shares the caller's `self`, so `@t = 0; [1,
+      # 2].map { @t += 1 }` folded to `[1, 1]` too — and takes the same treatment under every rule above: the
+      # ivars the body rebinds ({CapturedLocals.writes} with `ivars: true`) join the name set. They keep their
+      # `@`, so the one map cannot confuse `@t` with a local `t`, and the arity-cap floor
+      # ({#unanswered_tail_dependency?}), which compares names sigil-and-all, counts a rebound ivar as answered.
+      #
+      # The same pin has a CONTENT half the rebind set cannot see: a captured receiver the body mutates in place
+      # is never rebound, so `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }` read `h` at its entry
+      # contents at every position and folded to `[1, 1]` (runtime `[1, 2]`). Each such local
+      # ({CapturedLocals.content_mutations}) is bound as if every mutation site in the body had already stored
+      # an unknown value ({UnknownStoreWidening.widen}): `Hash[Dynamic[top] | Symbol, Dynamic[top] |
+      # Integer]`, an open arity with a gradual arm on every content parameter a storing site touches. A local
+      # whose widening declines (a precise nominal) gets no binding at all, so it keeps today's answer. The
+      # binding evaluates no body, so it applies under threading suppression too; the rebind fixpoint runs
+      # over it, and a local the body both rebinds and mutates takes the same widening over its converged
+      # type — the rebind can bring a fresh literal back, which the next iteration then mutates. An unmutated
+      # captured local keeps its exact binding (`h = { a: 0 }; [:a, :a].map { |k| h[k] }` still folds to
+      # `[0, 0]`). An instance variable the body mutates in place takes the same binding (`ivars: true`, on the
+      # rebind set's terms): once the #587 (a) gate threads an index write, `@cache[:first] ||= e` pins the same
+      # way.
+      #
+      # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds and mutates nothing
+      # captured.
       def per_element_captured_bindings(block, element_types)
-        names = CapturedLocals.writes(block, scope)
-        return nil if names.empty?
+        stores = CapturedLocals.content_mutations(block, scope, ivars: true)
+        stored = stored_capture_bindings(stores)
+        bindings = stored.dup
+        names = CapturedLocals.writes(block, scope, ivars: true)
+        unless names.empty?
+          rebound_capture_bindings(block, names, element_types, stored).each do |name, converged|
+            bindings[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
+          end
+        end
+        bindings.empty? ? nil : bindings
+      end
+
+      # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, `Hash#shift` on a
+      # literal) is still the entry binding, which says nothing about later iterations; recording it would
+      # make the arity-cap floor ({#unanswered_tail_dependency?}) treat the name as answered and type the tail
+      # from that stale binding. Left out, the name keeps the entry binding below the cap and the floor above
+      # it, which is the fold's answer without this pass.
+      def stored_capture_bindings(stores)
+        stores.each_with_object({}) do |(name, sites), bindings|
+          seed = CapturedLocals.bound_type(scope, name)
+          next if seed.nil?
+
+          widened = UnknownStoreWidening.widen(seed, sites)
+          bindings[name] = widened unless widened == seed
+        end
+      end
+
+      # `stored` is laid under every fixpoint pass, so the rebind converges over the widened contents rather
+      # than the entry ones.
+      def rebound_capture_bindings(block, names, element_types, stored)
         return captured_floor(names) if block_body_threading_suppressed?
 
-        begin
-          converged_captured_bindings(block, names, element_types)
-        rescue StandardError
-          captured_floor(names)
-        end
+        converged_captured_bindings(block, names, element_types, stored)
+      rescue StandardError
+        captured_floor(names)
       end
 
       def captured_floor(names)
         names.to_h { |name| [name, Type::Combinator.untyped] }
       end
 
-      def converged_captured_bindings(block, names, element_types)
+      def converged_captured_bindings(block, names, element_types, stored)
         param_types = [Type::Combinator.union(*element_types)]
-        seeds = names.to_h { |name| [name, scope.local(name)] }
+        base = stored.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+        seeds = names.to_h { |name| [name, CapturedLocals.bound_type(base, name)] }
         moved = {}
         converged = BodyFixpoint.converge(
           names: names,
           seed_bindings: seeds,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, bindings, names, moved) }
+          evaluate_body: ->(bindings) { captured_exit_bindings(block, param_types, base, bindings, names, moved) }
         )
         unmoved_pins_floored(converged, seeds, moved)
       end
@@ -4245,17 +4384,37 @@ module Rigor
       # value pinning are left alone — there is no first-iteration constant in them to remove, and widening a
       # `Nominal` here would only lose a class for nothing.
       #
-      # "Unmoved" is judged on the FALL-THROUGH alone (`moved`, filled by {#captured_exit_bindings}): a pass's
-      # exit binding also joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), and a
-      # rebind on a `next` arm moves the binding while the unthreaded write on the fall-through stays
-      # invisible — `if c; seen = 100; next false; end; (seen += 1) == 2` converged on `0 | 100` and folded
-      # `find` to `nil`. Without a `next` the two tests agree: a binding every pass's fall-through leaves where
-      # it entered is exactly one the fixpoint returns on its seed. A value-pinned seed rebound ONLY on a `next`
-      # arm is floored too — the far cheaper side, as above.
+      # The pin test reads a binding as a whole and nothing else. A `0 | Integer` seed is floored too, although a
+      # threaded `x += 1` only joins back into it: an unthreaded write storing another class (`log(x = nil)`)
+      # converges on the same seed, and only the floor keeps `x.nil?` from folding to `false`. Nor does a pass
+      # whose exit binding moved prove the rebind was threaded — a narrowing (`next false unless x`) or a
+      # threaded prefix (`x ||= 0`) moves it while `(x += 1) == 2` stays unthreaded.
+      #
+      # "Unmoved" compares against the fixpoint's own seed, but "pinned" is asked of the CALL-SITE binding. For a
+      # name the body also mutates in place the seed is already the in-place widening of that binding
+      # ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for: `s = +"ab"`
+      # seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot see (`(s &&=
+      # s.to_sym)` inside an expression) converge on `String` and be believed, where the local really holds a
+      # Symbol from the second iteration on. For every other name the two bindings are the same. The price is
+      # the trade the paragraph above already makes: a name the body mutates and VISIBLY rebinds to the widened
+      # class (`t << "c"; t = t.strip`) converges on that seed as well, and is floored with the hidden case.
+      #
+      # A pass's exit binding also joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), and
+      # a rebind on a `next` arm moves the converged binding off its seed while an unthreaded write on the
+      # fall-through stays invisible: `if c; seen = 100; next false; end; (seen += 1) == 2` converged on `0 |
+      # 100` and folded `find` to `nil`. So `moved` ({#captured_exit_bindings}) records which path moved each
+      # name. One the FALL-THROUGH moved is believed; one only a `next` arm moved is unmoved for this test, and
+      # floored with the hidden case; one neither moved is judged against its seed as before, so a block without
+      # a block-level `next` is judged exactly as it always was.
       def unmoved_pins_floored(converged, seeds, moved)
         converged.to_h do |name, type|
-          seed = seeds[name]
-          next [name, type] if moved[name] || !value_pinned?(seed)
+          unmoved =
+            case moved[name]
+            when :fall_through then false
+            when :jump then true
+            else type == seeds[name]
+            end
+          next [name, type] unless unmoved && value_pinned?(CapturedLocals.bound_type(scope, name))
 
           [name, Type::Combinator.untyped]
         end
@@ -4268,17 +4427,28 @@ module Rigor
       # One fixpoint pass: the body evaluated from `bindings` with the block parameters bound over them (the
       # same layering as {#type_block_body_with_param}), returning the per-name exit binding — the invocation's
       # exit, which joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), so a rebind on a
-      # jumping path reaches the fixpoint. Each name the FALL-THROUGH moves off this pass's entry is recorded in
-      # `moved` for {#unmoved_pins_floored}. Threading is suppressed for the pass, as it is for every full body
-      # evaluation the block-return pass runs.
-      def captured_exit_bindings(block, param_types, bindings, names, moved)
-        entry = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+      # jumping path reaches the fixpoint. `moved` records, per name, whether this pass's FALL-THROUGH moved it
+      # off its entry (`:fall_through`) or only the joined `next` arms did (`:jump`), for {#unmoved_pins_floored}.
+      # Threading is suppressed for the pass, as it is for every full body evaluation the block-return pass runs.
+      def captured_exit_bindings(block, param_types, base, bindings, names, moved)
+        entry = bindings.reduce(base) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         entry = BlockParameterBinder.new(expected_param_types: param_types).bind_onto(block, entry)
         _type, fall_through, exit_scope = without_block_body_threading do
           StatementEvaluator.new(scope: entry).evaluate_invocation(block)
         end
-        names.each { |name| moved[name] = true if moved_off?(bindings[name], fall_through.local(name)) }
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        exits = names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
+        names.each { |name| record_capture_move(moved, name, bindings[name], fall_through, exits[name]) }
+        exits
+      end
+
+      # Which path of one pass moved `name` off its `entry_type`: the fall-through outranks a `next` arm, and a
+      # name the fall-through moved in any pass stays moved.
+      def record_capture_move(moved, name, entry_type, fall_through, exit_type)
+        if moved_off?(entry_type, CapturedLocals.bound_type(fall_through, name))
+          moved[name] = :fall_through
+        elsif moved_off?(entry_type, exit_type)
+          moved[name] ||= :jump
+        end
       end
 
       # True when `after` is not already contained in `before` — the same stability test `BodyFixpoint` applies.
@@ -4648,6 +4818,8 @@ module Rigor
 
       def fold_hash_shape_transform_values(shape, block_arg)
         captured = hash_block_captured_bindings(block_arg, shape.pairs.values)
+        return hash_shape_values_floor(shape) if tail_only_pairs_floored?(shape, block_arg, captured)
+
         new_pairs = {}
         shape.pairs.each do |key, value|
           new_value = apply_hash_block(block_arg, value, captured: captured)
@@ -4661,18 +4833,45 @@ module Rigor
       def fold_hash_shape_transform_keys(shape, block_arg)
         key_types = shape.pairs.keys.map { |key| Type::Combinator.constant_of(key) }
         captured = hash_block_captured_bindings(block_arg, key_types)
+        return hash_keys_floor(shape) if tail_only_pairs_floored?(shape, block_arg, captured)
+
         new_pairs = {}
         key_types.zip(shape.pairs.values).each do |key_type, value|
-          new_key_type = apply_hash_block(block_arg, key_type, captured: captured)
-          return nil unless new_key_type.is_a?(Type::Constant)
-
-          new_key = new_key_type.value
-          return nil unless new_key.is_a?(Symbol) || new_key.is_a?(String)
-          return nil if new_pairs.key?(new_key)
+          new_key = new_shape_key(apply_hash_block(block_arg, key_type, captured: captured), new_pairs)
+          return undecided_keys_floor(shape, block_arg, key_types, captured) if new_key.nil?
 
           new_pairs[new_key] = value
         end
         Type::Combinator.hash_shape_of(new_pairs)
+      end
+
+      # The key a pair's block result can index the new `HashShape` with — a `Constant` Symbol or String that no
+      # earlier pair already took — or nil.
+      def new_shape_key(new_key_type, new_pairs)
+        return nil unless new_key_type.is_a?(Type::Constant)
+
+        new_key = new_key_type.value
+        return nil unless new_key.is_a?(Symbol) || new_key.is_a?(String)
+
+        new_pairs.key?(new_key) ? nil : new_key
+      end
+
+      # A key fold that cannot build a `HashShape` declines to the dispatcher — except under the suppression, where
+      # the dispatcher's block-return pass is typed tail-only too and reads a captured value the body mutates in
+      # place at its entry contents: `buf = +"k"; … { a: 1 }.transform_keys { |k| buf << w.to_s; buf }` answered
+      # `Hash["k", 1]` for `{ "k1" => 1 }`, though the pairs themselves were typed over the #587 (b) binding that
+      # answers `buf`. There the fold answers from the keys it typed, `Hash[union(<new keys>), union(<values>)]`,
+      # and takes the plain floor ({#hash_keys_floor}) when a pair could not be typed at all. The pairs are
+      # re-typed for it, which only a suppressed, undecided key fold pays.
+      def undecided_keys_floor(shape, block_arg, key_types, captured)
+        return nil unless block_body_threading_suppressed?
+
+        new_key_types = key_types.map { |key_type| apply_hash_block(block_arg, key_type, captured: captured) }
+        return hash_keys_floor(shape) if new_key_types.any?(&:nil?)
+
+        Type::Combinator.nominal_of(
+          "Hash", type_args: [Type::Combinator.union(*new_key_types), Type::Combinator.union(*shape.pairs.values)]
+        )
       end
 
       # The per-pair twin of issue #587 (b)'s first-iteration pin. Every pair is typed from the SAME entry scope,
@@ -4690,6 +4889,33 @@ module Rigor
         return nil if param_types.empty?
 
         per_element_captured_bindings(block_arg, param_types)
+      end
+
+      # The per-pair fold has no arity cap, so running nested inside a body another pass is evaluating whole
+      # ({#tail_only_walk?}'s second case) is the one way it reaches a tail-only pair the dependency predicate
+      # can flag, and that pair holds the same pre-state {#tail_only_body_floor} describes:
+      # `{ x: [], y: [] }.transform_values do |a| a << w; a end` inside a threaded `m.synchronize do w = v; …
+      # end` answered `{ x: [], y: [] }` for a hash whose values each hold `[1]`, and `r[:x].first + 1` was
+      # then reported on correct code. The floor is the Tuple fold's, applied per pair and over the same
+      # `captured` names, with the fold answering it rather than declining: a decline reaches the dispatcher,
+      # whose block-return pass the same suppression types tail-only, so `k = "#{k}#{w}"; k` read its keys
+      # as the entry `:a | :b`. An empty shape types no pair, so it keeps its exact `{}`.
+      def tail_only_pairs_floored?(shape, block_arg, captured)
+        !shape.pairs.empty? && block_arg.is_a?(Prism::BlockNode) && block_body_threading_suppressed? &&
+          unanswered_tail_dependency?(block_arg, captured)
+      end
+
+      # `transform_values` keeps the keys and answers every value `Dynamic[top]`.
+      def hash_shape_values_floor(shape)
+        Type::Combinator.hash_shape_of(shape.pairs.transform_values { Type::Combinator.untyped })
+      end
+
+      # `transform_keys` keeps the values, but a `Dynamic[top]` key cannot index a `HashShape`, and two keys may
+      # collide, so the floor is the plain `Hash` over them.
+      def hash_keys_floor(shape)
+        Type::Combinator.nominal_of(
+          "Hash", type_args: [Type::Combinator.untyped, Type::Combinator.union(*shape.pairs.values)]
+        )
       end
 
       # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to
@@ -4715,10 +4941,11 @@ module Rigor
         end
       end
 
-      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local the body rebinds
+      # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local and instance
+      # variable the body rebinds, and of every captured local it mutates in place
       # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
       def type_block_body_with_param(block_node, expected_param_types, captured: nil)
-        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_scope = (captured || {}).reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope)

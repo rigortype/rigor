@@ -95,10 +95,7 @@ L1 concern, not a mechanical check.)
   inaccuracy (the doc asserts ¬X where the engine does X). Distinguish the two in the report.
 - **Type-theory sub-lens** (only for `appendix-type-theory.md` and the cross-checker appendices): a
   reviewer at TAPL-teaching level checks the formal claims; honest simplifications are not faulted.
-- Note: `docs/notes/YYYYMMDD-docs-review-fidelity.md`. **First cycle expectation:** L1 is expected to
-  surface ADR-51 CI-format follow-through gaps in `11-ci.md` (rewritten after the last verification
-  pass), and any post-v0.1.16 feature (env-resilience, provenance labels, `evidence_tier`) whose docs
-  drifted.
+- Note: `docs/notes/YYYYMMDD-docs-review-fidelity.md`.
 
 ### L2 伝 — reader lenses (three sub-lenses, parallel)
 
@@ -170,10 +167,5 @@ L1 concern, not a mechanical check.)
 
 ## Notes
 
-- **Layer-at-a-time is the default;** a full cycle is heavy — reserve it for milestones.
-- **Never reorder 真 → 伝 → 簡 → 整,** and keep **L4 整 last.** Correctness → teaching → leanness →
-  polish is the only order in which "fitness as a knowledge-transfer medium" accumulates.
 - Findings notes live under `docs/notes/`, **never** inside `docs/manual/` or `docs/handbook/` (those
   are shipping docs).
-- After authoring/editing this skill, run `waza check .claude/skills/rigor-docs-review` once (the
-  CLAUDE.md convention); treat everything beyond spec-compliance as informational (ADR-81).

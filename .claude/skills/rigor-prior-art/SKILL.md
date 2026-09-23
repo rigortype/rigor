@@ -11,7 +11,7 @@ metadata:
 # rigor-prior-art — corpus archaeology with citation-grade output
 
 The rigor repository accumulates evidence across 80+ ADRs, 100+ research
-notes, two CHANGELOGs, a handbook, and a manual. Answering "what do we
+notes, the CHANGELOG and its archives, a handbook, and a manual. Answering "what do we
 already know about X?" is a recurring task whose cost is dominated by two
 things this skill freezes: **knowing where each kind of evidence lives**, and
 **the discipline that keeps citations accurate**. The stakes are asymmetric —
@@ -31,11 +31,11 @@ repo (talks, comparisons, READMEs).
 | Location | What lives there | When to look |
 | --- | --- | --- |
 | `docs/adr/README.md` | Canonical ADR index: title + a short status (`Accepted (WD1–WD4 landed; WD5 deferred)`). Index only — no detail, by [ADR-97](../../../docs/adr/97-adr-index-budgets.md). | **First stop**, to shortlist 2–5 ADRs and to see which are live. Never a source for *what* was decided. |
-| `CLAUDE.md` ADR list | Thinner still — one line per ADR, topic and link, no status ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)). | Learning *that* an ADR on a topic exists. Never a source. |
+| `AGENTS.md` ADR premises | A capped premise set (≤12) — topic and link, no status ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)). | Which few ADRs bind every task. Never a source. |
 | `docs/notes/README.md` | Categorized note index: library surveys / coverage audits / regression sweeps / teeth / outside-research reviews / perf / meta. | Shortlisting notes by category. |
 | `docs/adr/*.md` | Full decisions: criteria, rejected alternatives, gate results. | The "why" behind a behaviour; what was *rejected* and why. |
 | `docs/notes/*.md` | What was observed, when, against which Rigor version. | Measurements, sweeps, adjudications. |
-| `docs/CHANGELOG-0.1.x.md` + `CHANGELOG.md` | Per-feature landing narratives with spec/corpus evidence. | **Comparative evidence often lives ONLY here** — e.g. the `rbs_rails` coverage comparison and the ~20-methods-per-column contrast are in the 0.1.x archive, indexed nowhere else. Always include both files in a sweep. |
+| `docs/CHANGELOG-*.md` + `CHANGELOG.md` | Per-feature landing narratives with spec/corpus evidence. | **Comparative evidence often lives ONLY here** — e.g. the `rbs_rails` coverage comparison and the ~20-methods-per-column contrast are in the 0.1.x archive, indexed nowhere else. Always include every archive. |
 | `docs/design/*.md` | Design plans that preceded ADRs. | Pre-decision context, roadmaps. |
 | `docs/handbook/`, `docs/manual/` | User-facing claims. | What Rigor *promises publicly* — the bar a new claim must clear. |
 | `docs/notes/deep-research/` | **External** LLM deep-research reports stored for reference. | Community/competitor landscape only — never a first-party claim (register rules in [its README](../../../docs/notes/deep-research/README.md)). |
@@ -107,9 +107,8 @@ carry downstream — do not collapse the three into one list.
 
 - **Archived CHANGELOGs are the evidence trove.** Landing narratives hold
   the densest per-feature comparative evidence, and an archived changelog
-  drops out of casual view (current instance: `docs/CHANGELOG-0.1.x.md`;
-  each future `CHANGELOG-0.x` archive joins it). A sweep that skips them
-  misses decisive material.
+  drops out of casual view (`docs/CHANGELOG-*.md`). A sweep that skips
+  them misses decisive material.
 - **ADR supersedes note.** An ADR's status line is updated in place; the
   note that spawned it is frozen. For "what is true now" prefer the ADR
   status; for "what was measured then" cite the note.

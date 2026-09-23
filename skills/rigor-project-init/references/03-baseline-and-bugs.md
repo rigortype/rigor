@@ -75,12 +75,12 @@ Use the sections like this:
 | --- | --- | --- |
 | `activesupport-core-ext` | ActiveSupport core-class monkey-patches not loaded. | Go back to Phase 3/4: add `rigor-activesupport-core-ext` to `plugins:` (it is an RBS-bundle plugin), re-run triage. This is a config gap, not a bug. |
 | `gem-without-rbs` | A dependency ships no RBS. | If `rbs_collection.lock.yaml` was present and Phase 1 installed the collection, re-run `rigor triage` — the hint may shrink or disappear. Otherwise: Phase 8 escalation — `bundle exec rbs collection install`, or `dependencies.source_inference:`, or open a Rigor issue. |
-| `project-monkey-patch-known` | **High confidence.** The engine proved the called method *is* defined by a project file (a reopened core/stdlib/gem class) but is not applied cross-file. The hint **names the defining file(s)**. | Phase 7 escalation — copy the named file(s) straight into `pre_eval:`. No detective work needed; the diagnostic already found the source. |
-| `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see, inferred from the *spread* of the same method across ≥3 files (no proven def site). | Phase 7 escalation — find the defining file (grep for `def <method>` / `class <Receiver>`), register it via `pre_eval:`, or (if it is a DSL) write a project plugin. |
-| `unresolved-toplevel` | Toplevel calls (outside any `def`/`class`/`module`) that resolve to nothing visible — usually a script relying on a monkey-patch or a `require`d helper Rigor did not walk (ADR-34). | Phase 7 escalation — if a project file defines these (toplevel `def`, or a patch on `Object`/`Kernel`), list it in `pre_eval:`. If nothing defines them, treat as genuine typos / missing requires (Phase 8). |
+| `project-monkey-patch-known` | **High confidence.** The engine proved the called method *is* defined by a project file (a reopened core/stdlib/gem class) but is not applied cross-file. The hint **names the defining file(s)**. | Phase 6a — copy the named file(s) straight into `pre_eval:`. No detective work needed; the diagnostic already found the source. |
+| `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see, inferred from the *spread* of the same method across ≥3 files (no proven def site). | Phase 6a — find the defining file (grep for `def <method>` / `class <Receiver>`), register it via `pre_eval:`, or (if it is a DSL) write a project plugin. |
+| `unresolved-toplevel` | Toplevel calls (outside any `def`/`class`/`module`) that resolve to nothing visible — usually a script relying on a monkey-patch or a `require`d helper Rigor did not walk (ADR-34). | Phase 6a — if a project file defines these (toplevel `def`, or a patch on `Object`/`Kernel`), list it in `pre_eval:`. If nothing defines them, treat as genuine typos / missing requires (Phase 8). |
 | `activerecord-relation-misinference` | An ActiveRecord relation inferred as `Array`. | Ensure `rigor-activerecord` is enabled (Phase 3). If it persists, it is an engine gap — open a Rigor issue. |
 | `systemic-file-cluster` | One file × one rule, large count. | Acknowledge mode: a clean baseline bucket. Strict mode: a single fix may clear many — review that file first. |
-| `genuine-bugs` | Low-count rules scattered across files. | **Phase 7** — these are the localised bugs Rigor caught. Review first, in both modes. Note: the hint groups all low-count rules regardless of severity — filter for `error` severity when prioritising actionable items. |
+| `genuine-bugs` | Low-count rules scattered across files. | **Phase 8** — these are the localised bugs Rigor caught. Review first, in both modes. Note: the hint groups all low-count rules regardless of severity — filter for `error` severity when prioritising actionable items. |
 
 If triage flags `activesupport-core-ext` (or any config gap),
 **fix the config and re-run `rigor triage` before continuing**. The
@@ -170,8 +170,8 @@ bundle exec rbs collection install   # if rbs is in Gemfile
 # or: rbs collection install
 ```
 
-Re-run `rigor triage`. If the `gem-without-rbs` count drops,
-re-generate the baseline against the new number.
+Re-run `rigor triage`. If the `gem-without-rbs` count drops, carry
+the new, smaller count into Phase 7.
 
 ## Phase 7 — Generate the baseline (acknowledge mode only)
 
@@ -215,7 +215,8 @@ So ordinary coding cannot quietly grow the diagnostic count: the
 baseline is a ceiling, not a blanket. Reducing it later is the
 `rigor-baseline-reduce` skill's job.
 
-Commit `.rigor-baseline.yml` — it documents project state.
+Recommend committing `.rigor-baseline.yml` — it documents project
+state; list it in the Final step's file inventory.
 
 Print the suppression summary for the user: "N diagnostics recorded
 as baseline; M will surface on subsequent runs."
@@ -288,18 +289,17 @@ sig issue.
 
 #### `call.argument-type-mismatch` on regex capture variables (`$1`, `$~`)
 
-Rigor infers `$1`, `$~`, and similar capture variables as
-`String | nil` everywhere, even inside `gsub`/`match` blocks where
-they are guaranteed non-nil by the match condition. Diagnostics of
-the form:
+Rigor narrows `$1`, `$~`, and similar capture variables to non-nil
+after a successful `=~` match and inside a `when /re/` branch. Where
+the match is guaranteed by some other shape Rigor does not track, they
+stay `String | nil`, and a diagnostic of the form:
 
 ```
 expected String, got String | nil   (on $1 / $~)
 ```
 
-are **engine FPs** (ADR-24 WD3 / known limitation). Note them as
-noise rather than surfacing them as bugs. They belong in the
-baseline.
+is an **engine FP** (ADR-24 WD3 / known limitation). Note it as noise rather than
+surfacing it as a bug; it belongs in the baseline.
 
 ### Escalation path A — application-specific metaprogramming
 

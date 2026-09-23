@@ -133,8 +133,9 @@ skip is a finding. `--format=json` names each one:
   "classification": "skipped", "skip_reason": "sig.skipped.untyped-return" }
 ```
 
-Classifications: `new-file`, `new-method`, `tighter-return`, `equivalent`
-(nothing to tighten; silently dropped), `skipped`. Skip reasons and what
+Classifications (the JSON `classification` values): `new_file`,
+`new_method`, `tighter_return`, `equivalent` (nothing to tighten;
+silently dropped), `skipped`. Skip reasons and what
 each one means for you: [`03-gap-protocol.md`](03-gap-protocol.md).
 
 ### Deriving a parameter type from call sites
@@ -215,10 +216,11 @@ a family prefix (`call`, `flow`, `assert`, `dump`, `def`) it prints the
 rule's firing conditions, the severity per profile, the evidence tier,
 and how to suppress it.
 
-**`explain` covers diagnostic rules only.** A `sig.skipped.*` id is a
-sig-gen *skip reason*, not a diagnostic rule — `rigor explain
-sig.skipped.untyped-return` answers `Unknown rule`. Skip reasons are
-documented in [`03-gap-protocol.md`](03-gap-protocol.md).
+**`explain` has two catalogues.** A `sig.skipped.*` id is a sig-gen
+*skip reason*, not a diagnostic rule, but `rigor explain
+sig.skipped.untyped-return` answers it from a second catalogue (no
+severity, no profile, nothing to suppress). The table in
+[`03-gap-protocol.md`](03-gap-protocol.md) is the summary.
 
 ## `rigor check` — the gate, not the oracle
 

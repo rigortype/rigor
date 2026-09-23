@@ -166,6 +166,49 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/multi_write_index_target_widening.rb — a multi-assign `h[k], x = …` widens like `h[k] = v`" do
+    let(:harness) { harness_for("multi_write_index_target_widening") }
+
+    # The must-not-fire / must-fire pair in one assertion: every stored-then-read condition folded to `true`
+    # on the stale literal before the fix, and the two conditions on a hash nothing stores into must still fold.
+    it "silences the stale folds without silencing the genuine ones" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+
+    it "reads a foreign stored value and a correlated-guard slot quietly" do
+      calls = harness.diagnostics.select { |d| %w[call.undefined-method call.possible-nil-receiver].include?(d.rule) }
+      expect(calls).to be_empty
+    end
+
+    it "widens the straight-line, nested and splatted receivers and leaves the untouched one literal" do
+      expect(harness.local(:multi)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:nested)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:splat)).to be_a(Rigor::Type::Nominal)
+      expect(harness.local(:kept)).to be_a(Rigor::Type::HashShape)
+    end
+  end
+
+  describe "fixtures/for_rescue_index_target_widening.rb — `for h[k] in` and `rescue => h[k]` widen like `h[k] = v`" do
+    let(:harness) { harness_for("for_rescue_index_target_widening") }
+
+    # The must-not-fire / must-fire pair in one assertion: every stored-then-read condition folded to `true`
+    # on the stale literal before the fix, and the conditions on a hash nothing stores into must still fold.
+    it "silences the stale folds without silencing the genuine ones" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-TRUTHY"))
+    end
+
+    it "widens every stored-into receiver and leaves the untouched ones literal" do
+      %i[looped pair rescued].each do |name|
+        expect(harness.local(name).members).to include(a_kind_of(Rigor::Type::Nominal)), name.to_s
+      end
+      %i[kept_for kept_pair kept_rescue].each do |name|
+        expect(harness.local(name)).to be_a(Rigor::Type::HashShape), name.to_s
+      end
+    end
+  end
+
   # Issue #560 — the ADDED-value half of the mutation widening. PR #561 widened the value pinning a
   # slot-REWRITING mutator falsifies; this pins the join that covers what the mutation stored.
   describe "fixtures/mutation_added_value_join.rb — straight-line mutations join the added value" do
@@ -1994,6 +2037,38 @@ RSpec.describe "Rigor type construction (integration)" do
 
       it "floors a compounding captured local to Dynamic[top] at the cap" do
         expect(harness.local(:growing)).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
+    # The slice-C seam typed every stored value ONCE, in the block-entry scope, so a value computed
+    # from the receiver's own contents (`h[k] = h[k] + 1`) was the first iteration's answer and the
+    # join closed over it.
+    describe "fixtures/block_content_self_read.rb — a stored value that reads its own receiver" do
+      let(:harness) { harness_for("block_content_self_read") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion: every self-reading store's comparison is
+      # true at runtime, and the paired control storing a receiver-independent value still folds.
+      # Asserting the exact line set is what keeps the quiet half from passing because the rule
+      # stopped firing at all.
+      it "silences the first-iteration folds without silencing the genuine one" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      end
+
+      it "joins the converged, value-pin-widened evidence into the carrier" do
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        expect(harness.local(:counts)).to eq(
+          Rigor::Type::Combinator.nominal_of(
+            "Hash",
+            type_args: [Rigor::Type::Combinator.nominal_of("Symbol"),
+                        Rigor::Type::Combinator.union(constant(0), integer)]
+          )
+        )
       end
     end
 

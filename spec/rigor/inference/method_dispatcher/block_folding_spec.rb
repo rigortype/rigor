@@ -103,6 +103,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
       it "#{method} { #{!block_value} } on a HashShape keeps the receiver shape" do
         expect(fold(receiver: shape, method: method, block: constant_of(!block_value))).to eq(shape)
       end
+
+      it "#{method} { #{!block_value} } on Hash[K, V] and non-empty-hash keeps the receiver" do
+        expect(fold(receiver: hash_nominal, method: method, block: constant_of(!block_value))).to eq(hash_nominal)
+        expect(fold(receiver: non_empty_hash, method: method, block: constant_of(!block_value))).to eq(non_empty_hash)
+      end
     end
 
     # `Hash#take_while` / `#drop_while` are Enumerable's and return an Array of `[key, value]` pairs:
@@ -151,6 +156,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
 
     it "reject { true } on Range[T] folds to the empty tuple" do
       expect(fold(receiver: range_nominal, method: :reject, block: true_const)).to eq(tuple_of)
+    end
+
+    it "declines on a non-collection Constant or Difference receiver" do
+      non_empty_string = Rigor::Type::Combinator.non_empty_string
+      expect(fold(receiver: constant_of("abc"), method: :select, block: false_const)).to be_nil
+      expect(fold(receiver: non_empty_string, method: :select, block: false_const)).to be_nil
     end
   end
 

@@ -15,10 +15,11 @@ module Rigor
       # The methods covered fall in two families:
       #
       # - **Filter-shaped** (`select` / `filter` / `reject` / `take_while` / `drop_while`): the block's
-      #   truthiness selects the all-or-nothing endpoints — either the receiver's full shape (when every
-      #   element is kept) or the empty collection (when every element is dropped). The empty collection
-      #   is the empty HashShape for `Hash#select` / `#filter` / `#reject` and the empty-tuple carrier
-      #   everywhere else, because every other combination is Enumerable's and returns an Array.
+      #   truthiness selects the all-or-nothing endpoints — either every element kept or every element
+      #   dropped — and each endpoint is a value of the class the method returns. `Hash#select` / `#filter`
+      #   / `#reject` keep the Hash receiver or drop to the empty HashShape; every other combination is
+      #   Enumerable's and returns an Array, so it drops to the empty-tuple carrier and keeps the receiver
+      #   only when that receiver is itself an Array (otherwise the all-kept side declines).
       # - **Predicate-shaped** (`all?` / `any?` / `none?`): the block's truthiness combined with the
       #   receiver's emptiness collapses the call to a `Constant[bool]` in the cases where Ruby's actual
       #   semantics make it unconditional. Non-empty + truthy `any?` is `true`; non-empty + falsey `all?` is
@@ -243,14 +244,16 @@ module Rigor
 
         # Classifies a filter receiver as `:array`, `:hash`, or `:enumerable` (a `Set` or `Range`, whose
         # filters are all Enumerable's). Filter folds need at least a recognised collection carrier, so
-        # `Top` / `Dynamic` / arbitrary nominals answer `nil` and decline so the RBS tier answers (its
-        # `Array#select { … } -> Array[T]` projection is correct, just less precise on the empty endpoint).
-        # A `Difference` (`non-empty-array[T]`, `non-empty-hash[K, V]`) classifies by its base.
+        # `Top` / `Dynamic` / arbitrary nominals / non-collection constants answer `nil` and decline so the
+        # RBS tier answers (its `Array#select { … } -> Array[T]` projection is correct, just less precise
+        # on the empty endpoint). A `Difference` (`non-empty-array[T]`, `non-empty-hash[K, V]`) classifies
+        # by its base. The `Constant` receivers are the ones `constant_emptiness` reads: `Range` literals
+        # and folded `Set` values.
         def filter_receiver_kind(receiver)
           case receiver
           when Type::Tuple then :array
           when Type::HashShape then :hash
-          when Type::Constant then :enumerable
+          when Type::Constant then :enumerable if receiver.value.is_a?(Range) || receiver.value.is_a?(::Set)
           when Type::Difference then filter_receiver_kind(receiver.base)
           when Type::Nominal then FILTER_NOMINAL_KINDS[receiver.class_name]
           end

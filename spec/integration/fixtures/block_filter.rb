@@ -43,3 +43,9 @@ hash_selected[:x] = 1
 # `Hash#take_while` is Enumerable's and returns an Array of pairs.
 hash_taken = { a: :q }.take_while { false }
 assert_type("[]", hash_taken)
+
+# A `Hash[K, V]` receiver drops to the empty HashShape too.
+nominal_hash = Hash.new(0)
+hash_kept_none = nominal_hash.select { false }
+assert_type("{}", hash_kept_none)
+hash_kept_none[:y] = 2

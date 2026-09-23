@@ -20,9 +20,9 @@ module Rigor
     # not bound in the outer scope are excluded; a write to either is not a captured rebind of an outer
     # variable.
     #
-    # The write-back and the drop also ask for the instance variables the body rebinds (`ivars: true`). Their
-    # names keep their `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each
-    # name through its own kind of binding.
+    # All three also ask for the instance variables the body rebinds (`ivars: true`). Their names keep their
+    # `@`, so a map over both kinds never collides, and {.bound_type} / {.bind} reach each name through its
+    # own kind of binding.
     module CapturedLocals
       LOCAL_WRITE_NODES = Set[
         Prism::LocalVariableWriteNode,

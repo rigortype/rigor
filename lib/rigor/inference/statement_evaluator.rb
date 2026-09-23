@@ -283,6 +283,31 @@ module Rigor
         callee_content_mutated_parameters(def_node).values.uniq.sort
       end
 
+      # The value `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` evaluates to in this evaluator's scope: what it stores
+      # through `[]=` ({#index_write_stored_type}). The `[]=` widening and the indexed-narrowing record are scope
+      # effects, so they stay with {#eval_index_or_write} / {#eval_index_write}. `ExpressionTyper` types a
+      # value-position index compound write from here.
+      #
+      # One reading departs from the statement's: a `||=` whose `[]` read is wholly gradual (`Dynamic`, not a
+      # union with a `Dynamic` member) reads as the rvalue. That is the memoization idiom — `CACHE[key] ||=
+      # build(key)`, `(@memo ||= {})[[a, b]] ||= compute`, `@targets[name] ||= new(name)` on an ivar the method
+      # never writes — where the value the idiom returns is the one it stores, and `Dynamic[top] | rhs` sent
+      # every such method to `sig.skipped.untyped-return`. It is the variable form's optimism for an unbound
+      # target (`ExpressionTyper#type_of_compound_variable_write`) keyed on the slot, and narrower: `&&=` is no
+      # memo (`h[k] &&= v` on an absent slot is `nil`), an operator write has no such reading, and an rvalue
+      # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
+      # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
+      # `@flags[n] = true` elsewhere, never provably `false`.
+      def index_compound_write_value(node)
+        return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
+
+        current = index_read_type(node, scope)
+        rhs = scope.type_of(node.value, tracer: tracer)
+        return rhs if current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+
+        index_write_stored_type(node, scope, current: current, rhs: rhs)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -628,8 +653,7 @@ module Rigor
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
       # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
-      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone, which the
-      # expression typer's `type_of_assignment_write` answer would join as if it were what got stored.
+      # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       def eval_index_write(node)
         _rhs_type, post_rhs = sub_eval(node.value, scope)
         stored = index_write_stored_type(node, scope)
@@ -642,9 +666,9 @@ module Rigor
       # call's argument list so the widening seam can join it the same way (issue #560) — a
       # two-index compound write (`a[0, 1] += v`) keeps BOTH index arguments ahead of the stored
       # value, which is what lets the join read it as a splice (issue #1140). The stored value is
-      # the node's OWN expression type — for `t[0] += 5` that is the compound machinery's
-      # already-computed `t[0] + 5`, which is the whole point: it is the value the mutation put in
-      # the slot, and the one the retained element evidence provably no longer covers. Returns `[]`
+      # {#index_write_stored_type}'s compound result — for `t[0] += 5` the already-computed
+      # `t[0] + 5`, which is the whole point: it is the value the mutation put in the slot, and
+      # the one the retained element evidence provably no longer covers. Returns `[]`
       # when the key is unresolvable, which reproduces the pre-join widening.
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
@@ -662,21 +686,22 @@ module Rigor
       end
 
       # What a compound index write stores through `[]=` — `a[i] ||= v` stores `truthy(a[i]) | v`,
-      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`.
-      # `type_of(node)` cannot answer it: every index-write node types as its rvalue, so a `+=`
-      # would join the RHS as if it were the stored value — `a[0, 1] += [2]` reads `a[0, 1] + [2]`,
-      # not `[2]` (issue #1140). Any other node falls back to its own type (a multi-assign index
-      # target keeps its untyped answer).
-      def index_write_stored_type(node, type_scope)
+      # `a[i] &&= v` stores `falsey(a[i]) | v`, and `a[i] op= v` stores the dispatched `a[i] op v`:
+      # `a[0, 1] += [2]` reads `a[0, 1] + [2]`, not `[2]` (issue #1140). It is also the node's value
+      # outside {#index_compound_write_value}'s memoizing `||=`. That method passes the `current` read
+      # and the `rhs` it already typed, so a nested `(a[i] ||= {})[j] ||= v` chain types each level's
+      # receiver once rather than doubling per level. Any other node falls back to its own type (a
+      # multi-assign index target keeps its untyped answer).
+      def index_write_stored_type(node, type_scope, current: nil, rhs: nil)
         case node
         when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode
-          current = index_read_type(node, type_scope)
+          current ||= index_read_type(node, type_scope)
           narrowed = if node.is_a?(Prism::IndexOrWriteNode)
                        Narrowing.narrow_truthy(current)
                      else
                        Narrowing.narrow_falsey(current)
                      end
-          Type::Combinator.union(narrowed, type_scope.type_of(node.value, tracer: tracer))
+          Type::Combinator.union(narrowed, rhs || type_scope.type_of(node.value, tracer: tracer))
         when Prism::IndexOperatorWriteNode
           MethodDispatcher.dispatch(
             receiver_type: index_read_type(node, type_scope), method_name: node.binary_operator,
@@ -2829,8 +2854,8 @@ module Rigor
 
       # `[index_type..., stored_value_type]` for an index-write node inside a block, typed in the
       # block-entry scope — the stored value is what the write stores through `[]=`, which for a
-      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, not the
-      # rvalue the node itself types as); a multi-assign target stays untyped.
+      # compound write is the dispatched compound result (`a[i] += v` stores `a[i] + v`, the same
+      # compound result the node itself types as); a multi-assign target stays untyped.
       # `[]` when any type cannot be read, which reproduces the pre-join no-evidence answer.
       def index_write_block_arg_types(node, block_entry)
         args = node.arguments

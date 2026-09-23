@@ -52,8 +52,9 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "prism", ">= 1.0", "< 2.0"
-  # Pin tightly — the plugin contract is pre-1.0 (see SKILL.md).
-  spec.add_dependency "rigortype", ">= 0.1.0", "< 0.2.0"
+  # Pin to the minor you built against — the contract is pre-1.0
+  # (see SKILL.md). X.Y comes from `rigor --version`.
+  spec.add_dependency "rigortype", "~> X.Y.0"
 end
 ```
 
@@ -131,7 +132,7 @@ your-app/
 
 ```ruby
 # your-app/Gemfile
-gem "rigortype", "~> 0.1.0"
+gem "rigortype", "~> X.Y.0"   # the minor you built against
 gem "rigor-myapp", path: "rigor-plugin"
 ```
 
@@ -172,16 +173,16 @@ module Rigor
         # Optional: declare config keys the user may set under
         # `.rigor.yml` plugins: [{ gem:, config: { … } }].
         config_schema: {
-          # "module_name" => :string,
-          # "rules"       => :array,
+          "module_name" => { kind: :string, default: "Default" }
+          # "rules"     => :array,
         }
       )
 
       # Called once at load time with the service container.
-      # Read config defaults here. `config` is the validated
-      # user config Hash.
+      # `config` is the validated user config Hash, with declared
+      # defaults merged beneath it.
       def init(_services)
-        @module_name = config.fetch("module_name", "Default")
+        @module_name = config["module_name"]
       end
 
       # The engine owns the AST walk and hands every matching node to

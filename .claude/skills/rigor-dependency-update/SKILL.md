@@ -29,8 +29,7 @@ one alone is fine. Work on a branch and open **one PR** carrying both
 commits (the public-dev workflow — grouped changes go through a PR, not a
 direct push to `master`).
 
-Use `bundle` / `nix` commands, never hand-edit a lockfile (per the repo's
-Bundler rule).
+Use `bundle` / `nix` commands; never hand-edit a lockfile.
 
 ## Layer 1 — bundled gems (`bundle update`)
 
@@ -55,8 +54,6 @@ Two judgment calls the resolver makes for you, worth confirming:
   ranges forbid would require a **gemspec range change**, which is a
   deliberate decision outside this skill (edit the gemspec via
   `bundle add`, verify the new major, land it on its own).
-- **Leave scheduled-removal gems in place.** `parallel_tests` is retained
-  only until v0.3.0 (binpacker replaced it); do not update or drop it here.
 
 Commit subject: `Update bundled gems to their latest in-range versions`.
 Body: list the bumps, note no range change, note any major deliberately
@@ -137,7 +134,7 @@ in `git status` (`vendor/bundle` stays untracked).
 ## Push and open the PR
 
 ```sh
-git push -u origin <branch>
+git push origin HEAD:refs/heads/<branch>
 gh pr create --draft --base master --title "Update dependencies: bundled gems + Nix Flake dev environment" \
   --body "<the two commits, per-layer>"
 ```
@@ -146,8 +143,8 @@ The PR's `ci.yml` gate re-runs the full suite on a clean checkout (its own
 `bundle install`), which is the authoritative cross-environment check. The PR
 is created `--draft` and goes Ready (`gh pr ready <pr>`) only on the user's
 explicit instruction to land it, with CI green and no stop instruction standing
-(`AGENTS.md` § "Commit and PR Etiquette" — a GitHub APPROVE cannot exist on a
-one-developer repository, so it is not the trigger).
+(`docs/agents/contribution-flow.md` § "Branches and pull requests" — a GitHub
+APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 
 ## Stays untouched (out of scope here)
 
@@ -163,8 +160,7 @@ one-developer repository, so it is not the trigger).
 
 - Branch cut; one PR carrying one commit per layer.
 - `bundle update` (not a hand-edit); `git diff Gemfile.lock` is
-  version-only; no gemspec range change; held-back majors and
-  scheduled-removal gems left alone.
+  version-only; no gemspec range change; held-back majors left alone.
 - `nix flake update`; only `flake.lock` moved; Ruby / git / waza in-flake
   pins untouched.
 - `rm -rf vendor/bundle && bundle install` **after** the Flake update.

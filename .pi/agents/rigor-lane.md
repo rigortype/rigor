@@ -53,8 +53,8 @@ If the task is incomplete or acceptance is uncheckable, escalate via
 - Push; print **head SHA**
 - Finish exactly: `Head SHA <sha> — lane done` or `Blocked — need human`
 
-Do **not** return CI status. Do not open or merge the PR unless the task
-explicitly says so.
+Open a Draft PR with `--body-file`; do not merge it and do not return CI
+status.
 
 ## Hard rules (ADR-115)
 
@@ -74,7 +74,7 @@ explicitly says so.
 1. Read the supplied LaneInput / contract first.
 2. Implement the smallest correct change in the assigned worktree.
 3. Run only targeted local checks needed for Acceptance.
-4. Commit and push on the assigned branch.
+4. Commit, push the change-named branch, and open the Draft PR with `--body-file`.
 5. Print `Head SHA <sha> — lane done` and stop.
 
 If `contact_supervisor` is unavailable and you are blocked, end with

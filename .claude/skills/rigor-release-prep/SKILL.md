@@ -27,13 +27,13 @@ git switch -c release/x.y.z
 
 Every step below — the metadata edits, the local verify, the version-bump
 commit — lands on this branch. Pushing it runs `release-gate.yml` (perf
-benchmark, gem-build validation, OSS-corpus sweep — advisory during the
-v0.2.0 trial), the **comprehensive release gate** the normal master CI does
-not (see "Push and watch the release gate" below). The base CI gate
-(`ci.yml`) runs on the release **PR** you open next, via its `pull_request`
-event — `ci.yml` triggers on `push` to `master` only, so a release branch is
-not double-run (push + pull_request) the way it would be if `release/**` were
-also a `push` branch.
+benchmark, gem-build validation, OSS-corpus sweep — advisory until it is
+promoted to a required check), the **comprehensive release gate** the normal
+master CI does not (see "Push and watch the release gate" below). The base CI
+gate (`ci.yml`) runs on the release **PR** you open next, via its
+`pull_request` event — `ci.yml` triggers on `push` to `master` only, so a
+release branch is not double-run (push + pull_request) the way it would be if
+`release/**` were also a `push` branch.
 
 ## Update Release Metadata
 
@@ -52,8 +52,8 @@ Update these files:
 
 **Do this first, before the mechanical version-heading move below, and treat
 the entries — not the version bump — as the deliverable of this skill.** The
-intended state is that every `[Unreleased]` entry was already written
-release-style **at landing** (per `AGENTS.md` § "Release Cadence"), so this step
+intended state is that every fragment was already written release-style **at
+landing** (`docs/agents/contribution-flow.md` § "Release Cadence"), so this step
 is mostly **cross-entry consolidation**: fold several commits' entries into one
 user-recognisable change, reorder, dedupe, and split any merge artefacts —
 work that needs the cycle-wide context only release time has. In practice the
@@ -70,25 +70,27 @@ to `make verify`, so nothing downstream will catch a skipped rewrite. It is the
 one step silently lost when the mechanical steps around it get done; do not let
 "the entries are already there" stand in for reviewing and consolidating them.
 
-**Consolidate `changelog.d/` fragments before anything else.** Since ADR-105,
-entries land as `changelog.d/<section>/<slug>.md` fragments, not as direct
-`[Unreleased]` edits — so the seal starts by moving every fragment's line(s)
-under the matching `###` section of `[Unreleased]` (creating sections in Keep
-a Changelog order as needed) and deleting the fragment files (`git rm`). After
-this, `changelog.d/` contains only its `README.md`, and the enumeration below
-runs over the consolidated `[Unreleased]` exactly as it always has.
+**Consolidate `changelog.d/` fragments before anything else.** Entries land as
+`changelog.d/<section>/<slug>.md` fragments (ADR-105), so the seal starts by
+moving every fragment's line(s) under the matching `###` section of
+`[Unreleased]` (creating sections in Keep a Changelog order as needed) and
+deleting the fragment files (`git rm`). After this, `changelog.d/` contains
+only its `README.md`, and the enumeration below runs over the consolidated
+`[Unreleased]`.
 
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
-**This skill is the canonical statement of the entry rules** — `AGENTS.md`
-carries only the landing-time one-liner, because the full set matters to a
-session writing an entry, not to every session. The rules:
+**This skill is the canonical statement of the entry rules** —
+`docs/agents/contribution-flow.md` carries only the landing-time one-liner,
+because the full set matters to a session writing an entry, not to every
+session. The rules:
 
 - **One sentence per top-level bullet.** One period, no em-dash clauses, no
   run-ons. Self-contained enough to understand without the body.
 - **One LINE per bullet, never column-wrapped.** This section is extracted
   verbatim as the GitHub Release body, and GitHub renders a newline inside a
   paragraph as `<br>` — a wrapped entry renders ragged. Same rule for any PR /
-  issue / comment / wiki text (`AGENTS.md` § "Commit and PR Etiquette").
+  issue / comment / wiki text (`docs/agents/contribution-flow.md` § "Commits
+  and GitHub Markdown").
 - **Subsystem label prefix**: `**[rigor check]**`, `**[engine]**`,
   `**[plugin contract]**`, `**[plugins/rigor-foo]**`, etc.
 - **User-facing only.** Cut internal implementation detail — class renames,
@@ -104,18 +106,18 @@ session writing an entry, not to every session. The rules:
   the child item instead when one bullet consolidates several PRs and each
   detail traces to a different one. Add the reporting issue too when there is
   one, and `thank you @handle!` for an outside report. The link is how a user
-  gets from "what changed" to the detail — `AGENTS.md` says the git log is
-  where detail lives, and this is the door to it.
+  gets from "what changed" to the detail.
   - **The full form, never a bare `#170`.** This section is extracted
     **verbatim** as the GitHub Release body (`rake release:github`), where
     GitHub autolinks a bare `#170` — but the same text is also `CHANGELOG.md`
     rendered from the repo tree, where it is **not** autolinked and stays dead
     text. Only the markdown form works in both, which is why every link already
     in the file uses it.
-  - Omit it when there is no PR. A Markdown-only change lands straight on
-    `master` (`AGENTS.md` § "Commit and PR Etiquette"), so it has a commit and
-    no PR. Do not invent one, and do not link the commit instead — if the
-    change is user-facing enough to have an entry, the entry is the record.
+  - Omit it when there is no PR. A small docs-only change can land straight
+    on `master` (`docs/agents/contribution-flow.md` § "Branches and pull
+    requests"), so it has a commit and no PR. Do not invent one, and do not
+    link the commit instead — if the change is user-facing enough to have an
+    entry, the entry is the record.
 
 The three shapes to reject on sight:
 
@@ -153,12 +155,8 @@ shortcut it:
 
    **The heading date is a trap.** It is a local-time date, and
    `gh pr list --search "merged:>=DATE"` filters in UTC, so every PR merged
-   between the tag and local midnight falls outside the query. At v0.3.6 the
-   tag was `2026-08-25 03:06 +0900` = `2026-08-24T18:06Z`, and the resulting
-   blind window hid six merged PRs — #473, #474, #475, #477, #478, #479 — from
-   a query written exactly as this step used to prescribe. They were recovered
-   only by cross-checking `git log vX.Y.Z..HEAD`. The tag range is exact,
-   offline, and has no timezone to get wrong.
+   between the tag and local midnight falls outside the query. The tag range
+   is exact, offline, and has no timezone to get wrong.
 
    Keep the list beside you for step 4. It is also a **completeness check**: a
    PR in it with no entry anywhere is either a user-facing change nobody wrote
@@ -169,7 +167,7 @@ shortcut it:
    "why / how it works / measured numbers" into a child item, delete internal
    detail outright.
 4. **Check every bullet already carries its PR link**, against the step-1 list.
-   `AGENTS.md` requires the link at landing, so this is verification, not
+   The landing rule requires the link, so this is verification, not
    authoring: a bullet missing one means the landing rule was skipped, and you
    are now paying the reconstruction cost this step exists to avoid. Match on
    the change, not the title wording — a bullet that consolidates several PRs
@@ -213,12 +211,6 @@ Worked collapse (a real shape this repo produces):
 PR to link — the omission above is the rule working, not a lapse. A change that
 did go through one reads
 `… so the scan no longer re-runs per file ([#74](https://github.com/rigortype/rigor/pull/74)).`)
-
-This step is judgment-heavy — deciding what is user-facing, and preserving
-facts while compressing. It rewards a capable model and full attention; if you
-are running on a smaller / faster model, slow down here rather than racing to
-the version bump, because it is the one release step a later `make verify`
-cannot rescue.
 
 ### Write the release summary
 
@@ -281,11 +273,8 @@ release lands, the front page already names the version RubyGems serves.
   `### Added`). Do NOT use `####` sub-headings inside a version block.
   **There is no `Performance` / `Internal` / `Documentation` section** — a
   speed-up is `Changed`, a docs correction is `Fixed`. Say what it is in the
-  entry, not in a heading of your own invention. This rule was already written
-  here and drifted anyway (six `### Performance` sections accumulated across
-  four changelog files before 2026-07-30), so it is now gated by
-  `spec/docs/changelog_conformance_spec.rb` — the ADR-97 lesson, applied to the
-  changelog.
+  entry, not in a heading of your own invention;
+  `spec/docs/changelog_conformance_spec.rb` gates this.
 - Group the same kinds of changes under the same heading — one section per type
   per release, in the Keep a Changelog order above (`Added` first, `Security`
   last). Both are gated.
@@ -344,8 +333,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ve
 nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
 ```
 
-`make verify` runs `make test`, `make lint`, and `make check` in sequence —
-the same set CI runs. `git diff --check` catches whitespace mistakes in the
+`make verify` is the CI-equivalent gate (tests, lint, `check`, and
+`check-plugins`). `git diff --check` catches whitespace mistakes in the
 release diff.
 
 **Overlap it with the sealing rather than queueing behind it.** `make verify` is
@@ -353,7 +342,7 @@ release diff.
 commit touches no `lib/`. Land the code-affecting edits first — `version.rb`,
 then `bundle install` — start `make verify` in the background, and seal the
 `[Unreleased]` entries while it runs. **The gate must still see the last edit**:
-a `CHANGELOG.md` tweak made after a green verify has gone red on CI twice, and
+a `CHANGELOG.md` tweak made after a green verify can turn CI red, and
 `make docs-check` does not cover the changelog conformance spec. So after the
 final edit, re-run the two cheap gates that the prose can actually break:
 
@@ -380,12 +369,12 @@ commit that work separately before creating the version-bump commit. Do not
 fold release verification cleanup into the `Bump up version to x.y.z`
 commit.
 
-### Perf-gate gotchas (learned the hard way)
+### Perf-gate gotchas
 
 - The Make target is `bench-perf`, not `bench` (the bare name collides with
-  the `bench/` data directory). `release-gate.yml` is **advisory** during the
-  evaluation line — it reports but does not block; `ci.yml` is the required
-  gate. The signal is still release-quality: review it.
+  the `bench/` data directory). `release-gate.yml` is **advisory** until it
+  is promoted to a required check — it reports but does not block; `ci.yml`
+  is the required gate. The signal is still release-quality: review it.
 - Both baselines (`bench/baseline.json`,
   `data/oss-sweep/mastodon-thresholds.json`) are exact-count / banded with
   little headroom, so a precision or allocation change flips them red **by
@@ -393,8 +382,7 @@ commit.
   values: allocations is the deterministic signal; **`wall_s` is a rerunnable
   flake — `gh run rerun --failed` clears it; never recalibrate for wall
   alone.** Diff the OSS-sweep diagnostics for FPs before blessing a higher
-  count (the v0.2.0 recalibration found 3 `StringScanner#[]` FPs → fixed at
-  root, not blessed in).
+  count; fix an FP at its root rather than blessing it in.
 - Perf-measurement comparability: warm numbers are only comparable within one
   process model (an in-process cold-then-warm chain is ~186k allocs cheaper
   than a fresh-process warm — a phantom regression otherwise). Self-check
@@ -438,7 +426,8 @@ release **PR** you open next (it triggers on `pull_request`, not on a
 
 - **`ci.yml`** (base gate, required) — test / lint / self-check warm+cold /
   warm==cold diff; runs on the PR. MUST be green before the PR merge below.
-- **`release-gate.yml`** (comprehensive, advisory during the v0.2.0 trial) —
+- **`release-gate.yml`** (comprehensive, advisory until promoted to a
+  required check) —
   the perf benchmark (`make bench-perf`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
   WD4), gem-build validation, and the OSS-corpus sweep. It reports but does
   not block while the baselines calibrate; a regression here is still a
@@ -466,9 +455,10 @@ gh pr ready <pr>                 # only on the user's explicit word, CI green, n
 gh pr merge <pr> --rebase --delete-branch
 ```
 
-The release PR is created `--draft` like every other PR (`AGENTS.md`
-§ "Commit and PR Etiquette"): the user reviews the sealed section on the PR,
-and `gh pr ready` is the recorded hand-off from review to landing.
+The release PR is created `--draft` like every other PR
+(`docs/agents/contribution-flow.md` § "Branches and pull requests"): the user
+reviews the sealed section on the PR, and `gh pr ready` is the recorded
+hand-off from review to landing.
 
 - **Merge on the required gate; review the advisory one.** `ci.yml` is the
   merge gate; `release-gate.yml` is advisory (apply the wall-noise / sweep
@@ -487,7 +477,9 @@ and `gh pr ready` is the recorded hand-off from review to landing.
 ## Publish
 
 After the release PR merges, publish from an up-to-date `master` via the
-`bundler/gem_tasks` release task wired into `Rakefile`:
+`bundler/gem_tasks` release task wired into `Rakefile`. Run it only after the
+user explicitly authorizes publishing: it tags, pushes, and publishes to
+RubyGems, and none of that can be undone.
 
 ```sh
 git switch master && git pull

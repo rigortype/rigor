@@ -768,6 +768,19 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "widens a captured array whose remover is written before its adder" do
+      # `[0, 1]` at runtime. The `pop` closed the literal to `Array[0]` before the `push` could add its
+      # gradual arm, so every position read `0?` and `r.last == 1` folded always-falsey.
+      expect(dumped_type(<<~RUBY)).to eq("[0 | Dynamic[top] | nil, 0 | Dynamic[top] | nil]")
+        stack = [0]
+        dump_type([1, 2].map do |x|
+          top = stack.pop
+          stack.push(x)
+          top
+        end)
+      RUBY
+    end
+
     it "widens the mutated local when the fold is nested inside a threaded body" do
       # The widening evaluates no body, so threading suppression is no reason to skip it.
       expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top] | Integer, Dynamic[top] | Integer]")

@@ -112,8 +112,8 @@ module Rigor
 
       # The captured outer locals the body mutates in place, each mapped to its mutation sites (the nodes
       # above) in source order. A site counts through every variable its receiver can evaluate to
-      # ({ReceiverAlias.candidates}), at any depth, and a local is excluded on exactly the terms {.writes}
-      # excludes it.
+      # ({ReceiverAlias.candidates}), at any nesting depth as long as a local's read resolves past every nested
+      # block ({.outer_read?}), and a local is excluded on exactly the terms {.writes} excludes it.
       #
       # Under `ivars: true` the instance variables the body mutates in place count too, on the terms {.writes}
       # takes a rebound one ({.rebindable_ivar?}). Since the block-return threading gate threads an index write,
@@ -131,7 +131,7 @@ module Rigor
 
         introduced = nil
         sites = {}
-        Source::NodeWalker.each(body) do |descendant|
+        Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           receiver = mutated_receiver(descendant)
           next if receiver.nil?
 
@@ -139,6 +139,8 @@ module Rigor
             next unless content_target?(read, base_scope, ivars)
 
             if read.is_a?(Prism::LocalVariableReadNode)
+              next unless outer_read?(read, ancestors)
+
               introduced ||= introduced_locals(block_node)
               next if introduced.include?(read.name)
             end
@@ -155,6 +157,14 @@ module Rigor
         return base_scope.locals.key?(read.name) if read.is_a?(Prism::LocalVariableReadNode)
 
         ivars && rebindable_ivar?(base_scope, read.name)
+      end
+
+      # True when `read` reaches past every block nested between the body and the mutation site. A read Prism
+      # resolves inside a nested block's own scope (`[[9]].each { |a| a << x }`) names that block's parameter,
+      # not the outer local that happens to share its name.
+      def outer_read?(read, ancestors)
+        nesting = ancestors.count { |node| node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) }
+        read.depth > nesting
       end
 
       def mutated_receiver(node)

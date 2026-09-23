@@ -30,6 +30,7 @@ require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
+require_relative "unknown_store_widening"
 require_relative "version_guard"
 
 module Rigor
@@ -2765,6 +2766,12 @@ module Rigor
       #
       # Fast path: a block writing no outer local and no rebindable ivar leaves `post_scope` byte-identical (the
       # overwhelming majority of blocks), so this costs one `CapturedLocals.writes` walk and nothing else.
+      #
+      # Every pass reads a captured local the body mutates IN PLACE at its unknown-store widening
+      # ({#capture_pass_bindings}), never at the contents the collection held before the call: only the rebound names
+      # move between passes, so a rebind read from such a collection (`last = a.last; a << x`) would otherwise record
+      # the first iteration's answer on every pass and the fixpoint would close over it (ADR-56 WD2.13, second
+      # residue).
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -3494,7 +3501,71 @@ module Rigor
       # `bindings`.
       def block_pass_entry(call_node, block, bindings)
         entry = build_block_entry_scope(call_node, block)
-        bindings.reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
+        capture_pass_bindings(block, bindings).reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
+      end
+
+      # `bindings` plus the pass binding of every captured local the body mutates in place
+      # ({CapturedLocals.content_mutations}): its binding widened for a store of UNKNOWN values at every mutation site
+      # ({#unknown_store_binding}), so it holds whatever any earlier iteration stored. A name the pass does not move
+      # is widened from its call-site binding; a name it moves (the body both rebinds and mutates it) is widened over
+      # the running assumption, as the per-element fold widens the same name (#587 (b)) — that assumption carries the
+      # exits of the body's straight-line seam, which can close the collection without a gradual arm
+      # (`stack ||= [0]; top = stack.pop; stack.push(x)` kept `top` at `0?`). The stored values are not typed: one
+      # computed from the collection's own entry contents is the same first-iteration answer. `bindings` itself
+      # comes back for the common body that mutates nothing captured.
+      #
+      # The price is the gradual arm on a rebind that reads such a collection — `last = a.last; a << x` over `a =
+      # [0]` reads `0 | Dynamic[top] | nil`, not `0 | 1 | 2 | nil`. Precise evidence would mean iterating this
+      # fixpoint jointly with slice C's content join; ADR-56 WD2.13 records why that was not taken.
+      def capture_pass_bindings(block, bindings)
+        stores = block_content_mutations(block)
+        return bindings if stores.empty?
+
+        widened = stores.each_with_object({}) do |(name, sites), acc|
+          next if bindings.key?(name)
+
+          seed = scope.local(name)
+          acc[name] = unknown_store_binding(seed, sites) unless seed.nil?
+        end
+        widened.merge(bindings.to_h do |name, type|
+          sites = stores[name]
+          [name, sites.nil? || type.nil? ? type : unknown_store_binding(type, sites)]
+        end)
+      end
+
+      # {CapturedLocals.content_mutations} of `block` against this evaluator's scope, once per block: every write-back
+      # pass asks, and neither input changes between them.
+      def block_content_mutations(block)
+        (@block_content_mutations ||= {}.compare_by_identity)[block] ||= CapturedLocals.content_mutations(block, scope)
+      end
+
+      # `type` widened through `sites` for a store of unknown values, with one more step: when the result is still a
+      # collection whose contents are value-pinned, those pins are the first-iteration answer and the contents take
+      # the gradual arm. A widening that DECLINES leaves such a binding — `s = [0, 9]; s.pop` leaves `Array[0 | 9]`,
+      # a nominal the `push` in the body then declines — and so does one that only changes a refinement: under `if
+      # s.any?` the `pop` drops `non-empty-array[0 | 9]` to that same pinned `Array[0 | 9]` before the `push` declines
+      # it. Either way `top = s.last; s.push(x)` would keep `top` at `0 | 9`. A result that already carries the arm
+      # is unchanged by it.
+      def unknown_store_binding(type, sites)
+        widened = UnknownStoreWidening.widen(type, sites)
+        return widened unless value_pinned_collection?(widened)
+
+        UnknownStoreWidening.gradual_content(widened)
+      end
+
+      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
+      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
+      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
+      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
+      def value_pinned_collection?(type)
+        case type
+        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
+        when Type::Difference then value_pinned_collection?(type.base)
+        when Type::Nominal
+          %w[Array Hash].include?(type.class_name) &&
+            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
+        else false
+        end
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller

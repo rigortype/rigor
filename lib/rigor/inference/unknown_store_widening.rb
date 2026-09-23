@@ -19,7 +19,13 @@ module Rigor
     # `flatten!` — comes back with the seed's element types alone, which is a wrong precise answer once the
     # block has run: `a = [1]` under `a.map!(&:to_s)` would read `Array[Integer]`. Only a site that removes or
     # reorders ({VALUE_PRESERVING}) keeps its content as the widening left it, since it cannot put a value
-    # there that was not there before.
+    # there that was not there before — unless it is the site that CLOSES a literal carrier. A `Tuple` or
+    # `HashShape` knows which slots and keys exist, and the nominal it widens to cannot say that any may be
+    # missing, so it takes the gradual arm too: `{ a: 0 }` under a lone `h.delete(:a)` read `Hash[Symbol, 0]`,
+    # whose `h[:b]` answered `0` where Ruby answers `nil`, and `s = [0]` under `p = s.pop; s.push(x)` closed to
+    # `Array[0]`, a precise nominal the `push` after it then declined, so `p` stayed `0?`. With the arm the
+    # answer for a `Tuple` / `HashShape` seed (alone or in a `Union`) no longer depends on the order the sites are
+    # written in; a refinement seed (`non-empty-array[0]`) still can, since its remover does not close a literal.
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
     # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
@@ -53,7 +59,16 @@ module Rigor
           widened = MutationWidening.widen_for_mutator(acc, method_name, arg_types: arg_types)
           next acc if widened.nil?
 
-          VALUE_PRESERVING.include?(method_name) ? widened : gradual_content(widened)
+          VALUE_PRESERVING.include?(method_name) && !literal_carrier?(acc) ? widened : gradual_content(widened)
+        end
+      end
+
+      # A carrier that still records its slots or keys: a `Tuple` / `HashShape`, alone or as a `Union` member.
+      def literal_carrier?(type)
+        case type
+        when Type::Tuple, Type::HashShape then true
+        when Type::Union then type.members.any? { |member| literal_carrier?(member) }
+        else false
         end
       end
 

@@ -99,6 +99,9 @@ zero new diagnostics** — the removal is a genuine win
 (`form/account_batch.rb`'s `error ||= e`-in-`each` then
 `raise error if error.present?` no longer folds to a wrong always-falsey
 constant); perf neutral (lib self-check ~17.8s vs ~17.5s baseline).
+*(Amended by WD2.13's second-residue closure: a captured local the body
+mutates in place is read at its unknown-store widening in every pass,
+never at its pre-call contents.)*
 
 ### WD2 — Slice B: loop-body fixpoint
 
@@ -1002,6 +1005,71 @@ it does not reassign. Their always-falsey must still fire, so the seam
 has not gone gradual on every store. The spec asserts every rule, not
 only `flow.*`, because the rejected readings failed as nil receivers
 and return-type mismatches as well as folds.
+
+*(The second residue is closed, 2026-09-23.)* Slice A's passes now
+read every captured local the body mutates in place at its call-site
+binding widened for a store of UNKNOWN values at each mutation site
+— `Inference::UnknownStoreWidening`, the binding the per-element fold
+already lays under every position. A name the body both rebinds and
+mutates takes the same widening over the pass's running assumption,
+as the fold widens it (#587 (b)): the assumption carries the exits of
+the body's straight-line seam, which can close the collection without
+a gradual arm. `last = a.last; a << x` over `a = [0]` reads `0 |
+Dynamic[top] | nil`, and `last == 1` no longer folds.
+
+Two repairs were open, and the corpus decided between them. Iterating
+slice A jointly with this join, so each reads the other's running
+binding, would type the rebind precisely (`0 | 1 | 2 | nil`) and reach
+the first residue as well. The price is re-typing the evidence on
+every pass and merging two seams that `eval_call` runs apart.
+**Decision: the unknown-store binding.** It evaluates no body and only
+widens, and a block that mutates nothing captured is untouched: `sum =
+0; xs.each { |x| sum += x }` keeps its three passes. Its cost is the
+gradual arm on a rebind read from an Array or a Hash; a String capture
+widens to `String` and needs none. No corpus code uses the precision
+the joint iteration would buy. Across 32 survey targets (8,725
+diagnostics), an instrumented first cut engaged at 40 block sites
+without changing any rebound binding, and the final change moves no
+diagnostic. It costs +3,775 allocated objects out of 33.7M on the
+`lib` self-check.
+
+Adversarial review found four routes the first cut still pinned, all
+closed here. A lone remover or a remover written before an adder (`p =
+s.pop; s.push(x)`) closed a literal to a nominal with no gradual arm.
+The adder then declined that nominal, and `{ a: 0 }` under
+`h.delete(:a)` read `h[:b]` as `0` where Ruby answers `nil`.
+`UnknownStoreWidening` now gives the gradual arm to the site that
+closes a `Tuple` or `HashShape`, whatever kind of site it is, so for a
+`Tuple` or `HashShape` seed the answer no longer depends on the order
+the sites are written in. A rebound-and-mutated name was the second
+route, covered above. The third was a nested block's own parameter
+sharing the outer name (`[[9]].each { |a| a << x }`), which
+`CapturedLocals.content_mutations` counted as a mutation of the outer
+local. It now counts a read only when it resolves past every nested
+block. The fourth was a seed closed before the call: `s = [0, 9];
+s.pop` leaves the value-pinned `Array[0 | 9]`, which the widening
+declines like a declared nominal, so every pass read its pins. A
+widening whose result is still a value-pinned collection now takes the
+gradual arm instead, a refinement's base included (under `if s.any?`
+the `pop` drops `non-empty-array[0 | 9]` to the same pinned nominal).
+
+What stays open is the same pin through a binding slice A does not
+own. An instance variable read before an in-place mutation
+(`last = @a.last; @a << x`) is not collected (#1208). A block-local
+alias (`b = a; b << x`) hides the mutation from the scan. A block that
+rebinds nothing and returns the read (`xs.map { v = a.last; a << x;
+v }` on a nominal receiver) goes through the block-return pass, which
+is WD2.10's generic `Array[U]` residue.
+
+Gate: the `block_rebind_reads_mutated_capture` fixture carries ten
+must-not-fire shapes: tail, Hash slot, emptiness, String size,
+remover-before-adder, slot rewriter, lone remover,
+rebound-and-mutated, and a seed closed before the call, bare and under
+a guard. The first five are pinned by `assert_type`. Two controls must
+still fire: a collection the body does not mutate, and an inner block
+parameter sharing the outer name. The spec asserts the exact `flow.*`
+line set, that no error fires on a value the body stored, and the
+accumulator's pass count.
 
 ### WD3 — One mechanism, shared
 

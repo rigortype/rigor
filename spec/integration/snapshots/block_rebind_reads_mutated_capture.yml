@@ -1,0 +1,34 @@
+---
+locals:
+  base: "[0]"
+  buf: Array[1 | 2]
+  counts: Hash[:a | Symbol, 0 | Dynamic[top]]
+  first: 0?
+  got: Dynamic[top] | Integer | nil
+  head: Dynamic[top] | Integer | nil
+  last: 0 | Dynamic[top] | nil
+  len: 0 | non-negative-int
+  missing: 0 | 1 | Dynamic[top]
+  out: Array[1 | 2]
+  peek: 0?
+  peeked: 0 | 9 | Dynamic[top] | nil
+  peeked2: 0 | 9 | Dynamic[top] | nil
+  pinned: Array[0 | 1 | 2 | 9]
+  pinned2: Array[0 | 1 | 2 | 9] | Array[0 | 9]
+  prev: 0 | Dynamic[top] | nil
+  pruned: Hash[Symbol, 0]
+  queue: Array[0 | 1 | 2 | Dynamic[top] | Integer]
+  seen: 0 | Dynamic[top] | Integer
+  stack: Array[0 | 1 | 2]
+  store: Hash[:k | Symbol, "x" | "y" | 0]
+  tail: Array[0 | 1 | 2]
+  tail2: "[0]"
+  text: String
+  was_empty: bool
+assertions:
+  '1': 0 | Dynamic[top] | nil
+  '2': 0 | Dynamic[top] | Integer
+  '3': bool
+  '4': 0 | non-negative-int
+  '5': 0 | Dynamic[top] | nil
+  '6': 0?

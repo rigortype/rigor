@@ -41,9 +41,31 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
     end
 
-    it "forgets the arity a remover falsifies without inventing an element" do
+    # A remover that CLOSES the literal cannot keep its content as it is: the nominal it widens to cannot say a
+    # slot may be missing. `{ a: 0 }` under a lone `h.delete(:a)` read `Hash[Symbol, 0]`, whose `h[:b]` answered
+    # `0` where Ruby answers `nil`.
+    it "gives a literal a remover closes the gradual arm" do
       widened = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.pop }\n"))
-      expect(widened.describe).to eq("Array[1]")
+      expect(widened.describe).to eq("Array[1 | Dynamic[top]]")
+    end
+
+    # The exception is for the site that closes a literal only: a refinement is no literal, so a remover keeps
+    # its element types exactly and adds no arm.
+    it "keeps a remover's content when the carrier is no literal" do
+      refined = Rigor::Type::Combinator.difference(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")]),
+        Rigor::Type::Tuple.new([])
+      )
+      widened = described_class.widen(refined, sites_of("a = []\n[1].each { |e| a.pop }\n"))
+      expect(widened.describe).to eq("Array[Integer]")
+    end
+
+    # A remover written first closed the literal to `Array[1]`, which the adder after it then declined as a
+    # precise nominal — the arm the adder stands for went missing, and `p == 2` after the loop folded.
+    it "widens the same way whichever order a remover and an adder are written in" do
+      remover_first = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.pop; a.push(e) }\n"))
+      adder_first = described_class.widen(one_pinned_tuple, sites_of("a = []\n[1].each { |e| a.push(e); a.pop }\n"))
+      expect([remover_first.describe, adder_first.describe]).to eq(["Array[1 | Dynamic[top]]"] * 2)
     end
 
     it "gives a site whose arguments describe no stored value the gradual arm" do

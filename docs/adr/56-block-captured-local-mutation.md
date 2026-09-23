@@ -930,13 +930,24 @@ local as `Dynamic[top]`
 (`StatementEvaluator#shadow_rebound_reads`), so `out` reads
 `Array[Dynamic[top]]` and `out.last == 3` no longer folds. The locals
 covered are an outer local the body rebinds, and a block parameter or
-`;`-local it reassigns. The binding joins the per-store `shadows`
-overlay, where an inner block's own names were already bound to
-`Dynamic[top]`. Joined collections keep the join's binding, and a local
-the body introduces already read `Dynamic[top]`. A store that reads
-only locals the body does not write keeps its precise binding, so a
-block that rebinds `tally` still stores `limit` as `5`. No extra walk
-runs, and the seam no longer depends on slice A.
+`;`-local it reassigns. A write inside an inner block to a name that
+block introduces does not count, because it is a different variable. A
+joined collection the body also rebinds counts too, because the join's
+seed carries slice A's continuation. A local the body introduces
+already read `Dynamic[top]`.
+
+The binding joins the per-store `shadows` overlay, where an inner
+block's own names were already bound to `Dynamic[top]`. An Array index
+write is the exception: its index arguments, and every name they read,
+keep the block-entry binding. The join classifies such a store as an
+element or a splice from the index's type. A `Dynamic` index reads as
+both, so `grid[i] = [x, x]` would join `x` itself beside the pair and
+draw `def.return-type-mismatch` against a declared
+`Array[Array[Integer]]`. A Hash key is not an index, so it is covered.
+A store that reads only locals the body does not write keeps its
+precise binding, so a block that rebinds `tally` still stores `limit`
+as `5`. No extra evaluation pass runs, and the evidence no longer reads
+slice A's continuation.
 
 Three precise readings were built first. Adversarial review rejected
 each one for reporting on correct code (ADR-5):
@@ -970,10 +981,15 @@ each one for reporting on correct code (ADR-5):
 
 The cost is precision: such a collection gains a `Dynamic[top]`
 member, which quiets later reads of it. #1233 records how to return to
-reading (3) once those gaps close. Two shapes stay open:
+reading (3) once those gaps close. These shapes stay open:
 
-- A store that reads an instance variable directly (`out << @total`)
-  is not covered.
+- A store that reads an instance variable the body writes
+  (`out << @total`) is not covered (#1235).
+- The index of an Array index write keeps its first-iteration reading,
+  so an index the body rebinds to a Range is still classified as an
+  element store, as on master.
+- A local written through a proc defined outside the block is not seen
+  as written, as everywhere in the engine.
 - The rebound local itself keeps whatever slice A gives it.
 
 Gate: the `block_content_self_read` fixture carries the six
@@ -998,11 +1014,16 @@ closure. Its must-not-fire cases each store a local the body writes:
 - a reassigned parameter;
 - an `inject` accumulator;
 - a `next`;
-- a store inside an inner block.
+- a store inside an inner block;
+- a collection the body both rebinds and grows;
+- an index the body increments, under a declared return in the
+  fixture's `sig/`.
 
-Its two controls read a local the body does not write, and a parameter
-it does not reassign. Their always-falsey must still fire, so the seam
-has not gone gradual on every store. The spec asserts every rule, not
+A precision case keeps an index store's value exact. Its three controls
+read a local the body does not write, a parameter it does not reassign,
+and a name only an inner block's own parameter writes. Their
+always-falsey must still fire, so the seam has not gone gradual on
+every store. The spec asserts every rule, not
 only `flow.*`, because the rejected readings failed as nil receivers
 and return-type mismatches as well as folds.
 

@@ -70,10 +70,9 @@ positives = []
 end
 positives.each { |v| puts v + 1 }
 
-# --- A declared return type meets the store, not the `5` the body resets
-# the local to afterwards. ---
+# --- A declared return type (`sig/rebound_capture.rbs`) meets the store,
+# not the `5` the body resets the local to afterwards. ---
 class ReboundCaptureReturn
-  #: () -> Array[String]
   def successors
     state = nil
     out = []
@@ -128,6 +127,46 @@ nested = []
 end
 puts "three" if nested.last == 3
 
+# --- A collection the body both rebinds and grows: the join's seed
+# carries slice A's continuation, which misses the `[:m]` read between
+# two rebinds. ---
+tags = [:a]
+firsts = []
+[1, 2].each do |_x|
+  tags = [:m]
+  firsts << tags.first
+  tags << :b
+  tags = [:c]
+end
+puts "m" if firsts.last == :m
+
+# --- An index the body increments stays out of the reading: typed as
+# `Dynamic[top]` it would make the join take `[x, x]` for a splice as
+# well, and `x` itself would reach the declared `Array[Array[Integer]]`
+# (`sig/rebound_capture.rbs`). ---
+class ReboundCaptureGrid
+  def rows
+    grid = []
+    i = 0
+    [1, 2].each do |x|
+      grid[i] = [x, x]
+      i += 1
+    end
+    grid
+  end
+end
+ReboundCaptureGrid.new.rows
+
+# --- The value an index store writes keeps its precise type when it
+# reads nothing the body writes. ---
+names = []
+slot = 0
+%w[a b].each do |w|
+  names[slot] = w.upcase
+  slot += 1
+end
+assert_type("Array[\"A\" | \"B\"]", names)
+
 # --- Paired controls: a store reading a local the body does not write,
 # or a parameter it does not reassign, keeps its precise binding beside a
 # rebind, and the comparisons it rules out still fold. ---
@@ -148,3 +187,14 @@ picked = []
 end
 assert_type("Array[1 | 2]", picked)
 puts "three" if picked.last == 3 # GENUINE-FALSEY
+
+# An inner block's own parameter of the same name is a different variable:
+# the body does not write `width`.
+width = 5
+widths = []
+[1, 2].each do |_y|
+  widths << width
+  [3].each { |width| width += 1 }
+end
+assert_type("Array[5]", widths)
+puts "six" if widths.last == 6 # GENUINE-FALSEY

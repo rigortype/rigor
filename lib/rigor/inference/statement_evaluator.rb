@@ -2940,15 +2940,16 @@ module Rigor
         mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        shadow_rebound_reads(block, mutations, shadows)
         seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        shadow_rebound_reads(block, mutations, seeds, shadows)
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
       end
 
       # Adds to each store's `shadows` every local it reads that the block body writes and the block-entry scope binds:
-      # an outer local the body rebinds, or a block parameter or `;`-local it reassigns. Joined collections are left to
-      # the join, and a local the body introduces already reads `Dynamic[top]` there.
+      # an outer local the body rebinds, or a block parameter or `;`-local it reassigns. A local the body introduces
+      # already reads `Dynamic[top]` there. A joined collection the body also rebinds is included: the join's seed
+      # carries slice A's continuation, which misses a value written between two rebinds.
       #
       # The block-entry scope binds such a local where the call found it, so a store reading one recorded the first
       # iteration's value: `total = 0; out = []; [1, 2].each { |x| total += x; out << total }` stored `0` as far as the
@@ -2962,24 +2963,48 @@ module Rigor
       # - one more walk of the body to the store inherits every gap in the engine's in-body flow.
       #
       # See ADR-56 WD2.13.
-      def shadow_rebound_reads(block, sites, shadows)
+      def shadow_rebound_reads(block, sites, seeds, shadows)
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = (body_local_writes(block.body) & entry_names) - sites.keys
+        written = scope_local_writes(block.body) & entry_names
         return if written.empty?
 
-        sites.each_value do |nodes|
+        sites.each do |name, nodes|
+          array = content_kind(seeds[name]) == :array
           nodes.each do |site|
-            names = local_reads(site) & written
+            names = store_value_reads(site, array) & written
             shadows[site] = shadows.fetch(site, []) | names unless names.empty?
           end
         end
       end
 
-      # Every local a body writes, at any depth.
-      def body_local_writes(body)
-        Source::NodeWalker.each(body).filter_map do |node|
-          node.name if CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) }
-        end.uniq
+      # The locals a store reads to build what it stores. An Array index write's index arguments are left out, and so
+      # is any name they read: the join classifies the store as an element or a splice from the index's type, and a
+      # `Dynamic` index reads as both, so `grid[i] = [x, x]` would join `x` itself as a member of `grid` beside the
+      # pair. Such an index keeps its block-entry binding, which is master's reading.
+      def store_value_reads(site, array)
+        return local_reads(site) unless array
+
+        if site.is_a?(Prism::CallNode) && site.name == :[]=
+          *index, value = site.arguments&.arguments || []
+          [value, site.receiver].compact.flat_map { |n| local_reads(n) } - index.flat_map { |n| local_reads(n) }
+        elsif IndexWriteWidening.index_write?(site)
+          value = site.respond_to?(:value) ? site.value : nil
+          [value, site.receiver].compact.flat_map { |n| local_reads(n) } - local_reads(site.arguments)
+        else
+          local_reads(site)
+        end
+      end
+
+      # Every local the body writes in the block's own scope or an outer one. A write inside an inner block or lambda
+      # to a name that block introduces is a different variable: its `depth` climbs fewer scopes than it is nested in.
+      def scope_local_writes(body)
+        names = []
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+
+          names << node.name if node.depth >= scope_nesting(ancestors)
+        end
+        names.uniq
       end
 
       # The nodes that read a local's current value: a plain read, and the compound writes that read before they store.
@@ -2991,11 +3016,18 @@ module Rigor
       ].freeze
       private_constant :LOCAL_READ_NODES
 
-      # Every local `node` reads, anywhere in it.
+      # Every local `node` reads from the scope it sits in: a read inside an inner block of a name that block
+      # introduces is a different variable.
       def local_reads(node)
-        Source::NodeWalker.each(node).filter_map do |n|
-          n.name if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
-        end.uniq
+        return [] if node.nil?
+
+        names = []
+        Source::NodeWalker.each_with_ancestors(node) do |n, ancestors|
+          next unless LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
+
+          names << n.name if n.depth >= scope_nesting(ancestors)
+        end
+        names.uniq
       end
 
       # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
@@ -3246,7 +3278,7 @@ module Rigor
         seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
         seeds[memo_param] = pre_state
         sites = captured.merge(memo_param => calls)
-        shadow_rebound_reads(block, sites, shadows)
+        shadow_rebound_reads(block, sites, seeds, shadows)
         join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 

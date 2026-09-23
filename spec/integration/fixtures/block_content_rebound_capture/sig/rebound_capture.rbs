@@ -1,0 +1,8 @@
+# The declared returns the fixture's stores must stay inside.
+class ReboundCaptureReturn
+  def successors: () -> Array[String]
+end
+
+class ReboundCaptureGrid
+  def rows: () -> Array[Array[Integer]]
+end

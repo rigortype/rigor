@@ -111,6 +111,12 @@ FOLD_PARITY_CASES = {
     "[1, 2, nil].select(&:nil?)", "[1, 2, 3, 4, 5].select(&:odd?)",
     "[1, 2, 3].reject { |n| n.positive? }", "[1, 2, 3].map(&:to_s)"
   ],
+  "Array / Range — per-element find/detect/index fold" => [
+    "[1, 2].find { |e| e > 1 }", "[1, 2].find { |e| e > 5 }", "(1..3).detect { |e| e > 1 }",
+    "[1, 2].find(-> { 0 }) { |e| e > 5 }", "[1, 2].detect(proc { 0 }) { |e| e > 5 }",
+    "(1..3).find(-> { 0 }) { |e| e > 5 }", "(1..3).detect(-> { 0 }) { |e| e > 5 }",
+    "[1, 2].find(-> { 0 }, &:nil?)", "[1, 2].index { |e| e == 2 }", "[1, 2].index(2)"
+  ],
   "Enumerator — block-less iteration overload" => [
     "[1, 2, nil].filter", "[1, 2, 3].select", "[1, 2, 3].reject",
     "[1, 2, 3].map", "[1, 2, 3].collect", "[1, 2, 3].each",

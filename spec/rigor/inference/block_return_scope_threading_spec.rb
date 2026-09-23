@@ -1573,38 +1573,44 @@ RSpec.describe "block-return scope threading", type: :runner do
   end
 
   describe "a captured local the body mutates in place and rebinds as a statement" do
-    it "believes a statement rebind converging on the widened class" do
-      # `["abcc", "abcc"]` at runtime. The seed is the in-place widening's `String`, and the statement `s =
-      # s.strip` lands inside it; asking the call-site `"ab"` whether a pin was at stake floored it to
-      # `Dynamic[top]`, where the rebind-only fold answered `String` before the in-place binding existed.
-      expect(dumped_type(<<~RUBY)).to eq("[String, String]")
+    # The unmoved-pin floor asks the call-site binding, not the in-place widened seed, even when the body rebinds
+    # the name as a statement: converging on the widened seed next to a statement rebind does not show that the
+    # rebind was all there was. These fixtures are the two routes that would otherwise report on correct code.
+    it "keeps the floor for a statement rebind that lands inside the widened seed" do
+      # `["abcc", "abcc"]` at runtime; `String` is right here, but nothing the fixpoint sees tells this body from
+      # the two below.
+      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
         s = +"ab"
         dump_type([1, 2].map { |e| s << "c"; s = s.strip; s })
       RUBY
     end
 
-    it "keeps a value read before the mutation and the rebind" do
-      expect(dumped_type(<<~RUBY)).to eq("[non-negative-int, non-negative-int]")
+    it "does not report a rebind the capped fixpoint never runs" do
+      # Runtime `r.last` is `[5, "c"]`: `n` reaches the cap before the guarded `s = [e]` runs in any pass, so `s`
+      # converges on its widened `String` seed.
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
         s = +"ab"
-        dump_type([1, 2].map { |e| v = s.size; s << "c"; s = s.dup; v })
+        n = 0
+        r = [1, 2, 3, 4, 5, 6].map { |e| t = s; s << "c"; s = s.dup; n += 1; s = [e] if n > 3; t }
+        r.last.push(0)
       RUBY
     end
 
-    it "keeps the floor when a hidden rebind sits beside the statement rebind" do
-      # `[:abcc, :abcc]` at runtime: the `&&=` inside an array literal is the unthreaded rebind the
-      # UnthreadedRebinds floor takes, whatever the statement rebind converged to.
-      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
-        s = +"ab"
-        dump_type([1, 2].map { |e| s << "c"; s = s.strip; [(s &&= s.to_sym)]; s })
-      RUBY
-    end
-
-    it "keeps the floor for a statement rebind of a name the body does not mutate" do
-      # The seed IS the call-site `5` here, so the unmoved-pin trade stands: a write restoring its entry value
-      # is indistinguishable from one the pass missed.
-      expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
-        x = 5
-        dump_type([1, 2].map { |e| v = x; x = 5; v })
+    it "does not report a rebind a lambda defined outside the body makes" do
+      # Runtime `[false, false, true]`: `close.call` rebinds `cur` where no write node in the body shows it.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cur = nil
+        close = -> { cur = nil }
+        cur = +""
+        flags = %w[a b. c].map do |w|
+          was_nil = cur.nil?
+          cur ||= +""
+          cur << w
+          cur = cur.strip
+          close.call if w.end_with?(".")
+          was_nil
+        end
+        puts "restarted" if flags.last
       RUBY
     end
   end

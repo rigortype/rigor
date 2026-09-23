@@ -4743,7 +4743,7 @@ module Rigor
             captured_exit_bindings(block, param_types, base, bindings, moved, marks)
           end
         )
-        unmoved_pins_floored(block, converged, seeds, moved).merge(captured_floor(floored))
+        unmoved_pins_floored(converged, seeds, moved).merge(captured_floor(floored))
       end
 
       # A name the write scan says this block REBINDS, whose fixpoint came back on exactly its value-pinned
@@ -4780,15 +4780,21 @@ module Rigor
       # whose exit binding moved prove the rebind was threaded — a narrowing (`next false unless x`) or a
       # threaded prefix (`x ||= 0`) moves it while `(x += 1) == 2` stays unthreaded.
       #
-      # "Unmoved" compares against the fixpoint's own seed, but "pinned" is asked of the CALL-SITE binding
-      # ({#pin_witness}). For a name the body also mutates in place the seed is already the in-place widening of
-      # that binding ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for:
-      # `s = +"ab"` seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot
-      # see (`(s &&= s.to_sym)` inside an expression) converge on `String` and be believed, where the local
-      # really holds a Symbol from the second iteration on. For every other name the two bindings are the same.
-      # The one exception is a name the body rebinds as a STATEMENT of its own (`s << "c"; s = s.strip; s`):
-      # every pass's fall-through runs that write, so converging on the widened seed is the write landing inside
-      # it rather than a rebind the pass missed, and the seed is what the pin test asks.
+      # "Unmoved" compares against the fixpoint's own seed, but "pinned" is asked of the CALL-SITE binding. For a
+      # name the body also mutates in place the seed is already the in-place widening of that binding
+      # ({#stored_capture_bindings}), and the widening erases exactly the pin this test looks for: `s = +"ab"`
+      # seeds `String`, not `"ab"`. Asking the seed would let a nested rebind the evaluator cannot see (`(s &&=
+      # s.to_sym)` inside an expression) converge on `String` and be believed, where the local really holds a
+      # Symbol from the second iteration on. For every other name the two bindings are the same. The price is
+      # the trade the paragraph above already makes: a name the body mutates and VISIBLY rebinds to the widened
+      # class (`t << "c"; t = t.strip`) converges on that seed as well, and is floored with the hidden case.
+      #
+      # A statement rebind does not buy that case back, because converging on the widened seed is not evidence
+      # that the rebind was all there was. The capped pass above runs no rebind a counter guards past the third
+      # iteration (`s = s.dup; n += 1; s = [e] if n > 3`), and the scans see only write nodes in the body, so a
+      # lambda defined outside it (`close = -> { cur = nil }; … close.call`) or `binding.local_variable_set`
+      # rebinds the local where no pass looks. Both converge on the seed next to a statement rebind, and
+      # believing `String` there reports `undefined method` or an always-falsey `cur.nil?` on correct code.
       #
       # A pass's exit binding also joins every block-level `next` ({StatementEvaluator#evaluate_invocation}), and
       # a rebind on a `next` arm moves the converged binding off its seed while an unthreaded write on the
@@ -4803,7 +4809,7 @@ module Rigor
       # unthreaded `(seen += 1) == 2` included — so this test only ever sees a name whose rebinds the scan found
       # threaded. It stays as the backstop for what the scan cannot see, and so the `0 | Integer` seed above
       # keeps its floor: skipping it for a scan-clean name would trade that backstop for precision.
-      def unmoved_pins_floored(block, converged, seeds, moved)
+      def unmoved_pins_floored(converged, seeds, moved)
         converged.to_h do |name, type|
           unmoved =
             case moved[name]
@@ -4811,31 +4817,9 @@ module Rigor
             when :jump then true
             else type == seeds[name]
             end
-          next [name, type] unless unmoved && value_pinned?(pin_witness(block, name, seeds[name]))
+          next [name, type] unless unmoved && value_pinned?(CapturedLocals.bound_type(scope, name))
 
           [name, Type::Combinator.untyped]
-        end
-      end
-
-      # The binding {#unmoved_pins_floored} asks whether a pin is at stake: the call-site binding, unless the
-      # in-place widening moved the seed off it AND the body rebinds `name` as one of its own statements. Such a
-      # write is on every fall-through, and the {UnthreadedRebinds} floor has already taken any name the body
-      # also rebinds out of the pass's sight, so the seed it converged on is the rebind's own answer.
-      def pin_witness(block, name, seed)
-        call_site = CapturedLocals.bound_type(scope, name)
-        return call_site if seed == call_site || !statement_rebind?(block.body, name)
-
-        seed
-      end
-
-      def statement_rebind?(body, name)
-        body.is_a?(Prism::StatementsNode) && body.body.any? { |statement| rebound_name(statement) == name }
-      end
-
-      # The name a variable-write node rebinds, or nil for any other node.
-      def rebound_name(node)
-        case node
-        when *VARIABLE_WRITE_NODES then node.name
         end
       end
 

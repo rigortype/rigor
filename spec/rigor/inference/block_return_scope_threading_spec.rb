@@ -1027,6 +1027,64 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
+    # The index sibling of (3). The expression typer read `h[k] += v` / `||=` / `&&=` as the rvalue alone, so
+    # a block whose tail is one answered `v` at every position whatever the slot held.
+    describe "an index compound write as the block's tail" do
+      it "types a counter-hash tally as the stored sum, not the increment" do
+        # Runtime `[1, 1, 2]`. The rvalue answer was `[1, 1, 1]`.
+        expect(dumped_type(<<~RUBY)).to eq("[Integer, Integer, Integer]")
+          counts = Hash.new(0)
+          dump_type(%w[a b a].map { |w| counts[w] += 1 })
+        RUBY
+      end
+
+      it "stops the always-truthy firing on the tally" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          counts = Hash.new(0)
+          r = %w[a b a].map { |w| counts[w] += 1 }
+          puts "x" if r.last == 1
+        RUBY
+      end
+
+      it "keeps a truthy slot's value in a `||=` tail" do
+        # Runtime `["x"]`: the slot is truthy, so `||=` stores nothing and answers it.
+        expect(dumped_type(<<~RUBY)).to eq('["x" | 3]')
+          seen = { a: "x" }
+          dump_type([:a].map { |k| seen[k] ||= 3 })
+        RUBY
+      end
+
+      it "stops the always-truthy firing on a `||=` tail that keeps the slot" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          seen = { a: "x" }
+          r = [:a].map { |k| seen[k] ||= 3 }
+          puts "x" if r.first == 3
+        RUBY
+      end
+
+      it "types a straight-line index compound write in argument position as the stored value" do
+        expect(dumped_type("h = { a: 1 }\ndump_type(h[:a] += 1)")).to eq("2")
+      end
+
+      it "types an untracked slot's `+=` tail as untyped, not the increment" do
+        # `c` is a parameter, so nothing is known of `c[x]`; the rvalue answer pinned both positions to `1`.
+        expect(dumped_type(<<~RUBY)).to eq("[Dynamic[top], Dynamic[top]]")
+          def tally(c)
+            dump_type([1, 2].map { |x| c[x] += 1 })
+          end
+        RUBY
+      end
+
+      it "stops the always-truthy firing on an untracked slot's `+=` tail" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          def tally(c)
+            r = [1, 2].map { |x| c[x] += 1 }
+            puts "x" if r.last == 1
+          end
+        RUBY
+      end
+    end
+
     describe "(4) straight-line String mutation" do
       it "widens a mutated string literal binding" do
         expect(dumped_type("s = +\"ab\"\ns << \"c\"\ndump_type(s)")).to eq("String")

@@ -129,9 +129,9 @@ module Rigor
         Prism::LocalVariableOperatorWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableOrWriteNode => :type_of_compound_variable_write,
         Prism::LocalVariableAndWriteNode => :type_of_compound_variable_write,
-        Prism::IndexOperatorWriteNode => :type_of_assignment_write,
-        Prism::IndexOrWriteNode => :type_of_assignment_write,
-        Prism::IndexAndWriteNode => :type_of_assignment_write,
+        Prism::IndexOperatorWriteNode => :type_of_index_compound_write,
+        Prism::IndexOrWriteNode => :type_of_index_compound_write,
+        Prism::IndexAndWriteNode => :type_of_index_compound_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
         # LHS-only target nodes (destructuring assignment, pattern matching, `for x in xs`, block parameter
         # `|a, (b, c)|`). They have no value to extract — the type-of pass acknowledges the node class so the
@@ -402,9 +402,8 @@ module Rigor
       # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
       # inventing the rvalue.
       #
-      # Constant and index targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body,
-      # and `IndexOperatorWriteNode` is typed through `Scope#type_of`'s own indexed path by
-      # `StatementEvaluator#eval_index_write`.
+      # Constant targets keep {#type_of_assignment_write}: a constant is not rebound in a loop body. Index
+      # targets have their own handler, {#type_of_index_compound_write}.
       def type_of_compound_variable_write(node)
         current = compound_write_current_binding(node)
         rhs = type_of(node.value)
@@ -427,6 +426,24 @@ module Rigor
         else
           compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end
+      end
+
+      # `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` as an EXPRESSION. Like a variable compound write, its value is
+      # what it stores through `[]=` — the dispatched `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — which
+      # reads the slot's current type, recorded indexed narrowing included. Typed as the rvalue alone it answered
+      # `1` for `counts[w] += 1`, so `r = words.map { |w| counts[w] += 1 }` pinned every position to `1` and
+      # `r.last == 1` drew a false `flow.always-truthy-condition`.
+      #
+      # The statement evaluator already owned that algebra for the straight-line write and the `[]=` widening
+      # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
+      # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
+      # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
+      #
+      # One exception carries over, narrowed, from {#type_of_compound_variable_write}: a memoizing `||=` whose
+      # slot the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it,
+      # because it is decided on the `[]` read the evaluator performs.
+      def type_of_index_compound_write(node)
+        StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
       end
 
       def compound_write_current_binding(node)

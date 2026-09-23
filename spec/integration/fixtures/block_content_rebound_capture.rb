@@ -117,6 +117,89 @@ size = 0
 end
 puts "one" if sizes.last == 1
 
+# --- A local that is nil until the collection it guards exists: the
+# walk floors that collection member by member, so the `nil` survives
+# and `pending ? :cont : :start` keeps both arms. ---
+phase = :none
+phases = []
+pending = nil
+[1, 2].each do |x|
+  phase = pending ? :cont : :start
+  phases << phase
+  pending ||= []
+  pending << x
+end
+assert_type("Array[:cont | :start]", phases)
+puts "start" if phases.first == :start
+
+# --- Shapes one more walk of the body cannot stand for keep the
+# block-entry reading, which reads the untyped parameter here. ---
+
+# A store inside a loop of its own: the walk sees the loop's capped
+# passes, never its widened answer.
+def counted(start)
+  i = start
+  counts = []
+  [1].each do
+    i = 0
+    while i < 10
+      i += 1
+      counts << i
+    end
+  end
+  puts "ten" if counts.last == 10
+end
+counted(0)
+
+# A `break` beside an `else`: `eval_if` joins the breaking branch's
+# `nil` into the scope after it.
+def upcased(start)
+  word = start
+  words = []
+  %w[a b c].each do |x|
+    if x == "c"
+      word = nil
+      break
+    else
+      word = x.upcase
+    end
+    words << word
+  end
+  words.each { |w| puts w.downcase }
+end
+upcased("")
+
+# A local written inside an argument, which no later scope carries (#1223).
+def marked(start)
+  mark = start
+  marks = []
+  seen = nil
+  [1, 2].each do |x|
+    mark = seen ? :later : :first
+    marks << mark
+    [seen = x].size
+  end
+  puts "later" if marks.last == :later
+end
+marked(nil)
+
+# An instance variable the body writes: the walk enters with it where the
+# call found it.
+class ReboundCaptureIvar
+  def run(start)
+    @count = 0
+    seen = start
+    counts = []
+    [1, 2].each do
+      @count += 1
+      seen = @count
+      counts << seen
+    end
+    puts "two" if counts.last == 2
+  end
+end
+ReboundCaptureIvar.new.run(nil)
+
 # --- A block parameter reassigned before the store. ---
 bumped = []
 [1, 2].each do |n|

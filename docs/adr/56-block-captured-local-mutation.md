@@ -925,18 +925,46 @@ carries the flip comment.
 local the body writes now reads it where the store runs
 (`StatementEvaluator#record_store_point_bindings`), so `out` reads
 `Array[Integer]`. The seam evaluates the block body once more with an
-`on_enter` recorder on its stores. On entry, every outer local the body
-rebinds is bound at slice A's continuation, the pre-call value joined
-with every iteration's exit value, which is what the local can hold as
-any iteration starts. Every collection the join rederives is bound at
-its gradual floor, so a value computed from one is never read off its
-pre-call contents. Each store's evidence is then typed with the locals
-it reads at their binding in the scope recorded at the store, joined
-over every visit. The rule covers block parameters and `;`-locals the
-body reassigns (`|s| s += 1; out << s`) as well as outer locals.
+`on_enter` recorder on its stores. On entry to that walk:
+
+- every outer local the body rebinds is bound at slice A's
+  continuation, the pre-call value joined with every iteration's exit
+  value;
+- every other outer local, instance, class and global variable has each
+  collection member floored to `Array[untyped]`, `Hash[untyped,
+  untyped]` or `String`, and every other member kept. The body may
+  change a collection in place, and a value computed from one must not
+  be read off its pre-call contents. Flooring the whole type instead
+  would drop the `nil` of `nil | Array` and make a `cur ? :cont :
+  :start` guard fold.
+
+Each store's evidence is then typed with the locals it reads at their
+binding in the scope recorded at the store, joined over every visit.
+The rule covers block parameters and `;`-locals the body reassigns
+(`|s| s += 1; out << s`) as well as outer locals.
 `each_with_object_return` now runs after slice A in `eval_call`, and
 both seams take the continuation from the scope slice A leaves, before
-any post-call narrowing.
+any post-call narrowing. The walk reports into no `return`, `next` or
+`break` sink, and into no tracer.
+
+The walk is one pass, so it stands for every iteration only under
+conditions it checks (`StatementEvaluator#store_point_reads`). Every
+other store keeps the block-entry reading:
+
+- The store must be written in the body itself. Inside an inner block,
+  lambda or loop, the walk sees a fixpoint's capped intermediate passes
+  and never its widened answer: `while i < 10; i += 1; out << i` would
+  store `1 | 2 | 3`.
+- The body must hold no `next`, `redo`, `break` or `retry`. Slice A
+  reads no scope at a `next` (#1214). `eval_if` still joins a branch
+  that ends in `break` beside an `else` into the scope after it, so a
+  `nil` written before the `break` would reach the store.
+- Every local the body writes must be written as a statement of its
+  own. A write inside an argument, a receiver, parentheses or a
+  predicate reaches no scope after that statement (#1223), so neither
+  slice A nor the walk sees it.
+- The body must write no instance, class or global variable, since the
+  walk enters with those where the call found them.
 
 Two cheaper readings were tried first and rejected, because each adds
 false positives on correct code (ADR-5). Slice A's continuation alone
@@ -954,17 +982,16 @@ narrows the local it reads as well.
 
 These stay recorded:
 
-- A body that jumps to its next iteration (`next`, `redo`) keeps the
-  block-entry reading. Slice A drops the scope at the jump and keeps
-  any dead reset after it, so its continuation cannot stand for an
-  iteration's entry (#1214).
-- A local written inside a store's own argument (`out << (total +=
-  x)`) is never carried into any scope after the statement, so slice A
-  misses the rebind (#1223).
-- A store that the statement walk never enters, such as one nested in
-  another call's argument, keeps the block-entry reading.
-- Instance variables are not covered (`@total += x; out << @total`).
-- A local the body introduces reads `Dynamic[top]` at a store, as before.
+- Every refused shape above keeps the first-iteration reading until
+  #1214, #1223 and the `eval_if` join are fixed. A store the walk never
+  enters, such as one nested in another call's argument, keeps it as
+  well.
+- A store that reads an instance variable directly (`out << @total`)
+  is not covered.
+- A local the body introduces reads `Dynamic[top]` at a store, as
+  before.
+- A value computed from any outer collection reads through the floor:
+  sound, but it carries a `Dynamic` arm the pre-call contents did not.
 
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
@@ -987,7 +1014,15 @@ closure. Its must-not-fire cases are:
 - a guarded store;
 - a declared return type;
 - a reassigned parameter;
-- a local computed from the collection being filled.
+- a local computed from the collection being filled;
+- a `nil` that the member-wise floor keeps.
+
+Each refused shape also has a case that must not fire, one each for:
+
+- a store inside a loop;
+- a `break` beside an `else`;
+- a write inside an argument;
+- an instance-variable write.
 
 It also asserts that a parameter still shadows the local it names, and
 pins the #1214 shape. Its control is a store that only ever reads `1`,

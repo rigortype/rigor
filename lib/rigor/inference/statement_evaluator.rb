@@ -2681,8 +2681,9 @@ module Rigor
       # the same choice with `pre_body`; see {#loop_content_writeback}.
       #
       # The stored evidence is typed in the block-entry scope, with each local the body writes read where its store runs
-      # ({#record_store_point_bindings}), and iterated to a fixpoint when a store reads a collection the join moves —
-      # see {#join_content_to_fixpoint}. Always sound — only ever widens.
+      # when one more walk of the body can stand for every iteration ({#record_store_point_bindings}), and iterated to a
+      # fixpoint when a store reads a collection the join moves — see {#join_content_to_fixpoint}. The join only ever
+      # widens the collection's pre-call binding.
       def content_writeback_block_captures(call_node, post_scope, seed_scope:, rebound_scope:)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
@@ -2709,12 +2710,13 @@ module Rigor
       #
       # The binding at the store, not slice A's continuation: the continuation also holds exit values the store never
       # reads (`state = s; out << state; state = nil` would store `nil`), and a flow guard at the store (`out << prev if
-      # prev`) narrows it. A store the statement walk never enters keeps the block-entry binding.
+      # prev`) narrows it. The reading is taken only where one more walk of the body can stand for every iteration
+      # ({#store_point_reads}); every other store keeps the block-entry binding.
       def record_store_point_bindings(call_node, block, rebound_scope, sites, shadows)
         reads = store_point_reads(block, sites)
         return if reads.empty?
 
-        visits = store_point_scopes(call_node, block, rebound_scope, sites.keys, reads.keys)
+        visits = store_point_scopes(call_node, block, rebound_scope, reads.keys)
         reads.each do |site, names|
           scopes = visits[site]
           next if scopes.nil?
@@ -2730,48 +2732,153 @@ module Rigor
       # `{ site => names }`: the locals each store reads that the body writes and the block-entry scope binds — an outer
       # local the body rebinds, or a block parameter or `;`-local it reassigns — less the joined collections, whose
       # binding the join owns. A local the body introduces is left out: the block-entry scope reads it as
-      # `Dynamic[top]`, which a store cannot mistake for a value. Empty when the body jumps to its next iteration
-      # (`next`, `redo`): slice A reads no scope at the jump (#1214), so its continuation cannot stand for an
-      # iteration's entry.
+      # `Dynamic[top]`, which a store cannot mistake for a value.
+      #
+      # Only a store written in the body itself counts. Inside an inner block, lambda or loop, the walk sees a
+      # fixpoint's capped intermediate passes and never its widened answer (`while i < 10; i += 1; out << i` would store
+      # `1 | 2 | 3`). And the whole body is refused when one walk cannot stand for every iteration
+      # ({#store_point_trusted?}).
       def store_point_reads(block, sites)
-        return {} if jumps_to_next_iteration?(block.body)
+        body = block.body
+        return {} unless store_point_trusted?(body)
 
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = (body_local_writes(block.body) & entry_names) - sites.keys
+        written = (body_local_writes(body) & entry_names) - sites.keys
         return {} if written.empty?
 
-        sites.each_value.with_object({}.compare_by_identity) do |nodes, reads|
-          nodes.each do |site|
-            names = local_reads(site) & written
-            reads[site] = names unless names.empty?
-          end
+        direct_store_sites(body, sites).each_with_object({}.compare_by_identity) do |site, reads|
+          names = local_reads(site) & written
+          reads[site] = names unless names.empty?
         end
       end
 
+      def direct_store_sites(body, sites)
+        wanted = sites.each_value.with_object({}.compare_by_identity) { |nodes, acc| nodes.each { |n| acc[n] = true } }
+        found = []
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless wanted.key?(node)
+
+          found << node if ancestors.none? { |ancestor| ITERATION_BARRIERS.any? { |klass| ancestor.is_a?(klass) } }
+        end
+        found
+      end
+
+      # False when one more walk of the body cannot stand for every iteration, which the body shows by:
+      #
+      # - a `next`, `redo`, `break` or `retry` anywhere in it: slice A reads no scope at a `next` (#1214), and
+      #   `eval_if` still joins a branch that ends in `break` beside an `else` into the scope after it;
+      # - a local written anywhere but a statement of its own, which no scope after that statement carries (#1223);
+      # - an instance, class or global variable written: the walk enters with those where the call found them.
+      def store_point_trusted?(body)
+        Source::NodeWalker.each_with_ancestors(body).none? do |node, ancestors|
+          UNTRUSTED_STORE_POINT_NODES.any? { |klass| node.is_a?(klass) } ||
+            (CapturedLocals::LOCAL_WRITE_NODES.any? { |klass| node.is_a?(klass) } && !statement_write?(node, ancestors))
+        end
+      end
+
+      UNTRUSTED_STORE_POINT_NODES = [
+        Prism::NextNode, Prism::RedoNode, Prism::BreakNode, Prism::RetryNode,
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode,
+        Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode, Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode, Prism::ClassVariableTargetNode,
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
+      ].freeze
+      private_constant :UNTRUSTED_STORE_POINT_NODES
+
+      # The nodes whose own statements the evaluator walks, binding each local write in them.
+      STATEMENT_CONTAINERS = [
+        Prism::StatementsNode, Prism::IfNode, Prism::UnlessNode, Prism::ElseNode, Prism::CaseNode, Prism::CaseMatchNode,
+        Prism::WhenNode, Prism::InNode, Prism::BeginNode, Prism::RescueNode, Prism::EnsureNode, Prism::WhileNode,
+        Prism::UntilNode, Prism::ForNode, Prism::BlockNode, Prism::MultiWriteNode
+      ].freeze
+      private_constant :STATEMENT_CONTAINERS
+
+      # True when every node between `write` and the body is one the evaluator walks as statements: a statement list or
+      # branch (never its predicate), a multi-assign's targets (never its value), or a nested block whose call is itself
+      # such a statement. A write inside an argument, a receiver, parentheses or a predicate is typed as an expression,
+      # and its binding reaches no later scope. A method or class body is a scope of its own and ends the climb.
+      def statement_write?(write, ancestors)
+        child = write
+        ancestors.reverse_each do |ancestor|
+          return true if SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) }
+
+          contained =
+            if ancestor.is_a?(Prism::CallNode) then ancestor.block.equal?(child)
+            else STATEMENT_CONTAINERS.any? { |klass| ancestor.is_a?(klass) } && !condition_of?(ancestor, child)
+            end
+          return false unless contained
+
+          child = ancestor
+        end
+        true
+      end
+
+      SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :SCOPE_BODY_NODES
+
+      def condition_of?(container, child)
+        %i[predicate collection pattern value].any? do |reader|
+          container.respond_to?(reader) && container.public_send(reader).equal?(child)
+        end || (container.respond_to?(:conditions) && container.conditions.any? { |c| c.equal?(child) })
+      end
+
       # Evaluates the block body once more, recording the scope each store runs in: `{ site => [scope, ...] }`, one per
-      # time the walk reached it. The body enters with every local it rebinds at slice A's continuation in
-      # `rebound_scope`, what that local can hold as ANY iteration starts, and with every collection the join rederives
-      # at its gradual floor, since a value computed from one would otherwise be read off its pre-call contents.
-      def store_point_scopes(call_node, block, rebound_scope, collections, sites)
+      # time the walk reached it. The walk reports into no `return`, `next` or `break` sink, and to no tracer, so the
+      # method, block and loop it runs inside see nothing of it.
+      def store_point_scopes(call_node, block, rebound_scope, sites)
         wanted = sites.each_with_object({}.compare_by_identity) { |site, acc| acc[site] = true }
         visits = {}.compare_by_identity
         recorder = ->(node, node_scope) { (visits[node] ||= []) << node_scope if wanted.key?(node) }
-        StatementEvaluator.new(
-          scope: store_point_entry(call_node, block, rebound_scope, collections),
-          tracer: tracer, on_enter: recorder, class_context: @class_context, lexical_nesting: @lexical_nesting
-        ).evaluate(block)
+        entry = store_point_entry(call_node, block, rebound_scope)
+        with_detached_sinks do
+          StatementEvaluator.new(
+            scope: entry, on_enter: recorder, class_context: @class_context, lexical_nesting: @lexical_nesting
+          ).evaluate(block)
+        end
         visits
       end
 
-      def store_point_entry(call_node, block, rebound_scope, collections)
+      STORE_POINT_SINK_KEYS = [RETURN_SINK_KEY, NEXT_SINK_KEY, BREAK_SINK_KEY, BREAK_VALUE_SINK_KEY].freeze
+      private_constant :STORE_POINT_SINK_KEYS
+
+      def with_detached_sinks
+        saved = STORE_POINT_SINK_KEYS.map { |key| Thread.current[key] }
+        STORE_POINT_SINK_KEYS.each { |key| Thread.current[key] = nil }
+        yield
+      ensure
+        STORE_POINT_SINK_KEYS.zip(saved) { |key, sink| Thread.current[key] = sink }
+      end
+
+      # The scope the walk enters the body with. Every outer local the body rebinds is at slice A's continuation in
+      # `rebound_scope`, what it can hold as any iteration starts. Every other outer local, instance, class and global
+      # variable has each collection member at its gradual floor: the body may change a collection in place, and a
+      # value computed from one must not be read off its pre-call contents. The block's own parameters are fresh on
+      # every iteration and keep their bindings.
+      def store_point_entry(call_node, block, rebound_scope)
         entry = CapturedLocals.writes(block, scope).reduce(build_block_entry_scope(call_node, block)) do |acc, name|
           binding = rebound_scope.local(name)
           binding.nil? ? acc : acc.with_local(name, binding)
         end
-        collections.reduce(entry) do |acc, name|
-          floor = content_floor_for(acc.local(name))
-          floor.nil? ? acc : acc.with_local(name, floor)
-        end
+        floor_store_point_collections(entry, scope.locals.keys - CapturedLocals.introduced_locals(block).to_a)
+      end
+
+      def floor_store_point_collections(entry, outer_locals)
+        entry = outer_locals.reduce(entry) { |acc, name| acc.with_local(name, store_point_floor(acc.local(name))) }
+        entry = entry.ivars.reduce(entry) { |acc, (name, type)| acc.with_ivar(name, store_point_floor(type)) }
+        entry = entry.cvars.reduce(entry) { |acc, (name, type)| acc.with_cvar(name, store_point_floor(type)) }
+        entry.globals.reduce(entry) { |acc, (name, type)| acc.with_global(name, store_point_floor(type)) }
+      end
+
+      # `type` with each collection member at its gradual floor and every other member kept, so `nil | Array[Integer]`
+      # floors to `nil | Array[untyped]`, never to `Array[untyped]`.
+      def store_point_floor(type)
+        return type if type.nil?
+
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        floored = members.map { |member| content_floor_for(member) || member }
+        floored.zip(members).all? { |f, m| f.equal?(m) } ? type : Type::Combinator.union(*floored)
       end
 
       # Every local a body writes, at any depth.
@@ -2797,22 +2904,13 @@ module Rigor
         end.uniq
       end
 
-      # The nodes a `next` / `redo` inside cannot leave the block through: an inner block, lambda or method, a loop that
-      # owns its own iterations, or a class or module body.
+      # The nodes that open a body a store inside is not written in: an inner block, lambda or method, a loop that owns
+      # its own iterations, or a class or module body.
       ITERATION_BARRIERS = [
         Prism::BlockNode, Prism::LambdaNode, Prism::DefNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode,
         Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
       ].freeze
       private_constant :ITERATION_BARRIERS
-
-      # True when `node` holds a `next` or `redo` that ends the block's current iteration.
-      def jumps_to_next_iteration?(node)
-        return false if node.nil?
-        return true if node.is_a?(Prism::NextNode) || node.is_a?(Prism::RedoNode)
-        return false if ITERATION_BARRIERS.any? { |klass| node.is_a?(klass) }
-
-        node.compact_child_nodes.any? { |child| jumps_to_next_iteration?(child) }
-      end
 
       # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
       # value union for a Hash, and none for a String, which widens to `String` whatever it stored.

@@ -1208,11 +1208,12 @@ module Rigor
         private_constant :LIBRARY_SUPPLEMENT_CORE_OVERLAYS
 
         # `data/core_overlay/` files that fill a hole only one `rbs` release line has, keyed by file basename
-        # to the `rbs` versions they load under. Each carries an `| ...` continuation of overloads a later
-        # line declares upstream, so loading it there would add a second copy of them. The env-cache key
+        # to the `rbs` version requirement they load under. Each carries an `| ...` continuation of overloads a
+        # later line declares upstream, so loading it there would add a second copy of them. The env-cache key
         # already carries `RBS::VERSION` ({Cache::RbsDescriptor.rbs_gem_entry}), so switching lines re-keys.
+        # The requirement is a String, not a `Gem::Requirement`, so the constant stays `Ractor.shareable?`.
         RBS_LINE_CORE_OVERLAYS = {
-          "hash_rbs3.rbs" => Gem::Requirement.new("< 4.0")
+          "hash_rbs3.rbs" => "< 4.0"
         }.freeze
         private_constant :RBS_LINE_CORE_OVERLAYS
 
@@ -1257,7 +1258,7 @@ module Rigor
         # @return true when `path` is not tied to an `rbs` release line, or the running `rbs` is on its line.
         def rbs_line_matches?(path)
           requirement = RBS_LINE_CORE_OVERLAYS[path.basename.to_s]
-          requirement.nil? || requirement.satisfied_by?(Gem::Version.new(::RBS::VERSION))
+          requirement.nil? || Gem::Requirement.new(requirement).satisfied_by?(Gem::Version.new(::RBS::VERSION))
         end
 
         # Rigor-owned per-gem RBS overlays (`data/gem_overlay/<gem>/`), ADR-72. Unlike the unconditional

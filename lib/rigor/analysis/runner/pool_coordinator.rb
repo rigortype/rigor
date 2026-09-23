@@ -905,6 +905,11 @@ module Rigor
         #   i.e. with no synthesized RBS at all, even on a full run.
         def analyze_files_sequentially_fallback(files, reason:, source_files: files)
           environment = build_runner_environment(source_files: source_files)
+          # Same set, same ORDER as `#analyze_files_sequentially`. The signature state used to be hand-copied
+          # here slot by slot, which dropped `synthesized-namespace` and every conformance row. The conformance
+          # scan inside it demands the definition of every `rigor:v1:conforms-to` class, so it has to run
+          # BEFORE the definition-build failures are read below, or a failure only that scan reaches is lost.
+          snapshot_project_signature_state(environment)
           snapshot_effect_annotation_carrier(environment.rbs_loader)
           diagnostics = files.flat_map { |path| @analyze_file.call(path, environment) }
           loader = environment.rbs_loader
@@ -919,10 +924,6 @@ module Rigor
           record_hkt_scan_failure(hkt_scan_outcome(environment))
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
-          @snapshots.signature_standdowns = plugin_signature_paths? ? signature_standdowns_for(loader) : []
-          @snapshots.quarantined_signatures =
-            project_signature_paths? ? (loader&.quarantined_signatures || []) : []
-          @snapshots.env_build_failure = project_signature_paths? ? loader&.env_build_failure : nil
           diagnostics.unshift(
             Diagnostic.new(
               path: ".rigor.yml", line: 1, column: 1,

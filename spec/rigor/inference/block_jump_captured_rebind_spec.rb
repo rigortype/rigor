@@ -32,14 +32,12 @@ RSpec.describe "captured rebinds on a block's jump paths", type: :runner do
   # Every fixture here is written with exactly one `dump_type`.
   def dumped_type(source) = dumped_types(source).first
 
-  STALE_BINDING_RULES = %w[call.undefined-method call.possible-nil-receiver].freeze
-
   # The rule id of every diagnostic a stale binding draws — an undefined method, a nil receiver, and the
   # always-truthy family.
   def reported_rules(source)
     analyzed(source).diagnostics.filter_map do |diagnostic|
       rule = diagnostic.rule.to_s
-      rule if STALE_BINDING_RULES.include?(rule) || rule.start_with?("flow.")
+      rule if %w[call.undefined-method call.possible-nil-receiver].include?(rule) || rule.start_with?("flow.")
     end
   end
 

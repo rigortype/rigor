@@ -1464,7 +1464,8 @@ module Rigor
 
       # The `BreakNode`s that lexically target THIS loop ({JumpTargets}) — a `break` inside a nested loop, block, or
       # def targets that construct instead. An identity-keyed Hash used as a membership set to filter the collected
-      # break scopes (the thread-local sink also collects breaks from nested blocks that did not install their own sink).
+      # break scopes (the thread-local sink also collects breaks from nested blocks that did not install their own
+      # sink).
       def directly_targeting_breaks(statements)
         JumpTargets.of(statements, Prism::BreakNode)
       end

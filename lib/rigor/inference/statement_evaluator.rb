@@ -2600,11 +2600,15 @@ module Rigor
       # drop matches the spec line "facts about locals it can write become unstable after the escape point": rather than
       # synthesise the union of the block's write types (which the current pass does not yet expose), we discard the
       # narrowed binding altogether. A future sub-phase MAY refine this to the union of the block's actual writes.
+      #
+      # An instance variable the body rebinds is dropped the same way: the block shares the caller's `self`, so a
+      # callback that runs later writes the very ivar the continuation reads (`@clicked = false; button.on_click {
+      # @clicked = true }` left `if @clicked` folding always-falsey).
       def drop_captured_narrowing(block_node, base_scope)
-        names = CapturedLocals.writes(block_node, base_scope)
+        names = CapturedLocals.writes(block_node, base_scope) + CapturedLocals.ivar_writes(block_node, base_scope)
         return base_scope if names.empty?
 
-        names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+        names.reduce(base_scope) { |acc, name| CapturedLocals.bind(acc, name, Type::Combinator.untyped) }
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -2613,17 +2617,22 @@ module Rigor
       # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
-      # Fast path: a block writing no outer local leaves `post_scope` byte-identical (the overwhelming majority of
-      # blocks), so this costs one extra `CapturedLocals.writes` walk and nothing else.
+      # The instance variables the body rebinds ({CapturedLocals.ivar_writes}) outlive the call the same way — `@n = 0;
+      # [1, 2].each { @n += 1 }` left `@n == 0` folding always-truthy — so they join the name set, seeded from their
+      # pre-call binding. The fixpoint runs over both kinds at once: a local the body reads off a rebound ivar (`last =
+      # @n; @n += 1`) moves with it, which two separate fixpoints would each have pinned to the other's pre-call value.
+      #
+      # Fast path: a block writing no outer local and no bound ivar leaves `post_scope` byte-identical (the
+      # overwhelming majority of blocks), so this costs the two `CapturedLocals` walks and nothing else.
       def write_back_block_captures(call_node, post_scope)
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
 
-        names = CapturedLocals.writes(block, scope)
+        names = CapturedLocals.writes(block, scope) + CapturedLocals.ivar_writes(block, scope)
         return post_scope if names.empty?
 
-        seed = names.to_h { |name| [name, scope.local(name)] }
+        seed = names.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] }
         result = BodyFixpoint.converge(
           names: names,
           seed_bindings: seed,
@@ -2631,7 +2640,7 @@ module Rigor
           evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
         )
 
-        result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        result.reduce(post_scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
       end
 
       # ADR-56 slice C — receiver-content element-type join. After the rebind write-back and
@@ -2927,14 +2936,14 @@ module Rigor
         []
       end
 
-      # Evaluates `block`'s body once with each written outer local bound to the supplied `bindings` (block params /
-      # `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the `BodyFixpoint`
-      # body-evaluator.
+      # Evaluates `block`'s body once with each written outer local or ivar bound to the supplied `bindings` (block
+      # params / `;`-locals re-bound as usual) and returns the per-name exit binding for `names`. Used as the
+      # `BodyFixpoint` body-evaluator.
       def block_exit_bindings(call_node, block, bindings, names)
         entry = build_block_entry_scope(call_node, block)
-        entry = bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = bindings.reduce(entry) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
         _type, exit_scope = sub_eval(block, entry)
-        names.to_h { |name| [name, exit_scope.local(name)] }
+        names.to_h { |name| [name, CapturedLocals.bound_type(exit_scope, name)] }
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller

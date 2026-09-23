@@ -46,6 +46,10 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
         %a{rigor:v1:param: value is non-empty-string}
         def pick: (String value) -> void
                 | (Integer value) -> void
+        %a{rigor:v1:param: value is non-empty-array[Integer]}
+        def take_ids: (Array[Integer] value) -> void
+        %a{rigor:v1:param: value is non-empty-hash[Symbol, Integer]}
+        def take_attrs: (Hash[Symbol, Integer] value) -> void
       end
     RBS
   end
@@ -304,6 +308,25 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
 
     it "stays clean when the argument satisfies the override" do
       expect(arg_mismatches(%(Sink.new.take_name("abc")\n))).to be_empty
+    end
+  end
+
+  # A `non-empty-array[T]` / `non-empty-hash[K, V]` override is a `Difference` whose removed value is itself a
+  # shape (`Tuple[]`, the closed `{}`), so a literal argument proves it absent through its arity or a required
+  # key. The empty literal is the removed value and still fires on the same parameter.
+  describe "empty-witness collection overrides (a shape argument proves the witness absent)" do
+    it "stays clean on a non-empty array literal and a hash literal with a key" do
+      expect(arg_mismatches(%(Sink.new.take_ids([1, 2])\nSink.new.take_attrs({ a: 1 })\n))).to be_empty
+    end
+
+    it "fires on the empty literal each override removes" do
+      diagnostics = arg_mismatches(%(Sink.new.take_ids([])\nSink.new.take_attrs({})\n))
+      expect(diagnostics.map(&:message)).to contain_exactly(
+        "argument type mismatch at parameter `value' of `take_ids' on Sink: " \
+        "expected non-empty-array[Integer], got []",
+        "argument type mismatch at parameter `value' of `take_attrs' on Sink: " \
+        "expected non-empty-hash[Symbol, Integer], got {}"
+      )
     end
   end
 

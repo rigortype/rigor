@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "range_constant"
+require_relative "content_join"
 
 module Rigor
   module Inference
@@ -74,9 +75,32 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
+      # Whether `param` contains a record (at any depth: `Array[{ a: Integer }]`, a tuple, a union) and `arg` a
+      # `Hash` with a gradual arm ({#gradual_hash?}). That pair is where a record answers `maybe` because it cannot
+      # read the entries, and the `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict
+      # pass reads it as no evidence for the overload.
+      def record_against_gradual_hash?(param, arg)
+        contains_type?(param) { |type| type.is_a?(Type::HashShape) } && contains_type?(arg) { |type| gradual_hash?(type) }
+      end
+
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
+
+        def contains_type?(type, &)
+          return true if yield(type)
+
+          components =
+            case type
+            when Type::Union then type.members
+            when Type::Nominal then type.type_args
+            when Type::Tuple then type.elements
+            when Type::HashShape then type.pairs.values
+            when Type::Difference then [type.base]
+            else return false
+            end
+          components.any? { |component| contains_type?(component, &) }
+        end
 
         def accepts_one(self_type, other_type, mode)
           handler = TYPE_HANDLERS[self_type.class]
@@ -948,10 +972,12 @@ module Rigor
         # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
         # the other side and Ti accepts Ui (depth covariant). Optional keys may be absent on the other side;
         # when present, their values are checked. A closed self rejects known or possible extra keys. Other
-        # types are rejected; the converse direction (a Nominal accepting a HashShape) is handled by
-        # `accepts_nominal` via projection.
+        # types are rejected, except a `Hash` with a gradual arm (see {#gradual_hash?}); the converse direction
+        # (a Nominal accepting a HashShape) is handled by `accepts_nominal` via projection.
         def accepts_hash_shape(self_type, other_type, mode)
           unless other_type.is_a?(Type::HashShape)
+            return gradual_hash_verdict(self_type, other_type, mode) if gradual_hash?(other_type)
+
             return Type::AcceptsResult.no(
               mode: mode,
               reasons: "HashShape does not accept #{other_type.class}"
@@ -973,6 +999,53 @@ module Rigor
           per_entry = hash_shape_entry_results(self_type, other_type, mode)
           combine_arg_results(per_entry, mode)
         end
+
+        # A `Hash` nominal — directly or as the base of a `Difference` (`non-empty-hash[K, V]`) — that is raw or
+        # carries a `Dynamic` arm in a type argument. A hash literal with a `**splat` entry carries the arm by
+        # design, `Hash.new` filled key by key reads as the raw `Hash`, and a declared `Hash[Symbol, untyped]`
+        # is the author saying the hash may hold anything (the reading `MutationRejoin#regrowable_carrier?`
+        # gives a declared gradual arm). The runtime value may then hold exactly the record's keys, so a shape
+        # cannot reject it on the arm's account, the way `Hash[K, V]` accepts a raw `Hash` as maybe. A `Hash`
+        # subclass is not read: its entries need not be the record's (`HashWithIndifferentAccess` stores String
+        # keys).
+        def gradual_hash?(type)
+          nominal = type.is_a?(Type::Difference) ? type.base : type
+          nominal.is_a?(Type::Nominal) && nominal.class_name == "Hash" &&
+            (nominal.type_args.empty? || nominal.type_args.any? { |arg| gradual_arm?(arg) })
+        end
+
+        # `maybe`, unless an argument without a gradual arm already rules the record out: a precise `K` that
+        # rejects a required key (`Hash[String, untyped]` never holds `:a`), or a precise `V` none of whose
+        # members a required key's type accepts.
+        def gradual_hash_verdict(self_type, other_type, mode)
+          nominal = other_type.is_a?(Type::Difference) ? other_type.base : other_type
+          key_type, value_type = nominal.type_args
+          missing = unholdable_keys(self_type, key_type, mode)
+          return hash_shape_no(mode, "Hash key type cannot hold required keys: #{missing.inspect}") if missing.any?
+
+          refused = refused_value_keys(self_type, value_type, mode)
+          return hash_shape_no(mode, "Hash value type refused for required keys: #{refused.inspect}") if refused.any?
+
+          Type::AcceptsResult.maybe(mode: mode, reasons: "HashShape cannot check #{other_type.describe(:short)}")
+        end
+
+        def unholdable_keys(self_type, key_type, mode)
+          return [] if key_type.nil? || gradual_arm?(key_type)
+
+          self_type.required_keys.select { |key| key_type.accepts(Type::Combinator.constant_of(key), mode: mode).no? }
+        end
+
+        def refused_value_keys(self_type, value_type, mode)
+          return [] if value_type.nil? || gradual_arm?(value_type)
+
+          members = ContentJoin.union_members(value_type)
+          self_type.required_keys.select do |key|
+            formal = self_type.pairs.fetch(key)
+            members.all? { |member| accepts(formal, member, mode: mode).no? }
+          end
+        end
+
+        def gradual_arm?(type) = ContentJoin.union_members(type).any?(Type::Dynamic)
 
         def hash_shape_entry_results(self_type, other_type, mode)
           self_type.pairs.filter_map do |key, formal|

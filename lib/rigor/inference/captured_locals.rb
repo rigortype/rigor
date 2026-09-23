@@ -337,23 +337,33 @@ module Rigor
       # name in a nested block's own scope first, so `[[9]].each { |a| a << x }` mutates, and `[[9]].each { |a| a =
       # x }` rebinds, that block's parameter, not the outer local that happens to share its name: its `depth` stops
       # short of the body's own scope. A `def`, `class`, `module` or `class << self` body opens a scope of its own
-      # that sees no outer local at all, so `def helper; z = 5; end` writes the method's `z`. {.writes} and
+      # that sees no outer local at all, so `def helper; z = 5; end` writes the method's `z` — but only its body,
+      # and a `def`'s parameters, are that scope: a `def (o = x).m` receiver, a `class Foo < (s = x)` superclass or
+      # a `class << (t = x)` target runs in the enclosing one and is left to the depth test. {.writes} and
       # {.content_mutations} both ask it, so the two sets cannot disagree about which `a` a site names. A name
       # resolving in the body's own scope is left to the block-introduced exclusion: Prism puts an outer local there
       # only when the parse never saw it declared, which a synthetic call-site scope can still bind.
       def outer_local?(node, ancestors)
         nesting = 0
-        ancestors.each do |ancestor|
-          return false if HARD_SCOPE_NODES.include?(ancestor.class)
+        ancestors.each_with_index do |ancestor, index|
+          return false if hard_scope_entered?(ancestor, ancestors[index + 1] || node)
 
           nesting += 1 if NESTED_SCOPE_NODES.include?(ancestor.class)
         end
         node.depth >= nesting
       end
 
+      # True when `child`, the next node on the path, is inside the scope `ancestor` opens.
+      def hard_scope_entered?(ancestor, child)
+        case ancestor
+        when Prism::DefNode then child.equal?(ancestor.body) || child.equal?(ancestor.parameters)
+        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode then child.equal?(ancestor.body)
+        else false
+        end
+      end
+
       NESTED_SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
-      HARD_SCOPE_NODES = Set[Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :NESTED_SCOPE_NODES, :HARD_SCOPE_NODES
+      private_constant :NESTED_SCOPE_NODES
 
       def mutated_receiver(node)
         case node

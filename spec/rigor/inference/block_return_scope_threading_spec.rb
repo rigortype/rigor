@@ -1640,6 +1640,18 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "still floors a rebind in a singleton-class target, which runs in the enclosing scope" do
+      # `[nil, #<Object>]` at runtime; `r.last.tag` must not read a stale `nil`.
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        def sclass_real
+          target = nil
+          objs = [Object.new, Object.new]
+          r = [1, 2].map { |k| prev = target; class << (target = objs[k - 1]); def tag = :t; end; prev }
+          r.last.tag
+        end
+      RUBY
+    end
+
     it "still widens the outer local a nested block without the shadow rebinds" do
       expect(dumped_type(<<~RUBY)).not_to eq("[1, 1]")
         a = [1]

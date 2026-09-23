@@ -53,9 +53,17 @@ RSpec.describe Rigor::Inference::CapturedLocals do
       expect(written(source, :z)).to be_empty
     end
 
-    it "excludes a mutation inside a nested def" do
-      source = "h = {}\n[1].each { |k| def helper; h = {}; h[:a] = 1; end }\n"
-      expect(described_class.content_mutations(block_of(source), scope_binding(:h))).to be_empty
+    it "still collects a write in a def receiver, a superclass or a singleton-class target" do
+      # Each runs in the enclosing scope, not the one the `def` or class body opens.
+      source = "a = 1\nb = 2\nc = 3\n[1].each { |k| def (a = k).m; end; class Foo < (b = Object); end; " \
+               "class << (c = k); end }\n"
+      expect(written(source, :a, :b, :c)).to eq(%i[a b c])
+    end
+
+    it "excludes a mutation inside a nested def, but not one in its receiver" do
+      source = "h = {}\n[1].each { |k| def helper; h = {}; h[:a] = 1; end; def (h[:b] = k).m; end }\n"
+      expect(described_class.content_mutations(block_of(source), scope_binding(:h)).transform_values(&:size))
+        .to eq(h: 1)
     end
 
     it "still collects the outer local a sibling write reaches past the shadowing block" do

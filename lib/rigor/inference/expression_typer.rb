@@ -3962,9 +3962,9 @@ module Rigor
       # That is a floor per NAME, not per block, so the structure around a floored name survives (`e = e.to_s; [e, w]`
       # keeps its Tuple), and it is limited to the names tail-only answers stale. A name the entry scope does not bind —
       # a body-local, or an instance variable, class variable or global nothing bound yet — already reads
-      # `Dynamic[top]`. An instance variable the prefix only rebinds keeps its ADR-58 class-wide seed, the union of
-      # every write in the class, this prefix's included ({#class_seeded_ivar?}); one it also mutates in place does not,
-      # since no write shows that. A name whose widening declines keeps its entry binding, because the threaded body
+      # `Dynamic[top]`. An instance variable on its ADR-58 class-wide seed takes no floor for a rebind, since the seed
+      # is the union of every write in the class, this prefix's included, though its mutation sites still widen it
+      # ({#class_seeded_ivar?}). A name whose widening declines keeps its entry binding, because the threaded body
       # would have kept it as well: `s = String.new; … { s << "x"; s }` is `String` either way, and a precise nominal
       # `Array[String]` is a claim the widening may not grow on either path. And a name the #587 (b) `captured` binding
       # answers is left to it, as {#unanswered_tail_dependency?} leaves it: the per-element fold computes that binding
@@ -3987,19 +3987,16 @@ module Rigor
         entry = CapturedLocals.bound_type(block_scope, name)
         return nil if entry.nil?
 
-        mutations = sites.fetch(name, NO_MUTATION_SITES)
-        if rebound.include?(name)
-          return nil if mutations.empty? && class_seeded_ivar?(block_scope, name)
+        return Type::Combinator.untyped if rebound.include?(name) && !class_seeded_ivar?(block_scope, name)
 
-          return Type::Combinator.untyped
-        end
-        widened = UnknownStoreWidening.widen(entry, mutations)
+        widened = UnknownStoreWidening.widen(entry, sites.fetch(name, NO_MUTATION_SITES))
         widened == entry ? nil : widened
       end
 
-      # An instance variable still on its ADR-58 class-wide seed: the union of every WRITE in the class. That covers
-      # a prefix that only rebinds it, never one that mutates it in place — `@out << w.to_s` is no write, so the
-      # seed `"k"` stays `"k"` while the object holds `"k1"`.
+      # An instance variable still on its ADR-58 class-wide seed: the union of every WRITE in the class, so a rebind
+      # in the prefix is already in it and needs no floor. An in-place mutation is no write — `@out << w.to_s` leaves
+      # the seed `"k"` while the object holds `"k1"` — so the mutation sites still widen the seed, as they widen any
+      # other entry binding.
       def class_seeded_ivar?(block_scope, name)
         CapturedLocals.ivar_name?(name) && block_scope.declaration_sourced?(:ivar, name)
       end

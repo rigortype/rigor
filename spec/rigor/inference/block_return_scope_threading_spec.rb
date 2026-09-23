@@ -1919,8 +1919,9 @@ RSpec.describe "block-return scope threading", type: :runner do
     # local — a name the prefix rebinds reads `Dynamic[top]`, one it only mutates in place reads its in-place
     # widening — extended to every name no #587 (b) binding answers: a block parameter, and a capture of a block the
     # call runs at most once, of an iterator that discards its block's value or that the catalogue does not know, or
-    # of the `inject` fold. A name whose widening declines keeps its entry binding, because threading would have kept
-    # it too, and so does an instance variable the prefix only rebinds while it is on its class-wide seed.
+    # of the `inject` fold, and an instance variable on its class-wide seed. A name whose widening declines keeps its
+    # entry binding, because threading would have kept it too; a class-wide seed already holds the prefix's rebinds,
+    # so only its in-place mutations widen it.
     describe "(2), nested: the generic block-return pass under the same suppression" do
       it "widens a parameter the body mutated in place under a HashShape map" do
         # Runtime `[[1], [1]]`; the pass read `a` at its entry `[]`.
@@ -2103,9 +2104,9 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "floors an instance variable on its class-wide seed that the body both rebinds and mutates" do
-        # The seed holds the rebind's `"a"` but not the append after it: runtime `"a1"`.
-        expect(dumped_type(<<~RUBY)).to eq("Dynamic[top]")
+      it "widens the class-wide seed of an instance variable the body both rebinds and mutates" do
+        # The seed `"a" | "k"` holds the rebind's `"a"` but not the append after it: runtime `"a1"`.
+        expect(dumped_type(<<~RUBY)).to eq("String")
           class Buf
             def initialize
               @out = +"k"

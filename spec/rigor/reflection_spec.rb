@@ -184,6 +184,33 @@ RSpec.describe Rigor::Reflection do
       end
     end
 
+    # #1290 — a candidate the census records as written is where Ruby's lookup stops, even when no source
+    # types it. The stop only REPLACES what a lower rung answers; a reference nothing else answers stays
+    # unresolved, because its caller's fallback, missing-constant edge and gem-origin label read that nil.
+    describe "a written candidate no source types (#1290)" do
+      def app_scope(in_source:, writers:)
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: in_source, constant_writers: writers)
+        Rigor::Scope.empty.with_self_type(Rigor::Type::Combinator.nominal_of("App")).with_discovery(index)
+      end
+
+      it "replaces the lower rung's answer with Dynamic[top]" do
+        scope = app_scope(in_source: { "LIMIT" => Rigor::Type::Combinator.constant_of(5) },
+                          writers: { "LIMIT" => %w[LIMIT App::LIMIT].freeze })
+        expect(described_class.resolve_constant_type("LIMIT", scope: scope)).to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "stays unresolved when no rung below the written candidate answers" do
+        scope = app_scope(in_source: {}, writers: { "LIMIT" => %w[App::LIMIT].freeze })
+        expect(described_class.resolve_constant_type("LIMIT", scope: scope)).to be_nil
+      end
+
+      it "keeps the lower rung's answer when the written name is not a candidate" do
+        five = Rigor::Type::Combinator.constant_of(5)
+        scope = app_scope(in_source: { "LIMIT" => five }, writers: { "LIMIT" => %w[LIMIT Other::LIMIT].freeze })
+        expect(described_class.resolve_constant_type("LIMIT", scope: scope)).to eq(five)
+      end
+    end
+
     # #656 — the same lookup one segment at a time. The block above resolves a BARE name through the
     # ancestors; a PATH needs it per segment, because the head and the tail can have different owners
     # and then no `<prefix>::<full path>` candidate names what Ruby names. The shape throughout is

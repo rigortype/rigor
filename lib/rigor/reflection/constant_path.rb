@@ -61,10 +61,14 @@ module Rigor
 
     # Step 2.5's rung as a type: the segment-wise name, then that name looked up like any other
     # candidate so the answer comes from the same source-precedence order as every other rung.
-    def constant_path_type(name, scope, caller_derived: true)
-      known = ->(candidate) { constant_type_at(candidate, scope) }
+    #
+    # Issue #1290 — the final segment's candidates are looked up with the reference's `bound` names
+    # ({.constant_type_at}), so an owner's own `B` another file writes stops the walk before the owner's
+    # superclass answers with its published `B`.
+    def constant_path_type(name, scope, bound:, caller_derived: true)
+      known = ->(candidate) { constant_type_at(candidate, scope, bound) }
       qualified = walk_constant_path(name, scope, known, caller_derived: caller_derived)
-      qualified && constant_type_at(qualified, scope)
+      qualified && constant_type_at(qualified, scope, bound)
     end
     private_class_method :constant_path_type
 

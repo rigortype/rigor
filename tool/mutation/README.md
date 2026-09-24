@@ -103,7 +103,7 @@ finds nothing; a finding is a bug. First run was clean (2,706 `lib/rigor`
 mutants, zero crashes/hangs).
 
 ```sh
-nix … develop -c bundle exec ruby tool/mutation/mutate.rb fuzz lib/rigor --per-file 10
+nix develop -c bundle exec ruby tool/mutation/mutate.rb fuzz lib/rigor --per-file 10
 ```
 
 ## Next steps (staged)

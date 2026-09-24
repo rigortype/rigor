@@ -77,7 +77,7 @@ URI.methods      - Module.methods        # URI
 Regexp.methods   - Class.methods         # Regexp class methods
 ```
 
-Run this inside `nix … develop --command bundle exec ruby -e '…'` so the environment
+Run this inside `nix develop --command bundle exec ruby -e '…'` so the environment
 matches the project's Ruby 4.0.5.
 
 ### 1-b. Cross-reference against the existing implementation

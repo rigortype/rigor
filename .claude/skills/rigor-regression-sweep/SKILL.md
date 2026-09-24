@@ -183,7 +183,7 @@ Use [`scripts/tabulate.rb`](scripts/tabulate.rb) (set the same paths
 + `TAGS`):
 
 ```sh
-nix … develop --command ruby \
+nix develop --command ruby \
   .claude/skills/rigor-regression-sweep/scripts/tabulate.rb
 ```
 

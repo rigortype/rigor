@@ -132,7 +132,7 @@ automatically.
 
 ## Submodule hygiene
 
-Drive the lifecycle through the Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses the sparse-checkout setup `init-submodules` bakes in for `references/phpstan` and `references/TypeScript-Website`. If a submodule is empty after cloning, run `nix … develop --command make init-submodules`.
+Drive the lifecycle through the Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses the sparse-checkout setup `init-submodules` bakes in for `references/phpstan` and `references/TypeScript-Website`. If a submodule is empty after cloning, run `nix develop --command make init-submodules`.
 
 **Never hand-edit `.gitmodules` or `.git/config` for a rename.** Use `git mv old/path new/path`, then `git submodule sync` so `.git/config` follows `.gitmodules`. Hand edits leave stale `submodule.<name>.*` sections and orphan `.git/modules/<old>/` directories, which can crash later parent operations with a `submodule.c` BUG assertion.
 

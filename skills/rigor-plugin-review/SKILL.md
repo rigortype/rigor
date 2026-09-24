@@ -122,7 +122,7 @@ green first, so you can prove each later step is a faithful refactor:
 # external gem:
 bundle exec rspec spec/
 # in the rigor monorepo:
-nix … develop --command bundle exec rspec spec/integration/<plugins|examples>/<id>_plugin_spec.rb
+nix develop --command bundle exec rspec spec/integration/<plugins|examples>/<id>_plugin_spec.rb
 ```
 
 If there is no spec, **write one first** (per `rigor-plugin-author`

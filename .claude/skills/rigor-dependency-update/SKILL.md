@@ -37,8 +37,8 @@ See what is available first, then update within the existing gemspec
 constraints:
 
 ```sh
-nix ... develop --command bundle outdated
-nix ... develop --command bundle update
+nix develop --command bundle outdated
+nix develop --command bundle update
 ```
 
 `bundle update` re-resolves every gem to the latest version the
@@ -100,7 +100,7 @@ Rebuild the native extensions against the new Ruby before verifying:
 
 ```sh
 rm -rf vendor/bundle
-nix ... develop --command bundle install     # recompiles native ext against the new Ruby
+nix develop --command bundle install     # recompiles native ext against the new Ruby
 ```
 
 `vendor/bundle` is **gitignored** — this is a purely local artifact of the

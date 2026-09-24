@@ -27,11 +27,12 @@ Run every development command through the Nix Flake:
 nix develop --command <cmd>
 ```
 
-Nix must have the `nix-command` and `flakes` experimental features enabled — once per machine, in
-`~/.config/nix/nix.conf` (or `/etc/nix/nix.conf`):
+Nix must have the `nix-command` and `flakes` experimental features enabled, once per machine. The
+Determinate Systems installer enables both; otherwise add this line to `~/.config/nix/nix.conf`
+(on NixOS or nix-darwin, set `nix.settings.experimental-features` instead):
 
 ```
-experimental-features = nix-command flakes
+extra-experimental-features = nix-command flakes
 ```
 
 Where that is not set, insert `--extra-experimental-features 'nix-command flakes'` after `nix`. Use an

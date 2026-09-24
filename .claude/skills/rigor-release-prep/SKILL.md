@@ -10,7 +10,7 @@ metadata:
 Follow this workflow when preparing a new `rigor` gem release.
 
 All commands MUST run through the Flake per `AGENTS.md`. The examples below
-include the full `nix ... develop --command` prefix so each line is directly
+include the full `nix develop --command` prefix so each line is directly
 runnable from outside the Flake shell. Inside the Flake shell, drop the
 prefix.
 

@@ -191,7 +191,7 @@ pointer — most ADRs do not need this.)
 git diff --check                                # whitespace
 git status --short                              # expect: new ADR file + modified docs/adr/README.md
                                                 # (+ AGENTS.md only in the rare 4c case)
-nix … develop --command make docs-check         # gates the index rules (ADR-97)
+nix develop --command make docs-check         # gates the index rules (ADR-97)
 ```
 
 ADR authoring is docs-only, so the code gates are not required for the ADR

@@ -456,20 +456,27 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
 
     # A method-level variable that is both the block's return type and part of a parameter's type
     # (`Enumerable#inject: [A] (A initial) { (A, E) -> A } -> A`) depends on the argument as well as the
-    # block. When the call passes an argument, the variable is left `Dynamic[top]` rather than bound to the
-    # block's type: a `Dynamic[block_type]` facet still dispatches exactly, and the block's type need not
-    # contain the result. Each untyped example is paired with an exact control.
+    # block. When the call passes an argument, the variable is not bound to the block's type: a
+    # `Dynamic[block_type]` facet still dispatches exactly, and the block's type need not contain the
+    # result. Where the variable is the whole type of the argument's parameter, the block receives nothing
+    # it names, and both sides widen to one closed value class, it is bound to that class; every other
+    # shape leaves it `Dynamic[top]`. Each untyped example is paired with a control that binds.
     describe "a block-return variable that a parameter also names" do
       let(:fold_rbs) do
         <<~RBS
           class RigorSpecFold
             def self.seeded: [A] (A initial) { () -> A } -> A
             def self.optional_seed: [U] (?U seed) { () -> U } -> U
+            def self.accumulated: [A] (A initial) { (A acc) -> A } -> A
+            def self.rebound: [A] (A initial) { () [self: A] -> A } -> A
+            def self.paired_seed: [T] (T first, T second) { () -> T } -> T
+            def self.late_seed: [T] (?::Integer count, ?T seed) { () -> T } -> T
             def self.rest_seed: [T] (*T seeds) { () -> T } -> T
             def self.trailing_seed: [T] (*::Integer counts, T last) { () -> T } -> T
             def self.keyword_seed: [T] (?seed: T) { () -> T } -> T
             def self.keyword_rest_seed: [T] (**T seeds) { () -> T } -> T
             def self.mapped: [K2] (::Hash[::Symbol, K2] mapping) { () -> K2 } -> ::Array[K2]
+            def self.listed: [T] (::Array[T] seeds) { () -> T } -> T
             def self.counted: [U] (::Integer n) { () -> U } -> U
             def self.block_only: [U] () { () -> U } -> U
           end
@@ -483,29 +490,163 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       let(:fold) { Rigor::Type::Combinator.singleton_of("RigorSpecFold") }
       let(:integer) { Rigor::Type::Combinator.nominal_of(Integer) }
       let(:untyped) { Rigor::Type::Combinator.untyped }
-      let(:seed) { Rigor::Type::Combinator.constant_of(0.0) }
+      let(:seed) { Rigor::Type::Combinator.constant_of(0) }
       let(:keywords) { Rigor::Type::Combinator.hash_shape_of({ seed: seed }) }
 
-      def fold_call(method_name, args, block_type: integer)
+      def permitting_scope
+        Rigor::Scope.empty(environment: fold_environment)
+      end
+
+      def call_node_of(source)
+        Prism.parse(source).value.statements.body.first
+      end
+
+      # The call site the issue #303 argument binding accepts — a live scope and a call node passing plain
+      # positional arguments — so a decline below comes from the shape under test, not from that gate.
+      def fold_call(method_name, args, block_type: integer, scope: permitting_scope, call_node: nil)
+        placeholders = Array.new(args.size) { |i| "a#{i}" }.join(", ")
+        call_node ||= call_node_of("RigorSpecFold.#{method_name}(#{placeholders}) { 1 }")
         described_class.try_dispatch(cc(
                                        receiver: fold,
                                        method_name: method_name,
                                        args: args,
                                        environment: fold_environment,
-                                       block_type: block_type
+                                       block_type: block_type,
+                                       scope: scope,
+                                       call_node: call_node
                                      ))
       end
 
-      it "leaves the variable untyped when a required positional parameter names it" do
-        expect(fold_call(:seeded, [seed])).to equal(untyped)
+      # Binding the argument alone (issue #303) would answer the literal `0`.
+      it "binds the shared class when a required positional parameter is the variable" do
+        expect(fold_call(:seeded, [seed])).to eq(integer)
       end
 
-      it "leaves the variable untyped when the call passes the optional parameter that names it" do
-        expect(fold_call(:optional_seed, [seed])).to equal(untyped)
+      it "binds the shared class when the call passes the optional parameter that is the variable" do
+        expect(fold_call(:optional_seed, [seed])).to eq(integer)
       end
 
       it "binds exactly when the call omits the optional parameter that names it (control)" do
         expect(fold_call(:optional_seed, [])).to eq(integer)
+      end
+
+      # `sum(1) { -1 }` over three elements is `-2`, which neither `1` nor `-1` contains. A literal is not
+      # closed under the arithmetic a combining method applies; its class is.
+      it "widens a literal and a bounded integer to their class" do
+        block_type = Rigor::Type::Combinator.negative_int
+        expect(fold_call(:seeded, [Rigor::Type::Combinator.constant_of(1)], block_type: block_type)).to eq(integer)
+      end
+
+      it "widens a bounded float to its class" do
+        float = Rigor::Type::Combinator.nominal_of(Float)
+        block_type = Rigor::Type::Combinator.non_nan_float
+        expect(fold_call(:seeded, [Rigor::Type::Combinator.constant_of(0.0)], block_type: block_type)).to eq(float)
+      end
+
+      it "widens a difference to its base's class" do
+        expect(fold_call(:seeded, [seed], block_type: Rigor::Type::Combinator.non_zero_int)).to eq(integer)
+      end
+
+      it "widens a refinement to its base's class" do
+        string = Rigor::Type::Combinator.nominal_of(String)
+        type = fold_call(:seeded, [Rigor::Type::Combinator.constant_of("")],
+                         block_type: Rigor::Type::Combinator.lowercase_string)
+        expect(type).to eq(string)
+      end
+
+      # `sum(0.0)` over Integers is a Float every time; `Float | Integer` would fire
+      # `def.return-type-mismatch` against a declared `-> Float`.
+      it "leaves the variable untyped when the two sides' classes differ" do
+        expect(fold_call(:seeded, [Rigor::Type::Combinator.constant_of(0.0)])).to equal(untyped)
+      end
+
+      it "reads every argument the variable's parameters receive" do
+        expect(fold_call(:paired_seed, [seed, Rigor::Type::Combinator.constant_of("x")])).to equal(untyped)
+      end
+
+      it "binds when every argument shares the block's class (control)" do
+        expect(fold_call(:paired_seed, [seed, Rigor::Type::Combinator.constant_of(2)])).to eq(integer)
+      end
+
+      # The block's type is one typing of its body, taken with whatever its `acc` or `self` was typed as.
+      it "leaves the variable untyped when the block's parameter names it" do
+        expect(fold_call(:accumulated, [seed])).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the block's self names it" do
+        expect(fold_call(:rebound, [seed])).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the argument is nil" do
+        nil_type = Rigor::Type::Combinator.constant_of(nil)
+        expect(fold_call(:seeded, [nil_type], block_type: nil_type)).to equal(untyped)
+      end
+
+      it "leaves the variable untyped for NilClass" do
+        nil_class = Rigor::Type::Combinator.nominal_of("NilClass")
+        expect(fold_call(:seeded, [nil_class], block_type: nil_class)).to equal(untyped)
+      end
+
+      # `class Name < String` inherits a `+` that answers a plain String.
+      it "leaves the variable untyped for a class outside the closed value classes" do
+        own = Rigor::Type::Combinator.nominal_of("RigorSpecFold")
+        expect(fold_call(:seeded, [own], block_type: own)).to equal(untyped)
+      end
+
+      # Dropping the key instead would let the issue #303 argument binding pin `A` to the argument alone.
+      it "leaves the variable untyped when the argument is generic" do
+        array = Rigor::Type::Combinator.nominal_of("Array", type_args: [integer])
+        expect(fold_call(:seeded, [array], block_type: array)).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the block's type is a tuple" do
+        expect(fold_call(:seeded, [seed], block_type: Rigor::Type::Combinator.tuple_of(integer))).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the block's type is Dynamic" do
+        expect(fold_call(:seeded, [seed], block_type: Rigor::Type::Combinator.dynamic(integer))).to equal(untyped)
+      end
+
+      # A splat that turns out empty moves the argument after it into `count`.
+      it "leaves the variable untyped when a splat precedes the argument" do
+        splat = call_node_of("RigorSpecFold.late_seed(*counts, a1) { 1 }")
+        expect(fold_call(:late_seed, [untyped, seed], call_node: splat)).to equal(untyped)
+      end
+
+      it "binds when plain arguments fix the positions (control)" do
+        expect(fold_call(:late_seed, [Rigor::Type::Combinator.constant_of(3), seed])).to eq(integer)
+      end
+
+      # Keyword arguments reach a method without keyword parameters as a trailing positional hash.
+      it "leaves the variable untyped when the call passes keyword arguments" do
+        type = fold_call(:optional_seed, [seed], call_node: call_node_of("RigorSpecFold.optional_seed(k: a0) { 1 }"))
+        expect(type).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the call forwards `...`" do
+        definition = call_node_of("def forward(...) = RigorSpecFold.optional_seed(...)")
+        type = fold_call(:optional_seed, [seed], call_node: definition.body.body.first)
+        expect(type).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the argument types do not line up with the call's arguments" do
+        expect(fold_call(:seeded, [seed], call_node: call_node_of("RigorSpecFold.seeded { 1 }"))).to equal(untyped)
+      end
+
+      it "leaves the variable untyped at a call node that is not a method call" do
+        definition = call_node_of("def seeded(a0) = super(a0) { 1 }")
+        expect(fold_call(:seeded, [seed], call_node: definition.body.body.first)).to equal(untyped)
+      end
+
+      it "leaves the variable untyped without a call site the argument binding accepts" do
+        expect(fold_call(:seeded, [seed], scope: nil)).to equal(untyped)
+      end
+
+      it "leaves the variable untyped when the scope discovered a method shadowing the resolved one" do
+        shadowed = permitting_scope.with_discovery(
+          Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_methods: { "RigorSpecFold" => { seeded: :singleton } })
+        )
+        expect(fold_call(:seeded, [seed], scope: shadowed)).to equal(untyped)
       end
 
       it "leaves the variable untyped when a rest parameter names it" do
@@ -516,7 +657,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         expect(fold_call(:trailing_seed, [Rigor::Type::Combinator.constant_of(1), seed])).to equal(untyped)
       end
 
-      it "leaves the variable untyped when a keyword parameter names it and the call passes keywords" do
+      it "leaves the variable untyped when a keyword parameter names it" do
         expect(fold_call(:keyword_seed, [keywords])).to equal(untyped)
       end
 
@@ -530,6 +671,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         expect(type).to eq(Rigor::Type::Combinator.nominal_of("Array", type_args: [untyped]))
       end
 
+      # `T` is the container's element, whatever class the argument has.
+      it "leaves the variable untyped when a closed-class argument lands in a container parameter" do
+        string = Rigor::Type::Combinator.nominal_of(String)
+        expect(fold_call(:listed, [string], block_type: string)).to equal(untyped)
+      end
+
       it "binds exactly when the argument's parameter does not name the variable (control)" do
         expect(fold_call(:counted, [Rigor::Type::Combinator.constant_of(3)])).to eq(integer)
       end
@@ -538,25 +685,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         expect(fold_call(:block_only, [])).to eq(integer)
       end
 
-      # Dropping the key instead would let the issue #303 argument binding pin `A` to the seed alone.
-      it "does not fall through to binding the variable from the argument" do
-        call_node = Prism.parse("RigorSpecFold.seeded(0.0) { 1 }").value.statements.body.first
-        type = described_class.try_dispatch(cc(
-                                              receiver: fold,
-                                              method_name: :seeded,
-                                              args: [seed],
-                                              environment: fold_environment,
-                                              block_type: integer,
-                                              scope: Rigor::Scope.empty(environment: fold_environment),
-                                              call_node: call_node
-                                            ))
-        expect(type).to equal(untyped)
-      end
-
       # core RBS: `Hash#transform_keys: [K2] (hash[_Key, K2]) { (K) -> K2 } -> Hash[K2, V]`. The key a
       # mapping hit takes never reaches the block, so the block's `String` does not cover `:x`.
       # `HashTransformKeysFolding` answers this form ahead of this tier; calling the tier directly shows
-      # what a form that tier declines would get.
+      # what a form that tier declines would get, at a call site the argument binding accepts.
       it "leaves the core transform_keys mapping overload's key untyped" do
         receiver = Rigor::Type::Combinator.nominal_of(
           "Hash", type_args: [Rigor::Type::Combinator.nominal_of(Symbol), integer]
@@ -567,7 +699,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
                                               method_name: :transform_keys,
                                               args: [mapping],
                                               environment: environment,
-                                              block_type: Rigor::Type::Combinator.nominal_of(String)
+                                              block_type: Rigor::Type::Combinator.nominal_of(String),
+                                              scope: Rigor::Scope.empty(environment: environment),
+                                              call_node: Prism.parse("h.transform_keys(m) { |k| k.to_s }")
+                                                              .value.statements.body.first
                                             ))
         expect(type).to eq(Rigor::Type::Combinator.nominal_of("Hash", type_args: [untyped, integer]))
       end

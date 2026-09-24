@@ -238,6 +238,8 @@ An `effects.envelopes:` entry participates when it selects by `namespace:`. A `m
 
 An envelope that reads ⊤ imports nothing and discharges nothing. A tag that stopped bounding must not silently buy a call site its exhaustiveness back.
 
+**Whose `self`.** An imported bound is copied into the caller unchanged, just as a callee's proven labels join the caller's along an edge. Its `mutate.*` labels therefore keep the frame of the method that declared them. An envelope's `mutate.self` means the callee changes its own receiver, so in the caller's row it names the object the caller called on, not the caller's `self`. `blog.posts.build` reads `≤ [mutate.self]` although only the association changed. An attribution row is written about the call rather than the callee. It spells a change to a receiver that is not the caller's `self` as bare `mutate`, or as `mutate.static` when what changes is class-level or process-global state, which belongs to no frame. It keeps `mutate.self` for an implicit-self call, where the two are one object.
+
 ## Attribution
 
 Gem methods have no bodies Rigor analyses, so someone must colour them. `effects.attribution:` is the project's own channel for that:

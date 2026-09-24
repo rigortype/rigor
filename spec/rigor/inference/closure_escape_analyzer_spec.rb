@@ -50,6 +50,29 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
         end
       end
 
+      # IO, File and StringIO are Enumerable over lines, and an eager Enumerable method runs its block from inside
+      # the call, through `each`. Without these entries `io.each_with_index { ... }` classified `:unknown` where
+      # `io.each_line { ... }` did not, and missed the same loop-body re-narrowing. Spelled out rather than read
+      # back from the catalogue's own constant, so a wrong entry cannot pass.
+      it "recognises eager Enumerable methods on IO / File / StringIO instances" do
+        eager = %i[each_with_index each_with_object map select reject detect find inject reduce count sum
+                   partition group_by min_by zip filter_map]
+        %w[IO File StringIO].each do |name|
+          stream = Rigor::Type::Combinator.nominal_of(name)
+          eager.each { |m| expect(classify(stream, m)).to eq(:non_escaping), "expected #{name}##{m} non_escaping" }
+        end
+      end
+
+      # `chunk` / `chunk_while` / `slice_*` return an Enumerator that keeps the block and runs it only when the
+      # Enumerator is consumed, so the block is not invoked during the call.
+      it "leaves the Enumerator-returning Enumerable methods unknown on IO / File / StringIO instances" do
+        deferred = %i[chunk chunk_while slice_when slice_before slice_after]
+        %w[IO File StringIO].each do |name|
+          stream = Rigor::Type::Combinator.nominal_of(name)
+          deferred.each { |m| expect(classify(stream, m)).to eq(:unknown), "expected #{name}##{m} unknown" }
+        end
+      end
+
       it "recognises Object#tap / then / yield_self on any receiver" do
         %i[tap then yield_self].each do |m|
           expect(classify(string_nominal, m)).to eq(:non_escaping)

@@ -919,7 +919,8 @@ label with no stated reason is a claim nobody can review.
 `labels:` describe the **call**, not the callee's body. A row cannot run the ownership judgment the scan
 applies to a core mutator, so a change to a receiver that is not the caller's `self` is spelt bare `mutate`,
 and `mutate.self` is kept for an implicit-self call. Examples of the two are rigor-actionpack's
-`session[:k] = v` and `render`. An RBS envelope is the other way round, because it bounds the callee's own
+`session[:k] = v` and `render`. A change to class-level or process-global state belongs to no frame and is
+`mutate.static` either way, as in rigor-railties' `Rails.application.reload_routes!`. An RBS envelope is the other way round, because it bounds the callee's own
 body ([`effect-labels.md`](../type-specification/effect-labels.md) § The declared lane at call sites).
 
 `receiver:` is spelled one of three ways, and the spelling picks the matching rule:

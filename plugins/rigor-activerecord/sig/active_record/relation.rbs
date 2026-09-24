@@ -125,12 +125,12 @@
 # AssociationRelation (`user.posts.where(…)`), neither of which
 # overrides it, raises `ArgumentError` and goes unreported.
 #
-# Of the rest, the `insert_all` family's `(...)` methods and the
-# proxy's `delegate … to: :scope` block (the query builders and
-# `scoping`) forward their arguments unchanged to the Relation's own
-# methods, and the proxy's other overrides (`find`, `last`, `take`,
-# `build`, `create`, `calculate`, `pluck`, …) take no more than the
-# declarations here. `delete` and `destroy`, whose overrides take
+# Of the rest, the `(...)` methods of the `insert` and `insert_all`
+# families and the proxy's `delegate … to: :scope` block (the query
+# builders and `scoping`) forward their arguments unchanged to the
+# Relation's own methods, and the proxy's other overrides (`find`,
+# `last`, `take`, `build`, `create`, `calculate`, `pluck`, …) take no
+# more than the declarations here. `delete` and `destroy`, whose overrides take
 # more arguments than the Relation's, stay undeclared for the
 # reasons above.
 

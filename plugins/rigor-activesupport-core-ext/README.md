@@ -51,9 +51,12 @@ in-place extensions to Ruby's built-in classes:
 - `String` — `underscore`, `camelize`, `classify`, `constantize`,
   `demodulize`, `pluralize`, `singularize`, `humanize`, `tableize`,
   `parameterize`, `squish`, `truncate`, `truncate_words`,
-  `html_safe`, `starts_with?`, `ends_with?`, `indent`, `mb_chars`,
-  `to_time` / `to_date` / `to_datetime` / `to_hours`, `from`, `to`,
-  `first`, `last`
+  `upcase_first` / `downcase_first`, `html_safe`, `starts_with?`,
+  `ends_with?`, `indent`, `mb_chars`, `is_utf8?`, `acts_like_string?`,
+  `to_time` / `to_date` / `to_datetime` / `to_hours`, `in_time_zone`,
+  `from`, `to`, `first`, `last`
+- `Symbol` — `starts_with?` / `ends_with?`
+- `Kernel` — `class_eval` on any object (`singleton_class.class_eval`)
 - `Array` — `Array.wrap`, `#to_sentence`, `#in_groups_of`,
   `#in_groups`, `#split`, `#second` / `#third` / `#fourth`,
   `#second_to_last` / `#third_to_last`, `#from`, `#to`, `#extract!`,
@@ -72,9 +75,9 @@ in-place extensions to Ruby's built-in classes:
   `#exclude?`, `#including`, `#excluding`, `#without`, `#sole`,
   `#many?`, `#in_order_of`, `#maximum`, `#minimum`, `#compact_blank`
 - `Object` (universal) — `#blank?`, `#present?`, `#presence`,
-  `#try`, `#try!`, `#acts_like?`, `#to_param`, `#to_query`,
-  `#duplicable?`, `#deep_dup`, `#instance_values`,
-  `#instance_variable_names` plus
+  `#presence_in`, `#try`, `#try!`, `#acts_like?`, `#to_param`,
+  `#to_query`, `#duplicable?`, `#deep_dup`, `#instance_values`,
+  `#instance_variable_names`, `#with`, `#with_options`, `#html_safe?` plus
   the `NilClass` / `TrueClass` / `FalseClass` specialisations
 - `ActiveSupport::TimeWithZone` — declared as a subclass of `Time`,
   which is what `Time.current` and the `Duration#ago` family answer, so
@@ -200,14 +203,15 @@ much, and possibly more", which is the truth.
 
 `sig/active_support/core_ext.rbs` also carries `%a{pure}` on the
 predicates and transforms genuinely free of side effects — `blank?` /
-`present?` / `presence`, `Hash#deep_dup` / `deep_merge`, the inflections
+`present?` / `presence`, `Hash#deep_merge`, the inflections
 (`camelize`, `underscore`, `pluralize`, `titleize`, …), `squish` /
 `truncate` / `remove`, `with_indifferent_access`, the Duration and
 Bytes multipliers, and more — audited one by one against the vendored
 ActiveSupport source rather than assumed from the method name. Each
 skipped candidate carries a one-line reason in the RBS file itself:
 `try` / `try!` / `as_json` dispatch to a method named at the call site
-and cannot be judged in isolation; `constantize` may autoload;
+and cannot be judged in isolation; `deep_dup` runs each element's own
+`initialize_copy`; `constantize` may autoload;
 `parameterize` reads `I18n.locale`; every bang method mutates in
 place; and `Date#ago` / `#beginning_of_day` / friends turn out to read
 `Time.zone` where the same-named `Time` methods do not — verified

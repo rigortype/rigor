@@ -36,14 +36,16 @@ path, no vendoring, no `signature_paths:` wiring.
 
 Roughly the top ~40 selectors plus their close neighbours, across:
 
-- **Object (universal)** — `#blank?`, `#present?`, `#presence`, `#try`,
-  `#try!`, `#acts_like?`, `#deep_dup` (+ `NilClass` / `TrueClass` /
-  `FalseClass`).
+- **Object (universal)** — `#blank?`, `#present?`, `#presence`,
+  `#presence_in`, `#try`, `#try!`, `#acts_like?`, `#deep_dup`, `#with`,
+  `#with_options`, `#html_safe?`, `Kernel#class_eval` (+ `NilClass` /
+  `TrueClass` / `FalseClass`).
 - **Integer / Float** — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …).
 - **String** — inflections (`#underscore`, `#camelize`, `#classify`,
   `#constantize`, `#pluralize`, …), filters (`#squish`, `#truncate`),
-  `#html_safe`, `#starts_with?` / `#ends_with?`, conversions.
+  `#html_safe`, `#starts_with?` / `#ends_with?` (also on **Symbol**),
+  conversions and `#in_time_zone`.
 - **Time / Date / DateTime** — `.current`, `.zone`, `#yesterday`,
   `#tomorrow`, `#beginning_of_*` / `#end_of_*`, `#ago`, `#since`. `Time`
   additionally carries its **whole** Rails instance surface (see below);

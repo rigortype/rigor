@@ -104,7 +104,7 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   Float#byte Float#bytes Float#day Float#days Float#gigabyte Float#gigabytes Float#hour Float#hours
   Float#kilobyte Float#kilobytes Float#megabyte Float#megabytes Float#minute Float#minutes
   Float#month Float#months Float#second Float#seconds Float#week Float#weeks Float#year Float#years
-  Hash#assert_valid_keys Hash#compact_blank Hash#deep_dup Hash#deep_merge Hash#deep_merge?
+  Hash#assert_valid_keys Hash#compact_blank Hash#deep_merge Hash#deep_merge?
   Hash#deep_stringify_keys Hash#deep_symbolize_keys Hash#deep_transform_keys Hash#deep_transform_values
   Hash#extractable_options? Hash#nested_under_indifferent_access Hash#reverse_merge Hash#stringify_keys
   Hash#symbolize_keys Hash#to_options Hash#with_defaults Hash#with_indifferent_access Hash#without
@@ -116,15 +116,17 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   Integer#terabyte Integer#terabytes Integer#week Integer#weeks Integer#year Integer#years
   NilClass#blank? NilClass#duplicable? NilClass#presence NilClass#present? NilClass#to_param
   NilClass#try NilClass#try!
-  Object#acts_like? Object#blank? Object#duplicable? Object#in? Object#presence Object#present?
+  Object#acts_like? Object#blank? Object#duplicable? Object#html_safe? Object#in? Object#presence
+  Object#presence_in Object#present?
   Range#overlaps?
-  String#at String#camelcase String#camelize String#classify String#dasherize String#deconstantize
-  String#demodulize String#ends_with? String#exclude? String#first String#foreign_key String#from
-  String#html_safe String#html_safe? String#humanize String#indent String#inquiry String#last
-  String#mb_chars String#pluralize String#remove String#singularize String#squish
-  String#starts_with? String#strip_heredoc String#tableize String#titlecase String#titleize
-  String#to String#truncate String#truncate_bytes String#truncate_words String#underscore
-  String#upcase_first
+  String#acts_like_string? String#at String#camelcase String#camelize String#classify String#dasherize
+  String#deconstantize String#demodulize String#downcase_first String#ends_with? String#exclude?
+  String#first String#foreign_key String#from String#html_safe String#html_safe? String#humanize
+  String#indent String#inquiry String#is_utf8? String#last String#mb_chars String#pluralize
+  String#remove String#singularize String#squish String#starts_with? String#strip_heredoc
+  String#tableize String#titlecase String#titleize String#to String#truncate String#truncate_bytes
+  String#truncate_words String#underscore String#upcase_first
+  Symbol#ends_with? Symbol#starts_with?
   TrueClass#blank? TrueClass#present? TrueClass#to_param
   ERB::Util.html_escape_once
 ].freeze
@@ -141,10 +143,11 @@ CORE_EXT_PURE_KEYS = (CORE_EXT_PURE_OTHER_KEYS + CORE_EXT_PURE_DATE_AND_TIME_KEY
 # mutable `Time::DATE_FORMATS` and is NOT pure. Under-claiming an envelope costs precision;
 # over-claiming one is unsound. These two lines are what stops someone "completing" the sweep (#670).
 CORE_EXT_NOT_PURE_KEYS = %w[
-  Object#as_json Object#try Object#try! Object#deep_dup
+  Object#as_json Object#try Object#try! Object#deep_dup Object#with Object#with_options
+  Kernel#class_eval
   String#constantize String#safe_constantize String#parameterize
   String#squish! String#remove! String#indent!
-  String#to_time String#to_date String#to_datetime String#to_hours
+  String#to_time String#to_date String#to_datetime String#to_hours String#in_time_zone
   Time.current Time.zone Time.zone=
   Time#beginning_of_week Time#end_of_week Time#at_beginning_of_week Time#at_end_of_week
   Time#all_week Time#days_to_week_start Time#next_week Time#next_weekday Time#prev_week
@@ -176,7 +179,7 @@ CORE_EXT_NOT_PURE_KEYS = %w[
   Hash#symbolize_keys! Hash#deep_symbolize_keys! Hash#stringify_keys! Hash#deep_stringify_keys!
   Hash#deep_transform_keys! Hash#deep_transform_values! Hash#deep_merge! Hash#except!
   Hash#to_query Hash#to_param Hash#to_xml Hash#compact_blank! Hash#reverse_merge! Hash#slice!
-  Hash#to_options! Hash#with_defaults! Hash#reverse_update Hash#extract!
+  Hash#to_options! Hash#with_defaults! Hash#reverse_update Hash#extract! Hash#deep_dup
   Range#to_fs Range#to_formatted_s
 ].freeze
 

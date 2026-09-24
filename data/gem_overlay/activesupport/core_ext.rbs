@@ -68,6 +68,8 @@ class Object
 
   # `core_ext/object/inclusion` — `x.in?([a, b])` / `x.in?(1..10)`.
   def in?: (untyped) -> bool
+  # `in?(another_object) ? self : nil` — `params[:kind].presence_in(%w[a b])`.
+  def presence_in: (untyped) -> self?
 
   # Issue #673 — `core_ext/object/to_query`, `core_ext/object/duplicable` and
   # `core_ext/object/instance_variables` all hang off `Object`, so every
@@ -100,6 +102,43 @@ class Object
   # `Object` and not only on `Hash`, where it sat alone: `[[1], [2]].deep_dup`
   # is the common shape.
   def deep_dup: () -> self
+
+  # `core_ext/object/with` (ActiveSupport 7.1+) — sets each keyword through
+  # its public writer, yields `self`, and restores the old values in an
+  # `ensure`; the answer is the block's. There is no blockless form: `yield` without a block raises.
+  # ActiveSupport `undef_method`s it on `NilClass`, `TrueClass`, `FalseClass`,
+  # `Integer`, `Float` and `Symbol`, which RBS cannot express, so `1.with(a: 1)`
+  # resolves here where Ruby raises — a missed error, not a false one.
+  # `Data#with` (core) is a subclass override and keeps its own `-> self`.
+  def with: [T] (**untyped attributes) { (self) -> T } -> T
+
+  # `core_ext/object/with_options` — without a block, the
+  # `ActiveSupport::OptionMerger` proxy (not declared here); with one, the
+  # block's value. A zero-arity block is `instance_eval`ed on the proxy, the
+  # `with_options dependent: :destroy do has_many … end` model-body shape.
+  def with_options: (untyped options) -> untyped
+                  | [T] (untyped options) { (?) -> T } -> T
+
+  # `core_ext/string/output_safety` — `false` on `Object`, `true` on
+  # `Numeric`, the buffer's own state on `ActiveSupport::SafeBuffer`. `bool`
+  # for the reason `duplicable?` is: `-> false` on the universal receiver makes
+  # every `if x.html_safe?` an always-falsy branch on the subclasses that answer
+  # true.
+  def html_safe?: () -> bool
+end
+
+# ---------------------------------------------------------------
+# Kernel — `core_ext/kernel/singleton_class`
+# ---------------------------------------------------------------
+
+# `singleton_class.class_eval(*args, &block)` on any object. Declared on
+# `Kernel`, where ActiveSupport defines it; a `Module` receiver still answers
+# core `Module#class_eval`, which is its own alias of `module_eval`. The two
+# overloads mirror that `module_eval`: a string, or a block given the
+# singleton class.
+module Kernel
+  def class_eval: (string code, ?string? filename, ?int lineno) -> untyped
+                | [U] () { (untyped singleton_class) -> U } -> U
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -156,6 +195,10 @@ class String
   def titlecase: () -> String
   def dasherize: () -> String
   def upcase_first: () -> String
+  def downcase_first: () -> String # ActiveSupport 7.1+
+
+  # `core_ext/string/behavior` — the `acts_like?(:string)` duck-type hook.
+  def acts_like_string?: () -> true
 
   # `core_ext/string/filters`
   def squish: () -> String
@@ -189,6 +232,12 @@ class String
   def to_datetime: () -> DateTime
   def to_hours: () -> Float
 
+  # `core_ext/string/zones` — `Time.find_zone!(zone).parse(self)`, or
+  # `to_time` when no zone is set. `untyped` like the `Time` / `Date` rows:
+  # the parse answers an `ActiveSupport::TimeWithZone`, or `nil` on a string
+  # with no date parts.
+  def in_time_zone: (?untyped zone) -> untyped
+
   # `core_ext/string/access`
   def at: (Integer | Range[Integer] | Regexp position) -> String?
   def from: (Integer position) -> String
@@ -201,12 +250,24 @@ class String
 
   # `core_ext/string/multibyte`
   def mb_chars: () -> untyped
+  def is_utf8?: () -> bool
 
   # `core_ext/string/inquiry`
   def inquiry: () -> untyped # ActiveSupport::StringInquirer
 
   # `core_ext/string/exclude` (an ActiveSupport addition)
   def exclude?: (String) -> bool
+end
+
+# ---------------------------------------------------------------
+# Symbol — `core_ext/symbol/starts_ends_with`
+# ---------------------------------------------------------------
+
+# `alias_method`s of core `start_with?` / `end_with?`, declared with the core
+# parameter lists.
+class Symbol
+  def starts_with?: (*Regexp | string prefixes) -> bool
+  def ends_with?: (*string suffixes) -> bool
 end
 
 # ---------------------------------------------------------------

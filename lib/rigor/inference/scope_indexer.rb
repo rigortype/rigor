@@ -385,6 +385,7 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        merge_ivar_and_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
@@ -1724,9 +1725,33 @@ module Rigor
       # earlier write, so the rvalue is the contribution; no `nil` member (unlike `||=`, the write
       # cannot be the first thing to give the ivar a value, and a spurious nil here would fire
       # possible-nil at reads the pre-existing writes already typed).
+      #
+      # For the same reason the contribution counts only beside a write that can give the ivar a value,
+      # so it waits under {AND_WRITE_CONTRIBUTIONS} until {#merge_ivar_and_writes!} sees the whole class:
+      # that write may come later in source order. An ivar only `&&=` writes stays unseeded, the unbound
+      # target `ExpressionTyper#compound_write_value` reads as `Dynamic[top]`. Seeded as the rvalue, the
+      # `&&=` bound itself, and `if (@x &&= 1)` folded always-truthy on an ivar that is `nil` at runtime.
       def record_ivar_and_write(node, scope, class_name, accumulator)
-        accumulate_ivar_type(accumulator, class_name, node.name, scope.type_of(node.value))
+        pending = (accumulator[AND_WRITE_CONTRIBUTIONS] ||= {})
+        accumulate_ivar_type(pending, class_name, node.name, scope.type_of(node.value))
       end
+
+      # Folds the held `&&=` contributions into the seed of every ivar another write seeds, and drops the rest.
+      def merge_ivar_and_writes!(accumulator)
+        accumulator.delete(AND_WRITE_CONTRIBUTIONS)&.each do |class_name, ivars|
+          seeded = accumulator[class_name]
+          next if seeded.nil?
+
+          ivars.each do |ivar_name, type|
+            seeded[ivar_name] = Type::Combinator.union(seeded[ivar_name], type) if seeded.key?(ivar_name)
+          end
+        end
+      end
+
+      # The accumulator key {#record_ivar_and_write} holds its contributions under until the walk ends. Every
+      # other key is a qualified class name, a String, so a Symbol can never collide with one.
+      AND_WRITE_CONTRIBUTIONS = :and_write_contributions
+      private_constant :AND_WRITE_CONTRIBUTIONS
 
       # `@x op= v` stores `@x op v`. The receiver for the dispatch is the accumulator's current union
       # for the ivar — an over-approximation of the live value, which is the right direction for a
@@ -1736,9 +1761,15 @@ module Rigor
       # at runtime, so the seed is unconstrained there — or the dispatch fails (`bool + 1`); either
       # way the fallback is the widened rvalue, which is the right answer for the dominant `+=` /
       # `-=` / `|=` families and an under-report elsewhere rather than a folded wrong claim.
+      #
+      # The union includes the `&&=` contributions {#record_ivar_and_write} still holds: a `+=` walked
+      # after `@x &&= 1.5` would otherwise dispatch on `1` alone, drop `Float` from the seed, and fold
+      # `x == 2.5` always-falsey on a program that reaches it.
       def record_ivar_operator_write(node, scope, class_name, accumulator)
         rvalue_type = scope.type_of(node.value)
-        current = accumulator.dig(class_name, node.name)
+        seeded = accumulator.dig(class_name, node.name)
+        held = accumulator.dig(AND_WRITE_CONTRIBUTIONS, class_name, node.name)
+        current = seeded && held ? Type::Combinator.union(seeded, held) : seeded || held
         result =
           if current
             MethodDispatcher.dispatch(

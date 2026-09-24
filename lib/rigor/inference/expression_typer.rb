@@ -490,9 +490,13 @@ module Rigor
         when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
              Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode,
              Prism::ConstantAndWriteNode, Prism::ConstantPathAndWriteNode
-          return rhs if current.nil?
-
-          Type::Combinator.union(Narrowing.narrow_falsey(current), rhs)
+          # `&&=` is no memo: an unset target returns its own `nil` without evaluating the rvalue (a constant or
+          # class variable raises instead). Beside the rvalue, an UNBOUND target's value is its own falsey value —
+          # `nil` when unset, or a falsey value a write the analyzer did not see stored — which
+          # `narrow_falsey(Dynamic[top])` carries as `Dynamic[top]`, the statement evaluator's reading. The index
+          # rule says the same of `h[k] &&= v`. Read as the rvalue, `if (@x &&= 1)` folded always-truthy on a
+          # program that takes the else arm.
+          Type::Combinator.union(Narrowing.narrow_falsey(current || dynamic_top), rhs)
         else
           compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
         end

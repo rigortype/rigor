@@ -1343,6 +1343,35 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
     end
 
+    # `&&=` is no memo: an unset target returns its own `nil` without evaluating the rvalue, so an unbound `&&=`
+    # reads the binding something the analyzer did not see stored beside the rvalue — the statement evaluator's
+    # `falsey(Dynamic[top]) | rhs`, never the rvalue alone.
+    describe "an unbound `&&=`" do
+      it "reads the unseen binding beside the rvalue, for every variable kind" do
+        ["@x", "@@x", "$x", "x"].each do |target|
+          type = scope.type_of(parse_expression("#{target} &&= 7"), tracer: tracer)
+
+          expect([target, type.describe]).to eq([target, "7 | Dynamic[top]"])
+        end
+        expect(tracer).to be_empty
+      end
+
+      it "agrees with the statement evaluator's answer for the same write" do
+        ["@x", "@@x", "$x", "x"].product(["7", 'raise("b")']).each do |target, rvalue|
+          node = parse_expression("#{target} &&= #{rvalue}")
+          statement_type, = scope.evaluate(node)
+
+          expect([target, rvalue, scope.type_of(node)]).to eq([target, rvalue, statement_type])
+        end
+      end
+
+      it "types a bound target's `&&=` as the value it stores (control)" do
+        bound = scope.with_ivar(:@x, Rigor::Type::Combinator.nominal_of("String"))
+
+        expect(bound.type_of(parse_expression("@x &&= 7"))).to eq(Rigor::Type::Combinator.constant_of(7))
+      end
+    end
+
     describe "ivar/cvar/global reads consult Scope bindings (Slice 7 phase 1)" do
       it "returns the bound type for an InstanceVariableReadNode" do
         bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(7))

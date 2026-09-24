@@ -1453,6 +1453,55 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include("init", "refreshed")
         end
 
+        it "keeps the `&&=` contribution when the seeding write comes later in source order" do
+          program = parse(<<~RUBY)
+            class C
+              def refresh
+                @token &&= "refreshed"
+              end
+              def initialize
+                @token = "init"
+              end
+            end
+          RUBY
+          values = seed_members(program, "C", :@token).grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include("init", "refreshed")
+        end
+
+        it "lets a later `op=` dispatch on an `&&=` contribution the walk still holds" do
+          # Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the `1.5` the `&&=` stores.
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @x = 1
+              end
+              def shrink
+                @x &&= 1.5
+              end
+              def grow
+                @x += 1
+              end
+            end
+          RUBY
+          members = seed_members(program, "C", :@x)
+          expect(members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }).to be(true)
+        end
+
+        it "does not seed an `&&=`-only ivar — the write cannot give the ivar its first value" do
+          # Seeded as the rvalue, `if (@token &&= 1)` folded always-truthy on an ivar that is `nil` at runtime.
+          program = parse(<<~RUBY)
+            class C
+              def refresh
+                @token &&= 1
+                @guard &&= raise("unset")
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          expect(idx[program].class_ivars_for("C")).not_to have_key(:@token)
+          expect(idx[program].class_ivars_for("C")).not_to have_key(:@guard)
+        end
+
         it "seeds `@x += v` as the widened dispatch result, not a pinned literal" do
           program = parse(<<~RUBY)
             class C

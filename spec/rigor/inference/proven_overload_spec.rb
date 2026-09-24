@@ -154,26 +154,54 @@ RSpec.describe "proven overload pass", type: :runner do
     expect(rules(source, sig: sig)).not_to include("call.undefined-method")
   end
 
-  it "does not skip an earlier arm naming a project class that the source, not the RBS, includes" do
-    # Runtime: `"p"`. The RBS never includes `Printable` into `Integer`, so both orderings call them disjoint; only
-    # the source does (#1351). A project-declared parameter class is never proven out.
-    sig = { "money.rbs" => <<~RBS }
-      module Printable
-      end
+  # Runtime: `"p"`. The RBS never includes `Printable` into `Integer`, so both orderings call them disjoint; only the
+  # source does (#1351). A module never counts as proven out, whether `sig/` declares it or Rigor stubs it.
+  {
+    "declared in sig/" => "module Printable\nend\n",
+    "declared nowhere" => ""
+  }.each do |label, module_rbs|
+    it "does not skip an earlier arm naming a module #{label} that only the source includes" do
+      sig = { "money.rbs" => <<~RBS }
+        #{module_rbs}class Money
+          def show: (Printable) -> String
+                  | (Integer) -> Integer
+                  | (Object) -> Symbol
+        end
+      RBS
+      source = <<~RUBY
+        module Printable; end
+        class Integer; include Printable; end
+        class Money
+          def show(x) = "p"
+        end
+        dump_type(Money.new.show(1))
+        Money.new.show(1).upcase
+      RUBY
+      expect(dumped_types(source, sig: sig)).not_to eq(["Integer"])
+      expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+    end
+  end
+
+  it "still proves an earlier arm out when it names a declared class, which nothing can include" do
+    # Runtime: `1`. Declining here gave `(Object) -> Symbol` back to the affinity order and fired `even?`.
+    sig = { "svc.rbs" => <<~RBS }
       class Money
-        def show: (Printable) -> String
+      end
+      class Svc
+        def show: (Money) -> String
                 | (Integer) -> Integer
                 | (Object) -> Symbol
       end
     RBS
     source = <<~RUBY
-      module Printable; end
-      class Integer; include Printable; end
-      class Money
-        def show(x) = "p"
+      class Money; end
+      class Svc
+        def show(x) = 1
       end
-      Money.new.show(1).upcase
+      dump_type(Svc.new.show(1))
+      Svc.new.show(1).even?
     RUBY
+    expect(dumped_types(source, sig: sig)).to eq(["Integer"])
     expect(rules(source, sig: sig)).not_to include("call.undefined-method")
   end
 

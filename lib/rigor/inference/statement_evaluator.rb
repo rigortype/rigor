@@ -3626,6 +3626,8 @@ module Rigor
         return if written.empty?
 
         sites.each do |name, nodes|
+          # A mixed `Array | Hash` seed reads as a Hash here: its key arguments are the Hash side's evidence, and a
+          # `Dynamic` index only makes the Array side read the store as both forms.
           array = content_kind(seeds[name]) == :array
           nodes.each do |site|
             names = store_value_reads(site, array) & written
@@ -3703,8 +3705,11 @@ module Rigor
       end
 
       # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
-      # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
-      CONTENT_EVIDENCE_SLOTS = { array: %i[element].freeze, hash: %i[key value].freeze, string: [].freeze }.freeze
+      # value union for a Hash, all three for a seed carrying both ({ContentJoin.join_mixed_content}), and none for a
+      # String, which widens to `String` whatever it stored.
+      CONTENT_EVIDENCE_SLOTS = {
+        array: %i[element].freeze, hash: %i[key value].freeze, mixed: %i[key value element].freeze, string: [].freeze
+      }.freeze
       private_constant :CONTENT_EVIDENCE_SLOTS
 
       # The joined continuation carrier of each content-mutated name, shared by the block seam and
@@ -3755,11 +3760,12 @@ module Rigor
       end
 
       # The pre-state's collection kind, or nil when the join has no carrier to rederive — the dispatch
-      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states.
+      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states. A seed carrying both
+      # an Array and a Hash member is `:mixed`, and each side joins with its own class's evidence.
       def content_kind(pre_state)
         return nil if pre_state.nil?
         return :string if stringish?(pre_state)
-        return :hash if hashish?(pre_state)
+        return (arrayish?(pre_state) ? :mixed : :hash) if hashish?(pre_state)
 
         :array if arrayish?(pre_state)
       end
@@ -3772,7 +3778,7 @@ module Rigor
         movable = kinds.reject { |_name, kind| kind == :string }.keys
         movable.select do |name|
           sites[name].any? do |node|
-            (kinds[name] == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
+            (kinds[name] != :hash && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
           end
         end
       end
@@ -3874,12 +3880,12 @@ module Rigor
       # to reads `bot`.
       def content_evidence(sites, kinds, evidence_scope, shadows)
         kinds.each_with_object({}) do |(name, kind), evidence|
-          case kind
-          when :hash
+          if %i[hash mixed].include?(kind)
             pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
             evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
             evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
-          when :array
+          end
+          if %i[array mixed].include?(kind)
             evidence[[name, :element]] =
               Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
           end
@@ -3898,12 +3904,21 @@ module Rigor
         when :string
           Type::Combinator.nominal_of("String")
         when :hash
-          key = present_evidence(evidence[[name, :key]]).first
-          value = present_evidence(evidence[[name, :value]]).first
-          ContentJoin.join_hash_content(seed, key.nil? && value.nil? ? [] : [[key, value]])
+          ContentJoin.join_hash_content(seed, joined_pair_evidence(name, evidence))
+        when :mixed
+          ContentJoin.join_mixed_content(
+            seed, joined_pair_evidence(name, evidence), present_evidence(evidence[[name, :element]])
+          )
         else
           ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
         end
+      end
+
+      # The Hash side's evidence as the one `[key, value]` pair its slots join to, or none.
+      def joined_pair_evidence(name, evidence)
+        key = present_evidence(evidence[[name, :key]]).first
+        value = present_evidence(evidence[[name, :value]]).first
+        key.nil? && value.nil? ? [] : [[key, value]]
       end
 
       def present_evidence(type)
@@ -4033,6 +4048,10 @@ module Rigor
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
+        elsif content_kind(pre_state) == :mixed
+          ContentJoin.join_mixed_content(
+            pre_state, hash_pair_evidence(calls, block_entry), array_element_evidence(calls, block_entry)
+          )
         elsif hashish?(pre_state)
           join_hash_param(calls, pre_state, block_entry)
         else

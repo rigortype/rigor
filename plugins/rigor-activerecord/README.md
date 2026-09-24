@@ -171,9 +171,10 @@ the caller's `self`.
 A saved owner's `<<`, `push`, `append`, `concat` and `replace` also
 run the model's save callbacks. So do `create`, `find_or_create_by`,
 `create_or_find_by` and `first_or_create` (with their `!` forms) and
-`update` on any Relation. `destroy_all`, `destroy_by` and the proxy's
-`destroy` run its destroy callbacks. No edge carries those callbacks to
-the caller yet ([#1313](https://github.com/rigortype/rigor/issues/1313)).
+`update` on any Relation. `destroy_all`, `destroy_by` and `destroy` run
+its destroy callbacks, and so does the proxy's `delete` under
+`dependent: :destroy`. No edge carries those callbacks to the caller
+yet ([#1313](https://github.com/rigortype/rigor/issues/1313)).
 
 ### Framework edges
 

@@ -130,9 +130,9 @@
 # builders and `scoping`) forward their arguments unchanged to the
 # Relation's own methods, and the proxy's other overrides (`find`,
 # `last`, `take`, `build`, `create`, `calculate`, `pluck`, …) take no
-# more than the declarations here. `delete` and `destroy`, whose overrides take
-# more arguments than the Relation's, stay undeclared for the
-# reasons above.
+# more than the declarations here. `delete` and `destroy`, whose
+# overrides take more arguments than the Relation's, stay undeclared
+# for the reasons above.
 
 module ActiveRecord
   class Relation[Elem]

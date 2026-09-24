@@ -24,8 +24,9 @@ module Rigor
       # flow rules a non-nil nominal and license folds that draw diagnostics on correct templates — the
       # trap `Actionpack::STRONG_PARAMS_CHAIN_METHODS` documents at length for `Parameters#[]`. Anything
       # else assigns nothing, the ivar stays unseeded, and the template reads it as `Dynamic`, which
-      # taints honestly (ADR-5). A call on that list that returns SEVERAL records — `find(a, b)`,
-      # `find([1, 2])`, `create([{…}, {…}])` — is excluded by the same rule; see {Builder#single_record?}.
+      # taints honestly (ADR-5). A call on that list that returns, or may return, SEVERAL records —
+      # `find(a, b)`, `find([1, 2])`, `create([{…}, {…}])` — is excluded by the same rule; see
+      # {Builder#single_record?}.
       #
       # Two assignments of the same ivar that disagree drop it for that template, for the same reason.
       #
@@ -295,12 +296,15 @@ module Rigor
           # spelling here, and seeding the element type would contradict rigor-activerecord, which types the
           # controller's own `Model.find(a, b)` as `Array[Model]` (#1321).
           #
-          # `find` therefore seeds only for exactly one plain positional argument and no block: two or more
-          # ids return an Array, so does `find([1, 2])` and, depending on what it expands to, `find(*ids)`;
-          # a block turns the call into `Enumerable#find` over the relation, which returns nil on no match.
-          # One argument that merely EVALUATES to an Array (`find(params[:ids])`) cannot be told apart from
-          # an id — the limit the bundled `Relation#find` RBS states too — and keeps the model, as it does
-          # there. `create` / `create!` given an Array of attribute hashes return one record per hash.
+          # `find` therefore seeds only for exactly one plain positional argument and no block. Two or more
+          # ids return an Array. So may `find([1, 2])` and `find(*ids)`: rigor-activerecord keeps the model
+          # for both, because a composite key's tuple is one record, but the view declines where the runtime
+          # answer may be an Array, which leaves it `Dynamic` rather than contradicting the controller. A
+          # block hands the call to `Enumerable#find`, which the arity rule does not describe. One argument
+          # that merely EVALUATES to an Array (`find(params[:ids])`, `create(rows)`) cannot be told apart from
+          # one id or one attribute hash — the limit the bundled `Relation#find` RBS states too — and keeps
+          # the model, as it does there. `create` / `create!` given an Array of attribute hashes return one
+          # record per hash.
           def single_record?(call)
             arguments = call.arguments&.arguments || []
             case call.name

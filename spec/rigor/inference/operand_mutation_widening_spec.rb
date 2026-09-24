@@ -8,9 +8,9 @@ require "spec_helper"
 # mutator's own post-call widening never ran and `b` kept the `[1]` its literal wrote. `d.first.upcase` after
 # `d.map!.with_index { |x, i| x.to_s }` drew a false `call.undefined-method` for Integer.
 #
-# The contract is "exactly as the same call does as a statement", so each example compares against the
-# statement form. Each is paired with a non-mutating control in the same position that must keep the literal —
-# without it, a seam that widened every operand's receiver would pass too.
+# The contract is "as the same call does as a statement", so a widening example compares against the statement
+# form where the two can be compared, and each operand route is paired with a non-mutating control in the same
+# position that must keep the literal — without it, a seam that widened every operand's receiver would pass too.
 RSpec.describe "mutator widening in operand position", type: :runner do
   def diagnostics(source, sig: {})
     analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig).diagnostics

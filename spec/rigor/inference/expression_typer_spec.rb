@@ -1298,6 +1298,51 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(bound.type_of(parse_expression("@x ||= 7")).value).to eq(7)
     end
 
+    # The memoization reading needs an rvalue that can store something truthy. `def self.settings =
+    # (@settings ||= raise("boot first"))` returns only when a write the analyzer did not see set
+    # `@settings`, so its value is that binding, never the rvalue's `bot` — the index and constant rules'
+    # guard exception, carried to the variable targets.
+    describe "an unbound `||=` whose rvalue has no truthy part" do
+      it "reads a `||= raise` guard as the binding it guards, for every variable kind" do
+        ["@x", "@@x", "$x", "x"].each do |target|
+          type = scope.type_of(parse_expression("#{target} ||= raise(\"boot first\")"))
+
+          expect([target, type.describe]).to eq([target, "Dynamic[top]"])
+        end
+      end
+
+      it "keeps the unseen binding beside an rvalue that is never truthy" do
+        # `@flag ||= false` answers `true` once another method stored `true`.
+        expect(scope.type_of(parse_expression("@x ||= nil")).describe).to eq("Dynamic[top]?")
+        expect(scope.type_of(parse_expression("@x ||= false")).describe).to eq("Dynamic[top] | false")
+      end
+
+      it "agrees with the statement evaluator's answer for the same write" do
+        ["@x", "@@x", "$x", "x"].product(['raise("boot first")', "nil", "false"]).each do |target, rvalue|
+          node = parse_expression("#{target} ||= #{rvalue}")
+          statement_type, = scope.evaluate(node)
+
+          expect([target, rvalue, scope.type_of(node)]).to eq([target, rvalue, statement_type])
+        end
+      end
+
+      it "keeps the memo reading for an rvalue with a truthy part (control)" do
+        expect(scope.type_of(parse_expression("@x ||= (7 if rand > 0.5)")).describe).to eq("7?")
+      end
+
+      it "keeps a bound target's truthy value past the guard (control)" do
+        bound = scope.with_ivar(:@x, Rigor::Type::Combinator.nominal_of("String"))
+
+        expect(bound.type_of(parse_expression('@x ||= raise("boot first")')).describe).to eq("String")
+      end
+
+      it "still reads a provably falsey target's guard as raising (control)" do
+        bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(nil))
+
+        expect(bound.type_of(parse_expression('@x ||= raise("boot first")')).describe).to eq("bot")
+      end
+    end
+
     describe "ivar/cvar/global reads consult Scope bindings (Slice 7 phase 1)" do
       it "returns the bound type for an InstanceVariableReadNode" do
         bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(7))

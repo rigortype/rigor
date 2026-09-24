@@ -404,6 +404,14 @@ Self-check invocations also gained `--fail-on=warning`, matching
 `make check` — the warning had printed green on every run since #1071
 because the job read the exit code and warnings did not move it.
 
+**Status, 2026-09-24 — widened (#1338).** The `||=` skip now covers
+every rvalue with no truthy part, not only a falsey literal.
+`@x ||= raise "unset"` stores nothing, yet its `union(bot, nil)`
+contribution is `nil`, which bound the ivar in every instance method
+of the class; the guard then read as provably raising, and `sig-gen`
+declared `-> bot` on a reader whose ivar another class or an
+`attr_writer` stores.
+
 ## Rejected / deferred alternatives
 
 - **Cross-method ivar definite assignment as the headline fix.**

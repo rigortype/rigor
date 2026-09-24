@@ -168,10 +168,12 @@ The proxy's own writers (`<<`, `push`, `append`, `concat`, `replace`,
 `mutate` is used because a row describes the call, and the proxy is not
 the caller's `self`.
 
-A saved owner's `<<` also runs the model's save callbacks, and so do
-`create` and the `find_or_*` builders on any Relation. No edge carries
-those callbacks to the caller yet
-([#1313](https://github.com/rigortype/rigor/issues/1313)).
+A saved owner's `<<`, `push`, `append`, `concat` and `replace` also
+run the model's save callbacks. So do `create`, `find_or_create_by`,
+`create_or_find_by` and `first_or_create` (with their `!` forms) and
+`update` on any Relation. `destroy_all`, `destroy_by` and the proxy's
+`destroy` run its destroy callbacks. No edge carries those callbacks to
+the caller yet ([#1313](https://github.com/rigortype/rigor/issues/1313)).
 
 ### Framework edges
 

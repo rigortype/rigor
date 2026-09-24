@@ -96,8 +96,10 @@
 # `insert`, `insert!` and `upsert` are declared here, beside their
 # `_all` forms, because a plain Relation defines them too. The
 # declaration changes no result type: an undeclared method on this
-# open receiver already types as `untyped`. Its parameter list admits
-# every call Rails accepts.
+# open receiver already types as `untyped`. It adds the checks any
+# declared method gets, `call.wrong-arity` and
+# `call.possible-nil-receiver`, and its parameter list admits every
+# call Rails accepts.
 #
 # The writers a plain Relation does not define (`<<`, `push`,
 # `append`, `concat`, `replace`, `clear`) are rows in the plugin's

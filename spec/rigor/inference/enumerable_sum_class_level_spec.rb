@@ -43,9 +43,25 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
       expect(dumped_types(run("dump_type(ARGV.map(&:size).each.sum(0.0))"))).to eq(["Float"])
     end
 
-    it "promotes an Integer element to a Rational seed" do
-      # Runtime: `(0/1)` for an empty ARGV, a Rational otherwise.
-      expect(dumped_types(run("dump_type(ARGV.map(&:size).each.sum(0r))"))).to eq(["Rational"])
+    it "promotes a Rational element to a Float seed" do
+      # Runtime: 3.0.
+      expect(dumped_types(run("dump_type([1r, 2r].each.sum(0.0))"))).to eq(["Float"])
+    end
+
+    it "declines to Dynamic[top] for a Rational seed, which an Integer range reads as a Float" do
+      # Runtime: a Float for a non-empty range, since CRuby adds the Gauss sum through Integer#coerce.
+      result = run(<<~RUBY)
+        x = (1..ARGV.size).sum(0r)
+        dump_type(x)
+        puts x.nan?
+        puts ARGV.size.to_r.nan?
+      RUBY
+      expect(dumped_types(result)).to eq(["Dynamic[top]"])
+      expect(result.diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }.map(&:line)).to eq([6])
+    end
+
+    it "keeps an Integer seed over an Integer range" do
+      expect(dumped_types(run("dump_type((1..ARGV.size).sum(0))"))).to eq(["Integer"])
     end
 
     it "does not reject a declared Float return over an Integer receiver" do
@@ -153,7 +169,7 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
 
   describe "sides with no class to widen to" do
     it "declines to Dynamic[top] for a sum that concatenates tuples" do
-      # Runtime: `[1, 2]`, which is none of `[1] | [2] | []`, and no class-level union states it.
+      # Runtime: `[1, 2]`, which is none of `[1] | [2] | []`, and no value class states it.
       expect(dumped_types(run("dump_type([[1], [2]].each.sum([]))"))).to eq(["Dynamic[top]"])
     end
 
@@ -161,6 +177,21 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
       # Runtime: the seed's Integers and the elements' Strings in one Array, which neither
       # Array[String] nor Array[Integer] contains.
       expect(dumped_types(run("dump_type(ARGV.map(&:chars).each.sum(ARGV.map(&:size)))"))).to eq(["Dynamic[top]"])
+    end
+
+    it "declines to Dynamic[top] for a String subclass" do
+      # `Name + Name` is a plain String, so the `when String` clause is reachable.
+      result = run(<<~RUBY)
+        class Name < String; end
+        n = ARGV.map { |a| Name.new(a) }.each.sum(Name.new(""))
+        dump_type(n)
+        case n
+        when Name then puts "name"
+        when String then puts "string"
+        end
+      RUBY
+      expect(dumped_types(result)).to eq(["Dynamic[top]"])
+      expect(rules(result, "flow.unreachable-clause")).to be_empty
     end
 
     it "declines to Dynamic[top] for a nil member rather than carry a nil arm" do
@@ -190,6 +221,10 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
     it "keeps ENV.fetch's literal default" do
       expect(dumped_types(run('dump_type(ENV.fetch("X", :none))'))).to eq([":none | String"])
     end
+
+    it "keeps the literal return of an Enumerable method other than sum" do
+      expect(dumped_types(run("dump_type([1, 2].each.min)"))).to eq(["1 | 2 | nil"])
+    end
   end
 
   # The widening is keyed to the declaration `Enumerable` owns, not to the method name.
@@ -203,6 +238,11 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
         class RigorSpecBag
           include ::Enumerable[::Integer]
           def each: () { (::Integer) -> void } -> void
+        end
+
+        class RigorSpecGappy
+          include ::Enumerable[::NilClass | ::Integer]
+          def each: () { (::NilClass | ::Integer) -> void } -> void
         end
       RBS
     end
@@ -225,6 +265,11 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
     it "widens the seed of the sum a class inherits from Enumerable" do
       type = sum("RigorSpecBag", [Rigor::Type::Combinator.constant_of(0.0)])
       expect(type.describe(:short)).to eq("Float")
+    end
+
+    it "declines to Dynamic[top] for a NilClass element" do
+      type = sum("RigorSpecGappy", [Rigor::Type::Combinator.constant_of(0)])
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
     end
 
     it "keeps the literal seed of a sum the class declares itself" do

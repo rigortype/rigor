@@ -733,6 +733,19 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
     end
 
+    it "keeps `!` over a safe-navigation predicate that a miss answers the same way" do
+      # Hit: `!false`; miss: `!nil`. Both are `true`, so `bool` would invent a `false`.
+      type, = evaluate_with({ pairs: pairs }, "!pairs.first&.empty?\n")
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "still widens `!!` over a marked read, whose miss answers the other boolean" do
+      type, = evaluate_with({ h: hash_of("x") }, "!!h[key]\n")
+
+      expect(type.describe).to eq("bool")
+    end
+
     it "still widens `.nil?` over a safe-navigation read, which a miss flips" do
       type, = evaluate_with({ pairs: pairs }, "pairs.first&.last.nil?\n")
 

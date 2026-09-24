@@ -49,6 +49,9 @@ module Rigor
       # other value folds from the carrier's value and stays out, for the reason the value predicates do.
       NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
 
+      # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
+      UNKNOWN_MISS = Object.new.freeze
+
       module_function
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
@@ -84,31 +87,65 @@ module Rigor
         resolve(node.receiver, scope) if node.safe_navigation?
       end
 
-      # `recv.nil?` / `!recv` — the fold is a statement about `recv`, so it is exactly as optimistic as `recv`
-      # is. A block or any argument means this is not the unary predicate it looks like (`x.!(y)` is a
-      # user-defined operator), and the derivation declines.
+      # `recv.nil?` / `!recv` / `recv == nil` — the fold is a statement about `recv`, so it is exactly as
+      # optimistic as `recv` is.
       def resolve_through_predicate(node, scope)
-        return nil unless node.block.nil?
-        return resolve_through_nil_comparison(node, scope) if NIL_COMPARISONS.include?(node.name)
-        return nil unless NIL_COLLAPSING_PREDICATES.include?(node.name)
-        return nil unless node.arguments.nil? || node.arguments.arguments.empty?
-
-        resolve(node.receiver, scope)
+        operand = nil_question_operand(node)
+        operand && resolve(operand, scope)
       end
 
-      # `x == nil` / `nil == x` — resolves the non-`nil` operand. Declines unless there is exactly one
-      # positional argument and exactly one side is the `nil` literal (`nil == nil` states nothing about a
-      # carrier).
-      def resolve_through_nil_comparison(node, scope)
-        arguments = node.arguments&.arguments
-        return nil unless arguments&.size == 1
+      # The operand a nil-collapsing predicate restates the nil-ness of, or nil when `node` is not one. A block
+      # or any argument means `nil?` / `!` is not the unary predicate it looks like (`x.!(y)` is a user-defined
+      # operator). A comparison needs exactly one positional argument and exactly one `nil` literal side, and
+      # answers the other side (`nil == nil` states nothing about a carrier).
+      def nil_question_operand(node)
+        return nil unless node.block.nil?
 
-        receiver = node.receiver
-        argument = arguments.first
+        arguments = node.arguments&.arguments || []
+        if NIL_COLLAPSING_PREDICATES.include?(node.name)
+          node.receiver if arguments.empty?
+        elsif NIL_COMPARISONS.include?(node.name) && arguments.size == 1
+          nil_comparison_operand(node.receiver, arguments.first)
+        end
+      end
+
+      def nil_comparison_operand(receiver, argument)
         if argument.is_a?(Prism::NilNode) && !receiver.nil? && !receiver.is_a?(Prism::NilNode)
-          resolve(receiver, scope)
+          receiver
         elsif receiver.is_a?(Prism::NilNode) && !argument.is_a?(Prism::NilNode)
-          resolve(argument, scope)
+          argument
+        end
+      end
+
+      # What a marked expression answers when the carrier its mark rests on misses, or {UNKNOWN_MISS}. The
+      # carrier itself — the read the mark is recorded on, or a `recv&.m` over a marked receiver — answers `nil`,
+      # and each nil-collapsing predicate over it answers what it answers for that value: `!` its negation,
+      # `nil?` / `== nil` whether it is `nil`, `!= nil` the reverse. A binding, an `&&` / `||` and anything else
+      # is unknown. `ExpressionTyper` widens a predicate's folded boolean only when the miss answers the other
+      # boolean (or cannot be told), so `!recv&.empty?` — `!false` on a hit, `!nil` on a miss — stays `true`.
+      def miss_answer(node, scope)
+        return nil if scope.optimistic_origins[node]
+
+        case node
+        when Prism::CallNode then miss_answer_of_call(node, scope)
+        when Prism::ParenthesesNode
+          body = node.body
+          body.is_a?(Prism::StatementsNode) && body.body.size == 1 ? miss_answer(body.body.first, scope) : UNKNOWN_MISS
+        else UNKNOWN_MISS
+        end
+      end
+
+      def miss_answer_of_call(node, scope)
+        return nil if node.safe_navigation? && resolve(node.receiver, scope)
+
+        operand = nil_question_operand(node)
+        inner = operand ? miss_answer(operand, scope) : UNKNOWN_MISS
+        return UNKNOWN_MISS if inner.equal?(UNKNOWN_MISS)
+
+        case node.name
+        when :! then !inner
+        when :!= then !inner.nil?
+        else inner.nil?
         end
       end
 

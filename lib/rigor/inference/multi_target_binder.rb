@@ -266,6 +266,8 @@ module Rigor
             .map { |offsets| offsets.map { |i| optimistic.fetch(i, false) } }
         end
 
+        # Every member walks the same target tree, so each binds the same names; the first member's
+        # key order is the declaration order.
         def visit_union(node, members, optimistic, bindings, marked, context)
           walks = members.map do |member|
             member_bindings = {}

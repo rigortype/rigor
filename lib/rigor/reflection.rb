@@ -166,7 +166,7 @@ module Rigor
       # names to the rungs ({.constant_type_at}); a stop is `Dynamic[top]` only when the plain ladder, run
       # again, answers below it. When nothing below answers, the reference stays unresolved exactly as before,
       # so the nil its caller turns into the fallback, the missing-constant edge and the gem-origin label stay.
-      hit = lexical_constant_type(name, scope, caller_derived, scope.shadowing_constant_names(name))
+      hit = lexical_constant_type(name, scope, caller_derived, scope.shadowing_constant_names(name.to_s))
       return hit unless hit.equal?(WRITTEN_CANDIDATE)
 
       Type::Combinator.untyped if lexical_constant_type(name, scope, caller_derived, nil)

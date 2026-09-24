@@ -1113,9 +1113,9 @@ module Rigor
           SUM_DEFAULT_SEED = ["Integer"].freeze
           private_constant :SUM_DEFAULT_SEED
 
-          # The seeds CRuby's integer-range shortcut reads as a Float ({#range_coerced_seed?}).
-          RANGE_COERCED_SEEDS = Set["Rational", "Complex"].freeze
-          private_constant :RANGE_COERCED_SEEDS
+          # The seeds CRuby's integer-range shortcut adds to with plain `+` ({#range_coerced_seed?}).
+          RANGE_ADDED_SEEDS = Set["Integer", "Float"].freeze
+          private_constant :RANGE_ADDED_SEEDS
 
           # The class-level reading of a `sum` overload's translated return, or `Dynamic[top]` when a member
           # widens to none of the value classes {#value_classes} admits. A class, not a value, is what the
@@ -1142,12 +1142,13 @@ module Rigor
           end
 
           # Whether CRuby may skip the accumulator and read the seed as a Float. With no block and a seed that
-          # is not a Float, `enum_sum` sums a range with Integer endpoints by Gauss's formula, and adds the
-          # result to the seed through `Integer#coerce`, which converts a Rational or Complex seed to a Float:
-          # `(1..3).sum(0r)` is `6.0`. Any object that answers `begin`, `end` and `exclude_end?` takes the same
-          # path, so the receiver's class cannot rule it out.
+          # is not a Float, `enum_sum` sums a range with Integer endpoints by Gauss's formula and adds the
+          # result to the seed. An Integer seed takes plain `+`; any other goes through `Integer#coerce`, which
+          # converts it with `Float()`: `(1..3).sum(0r)` is `6.0` and `(1..3).sum("1.5")` is `7.5`. Any object
+          # that answers `begin`, `end` and `exclude_end?` takes the same path, so the receiver's class cannot
+          # rule it out.
           def range_coerced_seed?(method_type, seeds)
-            method_type.block.nil? && seeds.any? { |seed| RANGE_COERCED_SEEDS.include?(seed) }
+            method_type.block.nil? && seeds.any? { |seed| !RANGE_ADDED_SEEDS.include?(seed) }
           end
 
           # The classes of the value `sum` starts from: the argument when the overload takes one and the call
@@ -1160,9 +1161,10 @@ module Rigor
             value_classes(args.first)
           end
 
-          # The class the accumulator reaches when a `member` value is added to a `seed`-class one. A String
-          # and a number do not add (`"" + 1` raises), so such a pair keeps the member's class, which reads
-          # wider than the runtime rather than narrower.
+          # The class the accumulator reaches when a `member` value is added to a `seed`-class one. `+` does not
+          # add a String and a number (`"" + 1` and `1 + ""` raise), so such a pair keeps the member's class,
+          # which reads wider than the runtime rather than narrower. The range shortcut that does convert a
+          # String seed never reaches here ({#range_coerced_seed?}).
           def promoted_class(seed, member)
             seed_rank = SUM_PROMOTION_RANKS[seed]
             member_rank = SUM_PROMOTION_RANKS[member]

@@ -60,6 +60,14 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
       expect(result.diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }.map(&:line)).to eq([6])
     end
 
+    it "declines to Dynamic[top] for a Complex or a String seed over an Integer range" do
+      # Runtime: 6.0 and 7.5, since Integer#coerce reads either seed through Float().
+      expect(dumped_types(run(<<~RUBY))).to eq(["Dynamic[top]", "Dynamic[top]"])
+        dump_type((1..ARGV.size).sum(0i))
+        dump_type((1..ARGV.size).sum("1.5"))
+      RUBY
+    end
+
     it "keeps an Integer seed over an Integer range" do
       expect(dumped_types(run("dump_type((1..ARGV.size).sum(0))"))).to eq(["Integer"])
     end
@@ -105,14 +113,14 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
       expect(rules(result, "flow.always-truthy-condition")).to be_empty
     end
 
-    it "reads a String seed over String literals as String" do
-      # Runtime: "ab".
+    it "does not fold a comparison against a String seed over String literals" do
+      # Runtime: "ab". A blockless String seed declines with the range shortcut below.
       result = run(<<~RUBY)
         d = %w[a b].each.sum("")
         dump_type(d)
         puts "ab" if d == "ab"
       RUBY
-      expect(dumped_types(result)).to eq(["String"])
+      expect(dumped_types(result)).to eq(["Dynamic[top]"])
       expect(rules(result, "flow.always-truthy-condition")).to be_empty
     end
 
@@ -140,6 +148,16 @@ RSpec.describe "Enumerable#sum's return read at class level", type: :runner do
   end
 
   describe "the other overloads" do
+    it "keeps a Rational seed when a block skips the range shortcut" do
+      # Runtime: `(6/1)` for `1..3`; with a block CRuby adds every value to the seed.
+      expect(dumped_types(run("dump_type((1..ARGV.size).sum(0r) { |i| i.to_r })"))).to eq(["Rational"])
+    end
+
+    it "reads a String seed with a String block as String" do
+      # The block overload skips the range shortcut, and #1293 binds `U` to the shared String class.
+      expect(dumped_types(run('dump_type(%w[a b].each.sum("") { |s| s })'))).to eq(["String"])
+    end
+
     it "widens the receiver's literal elements on the parameterless overload" do
       # Runtime: 4.0, a Float the declared `1.5 | 2.5 | Integer` narrowed to `1.5 | 2.5` misses.
       result = run(<<~RUBY)

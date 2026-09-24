@@ -191,6 +191,17 @@ class Object
   # `instance_variable_names`.
   def instance_values: () -> Hash[String, untyped]
   def instance_variable_names: () -> Array[String]
+
+  # `core_ext/object/deep_dup` — `duplicable? ? dup : self`, with the
+  # `Array` (`map(&:deep_dup)`), `Hash` and `Module` overrides all answering
+  # a value of the receiver's own class. Declared on `Object` and not only on
+  # `Hash`, where it sat alone: `[[1], [2]].deep_dup` is the common shape.
+  #
+  # NOT `%a{pure}`, though `Hash#deep_dup` below is: on `Object` the `dup`
+  # runs the receiver class's own `initialize_copy`, and `duplicable?` is
+  # itself overridable — the same unknown-at-this-declaration dispatch that
+  # keeps `as_json` bare, on as broad a receiver as RBS has.
+  def deep_dup: () -> self
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -1490,6 +1501,10 @@ class Hash[unchecked out K, unchecked out V]
   %a{pure}
   def deep_transform_values: () { (V) -> untyped } -> Hash[K, untyped]
   def deep_transform_values!: () { (V) -> untyped } -> self
+  # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
+  %a{pure}
+  def to_options: () -> Hash[Symbol, V]
+  def to_options!: () -> self
 
   # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the
   # receiver.
@@ -1504,6 +1519,10 @@ class Hash[unchecked out K, unchecked out V]
                 | (Hash[K, V]) { (K, V, V) -> V } -> Hash[K, V]
   def deep_merge!: (Hash[K, V]) -> self
                  | (Hash[K, V]) { (K, V, V) -> V } -> self
+  # `other.is_a?(Hash)` — the hook `ActiveSupport::DeepMergeable` asks before
+  # recursing into a value. `:nodoc:`, but public.
+  %a{pure}
+  def deep_merge?: (untyped other) -> bool
 
   # `core_ext/hash/except` — `Hash#except` is in core RBS as of
   # Ruby 3.0+; `except!` is ActiveSupport-only. ActiveSupport
@@ -1528,6 +1547,9 @@ class Hash[unchecked out K, unchecked out V]
   # `%a{pure}` explicitly.
   %a{pure}
   def with_indifferent_access: () -> untyped
+  # An `alias` of `with_indifferent_access`.
+  %a{pure}
+  def nested_under_indifferent_access: () -> untyped
 
   # `core_ext/hash/conversions`
   def self.from_xml: (String, ?Symbol disallowed_types) -> Hash[String, untyped]
@@ -1542,15 +1564,53 @@ class Hash[unchecked out K, unchecked out V]
   %a{pure}
   def extractable_options?: () -> bool
 
-  # `core_ext/hash/reverse_merge`
+  # `core_ext/hash/reverse_merge` — `other_hash.merge(self)`, so the result
+  # carries the argument's keys and values as well as the receiver's, the
+  # same shape as core `Hash#merge`. `-> Hash[K, V]` typed
+  # `opts.reverse_merge(size: 25, velocity: 10)` as `Hash[:size, 1]`.
   %a{pure}
-  def reverse_merge: (Hash[K, V]) -> Hash[K, V]
+  def reverse_merge: [A, B] (Hash[A, B] other_hash) -> Hash[A | K, B | V]
   def reverse_merge!: (Hash[K, V]) -> self # NOT %a{pure}: bang (`replace`), mutates in place.
+  # `alias_method`s: `with_defaults` of `reverse_merge`, `with_defaults!`
+  # and `reverse_update` of `reverse_merge!`.
+  %a{pure}
+  def with_defaults: [A, B] (Hash[A, B] other_hash) -> Hash[A | K, B | V]
+  def with_defaults!: (Hash[K, V]) -> self # NOT %a{pure}: bang (`replace`), mutates in place.
+  def reverse_update: (Hash[K, V]) -> self # NOT %a{pure}: `reverse_merge!` under another name.
 
   # `core_ext/hash/slice` — `Hash#except` is in core RBS (Ruby 3.0+);
   # `Hash#slice` is in core RBS (Ruby 2.5+); the bang variants are
-  # ActiveSupport-only.
+  # ActiveSupport-only. `extract!` deletes the named keys and answers them
+  # as a new hash; a key the receiver lacks is skipped, not `nil`-filled.
   def slice!: (*K) -> Hash[K, V] # NOT %a{pure}: bang (`replace`), mutates in place.
+  def extract!: (*K) -> Hash[K, V] # NOT %a{pure}: bang, mutates via `delete`.
+end
+
+# ---------------------------------------------------------------
+# Range — `core_ext/range/*`
+# ---------------------------------------------------------------
+
+# `[out E]` matches core `range.rbs`. A reopening whose parameters differ in
+# count or variance (`class Range`, `class Range[E]`) raises
+# `RBS::GenericParameterMismatchError` and collapses `Range`.
+class Range[out E]
+  # `core_ext/range/overlap` — an `alias` of `overlap?`, which rbs declares
+  # since Ruby 3.3 (ActiveSupport defines the method itself only on an older
+  # Ruby). `overlap?` is therefore NOT redeclared here: a second declaration
+  # is a `DuplicatedMethodDefinitionError` that collapses the whole class.
+  %a{pure}
+  def overlaps?: (Range[untyped]) -> bool
+
+  # `core_ext/range/conversions` — `ActiveSupport::RangeWithFormat`, prepended
+  # onto `Range`. An unknown format falls back to `to_s`; `:db` answers `nil`
+  # for a beginless-and-endless range, which the declared `String` does not
+  # model — `(nil..nil).to_fs(:db)` is not a shape correct code writes.
+  #
+  # NOT `%a{pure}`, for the `Array#to_fs` reasons: `RANGE_FORMATS` is a
+  # mutable constant an initializer extends, and `:db` calls `to_fs(:db)` on
+  # both endpoints.
+  def to_fs: (?Symbol format) -> String
+  def to_formatted_s: (?Symbol format) -> String
 end
 
 # ---------------------------------------------------------------

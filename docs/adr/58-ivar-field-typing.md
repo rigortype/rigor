@@ -452,8 +452,12 @@ that would go on from a receiver wider than 40 members floors to
 unwired `union_size` budget; 40 is the low end of the pathology band
 ADR-41's Slice 2a names, and the survey corpus's widest `op=`-written
 seed has seven members. The seed then holds what every source order
-produced, except the rvalue master fell back to in an order where no
-other write, or only a member that raises, stood in the receiver.
+produced, except the rvalue master fell back to when no other write
+stood in the receiver, or when a member that raises made the dispatch
+decline. "Raises" is read from the RBS: a source monkey patch of a core
+operator, an operator the RBS omits, and the `nil` of an ivar no write
+reached yet (`nil ^ true` is `true`), which the seed never modelled,
+all read as raising.
 
 ADR-56's `BodyFixpoint` was rejected for the chain: iterated to its
 fixed point, a lone counter's `@n += x` re-dispatched on its own

@@ -1846,7 +1846,9 @@ module Rigor
       # A declining member whose class the environment knows lacks the operator, so the write raises and stores
       # nothing; joined for it, the rvalue put an `Integer` no run can store beside `0.5 | Float | nil`, and a
       # sibling `def level = @x` declared `-> Float?` reported `def.return-type-mismatch`. Any other declining
-      # member stores what the pre-pass cannot see, and keeps the rvalue it fell back to before.
+      # member stores what the pre-pass cannot see, and keeps the rvalue it fell back to before. "Lacks" is
+      # read from the RBS: a source monkey patch of a core operator, or an operator the RBS omits, reads as
+      # raising, and so does an unwritten ivar's `nil`, which the seed does not model (`nil ^ true` is `true`).
       def partial_operator_result(receiver, rvalue_type, environment, dispatch)
         return rvalue_type unless receiver.is_a?(Type::Union)
 

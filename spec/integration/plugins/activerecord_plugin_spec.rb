@@ -1056,6 +1056,20 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(dumped(source)).to eq(["dump_type: Post"])
     end
 
+    it "makes no Array note for a model's own two-argument `self.find`" do
+      source = <<~RUBY
+        class Post
+          def self.find(owner, id) = where(user: owner).find_by!(id: id)
+        end
+        Post.find(User.find(1), 1)
+        Post.find
+      RUBY
+      diags = find_diagnostics(source)
+      expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
+      expect(diags.select { |d| d.rule == "model-call" }.map(&:message))
+        .to eq(["`User.find` returns User (table: `users`)"])
+    end
+
     it "names the Array in the class-side `find`'s model-call note" do
       notes = rule_hits("Post.find(1, 2)\nPost.find(1)\n", "model-call").map(&:message)
       expect(notes).to eq(["`Post.find` returns Array[Post] (table: `posts`)",
@@ -1158,6 +1172,16 @@ RSpec.describe "plugins/rigor-activerecord" do
         Rigor.dump_type(Post.find { |post| post.title == "x" })
       RUBY
       expect(dumped(source)).to eq(["dump_type: :own"])
+    end
+
+    it "makes no nil-arm note for a model's own `self.find`" do
+      source = <<~RUBY
+        class Post
+          def self.find(*) = :own
+        end
+        Post.find { |post| post.title == "x" }
+      RUBY
+      expect(rule_hits(source, "model-call")).to be_empty
     end
 
     it "names the nil arm in the model-call note, and makes none for the `ifnone` form" do

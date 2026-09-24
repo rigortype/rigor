@@ -36,6 +36,11 @@ errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plug
 Did-you-mean suggestions use `DidYouMean` fuzzy matching against
 the resolved table's column names.
 
+A model that defines its own `self.find` owns that method's arity
+and result. The plugin reports no `wrong-arity` for it, and no note
+for the several-id or block form, where the call types as the
+model's method rather than Rails' `find`.
+
 ## Configuration
 
 ```yaml

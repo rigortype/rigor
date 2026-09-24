@@ -38,6 +38,7 @@ module Rigor
 
         READ = ["io.db.read"].freeze
         WRITE = ["io.db.write"].freeze
+        READ_WRITE = ["io.db.read", "io.db.write"].freeze
         TRANSACTION = ["io.db.transaction"].freeze
         SCHEMA_WRITE = ["io.db.write", "rails.schema.write"].freeze
 
@@ -51,19 +52,30 @@ module Rigor
           find_or_initialize_by
         ].freeze
 
-        # Class-side writers.
-        SINGLETON_WRITES = %w[
-          create create! insert insert! insert_all insert_all! upsert upsert_all
-          update update! update_all delete delete_all delete_by destroy destroy_all destroy_by
-          find_or_create_by find_or_create_by! create_or_find_by create_or_find_by! touch_all
+        # Class-side writers that issue their statement and query nothing of their own: `create` is
+        # `new(…).save`, and the bulk writers compile one `INSERT`.
+        SINGLETON_WRITES = %w[create create! insert insert! insert_all insert_all! upsert upsert_all].freeze
+
+        # Class-side writers that query as well, checked against activerecord 8.1.3.1. `update` / `destroy`
+        # call `find`, or `update` walks `all.each`. The rest Rails delegates to `all`, so each is the
+        # Relation method of the same name, and the row carries the read that `relation.rbs` gives it: a
+        # lookup before the write, a `find_by!` after a failed insert, the records `destroy_all` loads, or the
+        # `SELECT` of distinct primary keys an eager-loading, limited scope runs before its UPDATE / DELETE.
+        # `delete` is `where(id:).delete_all`. A default scope is what `all` adds, and it can eager-load.
+        SINGLETON_READ_WRITES = %w[
+          update update! update_all delete delete_all delete_by destroy destroy_all destroy_by touch_all
+          find_or_create_by find_or_create_by! create_or_find_by create_or_find_by!
         ].freeze
 
         # Instance-side readers. `reload` re-issues the `SELECT` and replaces the record's attributes,
         # which is a receiver mutation as well as a read.
         INSTANCE_READS = %w[valid? invalid? reload].freeze
 
-        # Instance-side writers. Each is a statement issued now; `save`'s callbacks and validators are the
-        # `effect_edges:` half, and arrive as edges rather than labels.
+        # Instance-side writers. Each is a statement issued now, and none queries on its own: `update` is
+        # `assign_attributes` plus `save`, and `increment!` / `update_columns` compile one UPDATE. What
+        # `save` or `destroy` reads comes from the model: a uniqueness validator, a required `belongs_to`,
+        # a `touch:` or `dependent:` option. Callbacks and validators are the `effect_edges:` half, and
+        # arrive as edges rather than labels.
         INSTANCE_WRITES = %w[
           save save! update update! update_attribute update_attributes update_attributes!
           update_column update_columns destroy destroy! delete touch increment! decrement!
@@ -131,7 +143,11 @@ module Rigor
                                             why: "issues the SELECT at the call — this is the materializing " \
                                                  "half of the builder/materializer split") +
             rows(BASE, SINGLETON_WRITES, WRITE, singleton: true,
-                                                why: "issues an INSERT / UPDATE / DELETE at the call") +
+                                                why: "issues an INSERT at the call and queries nothing first") +
+            rows(BASE, SINGLETON_READ_WRITES, READ_WRITE,
+                 singleton: true,
+                 why: "issues an UPDATE / DELETE / INSERT at the call, and a SELECT before it or after " \
+                      "a failed insert") +
             rows(BASE, TRANSACTIONAL, TRANSACTION, singleton: true,
                                                    why: "opens a transaction; the block's own origins join " \
                                                         "by containment, so the row states only the BEGIN")

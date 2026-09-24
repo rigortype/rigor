@@ -120,20 +120,28 @@ RSpec.describe "the Rails effect layer" do
   # imports. Their builders and writers change the association's target, which the caller can still reach
   # through the owner.
   describe "an association relation typed as a Relation" do
+    # A writer that queries before its write, or after a failed one, names both leaves: `io.db.write` does
+    # not include `io.db.read`. relation.rbs cites the activerecord 8.1.3.1 path each read comes from.
+    read_write = %w[io.db.read io.db.write].freeze
+
     # The RBS envelopes, written from the callee's side: the receiver changes itself.
     envelope_bounds = {
       "via_build" => [], "via_new" => [], "via_scoped_build" => [],
-      "via_create" => ["io.db.write"], "via_create!" => ["io.db.write"],
-      "via_find_or_create_by" => ["io.db.write"], "via_find_or_create_by!" => ["io.db.write"],
-      "via_create_or_find_by" => ["io.db.write"], "via_create_or_find_by!" => ["io.db.write"],
-      "via_first_or_create" => ["io.db.write"], "via_first_or_create!" => ["io.db.write"],
+      "via_create" => read_write, "via_create!" => read_write,
+      "via_find_or_create_by" => read_write, "via_find_or_create_by!" => read_write,
+      "via_create_or_find_by" => read_write, "via_create_or_find_by!" => read_write,
+      "via_first_or_create" => read_write, "via_first_or_create!" => read_write,
       "via_find_or_initialize_by" => ["io.db.read"], "via_first_or_initialize" => ["io.db.read"],
       "via_reset" => [], "via_reload" => ["io.db.read"],
-      "via_delete_all" => ["io.db.write"], "via_destroy_all" => ["io.db.write"],
-      "via_update_all" => ["io.db.write"], "via_touch_all" => ["io.db.write"],
+      "via_delete_all" => read_write, "via_destroy_all" => read_write,
+      "via_update_all" => read_write, "via_touch_all" => read_write,
       "via_insert_all" => ["io.db.write"], "via_insert_all!" => ["io.db.write"],
       "via_upsert_all" => ["io.db.write"]
     }.freeze
+
+    # Writers that run on a relation of their own, or on the records they load, so the proxy's target is
+    # left alone and the bound is the two I/O leaves with no mutation.
+    unmutating_writers = %w[via_update via_update! via_destroy_by via_delete_by].freeze
 
     # The attribution rows for the writers a plain Relation does not define, written about the call: the
     # proxy is not the caller's `self`, so the change is bare `mutate`.
@@ -146,6 +154,14 @@ RSpec.describe "the Rails effect layer" do
         expect(declared(key)).to contain_exactly(*io, "mutate.self")
         expect(entry(key)).to be_exhaustive
         expect(entry(key)).not_to be_trivial
+      end
+    end
+
+    unmutating_writers.each do |method|
+      it "bounds ##{method} with the read beside the write and no mutation" do
+        key = "PostDrafts##{method}"
+        expect(declared(key)).to contain_exactly("io.db.read", "io.db.write")
+        expect(entry(key)).to be_exhaustive
       end
     end
 
@@ -170,6 +186,61 @@ RSpec.describe "the Rails effect layer" do
     it "leaves a query builder on the proxy trivial" do
       expect(entry("PostDrafts#titled")).to be_trivial
       expect(Rigor::SigGen::EffectAnnotation.decide(entry("PostDrafts#titled"))).to eq([["%a{pure}"], :emitted])
+    end
+  end
+
+  # `Post` declares no callback and no validator, so nothing is synthesised in front of the
+  # `ActiveRecord::Base` row, and each `PostMaintenance` method reads exactly the row its one call matches.
+  describe "a class-side writer" do
+    reading_writers = %w[
+      via_find_or_create_by via_find_or_create_by! via_create_or_find_by via_create_or_find_by!
+      via_update via_update! via_destroy via_destroy_all via_destroy_by
+      via_delete via_delete_all via_delete_by via_update_all via_touch_all
+    ].freeze
+
+    # The control: a writer that queries nothing first must not gain the read from a list edited by name.
+    plain_writers = %w[
+      via_create via_create! via_insert via_insert! via_insert_all via_insert_all! via_upsert via_upsert_all
+    ].freeze
+
+    reading_writers.each do |method|
+      it "bounds ##{method} with the read beside the write" do
+        key = "PostMaintenance##{method}"
+        expect(declared(key)).to contain_exactly("io.db.read", "io.db.write")
+        expect(entry(key)).to be_exhaustive
+      end
+    end
+
+    plain_writers.each do |method|
+      it "keeps ##{method} a write alone" do
+        expect(declared("PostMaintenance##{method}")).to contain_exactly("io.db.write")
+      end
+    end
+
+    # Rails delegates the class-side finders and writers to `all`, so `Post.update_all` IS
+    # `Post.all.update_all`, and its row has to say what the Relation signature says. This keeps an edit to
+    # one side from leaving the other behind. `create` is the exception by construction: `Post.create` is
+    # `new(…).save`, not `all.create`, so it never reaches the proxy path that reads in `Relation#create`.
+    it "gives a class-side selector the I/O labels of the Relation method it delegates to" do
+      relation_io = relation_io_bounds
+      rows = Rigor::Plugin::Activerecord::Effects.singleton_rows.reject { |row| %i[create create!].include?(row.method) }
+      shared = rows.select { |row| relation_io.key?(row.method.to_s) }
+
+      expect(shared.map { |row| row.method.to_s }).to include("update_all", "destroy_all", "find_or_create_by")
+      shared.each do |row|
+        expect([row.method, row.labels.grep(/\Aio\./).sort]).to eq([row.method, relation_io[row.method.to_s]])
+      end
+    end
+
+    def relation_io_bounds
+      path = File.expand_path("../../../plugins/rigor-activerecord/sig/active_record/relation.rbs", __dir__)
+      _, _, decls = RBS::Parser.parse_signature(RBS::Buffer.new(name: path, content: File.read(path)))
+      relation = decls.flat_map(&:members).find { |decl| decl.name.to_s == "Relation" }
+      relation.members.grep(RBS::AST::Members::MethodDefinition).to_h do |member|
+        labels = member.annotations.map(&:string).grep(/\Arigor:v1:effect /)
+                       .flat_map { |text| text.delete_prefix("rigor:v1:effect ").split(/,\s*/) }
+        [member.name.to_s, labels.grep(/\Aio\./).sort]
+      end
     end
   end
 

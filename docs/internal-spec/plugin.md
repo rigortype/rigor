@@ -907,16 +907,23 @@ plain Relation's `build` changes nothing. A writer that only the subclass define
 an `effect_attributions:` row keyed on the base class. A bound that fits only the base class would give
 `%a{pure}` to a method that changes an object its caller still holds.
 
-A bound also names **every leaf the framework's own implementation reaches, on any path**. Sibling leaves do
-not subsume each other, so a writer that queries before its write, or after a failed one, carries both
-`io.db.read` and `io.db.write`. rigor-activerecord's `find_or_create_by` is `find_by` and then a create, and
-`destroy_all` loads the records it destroys. A class method that the framework delegates to another
-receiver carries that receiver's bound: `Model.update_all` is `Model.all.update_all`. Two kinds of work
-stay outside it. Schema reflection is one, because counting it would make every query builder a read. The
-model's callbacks and validators are the other, including the ones an association option such as
-`dependent:` or `touch:` registers. They belong to the model, and an `effect_edges:` strategy is the channel
-that carries them. Which association a proxy stands for is not a callback: the `has_many :through` proxy's
-`delete_all` loads its target first, so the bound counts that read.
+A bound also names **every read and write the framework's own implementation performs, on any path**.
+Sibling leaves do not subsume each other, so a writer that queries before its write, or after a failed one,
+carries both `io.db.read` and `io.db.write`. rigor-activerecord's `find_or_create_by` is `find_by` and then a
+create, and `destroy_all` loads the records it destroys. A class method that the framework delegates to
+another receiver carries that receiver's bound: `Model.update_all` is `Model.all.update_all`. Two kinds of
+work stay outside it. Schema reflection is one, because counting it would make every query builder a read.
+The model's callbacks and validators are the other, including the ones an association option such as
+`dependent:` or `touch:` registers. They belong to the model, and an `effect_edges:` strategy is the only
+channel that can carry them. Today's strategy carries symbol-argument callback macros and a uniqueness
+validator, so the reads those association options register are carried by nothing. Which association a
+proxy stands for is not a callback: the `has_many :through` proxy's `delete_all` loads its target first, so
+the bound counts that read.
+
+`io.db.transaction` is not held to the rule yet. A write that opens a transaction around itself is not
+labelled with it: `save`'s implicit transaction and the explicit ones in `create_or_find_by` and the proxy's
+`create` are not. rigor-activerecord's proxy-writer rows and its `transaction` / `with_lock` rows do carry
+it.
 
 ##### `EffectAttribution`
 

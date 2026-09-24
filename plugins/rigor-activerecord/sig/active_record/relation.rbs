@@ -94,10 +94,12 @@
 #
 # The writers a plain Relation does not define (`<<`, `push`,
 # `append`, `concat`, `replace`, `clear`) are rows in the plugin's
-# `effect_attributions:` rather than declarations here. The same rows
-# cover `delete` / `destroy`, which a plain Relation hands to the
-# model class. Declaring them here would claim a Relation defines
-# them, and would change how they type.
+# `effect_attributions:` rather than declarations here. Declaring
+# them here would claim a Relation defines them, and would change
+# how they type. The same rows cover `delete` / `destroy`. A plain
+# Relation does define those, as `where(id:).delete_all` and
+# `find(id).destroy`, and the rows' labels cover both. They are not
+# declared here because that too would change how they type.
 #
 # ## A writer that also queries carries the read too
 #
@@ -113,9 +115,10 @@
 #   or passes an id to the model's `update`, which calls `find`.
 # - `update_all` and `delete_all`, and so `touch_all` and `delete_by`,
 #   first `SELECT` the distinct primary keys when the relation
-#   eager-loads a collection and has a limit or offset
-#   (`apply_join_dependency`). The proxy's `delete_all` on a
-#   `has_many :through` loads the target before it deletes.
+#   eager-loads, has a limit or offset and no `group`, and eager-loads
+#   or joins a collection association (`apply_join_dependency`). The
+#   proxy's `delete_all` on a `has_many :through` loads the target
+#   before it deletes.
 # - `create(!)` on the proxy of a `has_many :through` a `has_one`
 #   builds the join record through the `has_one`, which loads the
 #   record it replaces.
@@ -124,14 +127,18 @@
 # column and index lookups the schema cache serves would otherwise
 # make `where` a read. The model's callbacks and validators are the
 # other, including those an association option such as `dependent:`
-# or `touch:` registers. They are not part of any bound here, and the
-# plugin's callback edge carries them only on the model's own `save`
-# / `destroy`.
+# or `touch:` registers. They are not part of any bound here. The
+# plugin's callback edge carries only symbol-argument callback macros
+# and a uniqueness validator, and only on the model's own `save` /
+# `destroy`. Nothing carries the reads a required `belongs_to`,
+# `touch:` or `dependent:` registers.
 #
 # One case is not covered. On that same `has_many :through` a
 # `has_one`, `new` / `build` also build the join record when the
-# source reflection has an inverse. The `has_one` then replaces its
-# record, which reads and can write.
+# source reflection has an inverse, and so do `find_or_initialize_by`
+# and `first_or_initialize`, which reach `new`. The `has_one` then
+# replaces its record: it loads the old one, and even without a
+# save it can delete, destroy or save it.
 
 module ActiveRecord
   class Relation[Elem]

@@ -11,7 +11,6 @@ require_relative "../source/parameter_envelope"
 require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
-require_relative "body_fixpoint"
 require_relative "def_handle"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
@@ -1783,22 +1782,27 @@ module Rigor
         end
       end
 
-      # The `op=` results join the seed as a loop body's rebinds join a local (ADR-56's {BodyFixpoint}): the
-      # methods may run any number of times, so a result is itself a receiver for the next write, and a chain
-      # that still grows at the cap floors to `Dynamic[top]`.
+      # The `op=` results join the complete seed. The methods run in any order, so a result is itself the
+      # receiver of another held write: the dispatch repeats once per held write, which covers every chain one
+      # call of each method can form, and so every chain any source order used to see. It stops early once a
+      # pass adds nothing. Not ADR-56's {BodyFixpoint}: iterated to its fixed point, `@n += x` re-dispatched on
+      # its own `Dynamic[Integer | …]` result added `Dynamic[top]`, and the final widening pass dropped the `0`
+      # the counter starts at — on nearly every counter ivar in the survey corpus.
       def merge_ivar_operator_writes!(accumulator, operator_writes)
         operator_writes.each do |class_name, ivars|
           seeded = accumulator[class_name]
-          converged = BodyFixpoint.converge(
-            names: ivars.keys,
-            seed_bindings: seeded.slice(*ivars.keys),
-            widen: Type::Combinator.method(:widen_value_pinned),
-            evaluate_body: lambda do |bindings|
-              ivars.to_h { |ivar_name, writes| [ivar_name, operator_write_results(bindings[ivar_name], writes)] }
-            end
-          )
-          seeded.merge!(converged)
+          ivars.each { |ivar_name, writes| seeded[ivar_name] = chain_operator_writes(seeded[ivar_name], writes) }
         end
+      end
+
+      def chain_operator_writes(seed, writes)
+        writes.size.times do
+          joined = Type::Combinator.union(seed, operator_write_results(seed, writes))
+          break if joined == seed
+
+          seed = joined
+        end
+        seed
       end
 
       # The union of what each held `op=` write stores when `@x` holds `current`. The receiver is widened off

@@ -1530,11 +1530,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             expect(float?(op_first)).to be(true)
           end
 
-          it "iterates a compounding `op=` past its first result" do
-            # `add` twice leaves `[1, 1]`, which the one-pass `[] | [1]` seed said the ivar could never hold.
-            seed = seed_of("def initialize = (@x = [])", "def add = (@x += [1])")
+          it "chains one held write's result into another's dispatch, in either order" do
+            # Runtime: `[1, "s"]` after `a` then `b`, `["s", 1]` after `b` then `a`.
             one = Rigor::Type::Combinator.constant_of(1)
-            expect(seed.accepts(Rigor::Type::Combinator.tuple_of(one, one)).yes?).to be(true)
+            str = Rigor::Type::Combinator.constant_of("s")
+            [%w[a b], %w[b a]].each do |order|
+              writes = { "a" => "def a = (@x += [1])", "b" => %(def b = (@x += ["s"])) }.values_at(*order)
+              seed = seed_of("def initialize = (@x = [])", *writes)
+              expect(seed.accepts(Rigor::Type::Combinator.tuple_of(one, str)).yes?).to be(true)
+              expect(seed.accepts(Rigor::Type::Combinator.tuple_of(str, one)).yes?).to be(true)
+            end
+          end
+
+          it "dispatches a lone `op=` once, so a counter keeps the literal it starts at" do
+            # Re-dispatched on its own `Dynamic[Integer | …]` result, `@n += n` added `Dynamic[top]`; a fixpoint's
+            # widening pass then dropped the `0`.
+            seed = seed_of("def initialize = (@x = 0)", "def add(n) = (@x += n)")
+            members = seed.is_a?(Rigor::Type::Union) ? seed.members : [seed]
+            expect(members.grep(Rigor::Type::Constant).map(&:value)).to eq([0])
+            expect(members).not_to include(Rigor::Type::Combinator.untyped)
           end
         end
 

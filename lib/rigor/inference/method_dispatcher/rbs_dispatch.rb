@@ -1113,7 +1113,9 @@ module Rigor
             return nil if type.nil?
 
             members = class_level_members(type)
-            seeds = members && sum_seed_classes(method_type, args)
+            return Type::Combinator.untyped if members.nil?
+
+            seeds = sum_seed_classes(method_type, args)
             return Type::Combinator.untyped if seeds.nil?
 
             promoted = seeds.flat_map { |seed| members.map { |member| promoted_class(seed, member) } }

@@ -1,0 +1,3 @@
+- **[plugins/rigor-activerecord]** A method that builds into a held association, such as `@posts.build`, no longer reads as pure or gets `%a{pure}` from `rigor sig-gen`. ([#1309](https://github.com/rigortype/rigor/pull/1309))
+  - An association reader is typed as `ActiveRecord::Relation[Model]` but returns a `CollectionProxy`, so the Relation bounds of the builders, `create` family, `reset`, `reload`, `delete_all`, `destroy_all`, `update_all`, `touch_all` and bulk inserts now carry `mutate.self`.
+  - The proxy-only writers (`<<`, `push`, `append`, `concat`, `replace`, `delete`, `destroy`, `clear`) now carry `io.db.read`, `io.db.write`, `io.db.transaction` and `mutate` instead of reading as trivial.

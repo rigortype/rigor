@@ -80,6 +80,23 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
+        # The writers an association's `CollectionProxy` defines and a plain Relation does not (`delete` /
+        # `destroy` on a plain Relation reach the model class instead). Each adds records to the
+        # association's in-memory target or removes them from it. Depending on whether the owner is saved
+        # and on the association's `dependent:` option, it may also read, write, and open a transaction, so
+        # the row names all three rather than the parent `io.db`, which `--label io.db.write` would not
+        # match.
+        #
+        # The mutation is spelt from the call site, as every row here is, and bare `mutate` is the label
+        # for a receiver that is not the caller's `self`: the proxy is an object the caller holds, like the
+        # session in rigor-actionpack's `SESSION_WRITE`. The RBS envelopes on `build` / `reset` are written
+        # from the callee's side instead, and say `mutate.self`.
+        #
+        # A saved owner's `<<` saves the record, which runs the model's `before_save` / `after_commit`
+        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has.
+        PROXY_WRITERS = %w[<< push append concat replace delete destroy clear].freeze
+        PROXY_WRITE = ["io.db.read", "io.db.write", "io.db.transaction", "mutate"].freeze
+
         # Raw SQL, narrowed by the statement's own leading verb ({Rigor::Effects::Narrowing} `sql_verb`).
         ADAPTER_SQL = %w[execute exec_query exec_insert exec_update exec_delete select_all select_one
                          select_value select_values select_rows query query_value query_values].freeze
@@ -132,7 +149,13 @@ module Rigor
         def relation_rows
           rows(RELATION, RELATION_MATERIALIZERS, READ,
                why: "an Enumerable delegation on a Relation: it calls `each`, which runs the query. Not " \
-                    "declared in the bundled RBS because declaring it would change how it types")
+                    "declared in the bundled RBS because declaring it would change how it types") +
+            rows(RELATION, PROXY_WRITERS, PROXY_WRITE,
+                 why: "a CollectionProxy writer: it changes the association's target and, for a saved " \
+                      "owner, the rows behind it. Keyed on Relation because that is the type the plugin " \
+                      "gives an association reader. A plain Relation either has no such method or hands " \
+                      "`delete` / `destroy` to the model class, which stays inside the bound. The model's " \
+                      "save callbacks are not edged")
         end
 
         # Two rows per selector, because raw SQL is written two ways and only one of them names a type.

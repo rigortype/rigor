@@ -276,7 +276,7 @@ module Rigor
       def record_declaration(node, prefix, context)
         class_name = class_name_for(prefix)
         case node.name
-        when :include, :prepend then @ancestry.record_includes(class_name, constant_arguments(node), prefix)
+        when :include, :prepend then @ancestry.record_includes(class_name, node, prefix, context)
         when :define_method then declare_define_method(class_name, node, context)
         else synthesize_accessors(class_name, node, context.self_singleton_class?)
         end
@@ -318,10 +318,6 @@ module Rigor
       def symbol_arguments(node)
         node.arguments&.arguments&.filter_map { |argument| argument.unescaped if argument.is_a?(Prism::SymbolNode) } ||
           []
-      end
-
-      def constant_arguments(node)
-        node.arguments&.arguments&.filter_map { |argument| Source::ConstantPath.qualified_name(argument) } || []
       end
 
       def parameter_names(parameters)

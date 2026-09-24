@@ -65,6 +65,18 @@ RSpec.describe "a Const.new call in an effect summary" do
     expect(entry).to be_exhaustive
   end
 
+  # `include` inside `class << self` mixes the module into the singleton class, so `Setup#initialize` is a
+  # class method `new` never calls. Recorded as an instance-side include, it was the constructor the rule
+  # found, and its write reached a caller whose `new` runs `BasicObject#initialize`.
+  it "takes no constructor from a module included into the singleton class" do
+    entry = table["ConstructorEdge::EigenClient#build"]
+
+    expect(entry.proven).to be_empty
+    expect(entry.edges).to be_empty
+    expect(entry).not_to be_unclaimed
+    expect(entry).to be_exhaustive
+  end
+
   # A project `def self.new` is the definition the call actually reaches, and it must win over the
   # `#initialize` beside it.
   it "prefers a project def self.new over #initialize" do

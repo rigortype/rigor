@@ -70,9 +70,21 @@ module Rigor
         @superclasses[name] = [FileCollection::OPAQUE_ANCESTOR, *load_time_parent(value, prefix)]
       end
 
-      # @param names — the constant paths an `include` / `prepend` named, as written
-      def record_includes(class_name, names, prefix)
-        candidates = names.flat_map { |name| lexical_candidates(name, prefix) }
+      # A receiver-less `include` / `prepend` in `class_name`'s body, its constant arguments recorded as
+      # written.
+      #
+      # Both are calls on `self`, like `define_method`. Where `self` is the singleton class — inside
+      # `class << self`, or `singleton_class.class_eval` — they mix the module into the singleton class,
+      # which is what `extend` does. The include table is the instance ancestry that `super` and the
+      # constructor rule walk, so such a call records nothing, and the collection is as blind to it as it
+      # is to `extend`.
+      #
+      # @param context — the {DefinitionContext} of the class-body position the call sits at
+      def record_includes(class_name, node, prefix, context)
+        return if context.self_singleton_class?
+
+        names = node.arguments&.arguments&.filter_map { |argument| Source::ConstantPath.qualified_name(argument) }
+        candidates = (names || []).flat_map { |name| lexical_candidates(name, prefix) }
         (@includes[class_name] ||= []).concat(candidates) unless candidates.empty?
       end
 

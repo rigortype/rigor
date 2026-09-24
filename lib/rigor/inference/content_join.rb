@@ -133,6 +133,23 @@ module Rigor
         with_residue(Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t]), hash_residue(pre_state))
       end
 
+      # Builds the continuation of a pre-state that carries BOTH an Array and a Hash member, from the
+      # pairs and the elements the body stores. Each side is joined with its own class's evidence, and
+      # every member neither side absorbs survives beside the Hash carrier ({#hash_residue}).
+      #
+      # Joined as one carrier, the other class's member was residue and survived exactly as the seed
+      # had it: an unwidened literal `Tuple` / `HashShape`, so what the body did to it was gone — `x =
+      # gets ? [1] : { a: 1 }; [0].each { x.map!(&:to_s) if x.is_a?(Array); x[:k] = 2 if
+      # x.is_a?(Hash) }` read `[1]`, and `x.first.upcase` drew `undefined method` on correct code. The
+      # caller routes the evidence: a store may reach either member, and only the caller sees its
+      # index (`StatementEvaluator#mixed_content_evidence`).
+      def join_mixed_content(pre_state, added_pairs, added_elements)
+        members = pre_state.is_a?(Type::Union) ? pre_state.members : [pre_state]
+        arrays, rest = members.partition { |member| array_residue(member).empty? }
+        array = join_array_content(Type::Combinator.union(*arrays), added_elements)
+        Type::Combinator.union(array, join_hash_content(Type::Combinator.union(*rest), added_pairs))
+      end
+
       # ----------------------------------------------------------------
       # Union residue — the members the rederived carrier does NOT stand for (issue #631).
       #

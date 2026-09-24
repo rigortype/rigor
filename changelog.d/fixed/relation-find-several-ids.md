@@ -1,0 +1,3 @@
+- **[plugins/rigor-activerecord]** `find` with two or more ids, such as `user.posts.find(1, 2)`, is typed as an Array of the model, so an Array method on the result no longer reports a false `call.undefined-method` where the model has an RBS signature. ([#1321](https://github.com/rigortype/rigor/pull/1321))
+  - A single id, typed or untyped, is still typed as the model.
+  - `arel` accepts its optional `aliases` argument instead of reporting `call.wrong-arity`.

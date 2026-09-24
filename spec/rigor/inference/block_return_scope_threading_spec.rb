@@ -798,6 +798,116 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The one-statement form of the probe above. The in-place widening binds `cache` to `Hash[Dynamic[top],
+  # Dynamic[top]]` at every position, so the slot reads wholly gradual, and the value-position `||=` read that as
+  # the memoization idiom's "no evidence about the slot" (issue #1202): each position answered its OWN `e`.
+  # Under the per-element fold the gradual slot is what an earlier position stored, so the memo reading must not
+  # apply there; the memo reading of an untracked receiver, and of a hash the block builds afresh, must stay.
+  describe "a memoizing index `||=` as a per-element fold's whole predicate" do
+    it "does not pin a captured hash the one-statement `||=` fills" do
+      # THE REPORTED PROBE: Ruby keeps the first iteration's `1`, so `find` answers `nil`; the pin answered `2 == 2`
+      # at the second position, folded `find` to `2`, and reported `found == 2` always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = [1, 2].find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "answers element-or-nil for the same find" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        cache = {}
+        dump_type([1, 2].find { |e| (cache[:first] ||= e) == 2 })
+      RUBY
+    end
+
+    it "keeps an earlier position's store in a `map` over the same `||=`" do
+      # Runtime `[1, 1]`; the pin answered `[1, 2]`.
+      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 2 | Dynamic[top]]")
+        cache = {}
+        dump_type([1, 2].map { |e| cache[:first] ||= e })
+      RUBY
+    end
+
+    it "still fires on a memo hash the block builds afresh at every position (control)" do
+      # The fold is exact here: every position's `Hash.new` is empty, so Ruby answers `2 == 2` at the second one,
+      # `find` returns `2`, and `found == 2` is always true. The slot reads wholly gradual, so this is the memo
+      # reading on an untracked receiver, which the fix keeps.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        found = [1, 2].find { |e| (Hash.new[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "still fires when the body rebinds the captured name to a fresh hash first (control)" do
+      # A statement rebind replaces the in-place widening, so the `||=` reads a hash no earlier position filled.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        cache = {}
+        found = [1, 2].find do |e|
+          cache = Hash.new
+          (cache[:first] ||= e) == 2
+        end
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin a captured `Hash.new` the widening leaves where it is" do
+      # A bare `Hash` is a nominal the in-place widening declines, so no binding moves; the body still stores
+      # into it at every position.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = Hash.new
+        found = [1, 2].find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin a captured array slot" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        slots = []
+        found = [1, 2].find { |e| (slots[0] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin the same hash under a Range receiver" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = (1..2).find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin an instance-variable hash either" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        class Memo
+          def run
+            @cache = {}
+            dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
+          end
+        end
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_values fold fills" do
+      # Runtime `{ x: 1, y: 1 }`; the pin answered `{ x: 1, y: 2 }`, so `r[:y] == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = { x: 1, y: 2 }.transform_values { |v| cache[:first] ||= v }
+        puts "y" if r[:y] == 2
+      RUBY
+    end
+
+    it "keeps the memo reading under the generic block-return pass (control)" do
+      # The generic pass types the rvalue from the parameter's signature type, which covers every iteration's
+      # store, so the memo reading still describes the slot there.
+      expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+        pool = {}
+        words = gets.to_s.split(",")
+        dump_type(words.map { |w| pool[w] ||= w })
+      RUBY
+    end
+  end
+
   # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured
   # receiver the body only mutates IN PLACE (`h[k] = …`, `h[k] += …`, `seen[x] = true`) is never rebound, so
   # every position still read it at its ENTRY contents: `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }`

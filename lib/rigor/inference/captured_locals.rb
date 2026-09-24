@@ -78,12 +78,17 @@ module Rigor
 
       # The binding the per-element fold lays under a block's parameters: each name's type across iterations, and
       # the optimistic nil-freeness mark an iteration's own rebind gave it, which {.bind} adds to the one the
-      # call site already holds — as `Scope#join` unions the marks of the scopes it joins.
-      Bindings = Data.define(:types, :marks) do
+      # call site already holds — as `Scope#join` unions the marks of the scopes it joins. `stored` names the
+      # variables the body stores into in place, which the per-element fold marks (`Scope#with_fold_stored`)
+      # after binding them, since the bind itself drops the mark; the generic block-return pass passes none.
+      Bindings = Data.define(:types, :marks, :stored) do
         def names = types.keys
 
         def lay(scope)
-          types.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type, optimistic: marks[name]) }
+          bound = types.reduce(scope) do |acc, (name, type)|
+            CapturedLocals.bind(acc, name, type, optimistic: marks[name])
+          end
+          stored.reduce(bound) { |acc, name| acc.with_fold_stored(name) }
         end
       end
 

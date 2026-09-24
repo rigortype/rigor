@@ -2295,6 +2295,18 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
     end
 
+    it "keeps the slot on a receiver the per-element fold's body stores into" do
+      # The fold marks it: an earlier position may have filled the slot, so its gradual type is no memo's.
+      bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped).with_fold_stored(:@cache)
+      expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7 | Dynamic[top]")
+    end
+
+    it "keeps the slot under an element read rooted at such a receiver" do
+      bound = scope.with_local(:cache, Rigor::Type::Combinator.untyped).with_fold_stored(:cache)
+      node = parse_expression("cache[:a][:b] ||= 7", scopes: [[:cache]])
+      expect(bound.type_of(node).describe).to eq("7 | Dynamic[top]")
+    end
+
     it "gives an operator write on an untracked slot no optimistic reading (control)" do
       expect(scope.type_of(parse_expression("@cache[:k] += 1")).describe).to eq("Dynamic[top]")
     end

@@ -415,12 +415,16 @@ module Rigor
       # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
       # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
       # `@flags[n] = true` elsewhere, never provably `false`.
+      #
+      # Nor is a receiver the per-element block fold's body stores into in place ({#fold_stored_receiver?}). The
+      # fold types every position from one entry scope, so its slot's gradual type is what an EARLIER position
+      # stored rather than an absence of evidence, and the rvalue is only this position's.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 
         current = index_read_type(node, scope)
         rhs = scope.type_of(node.value, tracer: tracer)
-        return rhs if current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+        return rhs if memoizing_index_read?(node, current, rhs)
 
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
@@ -840,6 +844,24 @@ module Rigor
         else
           type_scope.type_of(node, tracer: tracer)
         end
+      end
+
+      # True when {#index_compound_write_value} reads the `||=` `node` as the memoization idiom's rvalue: the slot
+      # reads wholly gradual, the rvalue can store something truthy, and the receiver is no variable the
+      # per-element fold's body stores into in place.
+      def memoizing_index_read?(node, current, rhs)
+        current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot) &&
+          !fold_stored_receiver?(node)
+      end
+
+      # True when the receiver of the index write `node` can evaluate to a variable the per-element block fold
+      # marked as one its body stores into in place (`Scope#fold_stored?`). The receiver is resolved as the fold's
+      # own content-mutation scan resolves it ({CapturedLocals.site_reads}): the local an element read is rooted
+      # at (`cache[:a][:b] ||= e`), or every variable the receiver can evaluate to.
+      def fold_stored_receiver?(node)
+        return false if scope.fold_stored.empty?
+
+        CapturedLocals.site_reads(node).any? { |read| scope.fold_stored?(ReceiverAlias.read_name(read)) }
       end
 
       # The `receiver[i]` read a compound index write performs before storing — the `[]` read on the

@@ -26,7 +26,8 @@ module Rigor
                 :opaque_block_self, :singleton_class_body, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
-                :optimistic_origins, :optimistic_locals, :optimistic_ivars
+                :optimistic_origins, :optimistic_locals, :optimistic_ivars,
+                :fold_stored
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -216,10 +217,19 @@ module Rigor
     # Issue #667 — the empty answer of {#published_constant_ivars_for}, so a class with no such ivar (every
     # class in a project that publishes nothing) allocates none.
     EMPTY_PUBLISHED_CONSTANT_IVARS = Set.new.freeze
+    # The variables a per-element block fold's body stores into IN PLACE, laid by the fold at every position's
+    # entry ({#with_fold_stored}). Members are the sigil-bearing names `Inference::CapturedLocals` keys on
+    # (`:cache`, `:@cache`, `:@@c`, `:$g`), so one set covers every kind without a collision. The fold types
+    # each position from one entry scope, so a slot of such a binding may hold what an EARLIER position
+    # stored, which is evidence about the slot even where its type reads wholly gradual. A write to the name
+    # drops it, as it drops the ADR-58 mark, and a join keeps it when either arm holds it: the mark only ever
+    # withholds the memoizing `||=` reading (`StatementEvaluator#index_compound_write_value`), whose answer is
+    # the narrower one.
+    EMPTY_FOLD_STORED = Set.new.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
                      :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
-                     :EMPTY_PUBLISHED_CONSTANT_IVARS
+                     :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_FOLD_STORED
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -284,7 +294,8 @@ module Rigor
       plugin_typed_calls: {}.compare_by_identity,
       optimistic_origins: {}.compare_by_identity,
       optimistic_locals: EMPTY_ORIGINS,
-      optimistic_ivars: EMPTY_ORIGINS
+      optimistic_ivars: EMPTY_ORIGINS,
+      fold_stored: EMPTY_FOLD_STORED
     )
       @environment = environment
       @locals = locals
@@ -311,6 +322,7 @@ module Rigor
       @optimistic_origins = optimistic_origins
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
+      @fold_stored = fold_stored
       freeze
     end
 
@@ -387,7 +399,8 @@ module Rigor
               # rvalue is one.
               published_constant_sourced: drop_published_constant_sourced_for(:local, name),
               local_origins: drop_origin(@local_origins, name),
-              optimistic_locals: drop_origin(@optimistic_locals, name))
+              optimistic_locals: drop_origin(@optimistic_locals, name),
+              fold_stored: drop_fold_stored(name))
     end
 
     def with_fact(fact)
@@ -514,7 +527,8 @@ module Rigor
               declaration_sourced: drop_declaration_sourced_for(:ivar, name),
               published_constant_sourced: drop_published_constant_sourced_for(:ivar, name),
               ivar_origins: drop_origin(@ivar_origins, name),
-              optimistic_ivars: drop_origin(@optimistic_ivars, name))
+              optimistic_ivars: drop_origin(@optimistic_ivars, name),
+              fold_stored: drop_fold_stored(name))
     end
 
     # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only provenance is the class-ivar index.
@@ -598,11 +612,27 @@ module Rigor
     end
 
     def with_cvar(name, type)
-      rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
+      rebuild(cvars: @cvars.merge(name.to_sym => type).freeze, fold_stored: drop_fold_stored(name))
     end
 
     def with_global(name, type)
-      rebuild(globals: @globals.merge(name.to_sym => type).freeze)
+      rebuild(globals: @globals.merge(name.to_sym => type).freeze, fold_stored: drop_fold_stored(name))
+    end
+
+    # Record that the per-element block fold's body stores into `name` in place ({EMPTY_FOLD_STORED}). `name`
+    # carries its sigil. Applied AFTER the transition that binds the name, which drops the mark.
+    def with_fold_stored(name)
+      ref = name.to_sym
+      return self if @fold_stored.include?(ref)
+
+      rebuild(fold_stored: (@fold_stored.dup << ref).freeze)
+    end
+
+    # True when `name` (sigil included) is still bound as {#with_fold_stored} recorded it.
+    def fold_stored?(name)
+      return false if @fold_stored.empty?
+
+      @fold_stored.include?(name.to_sym)
     end
 
     # Regex match-data globals (`$~`, `$&`, `$1..$9`, the pre/post-match and last-paren back-references). Narrowed
@@ -1614,8 +1644,7 @@ module Rigor
         @globals == other.globals &&
         @indexed_narrowings == other.indexed_narrowings &&
         @method_chain_narrowings == other.method_chain_narrowings &&
-        @declaration_sourced == other.declaration_sourced &&
-        @published_constant_sourced == other.published_constant_sourced
+        same_marks?(other)
     end
     alias eql? ==
 
@@ -1624,6 +1653,13 @@ module Rigor
     end
 
     private
+
+    # The provenance marks {#==} compares: ADR-58's, issue #667's and the fold-stored set.
+    def same_marks?(other)
+      @declaration_sourced == other.declaration_sourced &&
+        @published_constant_sourced == other.published_constant_sourced &&
+        @fold_stored == other.fold_stored
+    end
 
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
@@ -1645,7 +1681,8 @@ module Rigor
       plugin_typed_calls: @plugin_typed_calls,
       optimistic_origins: @optimistic_origins,
       optimistic_locals: @optimistic_locals,
-      optimistic_ivars: @optimistic_ivars
+      optimistic_ivars: @optimistic_ivars,
+      fold_stored: @fold_stored
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -1668,7 +1705,8 @@ module Rigor
         plugin_typed_calls: plugin_typed_calls,
         optimistic_origins: optimistic_origins,
         optimistic_locals: optimistic_locals,
-        optimistic_ivars: optimistic_ivars
+        optimistic_ivars: optimistic_ivars,
+        fold_stored: fold_stored
       )
     end
 
@@ -1750,7 +1788,10 @@ module Rigor
         plugin_typed_calls: @plugin_typed_calls,
         optimistic_origins: @optimistic_origins,
         optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
-        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars)
+        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars),
+        # UNION, the published-constant mark's direction: the mark only withholds the memoizing `||=`
+        # reading, so keeping it when either arm holds it is the wider answer.
+        fold_stored: join_fold_stored(other)
       )
     end
 
@@ -1865,6 +1906,22 @@ module Rigor
     def join_published_constant_sourced(other)
       mine = @published_constant_sourced
       theirs = other.published_constant_sourced
+      return mine if mine.equal?(theirs) || theirs.empty?
+      return theirs if mine.empty?
+
+      (mine | theirs).freeze
+    end
+
+    def drop_fold_stored(name)
+      return @fold_stored if @fold_stored.empty?
+
+      ref = name.to_sym
+      @fold_stored.include?(ref) ? (@fold_stored - [ref]).freeze : @fold_stored
+    end
+
+    def join_fold_stored(other)
+      mine = @fold_stored
+      theirs = other.fold_stored
       return mine if mine.equal?(theirs) || theirs.empty?
       return theirs if mine.empty?
 

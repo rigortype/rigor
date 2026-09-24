@@ -165,6 +165,46 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # The per-element block fold marks the variables its body stores into in place, so the memoizing index `||=`
+  # reading does not take a slot an earlier position filled for one it knows nothing about.
+  describe "the fold-stored mark" do
+    let(:type) { Rigor::Type::Combinator.untyped }
+
+    it "records a marked name of every kind, sigil and all" do
+      marked = %i[cache @cache @@cache $cache].reduce(scope) { |acc, name| acc.with_fold_stored(name) }
+      expect(%i[cache @cache @@cache $cache].map { |name| marked.fold_stored?(name) }).to all(be(true))
+    end
+
+    it "keeps a local's mark apart from an ivar of the same stem" do
+      expect(scope.with_fold_stored(:cache).fold_stored?(:@cache)).to be(false)
+    end
+
+    it "drops the mark when the name is rebound, whatever its kind" do
+      rebound = {
+        cache: ->(s) { s.with_local(:cache, type) },
+        "@cache": ->(s) { s.with_ivar(:@cache, type) },
+        "@@cache": ->(s) { s.with_cvar(:@@cache, type) },
+        "$cache": ->(s) { s.with_global(:$cache, type) }
+      }
+      dropped = rebound.map { |name, write| write.call(scope.with_fold_stored(name)).fold_stored?(name) }
+      expect(dropped).to eq([false, false, false, false])
+    end
+
+    it "keeps the mark when another name is rebound" do
+      marked = scope.with_fold_stored(:cache).with_local(:other, type)
+      expect(marked.fold_stored?(:cache)).to be(true)
+    end
+
+    it "keeps the mark when either join branch carries it (union)" do
+      expect(scope.with_fold_stored(:cache).join(scope).fold_stored?(:cache)).to be(true)
+      expect(scope.join(scope.with_fold_stored(:cache)).fold_stored?(:cache)).to be(true)
+    end
+
+    it "participates in structural equality" do
+      expect(scope.with_fold_stored(:cache)).not_to eq(scope)
+    end
+  end
+
   describe "#forget_match_globals" do
     it "drops narrowed regex match-data globals so reads fall back to the default" do
       md = Rigor::Type::Combinator.nominal_of("MatchData")
@@ -450,7 +490,7 @@ RSpec.describe Rigor::Scope do
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
-          local_origins ivar_origins optimistic_locals optimistic_ivars
+          local_origins ivar_origins optimistic_locals optimistic_ivars fold_stored
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -497,7 +537,8 @@ RSpec.describe Rigor::Scope do
         plugin_typed_calls: { node => true }.compare_by_identity,
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
-        optimistic_ivars: { :@i => :cause }.freeze
+        optimistic_ivars: { :@i => :cause }.freeze,
+        fold_stored: Set[:x].freeze
       )
     end
 

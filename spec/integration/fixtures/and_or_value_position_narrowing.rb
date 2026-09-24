@@ -10,8 +10,8 @@ s = (ARGV.first if rand < 0.5)
 a = ARGV
 v = if rand < 0.5 then 1 else "str" end
 sym = if rand < 0.5 then :a else :b end
-uniform = { a: 1, b: 1 }
-key = ARGV[0].to_sym
+ones = [1, 1]
+idx = ARGV.size
 
 finite_stmt = x.finite? && x
 assert_type("false | finite-float", x.finite? && x)
@@ -41,8 +41,10 @@ assert_type(":a | false", sym == :a && sym)
 nested_stmt = !(s && x.finite?) || [s, x]
 assert_type("[String, finite-float] | true", !(s && x.finite?) || [s, x])
 
-# The constant short-circuit, shared by both positions, and its issue #313 decline on an optimistic lookup.
+# The constant short-circuit, shared by both positions, and its issue #313 decline on an optimistic lookup. The
+# lookup is `Array#[]` at a computed index, read past its `%a{implicitly-returns-nil}` as a lone `1`; a literal hash
+# no longer serves, since its shape reads a computed key with the nil arm and the fallback survives without the decline.
 short_circuit_stmt = 1 || s
 assert_type("1", 1 || s)
-fallback_stmt = uniform[key] || 5
-assert_type("1 | 5", uniform[key] || 5)
+fallback_stmt = ones[idx] || 5
+assert_type("1 | 5", ones[idx] || 5)

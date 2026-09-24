@@ -684,9 +684,62 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: optional_shape, method_name: :size)).to be_nil
     end
 
-    it "falls through for non-static keys" do
-      dyn = Rigor::Type::Combinator.untyped
-      expect(dispatch(receiver: shape, method_name: :[], args: [dyn])).to be_nil
+    context "with a computed key (not a single value-pinned literal)" do
+      let(:computed_key) { Rigor::Type::Combinator.nominal_of("Symbol") }
+      let(:values_or_nil) { Rigor::Type::Combinator.union(constant(1), constant("two"), constant(nil)) }
+
+      it "adds nil to the value union for `[]` on a closed shape, since the key may match none of the pairs" do
+        # `o = { a: 1 }; o[name] == 1` — any `name` but `:a` reads nil, so the comparison is not always truthy.
+        expect(dispatch(receiver: shape, method_name: :[], args: [computed_key])).to eq(values_or_nil)
+        untyped = Rigor::Type::Combinator.untyped
+        expect(dispatch(receiver: shape, method_name: :[], args: [untyped])).to eq(values_or_nil)
+      end
+
+      it "answers `dig` and `values_at` with the same nil-bearing step" do
+        expect(dispatch(receiver: shape, method_name: :dig, args: [computed_key])).to eq(values_or_nil)
+        result = dispatch(receiver: shape, method_name: :values_at, args: [constant(:a), computed_key])
+        expect(result).to eq(tuple(constant(1), values_or_nil))
+      end
+
+      it "defers on the empty shape, which a computed-key read shows was filled where the analysis did not see" do
+        # `h = {}; xs.each { |x| h[x] = h[x] ? h[x] + 1 : 1 }` — `Constant[nil]` would fold the guard always-falsey.
+        expect(dispatch(receiver: hash_shape({}), method_name: :[], args: [computed_key])).to be_nil
+        expect(dispatch(receiver: hash_shape({}), method_name: :dig, args: [computed_key])).to be_nil
+      end
+
+      it "defers `fetch`, which raises rather than returning nil on a miss" do
+        expect(dispatch(receiver: shape, method_name: :fetch, args: [computed_key])).to be_nil
+      end
+
+      it "defers on an open shape, whose undeclared keys may hold any value" do
+        open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+        expect(dispatch(receiver: open_shape, method_name: :[], args: [computed_key])).to be_nil
+        expect(dispatch(receiver: open_shape, method_name: :dig, args: [computed_key])).to be_nil
+      end
+
+      it "keeps a union of declared literal keys exact — no key in it can miss" do
+        both = Rigor::Type::Combinator.union(constant(:a), constant(:b))
+        exact = Rigor::Type::Combinator.union(constant(1), constant("two"))
+        expect(dispatch(receiver: shape, method_name: :[], args: [both])).to eq(exact)
+        expect(dispatch(receiver: shape, method_name: :fetch, args: [both])).to eq(exact)
+      end
+
+      it "reads a union with an undeclared member as a computed key, never as a lone Constant[nil]" do
+        # `counts = { total: 0 }; %i[a b a].each { |k| counts[k] = counts[k] ? counts[k] + 1 : 1 }` — the shape
+        # the loop body sees omits what earlier iterations stored, so the per-member answer is a stale `nil`.
+        partial = Rigor::Type::Combinator.union(constant(:a), constant(:missing))
+        expect(dispatch(receiver: shape, method_name: :[], args: [partial])).to eq(values_or_nil)
+        undeclared = Rigor::Type::Combinator.union(constant(:x), constant(:y))
+        expect(dispatch(receiver: shape, method_name: :[], args: [undeclared])).to eq(values_or_nil)
+        expect(dispatch(receiver: hash_shape({}), method_name: :[], args: [undeclared])).to be_nil
+        expect(dispatch(receiver: shape, method_name: :fetch, args: [partial])).to be_nil
+      end
+
+      it "defers `fetch` on a union reaching an optional key, which may be absent" do
+        optional = Rigor::Type::Combinator.hash_shape_of({ a: constant(1), b: constant(2) }, optional_keys: [:b])
+        both = Rigor::Type::Combinator.union(constant(:a), constant(:b))
+        expect(dispatch(receiver: optional, method_name: :fetch, args: [both])).to be_nil
+      end
     end
 
     it "resolves a scalar key absent from the shape to Constant[nil]" do
@@ -899,10 +952,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(result.elements).to eq([constant(1)])
     end
 
-    it "falls through when any argument is non-static" do
+    it "falls through when any argument is non-static on an open shape" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
       dyn = Rigor::Type::Combinator.untyped
       expect(
-        dispatch(receiver: shape, method_name: :values_at, args: [constant(:a), dyn])
+        dispatch(receiver: open_shape, method_name: :values_at, args: [constant(:a), dyn])
       ).to be_nil
     end
 

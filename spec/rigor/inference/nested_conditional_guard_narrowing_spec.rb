@@ -18,20 +18,30 @@ RSpec.describe "a conditional used as a condition" do
     v = if rand < 0.5 then 1 else "str" end
     sym = if rand < 0.5 then :a else :b end
     key = ARGV[0].to_sym
-    uniform = { a: 1, b: 1 }
-    table = { a: "x", b: "y" }
     missable = table[key]
   RUBY
 
+  # `uniform` and `table` are bound as `Hash[Symbol, V]` rather than seeded as literals: a literal's closed shape
+  # answers a computed key with the nil arm the miss produces, while this carrier's read is the one `RbsDispatch`
+  # types past `%a{implicitly-returns-nil}` — the optimistic lookup the issue #313 declines below are about.
+  seed_locals = %i[uniform table]
+
   def empty_scope
     Rigor::Scope.empty(environment: Rigor::Environment.default)
+                .with_local(:uniform, hash_of(1))
+                .with_local(:table, hash_of("x", "y"))
+  end
+
+  def hash_of(*values)
+    value = Rigor::Type::Combinator.union(*values.map { |v| Rigor::Type::Combinator.constant_of(v) })
+    Rigor::Type::Combinator.nominal_of("Hash", type_args: [Rigor::Type::Combinator.nominal_of("Symbol"), value])
   end
 
   # Types `subject` in one arm of `(guard) ? … : …`: the conditional's value as a statement and as a value, and the
   # subject itself inside the arm through the scope `ScopeIndexer` recorded for it.
   define_method(:arm_types) do |guard, subject, arm|
     fragment = arm == :truthy ? "(#{guard}) ? #{subject} : :no" : "(#{guard}) ? :no : #{subject}"
-    program = Prism.parse("#{seed}#{fragment}\n").value
+    program = Prism.parse("#{seed}#{fragment}\n", scopes: [seed_locals]).value
     statements = program.statements.body
     scope = statements[0..-2].reduce(empty_scope) { |acc, statement| acc.evaluate(statement).last }
     conditional = statements.last

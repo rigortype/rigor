@@ -126,7 +126,15 @@ RSpec.describe Rigor::Inference::MutationWidening do
     # The drift guard for the defect above: a name that mutates an Array in place and that Hash also
     # defines mutates a Hash in place too, so the Hash table must not be missing it.
     it "lists every Array mutator that Hash also defines as a Hash mutator" do
-      shared = described_class::ARRAY_MUTATORS.to_a.select { |name| Hash.method_defined?(name) }
+      # Core's own definitions only: a gem another spec loads into this process (ActiveSupport's
+      # `Hash#slice!`) reopens `Hash` in Ruby, which made the answer depend on which specs shared the worker.
+      core = lambda do |name|
+        next false unless Hash.method_defined?(name)
+
+        location = Hash.instance_method(name).source_location
+        location.nil? || location.first.start_with?("<internal:")
+      end
+      shared = described_class::ARRAY_MUTATORS.to_a.select { |name| core.call(name) }
       expect(shared.reject { |name| described_class::HASH_MUTATORS.include?(name) }).to be_empty
     end
 

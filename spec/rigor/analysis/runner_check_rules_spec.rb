@@ -995,11 +995,15 @@ RSpec.describe Rigor::Analysis::Runner do
       # models, so nothing folded from it is proof. The `.nil?` skip above covers the bare form by syntax
       # alone, which is why only the composed spellings ever surfaced this.
       describe "optimistically nil-free carriers" do
+        # The declines read a declared `Hash[Symbol, Integer]`, the carrier `RbsDispatch` types past the
+        # annotation. A literal table no longer serves: its closed shape answers a computed key with the nil
+        # arm the miss produces, so a decline over one would pass with no mark recorded. The static-key
+        # control keeps the literal, which is the proof side.
         let(:rank_table) { "MAP = { public: 2, protected: 1, private: 0 }.freeze\n" }
+        let(:rank_sig) { { "ranks.rbs" => "MAP: Hash[Symbol, Integer]\n" } }
 
         it "does not fire on a bare `.nil?` guard over the lookup" do
-          result = analyze(<<~RUBY)
-            #{rank_table}
+          result = analyze(<<~RUBY, sig: rank_sig)
             def rank(a)
               x = MAP[a]
               return false if x.nil?
@@ -1011,8 +1015,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "does not fire on a `||` composition of two such guards" do
-          result = analyze(<<~RUBY)
-            #{rank_table}
+          result = analyze(<<~RUBY, sig: rank_sig)
             def reduced?(a, b)
               x = MAP[a]
               y = MAP[b]
@@ -1025,8 +1028,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "does not fire on a `&&` composition of two negated guards" do
-          result = analyze(<<~RUBY)
-            #{rank_table}
+          result = analyze(<<~RUBY, sig: rank_sig)
             def reduced?(a, b)
               x = MAP[a]
               y = MAP[b]
@@ -1041,8 +1043,7 @@ RSpec.describe Rigor::Analysis::Runner do
         it "does not fire when the lookup is the predicate itself" do
           # A uniform-valued table reads as a lone `Constant`, so the rule's `Constant` test cannot tell this
           # from a proof — the shape that made the exclusion unenforceable without provenance.
-          result = analyze(<<~RUBY)
-            UNIFORM = { public: 1, protected: 1 }.freeze
+          result = analyze(<<~RUBY, sig: { "uniform.rbs" => "UNIFORM: Hash[Symbol, 1]\n" })
             def known?(a)
               return false if UNIFORM[a]
 
@@ -1077,6 +1078,108 @@ RSpec.describe Rigor::Analysis::Runner do
             end
           RUBY
           expect(truthy_diags(result).map(&:message)).to include(a_string_including("always falsey"))
+        end
+      end
+
+      # A literal hash read with a computed key misses for every key it does not declare, and reads nil there.
+      # The shape tier used to decline such a key, so the projection answered the nil-free value union and a
+      # comparison against the only value folded.
+      describe "a literal hash read with a computed key" do
+        it "does not fire on a comparison the miss makes false" do
+          result = analyze(<<~RUBY)
+            def computed_read(name)
+              o = { a: 1 }
+              puts "computed" if o[name] == 1
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still fires on the same comparison through a declared literal key (the control)" do
+          result = analyze(<<~RUBY)
+            def literal_read
+              o = { a: 1 }
+              puts "literal" if o[:a] == 1
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
+        end
+
+        # An empty hash read by a computed key was filled where the analysis did not see. Both of these reached
+        # `Constant[nil]` and folded their own guard on correct code.
+        it "does not fire on a counter an earlier iteration of the same block filled" do
+          result = analyze(<<~RUBY)
+            def counts(chars)
+              hash = {}
+              chars.each do |c|
+                hash[c] = if hash[c]
+                            hash[c] + 1
+                          else
+                            1
+                          end
+              end
+              hash
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+          expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+        end
+
+        it "does not fire on a cache another method fills through a receiver the widening does not track" do
+          result = analyze(<<~RUBY)
+            class Registry
+              class << self
+                def fetch(key) = (@cache ||= {})[key]
+                def store(key, value) = ((@cache ||= {})[key] = value)
+              end
+
+              def lookup(key)
+                (found = Registry.fetch(key)) ? found : :none
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on a counter keyed by a union of literals the seed does not declare" do
+          result = analyze(<<~RUBY)
+            def counts
+              counts = { total: 0 }
+              %i[a b a].each { |k| counts[k] = counts[k] ? counts[k] + 1 : 1 }
+              counts
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+        end
+
+        it "does not report a nil receiver once a default answers the miss" do
+          result = analyze(<<~RUBY)
+            def with_default(name)
+              h = { a: 1 }
+              h.default = 0
+              v = h[name]
+              v + 1
+            end
+
+            def with_default_proc(name)
+              h = { a: 1 }
+              h.default_proc = proc { 0 }
+              v = h[name]
+              v + 1
+            end
+          RUBY
+          expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
+        end
+
+        it "still fires when every key the read can take is declared (the control)" do
+          result = analyze(<<~RUBY)
+            def union_read(flag)
+              o = { a: 1, b: 1 }
+              k = flag ? :a : :b
+              puts "union" if o[k] == 1
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
         end
       end
 

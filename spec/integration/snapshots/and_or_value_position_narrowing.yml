@@ -7,15 +7,15 @@ locals:
   empty_stmt: non-empty-array[String] | true
   fallback_stmt: 1 | 5
   finite_stmt: false | finite-float
-  key: Symbol
+  idx: non-negative-int
   literal_stmt: ":a | false"
   nan_stmt: non-nan-float | true
   nested_stmt: "[String, finite-float] | true"
   nil_stmt: String | true
+  ones: "[1, 1]"
   s: String?
   short_circuit_stmt: '1'
   sym: ":a | :b"
-  uniform: "{ a: 1, b: 1 }"
   v: '"str" | 1'
   x: Float
 assertions:

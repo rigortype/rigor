@@ -165,6 +165,41 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # A block-return pass marks the index `||=` sites whose slot an earlier run of a repeating body may have filled,
+  # so the memoizing `||=` reading does not take such a slot for one it knows nothing about.
+  describe "the repeated `||=` mark" do
+    def or_write(source = "x[1] ||= 2") = Prism.parse(source).value.statements.body.first
+
+    let(:site) { or_write }
+
+    it "marks a site by identity, not by its text" do
+      marked = scope.with_repeated_or_writes([site])
+      expect([marked.repeated_or_write?(site), marked.repeated_or_write?(or_write)]).to eq([true, false])
+    end
+
+    it "survives a rebind of every kind of variable" do
+      type = Rigor::Type::Combinator.untyped
+      marked = scope.with_repeated_or_writes([site])
+                    .with_local(:x, type).with_ivar(:@x, type).with_cvar(:@@x, type).with_global(:$x, type)
+      expect(marked.repeated_or_write?(site)).to be(true)
+    end
+
+    it "keeps a site when either join branch marks it (union)" do
+      marked = scope.with_repeated_or_writes([site])
+      joined = [marked.join(scope), scope.join(marked)]
+      expect(joined.map { |each| each.repeated_or_write?(site) }).to eq([true, true])
+    end
+
+    it "returns the same scope when every site is already marked" do
+      marked = scope.with_repeated_or_writes([site])
+      expect(marked.with_repeated_or_writes([site])).to equal(marked)
+    end
+
+    it "participates in structural equality" do
+      expect(scope.with_repeated_or_writes([site])).not_to eq(scope)
+    end
+  end
+
   describe "#forget_match_globals" do
     it "drops narrowed regex match-data globals so reads fall back to the default" do
       md = Rigor::Type::Combinator.nominal_of("MatchData")
@@ -450,7 +485,7 @@ RSpec.describe Rigor::Scope do
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
-          local_origins ivar_origins optimistic_locals optimistic_ivars
+          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -497,7 +532,8 @@ RSpec.describe Rigor::Scope do
         plugin_typed_calls: { node => true }.compare_by_identity,
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
-        optimistic_ivars: { :@i => :cause }.freeze
+        optimistic_ivars: { :@i => :cause }.freeze,
+        repeated_or_writes: { node => true }.compare_by_identity.freeze
       )
     end
 

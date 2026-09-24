@@ -415,12 +415,16 @@ module Rigor
       # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
       # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
       # `@flags[n] = true` elsewhere, never provably `false`.
+      #
+      # Nor is a site a block-return pass marked (`Scope#repeated_or_write?`, {RepeatedOrWrites}): the pass types
+      # every run of a repeating body from one entry scope, so its slot's gradual type may be what an EARLIER run
+      # stored rather than an absence of evidence.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 
         current = index_read_type(node, scope)
         rhs = scope.type_of(node.value, tracer: tracer)
-        return rhs if current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+        return rhs if memoizing_index_read?(node, current, rhs)
 
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
@@ -840,6 +844,13 @@ module Rigor
         else
           type_scope.type_of(node, tracer: tracer)
         end
+      end
+
+      # True when {#index_compound_write_value} reads the `||=` `node` as the memoization idiom's rvalue: the slot
+      # reads wholly gradual, the rvalue can store something truthy, and no block-return pass marked the site.
+      def memoizing_index_read?(node, current, rhs)
+        current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot) &&
+          !scope.repeated_or_write?(node)
       end
 
       # The `receiver[i]` read a compound index write performs before storing — the `[]` read on the

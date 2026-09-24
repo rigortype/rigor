@@ -26,7 +26,8 @@ module Rigor
                 :opaque_block_self, :singleton_class_body, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
-                :optimistic_origins, :optimistic_locals, :optimistic_ivars
+                :optimistic_origins, :optimistic_locals, :optimistic_ivars,
+                :repeated_or_writes
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -216,10 +217,17 @@ module Rigor
     # Issue #667 — the empty answer of {#published_constant_ivars_for}, so a class with no such ivar (every
     # class in a project that publishes nothing) allocates none.
     EMPTY_PUBLISHED_CONSTANT_IVARS = Set.new.freeze
+    # The index `||=` sites of a repeating block body whose slot an earlier run of the body may have filled,
+    # keyed by node identity and laid by a block-return pass at the body's entry
+    # ({#with_repeated_or_writes}; `Inference::RepeatedOrWrites` decides which). The memoizing `||=` reading
+    # (`StatementEvaluator#index_compound_write_value`) is withheld at such a site. The mark belongs to the
+    # site, so no rebind or narrowing of a variable drops it, and a join keeps a site either arm holds: the
+    # mark only ever withholds that reading, whose answer is the narrower one.
+    EMPTY_REPEATED_OR_WRITES = {}.compare_by_identity.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
                      :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
-                     :EMPTY_PUBLISHED_CONSTANT_IVARS
+                     :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -284,7 +292,8 @@ module Rigor
       plugin_typed_calls: {}.compare_by_identity,
       optimistic_origins: {}.compare_by_identity,
       optimistic_locals: EMPTY_ORIGINS,
-      optimistic_ivars: EMPTY_ORIGINS
+      optimistic_ivars: EMPTY_ORIGINS,
+      repeated_or_writes: EMPTY_REPEATED_OR_WRITES
     )
       @environment = environment
       @locals = locals
@@ -311,6 +320,7 @@ module Rigor
       @optimistic_origins = optimistic_origins
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
+      @repeated_or_writes = repeated_or_writes
       freeze
     end
 
@@ -603,6 +613,23 @@ module Rigor
 
     def with_global(name, type)
       rebuild(globals: @globals.merge(name.to_sym => type).freeze)
+    end
+
+    # Mark `nodes`, index `||=` sites, as ones whose slot an earlier run of a repeating block body may have
+    # filled ({EMPTY_REPEATED_OR_WRITES}).
+    def with_repeated_or_writes(nodes)
+      return self if nodes.all? { |node| @repeated_or_writes.key?(node) }
+
+      marked = @repeated_or_writes.dup
+      nodes.each { |node| marked[node] = true }
+      rebuild(repeated_or_writes: marked.freeze)
+    end
+
+    # True when {#with_repeated_or_writes} marked the index `||=` node `node` (by identity).
+    def repeated_or_write?(node)
+      return false if @repeated_or_writes.empty?
+
+      @repeated_or_writes.key?(node)
     end
 
     # Regex match-data globals (`$~`, `$&`, `$1..$9`, the pre/post-match and last-paren back-references). Narrowed
@@ -1614,8 +1641,7 @@ module Rigor
         @globals == other.globals &&
         @indexed_narrowings == other.indexed_narrowings &&
         @method_chain_narrowings == other.method_chain_narrowings &&
-        @declaration_sourced == other.declaration_sourced &&
-        @published_constant_sourced == other.published_constant_sourced
+        same_marks?(other)
     end
     alias eql? ==
 
@@ -1624,6 +1650,13 @@ module Rigor
     end
 
     private
+
+    # The marks {#==} compares: ADR-58's, issue #667's and the repeated `||=` sites.
+    def same_marks?(other)
+      @declaration_sourced == other.declaration_sourced &&
+        @published_constant_sourced == other.published_constant_sourced &&
+        @repeated_or_writes == other.repeated_or_writes
+    end
 
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
@@ -1645,7 +1678,8 @@ module Rigor
       plugin_typed_calls: @plugin_typed_calls,
       optimistic_origins: @optimistic_origins,
       optimistic_locals: @optimistic_locals,
-      optimistic_ivars: @optimistic_ivars
+      optimistic_ivars: @optimistic_ivars,
+      repeated_or_writes: @repeated_or_writes
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -1668,7 +1702,8 @@ module Rigor
         plugin_typed_calls: plugin_typed_calls,
         optimistic_origins: optimistic_origins,
         optimistic_locals: optimistic_locals,
-        optimistic_ivars: optimistic_ivars
+        optimistic_ivars: optimistic_ivars,
+        repeated_or_writes: repeated_or_writes
       )
     end
 
@@ -1750,7 +1785,10 @@ module Rigor
         plugin_typed_calls: @plugin_typed_calls,
         optimistic_origins: @optimistic_origins,
         optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
-        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars)
+        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars),
+        # UNION, the published-constant mark's direction: the mark only withholds the memoizing `||=`
+        # reading, so keeping a site either arm holds is the wider answer.
+        repeated_or_writes: join_repeated_or_writes(other)
       )
     end
 
@@ -1869,6 +1907,15 @@ module Rigor
       return theirs if mine.empty?
 
       (mine | theirs).freeze
+    end
+
+    def join_repeated_or_writes(other)
+      mine = @repeated_or_writes
+      theirs = other.repeated_or_writes
+      return mine if mine.equal?(theirs) || theirs.empty?
+      return theirs if mine.empty?
+
+      mine.merge(theirs).freeze
     end
 
     def add_declaration_sourced(kind, name)

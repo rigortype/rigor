@@ -78,12 +78,17 @@ module Rigor
 
       # The binding the per-element fold lays under a block's parameters: each name's type across iterations, and
       # the optimistic nil-freeness mark an iteration's own rebind gave it, which {.bind} adds to the one the
-      # call site already holds — as `Scope#join` unions the marks of the scopes it joins.
-      Bindings = Data.define(:types, :marks) do
+      # call site already holds — as `Scope#join` unions the marks of the scopes it joins. `repeated` is the
+      # `RepeatedOrWrites::Marks` of the index `||=` sites whose slot an earlier run may have filled, marked on the
+      # same scope: those of the per-element fold's `position`, or every site when no position is given.
+      Bindings = Data.define(:types, :marks, :repeated) do
         def names = types.keys
 
-        def lay(scope)
-          types.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type, optimistic: marks[name]) }
+        def lay(scope, position: nil)
+          bound = types.reduce(scope) do |acc, (name, type)|
+            CapturedLocals.bind(acc, name, type, optimistic: marks[name])
+          end
+          bound.with_repeated_or_writes(repeated.at(position))
         end
       end
 

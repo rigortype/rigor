@@ -798,6 +798,488 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
   end
 
+  # The one-statement form of the probe above. The in-place widening binds `cache` to `Hash[Dynamic[top],
+  # Dynamic[top]]` at every position, so the slot reads wholly gradual, and the value-position `||=` read that as
+  # the memoization idiom's "no evidence about the slot" (issue #1202): each position answered its OWN `e`. A
+  # block-return pass now marks every such site an earlier run may have filled (`RepeatedOrWrites`), whatever the
+  # receiver; a site on a fresh receiver, one whose key differs at every position, and an isolated site under the
+  # generic pass keep the memo reading.
+  describe "a memoizing index `||=` as a repeating block's whole predicate" do
+    def nil_receiver_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      rules = result.diagnostics.map(&:rule)
+      rules.select { |rule| rule.to_s == "call.possible-nil-receiver" }
+    end
+
+    it "does not pin a captured hash the one-statement `||=` fills" do
+      # THE REPORTED PROBE: Ruby keeps the first iteration's `1`, so `find` answers `nil`; the pin answered `2 == 2`
+      # at the second position, folded `find` to `2`, and reported `found == 2` always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = [1, 2].find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "answers element-or-nil for the same find" do
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        cache = {}
+        dump_type([1, 2].find { |e| (cache[:first] ||= e) == 2 })
+      RUBY
+    end
+
+    it "keeps an earlier position's store in a `map` over the same `||=`" do
+      # Runtime `[1, 1]`; the pin answered `[1, 2]`. The first position has no earlier one, so it stays exact.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2 | Dynamic[top]]")
+        cache = {}
+        dump_type([1, 2].map { |e| cache[:first] ||= e })
+      RUBY
+    end
+
+    it "still fires on a memo hash the block builds afresh at every position (control)" do
+      # The fold is exact here: every position's `Hash.new` is empty, so Ruby answers `2 == 2` at the second one,
+      # `find` returns `2`, and `found == 2` is always true. A `.new` receiver is fresh at every run, so the site
+      # keeps the memo reading.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        found = [1, 2].find { |e| (Hash.new[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "still fires on a memo hash a block-local holds afresh at every position (control)" do
+      # `c` is bound only by the body and only to a new hash, so no position sees another's store: Ruby answers `2`.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        found = [1, 2].find { |e| c = Hash.new; (c[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not take a block-local for fresh below its own slots" do
+      # `box` is new at every position, but `box[0]` is `shared`, which the first position filled. Runtime `nil`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        shared = Hash.new
+        found = [1, 2].find do |e|
+          box = [shared]
+          (box[0][:first] ||= e) == 2
+        end
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "answers wider than Ruby when the body rebinds the captured name to a fresh hash first" do
+      # Ruby answers `2`: every position's `||=` reads a new hash. The mark belongs to the site, not to the
+      # binding, so the rebind does not lift it. Wider, never narrower: nothing is reported.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+        cache = {}
+        dump_type([1, 2].find do |e|
+          cache = Hash.new
+          (cache[:first] ||= e) == 2
+        end)
+      RUBY
+    end
+
+    it "does not pin a captured `Hash.new` the widening leaves where it is" do
+      # A bare `Hash` is a nominal the in-place widening declines, so no binding moves; the body still stores
+      # into it at every position.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = Hash.new
+        found = [1, 2].find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin a captured array slot" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        slots = []
+        found = [1, 2].find { |e| (slots[0] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin the same hash under a Range receiver" do
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        found = (1..2).find { |e| (cache[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not pin a captured hash the per-pair transform_values fold fills" do
+      # Runtime `{ x: 1, y: 1 }`; the pin answered `{ x: 1, y: 2 }`, so `r[:y] == 2` folded always-truthy.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        cache = {}
+        r = { x: 1, y: 2 }.transform_values { |v| cache[:first] ||= v }
+        puts "y" if r[:y] == 2
+      RUBY
+    end
+
+    it "does not pin the slot when a narrowing rebinds the receiver's name" do
+      # `c &&` narrows `c`, which rebinds it; a mark kept on the binding was dropped with it.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        c = {}
+        found = [1, 2].find { |e| c && (c[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    describe "whatever the receiver" do
+      it "does not pin an instance-variable hash the method assigns" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            def run
+              @cache = {}
+              dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin an instance-variable hash another method assigns" do
+        # The ADR-58 declaration seed is no binding the fold widens, but its slot reads a lone `Dynamic` all the same.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            def initialize = @cache = {}
+
+            def run
+              dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin a constant hash" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          CACHE = {}
+          found = [1, 2].find { |e| (CACHE[:first] ||= e) == 2 }
+          puts "hit" if found == 2
+        RUBY
+      end
+
+      it "does not pin a hash an attribute reader returns" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            attr_reader :cache
+
+            def initialize = @cache = {}
+
+            def run
+              dump_type([1, 2].find { |e| (cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin the inner slot of a nested memo" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = {}
+          found = [1, 2].find { |e| ((cache[:a] ||= {})[:b] ||= e) == 2 }
+          puts "hit" if found == 2
+        RUBY
+      end
+    end
+
+    describe "a key that differs at every position" do
+      it "keeps the memo reading, since no position reads another's slot" do
+        # Ruby stores each position under its own key, so `find` answers `"b"`, never nil. Withholding the reading
+        # here answered `"a" | "b" | nil` and reported `f.upcase` as a possible nil receiver.
+        source = <<~RUBY
+          pool = {}
+          f = %w[a b].find { |s| (pool[s] ||= s) == "b" }
+          dump_type(f)
+          puts f.upcase
+        RUBY
+        expect([dumped_type(source), nil_receiver_rules(source)]).to eq(['"b"', []])
+      end
+
+      it "withholds it only at the position whose key an earlier one shares" do
+        # Runtime `"b"`: the second position reads the `"a"` the first stored, and the third finds `"b"`. Marking every
+        # position answered `"a" | "b" | nil` and reported `f.upcase` as a possible nil receiver.
+        source = <<~RUBY
+          seen = {}
+          f = %w[a a b].find { |s| (seen[s] ||= s) == "b" }
+          dump_type(f)
+          puts f.upcase
+        RUBY
+        expect([dumped_type(source), nil_receiver_rules(source)]).to eq(['"a" | "b"', []])
+      end
+
+      it "keeps it for a key built from a captured local the body leaves alone" do
+        expect(dumped_type(<<~RUBY)).to eq('"b"')
+          pool = {}
+          prefix = "x"
+          dump_type(%w[a b].find { |k| (pool[prefix + k] ||= k) == "b" })
+        RUBY
+      end
+
+      it "keeps it for negative and mixed-class keys on a core Hash" do
+        expect(dumped_types(<<~RUBY)).to eq(["-2", '"b"'])
+          h = {}
+          dump_type([-1, -2].find { |i| (h[i] ||= i) == -2 })
+          g = {}
+          dump_type([:a, "b"].find { |k| (g[k] ||= k) == "b" })
+        RUBY
+      end
+
+      it "withholds it for a negative index on a receiver that may be an Array" do
+        # `a` is untyped, so `a[-1]` may name the slot `a[1]` names: `pick(Array.new(2))` answers `nil`.
+        expect(dumped_type(<<~RUBY)).to eq("[-1, :x] | [1, :y] | nil")
+          def pick(a) = dump_type([[-1, :x], [1, :y]].find { |i, v| (a[i] ||= v) == :y })
+        RUBY
+      end
+
+      it "withholds it for keys of two classes on a receiver that may normalise them" do
+        # With indifferent access `:a` and `"a"` name one slot, so the second position keeps the first's `1`.
+        expect(dumped_type(<<~RUBY)).to eq('["a", 2] | [:a, 1] | nil')
+          class IndifferentHash < Hash
+            def [](key)
+              super(key.to_s)
+            end
+
+            def []=(key, value)
+              super(key.to_s, value)
+            end
+          end
+          h = IndifferentHash.new
+          dump_type([[:a, 1], ["a", 2]].find { |k, v| (h[k] ||= v) == 2 })
+        RUBY
+      end
+
+      it "withholds it for a key the body rebinds" do
+        # `s = "k"` makes every position's key `"k"`, whatever the parameter held.
+        expect(dumped_type(<<~RUBY)).to eq('["a", 1] | ["b", 2] | nil')
+          pool = {}
+          dump_type([["a", 1], ["b", 2]].find { |s, n| s = "k"; (pool[s] ||= n) == 2 })
+        RUBY
+      end
+
+      it "types a distinct-key memo under the Tuple, Range and per-pair folds" do
+        expect(dumped_types(<<~RUBY)).to eq(['["A", "B"]', "[1, 4, 9]", "{ a: 10, b: 20 }"])
+          pool = {}
+          dump_type(%w[a b].map { |s| pool[s] ||= s.upcase })
+          squares = {}
+          dump_type((1..3).map { |i| squares[i] ||= i * i })
+          memo = {}
+          dump_type({ a: 1, b: 2 }.transform_values { |v| memo[v] ||= v * 10 })
+        RUBY
+      end
+
+      it "still withholds the reading for a key two positions share" do
+        # Runtime `[1, 1]`: the second position reads the `:k` slot the first one filled.
+        expect(dumped_type(<<~RUBY)).to eq("[1, 2 | Dynamic[top]]")
+          c = {}
+          dump_type([[:k, 1], [:k, 2]].map { |k, v| c[k] ||= v })
+        RUBY
+      end
+
+      it "still withholds the reading when another store in the body can fill the slot" do
+        # Runtime `nil`: the first position stores `"x"` under `"b"` after its own `||=`, and the second position's
+        # `||=` then keeps that `"x"`. The store comes second, so no threaded write narrows the slot first.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "keeps it beside a store into another instance variable" do
+        # `@log << s` reaches `@log`, never `@pool`, although neither is a binding the fold widens.
+        expect(dumped_type(<<~RUBY)).to eq('"b"')
+          class Registry
+            def initialize
+              @log = []
+              @pool = {}
+            end
+
+            def run = dump_type(%w[a b].find { |s| @log << s; (@pool[s] ||= s) == "b" })
+          end
+        RUBY
+      end
+
+      it "withholds it when the body stores through `send`" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool.send(:[]=, "b", "x")
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when the body rebinds the receiver to another hash" do
+        # Runtime `nil`: the second position reads `other`, whose `"b"` is `"x"`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          other = { "b" => "x" }
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool = other
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when a nested block's parameter may name the receiver" do
+        # Each block parameter holds `pool` at runtime, so each store puts `"x"` under `"b"`: every `find` answers nil.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          a = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; pool.tap { |h| h["b"] = "x" }; hit }
+          b = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; [pool].each { it["b"] = "x" }; hit }
+          c = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; [pool].each { _1.store("b", "x") }; hit }
+          puts "hit" if a == "b" || b == "b" || c == "b"
+        RUBY
+      end
+
+      it "withholds it when the fold's own parameter may name the receiver" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = [[pool, "a"], [pool, "b"]].find do |h, s|
+            hit = (pool[s] ||= s) == "b"
+            h["b"] = "x"
+            hit
+          end
+          puts "hit" if found
+        RUBY
+      end
+
+      it "withholds it when a store through a fresh container may reach the receiver" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            box = [pool]
+            box[0]["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when a store above the site may swap in a filled hash" do
+        # The first position replaces `pool[:a]` with `shared`, whose `"b"` is `"x"`. Runtime `nil`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          shared = Hash.new
+          shared["b"] = "x"
+          pool = { a: Hash.new }
+          found = %w[a b].find do |s|
+            hit = (pool[:a][s] ||= s) == "b"
+            pool[:a] = shared
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when the body takes a store method as an object" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool.method(:[]=).call("b", "x")
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it for a key built from a captured local the body mutates" do
+        # The typed keys are `"ab"` and `"b"`, but `prefix << "a"` makes the second one `"ab"` too. Runtime `nil`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          prefix = +""
+          found = %w[ab b].find do |s|
+            hit = (pool[prefix + s] ||= s) == "b"
+            prefix << "a"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "still withholds the reading when a store the scan cannot attribute may reach the slot" do
+        # `other` aliases `pool` inside the body, where the content scan does not follow it, so its store is filed
+        # under no captured name and may reach any object. Runtime `nil`, as above.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            other = pool
+            other["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+    end
+
+    describe "the find fold past an undecided position" do
+      it "answers the candidates up to a decisive match, without nil" do
+        # The first position is undecided and the second always matches, so `find` never returns `nil`.
+        expect(dumped_types(<<~RUBY)).to eq(["1 | 2", "0 | 1"])
+          x = gets
+          dump_type([1, 2].find { |e| e == 2 || x.nil? })
+          dump_type([1, 2].find_index { |e| e == 2 || x.nil? })
+        RUBY
+      end
+
+      it "keeps the nil floor when no position matches decisively (control)" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          x = gets
+          dump_type([1, 2].find { |e| e == 3 || x.nil? })
+        RUBY
+      end
+    end
+
+    describe "under the generic block-return pass" do
+      it "keeps the memo reading for an isolated site (control)" do
+        # The generic pass types the rvalue from the parameter's signature type, which covers every iteration's
+        # store, so the memo reading still describes the slot there.
+        expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+          pool = {}
+          words = gets.to_s.split(",")
+          dump_type(words.map { |w| pool[w] ||= w })
+        RUBY
+      end
+
+      it "keeps it beside stores into other objects (control)" do
+        # A store into `@log`, into an element of `@by_kind`, or into the `@cache[:names]` hash reaches no slot
+        # the site's own receiver holds.
+        expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "Array[Array]", "Array[String]"])
+          class Registry
+            def initialize
+              @log = []
+              @cache = {}
+              @by_kind = {}
+              @keys = gets.to_s.split(",")
+            end
+
+            def logged = dump_type(@keys.map { |k| @log << k; @cache[k] ||= build(k) })
+            def grouped = dump_type(@keys.map { |k| (@by_kind[k.size] ||= []) << k })
+            def nested = dump_type(@keys.map { |k| (@cache[:names] ||= {})[k] ||= build(k) })
+            def build(key) = key.upcase
+          end
+        RUBY
+      end
+
+      it "withholds it when two sites store different values into one slot" do
+        # Ruby with input `a,,b` prints `hit`: the empty element stores `:e`, and a later one keeps it and compares
+        # it with `:e`. Each site's rvalue alone made both arms provably false.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          xs = gets.to_s.split(",")
+          hit = xs.any? { |x| x.empty? ? (cache[:k] ||= :e) == :f : (cache[:k] ||= :f) == :e }
+          puts "hit" if hit
+        RUBY
+      end
+    end
+  end
+
   # The content half of the pin above. The fixpoint answers the outer locals the body REBINDS; a captured
   # receiver the body only mutates IN PLACE (`h[k] = …`, `h[k] += …`, `seen[x] = true`) is never rebound, so
   # every position still read it at its ENTRY contents: `h = { a: 0 }; [:a, :a].map { |k| h[k] = h[k] + 1 }`

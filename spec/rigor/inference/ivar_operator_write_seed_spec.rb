@@ -40,6 +40,40 @@ RSpec.describe "class ivar seed of an `op=` write", type: :runner do
     end
   end
 
+  it "keeps the condition live beside a write the operator cannot take" do
+    # Runtime: prints after `bump`. Dispatched on `0.5 | nil` as one union, `nil + 1` has no method, the `+=` fell
+    # back to its rvalue, and the seed lost `Float`.
+    %w[nil false].each do |cleared|
+      expect(flow_rules(<<~RUBY)).to be_empty
+        class Meter
+          def initialize = (@level = 0.5)
+          def bump = (@level += 1)
+          def clear = (@level = #{cleared})
+
+          def report
+            l = @level
+            puts "overflow" if l.is_a?(Float) && l > 1.0
+          end
+        end
+      RUBY
+    end
+  end
+
+  it "keeps the condition live beside a `||=` of the same ivar" do
+    expect(flow_rules(<<~RUBY)).to be_empty
+      class Meter
+        def initialize = (@level = 0.5)
+        def bump = (@level += 1)
+        def restore = (@level ||= 0.5)
+
+        def report
+          l = @level
+          puts "overflow" if l.is_a?(Float) && l > 1.0
+        end
+      end
+    RUBY
+  end
+
   it "still folds the condition when no `+=` can make the ivar `2.5`" do
     # Runtime: never prints; `@x` is `1` or `1.5`.
     expect(flow_rules(scale(:initialize, :shrink))).to eq(["flow.always-truthy-condition"])

@@ -434,15 +434,28 @@ one of them. Every `op=` write is now held like an `&&=` until the walk
 has seen the class. An ivar only `op=` writes is seeded from the
 widened rvalues first, and that seed counts as a write for `&&=`. The
 held writes are then dispatched on the complete seed, once per held
-write, which covers every chain one call of each method forms. ADR-56's
-`BodyFixpoint` was rejected for the chain: iterated to its fixed point,
-a counter's `@n += x` re-dispatched on its own `Dynamic[Integer | …]`
-result and gained `Dynamic[top]`, and the final widening pass dropped
-the literal it starts at, on 51 of 304 `op=`-written ivar seeds in the
-survey corpus. So a lone write is not applied to its own result:
-`@a = []; @a += [1]` still seeds `[] | [1]`, as before, and no rule was
-seen to fold on it. The corpus gate (18 targets) moved no diagnostic;
-9 of the 304 seeds change, as the PR itemises.
+write, which covers every chain one call of each method forms.
+
+Two consequences of dispatching on the complete seed needed handling.
+A member the operator cannot take (`nil + 1`, from a `reset` or any
+`||=`) made the dispatcher decline the whole union, so every write
+fell back to its rvalue; the members it can type are now dispatched
+together and only the rest fall back. And distinct tuple literals
+(`@a += [:s1]`, `@a += [:s2]`, …) grow the seed by two members per
+write, so a chain that would go on from a seed wider than the
+documented `union_size` default (24) floors to `Dynamic[top]`; the
+survey corpus's widest `op=`-written seed has seven members. With both,
+the seed holds what every source order produced, except the rvalue an
+`op=` written above every other write fell back to, which a later
+write replaces. ADR-56's `BodyFixpoint` was rejected for the chain:
+iterated to its fixed point, a lone counter's `@n += x` re-dispatched
+on its own `Dynamic[Integer | …]` result and gained `Dynamic[top]`, and
+the widening pass that forces convergence dropped the literal it starts
+at, on 51 of 304 `op=`-written ivar seeds in the survey corpus. A lone
+write is therefore not applied to its own result: `@a = []; @a += [1]`
+still seeds `[] | [1]`, as before, and no rule was seen to fold on it.
+The corpus gate (18 targets) moved no diagnostic; the PR itemises the
+37 seeds that change.
 
 ## Rejected / deferred alternatives
 

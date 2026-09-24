@@ -1482,14 +1482,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }
           end
 
-          def scale_seed(*order)
+          def scale_seed_definitions(order)
             definitions = {
               initialize: "def initialize = (@x = 1)",
               shrink: "def shrink = (@x &&= 1.5)",
-              grow: "def grow = (@x += 1)"
+              grow: "def grow = (@x += 1)",
+              reset: "def reset = (@x = nil)"
             }
-            seed_of(*definitions.values_at(*order))
+            definitions.values_at(*order)
           end
+
+          def scale_seed(*order) = seed_of(*scale_seed_definitions(order))
 
           %i[initialize shrink grow].permutation.each do |order|
             it "dispatches on the value an `&&=` stores with the methods in the order #{order.join(', ')}" do
@@ -1534,7 +1537,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           end
 
           it "chains one held write's result into another's dispatch, in either order" do
-            # Runtime: `[1, "s"]` after `a` then `b`, `["s", 1]` after `b` then `a`.
+            # Runtime: `[1, "s"]` after `a` then `b`, `["s", 1]` after `b` then `a`. The second pass dispatches on the
+            # union the first built, which the dispatcher answers with an `Array[…]` that accepts both; the one-pass
+            # `[] | [1] | ["s"]` accepts neither.
             one = Rigor::Type::Combinator.constant_of(1)
             str = Rigor::Type::Combinator.constant_of("s")
             [%w[a b], %w[b a]].each do |order|
@@ -1543,6 +1548,40 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
               expect(seed.accepts(Rigor::Type::Combinator.tuple_of(one, str)).yes?).to be(true)
               expect(seed.accepts(Rigor::Type::Combinator.tuple_of(str, one)).yes?).to be(true)
             end
+          end
+
+          %w[nil false :none].each do |declining|
+            it "dispatches on the members the operator types beside a `#{declining}` it cannot" do
+              # Runtime: `1.5` after `bump`, whatever `clear` stores. Dispatched on the whole union, `#{declining} + 1`
+              # has no method, so every member fell back to the rvalue and the seed lost `Float`.
+              seed = seed_of("def initialize = (@x = 0.5)", "def bump = (@x += 1)", "def clear = (@x = #{declining})")
+              expect(float?(seed)).to be(true)
+            end
+          end
+
+          it "keeps the rvalue fallback for a member the operator cannot type" do
+            # The order that writes `clear` first fell back to the rvalue, and the seed covers what every order saw.
+            seed = seed_of("def initialize = (@x = 0.5)", "def bump = (@x += 1)", "def clear = (@x = nil)")
+            expect(seed.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
+          end
+
+          it "seeds the same type in every order beside a `nil` write" do
+            seeds = %i[initialize shrink grow reset].permutation.map { |order| scale_seed(*order) }
+            expect(seeds.uniq.size).to eq(1)
+            expect(float?(seeds.first)).to be(true)
+          end
+
+          it "floors to `Dynamic[top]` rather than chain on a union past the `union_size` budget" do
+            # Thirty distinct tuple writes: a second pass would dispatch thirty writes on a 31-member union.
+            writes = (1..30).map { |i| "def m#{i} = (@x += [:s#{i}])" }
+            expect(seed_of("def initialize = (@x = [])", *writes)).to eq(Rigor::Type::Combinator.untyped)
+          end
+
+          it "does not floor a lone `op=` on a wide seed, which never takes a second pass" do
+            writes = (1..30).map { |i| "def w#{i} = (@x = #{i})" }
+            seed = seed_of(*writes, "def bump = (@x += 1)")
+            expect(seed).not_to eq(Rigor::Type::Combinator.untyped)
+            expect(seed.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
           end
 
           it "dispatches a lone `op=` once, so a counter keeps the literal it starts at" do

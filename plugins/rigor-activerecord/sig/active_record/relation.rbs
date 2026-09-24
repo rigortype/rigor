@@ -46,6 +46,39 @@
 # `Enumerable` surface, which materialise by delegating to `each`
 # — are covered by the plugin's `effect_attributions:` instead,
 # because declaring them here would change how they TYPE.
+#
+# ## Every bound here also bounds the association proxy
+#
+# A `has_many` reader returns an
+# `ActiveRecord::Associations::CollectionProxy`, a Relation
+# subclass, and the plugin types it as `Relation[Model]`. The
+# bound a call imports is therefore this file's, whichever of the
+# two classes answers at run time, so each annotation has to hold
+# for the proxy's override too.
+#
+# Where the proxy adds records to the association's in-memory
+# target or discards them from it, the bound carries `mutate.self`.
+# `build` / `new` and the other instantiating builders go through
+# `@association.build` / `create`, which call `add_to_target`.
+# `reset`, `reload`, `delete_all`, `destroy_all`, `insert_all`,
+# `insert_all!` and `upsert_all` reset the target, dropping any
+# record built there and not yet saved. So `user.posts.build` is a
+# change to an object the caller can still reach through `user`:
+# `user.posts.size` counts the new record, and `user.save` saves
+# it.
+#
+# On a plain Relation, `new` and `build` change nothing, so
+# `mutate.self` there over-states them. The type cannot tell the
+# two receivers apart, and an upper bound may be too wide but never
+# too narrow. Loading a relation is not counted as a change: `to_a`
+# and `load` fill the target with what the database holds, which is
+# the `io.db.read` they already carry.
+#
+# The writers only a proxy defines (`<<`, `concat`, `replace`,
+# `delete`, `clear`, …) are rows in the plugin's
+# `effect_attributions:` rather than declarations here. Declaring
+# them would claim a plain Relation has them, and would change how
+# they type.
 
 module ActiveRecord
   class Relation[Elem]
@@ -243,9 +276,9 @@ module ActiveRecord
     def entries: () -> Array[Elem]
     %a{rigor:v1:effect io.db.read}
     def load: (?untyped) -> self
-    %a{rigor:v1:effect io.db.read}
+    %a{rigor:v1:effect io.db.read, mutate.self}
     def reload: () -> self
-    %a{pure}
+    %a{rigor:v1:effect mutate.self}
     def reset: () -> self
     %a{pure}
     def loaded?: () -> bool
@@ -277,9 +310,9 @@ module ActiveRecord
     # --- whole-relation persistence ---
     %a{rigor:v1:effect io.db.write}
     def update_all: (untyped) -> Integer
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def delete_all: () -> Integer
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]
     %a{rigor:v1:effect io.db.write}
     def update: (*untyped) -> untyped
@@ -291,37 +324,37 @@ module ActiveRecord
     def destroy_by: (*untyped) -> Array[Elem]
     %a{rigor:v1:effect io.db.write}
     def touch_all: (*untyped) -> Integer
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all: (untyped, **untyped) -> untyped
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all!: (untyped, **untyped) -> untyped
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def upsert_all: (untyped, **untyped) -> untyped
 
     # --- instantiating builders (return an element) ---
-    %a{pure}
+    %a{rigor:v1:effect mutate.self}
     def new: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{pure}
+    %a{rigor:v1:effect mutate.self}
     def build: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def create: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def create!: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def find_or_create_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def find_or_create_by!: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.read}
+    %a{rigor:v1:effect io.db.read, mutate.self}
     def find_or_initialize_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def create_or_find_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def create_or_find_by!: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def first_or_create: (?untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def first_or_create!: (?untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.read}
+    %a{rigor:v1:effect io.db.read, mutate.self}
     def first_or_initialize: (?untyped) ?{ (Elem) -> void } -> Elem
   end
 end

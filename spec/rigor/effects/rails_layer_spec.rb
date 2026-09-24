@@ -115,6 +115,41 @@ RSpec.describe "the Rails effect layer" do
     end
   end
 
+  # An association reader returns a `CollectionProxy`, and the plugin types it as `Relation[Post]`, so the
+  # Relation signature's bound is the one a proxy call imports. A proxy's builders and writers change the
+  # association's target, which the caller can still reach through the owner.
+  describe "an association proxy typed as a Relation" do
+    # `%a{pure}` here claimed the build changed nothing, and `rigor sig-gen` wrote `%a{pure}` on `#draft`.
+    it "reads build and new as a change to the proxy's target" do
+      %w[PostDrafts#draft PostDrafts#draft_new].each do |key|
+        expect(declared(key)).to include("mutate.self")
+        expect(entry(key)).not_to be_trivial
+        expect(Rigor::SigGen::EffectAnnotation.decide(entry(key)).first).to be_empty
+      end
+    end
+
+    it "keeps the write beside the target change on create" do
+      expect(declared("PostDrafts#publish")).to include("io.db.write", "mutate.self")
+    end
+
+    it "reads reset as a change, since it drops unsaved built records" do
+      expect(declared("PostDrafts#discard")).to include("mutate.self")
+    end
+
+    # The writers only a proxy defines are rows, not signatures, and they still bound the site.
+    it "colours the proxy-only writers and keeps the site exhaustive" do
+      %w[PostDrafts#attach PostDrafts#detach].each do |key|
+        expect(declared(key)).to include("io.db", "mutate.self")
+        expect(entry(key)).to be_exhaustive
+      end
+    end
+
+    # The control: the query builders stay pure on a proxy, because a proxy hands them to a fresh scope.
+    it "leaves a query builder on the proxy trivial" do
+      expect(entry("PostDrafts#titled")).to be_trivial
+    end
+  end
+
   describe "framework edges" do
     # `save` runs `before_save :normalize_email` and `after_commit :notify`; `notify` logs. None of that
     # is visible at the call site, and all of it is the caller's own code.

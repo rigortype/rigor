@@ -897,6 +897,15 @@ A plugin has two ways to colour a framework method, and the choice is not a matt
 A row must never be in both: two channels on one method produce two origins for one fact, which reads as
 duplication in `rigor effects explain`.
 
+A bound is written for **every run-time class the plugin types as the declaring class**, not just the one it
+names. Where a plugin types a subclass's instances as the base class, the base's bound is what a call on
+the subclass imports, so it MUST also admit the subclass's override. rigor-activerecord types a `has_many`
+reader as `ActiveRecord::Relation[Model]`, but the reader returns a `CollectionProxy`, whose `build`
+pushes the new record into the association's target. `Relation#build` therefore carries `mutate.self`
+although a plain Relation's `build` changes nothing, and a writer only the subclass defines (the proxy's
+`<<`) is an `effect_attributions:` row keyed on the base class. A bound that fits only the base class
+would give `%a{pure}` to a method that changes an object its caller still holds.
+
 ##### `EffectAttribution`
 
 `Rigor::Plugin::EffectAttribution.new(receiver:, method:, labels:, why:, singleton: false, narrow: nil,

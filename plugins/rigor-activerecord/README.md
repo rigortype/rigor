@@ -147,6 +147,21 @@ them ∅ because that is what the code *does* — and the truthful one
 wins: a presenter that builds and returns a scope has pure code, and
 the caller that materialises it gets the read.
 
+### Association proxies change their target
+
+`user.posts` returns a `CollectionProxy`, and the plugin types it as
+`Relation[Post]`, so every bound in `relation.rbs` must also hold for
+the proxy. The proxy's `build` / `new`, `create`, the `find_or_*` /
+`first_or_*` builders, `reset`, `reload`, `delete_all`, `destroy_all`
+and the bulk inserts add records to the association's in-memory target
+or discard them from it, so their bounds carry `mutate.self`.
+`user.posts.build` changes an object the caller can still reach through
+`user`. A plain Relation's `new` changes nothing, and the same bound
+over-states it, because the type cannot tell the two receivers apart.
+The writers only a proxy defines (`<<`, `push`, `append`, `concat`,
+`replace`, `delete`, `destroy`, `clear`) are `effect_attributions:`
+rows carrying `io.db` and `mutate.self`.
+
 ### Framework edges
 
 `save` runs the class body's callbacks and validators, and none of that
@@ -161,6 +176,6 @@ contributes an `io.db.read`, because the uniqueness check IS a query.
 `map` / `filter_map` and the rest of `Enumerable` are attributions
 rather than RBS annotations, because declaring them in the bundled
 signature would change how they **type**. Association readers created
-by `has_many` are not rowed at all: they return a Relation, so they are
-already ∅ by the builder rule, and the read appears where the caller
+by `has_many` are not rowed at all: reading one issues no query, so it
+is already ∅ by the builder rule, and the read appears where the caller
 materialises.

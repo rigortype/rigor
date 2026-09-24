@@ -3932,6 +3932,66 @@ end
     end
   end
 
+  # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are
+  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper. Asserted
+  # on the tables because a read declines to project a `Union` facet at all, so no read tells the two apart there.
+  # The read-side face is `spec/rigor/inference/mutated_constant_census_spec.rb`.
+  describe "census widening of a mutated entry" do
+    it "unpins each carrier member of a mutated constant, and leaves an unmutated twin exact" do
+      program = parse(<<~RUBY)
+        V = ENV["X"] ? { a: 1 } : [1]
+        V << 2
+        W = ENV["X"] ? { a: 1 } : [1]
+      RUBY
+      table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .in_source_constants
+
+      expect(table["V"].describe).to eq("Dynamic[Array[1 | Dynamic[top]] | { a: 1, ... }]")
+      expect(table["W"].describe).to eq("[1] | { a: 1 }")
+    end
+
+    it "opens a mutated class variable's shape, and leaves an unmutated twin closed" do
+      program = parse(<<~RUBY)
+        class C
+          def init = (@@h = { a: 1 }) && (@@k = { a: 1 })
+          def mutate = @@h.default = 0
+        end
+      RUBY
+      cvars = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .class_cvars_for("C")
+
+      expect(cvars[:@@h].describe).to eq("Dynamic[{ a: 1, ... }]")
+      expect(cvars[:@@k].describe).to eq("{ a: 1 }")
+    end
+
+    # An RBS overload join over an untyped argument wraps its candidates before the census sees them, so the facet of
+    # an entry that is already `Dynamic` is unpinned too. The overload set is RBS's, so the members are asserted by
+    # kind rather than spelled out.
+    it "unpins the facet of an entry that is already Dynamic" do
+      program = parse(<<~RUBY)
+        X = 7.divmod(UNRESOLVED)
+        X << 1
+        Y = 7.divmod(UNRESOLVED)
+      RUBY
+      table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .in_source_constants
+
+      expect(table["X"].static_facet.members).to all(be_a(Rigor::Type::Nominal))
+      expect(table["Y"].static_facet.members).to all(be_a(Rigor::Type::Tuple))
+    end
+
+    # `clear` empties a `non-empty-array`, so the removal is not kept. What is left is an ordinary nominal: a
+    # value-pinned element gains the arm, and a class-level one keeps its claim.
+    it "drops a removal a mutation can falsify, and unpins what is left as a nominal" do
+      combinator = Rigor::Type::Combinator
+      pinned = combinator.non_empty_array(combinator.constant_of(1))
+      classed = combinator.non_empty_array(combinator.nominal_of("Integer"))
+
+      expect(described_class.send(:census_mutated_type, pinned).describe).to eq("Dynamic[Array[1 | Dynamic[top]]]")
+      expect(described_class.send(:census_mutated_type, classed).describe).to eq("Dynamic[Array[Integer]]")
+    end
+  end
+
   # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
   # instance-ancestor SEARCH order. It adds the prepend ORDER and KIND the include table cannot carry
   # (that one keeps every mixin in search order since #1173 — prepends ahead of includes — but is read

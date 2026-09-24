@@ -4398,24 +4398,9 @@ module Rigor
       # is unchanged by it.
       def unknown_store_binding(type, sites)
         widened = UnknownStoreWidening.widen(type, sites)
-        return widened unless value_pinned_collection?(widened)
+        return widened unless UnknownStoreWidening.value_pinned_collection?(widened)
 
         UnknownStoreWidening.gradual_content(widened)
-      end
-
-      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
-      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
-      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
-      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
-      def value_pinned_collection?(type)
-        case type
-        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
-        when Type::Difference then value_pinned_collection?(type.base)
-        when Type::Nominal
-          %w[Array Hash].include?(type.class_name) &&
-            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
-        else false
-        end
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller

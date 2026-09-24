@@ -162,6 +162,23 @@ module Rigor
         [:[]=, unknown + [Type::Combinator.untyped]]
       end
 
+      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
+      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
+      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
+      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
+      # A class-level argument (`Array[Integer]`) is not pinned: a store of the same class leaves it true, which is
+      # the claim this seam may not grow.
+      def value_pinned_collection?(type)
+        case type
+        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
+        when Type::Difference then value_pinned_collection?(type.base)
+        when Type::Nominal
+          COLLECTION_CLASSES.include?(type.class_name) &&
+            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
+        else false
+        end
+      end
+
       # Every type argument of an `Array` / `Hash` carrier joined with `Dynamic[top]`, member-wise through a
       # `Union` and through a `Difference`'s base. Anything else is returned untouched.
       def gradual_content(type)

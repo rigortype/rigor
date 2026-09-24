@@ -1,0 +1,1 @@
+- **[rbs]** `StringIO` is now `Enumerable[String]`, as it is at runtime, so `StringIO.new(s).detect { … }`, `.map`, `.each_with_index` and the rest of Enumerable no longer report `call.undefined-method`, and a block-taking `.select` no longer resolves to `Kernel#select` and reports `call.wrong-arity`. ([#1307](https://github.com/rigortype/rigor/pull/1307))

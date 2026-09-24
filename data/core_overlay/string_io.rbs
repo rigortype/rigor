@@ -1,0 +1,33 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- StringIO includes Enumerable[String] ---
+#
+# CRuby's `ext/stringio/stringio.c` makes `StringIO` Enumerable:
+#
+#   rb_include_module(StringIO, rb_mEnumerable);
+#
+# and `StringIO#each` yields the stream's lines, so a `StringIO` is an
+# `Enumerable[String]` exactly as rbs core declares `IO` to be. Upstream
+# `ruby/rbs` declares `class StringIO` with no `include` on every release the
+# gemspec supports, so `StringIO.new(s).detect { ... }`, `.map`,
+# `.each_with_index` and the rest of Enumerable reported
+# `call.undefined-method` on correct code, and a block-taking `.select` fell
+# through to `Kernel#select` (the IO multiplexer) and reported
+# `call.wrong-arity`.
+#
+# The mixin sits behind the class in the ancestry, so every method StringIO
+# declares itself (`each`, `each_line`, `each_char`, `readlines`, ...) keeps
+# upstream's signature. A duplicate include, should upstream add one, builds
+# on both rbs lines.
+#
+# Unconditional — NOT in `RbsLoader::LIBRARY_SUPPLEMENT_CORE_OVERLAYS`,
+# because every environment Rigor builds already declares `StringIO`: in rbs
+# `core/string_io.rbs` before 3.7, and from 3.7 on because
+# `RBS::EnvironmentLoader#load` adds the `stringio` library itself whenever
+# it loads core ("For migrating stringio to stdlib"). Gating on `stringio`
+# would drop the mixin on rbs < 3.7, which has no such library, and from any
+# environment that does not name it. The premise is pinned in
+# `spec/rigor/environment/bundled_rbs_definition_build_spec.rb`.
+class StringIO
+  include Enumerable[String]
+end

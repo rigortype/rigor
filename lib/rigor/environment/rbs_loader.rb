@@ -1191,6 +1191,10 @@ module Rigor
         # `core_overlay/pathname.rbs` also carries an `| ...` continuation but is deliberately NOT listed:
         # its base (`Pathname#expand_path`) lives in rbs's `core/pathname.rbs` on every supported rbs
         # release (3.10 / 4.0 / 4.1), so the continuation is safe — and applicable — with no library loaded.
+        # `core_overlay/string_io.rbs` re-opens a class the `stringio` library declares yet is NOT listed
+        # either: `RBS::EnvironmentLoader#load` adds that library itself whenever it loads core (rbs 3.7+),
+        # and earlier releases declare `StringIO` in core, so gating would only drop its `Enumerable` mixin
+        # where `StringIO` is present anyway.
         #
         # Keyed by `data/vendored_gem_sigs/` directory basename.
         LIBRARY_SUPPLEMENT_VENDORED_DIRS = {

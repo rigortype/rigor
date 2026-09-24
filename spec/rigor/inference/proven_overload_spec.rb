@@ -39,6 +39,27 @@ RSpec.describe "proven overload pass", type: :runner do
     RBS
   end
 
+  # Runtime: `"p"` for both. `*Printable` and `printable` (an alias of `Printable`) take the Integer through project
+  # RBS, which acceptance cannot see.
+  let(:spelled_sig) do
+    { "money.rbs" => <<~RBS }
+      module Printable
+      end
+      class Integer
+        include Printable
+      end
+      type printable = Printable
+      class Money
+        def rest: (*Printable) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+        def ali: (printable) -> String
+               | (Integer) -> Integer
+               | (Object) -> Symbol
+      end
+    RBS
+  end
+
   it "types Rational + Float as the Float core RBS declares first" do
     # Runtime: `Float`.
     expect(dumped_types(<<~RUBY)).to eq(%w[Float Complex])
@@ -85,6 +106,46 @@ RSpec.describe "proven overload pass", type: :runner do
     source = <<~RUBY
       module Printable; end
       class Integer; include Printable; end
+      class Money
+        def show(x) = "p"
+      end
+      Money.new.show(1).upcase
+    RUBY
+    expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+  end
+
+  %w[rest ali].each do |method_name|
+    it "does not skip an earlier arm spelled as #{method_name == 'rest' ? 'a rest parameter' : 'a type alias'}" do
+      source = <<~RUBY
+        module Printable; end
+        class Integer; include Printable; end
+        class Money
+          def #{method_name}(*x) = "p"
+        end
+        Money.new.#{method_name}(1).upcase
+      RUBY
+      expect(rules(source, sig: spelled_sig)).not_to include("call.undefined-method")
+    end
+  end
+
+  it "does not skip an earlier arm naming a core module that project RBS includes into a core class" do
+    # Runtime: `"p"`. The host class registry answers `Integer` / `Enumerable` as disjoint; the RBS says otherwise.
+    sig = { "money.rbs" => <<~RBS }
+      class Integer
+        include Enumerable[Integer]
+        def each: () { (Integer) -> void } -> self
+      end
+      class Money
+        def show: (Enumerable[untyped]) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      class Integer
+        include Enumerable
+        def each = yield(self)
+      end
       class Money
         def show(x) = "p"
       end

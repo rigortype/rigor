@@ -57,7 +57,7 @@ module Rigor
       # spec binds cannot drift apart.
       #
       # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read (or
-      # a write in value position, `if (x = MAP[k])`) resolves through, then the safe-navigation chain and the
+      # a write in value position, `if (x = MAP[k])`) resolves through, then a safe-navigation call and the
       # predicate-fold derivation issue #313 added.
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
@@ -74,17 +74,14 @@ module Rigor
         end
       end
 
-      # `recv&.m`, and every plain call chained after it (`recv&.m.n`), which Ruby's short-circuit skips as
-      # well: the chain is `nil` exactly when `recv` is, so it restates `recv`'s presence and is as optimistic
-      # as `recv`. A plain read `recv.m` is deliberately not derived — on a miss it raises `NoMethodError`
-      # instead of producing a value, so its own nil-freeness rests on `m`'s answer — and a parenthesised
-      # `(recv&.m).n` ends the short-circuit, so the walk stops at anything that is not a call.
+      # `recv&.m` is `nil` exactly when `recv` is (or when `m` answers `nil`), so it restates `recv`'s presence
+      # and is as optimistic as `recv`. Only the call carrying the `&.` is derived: Ruby skips that one call and
+      # no more, so `recv&.m.n` sends `n` to the `nil` and raises (or answers `NilClass#n`), and neither it nor
+      # a plain read `recv.m` produces the `nil` a miss would — their own nil-freeness rests on the method's
+      # answer. A nil-collapsing predicate over the call (`recv&.m.nil?`) still resolves, through
+      # {.resolve_through_predicate} and back here.
       def resolve_through_safe_navigation(node, scope)
-        current = node
-        current = current.receiver while current.is_a?(Prism::CallNode) && !current.safe_navigation?
-        return nil unless current.is_a?(Prism::CallNode)
-
-        resolve(current.receiver, scope)
+        resolve(node.receiver, scope) if node.safe_navigation?
       end
 
       # `recv.nil?` / `!recv` — the fold is a statement about `recv`, so it is exactly as optimistic as `recv`

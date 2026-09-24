@@ -245,27 +245,27 @@ module Rigor
             decompose(rhs_type, lefts.size, rights.size, rest_present: rest_present, context: context)
           rest_type = arity_free_rest(rest_type) if optimistic == true
           front_marks, back_marks =
-            slot_marks(optimistic || slots_optimistic, rhs_type, lefts.size, rights.size, rest_present: rest_present)
+            slot_marks(optimistic, slots_optimistic, rhs_type, [lefts.size, rights.size], rest_present: rest_present)
           lefts.each_with_index { |t, i| bind_target(t, fronts[i], front_marks[i], bindings, marked, context) }
           bind_rest_target(rest, rest_type, bindings, marked) if rest
           rights.each_with_index { |t, i| bind_target(t, backs[i], back_marks[i], bindings, marked, context) }
         end
 
         # The `[front_marks, back_marks]` pair a visit hands its fixed slots. A boolean `optimistic`
-        # applies to every slot. A per-element Array applies only to the `Type::Tuple` a literal
+        # applies to every slot, as does the decomposition's own short-array bet (`fallback`, the
+        # issue #1093 `Array[T]` mark). A per-element Array applies only to the `Type::Tuple` a literal
         # right-hand side types as, of the same arity, and each slot picks its element at the offset
-        # {decompose_tuple} reads ({slot_offsets}); any other carrier leaves the slots unmarked, and a
+        # {decompose_tuple} reads ({slot_offsets}); any other carrier falls back to `fallback`, and a
         # slot past the literal's end binds an exact `nil` that no mark qualifies.
-        def slot_marks(optimistic, rhs_type, front_count, back_count, rest_present:)
-          return [[optimistic] * front_count, [optimistic] * back_count] unless optimistic.is_a?(Array)
+        def slot_marks(optimistic, fallback, rhs_type, (front_count, back_count), rest_present:)
+          literal = optimistic.is_a?(Array) && rhs_type.is_a?(Type::Tuple) && rhs_type.elements.size == optimistic.size
+          uniform = optimistic.is_a?(Array) ? fallback : optimistic || fallback
+          return [[uniform] * front_count, [uniform] * back_count] unless literal
 
-          elements = rhs_type.is_a?(Type::Tuple) && rhs_type.elements.size == optimistic.size ? optimistic : []
-          slot_offsets(elements.size, front_count, back_count, rest_present: rest_present)
-            .map { |offsets| offsets.map { |i| elements.fetch(i, false) } }
+          slot_offsets(optimistic.size, front_count, back_count, rest_present: rest_present)
+            .map { |offsets| offsets.map { |i| optimistic.fetch(i, false) } }
         end
 
-        # Every member walks the same target tree, so each binds the same names; the first member's
-        # key order is the declaration order.
         def visit_union(node, members, optimistic, bindings, marked, context)
           walks = members.map do |member|
             member_bindings = {}
@@ -347,8 +347,10 @@ module Rigor
           elements = tuple.elements
           fronts, backs = slot_offsets(elements.size, front_count, back_count, rest_present: rest_present)
                           .map { |offsets| offsets.map { |i| slot_type(elements, i, soften) } }
-          # A reversed range (a short source) slices to `[]`, and one starting past the end to `nil`.
-          middle = elements[front_count...(elements.size - back_count)] || []
+          # The end is clamped at the fronts, as {slot_offsets} clamps the backs: an unclamped negative end
+          # (more back slots than elements) would count from the end instead. A range starting past the end
+          # slices to `nil`.
+          middle = elements[front_count...[elements.size - back_count, front_count].max] || []
           [fronts, rest_present ? Type::Combinator.tuple_of(*middle) : nil, backs]
         end
 
@@ -408,12 +410,14 @@ module Rigor
         end
 
         # A per-element Array mark reaches a name only through a nested target: a name bound to a
-        # whole literal array holds an Array, which is never `nil`.
+        # whole literal array holds an Array, which is never `nil`. Nor does any mark reach a name bound
+        # to an exact `nil` — a slot past a Tuple's end or a wrap's empty slot — which is `nil` whether
+        # or not the source missed, so the mark could only withhold an honest verdict.
         def bind_target(target, type, optimistic, bindings, marked, context)
           return visit(target, type, optimistic, bindings, marked, context) if target.is_a?(Prism::MultiTargetNode)
 
           key = binding_key(target)
-          bind_name(key, type, optimistic == true, bindings, marked) if key
+          bind_name(key, type, optimistic == true && !nil_literal?(type), bindings, marked) if key
         end
 
         # The rest is an `Array` even when the right-hand side is short, so it is never marked.

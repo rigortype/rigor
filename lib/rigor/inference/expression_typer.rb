@@ -1774,6 +1774,9 @@ module Rigor
         # The carrier read itself keeps its declared answer even when that is a literal `true` /
         # `false` — the mark says its nil-freeness is a bet, not that the value's class widened.
         return type if scope.optimistic_origins[node]
+        # A safe-navigation call over a marked receiver answers `nil` on the miss, never the other boolean, so
+        # widening its `Constant[true]` would invent a `false` (the certainty consumers decline on the mark).
+        return type if node.safe_navigation?
         return type if OptimisticOrigin.resolve(node, scope).nil?
 
         Type::Combinator.union(Type::Combinator.constant_of(true), Type::Combinator.constant_of(false))

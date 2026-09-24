@@ -213,7 +213,7 @@ backends behind one interface:
 | --- | --- | --- | --- | --- |
 | `process` (fork) — **default** | **full** (separate OS process) | **yes** (a child crash is contained; the parent declines) | one fork + IPC | Forks a **single persistent worker** (not one per call), which loads + calls the library and returns data (Marshal) over a pipe. Reuses Rigor's fork model (ADR-15). Falls back to `none` where `fork` is unavailable. |
 | `none` (direct) | none (loads into main space) | none | lowest | No isolation; the trusted, pure library loads into the main space. The fork-less-platform fallback, and an explicit opt-out. |
-| `ruby_box` | monkey-patch + version (per-box) | **no** (a native crash still kills the process) | low (in-process) | Ruby 4.0 `Ruby::Box`, `RUBY_BOX=1` (re-exec). Experimental; blocked on an upstream VM segfault (below). |
+| `ruby_box` | monkey-patch + version (per-box) | **no** (a native crash still kills the process) | low (in-process) | Ruby 4.0 `Ruby::Box`, `RUBY_BOX=1` (re-exec). Experimental; needs a Ruby carrying the upstream VM fix (below) — the launcher probes for it and falls back otherwise. |
 
 The key contrast: `ruby_box` isolates *correctness* contamination but a
 native crash in the boxed work still takes the whole process down (as
@@ -306,15 +306,29 @@ and reused. `process` falls back to `none` where `fork` is unavailable.
   `Ruby::Box#require` consults only the raw `$LOAD_PATH`) — the `ruby_box`
   strategy produces diagnostics identical to `none` / `process` on
   Redmine `app/models`, the box answering the inflections.
+- **2026-09: fixed upstream, not yet released.** The patch landed on CRuby
+  master as [Bug #22260](https://bugs.ruby-lang.org/issues/22260)
+  (`a4ad8e461a`, 2026-09-10). It is not in 4.0.7 (2026-09-15) and not on
+  the `ruby_4_0` branch — the ticket carries no 4.0 backport request — so
+  every released Ruby still crashes, and the first release to carry it
+  is 4.1.0 unless a 4.0.x backport lands first.
+- **The launcher now gates the re-exec on the fix.** Before re-exec'ing
+  under `RUBY_BOX=1`, `exe/rigor` runs the bug's minimal reproducer in a
+  child Ruby (`Rigor::Plugin::BoxProbe`). A Ruby that crashes, or has no
+  `Ruby::Box`, gets a one-line warning and the run continues under the
+  configured strategy (`process` by default) instead of segfaulting. The
+  check is behavioural rather than a version bound, so a fixed 4.1.0dev
+  build and any future 4.0.x backport are admitted without a code change.
 
 So **`process` (fork) is the default** — the production-ready isolation
 that works today: validated on a full Redmine `app` run (byte-identical
 diagnostics, no segfault) and across the whole spec suite with no env set,
 because the fork boundary contains exactly the crash that breaks
 `ruby_box`. It falls back to `none` where `fork` is unavailable.
-`ruby_box` is **landed but gated as experimental** (selectable, but
-blocked on the upstream `Ruby::Box` VM bug above — root-caused and patched
-locally 2026-08-24, awaiting an upstream release that ships the fix); it
+`ruby_box` is **landed but gated as experimental** (selectable; usable
+on a Ruby that carries the Bug #22260 fix, and refused with a warning by
+the launcher's probe on one that does not — fixed on CRuby master, awaiting
+a release); it
 becomes attractive (lighter, in-process, + exact-version coexistence) once
 a fixed Ruby is released. `none` is the explicit opt-out + the fork-less
 fallback.
@@ -368,8 +382,9 @@ reframed from "unify the approximations" to "use the real library."
    - `none` — `require` + `public_send` in the main space (default path).
    - `ruby_box` — call inside the `Plugin::Box` (`exe/rigor` re-execs under
      `RUBY_BOX=1` when selected). Isolates monkey-patches + versions; also
-     unlocks the maximal-fidelity "exact gem version" path. Experimental,
-     and can segfault on a full analysis (below) — so usable but gated.
+     unlocks the maximal-fidelity "exact gem version" path. Experimental;
+     a Ruby without the Bug #22260 fix segfaults on a full analysis
+     (below), so the launcher probes for the fix and falls back without it.
    - `process` — forks a **persistent worker** that loads + calls the
      library and returns data over a Marshal pipe; a worker crash (even
      `SIGSEGV`) is contained (the parent gets EOF / `EPIPE`, declines, and

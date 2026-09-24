@@ -5,6 +5,12 @@ Draft for [bugs.ruby-lang.org](https://bugs.ruby-lang.org) following
 Surfaced while prototyping ADR-39 slice 5 (running Rigor's analyzer under
 `RUBY_BOX=1` for plugin target-library isolation).
 
+**2026-09 status — filed and fixed upstream as
+[Bug #22260](https://bugs.ruby-lang.org/issues/22260)** (CRuby master
+`a4ad8e461a`, 2026-09-10; not backported to `ruby_4_0`, so 4.0.7 and every
+earlier release still crash). Rigor's launcher now probes for the fix
+before running under `RUBY_BOX=1` (`Rigor::Plugin::BoxProbe`).
+
 **2026-08-24 update — root cause identified, minimal reproducer found, patch
 written and verified.** The original draft (kept below as history) could not
 isolate a self-contained reproducer; the missing ingredient was

@@ -95,7 +95,7 @@ with the `plugins_isolation:` configuration key or the
 | --- | --- |
 | `process` (default) | Run the call in a forked, crash-contained worker, so the target library's monkey-patches and any crash never contaminate Rigor. Falls back to `none` where `fork` is unavailable (Windows / JRuby). |
 | `none` | Load the library into Rigor's own process and call it directly. |
-| `ruby_box` | Run inside an experimental `Ruby::Box` sandbox. This needs the `RUBY_BOX=1` start flag, so the `rigor` launcher re-execs itself with it set when you select this strategy. **Environment variable only** — the configuration file is read long after Ruby has booted, so `plugins_isolation: ruby_box` is reported as a configuration error instead. |
+| `ruby_box` | Run inside an experimental `Ruby::Box` sandbox. This needs the `RUBY_BOX=1` start flag, so the `rigor` launcher re-execs itself with it set when you select this strategy. It also needs a Ruby that fixes [Ruby Bug #22260](https://bugs.ruby-lang.org/issues/22260), which no release up to 4.0.7 does. The launcher checks for the fix first, and without it prints a warning and uses the configured strategy instead. **Environment variable only** — the configuration file is read long after Ruby has booted, so `plugins_isolation: ruby_box` is reported as a configuration error instead. |
 
 The environment variable wins over `plugins_isolation:`, so you can
 override a project's committed choice for one invocation. The legacy

@@ -11,13 +11,26 @@
 # context across the exec. The `none` and `process` (default) strategies
 # need no flag, so this is a no-op for them — behaviour is unchanged
 # unless a project opts into `ruby_box`.
+#
+# Before re-exec'ing, a child Ruby probes whether this Ruby can run
+# Rigor under `RUBY_BOX=1` at all (Rigor::Plugin::BoxProbe — released
+# Rubies through 4.0.7 segfault on Ruby Bug #22260). When it cannot,
+# the request is dropped with a warning and the run proceeds under the
+# configured strategy (`process` by default) instead of crashing.
 rigor_isolation = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
 rigor_wants_box = rigor_isolation == "ruby_box" || !ENV["RIGOR_BOX"].to_s.empty?
 if rigor_wants_box && ENV["RUBY_BOX"].to_s.empty?
-  require "rbconfig"
-  ENV["RUBY_BOX"] = "1"
-  ENV["RIGOR_PLUGIN_ISOLATION"] = "ruby_box" if rigor_isolation.empty?
-  exec(RbConfig.ruby, __FILE__, *ARGV)
+  require_relative "../lib/rigor/plugin/box_probe"
+  if (rigor_box_unsupported = Rigor::Plugin::BoxProbe.unsupported_reason)
+    warn "rigor: ruby_box plugin isolation is unavailable: #{rigor_box_unsupported}. " \
+         "Falling back to plugins_isolation from .rigor.yml (default: process)."
+    ENV.delete("RIGOR_PLUGIN_ISOLATION") if rigor_isolation == "ruby_box"
+    ENV.delete("RIGOR_BOX")
+  else
+    ENV["RUBY_BOX"] = "1"
+    ENV["RIGOR_PLUGIN_ISOLATION"] = "ruby_box" if rigor_isolation.empty?
+    exec(RbConfig.ruby, __FILE__, *ARGV)
+  end
 end
 
 lib = File.expand_path("../lib", __dir__)

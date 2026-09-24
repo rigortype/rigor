@@ -811,8 +811,15 @@ project's source.
     the fork-less fallback + explicit opt-out).
   - `ruby_box` — call inside a `Ruby::Box` (`Rigor::Plugin::Box`;
     `exe/rigor` re-execs under `RUBY_BOX=1`). Isolates monkey-patches +
-    versions in-process. Experimental; gated on an upstream `Ruby::Box`
-    VM bug.
+    versions in-process. Experimental. Before the re-exec,
+    `Rigor::Plugin::BoxProbe` runs the minimal reproducer of Ruby Bug
+    #22260 (a class-body proc isolated by `Ractor.make_shareable` loses
+    its box and segfaults on its first method call) in a child Ruby under
+    `RUBY_BOX=1`. When the child crashes, prints the wrong answer, cannot
+    start, or reports `Ruby::Box` inactive, the launcher warns on stderr,
+    drops `RIGOR_PLUGIN_ISOLATION=ruby_box` / `RIGOR_BOX`, and runs under
+    the configured strategy. The probe is skipped when `RUBY_BOX` is
+    already set, since the process has booted inside the box by then.
 - `Rigor::Plugin::Box` — the `Ruby::Box` wrapper backing the `ruby_box`
   strategy (`enabled?` / `require_feature` / `eval`).
 

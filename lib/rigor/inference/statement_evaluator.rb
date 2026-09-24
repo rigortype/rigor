@@ -244,9 +244,12 @@ module Rigor
       #   were typed under, when {#eval_call} runs the rest of that call
       #   from the scope its operands left ({#invoke_call}); nil otherwise,
       #   where it is the receiver scope itself ({#operand_scope}).
+      # @param in_operand — true for an evaluator {#thread_operand} opened, and every evaluator it opens: the
+      #   calls it runs are inside another expression's operand, which {#invoke_call} leaves the resets of a
+      #   statement-position call out of.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
-                     operand_scope: nil)
+                     operand_scope: nil, in_operand: false)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
@@ -255,6 +258,7 @@ module Rigor
         @converged_loop_recording = converged_loop_recording
         @next_scope_sink = next_scope_sink
         @operand_scope = operand_scope
+        @in_operand = in_operand
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -2441,17 +2445,22 @@ module Rigor
       # applies because it might have done anything ({#invoke_call}): the class's narrowed instance variables and the
       # regex globals. A call in an operand never applied them before #1223, and applying them only when the operand
       # happens to write made `$stdout.puts(Integer(v = $2)); $1.upcase` report where `$stdout.puts(Integer($2))`
-      # does not.
+      # does not. The same holds for every call under an operand evaluated through its handler, so the evaluator
+      # carries `in_operand` into everything it opens: an in-place mutation counts as an effect, and threading
+      # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
+      # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone.
       def thread_operand(node, entry)
         return entry unless OperandEffects.any?(node)
-        return evaluator_at(entry, on_enter: nil).send(:call_effects, node) if node.is_a?(Prism::CallNode)
+
+        operand = evaluator_at(entry, on_enter: nil, in_operand: true)
+        return operand.send(:call_effects, node) if node.is_a?(Prism::CallNode)
         # A container is threaded child by child even when it has a handler: the handler types the whole literal,
         # which a nested literal would repeat once per level of nesting. A statement list or `(…)` inside an operand
         # runs its statements in order just the same, and evaluating it would type each statement it holds.
         if OPERAND_CONTAINERS.include?(node.class) || OPERAND_SEQUENCES.include?(node.class)
           return thread_operand_children(node, entry)
         end
-        return sub_eval(node, entry, on_enter: nil).last if HANDLERS.key?(node.class)
+        return operand.evaluate(node).last if HANDLERS.key?(node.class)
 
         entry
       end
@@ -2472,7 +2481,8 @@ module Rigor
 
       # The rest of {#eval_call}: the call's block and every effect the call leaves on the scope, from the receiver
       # scope, which is the scope its operands left. Returns the post-call scope. `call_type` is nil for a threaded
-      # operand, which applies no post-return narrowing ({#call_effects}).
+      # operand, which applies no post-return narrowing ({#call_effects}); nor does a call an operand evaluator
+      # types through a handler ({#thread_operand}).
       def invoke_call(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like `private def`, `public def`, `module_function def`)
@@ -2489,7 +2499,8 @@ module Rigor
         # scope; the spec MUST in § "Fact stability and mutation" names captured locals a first-class invalidation
         # category. (The escaping / unknown path already widened to Dynamic[top] via `record_closure_escape_if_any`.)
         post_scope = write_back_block_captures(node, post_scope)
-        post_scope = apply_post_return_narrowing(node, post_scope) unless call_type.nil?
+        statement_call = !call_type.nil? && !@in_operand
+        post_scope = apply_post_return_narrowing(node, post_scope) if statement_call
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
@@ -2535,7 +2546,7 @@ module Rigor
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
-        post_scope = invalidate_ivars_for_intervening_call(node, post_scope) unless call_type.nil?
+        post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
         # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call is match-CAPABLE (a regex-matching method, or an implicit-self / unknown-receiver call
@@ -2546,7 +2557,7 @@ module Rigor
         # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
         # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
         post_scope ||= scope
-        post_scope = post_scope.forget_match_globals if !call_type.nil? && match_capable_call?(node)
+        post_scope = post_scope.forget_match_globals if statement_call && match_capable_call?(node)
         post_scope
       end
 
@@ -4849,7 +4860,8 @@ module Rigor
       # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` is set only by
       # {#call_effects}, for the evaluator that runs a call from the scope its operands left.
       def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
-                       on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil)
+                       on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil,
+                       in_operand: @in_operand)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
@@ -4858,7 +4870,8 @@ module Rigor
           lexical_nesting: lexical_nesting,
           converged_loop_recording: @converged_loop_recording,
           next_scope_sink: next_scope_sink,
-          operand_scope: operand_scope
+          operand_scope: operand_scope,
+          in_operand: in_operand
         )
       end
 

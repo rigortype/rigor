@@ -112,13 +112,21 @@ RSpec.describe "mutator widening in operand position", type: :runner do
       RUBY
     end
 
-    it "widens `collect!.each_with_index` and a filtering enumerator chain" do
+    it "widens `collect!.each_with_index` and a filtering enumerator chain, and not their non-bang forms" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Array[1 | 2]"])
         m = [1, 2]
         m.collect!.each_with_index { |x, i| x.to_s }
         dump_type(m)
         k = [1, 2]
         k.select!.with_index { |x, i| i > 0 }
+        dump_type(k)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["[1, 2]", "[1, 2]"])
+        m = [1, 2]
+        m.collect.each_with_index { |x, i| x.to_s }
+        dump_type(m)
+        k = [1, 2]
+        k.select.with_index { |x, i| i > 0 }
         dump_type(k)
       RUBY
     end
@@ -157,14 +165,57 @@ RSpec.describe "mutator widening in operand position", type: :runner do
       RUBY
     end
 
-    it "widens through a literal's element and an interpolation" do
-      expect(dumped_types(<<~RUBY)).to eq(%w[Array[1] String])
+    it "widens through a literal's element and an interpolation as the statement form does" do
+      statement = dumped_types(<<~RUBY)
         g = [1]
-        x = [g.sort!]
+        g.push(2)
+        dump_type(g)
+        s = +"a"
+        s << "b"
+        dump_type(s)
+      RUBY
+      expect(statement).not_to eq(["[1]", '"a"'])
+      expect(dumped_types(<<~RUBY)).to eq(statement)
+        g = [1]
+        x = [g.push(2)]
         dump_type(g)
         s = +"a"
         y = "\#{s << "b"}"
         dump_type(s)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["[1]", '"a"'])
+        g = [1]
+        x = [g.first]
+        dump_type(g)
+        s = +"a"
+        y = "\#{s + "b"}"
+        dump_type(s)
+      RUBY
+    end
+
+    it "widens an element read's container through an argument, and not through a non-mutating one" do
+      expect(rules(<<~RUBY, "flow.")).to be_empty
+        c = [[1]]
+        puts(c[0] << 5)
+        puts "five" if c[0].last == 5
+      RUBY
+      expect(rules(<<~RUBY, "flow.")).to eq(["flow.always-truthy-condition"]) # the rule id names both polarities
+        c = [[1]]
+        puts(c[0] + [5])
+        puts "five" if c[0].last == 5
+      RUBY
+    end
+
+    it "widens through an index store in an argument" do
+      expect(rules(<<~RUBY, "flow.")).to be_empty
+        h = { x: 1 }
+        puts(h[:x] = 2)
+        puts "one" if h[:x] == 1
+      RUBY
+      expect(rules(<<~RUBY, "flow.")).to eq(["flow.always-truthy-condition"])
+        h = { x: 1 }
+        puts(h[:x] + 2)
+        puts "one" if h[:x] == 1
       RUBY
     end
 
@@ -181,13 +232,73 @@ RSpec.describe "mutator widening in operand position", type: :runner do
         dump_type(h)
       RUBY
     end
+  end
 
-    it "leaves a block parameter mutated inside an operand to the block" do
-      expect(dumped_types(<<~RUBY)).to eq(["[1]"])
-        z = [1]
-        puts([[2]].map { |z| z << 1 }.size)
-        dump_type(z)
+  # The resets a statement-position call applies because it might have done anything — the class's narrowed
+  # instance variables and the regex globals — are left out of every call inside an operand. Counting a mutator
+  # as an effect threads operands that hold one, and a ternary or `&&` threaded through its handler types the
+  # sibling calls in it; those must not reset what the same line without the mutator leaves alone.
+  describe "the resets a statement-position call applies" do
+    it "are not applied by a sibling call beside the mutator in a threaded ternary" do
+      source = <<~RUBY
+        class P
+          def strict? = rand > 0.5
+          def run(line, queue, opts)
+            if line =~ /(\w+)/
+              opts[:first] = strict? ? queue.%<call>s : nil
+              key = $1
+              key.upcase
+            end
+          end
+        end
       RUBY
+      expect(rules(format(source, call: "shift"), "call.possible-nil")).to be_empty
+      expect(rules(format(source, call: "first"), "call.possible-nil")).to be_empty
+    end
+
+    it "are not applied by a sibling call beside the mutator in a threaded `&&`" do
+      source = <<~RUBY
+        class K
+          def initialize
+            @name = gets
+            @items = []
+          end
+          def ready? = rand > 0.5
+          def run
+            return unless @name
+            %<line>s
+            n = @name
+            n.upcase
+          end
+        end
+      RUBY
+      expect(rules(format(source, line: "$stdout.puts(ready? && @items.push(1))"), "call.possible-nil")).to be_empty
+      # The statement-position `&&` does reset: its `ready?` is a statement's call.
+      expect(rules(format(source, line: "ready? && @items.push(1)"), "call.possible-nil"))
+        .to eq(["call.possible-nil-receiver"])
+    end
+  end
+
+  describe Rigor::Inference::OperandEffects do
+    def effect?(source)
+      described_class.any?(Prism.parse(source).value.statements.body.last)
+    end
+
+    it "counts a mutator on a variable that outlives the operand" do
+      expect(effect?("b = [1]; b.push(2).size")).to be(true)
+      expect(effect?("@b.push(2).size")).to be(true)
+      expect(effect?("$b.push(2).size")).to be(true)
+      expect(effect?("c = [[1]]; puts(c[0] << 5)")).to be(true)
+      expect(effect?("h = []; [1].each { |x| h << x }.size")).to be(true)
+    end
+
+    it "does not count a non-mutator, a self receiver, or a block's own local" do
+      expect(effect?("b = [1]; b.dup.size")).to be(false)
+      expect(effect?("push(2).size")).to be(false)
+      expect(effect?("self.push(2).size")).to be(false)
+      expect(effect?("puts([[2]].map { |z| z << 1 }.size)")).to be(false)
+      expect(effect?("puts([[2]].map { it << 1 }.size)")).to be(false)
+      expect(effect?("puts([1].map { |x| y = [x]; y << 1 }.size)")).to be(false)
     end
   end
 end

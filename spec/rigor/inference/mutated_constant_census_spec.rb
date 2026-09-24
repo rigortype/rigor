@@ -81,15 +81,13 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
-    # A seed that is already a nominal (`tap` answers its receiver, `Hash[Symbol, Integer]`) pinned its value type the
-    # same way.
-    it "does not draw an undefined-method error on a value a mutation stored into a nominal seed" do
-      expect(rules(<<~RUBY)).to eq([[5, "call.undefined-method"]])
-        H = { a: 1 }.tap { }
-        H[:a] = "s"
-        puts H[:a].upcase
-        K = { a: 1 }.tap { }
-        puts K[:a].upcase
+    # A class-level nominal seed makes a claim a store of the same class keeps, so the census leaves it as the
+    # unknown-store seam does, and a genuine error on it still fires.
+    it "keeps a class-level nominal seed's value claim, so a genuine error still fires" do
+      expect(rules(<<~RUBY)).to eq([[3, "call.undefined-method"]])
+        COUNTS = Hash.new(0)
+        def hit(key) = COUNTS[key] += 1
+        puts COUNTS[:a].upcase
       RUBY
     end
 
@@ -177,13 +175,23 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
-    it "does not draw an undefined-method error on an element a mutation added to a nominal seed" do
-      expect(rules(<<~RUBY)).to eq([[5, "call.undefined-method"]])
-        A = [1, 2].tap { }
-        A << "x"
-        puts A.last.upcase
-        K = [1, 2].tap { }
-        puts K.last.upcase
+    # A nominal seed whose element type is value-pinned (`shuffle` answers `Array[1 | 2]`) makes the literal's claim.
+    it "does not fold an element a mutation added to a value-pinned nominal seed" do
+      expect(rules(<<~RUBY)).to eq([[6, "flow.always-truthy-condition"]])
+        P = [1, 2].shuffle
+        P << 3
+        puts "three" if P.last == 3
+
+        K = [1, 2].shuffle
+        puts "three" if K.last == 3
+      RUBY
+    end
+
+    it "keeps a class-level nominal seed's element claim, so a genuine error still fires" do
+      expect(rules(<<~RUBY)).to eq([[3, "call.undefined-method"]])
+        NAMES = ENV.fetch("NAMES", "").split(",")
+        def add(name) = NAMES << name
+        puts NAMES.last.lenght
       RUBY
     end
 

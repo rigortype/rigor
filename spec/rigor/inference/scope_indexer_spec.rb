@@ -3980,13 +3980,15 @@ end
       expect(table["Y"].static_facet.members).to all(be_a(Rigor::Type::Tuple))
     end
 
-    # `clear` empties a `non-empty-array`, so the removal is not kept either.
-    it "drops a removal a mutation can falsify along with the element pin" do
+    # `clear` empties a `non-empty-array`, so the removal is not kept. What is left is an ordinary nominal: a
+    # value-pinned element gains the arm, and a class-level one keeps its claim.
+    it "drops a removal a mutation can falsify, and unpins what is left as a nominal" do
       combinator = Rigor::Type::Combinator
-      non_empty = combinator.non_empty_array(combinator.nominal_of("Integer"))
+      pinned = combinator.non_empty_array(combinator.constant_of(1))
+      classed = combinator.non_empty_array(combinator.nominal_of("Integer"))
 
-      expect(described_class.send(:census_mutated_type, non_empty).describe)
-        .to eq("Dynamic[Array[Dynamic[top] | Integer]]")
+      expect(described_class.send(:census_mutated_type, pinned).describe).to eq("Dynamic[Array[1 | Dynamic[top]]]")
+      expect(described_class.send(:census_mutated_type, classed).describe).to eq("Dynamic[Array[Integer]]")
     end
   end
 

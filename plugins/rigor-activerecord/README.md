@@ -162,12 +162,6 @@ an object the caller can still reach through `user`. A plain Relation's
 `new` changes nothing, and the same bound over-states it, because the
 type cannot tell the receivers apart.
 
-The parameter lists follow the same rule. The proxy's `delete_all`
-takes an optional `dependent` (`:nullify` or `:delete_all`), so
-`user.posts.delete_all(:nullify)` is not reported. A plain Relation's
-`delete_all(:nullify)` raises `ArgumentError`, and it is not reported
-either.
-
 The proxy's own writers (`<<`, `push`, `append`, `concat`, `replace`,
 `delete`, `destroy`, `clear`) are `effect_attributions:` rows carrying
 `io.db.read`, `io.db.write`, `io.db.transaction` and `mutate`. Bare

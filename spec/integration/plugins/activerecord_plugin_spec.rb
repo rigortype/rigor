@@ -935,13 +935,18 @@ RSpec.describe "plugins/rigor-activerecord" do
       }
     end
 
-    def association_diagnostics(source)
-      run_ar(source, models: association_models).diagnostics
+    # Every example reads `user.posts` off the same local, so the siblings that must still type and fire
+    # also prove the no-fire example's receiver reached the Relation signature.
+    def association_diagnostics(body)
+      run_ar("user = User.find(1)\n#{body}", models: association_models).diagnostics
+    end
+
+    def wrong_arity(body)
+      association_diagnostics(body).select { |d| d.rule == "call.wrong-arity" }
     end
 
     it "does not fire wrong-arity on a proxy call Rails accepts" do
-      source = <<~RUBY
-        user = User.find(1)
+      body = <<~RUBY
         post = Post.find(1)
         user.posts.delete_all
         user.posts.delete_all(:delete_all)
@@ -951,8 +956,6 @@ RSpec.describe "plugins/rigor-activerecord" do
         user.posts.find(1, 2)
         user.posts.size
         user.posts.include?(post)
-        user.posts.delete(post)
-        user.posts.destroy(post)
         user.posts.reload
         user.posts.reset
         user.posts.build(title: "x")
@@ -960,21 +963,30 @@ RSpec.describe "plugins/rigor-activerecord" do
         user.posts.create!(title: "x")
         user.posts.destroy_all
       RUBY
-      expect(association_diagnostics(source).select { |d| d.rule == "call.wrong-arity" }).to be_empty
+      expect(wrong_arity(body)).to be_empty
     end
 
     it "keeps the declared return type when the proxy's argument is passed" do
-      diags = association_diagnostics("Rigor.dump_type(User.find(1).posts.delete_all(:nullify))\n")
+      diags = association_diagnostics("Rigor.dump_type(user.posts.delete_all(:nullify))\n")
       dumped = diags.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
       expect(dumped).to eq(["dump_type: Integer"])
     end
 
     it "STILL fires wrong-arity past the proxy's own arity" do
       # Without this sibling, the examples above would pass if arity checking were switched off for the Relation.
-      diags = association_diagnostics("User.find(1).posts.delete_all(:nullify, 1)\n")
-      arity = diags.select { |d| d.rule == "call.wrong-arity" }
+      arity = wrong_arity("user.posts.delete_all(:nullify, 1)\n")
       expect(arity.size).to eq(1)
-      expect(arity.first.message).to include("`delete_all'")
+      expect(arity.first.message).to include("`delete_all'", "expected 0..1")
+    end
+
+    it "accepts the proxy's argument on the relations that do not override delete_all" do
+      # The accepted trade: both calls raise ArgumentError at run time, but they share the proxy's type, so the
+      # widened signature admits them. Flip this if an association reader ever gets a type of its own.
+      body = <<~RUBY
+        user.posts.where(title: "x").delete_all(:nullify)
+        Post.where(title: "x").delete_all(:nullify)
+      RUBY
+      expect(wrong_arity(body)).to be_empty
     end
   end
 

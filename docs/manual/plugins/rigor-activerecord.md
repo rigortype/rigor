@@ -258,6 +258,14 @@ close every model in the project.
   reduced index until it is invalidated, so use `rigor check
   --no-cache` (or `make cache-clean`) if you want to see the change
   immediately.
+- **An association and a plain relation share one signature.**
+  `user.posts`, `user.posts.where(...)` and `Post.where(...)` all
+  type as `ActiveRecord::Relation[Post]`, although only the first
+  is an association's `CollectionProxy`, so the signature they share
+  takes the longest argument list among them.
+  `user.posts.delete_all(:nullify)` is valid and not reported. The
+  same call on the other two raises `ArgumentError` at run time, and
+  is not reported either.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

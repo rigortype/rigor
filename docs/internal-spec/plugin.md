@@ -900,11 +900,12 @@ duplication in `rigor effects explain`.
 A bound is written for **every run-time class the plugin types as the declaring class**, not just the one it
 names. Where a plugin types a subclass's instances as the base class, the base's bound is what a call on
 the subclass imports, so it MUST also admit the subclass's override. rigor-activerecord types a `has_many`
-reader as `ActiveRecord::Relation[Model]`, but the reader returns a `CollectionProxy`, whose `build`
-pushes the new record into the association's target. `Relation#build` therefore carries `mutate.self`
-although a plain Relation's `build` changes nothing, and a writer only the subclass defines (the proxy's
-`<<`) is an `effect_attributions:` row keyed on the base class. A bound that fits only the base class
-would give `%a{pure}` to a method that changes an object its caller still holds.
+reader, and every query builder called on it, as `ActiveRecord::Relation[Model]`. The reader actually
+returns a `CollectionProxy`, and the builders return an `AssociationRelation`, and the `build` of both pushes
+the new record into the association's target. `Relation#build` therefore carries `mutate.self`, although a
+plain Relation's `build` changes nothing. A writer that only the subclass defines (the proxy's `<<`) becomes
+an `effect_attributions:` row keyed on the base class. A bound that fits only the base class would give
+`%a{pure}` to a method that changes an object its caller still holds.
 
 ##### `EffectAttribution`
 
@@ -914,6 +915,12 @@ responds: false)`.
 
 `why:` is **required and non-empty**, exactly as every row of `data/effects/core.yml` requires one: a
 label with no stated reason is a claim nobody can review.
+
+`labels:` describe the **call**, not the callee's body. A row cannot run the ownership judgment the scan
+applies to a core mutator, so a change to a receiver that is not the caller's `self` is spelt bare `mutate`,
+and `mutate.self` is kept for an implicit-self call. Examples of the two are rigor-actionpack's
+`session[:k] = v` and `render`. An RBS envelope is the other way round, because it bounds the callee's own
+body ([`effect-labels.md`](../type-specification/effect-labels.md) § The declared lane at call sites).
 
 `receiver:` is spelled one of three ways, and the spelling picks the matching rule:
 

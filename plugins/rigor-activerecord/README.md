@@ -147,20 +147,27 @@ them ∅ because that is what the code *does* — and the truthful one
 wins: a presenter that builds and returns a scope has pure code, and
 the caller that materialises it gets the read.
 
-### Association proxies change their target
+### Association relations change their target
 
-`user.posts` returns a `CollectionProxy`, and the plugin types it as
-`Relation[Post]`, so every bound in `relation.rbs` must also hold for
-the proxy. The proxy's `build` / `new`, `create`, the `find_or_*` /
-`first_or_*` builders, `reset`, `reload`, `delete_all`, `destroy_all`
-and the bulk inserts add records to the association's in-memory target
-or discard them from it, so their bounds carry `mutate.self`.
-`user.posts.build` changes an object the caller can still reach through
-`user`. A plain Relation's `new` changes nothing, and the same bound
-over-states it, because the type cannot tell the two receivers apart.
-The writers only a proxy defines (`<<`, `push`, `append`, `concat`,
-`replace`, `delete`, `destroy`, `clear`) are `effect_attributions:`
-rows carrying `io.db` and `mutate.self`.
+`user.posts` returns a `CollectionProxy`, and `user.posts.where(…)` an
+`AssociationRelation`. The plugin types both as `Relation[Post]`, so
+every bound in `relation.rbs` must also hold for them. Their `build` /
+`new`, `create`, and the `find_or_*`, `create_or_find_by` and
+`first_or_*` builders add the record to the association's in-memory
+target. On the proxy, `reset`, `reload`, `delete_all`, `destroy_all`,
+`update_all` and `touch_all` discard unsaved records from it, and so
+will `insert_all`, `insert_all!` and `upsert_all` from Rails 8.2. Those
+bounds carry `mutate.self`, so `user.posts.build` reads as a change to
+an object the caller can still reach through `user`. A plain Relation's
+`new` changes nothing, and the same bound over-states it, because the
+type cannot tell the receivers apart.
+
+The proxy's own writers (`<<`, `push`, `append`, `concat`, `replace`,
+`delete`, `destroy`, `clear`) are `effect_attributions:` rows carrying
+`io.db.read`, `io.db.write`, `io.db.transaction` and `mutate`. Bare
+`mutate` is used because a row describes the call, and the proxy is not
+the caller's `self`. A saved owner's `<<` also runs the model's save
+callbacks, and no edge carries those yet.
 
 ### Framework edges
 
@@ -176,6 +183,7 @@ contributes an `io.db.read`, because the uniqueness check IS a query.
 `map` / `filter_map` and the rest of `Enumerable` are attributions
 rather than RBS annotations, because declaring them in the bundled
 signature would change how they **type**. Association readers created
-by `has_many` are not rowed at all: reading one issues no query, so it
-is already ∅ by the builder rule, and the read appears where the caller
-materialises.
+by `has_many` are not rowed at all. Reading one issues no query, so it
+adds no label, and the read appears where the caller materialises.
+Nothing claims the reader either, so `rigor sig-gen` never writes
+`%a{pure}` on a method that calls one.

@@ -115,38 +115,61 @@ RSpec.describe "the Rails effect layer" do
     end
   end
 
-  # An association reader returns a `CollectionProxy`, and the plugin types it as `Relation[Post]`, so the
-  # Relation signature's bound is the one a proxy call imports. A proxy's builders and writers change the
-  # association's target, which the caller can still reach through the owner.
-  describe "an association proxy typed as a Relation" do
-    # `%a{pure}` here claimed the build changed nothing, and `rigor sig-gen` wrote `%a{pure}` on `#draft`.
-    it "reads build and new as a change to the proxy's target" do
-      %w[PostDrafts#draft PostDrafts#draft_new].each do |key|
-        expect(declared(key)).to include("mutate.self")
+  # An association reader returns a `CollectionProxy`, and a query builder on it an `AssociationRelation`.
+  # The plugin types both as `Relation[Post]`, so the Relation signature's bound is the one such a call
+  # imports. Their builders and writers change the association's target, which the caller can still reach
+  # through the owner.
+  describe "an association relation typed as a Relation" do
+    # The RBS envelopes, written from the callee's side: the receiver changes itself.
+    envelope_bounds = {
+      "via_build" => [], "via_new" => [], "via_scoped_build" => [],
+      "via_create" => ["io.db.write"], "via_create!" => ["io.db.write"],
+      "via_find_or_create_by" => ["io.db.write"], "via_find_or_create_by!" => ["io.db.write"],
+      "via_create_or_find_by" => ["io.db.write"], "via_create_or_find_by!" => ["io.db.write"],
+      "via_first_or_create" => ["io.db.write"], "via_first_or_create!" => ["io.db.write"],
+      "via_find_or_initialize_by" => ["io.db.read"], "via_first_or_initialize" => ["io.db.read"],
+      "via_reset" => [], "via_reload" => ["io.db.read"],
+      "via_delete_all" => ["io.db.write"], "via_destroy_all" => ["io.db.write"],
+      "via_update_all" => ["io.db.write"], "via_touch_all" => ["io.db.write"],
+      "via_insert_all" => ["io.db.write"], "via_insert_all!" => ["io.db.write"],
+      "via_upsert_all" => ["io.db.write"]
+    }.freeze
+
+    # The attribution rows for the writers a plain Relation does not define, written about the call: the
+    # proxy is not the caller's `self`, so the change is bare `mutate`.
+    row_methods = %w[via_shovel via_push via_append via_concat via_replace via_delete via_destroy via_clear].freeze
+    let(:row_bound) { %w[io.db.read io.db.write io.db.transaction mutate] }
+
+    envelope_bounds.each do |method, io|
+      it "bounds ##{method} with mutate.self beside #{io.empty? ? 'nothing else' : io.join(', ')}" do
+        key = "PostDrafts##{method}"
+        expect(declared(key)).to contain_exactly(*io, "mutate.self")
+        expect(entry(key)).to be_exhaustive
         expect(entry(key)).not_to be_trivial
-        expect(Rigor::SigGen::EffectAnnotation.decide(entry(key)).first).to be_empty
       end
     end
 
-    it "keeps the write beside the target change on create" do
-      expect(declared("PostDrafts#publish")).to include("io.db.write", "mutate.self")
-    end
-
-    it "reads reset as a change, since it drops unsaved built records" do
-      expect(declared("PostDrafts#discard")).to include("mutate.self")
-    end
-
-    # The writers only a proxy defines are rows, not signatures, and they still bound the site.
-    it "colours the proxy-only writers and keeps the site exhaustive" do
-      %w[PostDrafts#attach PostDrafts#detach].each do |key|
-        expect(declared(key)).to include("io.db", "mutate.self")
+    row_methods.each do |method|
+      it "colours ##{method} through the proxy-writer row and keeps the site exhaustive" do
+        key = "PostDrafts##{method}"
+        expect(declared(key)).to match_array(row_bound)
         expect(entry(key)).to be_exhaustive
       end
     end
 
-    # The control: the query builders stay pure on a proxy, because a proxy hands them to a fresh scope.
+    # `%a{pure}` on `build` used to let `rigor sig-gen` write `%a{pure}` on a method whose only statement
+    # builds into a held association.
+    it "withholds %a{pure} from a method that only builds into the association" do
+      %w[via_build via_new via_scoped_build].each do |method|
+        expect(Rigor::SigGen::EffectAnnotation.decide(entry("PostDrafts##{method}")))
+          .to eq([[], :withheld_declared])
+      end
+    end
+
+    # The control: a query builder changes nothing, on a proxy as anywhere else, and stays emit-able.
     it "leaves a query builder on the proxy trivial" do
       expect(entry("PostDrafts#titled")).to be_trivial
+      expect(Rigor::SigGen::EffectAnnotation.decide(entry("PostDrafts#titled"))).to eq([["%a{pure}"], :emitted])
     end
   end
 

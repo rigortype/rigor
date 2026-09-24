@@ -14,9 +14,10 @@ module Rigor
     #
     # They are kept out of {MutationWidening::HASH_MUTATORS} on purpose. That table answers "the pair set changed",
     # and its other readers act on that answer: the widening there replaces the shape with a `Hash[K, V]` nominal,
-    # which costs every present key's value for a mutation that left every pair where it was, and the effect
-    # catalogue and the `non-empty-hash` witness read it as a store or a removal. This module answers the narrower
-    # question instead, so the present keys keep their values.
+    # which costs every present key's value for a mutation that left every pair where it was, and the `non-empty-hash`
+    # witness reads it as a store or a removal. This module answers the narrower question instead, so the present keys
+    # keep their values. The effect classifier asks only whether the receiver was written, which each of these three
+    # does, so it reads the two tables as one ({Effects::MutationClassifier::HASH_MUTATORS}).
     module HashLookupMutation
       MUTATORS = %i[default= default_proc= compare_by_identity].to_set.freeze
 

@@ -39,10 +39,13 @@ module Rigor
       DATA_PATH = File.expand_path("../../../data/effects/core.yml", __dir__).freeze
 
       # The mutator sets a value class may name, by reference. Adding a name here is the only way a
-      # class gets one — the data file may not spell a selector list of its own.
+      # class gets one — the data file may not spell a selector list of its own. Each is the set
+      # {MutationClassifier#mutating?} reads for that class, so a posture's answer and the classifier's
+      # cannot disagree: `hash` is the classifier's union of the widening's two Hash tables, because
+      # `compare_by_identity` mutates the receiver although the widening keeps it off `HASH_MUTATORS`.
       MUTATOR_SETS = {
         "array" => Inference::MutationWidening::ARRAY_MUTATORS,
-        "hash" => Inference::MutationWidening::HASH_MUTATORS,
+        "hash" => MutationClassifier::HASH_MUTATORS,
         "string" => Inference::StringMutation::MUTATORS
       }.freeze
 

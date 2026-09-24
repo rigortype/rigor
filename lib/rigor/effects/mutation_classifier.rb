@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../inference/mutation_widening"
 require_relative "label_set"
+require_relative "local_ownership"
 
 module Rigor
   module Effects
@@ -18,7 +19,9 @@ module Rigor
     #    proven lane is worse than a missing one — the proven lane is the one a verdict may read (ADR-5).
     # 2. **Who owns the receiver?** `self` and its ivars are `mutate.self` (`mutate.static` in singleton
     #    context), a class variable is `mutate.static`, a parameter is `mutate.instance`, a frame-owned
-    #    local is `mutate.local`. **Anything else answers nil**, and the caller records an
+    #    local is `mutate.local`, and so is a receiver that is itself an allocation (`{}.compare_by_identity`,
+    #    `raw.dup.force_encoding(e)`) by the local rule's own witness ({LocalOwnership.allocation?}): each
+    #    evaluation is a new object no caller holds yet. **Anything else answers nil**, and the caller records an
     #    `unknown-ownership` taint rather than a proven bare `mutate`: Ruby's ownership is a dataflow
     #    question, and a proven parent label on a fresh-but-unproven receiver would put findings on correct
     #    code (WD14).
@@ -28,6 +31,20 @@ module Rigor
 
       # `foo=`, and deliberately not `==` / `<=` / `!=` / `===`.
       ATTRIBUTE_WRITER = /\A[a-z_][A-Za-z0-9_]*=\z/
+
+      # Every Hash method that mutates its receiver. The widening keeps two tables because they answer two different
+      # questions of a `HashShape` — `MutationWidening::HASH_MUTATORS` changes the pair set,
+      # `HashLookupMutation::MUTATORS` changes what a read of the pairs answers — but either is a write to the
+      # receiver, and that is all this asks: `h.compare_by_identity` raises `FrozenError` on a frozen hash as
+      # `h.clear` does (unless the hash already compares by identity, when it returns before the check), and a
+      # method whose one effect was `@h.compare_by_identity` did not read as mutating while this cited the first
+      # table alone.
+      #
+      # `rehash` is in neither table because it changes no read a shape can state: a shape's keys are literals, which
+      # a rebuild never merges. It still rebuilds the receiver's table in place, and it is the one name spelt here.
+      HASH_MUTATORS = (
+        Inference::MutationWidening::HASH_MUTATORS | Inference::HashLookupMutation::MUTATORS | Set[:rehash]
+      ).freeze
 
       LABELS = {
         self_state: LabelSet.new(["mutate.self"]),
@@ -52,7 +69,7 @@ module Rigor
         # (ADR-103 WD3): a list kept here drifted from the widening's, and missed `force_encoding`.
         case receiver_class
         when "Array" then Inference::MutationWidening::ARRAY_MUTATORS.include?(name)
-        when "Hash" then Inference::MutationWidening::HASH_MUTATORS.include?(name)
+        when "Hash" then HASH_MUTATORS.include?(name)
         when "String" then Inference::StringMutation::MUTATORS.include?(name)
         else false
         end
@@ -71,6 +88,7 @@ module Rigor
           @singleton ? :static : :self_state
         when Prism::ClassVariableReadNode then :static
         when Prism::LocalVariableReadNode then local_ownership(receiver.name.to_s)
+        else :local if LocalOwnership.allocation?(receiver)
         end
       end
 

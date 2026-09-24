@@ -50,6 +50,20 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
         end
       end
 
+      # IO, File and StringIO are Enumerable over lines, and every Enumerable method reaches its block through
+      # `each`, so each inherits `each`'s immediate-invocation contract. Without these entries
+      # `io.each_with_index { ... }` classified `:unknown` where `io.each_line { ... }` did not, and missed the
+      # same loop-body re-narrowing. `reopen` is the control: a stream method outside the catalogue stays unknown.
+      it "recognises every Enumerable iteration method on IO / File / StringIO instances" do
+        %w[IO File StringIO].each do |name|
+          stream = Rigor::Type::Combinator.nominal_of(name)
+          described_class::ENUMERABLE_NON_ESCAPING.each do |m|
+            expect(classify(stream, m)).to eq(:non_escaping), "expected #{name}##{m} to be non_escaping"
+          end
+          expect(classify(stream, :reopen)).to eq(:unknown)
+        end
+      end
+
       it "recognises Object#tap / then / yield_self on any receiver" do
         %i[tap then yield_self].each do |m|
           expect(classify(string_nominal, m)).to eq(:non_escaping)

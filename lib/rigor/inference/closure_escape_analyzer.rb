@@ -151,6 +151,12 @@ module Rigor
       # `File.foreach(path) { case … when … then flag = true when … then return true if flag end }` classifies
       # `:unknown` and misses the loop-body re-narrowing, so a local written in one `when` arm reads its
       # pre-loop value in a sibling arm and a guarding condition folds to a spurious constant.
+      #
+      # The three are also `Enumerable[String]` over lines (rbs core declares it for `IO`;
+      # `data/core_overlay/string_io.rbs` for `StringIO`), and every Enumerable method reaches its block
+      # through `each`, so `io.each_with_index { … }` / `io.detect { … }` carry the same contract and share
+      # `ENUMERABLE_NON_ESCAPING` with `Array`. On the `singleton(File)` / `singleton(IO)` side those names
+      # only ever meet `IO.select`, which takes no block and so never retains one.
       IO_ITERATION = %i[each_line each each_byte each_char each_codepoint].freeze
       IO_SINGLETON_ITERATION = %i[foreach].freeze
 
@@ -162,9 +168,9 @@ module Rigor
         "Integer" => INTEGER_EXTRA,
         "Enumerator" => ENUMERABLE_NON_ESCAPING,
         "Enumerator::Lazy" => ENUMERABLE_NON_ESCAPING,
-        "IO" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
-        "File" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
-        "StringIO" => IO_ITERATION
+        "IO" => (ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
+        "File" => (ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
+        "StringIO" => (ENUMERABLE_NON_ESCAPING | IO_ITERATION).freeze
       }.freeze
 
       # Methods that are documented to **retain** the block past the call. The block is stored or scheduled,

@@ -549,6 +549,71 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # The same hazard through an Enumerable method on a stream instance: `each_with_index` reaches its block
+    # through `each` exactly as `each_line` does, so it must re-narrow the loop body too. `never?` is the positive
+    # control — its guard really is always falsey, so the rule must still fire there on the same receiver.
+    it "does not false-fire always-falsey on a stream each_with_index block-carried local" do # rubocop:disable RSpec/ExampleLength
+      Dir.mktmpdir("rigor-stream-enumerable-fixpoint-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        source = <<~RUBY
+          # frozen_string_literal: true
+          require "stringio"
+
+          class Scan
+            def string_io_hit?(text)
+              flag = false
+              StringIO.new(text).each_with_index do |line, _index|
+                case line
+                when /a/ then flag = true
+                when /b/ then return true if flag
+                end
+              end
+              false
+            end
+
+            def file_hit?(path)
+              flag = false
+              File.open(path) do |file|
+                file.each_with_index do |line, _index|
+                  case line
+                  when /a/ then flag = true
+                  when /b/ then return true if flag
+                  end
+                end
+              end
+              false
+            end
+
+            def never?(text)
+              flag = false
+              StringIO.new(text).each_with_index do |_line, _index|
+                return true if flag
+              end
+              false
+            end
+
+            def guard(text, path)
+              return [] unless string_io_hit?(text)
+              return [] unless file_hit?(path)
+              return [] unless never?(text)
+
+              [1]
+            end
+          end
+        RUBY
+        File.write(File.join(tmpdir, "lib", "scan.rb"), source)
+        control_line = source.lines.index { |line| line.include?("unless never?") } + 1
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+          falsey = result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+
+          expect(falsey.map(&:line)).to eq([control_line])
+        end
+      end
+    end
+
     # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
     def gemfile_lock_content(gem_name)
       <<~LOCK

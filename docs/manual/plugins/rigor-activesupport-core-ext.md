@@ -37,7 +37,8 @@ path, no vendoring, no `signature_paths:` wiring.
 Roughly the top ~40 selectors plus their close neighbours, across:
 
 - **Object (universal)** — `#blank?`, `#present?`, `#presence`, `#try`,
-  `#try!`, `#acts_like?` (+ `NilClass` / `TrueClass` / `FalseClass`).
+  `#try!`, `#acts_like?`, `#deep_dup` (+ `NilClass` / `TrueClass` /
+  `FalseClass`).
 - **Integer / Float** — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …).
 - **String** — inflections (`#underscore`, `#camelize`, `#classify`,
@@ -49,8 +50,11 @@ Roughly the top ~40 selectors plus their close neighbours, across:
   `Date` and `DateTime` carry the same subset they always did.
 - **Array** — `.wrap`, `#to_sentence`, `#in_groups_of`, `#second` …
   `#fifth`, `#compact_blank`, `#exclude?`.
-- **Hash** — `#symbolize_keys` / `#stringify_keys` (+ deep / bang),
-  `#deep_merge`, `#with_indifferent_access`, `#except!`.
+- **Hash** — `#symbolize_keys` / `#stringify_keys` (+ deep / bang) and
+  their `#to_options` alias, `#deep_merge`, `#reverse_merge` /
+  `#with_defaults` (+ bang), `#with_indifferent_access`, `#except!`,
+  `#extract!`.
+- **Range** — `#overlaps?`, `#to_fs` / `#to_formatted_s`.
 - **Enumerable** — `#index_by`, `#index_with`, `#pluck`, `#exclude?`.
 
 ```ruby

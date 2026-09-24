@@ -94,10 +94,11 @@ class Object
   def instance_values: () -> Hash[String, untyped]
   def instance_variable_names: () -> Array[String]
 
-  # `core_ext/object/deep_dup` — `duplicable? ? dup : self`, with the
-  # `Array` (`map(&:deep_dup)`), `Hash` and `Module` overrides all answering
-  # a value of the receiver's own class. Declared on `Object` and not only on
-  # `Hash`, where it sat alone: `[[1], [2]].deep_dup` is the common shape.
+  # `core_ext/object/deep_dup` — `duplicable? ? dup : self`, plus `Array`
+  # (`map(&:deep_dup)`), `Hash` and `Module` overrides. `self` over-claims on
+  # an `Array` subclass, whose override answers a plain `Array`. Declared on
+  # `Object` and not only on `Hash`, where it sat alone: `[[1], [2]].deep_dup`
+  # is the common shape.
   def deep_dup: () -> self
 end
 

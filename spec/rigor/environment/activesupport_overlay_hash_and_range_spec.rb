@@ -91,9 +91,10 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
 
   # `reverse_merge` is `other_hash.merge(self)`, so the argument's keys and values belong in the result.
   # The row answered `Hash[K, V]` — the receiver's own — until this change, so `opts[:velocity]` below
-  # typed as the receiver's `1`. The argument side reads `Dynamic[top]` because the method-level `[A, B]`
-  # is not solved against these arguments; core `Hash#merge` answers the same union on the same call, so
-  # the two agree, and neither claims a value the hash cannot hold.
+  # typed as the receiver's `1`. The argument side now reads `Dynamic[top]`: the method-level `[A, B]` is
+  # not solved against these arguments. That is gradual, not precise — core `Hash#merge` folds this
+  # literal receiver to the shape `{ size: 1, velocity: 10 }`, and the two agree only on a nominal
+  # receiver — but it no longer claims the result holds the receiver's keys and values alone.
   it "keeps the argument's keys and values in reverse_merge and with_defaults" do
     result = run_source(<<~RUBY)
       opts = { size: 1 }
@@ -115,25 +116,27 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
       Rigor.dump_type((1..5).overlap?(4..6))
       Rigor.dump_type((1..5).to_fs(:db))
       Rigor.dump_type((1..5).to_formatted_s)
-      Rigor.dump_type((1..5).sum)
+      Rigor.dump_type((1..5).each_slice(2))
     RUBY
 
     expect(call_rules(result)).to be_empty
-    expect(dumps(result)).to eq(%w[bool bool String String 15])
+    expect(dumps(result)).to eq(["bool", "bool", "String", "String", "Enumerator[Array[Dynamic[top]], Range]"])
   end
 
   # The must-still-fire sibling. `Range` is newly reopened by the overlay and `Object` reaches every
-  # receiver, so a row that collapsed either would silence these at once.
+  # receiver, so a row that collapsed either would silence these at once. The `each_slice` pin is the
+  # Range control, and not `size` / `sum`: those fold a literal range before RBS dispatch, so they kept
+  # answering `5` / `15` with the reopening mutated to `class Range[E]` and the class collapsed.
   it "still reports a genuinely undefined method on the receivers it just opened" do
     result = run_source(<<~RUBY)
-      Rigor.dump_type((1..5).size)
+      Rigor.dump_type((1..5).each_slice(2))
       (1..5).overlapz?(2..3)
       { a: 1 }.with_defaultz({})
       [1].deep_dupe
       Object.new.no_such_method_here
     RUBY
 
-    expect(dumps(result)).to eq(["5"])
+    expect(dumps(result)).to eq(["Enumerator[Array[Dynamic[top]], Range]"])
     expect(undefined_methods(result)).to eq(%w[overlapz? with_defaultz deep_dupe no_such_method_here])
   end
 

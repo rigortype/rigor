@@ -70,9 +70,21 @@ module Rigor
         @superclasses[name] = [FileCollection::OPAQUE_ANCESTOR, *load_time_parent(value, prefix)]
       end
 
-      # @param names — the constant paths an `include` / `prepend` named, as written
-      def record_includes(class_name, names, prefix)
-        candidates = names.flat_map { |name| lexical_candidates(name, prefix) }
+      # A receiver-less `include` / `prepend` in `class_name`'s body, its constant arguments recorded as
+      # written.
+      #
+      # Both are calls on `self`, like `define_method`, and the include table is the instance ancestry that
+      # `super` and the constructor rule walk, so a call is recorded only where `self` is the class the body
+      # opened (see {#instance_side_self?}). Inside `class << self`, or a `class_eval` / `instance_eval`
+      # block on `singleton_class`, it mixes the module into the singleton class, which is what `extend`
+      # does, and the collection is as blind to it as it is to `extend`.
+      #
+      # @param context — the {DefinitionContext} of the class-body position the call sits at
+      def record_includes(class_name, node, prefix, context)
+        return unless instance_side_self?(context)
+
+        names = node.arguments&.arguments&.filter_map { |argument| Source::ConstantPath.qualified_name(argument) }
+        candidates = (names || []).flat_map { |name| lexical_candidates(name, prefix) }
         (@includes[class_name] ||= []).concat(candidates) unless candidates.empty?
       end
 
@@ -84,13 +96,22 @@ module Rigor
         (@includes[class_name] ||= []) << FileCollection::OPAQUE_ANCESTOR
       end
 
-      # Whether this node aliases `initialize`, in either spelling. A `CallNode` qualifies only as a
-      # receiver-less `alias_method` whose first symbol argument is the new name.
-      def alias_to_initialize?(node)
+      # Whether this node aliases the instance-side `initialize`, in either spelling. A `CallNode` qualifies
+      # only as a receiver-less `alias_method` whose first symbol argument is the new name.
+      #
+      # `alias` works on the default definee and `alias_method` on `self`, so the two part in an
+      # `instance_eval` block, and inside `class << self` both alias the singleton class's `initialize`,
+      # a class method `new` never calls. Where the syntax does not say which class either one is, it
+      # records nothing here, as an include there does not (see {#instance_side_self?}).
+      #
+      # @param context — the {DefinitionContext} of the class-body position the node sits at
+      def alias_to_initialize?(node, context)
         case node
-        when Prism::AliasMethodNode then literal_name(node.new_name) == "initialize"
+        when Prism::AliasMethodNode
+          context.definee_singleton == false && literal_name(node.new_name) == "initialize"
         when Prism::CallNode
-          node.receiver.nil? && node.name == :alias_method && literal_name(first_argument(node)) == "initialize"
+          node.receiver.nil? && node.name == :alias_method && instance_side_self?(context) &&
+            literal_name(first_argument(node)) == "initialize"
         else false
         end
       end
@@ -106,6 +127,20 @@ module Rigor
       end
 
       private
+
+      # Whether the syntax shows that a call on `self` written here works on the class the enclosing body
+      # opened, or on `Object` through `main` at the top level, so what it declares is that class's instance
+      # ancestry.
+      #
+      # It does not where `self` is the singleton class, nor where the syntax does not say what `self` is:
+      # the block of `Class.new` and its kin, an eval on another receiver, `class << obj`. The syntax does not
+      # name the class the module goes into there, and filing it under the enclosing class would put it
+      # where `super` and the constructor rule look for that class. The class Ruby does put it in misses it,
+      # as it would an `extend`, and so does `W` for a `W.class_eval { include M }` inside `class W`, which
+      # the context reads as an eval on any other receiver (#1322).
+      def instance_side_self?(context)
+        !context.self_singleton_class? && context.self_kind != :unknown
+      end
 
       def opaque?(full_name)
         @superclasses.fetch(full_name, []).include?(FileCollection::OPAQUE_ANCESTOR)

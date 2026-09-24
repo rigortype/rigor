@@ -201,3 +201,30 @@ module ConstructorEdge
     end
   end
 end
+
+# `include` inside `class << self` mixes the module into the singleton class, as `extend` does, so its
+# `initialize` becomes a private class method that `new` never calls: `EigenSetup.new` runs
+# `BasicObject#initialize` and writes nothing.
+module ConstructorEdge
+  module Setup
+    def initialize
+      File.write("/tmp/setup", "x")
+    end
+  end
+
+  class EigenSetup
+    class << self
+      include Setup
+    end
+
+    def label
+      "eigen"
+    end
+  end
+
+  class EigenClient
+    def build
+      EigenSetup.new
+    end
+  end
+end

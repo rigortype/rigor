@@ -48,6 +48,41 @@ RSpec.describe "a super call in an effect summary" do
     expect(table["SuperEdge::Singleton.build"].proven.to_a).to eq(["io.output.stdout"])
   end
 
+  # `include` is a call on `self`, so where `self` is the singleton class it does what `extend` does, and an
+  # instance-side `super` skips the module. The collection used to record it as an instance-side include, and
+  # the `super` in each of the first three resolved to `Auditing#emit`, putting its write on a method that
+  # reads. `instance_eval` moves only the definee, so its `include` is still the class's own.
+  describe "with an include whose receiver may be the singleton class" do
+    # Ruby's own answer: the fixture is evaluated into an anonymous namespace, as `definition_side_spec.rb`
+    # does, so the file's claims are checked here and not only in its comment.
+    let(:evaluated) do
+      namespace = Module.new
+      %w[base.rb singleton_include.rb].each do |file|
+        path = File.join(fixture, "lib", file)
+        namespace.module_eval(File.read(path), path)
+      end
+      namespace.const_get(:SuperEdge)
+    end
+
+    # class name => [the class `super` in #emit reaches, the labels it reads through that edge]
+    {
+      "EigenInclude" => ["BaseWriter", "io.fs.read"],
+      "SingletonClassEvalInclude" => ["BaseWriter", "io.fs.read"],
+      "EigenPrepend" => ["BaseWriter", "io.fs.read"],
+      "InstanceEvalInclude" => ["Auditing", "io.fs.write"]
+    }.each do |name, (owner, label)|
+      it "resolves super in #{name}#emit to #{owner}#emit, as Ruby does" do
+        klass = evaluated.const_get(name)
+        expect(klass.instance_method(:emit).super_method.owner).to equal(evaluated.const_get(owner))
+
+        entry = table["SuperEdge::#{name}#emit"]
+        expect(entry.edges).to eq(["SuperEdge::#{owner}#emit"])
+        expect(entry.proven.to_a).to eq([label])
+        expect(entry).to be_exhaustive
+      end
+    end
+  end
+
   # The honest answer where the ancestry answers nothing — a gem's base class, Ruby's own core, a module
   # prepended at run time. Empty, and hedged; never empty and exhaustive.
   it "taints a super the project's ancestry cannot resolve rather than reading it as effect-free" do

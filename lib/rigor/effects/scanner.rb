@@ -140,10 +140,10 @@ module Rigor
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           @ancestry.record_constant_class(node, prefix)
         when Prism::AliasMethodNode
-          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node, context)
         when Prism::CallNode
           harvest_class_body_macro(node, prefix)
-          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node, context)
           return record_declaration(node, prefix, context) if declaration?(node)
         end
 
@@ -277,7 +277,7 @@ module Rigor
       def record_declaration(node, prefix, context)
         class_name = class_name_for(prefix)
         case node.name
-        when :include, :prepend then @ancestry.record_includes(class_name, constant_arguments(node), prefix)
+        when :include, :prepend then @ancestry.record_includes(class_name, node, prefix, context)
         when :define_method then declare_define_method(class_name, node, context)
         else synthesize_accessors(class_name, node, context.module_call_body)
         end
@@ -321,10 +321,6 @@ module Rigor
       def symbol_arguments(node)
         node.arguments&.arguments&.filter_map { |argument| argument.unescaped if argument.is_a?(Prism::SymbolNode) } ||
           []
-      end
-
-      def constant_arguments(node)
-        node.arguments&.arguments&.filter_map { |argument| Source::ConstantPath.qualified_name(argument) } || []
       end
 
       def parameter_names(parameters)

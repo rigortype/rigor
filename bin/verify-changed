@@ -3,9 +3,10 @@
 #
 # The full gate (`make verify`) belongs to CI on the Draft PR: locally it runs
 # the whole suite, and several parallel sessions running it at once is what
-# stalls the host (five at once took 12-20 minutes each in September 2026). This script covers the checks a session
-# can answer cheaply before pushing, over the files changed since the merge base
-# (committed, uncommitted and untracked):
+# stalls the host (five at once took 12-20 minutes each in September 2026).
+# This script covers the checks a session can answer cheaply before pushing,
+# over the files changed since the merge base (committed, uncommitted and
+# untracked):
 #
 #   1. whitespace errors (`git diff --check`, and the same check on untracked files);
 #   2. RuboCop on the changed files `make lint` covers;

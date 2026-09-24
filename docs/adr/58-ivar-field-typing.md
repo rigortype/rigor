@@ -439,23 +439,31 @@ write, which covers every chain one call of each method forms.
 Two consequences of dispatching on the complete seed needed handling.
 A member the operator cannot take (`nil + 1`, from a `reset` or any
 `||=`) made the dispatcher decline the whole union, so every write
-fell back to its rvalue; the members it can type are now dispatched
-together and only the rest fall back. And distinct tuple literals
-(`@a += [:s1]`, `@a += [:s2]`, …) grow the seed by two members per
-write, so a chain that would go on from a seed wider than the
-documented `union_size` default (24) floors to `Dynamic[top]`; the
-survey corpus's widest `op=`-written seed has seven members. With both,
-the seed holds what every source order produced, except the rvalue an
-`op=` written above every other write fell back to, which a later
-write replaces. ADR-56's `BodyFixpoint` was rejected for the chain:
-iterated to its fixed point, a lone counter's `@n += x` re-dispatched
-on its own `Dynamic[Integer | …]` result and gained `Dynamic[top]`, and
-the widening pass that forces convergence dropped the literal it starts
-at, on 51 of 304 `op=`-written ivar seeds in the survey corpus. A lone
+fell back to its rvalue. The members it can type are now dispatched
+together. A declining member whose class the environment knows lacks
+the operator, so its write raises and adds nothing; any other (a
+`Dynamic`, a class only source defines) keeps the rvalue it fell back
+to before. Joining the rvalue for a `nil` too put an `Integer` no run
+can store beside `0.5 | Float | nil`, and a `-> Float?` reader reported
+`def.return-type-mismatch`. And distinct tuple literals (`@a += [:s1]`,
+`@a += [:s2]`, …) grow the seed by two members per write, so a chain
+that would go on from a receiver wider than 40 members floors to
+`Dynamic[top]`. That is a cost guard local to the chain, not ADR-41's
+unwired `union_size` budget; 40 is the low end of the pathology band
+ADR-41's Slice 2a names, and the survey corpus's widest `op=`-written
+seed has seven members. The seed then holds what every source order
+produced, except the rvalue master fell back to in an order where no
+other write, or only a member that raises, stood in the receiver.
+
+ADR-56's `BodyFixpoint` was rejected for the chain: iterated to its
+fixed point, a lone counter's `@n += x` re-dispatched on its own
+`Dynamic[Integer | …]` result and gained `Dynamic[top]`, and the
+widening pass that forces convergence dropped the literal it starts at,
+on 51 of 304 `op=`-written ivar seeds in the survey corpus. A lone
 write is therefore not applied to its own result: `@a = []; @a += [1]`
 still seeds `[] | [1]`, as before, and no rule was seen to fold on it.
-The corpus gate (18 targets) moved no diagnostic; the PR itemises the
-37 seeds that change.
+The corpus gate (18 targets, plus gitlab's 97 files with an ivar `op=`)
+moved no diagnostic; the PR itemises the 39 seeds that change.
 
 ## Rejected / deferred alternatives
 

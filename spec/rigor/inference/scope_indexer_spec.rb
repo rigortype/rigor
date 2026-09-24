@@ -1559,10 +1559,36 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             end
           end
 
-          it "keeps the rvalue fallback for a member the operator cannot type" do
-            # The order that writes `clear` first fell back to the rvalue, and the seed covers what every order saw.
+          it "adds no rvalue for a member the operator cannot take, which stores nothing" do
+            # `nil + 1` raises, so `@x` is never an Integer. With the rvalue joined, a sibling `def level = @x`
+            # declared `-> Float?` reported `def.return-type-mismatch` in the order master kept clean.
             seed = seed_of("def initialize = (@x = 0.5)", "def bump = (@x += 1)", "def clear = (@x = nil)")
-            expect(seed.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
+            expect(seed).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(0.5),
+                                            Rigor::Type::Combinator.nominal_of("Float"),
+                                            Rigor::Type::Combinator.constant_of(nil))
+            )
+          end
+
+          it "keeps the rvalue for a member whose operator the pre-pass cannot see" do
+            # `Vec#+` is defined in source the pre-pass does not dispatch through, and a `Dynamic` member's result is
+            # unknown: what either stores the rvalue is the only stand-in for, as it was when the whole write fell back.
+            program = parse(<<~RUBY)
+              class Vec
+                def +(other) = self
+              end
+              class C
+                def initialize = (@x = Vec.new)
+                def bump = (@x += 1)
+                def reset = (@x = 0.5)
+              end
+            RUBY
+            vec = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("C")[:@x]
+            expect(vec.members).to include(Rigor::Type::Combinator.nominal_of("Vec"),
+                                           Rigor::Type::Combinator.nominal_of("Integer"),
+                                           Rigor::Type::Combinator.nominal_of("Float"))
+            counter = seed_of("def initialize = (@x = 0)", "def up(n) = (@x += n)", "def down(n) = (@x -= n)")
+            expect(counter.members).to include(Rigor::Type::Combinator.untyped)
           end
 
           it "seeds the same type in every order beside a `nil` write" do
@@ -1571,17 +1597,28 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             expect(float?(seeds.first)).to be(true)
           end
 
-          it "floors to `Dynamic[top]` rather than chain on a union past the `union_size` budget" do
-            # Thirty distinct tuple writes: a second pass would dispatch thirty writes on a 31-member union.
+          it "floors to `Dynamic[top]` rather than chain on an ever wider union of tuples" do
+            # Thirty distinct tuple writes add two members each: a third pass would dispatch thirty writes on a
+            # 61-member union.
             writes = (1..30).map { |i| "def m#{i} = (@x += [:s#{i}])" }
             expect(seed_of("def initialize = (@x = [])", *writes)).to eq(Rigor::Type::Combinator.untyped)
           end
 
-          it "does not floor a lone `op=` on a wide seed, which never takes a second pass" do
-            writes = (1..30).map { |i| "def w#{i} = (@x = #{i})" }
-            seed = seed_of(*writes, "def bump = (@x += 1)")
+          it "measures the chain guard on the receiver it dispatches, not on the literals it widens away" do
+            # Forty-five integer literals widen to one `Integer` receiver; the second `op=` must not floor them.
+            writes = (1..45).map { |i| "def w#{i} = (@x = #{i})" }
+            seed = seed_of(*writes, "def up = (@x += 1)", "def down = (@x -= 1)")
             expect(seed).not_to eq(Rigor::Type::Combinator.untyped)
-            expect(seed.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
+            expect(seed.members).to include(Rigor::Type::Combinator.constant_of(45),
+                                            Rigor::Type::Combinator.nominal_of("Integer"))
+          end
+
+          it "does not floor a lone `op=` on a wide seed, which never takes a second pass" do
+            # Forty-five distinct tuples stay forty-five members after widening.
+            writes = (1..45).map { |i| "def w#{i} = (@x = [#{i}])" }
+            seed = seed_of(*writes, "def add = (@x += [0])")
+            expect(seed).not_to eq(Rigor::Type::Combinator.untyped)
+            expect(seed.members).to include(Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(45)))
           end
 
           it "dispatches a lone `op=` once, so a counter keeps the literal it starts at" do

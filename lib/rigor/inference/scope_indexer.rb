@@ -1787,7 +1787,7 @@ module Rigor
       # call of each method can form, and stops early once a pass adds nothing. Not ADR-56's {BodyFixpoint}:
       # iterated to its fixed point, a lone counter's `@n += x` re-dispatched on its own `Dynamic[Integer | …]`
       # result and gained `Dynamic[top]`, and the widening pass that forces convergence dropped the `0` it
-      # starts at — on nearly every counter ivar in the survey corpus. A chain that has to go on from a seed
+      # starts at — on nearly every counter ivar in the survey corpus. A chain that has to go on from a receiver
       # wider than {OPERATOR_CHAIN_UNION_CAP} floors to `Dynamic[top]` instead: each further pass dispatches
       # every held write on that union, and distinct tuple literals (`@a += [:s1]`, `@a += [:s2]`, …) grow it
       # by two members per write.
@@ -1800,7 +1800,9 @@ module Rigor
 
       def chain_operator_writes(seed, writes)
         writes.size.times do |pass|
-          return Type::Combinator.untyped if pass.positive? && union_arity(seed) > OPERATOR_CHAIN_UNION_CAP
+          if pass.positive? && union_arity(Type::Combinator.widen_value_pinned(seed)) > OPERATOR_CHAIN_UNION_CAP
+            return Type::Combinator.untyped
+          end
 
           joined = Type::Combinator.union(seed, operator_write_results(seed, writes))
           break if joined == seed
@@ -1812,9 +1814,10 @@ module Rigor
 
       def union_arity(type) = type.is_a?(Type::Union) ? type.members.size : 1
 
-      # The documented `union_size` default (docs/type-specification/inference-budgets.md). The survey corpus's
-      # widest `op=`-written ivar seed has seven members.
-      OPERATOR_CHAIN_UNION_CAP = 24
+      # A cost guard local to this chain, not ADR-41's `union_size` budget, which stays unwired: it floors
+      # silently, as {BodyFixpoint} does. Forty is the low end of the pathology band ADR-41's Slice 2a names for
+      # such a valve; the widest `op=`-written ivar seed in the survey corpus has seven members.
+      OPERATOR_CHAIN_UNION_CAP = 40
       private_constant :OPERATOR_CHAIN_UNION_CAP
 
       # The union of what each held `op=` write stores when `@x` holds `current`. The receiver is widened off
@@ -1827,24 +1830,36 @@ module Rigor
             MethodDispatcher.dispatch(receiver_type: type, method_name: operator, arg_types: [rvalue_type],
                                       environment: environment)
           end
-          stored = dispatch.call(receiver) || partial_operator_result(receiver, rvalue_type, dispatch)
+          stored = dispatch.call(receiver) || partial_operator_result(receiver, rvalue_type, environment, dispatch)
           Type::Combinator.widen_value_pinned(stored)
         end
         Type::Combinator.union(*results)
       end
 
-      # A union the dispatch declines as a whole because one member has no such operator (`nil + 1`, `:none + 1`,
-      # a class the pre-pass cannot resolve). The members it does type are dispatched together, and the rest fall
-      # back to the rvalue, the answer the whole write fell back to before. Declined whole, a `reset` storing `nil`
-      # beside `@x = 0.5` and `@x += 1` sent the `+=` to its rvalue, `Float` left the seed, and `l > 1.0` under
-      # `l.is_a?(Float)` folded always-falsey. The typed members are not dispatched one by one: a union of tuples
-      # dispatches to one `Array[…]`, member by member to a tuple per chain.
-      def partial_operator_result(receiver, rvalue_type, dispatch)
+      # A union the dispatch declines as a whole because one member does (`nil + 1`, `:none + 1`, a `Dynamic`, a
+      # class the pre-pass cannot resolve). The members it does type are dispatched together; a union with none
+      # falls back to the rvalue. Declined whole, a `reset` storing `nil` beside `@x = 0.5` and `@x += 1` sent
+      # the `+=` to its rvalue, `Float` left the seed, and `l > 1.0` under `l.is_a?(Float)` folded always-falsey.
+      # The typed members are not dispatched one by one: a union of tuples dispatches to one `Array[…]`, member by
+      # member to a tuple per chain.
+      #
+      # A declining member whose class the environment knows lacks the operator, so the write raises and stores
+      # nothing; joined for it, the rvalue put an `Integer` no run can store beside `0.5 | Float | nil`, and a
+      # sibling `def level = @x` declared `-> Float?` reported `def.return-type-mismatch`. Any other declining
+      # member stores what the pre-pass cannot see, and keeps the rvalue it fell back to before.
+      def partial_operator_result(receiver, rvalue_type, environment, dispatch)
         return rvalue_type unless receiver.is_a?(Type::Union)
 
-        typed = receiver.members.select { |member| dispatch.call(member) }
+        typed, declined = receiver.members.partition { |member| dispatch.call(member) }
         result = dispatch.call(Type::Combinator.union(*typed)) unless typed.empty?
-        result ? Type::Combinator.union(result, rvalue_type) : rvalue_type
+        return rvalue_type if result.nil?
+        return result if declined.all? { |member| lacks_operator?(member, environment) }
+
+        Type::Combinator.union(result, rvalue_type)
+      end
+
+      def lacks_operator?(member, environment)
+        member.is_a?(Type::Constant) || (member.is_a?(Type::Nominal) && environment.class_known?(member.class_name))
       end
 
       # The accumulator keys {#record_ivar_and_write} and {#record_ivar_operator_write} hold their writes under

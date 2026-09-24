@@ -61,8 +61,13 @@ All keys are optional. Tweak them when:
 ## What it infers
 
 The plugin contributes call-site types as well as diagnostics.
-Class-side: `User.find(1)` → `User`, `User.find_by(...)` →
-`User | nil`, `User.find_by!(...)` → non-nullable `User`.
+Class-side: `User.find(1)` → `User`, `User.find(1, 2)` →
+`Array[User]`, `User.find_by(...)` → `User | nil`,
+`User.find_by!(...)` → non-nullable `User`. A single argument
+stays `User` even when it is an Array (`User.find([1, 2])`), so
+that an untyped one, such as `params[:id]`, keeps the model type.
+A relation or association (`user.posts.find(1, 2)`) answers the
+same way.
 Instance-side: a column read (`user.name`) narrows to the
 column's value type, `user.admin?` to `bool`, and a singular
 association (`post.user`) to the target model.
@@ -258,6 +263,14 @@ close every model in the project.
   reduced index until it is invalidated, so use `rigor check
   --no-cache` (or `make cache-clean`) if you want to see the change
   immediately.
+- **Every kind of relation shares one signature.**
+  `user.posts`, `user.posts.where(...)` and `Post.where(...)` all
+  type as `ActiveRecord::Relation[Post]`, although only the first
+  is an association's `CollectionProxy`, so the signature they share
+  accepts the widest argument list any of them takes.
+  `user.posts.delete_all(:nullify)` is valid and not reported. The
+  same call on the other two raises `ArgumentError` at run time, and
+  is not reported either.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

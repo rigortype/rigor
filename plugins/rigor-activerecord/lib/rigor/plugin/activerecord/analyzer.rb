@@ -77,8 +77,9 @@ module Rigor
             return
           end
 
+          returned = arity >= 2 ? "Array[#{entry.class_name}]" : entry.class_name
           push_info(node, "model-call",
-                    "`#{entry.class_name}.find` returns #{entry.class_name} (table: `#{entry.table_name}`)")
+                    "`#{entry.class_name}.find` returns #{returned} (table: `#{entry.table_name}`)")
         end
 
         def validate_column_hash_call(node, entry)

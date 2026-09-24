@@ -216,8 +216,8 @@ module Rigor
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
-      # block becomes that method's body. Each is `[name, keyed singleton, body context, body_node,
-      # parameters_node]`, the side and context being the {DefinitionContext}'s answer at the definition.
+      # block becomes that method's body. Each is `[name, body context, body_node, parameters_node]`, the
+      # context being the {DefinitionContext}'s answer at the definition. One it cannot place is omitted.
       attr_reader :nested
 
       # Whether this body reaches `super` — an override that delegates upward still runs whatever the
@@ -290,7 +290,7 @@ module Rigor
           @block_stack.push(node)
           node.rigor_each_child { |child| walk(child) }
           @block_stack.pop
-        elsif node.is_a?(Prism::CallNode) || node.is_a?(Prism::SingletonClassNode)
+        elsif DefinitionContext.rebinds?(node)
           walk_rebinding(node)
         else
           node.rigor_each_child { |child| walk(child) }
@@ -318,20 +318,21 @@ module Rigor
       end
 
       # A nested unit is recorded and NOT descended into: its body belongs to its own summary, and the
-      # enclosing method gets only the `mutate.static` of having defined it.
+      # enclosing method gets only the `mutate.static` of having defined it. One the {DefinitionContext}
+      # cannot place is not descended into either, and belongs to no summary.
       def unit_boundary?(node)
         case node
         when Prism::DefNode
-          singleton, context = @context.def_target(node)
-          @nested << [node.name.to_s, singleton, context, node.body, node.parameters]
+          context = @context.def_body(node)
+          @nested << [node.name.to_s, context, node.body, node.parameters] if context
           true
         when Prism::CallNode
           declared = self.class.define_method_unit(node)
           return false unless declared
 
           name, body, parameters = declared
-          singleton, context = @context.define_method_target
-          @nested << [name, singleton, context, body, parameters]
+          context = @context.module_call_body
+          @nested << [name, context, body, parameters] if context
           add(DEFINE_METHOD, MUTATE_STATIC)
           true
         else

@@ -38,32 +38,55 @@ module Rigor
 
         READ = ["io.db.read"].freeze
         WRITE = ["io.db.write"].freeze
+        READ_WRITE = ["io.db.read", "io.db.write"].freeze
         TRANSACTION = ["io.db.transaction"].freeze
         SCHEMA_WRITE = ["io.db.write", "rails.schema.write"].freeze
 
         # Class-side finders. Every one issues a `SELECT` the moment it is called — that is what separates
-        # them from `where`, which returns a relation and issues nothing.
+        # them from `where`, which returns a relation and issues nothing. An `async_*` calculation schedules
+        # it on the async executor, or runs it at once when there is none. `first_or_initialize` is
+        # `first || new`, and `extract_associated` loads the association it preloads.
         SINGLETON_READS = %w[
           find find_by find_by! first first! last last! take take! sole find_sole_by
-          second third fourth fifth forty_two second_to_last third_to_last
+          second second! third third! fourth fourth! fifth fifth! forty_two forty_two!
+          second_to_last second_to_last! third_to_last third_to_last!
           exists? any? none? one? many? empty? count sum average minimum maximum calculate
           pluck pick ids find_each find_in_batches in_batches find_by_sql count_by_sql
-          find_or_initialize_by
+          find_or_initialize_by first_or_initialize extract_associated
+          async_ids async_count async_average async_minimum async_maximum async_sum async_pluck async_pick
         ].freeze
 
-        # Class-side writers.
+        # Class-side writers that issue their statement and query nothing of their own: `create` is
+        # `new(…).save`, the bulk writers compile one `INSERT`, and the counter writers are an `update_all` on
+        # `unscoped`, which cannot eager-load.
         SINGLETON_WRITES = %w[
           create create! insert insert! insert_all insert_all! upsert upsert_all
-          update update! update_all delete delete_all delete_by destroy destroy_all destroy_by
-          find_or_create_by find_or_create_by! create_or_find_by create_or_find_by! touch_all
+          update_counters increment_counter decrement_counter
+        ].freeze
+
+        # Class-side writers that query as well, checked against activerecord 8.1.3.1. Most are in
+        # `Querying::QUERYING_METHODS`, which Rails delegates to `all`, so each is the Relation method of the
+        # same name and the row carries the read that `relation.rbs` gives it: a lookup before the write, a
+        # `find_by!` after a failed insert, the records `destroy_all` loads, or the `SELECT` of distinct
+        # primary keys an eager-loading, limited scope runs before its UPDATE / DELETE. `all` adds the default
+        # scope, which can eager-load. `delete` is `where(id:).delete_all`, and `destroy` calls `find`. Three
+        # are not delegated and read on their own: `update(!)` calls `find` or walks `all.each`, and
+        # `reset_counters` counts the association before it writes the column.
+        SINGLETON_READ_WRITES = %w[
+          update update! update_all delete delete_all delete_by destroy destroy_all destroy_by touch_all
+          find_or_create_by find_or_create_by! create_or_find_by create_or_find_by!
+          first_or_create first_or_create! reset_counters
         ].freeze
 
         # Instance-side readers. `reload` re-issues the `SELECT` and replaces the record's attributes,
         # which is a receiver mutation as well as a read.
         INSTANCE_READS = %w[valid? invalid? reload].freeze
 
-        # Instance-side writers. Each is a statement issued now; `save`'s callbacks and validators are the
-        # `effect_edges:` half, and arrive as edges rather than labels.
+        # Instance-side writers. Each is a statement issued now, and none queries on its own: `update` is
+        # `assign_attributes` plus `save`, and `increment!` / `update_columns` compile one UPDATE. What `save`
+        # or `destroy` reads beyond that comes from the model's callbacks and validators. The callback edge
+        # carries the ones it reads: symbol-argument callback macros and a uniqueness validator. Nothing
+        # carries the reads a required `belongs_to`, a `touch:` option or a `dependent:` option registers.
         INSTANCE_WRITES = %w[
           save save! update update! update_attribute update_attributes update_attributes!
           update_column update_columns destroy destroy! delete touch increment! decrement!
@@ -80,12 +103,13 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
-        # The writers an association's `CollectionProxy` defines and a plain Relation does not (`delete` /
-        # `destroy` on a plain Relation reach the model class instead). Each adds records to the
-        # association's in-memory target or removes them from it. Depending on whether the owner is saved
-        # and on the association's `dependent:` option, it may also read, write, and open a transaction, so
-        # the row names all three rather than the parent `io.db`, which `--label io.db.write` would not
-        # match.
+        # The writers an association's `CollectionProxy` defines, plus its `delete` / `destroy`, which
+        # override a plain Relation's own `delete(id_or_array)` / `destroy(id)`. Those are
+        # `where(id:).delete_all` and `find(id).destroy`, both inside this row's labels. Each adds records
+        # to the association's in-memory target or removes them from it. Depending on whether the owner is
+        # saved and on the association's `dependent:` option, it may also read, write, and open a
+        # transaction, so the row names all three rather than the parent `io.db`, which
+        # `--label io.db.write` would not match.
         #
         # The mutation is spelt from the call site, as every row here is, and bare `mutate` is the label
         # for a receiver that is not the caller's `self`: the proxy is an object the caller holds, like the
@@ -93,7 +117,9 @@ module Rigor
         # from the callee's side instead, and say `mutate.self`.
         #
         # A saved owner's `<<` saves the record, which runs the model's `before_save` / `after_commit`
-        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has.
+        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has: the
+        # call site's receiver is `Relation[Post]`, and the edge that would reach `Post#save` needs the type
+        # argument, which the collector does not record (#1313).
         PROXY_WRITERS = %w[<< push append concat replace delete destroy clear].freeze
         PROXY_WRITE = ["io.db.read", "io.db.write", "io.db.transaction", "mutate"].freeze
 
@@ -120,6 +146,12 @@ module Rigor
         # Ambient AR calls that are neither a read nor a write of rows.
         TRANSACTIONAL = %w[transaction with_lock lock!].freeze
 
+        # The instance-side locks re-read the row: `lock!` is `reload(lock:)`, a `SELECT … FOR UPDATE`, and
+        # `with_lock` runs it inside a transaction. `lock!` opens no transaction of its own, so on it the
+        # transaction label names the one whose end releases the lock, and over-states a `lock!` outside one.
+        INSTANCE_LOCKS = %w[with_lock lock!].freeze
+        LOCK = ["io.db.read", "io.db.transaction"].freeze
+
         module_function
 
         def attributions
@@ -131,7 +163,11 @@ module Rigor
                                             why: "issues the SELECT at the call — this is the materializing " \
                                                  "half of the builder/materializer split") +
             rows(BASE, SINGLETON_WRITES, WRITE, singleton: true,
-                                                why: "issues an INSERT / UPDATE / DELETE at the call") +
+                                                why: "issues an INSERT at the call and queries nothing first") +
+            rows(BASE, SINGLETON_READ_WRITES, READ_WRITE,
+                 singleton: true,
+                 why: "issues an UPDATE / DELETE / INSERT at the call, and a SELECT before it or after " \
+                      "a failed insert") +
             rows(BASE, TRANSACTIONAL, TRANSACTION, singleton: true,
                                                    why: "opens a transaction; the block's own origins join " \
                                                         "by containment, so the row states only the BEGIN")
@@ -142,8 +178,9 @@ module Rigor
                why: "re-reads the row (`reload`) or runs the validators, whose uniqueness checks query") +
             rows(BASE, INSTANCE_WRITES, WRITE,
                  why: "persists the record — the write a `db: none` envelope is written to catch") +
-            rows(BASE, TRANSACTIONAL, TRANSACTION,
-                 why: "opens a transaction / takes a row lock around the block")
+            rows(BASE, TRANSACTIONAL - INSTANCE_LOCKS, TRANSACTION, why: "opens a transaction around the block") +
+            rows(BASE, INSTANCE_LOCKS, LOCK,
+                 why: "re-reads the row with `SELECT … FOR UPDATE`; `with_lock` does it inside a transaction")
         end
 
         def relation_rows
@@ -153,9 +190,9 @@ module Rigor
             rows(RELATION, PROXY_WRITERS, PROXY_WRITE,
                  why: "a CollectionProxy writer: it changes the association's target and, for a saved " \
                       "owner, the rows behind it. Keyed on Relation because that is the type the plugin " \
-                      "gives an association reader. A plain Relation either has no such method or hands " \
-                      "`delete` / `destroy` to the model class, which stays inside the bound. The model's " \
-                      "save callbacks are not edged")
+                      "gives an association reader. A plain Relation either has no such method or, through " \
+                      "its own `delete` / `destroy`, deletes by id or finds and destroys, which stays inside " \
+                      "the bound. The model's save callbacks are not edged")
         end
 
         # Two rows per selector, because raw SQL is written two ways and only one of them names a type.

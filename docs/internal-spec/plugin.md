@@ -842,7 +842,7 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `target_gems` | `Array<String>` | The gems this plugin models, spelled as `Gemfile.lock` spells them (ADR-96 WD1). Not derivable from the plugin name — `rigor-factorybot` models `factory_bot`, `rigor-rspec` models `rspec-core`, `rigor-rails-routes` models `actionpack` / `railties` — which is why it is declared rather than inferred. An empty list is the meaningful answer for a plugin that models no gem (`rigor-typescript-utility-types`), and such a plugin is never advised about. Read by `Plugin::BundledCatalog` and, through it, by the `rigor doctor` / `rigor skill describe` plugin-gap advisory (ADR-96 WD2), which matches these names against the lockfile's `DEPENDENCIES` section — the project's own dependencies, expanded through an umbrella table for `rails` — and never against the resolved graph. Naming a plugin never loads it: gem presence is evidence for advice, not for execution. The catalogue holds one entry per id: a class defined under the engine's `plugins/` tree wins its id, and an anonymous or third-party class is consulted only for an id no bundled class claims (#982); the catalogue only advises, and the registry still refuses a second class per id. |
 | `produces` | `Array<Symbol>` | Cross-plugin facts this plugin publishes (ADR-9). |
 | `consumes` | `Array<Consumption>` | Cross-plugin facts this plugin reads (`{ plugin_id:, name:, optional: }`); drives the loader's topological ordering (ADR-9). |
-| `signature_paths` | `Array<String>` | RBS signature directories the plugin contributes, relative to the plugin gem root; resolved by `Loader` and merged into the environment (ADR-25). |
+| `signature_paths` | `Array<String>` | RBS signature directories the plugin contributes, relative to the plugin gem root; resolved by `Loader` and merged into the environment (ADR-25). Where the plugin types a subclass's instances as a class declared here, `call.wrong-arity` and `call.argument-type-mismatch` check a call on the subclass against the declared parameter list, so that list MUST accept every argument the subclass's override accepts. § Which channel a row belongs in has the worked example and states the same rule for effect bounds. |
 | `owns_receivers` | `Array<String>` | Receiver class names this plugin owns for dispatch routing. |
 | `rbs_complete_extends` | `Array<String>` | The `extend`-edge twin of `rbs_complete_ancestors`: module names whose RBS *instance* surface this plugin's `signature_paths:` declares COMPLETELY. A Ruby-source class or module whose body contains `extend M` for a listed `M` resolves singleton-side calls through `M`'s declared instance methods — `class F; extend T::Sig; sig { ... }; end` reaches `T::Sig#sig` (issue #1097). The walk also consults `Environment#singleton_extended_modules` on each discovered superclass, so `class Doc < T::ImmutableStruct` picks up `T::ImmutableStruct`'s own RBS-declared `extend T::Sig`. The same guards as the superclass bridge apply: an RBS-known receiver answers through the direct lookup, a nearer source `def self.x` shadows the bridge, and a candidate that resolves to a project class (or a non-allow-listed RBS module) and defines the method owns the edge and stops the whole walk — later `extend`s and RBS superclasses are not searched, matching `MacroBlockSelfType`. A module whose declared surface is partial does not belong here — the bridge would misreport real calls as `call.undefined-method`. A nearer source `def self.x` shadows only once it has executed: `Scope#singleton_def_shadows_call?` orders it against the call through the `discovered_deferred_ranges` table — calls inside def / block / lambda bodies run at invocation time and are shadowed iff a same-name def of the same class is known at all, while an eager class-body call is shadowed only by a same-name def OF THE SAME CLASS that starts before it. |
 | `rbs_complete_ancestors` | `Array<String>` | Class names whose RBS surface this plugin's `signature_paths:` declares COMPLETELY for its supported DSL surface (ADR-43 WD4). A Ruby-source subclass of a listed class bridges inherited calls to the ancestor's RBS — the manifest-declared half of the `RbsDispatch` allow-list — so the declared methods' return types and block parameters resolve on every subclass. The bridge is a signature lookup ONLY: the subclass itself stays outside RBS, so `call.undefined-method` / `call.wrong-arity` / `call.argument-type-mismatch` do not fire on calls the subclass makes to undeclared names (pairing with `open_receivers:` is therefore the honest pairing for a DSL whose surface is generated at runtime). A project `def` of the same name on the subclass or a nearer source ancestor shadows the bridge. Only a class whose declared surface is accurate belongs here — a signature member that does not exist at runtime makes a genuinely failing call resolve silently. |
@@ -891,7 +891,7 @@ A plugin has two ways to colour a framework method, and the choice is not a matt
 
 | The plugin… | Channel | Why |
 | --- | --- | --- |
-| already ships an RBS signature for the method | `%a{rigor:v1:effect …}` / `%a{pure}` in `signature_paths:` | Tier 1. The annotation rides the **accepted signature** stratum, which ADR-103 WD6 already trusts for types; the bound is imported at the call site by `Effects::EnvelopeIndex` and discharges. rigor-activerecord's `sig/active_record/relation.rbs` is the worked example — the builder / materializer split lives there because the file already draws it. |
+| already ships an RBS signature for the method | `%a{rigor:v1:effect …}` / `%a{pure}` in `signature_paths:` | Tier 1. The annotation rides the **accepted signature** stratum, which ADR-103 WD6 already trusts for types; the bound is imported at the call site by `Effects::EnvelopeIndex` and discharges. rigor-activerecord's `sig/active_record/relation.rbs` is the worked example — the builder / materializer split lives there because the file already draws it. To bound a method the class defines but the shipped signature leaves out, and that no row already covers, the plugin adds it to the signature when declaring it changes no type. On an `open_receivers:` class an undeclared method already types as `untyped`, so a `-> untyped` declaration adds the bound and the call checks every declared method gets (`call.wrong-arity`, `call.possible-nil-receiver`). Its parameter list MUST admit every call the class and each override it types as the class accept. `Relation#insert` / `insert!` / `upsert` are the case. |
 | does not, or cannot name the method per app | `effect_attributions:` | Association readers, `find_by_*`, scopes and the `Enumerable` delegations on a Relation are either per-project or would change how the method **types** if declared. So is any class the plugin ships no signature for at all. |
 
 A row must never be in both: two channels on one method produce two origins for one fact, which reads as
@@ -906,6 +906,31 @@ the new record into the association's target. `Relation#build` therefore carries
 plain Relation's `build` changes nothing. A writer that only the subclass defines (the proxy's `<<`) becomes
 an `effect_attributions:` row keyed on the base class. A bound that fits only the base class would give
 `%a{pure}` to a method that changes an object its caller still holds.
+
+The rule holds for parameter lists as well as bounds (the `signature_paths` row of
+§ `Rigor::Plugin::Manifest`). The proxy's `delete_all(dependent = nil)` is why `Relation#delete_all`
+declares an optional argument that a plain Relation's and an `AssociationRelation`'s do not take. The check
+then misses `delete_all(:nullify)` on either of those, which raises `ArgumentError`. That is the same trade
+as `build`'s `mutate.self`: a declaration that fits only the base class reports `call.wrong-arity` on
+valid Rails.
+
+A bound also names **every read and write the framework's own implementation performs, on any path**.
+Sibling leaves do not subsume each other, so a writer that queries before its write, or after a failed one,
+carries both `io.db.read` and `io.db.write`. rigor-activerecord's `find_or_create_by` is `find_by` and then a
+create, and `destroy_all` loads the records it destroys. A class method that the framework delegates to
+another receiver carries that receiver's bound: `Model.update_all` is `Model.all.update_all`. Two kinds of
+work stay outside it. Schema reflection is one, because counting it would make every query builder a read.
+The model's callbacks and validators are the other, including the ones an association option such as
+`dependent:` or `touch:` registers. They belong to the model, and an `effect_edges:` strategy is the only
+channel that can carry them. Today's strategy carries symbol-argument callback macros and a uniqueness
+validator, so the reads those association options register are carried by nothing. Which association a
+proxy stands for is not a callback: the `has_many :through` proxy's `delete_all` loads its target first, so
+the bound counts that read.
+
+`io.db.transaction` is not held to the rule yet. A write that opens a transaction around itself is not
+labelled with it: `save`'s implicit transaction and the explicit ones in `create_or_find_by` and the proxy's
+`create` are not. rigor-activerecord's proxy-writer rows and its `transaction` / `with_lock` rows do carry
+it.
 
 ##### `EffectAttribution`
 

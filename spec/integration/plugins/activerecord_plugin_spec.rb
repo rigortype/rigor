@@ -51,6 +51,13 @@ DEFAULT_MODELS = {
   RUBY
 }.freeze
 
+# `User has_many :posts`, `Post belongs_to :user`: the association examples' models.
+ASSOCIATION_MODELS = {
+  "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+  "app/models/user.rb" => "class User < ApplicationRecord\n  has_many :posts\nend\n",
+  "app/models/post.rb" => "class Post < ApplicationRecord\n  belongs_to :user\nend\n"
+}.freeze
+
 USER_RBS_FOR_NARROWING = <<~RBS
   class User
     attr_accessor name: String
@@ -918,6 +925,171 @@ RSpec.describe "plugins/rigor-activerecord" do
       # Guards against the guard being read as "arity checking is off whenever a plugin is loaded".
       diags = collision_diagnostics("[1].rotate(1, 2)\n")
       expect(diags.select { |d| d.rule == "call.wrong-arity" }.size).to eq(1)
+    end
+  end
+
+  describe "an association proxy's overrides (a declaration holds for every run-time class)" do
+    # `user.posts` types as `ActiveRecord::Relation[Post]` but returns a `CollectionProxy`, and a call on it is
+    # checked against the parameter list the bundled `relation.rbs` declares. That list has to accept every
+    # argument a proxy override accepts (`docs/internal-spec/plugin.md`, the `signature_paths` manifest row):
+    # the proxy's `delete_all(dependent = nil)` used to draw `call.wrong-arity (given 1, expected 0)`.
+
+    let(:association_models) { ASSOCIATION_MODELS }
+
+    # Every example reads `user.posts` off the same local, so the siblings that must still type and fire
+    # also prove the no-fire example's receiver reached the Relation signature.
+    def association_diagnostics(body)
+      run_ar("user = User.find(1)\n#{body}", models: association_models).diagnostics
+    end
+
+    def wrong_arity(body)
+      association_diagnostics(body).select { |d| d.rule == "call.wrong-arity" }
+    end
+
+    it "does not fire wrong-arity on a proxy call Rails accepts" do
+      body = <<~RUBY
+        post = Post.find(1)
+        user.posts.delete_all
+        user.posts.delete_all(:delete_all)
+        user.posts.delete_all(:nullify)
+        user.posts.last(2)
+        user.posts.take(2)
+        user.posts.find(1, 2)
+        user.posts.size
+        user.posts.include?(post)
+        user.posts.reload
+        user.posts.reset
+        user.posts.build(title: "x")
+        user.posts.create(title: "x")
+        user.posts.create!(title: "x")
+        user.posts.destroy_all
+      RUBY
+      expect(wrong_arity(body)).to be_empty
+    end
+
+    it "keeps the declared return type when the proxy's argument is passed" do
+      diags = association_diagnostics("Rigor.dump_type(user.posts.delete_all(:nullify))\n")
+      dumped = diags.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      expect(dumped).to eq(["dump_type: Integer"])
+    end
+
+    it "STILL fires wrong-arity past the proxy's own arity" do
+      # Without this sibling, the examples above would pass if arity checking were switched off for the Relation.
+      arity = wrong_arity("user.posts.delete_all(:nullify, 1)\n")
+      expect(arity.size).to eq(1)
+      expect(arity.first.message).to include("`delete_all'", "expected 0..1")
+    end
+
+    it "accepts the proxy's argument on the relations that do not override delete_all" do
+      # The accepted trade: both calls raise ArgumentError at run time, but they share the proxy's type, so the
+      # widened signature admits them. Flip this if an association reader ever gets a type of its own.
+      body = <<~RUBY
+        user.posts.where(title: "x").delete_all(:nullify)
+        Post.where(title: "x").delete_all(:nullify)
+      RUBY
+      expect(wrong_arity(body)).to be_empty
+    end
+  end
+
+  describe "the Relation signature's `find` by arity, and `arel`'s argument" do
+    # `find(1, 2)` returns an Array, and the bundled signature typed it as the element. Where the model has
+    # an RBS signature, an Array method on the result drew `call.undefined-method`. The class-side
+    # `Post.find(1, 2)`, which the plugin types itself, answered the same way. A single argument keeps the
+    # element type on purpose: see the comment on `find` in `relation.rbs`.
+
+    def relation_diagnostics(source, post_sig: false)
+      files = ASSOCIATION_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA)
+      files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
+      run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
+    end
+
+    def dumped(source)
+      relation_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def rule_hits(source, rule, post_sig: false)
+      relation_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
+    end
+
+    it "types two or more ids as an Array of the element, on either side of the model" do
+      source = <<~RUBY
+        user = User.find(1)
+        Rigor.dump_type(user.posts.find(1, 2))
+        Rigor.dump_type(user.posts.find(1, 2, 3))
+        Rigor.dump_type(Post.where(title: "x").find(1, 2))
+        Rigor.dump_type(Post.find(1, 2))
+        class Post
+          def self.pair(a, b) = Rigor.dump_type(find(a, b))
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Array[Post]"] * 5)
+    end
+
+    it "keeps one id, an untyped id and a lone splat as the element" do
+      # `find(id)` is the pin that matters. An overload keyed on an Array argument would also be selected for
+      # this untyped `id`, and the joined return would lose `Post`.
+      source = <<~RUBY
+        class Lookup
+          def self.run(id, ids)
+            user = User.find(1)
+            Rigor.dump_type(user.posts.find(1))
+            Rigor.dump_type(user.posts.find(id))
+            Rigor.dump_type(user.posts.find(*ids))
+            Rigor.dump_type(Post.find(id))
+            Rigor.dump_type(Post.find(*ids))
+          end
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Post"] * 5)
+    end
+
+    it "leaves a model's own two-argument `self.find` to the model" do
+      # The Array reading describes Rails' `find`. This `find(owner, id)` returns one record.
+      source = <<~RUBY
+        class Post
+          def self.find(owner, id) = where(user: owner).find_by!(id: id)
+        end
+        Rigor.dump_type(Post.find(User.find(1), 1))
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Post"])
+    end
+
+    it "names the Array in the class-side `find`'s model-call note" do
+      notes = rule_hits("Post.find(1, 2)\nPost.find(1)\n", "model-call").map(&:message)
+      expect(notes).to eq(["`Post.find` returns Array[Post] (table: `posts`)",
+                           "`Post.find` returns Post (table: `posts`)"])
+    end
+
+    it "does not report an Array method on the result of several ids" do
+      source = <<~RUBY
+        user = User.find(1)
+        user.posts.find(1, 2).each { |post| post.title }
+        user.posts.find(1, 2, 3).map(&:title)
+        Post.find(1, 2).each { |post| post.title }
+      RUBY
+      expect(rule_hits(source, "call.undefined-method", post_sig: true)).to be_empty
+    end
+
+    it "STILL reports an Array method on the result of one id" do
+      # Without this sibling, the example above would pass if the model's signature were never loaded.
+      source = <<~RUBY
+        User.find(1).posts.find(1).each { |post| post.title }
+        Post.find(1).each { |post| post.title }
+      RUBY
+      hits = rule_hits(source, "call.undefined-method", post_sig: true)
+      expect(hits.map(&:message)).to eq(["undefined method `each' for Post"] * 2)
+    end
+
+    it "accepts `arel`'s optional argument, and no more" do
+      source = <<~RUBY
+        user = User.find(1)
+        user.posts.arel(nil)
+        Post.where(title: "x").arel(nil)
+        Post.all.arel(nil, 1)
+      RUBY
+      arity = rule_hits(source, "call.wrong-arity")
+      expect(arity.map(&:line)).to eq([4])
+      expect(arity.first.message).to include("`arel'", "expected 0..1")
     end
   end
 

@@ -61,7 +61,7 @@ What you still do by hand (the script prints this checklist on exit):
 1. Read `data/builtins/ruby_core/<topic>.yml` and curate the blocklist in the loader file (Stage 5).
 2. Replace the placeholder `assert_type` lines in the fixture with the receiver-specific projections (Stage 7).
 3. Add a changelog fragment under `changelog.d/<section>/` (Stage 9).
-4. Run `make verify` and commit (Stage 8).
+4. Run `make verify-changed`, commit, and push a Draft PR for CI (Stage 8).
 
 Pass `--dry-run` to preview the planned edits without writing. Pass `--init-fn` / `--rbs` to override the defaults when the upstream layout differs (e.g. `Init_DateCore` instead of `Init_Date`, or a multi-class RBS).
 
@@ -190,9 +190,11 @@ The fixture's `assert_type` calls double as documentation; readers see the behav
 Final gate before commit:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check lib exe bin
+nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
 ```
+
+A catalog change can move folding anywhere in `lib`, which a changed-files gate does not see; the CI
+self-check over the whole of `lib` is the gate for that, so push the Draft PR and read it.
 
 Self-check on the project's own `lib` MUST stay clean. If your changes introduce false positives in Rigor's own code, fix them before committing — usually by extending the catalog blocklist or by adding a `# rigor:disable <rule>` comment with a load-bearing reason.
 
@@ -254,7 +256,7 @@ Before declaring an import done:
 - [ ] Per-topic blocklist (`MethodCatalog.new(mutating_selectors: …)`) curated for false-positive `:leaf`s.
 - [ ] `MethodDispatcher::ConstantFolding#catalog_for` routes the new receiver class.
 - [ ] At least one self-asserting fixture under `spec/integration/fixtures/`.
-- [ ] `make verify` and `bundle exec exe/rigor check lib exe bin` both clean.
+- [ ] `make verify-changed` clean locally; CI (including the self-check) green on the Draft PR.
 - [ ] A `changelog.d/` fragment records the user-visible additions.
 - [ ] If a new refinement / directive lands, the matching ADR / spec doc is updated.
 

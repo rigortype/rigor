@@ -146,7 +146,7 @@ The procedural shape is gem-type-agnostic. Use the existing
 - IoBoundary + cache-producer pattern (read inputs inside the producer
   block; declare `watch:` for directory globs).
 - Demo directory with `tmp/`-anchored cache + per-demo `.gitignore`.
-- `make verify` expectations + commit subject convention.
+- Local-gate and CI expectations + commit subject convention.
 
 **Gemspec note — wrapped-gem version pinning.** Pin the wrapped
 FFI gem's version range in your plugin's gemspec:

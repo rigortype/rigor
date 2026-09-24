@@ -60,7 +60,7 @@ Load each reference when you reach its phase. The phases assume prior context, s
 | --- | --- | --- | --- |
 | 1 | [`references/01-requirements-and-templates.md`](references/01-requirements-and-templates.md) | **Phases 1–2.** Five-question scope check (trigger surface / look at / prove / diagnostic / config). Picks ADR-16 macro-substrate tier (A/B/C, declarative) or a `node_rule` template from six worked examples. | Five Q&A answers + one template name from the table. |
 | 2 | [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) | **Phases 3–5.** Directory tree, gemspec, plugin class skeleton, per-template `node_rule` patterns (engine owns the walk; `node_file_context` / `NodeContext` for two-pass / lexical context), calling the target library directly instead of reimplementing it (ADR-39: `Plugin::Inflector`, `Base.suggest`, the `plugins_isolation:` strategy), IoBoundary + cache producer rule (ADR-60 WD3 record-and-validate: read inside the block, declare `watch:` for directory globs; `producer_value` / `producer_error` for the lazy-load + error surface), demo project with `tmp/`-anchored cache + per-demo `.gitignore`. | Working plugin directory + runnable `demo/` whose `rigor check` diagnostic stream matches expectations. |
-| 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phases 6–10.** RSpec integration helpers, README sections, changelog fragment, `make verify` expectations, commit subject convention. | Passing integration spec + README + changelog fragment + one green `make verify` + one commit. |
+| 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phases 6–10.** RSpec integration helpers, README sections, changelog fragment, local gate and CI expectations, commit subject convention. | Passing integration spec + README + changelog fragment + `make verify-changed` + green CI on the Draft PR + one commit. |
 | 4 | [`references/04-appendix.md`](references/04-appendix.md) | **Side material.** Common pitfalls (top 10), real-Rails alignment for `rigor-rails-*` plugins, post-ADR-9 `services.fact_store` cross-plugin pattern, reading list, closing checklist. | Reference-only — no fixed output. Consult per the surface the plugin touches. |
 
 ## Worked examples to copy from
@@ -89,8 +89,8 @@ If the requirement fits neither substrate nor template, **stop and ask the user*
 The plugin is shippable when **all** of these hold:
 
 - `bundle exec exe/rigor check` against the plugin's `demo/` prints the diagnostic stream documented in the plugin's `README.md` § "What the plugin recognises" — verbatim, no drift.
-- `spec/integration/plugins/<id>_plugin_spec.rb` (or `examples/`) covers every diagnostic shape the plugin emits, passing under `make verify`.
-- `make verify` is green: parallel-rspec 0 failures, rubocop 0 offenses on the spec file (the plugin source itself is excluded from rubocop), `rigor check lib` baseline unchanged.
+- `spec/integration/plugins/<id>_plugin_spec.rb` (or `examples/`) covers every diagnostic shape the plugin emits, passing in CI.
+- `make verify-changed` passes locally and CI is green on the Draft PR: rspec 0 failures, rubocop 0 offenses on the spec file (the plugin source itself is excluded from rubocop), `rigor check lib` baseline unchanged.
 - `git status` is clean (`tmp/`-anchored cache + per-demo `.gitignore` keep build artefacts out of the index).
 - A `changelog.d/added/<branch-slug>.md` fragment carries one sentence naming the plugin; `Rigor::VERSION` is **not** bumped (the user drives release cuts per `docs/agents/contribution-flow.md` § "Release Cadence").
 - One commit, subject following `docs/agents/contribution-flow.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).
@@ -105,13 +105,13 @@ Concrete trace through a fictional request — "Create a Rigor plugin for the `d
 2. **Phase 1** (Module 1) — user answers narrow the surface: Q1=A (`Dotenv.load(path)` call), Q2=E (reads `.env` file), Q3=A (known finite set of variable names), Q4=B (error on missing var), Q5=D (external file path config).
 3. **Phase 2** — answers match the `rigor-routes` template row (Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D). Copy the `rigor-routes` directory layout.
 4. **Phases 3–5** (Module 2) — scaffold `plugins/rigor-dotenv/{lib,demo}/`, add the cache-producer + IoBoundary pattern verbatim from Module 2, demo with `tmp/`-anchored cache.
-5. **Phases 6–10** (Module 3) — write `spec/integration/plugins/dotenv_plugin_spec.rb`, README, changelog fragment, run `make verify`, single commit.
+5. **Phases 6–10** (Module 3) — write `spec/integration/plugins/dotenv_plugin_spec.rb`, README, changelog fragment, run `make verify-changed`, single commit, Draft PR.
 
 If the request shifts mid-flow (e.g. user later says "and also error when the value is empty"), restart from Phase 1 Q3 — the requirements gathering is the gate that prevents accidental scope creep.
 
 ## Troubleshooting (most common at landing time)
 
-- **`make verify` fails on the new spec** — the spec doesn't `Rigor::Plugin.unregister!` in `before` + `after`. See [`references/04-appendix.md`](references/04-appendix.md) § Common pitfalls #2.
+- **CI fails on the new spec, though it passes alone** — the spec doesn't `Rigor::Plugin.unregister!` in `before` + `after`. See [`references/04-appendix.md`](references/04-appendix.md) § Common pitfalls #2.
 - **A newly-added file isn't picked up by a glob producer** — the producer reads files in-block (captured by ADR-60 WD3 record-and-validate) but did not declare `watch:`, so a *new* file the prior run never read reads as fresh. Add `watch: -> { [[@search_paths, "**/*.rb"]] }`. See [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) Phase 4.5.
 - **Diagnostics don't appear in the demo output** — `source_family:` was passed to the `Diagnostic` constructor. Don't — the runner overwrites it. See pitfall #7.
 - **`Prism::CallNode#name == "foo"` always false** — `node.name` returns a `Symbol`. Use `== :foo`. See pitfall #4.

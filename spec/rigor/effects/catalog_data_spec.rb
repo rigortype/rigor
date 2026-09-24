@@ -80,10 +80,11 @@ RSpec.describe "the shipped core effect catalogue" do
   describe "mutator sets, by reference" do
     # The catalogue names `mutators: array | hash | string` and the loader resolves each to the set the
     # widening rules and the mutation classifier already maintain. The YAML never re-spells a selector
-    # list, so this is what proves the two cannot drift.
+    # list, so this is what proves the two cannot drift. Hash's is the classifier's union of the
+    # widening's two Hash tables (`spec/rigor/effects/hash_receiver_mutation_spec.rb`).
     {
       "Array" => Rigor::Inference::MutationWidening::ARRAY_MUTATORS,
-      "Hash" => Rigor::Inference::MutationWidening::HASH_MUTATORS,
+      "Hash" => Rigor::Effects::MutationClassifier::HASH_MUTATORS,
       "String" => Rigor::Inference::StringMutation::MUTATORS
     }.each do |class_name, selectors|
       it "marks every #{class_name} mutator as a receiver mutation" do

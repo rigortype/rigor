@@ -104,9 +104,10 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   Float#byte Float#bytes Float#day Float#days Float#gigabyte Float#gigabytes Float#hour Float#hours
   Float#kilobyte Float#kilobytes Float#megabyte Float#megabytes Float#minute Float#minutes
   Float#month Float#months Float#second Float#seconds Float#week Float#weeks Float#year Float#years
-  Hash#assert_valid_keys Hash#compact_blank Hash#deep_dup Hash#deep_merge Hash#deep_stringify_keys
-  Hash#deep_symbolize_keys Hash#deep_transform_keys Hash#deep_transform_values Hash#extractable_options?
-  Hash#reverse_merge Hash#stringify_keys Hash#symbolize_keys Hash#with_indifferent_access Hash#without
+  Hash#assert_valid_keys Hash#compact_blank Hash#deep_dup Hash#deep_merge Hash#deep_merge?
+  Hash#deep_stringify_keys Hash#deep_symbolize_keys Hash#deep_transform_keys Hash#deep_transform_values
+  Hash#extractable_options? Hash#nested_under_indifferent_access Hash#reverse_merge Hash#stringify_keys
+  Hash#symbolize_keys Hash#to_options Hash#with_defaults Hash#with_indifferent_access Hash#without
   Integer#byte Integer#bytes Integer#day Integer#days Integer#exabyte Integer#exabytes
   Integer#fortnight Integer#fortnights Integer#gigabyte Integer#gigabytes Integer#hour Integer#hours
   Integer#kilobyte Integer#kilobytes Integer#megabyte Integer#megabytes Integer#minute
@@ -116,6 +117,7 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   NilClass#blank? NilClass#duplicable? NilClass#presence NilClass#present? NilClass#to_param
   NilClass#try NilClass#try!
   Object#acts_like? Object#blank? Object#duplicable? Object#in? Object#presence Object#present?
+  Range#overlaps?
   String#at String#camelcase String#camelize String#classify String#dasherize String#deconstantize
   String#demodulize String#ends_with? String#exclude? String#first String#foreign_key String#from
   String#html_safe String#html_safe? String#humanize String#indent String#inquiry String#last
@@ -139,7 +141,7 @@ CORE_EXT_PURE_KEYS = (CORE_EXT_PURE_OTHER_KEYS + CORE_EXT_PURE_DATE_AND_TIME_KEY
 # mutable `Time::DATE_FORMATS` and is NOT pure. Under-claiming an envelope costs precision;
 # over-claiming one is unsound. These two lines are what stops someone "completing" the sweep (#670).
 CORE_EXT_NOT_PURE_KEYS = %w[
-  Object#as_json Object#try Object#try!
+  Object#as_json Object#try Object#try! Object#deep_dup
   String#constantize String#safe_constantize String#parameterize
   String#squish! String#remove! String#indent!
   String#to_time String#to_date String#to_datetime String#to_hours
@@ -174,6 +176,8 @@ CORE_EXT_NOT_PURE_KEYS = %w[
   Hash#symbolize_keys! Hash#deep_symbolize_keys! Hash#stringify_keys! Hash#deep_stringify_keys!
   Hash#deep_transform_keys! Hash#deep_transform_values! Hash#deep_merge! Hash#except!
   Hash#to_query Hash#to_param Hash#to_xml Hash#compact_blank! Hash#reverse_merge! Hash#slice!
+  Hash#to_options! Hash#with_defaults! Hash#reverse_update Hash#extract!
+  Range#to_fs Range#to_formatted_s
 ].freeze
 
 RSpec.describe "plugins/rigor-activesupport-core-ext %a{pure} sweep (#388)" do

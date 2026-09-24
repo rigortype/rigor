@@ -402,6 +402,46 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # The #1326 review's runtime diff: `Object#deep_dup`, the `core_ext/hash` aliases and `core_ext/range`.
+  # The overlay twin is `spec/rigor/environment/activesupport_overlay_hash_and_range_spec.rb`.
+  describe "deep_dup, the Hash aliases and core_ext/range" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:method_name)
+    end
+
+    it "resolves the new rows to real types" do
+      source = <<~RUBY
+        h = { "a" => 1 }
+        Rigor.dump_type([[1], [2]].deep_dup)
+        Rigor.dump_type(h.to_options)
+        Rigor.dump_type(h.with_defaults!({ "b" => 2 }))
+        Rigor.dump_type(h.reverse_update({ "b" => 2 }))
+        Rigor.dump_type(h.extract!("a"))
+        Rigor.dump_type(h.deep_merge?({}))
+        Rigor.dump_type({ size: 1 }.with_defaults(velocity: 10)[:velocity])
+        Rigor.dump_type((1..5).overlaps?(4..6))
+        Rigor.dump_type((1..5).to_fs(:db))
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      expect(dumps(result)).to eq(
+        ["Array[Array[Integer]]", "Hash[Symbol, 1]", "Hash[String, Integer]", "Hash[String, Integer]",
+         'Hash["a", 1]', "bool", "1 | Dynamic[top]", "bool", "String"]
+      )
+    end
+
+    it "still witnesses a genuinely undefined method on a Range, a Hash and an Array receiver" do
+      result = run_plugin(source: "(1..5).overlapz?(2..3)\n{ a: 1 }.with_defaultz({})\n[1].deep_dupe\n")
+
+      expect(undefined_methods(result)).to eq(%w[overlapz? with_defaultz deep_dupe])
+    end
+  end
+
   # Issue #670 — the `Date` / `DateTime` half of #658. Both are CLOSED core classes carrying the same
   # undeclared `DateAndTime::Calculations` / `Zones` surface, so the same omission-is-a-false-positive
   # rule applies. What makes it more than "#658 again for two more classes" is that `DateTime < Date`:

@@ -59,17 +59,22 @@ in-place extensions to Ruby's built-in classes:
   `#second_to_last` / `#third_to_last`, `#from`, `#to`, `#extract!`,
   `#extract_options!`, `#to_query`, `#to_param`, `#to_xml`, `#inquiry`,
   `#compact_blank`, `#exclude?`
-- `Hash` — `#deep_dup`, `#deep_merge`, `#deep_merge!`,
+- `Hash` — `#deep_dup`, `#deep_merge`, `#deep_merge!`, `#deep_merge?`,
   `#symbolize_keys` / `#stringify_keys` (+ deep / bang variants),
-  `#assert_valid_keys`, `#except!`, `#to_query`, `#to_param`,
-  `#to_xml`, `#with_indifferent_access`, `#deep_transform_keys`,
-  `#extractable_options?`
+  `#to_options` / `#to_options!`, `#assert_valid_keys`, `#except!`,
+  `#slice!`, `#extract!`, `#reverse_merge` / `#with_defaults` (+ bang
+  variants and `#reverse_update`), `#to_query`, `#to_param`, `#to_xml`,
+  `#with_indifferent_access` / `#nested_under_indifferent_access`,
+  `#deep_transform_keys`, `#extractable_options?`
+- `Range` — `#overlaps?` (the alias of core `#overlap?`), `#to_fs` /
+  `#to_formatted_s`
 - `Enumerable` — `#index_by`, `#index_with`, `#pluck`, `#pick`,
   `#exclude?`, `#including`, `#excluding`, `#without`, `#sole`,
   `#many?`, `#in_order_of`, `#maximum`, `#minimum`, `#compact_blank`
 - `Object` (universal) — `#blank?`, `#present?`, `#presence`,
   `#try`, `#try!`, `#acts_like?`, `#to_param`, `#to_query`,
-  `#duplicable?`, `#instance_values`, `#instance_variable_names` plus
+  `#duplicable?`, `#deep_dup`, `#instance_values`,
+  `#instance_variable_names` plus
   the `NilClass` / `TrueClass` / `FalseClass` specialisations
 - `ActiveSupport::TimeWithZone` — declared as a subclass of `Time`,
   which is what `Time.current` and the `Duration#ago` family answer, so
@@ -195,7 +200,7 @@ much, and possibly more", which is the truth.
 
 `sig/active_support/core_ext.rbs` also carries `%a{pure}` on the
 predicates and transforms genuinely free of side effects — `blank?` /
-`present?` / `presence`, `deep_dup` / `deep_merge`, the inflections
+`present?` / `presence`, `Hash#deep_dup` / `deep_merge`, the inflections
 (`camelize`, `underscore`, `pluralize`, `titleize`, …), `squish` /
 `truncate` / `remove`, `with_indifferent_access`, the Duration and
 Bytes multipliers, and more — audited one by one against the vendored

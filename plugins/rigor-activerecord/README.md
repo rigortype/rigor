@@ -87,7 +87,8 @@ The plugin chains two cached producers:
               └────────────┬─────────────────────────┘
                            │
               ┌────────────▼─────────────────────────┐
-              │ Analyzer.new(path, model_index)      │
+              │ Analyzer.new(path, model_index,      │
+              │              scope)                  │
               │   .analyze(prism_root)               │
               │   → [Diagnostic, ...]                │
               └──────────────────────────────────────┘

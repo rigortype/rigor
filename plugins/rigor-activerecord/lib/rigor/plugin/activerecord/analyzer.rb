@@ -20,7 +20,8 @@ module Rigor
       #
       # Successful matches surface as `:info` diagnostics naming the resolved table; unknown columns
       # surface as `:error`. Calls whose receiver is not a model in the index, and calls with
-      # non-keyword arguments to `where` / `find_by`, stay silent.
+      # non-keyword arguments to `where` / `find_by`, stay silent. A model's own `self.find` owns its arity,
+      # so the arity check and the notes for the forms the return-type tier leaves to it stay silent too.
       class Analyzer
         # Methods that take a column → value Hash and need each key validated against the receiver's
         # column set. The bang variants (`find_by!` raises instead of returning nil; `find_or_create_by!`
@@ -36,9 +37,13 @@ module Rigor
 
         attr_reader :diagnostics
 
-        def initialize(path:, model_index:)
+        # `scope` is the file's entry scope, which carries the project's discovered methods; it answers
+        # whether a model defines its own `self.find`. An editor run seeds none, so there the check misses
+        # even a same-file `self.find` the typer sees (#1329).
+        def initialize(path:, model_index:, scope:)
           @path = path
           @model_index = model_index
+          @scope = scope
           @diagnostics = []
         end
 
@@ -72,15 +77,22 @@ module Rigor
 
         # A block turns `find` into `Enumerable#find` over `all` (see `Activerecord#block_find_return_type`),
         # which takes no id, so the zero-argument check applies only to the block-less id lookup.
+        #
+        # The arity check and the notes describe Rails' `find`. A model's own `self.find` has its own arity,
+        # and the return-type tier (`Activerecord#finder_return_type`) leaves the multi-id and block forms to
+        # it, so a note there would claim a type the call does not get. One id still types as the model.
         def validate_find(node, entry)
           return validate_block_find(node, entry) if node.block
 
           arity = call_argument_count(node)
           if arity.zero?
+            return if own_find?(entry)
+
             push_error(node, "wrong-arity",
                        "`#{entry.class_name}.find` expects at least 1 argument, got 0")
             return
           end
+          return if arity >= 2 && own_find?(entry)
 
           returned = arity >= 2 ? "Array[#{entry.class_name}]" : entry.class_name
           push_info(node, "model-call",
@@ -89,9 +101,16 @@ module Rigor
 
         def validate_block_find(node, entry)
           return unless call_argument_count(node).zero?
+          return if own_find?(entry)
 
           push_info(node, "model-call",
                     "`#{entry.class_name}.find` returns #{entry.class_name} | nil (table: `#{entry.table_name}`)")
+        end
+
+        # The predicate `Activerecord#finder_return_type` declines on, so the note and the type agree in a
+        # CLI run. In an editor run this scope lacks the file's own methods (#1329).
+        def own_find?(entry)
+          @scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
         end
 
         def validate_column_hash_call(node, entry)

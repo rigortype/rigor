@@ -256,7 +256,7 @@ module Rigor
         )
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+      def diagnostics_for_file(path:, scope:, root:)
         index = model_index
         # The schema-load disclosure is independent of whether an index was built: reduced mode still
         # produces one (and still analyzes), while a genuine index failure produces one and nothing else.
@@ -266,7 +266,7 @@ module Rigor
         return [] if index.nil? || index.empty?
         return [] if migration_path?(path)
 
-        Analyzer.new(path: path, model_index: index).analyze(root).diagnostics
+        Analyzer.new(path: path, model_index: index, scope: scope).analyze(root).diagnostics
       end
 
       # Rails migration files (`db/migrate/<timestamp>_*.rb`) and post-migration files

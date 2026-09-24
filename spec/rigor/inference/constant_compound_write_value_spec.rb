@@ -7,8 +7,9 @@ require "spec_helper"
 # Typed as the rvalue alone, `v = (H ||= 0); v[:x]` reported `Integer#[]` on a program whose `v[:x]` is `1`.
 #
 # The current binding is what a plain read of the constant resolves to at the write site. Every bound example is
-# paired with an UNBOUND control — nothing the analyzer saw binds the constant — where a `||=` / `&&=` keeps the
-# ADR-5 optimistic rvalue reading the memoization idiom relies on, exactly as a variable target does.
+# paired with an UNBOUND control — nothing the analyzer saw binds the constant — where a `||=` keeps the ADR-5
+# optimistic rvalue reading the memoization idiom relies on, exactly as a variable target does. An unbound `&&=`
+# is no memo and reads the unseen binding beside the rvalue.
 RSpec.describe "constant compound write value", type: :runner do
   def dumped_types(source)
     result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
@@ -157,8 +158,10 @@ RSpec.describe "constant compound write value", type: :runner do
       RUBY
     end
 
-    it "keeps an unbound `&&=` on the rvalue, as a variable target does" do
-      expect(dumped_type("dump_type(AND_ONLY &&= 1)")).to eq("1")
+    it "reads an unbound `&&=` as the unseen binding beside the rvalue, as a variable target does" do
+      # Runtime: NameError. An unset constant raises on the `&&=` read, so the write returns only where something
+      # the analyzer did not see set the constant; the rvalue alone is its value only when that binding is truthy.
+      expect(dumped_type("dump_type(AND_ONLY &&= 1)")).to eq("1 | Dynamic[top]")
     end
 
     it "reads an unbound operator write as Dynamic[top], as a variable target does" do

@@ -1,0 +1,1 @@
+- **[inference]** A call argument or literal element that follows one which writes or mutates a variable is now typed and checked from the scope that earlier operand left, so `puts(b.unshift("s"), b.first.upcase)` no longer reports a false `call.undefined-method` for Integer and `[n += 1, n += 1]` types as `[1, 2]`. [#1310](https://github.com/rigortype/rigor/pull/1310)

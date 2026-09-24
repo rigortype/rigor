@@ -61,8 +61,13 @@ All keys are optional. Tweak them when:
 ## What it infers
 
 The plugin contributes call-site types as well as diagnostics.
-Class-side: `User.find(1)` → `User`, `User.find_by(...)` →
-`User | nil`, `User.find_by!(...)` → non-nullable `User`.
+Class-side: `User.find(1)` → `User`, `User.find(1, 2)` →
+`Array[User]`, `User.find_by(...)` → `User | nil`,
+`User.find_by!(...)` → non-nullable `User`. A single argument
+stays `User` even when it is an Array (`User.find([1, 2])`), so
+that an untyped one, such as `params[:id]`, keeps the model type.
+A relation or association (`user.posts.find(1, 2)`) answers the
+same way.
 Instance-side: a column read (`user.name`) narrows to the
 column's value type, `user.admin?` to `bool`, and a singular
 association (`post.user`) to the target model.

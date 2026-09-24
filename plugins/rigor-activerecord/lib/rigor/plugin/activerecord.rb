@@ -64,6 +64,11 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.13.0, 2026-09-24 (#1321) — the class-side `Model.find` with two or more arguments returns
+        # `Array[Model]` instead of the model, unless the model defines its own `self.find`, and its
+        # `model-call` note says so. No producer payload changed shape; the bump records the type change as
+        # the 0.11.0 and 0.12.0 entries do.
+        #
         # 0.12.0, 2026-09-19 (#1089) — a written-receiver read of an enum-backed column returns the enum's
         # KEY type (the key String constants, or `String` for an empty key list) instead of the column's
         # SQL storage type. No producer payload changed shape, but the version is the cache key a project
@@ -113,7 +118,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.12.0",
+        version: "0.13.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -395,7 +400,7 @@ module Rigor
         return nil if index.nil? || index.empty?
 
         if call_node.receiver
-          class_call_return_type(call_node, index) ||
+          class_call_return_type(call_node, scope, index) ||
             relation_call_return_type(call_node, scope, index) ||
             instance_call_return_type(call_node, scope, index)
         else
@@ -404,7 +409,7 @@ module Rigor
         end
       end
 
-      def class_call_return_type(call_node, index)
+      def class_call_return_type(call_node, scope, index)
         model_name = constant_receiver_name(call_node.receiver)
         return nil if model_name.nil?
 
@@ -412,7 +417,7 @@ module Rigor
         entry = index.find(model_name)
         return nil if entry.nil?
 
-        finder_return_type(call_node, entry) ||
+        finder_return_type(call_node, entry, scope) ||
           class_scope_return_type(call_node, entry)
       end
 
@@ -438,7 +443,7 @@ module Rigor
         entry = index.find(self_type.class_name)
         return nil if entry.nil?
 
-        finder_return_type(call_node, entry) ||
+        finder_return_type(call_node, entry, scope) ||
           class_scope_return_type(call_node, entry)
       end
 
@@ -529,7 +534,7 @@ module Rigor
       # them for two or more ids; `find_by!` returns the model; `find_by` adds the `nil` arm; `where` /
       # `all` / `order` / `limit` / `none` open a relation. The relation then carries its element type
       # through any further chained query method via the bundled `ActiveRecord::Relation` RBS.
-      def finder_return_type(call_node, entry)
+      def finder_return_type(call_node, entry, scope)
         case call_node.name
         when :find
           arity = call_argument_count(call_node)
@@ -538,7 +543,13 @@ module Rigor
           # `Model.find` is `all.find`, so it answers by arity exactly as the bundled `Relation#find`
           # overloads do, and the comment there says why one argument stays the model.
           model = Rigor::Type::Combinator.nominal_of(entry.class_name)
-          arity >= 2 ? Rigor::Type::Combinator.nominal_of("Array", type_args: [model]) : model
+          return model if arity < 2
+
+          # A model that defines its own `self.find` (`find(owner, id)`) takes two arguments for its own
+          # reasons, so the Array reading of Rails' `find` is withheld and the project's method answers.
+          return nil if scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
+
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [model])
         when :find_by!
           # The bang variant raises `RecordNotFound` instead of returning `nil`, so the result is
           # non-nullable.

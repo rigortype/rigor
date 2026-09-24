@@ -1,0 +1,1 @@
+- **[plugins/rigor-activerecord]** Writers that query before or after their write, such as `find_or_create_by`, `destroy_all`, `update` and `update_all`, now carry `io.db.read` beside `io.db.write`, on a Relation and on the model class. ([#1314](https://github.com/rigortype/rigor/pull/1314))

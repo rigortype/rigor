@@ -80,8 +80,8 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
-        # The writers an association's `CollectionProxy` defines and a plain Relation does not (`delete` /
-        # `destroy` on a plain Relation reach the model class instead). Each adds records to the
+        # The writers an association's `CollectionProxy` defines, or for `delete` / `destroy` overrides (a
+        # plain Relation's own `delete` / `destroy` delete by id instead). Each adds records to the
         # association's in-memory target or removes them from it. Depending on whether the owner is saved
         # and on the association's `dependent:` option, it may also read, write, and open a transaction, so
         # the row names all three rather than the parent `io.db`, which `--label io.db.write` would not
@@ -153,8 +153,8 @@ module Rigor
             rows(RELATION, PROXY_WRITERS, PROXY_WRITE,
                  why: "a CollectionProxy writer: it changes the association's target and, for a saved " \
                       "owner, the rows behind it. Keyed on Relation because that is the type the plugin " \
-                      "gives an association reader. A plain Relation either has no such method or hands " \
-                      "`delete` / `destroy` to the model class, which stays inside the bound. The model's " \
+                      "gives an association reader. A plain Relation either has no such method or deletes " \
+                      "by id through its own `delete` / `destroy`, which stays inside the bound. The model's " \
                       "save callbacks are not edged")
         end
 

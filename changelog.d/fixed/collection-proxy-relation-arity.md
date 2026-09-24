@@ -1,0 +1,3 @@
+- **[plugins/rigor-activerecord]** `delete_all(:nullify)` and `delete_all(:delete_all)` on an association reader such as `user.posts` no longer report a false `call.wrong-arity`. ([#1312](https://github.com/rigortype/rigor/pull/1312))
+  - A `has_many`, `has_many :through` or `has_and_belongs_to_many` reader is typed as `ActiveRecord::Relation[Model]` but returns a `CollectionProxy`, whose `delete_all` takes an optional `dependent` argument. The bundled Relation signature now accepts it.
+  - `delete_all(:nullify)` on a plain relation or on `user.posts.where(…)` raises `ArgumentError`, and it is no longer reported either, because both share the reader's type.

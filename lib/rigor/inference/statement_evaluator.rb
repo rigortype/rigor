@@ -3950,7 +3950,7 @@ module Rigor
       def array_index_excluded?(site, scope)
         arguments = site.arguments
         list = arguments.is_a?(Prism::ArgumentsNode) ? arguments.arguments : []
-        list = list[0...-1] if site.is_a?(Prism::CallNode)
+        list = list.take(list.size - 1) if site.is_a?(Prism::CallNode)
         list.any? do |arg|
           next false if arg.is_a?(Prism::SplatNode)
 

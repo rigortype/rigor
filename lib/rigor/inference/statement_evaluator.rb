@@ -31,6 +31,7 @@ require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "operand_effects"
+require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
@@ -156,6 +157,11 @@ module Rigor
       OPERAND_SEQUENCES = Set[Prism::StatementsNode, Prism::ParenthesesNode].freeze
       private_constant :OPERAND_SEQUENCES
 
+      # The keywords of a pass whose scopes the per-node scope index must not keep — neither the nodes it
+      # evaluates nor the later operands an {OperandWalk} inside it takes ({#walk_recorder}).
+      UNRECORDED = { on_enter: nil, operand_recorder: nil }.freeze
+      private_constant :UNRECORDED
+
       # Thread-local sink (an Array) collecting the value types of explicit `return value` nodes reached while
       # evaluating a method body, so `ExpressionTyper#infer_user_method_return` can join them into the method's inferred
       # return type. The flow value of a `return` is still `Bot` (it transfers control rather than producing a value);
@@ -247,9 +253,14 @@ module Rigor
       # @param in_operand — true for an evaluator {#thread_operand} opened, and every evaluator it opens: the
       #   calls it runs are inside another expression's operand, which {#invoke_call} leaves the resets of a
       #   statement-position call out of.
+      # @param operand_recorder — the per-node scope index's recorder, for an evaluator {#thread_operand} opened
+      #   (whose own `on_enter` is nil) and every evaluator it opens but an unrecorded pass ({UNRECORDED}), so an
+      #   {OperandWalk} rooted inside an operand still records its later operands ({#walk_recorder}).
+      # @param operand_types — the later operands' own values ({OperandWalk#types}) for the evaluator that runs a
+      #   call from the scope its operands left, read by {#type_operand}.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
-                     operand_scope: nil, in_operand: false)
+                     operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
@@ -259,6 +270,8 @@ module Rigor
         @next_scope_sink = next_scope_sink
         @operand_scope = operand_scope
         @in_operand = in_operand
+        @operand_recorder = operand_recorder
+        @operand_types = operand_types
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -887,7 +900,7 @@ module Rigor
           return MutationWidening::NO_ARG_TYPES
         end
 
-        content_arg_types(call_node, operand_scope)
+        content_arg_types(call_node, operand_scope, @operand_types)
       end
 
       # The index node of an index-write when it holds exactly one index argument — the only form
@@ -1352,7 +1365,7 @@ module Rigor
 
         (mark...sink.size).each do |index|
           jump, jump_scope = sink[index]
-          sink[index] = [jump, sub_eval(ensure_clause, jump_scope, on_enter: nil).last]
+          sink[index] = [jump, sub_eval(ensure_clause, jump_scope, **UNRECORDED).last]
         end
       end
 
@@ -1840,10 +1853,11 @@ module Rigor
       #
       # The `next` scopes are collected into a sink threaded through `sub_eval` ({#evaluate_invocation} does the same
       # for a block), and the `break` scopes into a thread-local one, each installed only when the body has such a
-      # jump. `on_enter: nil` evaluates without recording into the per-node scope index.
-      def loop_iteration(statements, entry, jumps, on_enter: @on_enter)
+      # jump. `recorded: false` evaluates without recording into the per-node scope index.
+      def loop_iteration(statements, entry, jumps, recorded: true)
         next_sink = jumps.nexts && []
-        evaluate = -> { sub_eval(statements, entry, on_enter: on_enter, next_scope_sink: next_sink).last }
+        recording = recorded ? {} : UNRECORDED
+        evaluate = -> { sub_eval(statements, entry, next_scope_sink: next_sink, **recording).last }
         if jumps.breaks
           break_sink, fall_through = collect_break_scopes(&evaluate)
           breaks = targeted_scopes(break_sink, jumps.breaks)
@@ -1881,7 +1895,7 @@ module Rigor
         return break_pass[:arms] if break_pass[:entry] == converged.except(*body_first)
 
         entry = loop_pass_entry(node, post_pred, converged, body_first)
-        loop_iteration(node.statements, entry, jumps, on_enter: nil).last
+        loop_iteration(node.statements, entry, jumps, recorded: false).last
       end
 
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
@@ -2297,12 +2311,14 @@ module Rigor
       # An array or hash literal, an interpolation or a range: its value is the literal's, typed where it starts, and
       # its scope is the one its children leave in order ({#thread_operand}). Issue #1223 — `[s = 1]`, `x = [:a, s +=
       # 1]` and `"#{s = 1}"` left `s` on its pre-write binding. A literal holding no write or jump keeps the entry
-      # scope and costs one scan.
+      # scope and costs one scan. Issue #1256 — an element after one that wrote is typed from the scope the elements
+      # before it left ({OperandWalk}), so `[n += 1, n += 1]` is `[1, 2]`.
       def eval_value_container(node)
-        type = scope.type_of(node, tracer: tracer)
-        return [type, scope] unless OperandEffects.any?(node)
+        return [scope.type_of(node, tracer: tracer), scope] unless OperandEffects.any?(node)
 
-        [type, thread_operand_children(node, scope)]
+        walk = OperandWalk.new(walk_recorder)
+        after = thread_operand_children(node, scope, walk, scope)
+        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), after]
       end
 
       # `expr rescue alt`. The rescue arm runs only when `expr` raised, possibly after some of its writes, so the arm
@@ -2311,11 +2327,18 @@ module Rigor
       # rescue (s = 1)` left `s` on its pre-write binding. The value is the modifier's own, and one holding no write
       # or jump keeps the entry scope.
       def eval_rescue_modifier(node)
-        type = scope.type_of(node, tracer: tracer)
-        return [type, scope] unless OperandEffects.any?(node)
+        return [scope.type_of(node, tracer: tracer), scope] unless OperandEffects.any?(node)
 
-        after_expression = thread_operand(node.expression, scope)
-        after_rescue = thread_operand(node.rescue_expression, join_with_nil_injection(scope, after_expression))
+        walk = OperandWalk.new(walk_recorder)
+        after_expression = thread_operand(node.expression, scope, walk, scope)
+        # The arm is threaded outside the walk: its entry nil-injects a local `expr` first binds, which is the
+        # sound join (the raise may come before the write) but reads `u` as `String?` in `Float(u = s) rescue
+        # u.strip`, where the raise almost always comes from `Float` after it. Neither the arm nor anything in it
+        # is recorded or typed from there, which keeps it where it was before #1256: an ADR-5 trade of the rare
+        # raise-before-write path for no false positive on the common one.
+        arm_entry = join_with_nil_injection(scope, after_expression)
+        after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
+        type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
         return [type, after_expression] if branch_unconditionally_exits?(node.rescue_expression)
 
         [type, join_with_nil_injection(after_expression, after_rescue)]
@@ -2399,42 +2422,56 @@ module Rigor
       # after the call. {#call_operand_scope} threads each operand that holds one; when none does it answers the
       # entry scope itself and the call is handled exactly as before. Otherwise the rest of the call — the block's
       # entry, its write-back and every post-call widening — runs from the scope the operands left
-      # ({#invoke_call}), while the call's value and every operand's value are still typed where the operands
-      # started ({#operand_scope}): `out << (n += 1)` appends `1`, not the `2` a re-typing after the write reads.
-      # The operands are threaded without recording into the per-node scope index, so the index keeps the entry
-      # scope it always handed them.
+      # ({#invoke_call}), while the call's value is still typed where the operands started ({#operand_scope}), and
+      # each operand where it was entered: `out << (n += 1)` appends `1`, not the `2` a re-typing after the write
+      # reads. Issue #1256 — an operand after one that wrote is entered from the scope the operands before it left,
+      # and {OperandWalk} records it into the per-node scope index and types it from there: `puts(b.unshift("s"),
+      # b.first.upcase)` reads `b` as the `unshift` left it. The operands are threaded first and the call is typed
+      # after, with those later operands' values in hand, so no operand is typed twice.
       def eval_call(node)
-        call_type = scope.type_of(node, tracer: tracer)
+        walk = OperandWalk.new(walk_recorder)
+        invoked = call_operand_scope(node, walk, scope)
+        operand_types = walk.types(tracer)
+        call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
         # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
         # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
         # block-param and adopt it as the call's return type.
         call_type = each_with_object_return(node, call_type)
-        [call_type, call_effects(node, call_type)]
+        [call_type, invoke_from(node, invoked, call_type, operand_types)]
       end
 
-      # The scope after `node` runs, from the receiver scope. `call_type` is the call's value, or nil when the caller
-      # wants the scope alone: a call threaded as another call's operand ({#thread_operand}) is not typed, since
-      # its value is discarded and typing it re-types the whole subtree the enclosing call already typed — once
-      # per level of an operator chain whose every operand writes (`f(a = 1) + f(a = 2) + …`), and each through
-      # the callee's return inference. For the same reason such a call applies no post-return narrowing
-      # ({#invoke_call}): each of those resolves the method by typing the receiver, the same subtree again. They
-      # only narrow, and a call in an operand never applied them before #1223, so leaving them out is the
-      # sound side.
-      def call_effects(node, call_type = nil)
-        invoked = call_operand_scope(node)
-        return invoke_call(node, call_type) if invoked.equal?(scope)
+      # The scope after `node` runs as another expression's operand ({#thread_operand}), from the receiver scope.
+      # Such a call is not typed, since its value is discarded and typing it re-types the whole subtree the
+      # enclosing root types — once per level of an operator chain whose every operand writes (`f(a = 1) + f(a =
+      # 2) + …`), and each through the callee's return inference. For the same reason it applies no post-return
+      # narrowing ({#invoke_call}): each of those resolves the method by typing the receiver, the same subtree
+      # again. They only narrow, and a call in an operand never applied them before #1223, so leaving them out is
+      # the sound side. Its own later operands join `walk` and are typed as soon as they are all taken, so its
+      # invocation reads them ({#type_operand}) and the enclosing root does not type them again.
+      def call_effects(node, walk, typed_from)
+        mark = walk.mark
+        invoked = call_operand_scope(node, walk, typed_from)
+        invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
+      end
 
-        evaluator_at(invoked, operand_scope: scope).send(:invoke_call, node, call_type)
+      # The rest of the call from `invoked`, the scope its operands left, with each later operand's own value in
+      # `operand_types` for the helpers that type the call's operands ({#type_operand}).
+      def invoke_from(node, invoked, call_type, operand_types)
+        return invoke_call(node, call_type) if invoked.equal?(scope) && operand_types.nil?
+
+        evaluator_at(invoked, operand_scope: scope, operand_types: operand_types).send(:invoke_call, node, call_type)
       end
 
       # The scope Ruby runs `node`'s method from: the receiver, then the arguments, then a block-pass argument, each
       # threaded in turn ({#thread_operand}). A safe-navigation call skips its arguments when the receiver is nil,
       # so their scope joins with the receiver's.
-      def call_operand_scope(node)
-        after_receiver = thread_operand(node.receiver, scope)
-        after_arguments = thread_operand(node.arguments, after_receiver)
+      def call_operand_scope(node, walk, typed_from)
+        after_receiver = thread_operand(node.receiver, scope, walk, typed_from)
+        after_arguments = thread_operand(node.arguments, after_receiver, walk, typed_from)
         block_pass = node.block
-        after_arguments = thread_operand(block_pass, after_arguments) if block_pass.is_a?(Prism::BlockArgumentNode)
+        if block_pass.is_a?(Prism::BlockArgumentNode)
+          after_arguments = thread_operand(block_pass, after_arguments, walk, typed_from)
+        end
         return after_arguments if after_arguments.equal?(after_receiver) || !node.safe_navigation?
 
         join_with_nil_injection(after_receiver, after_arguments)
@@ -2443,7 +2480,12 @@ module Rigor
       # The scope after `node` from `entry`, for an expression otherwise typed as a pure value. One that holds no
       # write or jump ({OperandEffects}) answers `entry` itself. A call contributes its effects without its value
       # ({#call_effects}), any other node with a handler is evaluated through it, and an {OPERAND_CONTAINERS} node
-      # threads its children in order. Nothing is recorded into the per-node scope index.
+      # threads its children in order.
+      #
+      # `typed_from` is the scope the root types `node` from: its own entry, or that of the nearest enclosing operand
+      # {OperandWalk} took as a later one. When `entry` is not that scope, an earlier operand has moved it, and `walk`
+      # takes `node` ({OperandWalk#later}) before anything below it, so its descendants are typed and recorded against
+      # `entry` in turn. Nothing else is recorded into the per-node scope index.
       #
       # A call threaded this way is an operand, so it also leaves out the two resets a statement-position call
       # applies because it might have done anything ({#invoke_call}): the class's narrowed instance variables and the
@@ -2453,26 +2495,51 @@ module Rigor
       # carries `in_operand` into everything it opens: an in-place mutation counts as an effect, and threading
       # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
       # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone.
-      def thread_operand(node, entry)
-        return entry unless OperandEffects.any?(node)
+      def thread_operand(node, entry, walk, typed_from)
+        return entry unless node.is_a?(Prism::Node)
 
-        operand = evaluator_at(entry, on_enter: nil, in_operand: true)
-        return operand.send(:call_effects, node) if node.is_a?(Prism::CallNode)
+        taken = !entry.equal?(typed_from)
+        slot = walk.later(node, entry) if taken
+        typed_from = entry if slot
+        unless OperandEffects.any?(node)
+          # A taken position with no value of its own leaves its children to be taken: nothing types it whole.
+          thread_operand_children(node, entry, walk, typed_from) if taken && slot.nil?
+          return entry
+        end
+
+        operand = evaluator_at(entry, on_enter: nil, in_operand: true, operand_recorder: walk.recorder)
+        return operand.send(:call_effects, node, walk, typed_from) if node.is_a?(Prism::CallNode)
         # A container is threaded child by child even when it has a handler: the handler types the whole literal,
         # which a nested literal would repeat once per level of nesting. A statement list or `(…)` inside an operand
         # runs its statements in order just the same, and evaluating it would type each statement it holds.
         if OPERAND_CONTAINERS.include?(node.class) || OPERAND_SEQUENCES.include?(node.class)
-          return thread_operand_children(node, entry)
+          return thread_operand_children(node, entry, walk, typed_from)
         end
-        return operand.evaluate(node).last if HANDLERS.key?(node.class)
+        return entry unless HANDLERS.key?(node.class)
 
-        entry
+        # The handler types the operand from `entry`, which is the value a later operand takes.
+        type, after = operand.evaluate(node)
+        walk.resolve(slot, type) if slot
+        after
       end
 
-      def thread_operand_children(node, entry)
+      def thread_operand_children(node, entry, walk, typed_from)
         threaded = entry
-        node.rigor_each_child { |child| threaded = thread_operand(child, threaded) }
+        node.rigor_each_child { |child| threaded = thread_operand(child, threaded, walk, typed_from) }
         threaded
+      end
+
+      # The recorder an {OperandWalk} rooted here records later operands with: the per-node scope index's, whether
+      # this evaluator records into it itself or is an operand evaluator threading a recording one's operands. An
+      # unrecorded pass ({UNRECORDED}) has neither.
+      def walk_recorder
+        @operand_recorder || @on_enter
+      end
+
+      # A call operand's type, read from where the call's operands were typed ({#operand_scope}), with each later
+      # operand's own value ({OperandWalk}) where the call has one.
+      def type_operand(node)
+        OperandWalk.type_of(operand_scope, node, tracer, @operand_types)
       end
 
       # The scope this evaluator types a call's receiver and arguments under: where they were evaluated, which
@@ -2570,7 +2637,7 @@ module Rigor
       def local_attribute_write_value(node)
         return nil unless node.attribute_write? && node.receiver.is_a?(Prism::LocalVariableReadNode)
 
-        operand_scope.type_of(node, tracer: tracer)
+        type_operand(node)
       end
 
       def apply_post_return_narrowing(node, post_scope)
@@ -3366,7 +3433,7 @@ module Rigor
       end
 
       def classify_closure_escape(call_node)
-        receiver_type = call_node.receiver ? operand_scope.type_of(call_node.receiver, tracer: tracer) : nil
+        receiver_type = call_node.receiver ? type_operand(call_node.receiver) : nil
         ClosureEscapeAnalyzer.classify(
           receiver_type: receiver_type,
           method_name: call_node.name,
@@ -3544,7 +3611,7 @@ module Rigor
       # pass has run from.
       def converged_break_arms(call_node, block, converged, targets)
         entry = block_pass_entry(call_node, block, converged)
-        sink, = collect_break_scopes { sub_eval(block, entry, on_enter: nil) }
+        sink, = collect_break_scopes { sub_eval(block, entry, **UNRECORDED) }
         targeted_scopes(sink, targets)
       end
 
@@ -4322,7 +4389,7 @@ module Rigor
       # Argument types for a content-mutator call, typed against the block-entry scope (block params bound). A
       # sub-evaluator over `block_entry` keeps the argument typing flow-correct for params / `;`-locals without leaking
       # into the outer scope.
-      def content_arg_types(call_node, block_entry)
+      def content_arg_types(call_node, block_entry, operand_types = nil)
         arguments = call_node.arguments
         return [] if arguments.nil?
 
@@ -4333,7 +4400,7 @@ module Rigor
           # arity-unknown rather than as the untyped index it would type as (issue #1140).
           next nil if call_node.name == :[]= && i < list.size - 1 && arg.is_a?(Prism::SplatNode)
 
-          block_entry.type_of(arg, tracer: tracer)
+          OperandWalk.type_of(block_entry, arg, tracer, operand_types)
         end
       rescue StandardError
         []
@@ -4490,7 +4557,7 @@ module Rigor
       def narrow_macro_block_self(call_node)
         receiver_type =
           if call_node.receiver
-            operand_scope.type_of(call_node.receiver, tracer: tracer)
+            type_operand(call_node.receiver)
           else
             scope.self_type
           end
@@ -4517,7 +4584,7 @@ module Rigor
 
         receiver_type =
           if call_node.receiver
-            operand_scope.type_of(call_node.receiver, tracer: tracer)
+            type_operand(call_node.receiver)
           else
             scope.self_type || scope.environment.nominal_for_name("Object")
           end
@@ -4539,7 +4606,7 @@ module Rigor
         arguments = call_node.arguments
         return [] if arguments.nil?
 
-        arguments.arguments.map { |arg| operand_scope.type_of(arg, tracer: tracer) }
+        arguments.arguments.map { |arg| type_operand(arg) }
       end
 
       # ----- def/class helpers -----
@@ -4868,7 +4935,7 @@ module Rigor
       # context (a captured write elsewhere in the block), and the index must not change with it.
       def jump_scope(node)
         args = node.arguments&.arguments || []
-        args.reduce(scope) { |acc, arg| sub_eval(arg, acc, on_enter: nil).last }
+        args.reduce(scope) { |acc, arg| sub_eval(arg, acc, **UNRECORDED).last }
       end
 
       # A `break` transfers control to the loop exit (its flow value is `Bot`, like `return`). It records the scope it
@@ -4906,16 +4973,17 @@ module Rigor
       # the ones the index should keep. `next_scope_sink:` is replaced only by {#evaluate_invocation} and
       # {#loop_iteration}.
       def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
-                   on_enter: @on_enter, next_scope_sink: @next_scope_sink)
+                   on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_recorder: @operand_recorder)
         evaluator_at(with_scope, class_context: class_context, lexical_nesting: lexical_nesting, on_enter: on_enter,
-                                 next_scope_sink: next_scope_sink).evaluate(node)
+                                 next_scope_sink: next_scope_sink, operand_recorder: operand_recorder).evaluate(node)
       end
 
-      # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` is set only by
-      # {#call_effects}, for the evaluator that runs a call from the scope its operands left.
-      def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
+      # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` and
+      # `operand_types:` are set only by {#invoke_from}, for the evaluator that runs a call from the scope its
+      # operands left.
+      def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting, # rubocop:disable Metrics/ParameterLists
                        on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil,
-                       in_operand: @in_operand)
+                       in_operand: @in_operand, operand_recorder: @operand_recorder, operand_types: nil)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
@@ -4925,7 +4993,9 @@ module Rigor
           converged_loop_recording: @converged_loop_recording,
           next_scope_sink: next_scope_sink,
           operand_scope: operand_scope,
-          in_operand: in_operand
+          in_operand: in_operand,
+          operand_recorder: operand_recorder,
+          operand_types: operand_types
         )
       end
 

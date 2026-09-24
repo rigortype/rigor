@@ -2643,7 +2643,7 @@ module Rigor
           return nil if method_def.nil?
 
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
-          mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides)
+          mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides, scope_index)
           return nil if mismatch.nil?
           return nil if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
 
@@ -2669,12 +2669,15 @@ module Rigor
         # overload rejects) plus, on non-coerce methods, the non-nil channel
         # (a single-concrete-class argument every overload rejects). See
         # {#multi_overload_argument_mismatch}.
-        def argument_mismatch(method_types, call_node, scope, param_overrides)
+        #
+        # Each argument is typed from its own index entry, which is the call's unless an earlier operand moved
+        # the scope it was entered from (issue #1256): `(k = 0; 5)[k]` checks `k` as the `0` it holds there.
+        def argument_mismatch(method_types, call_node, scope, param_overrides, scope_index)
           mismatch =
             if method_types.size == 1
-              first_argument_mismatch(method_types.first, call_node, scope, param_overrides)
+              first_argument_mismatch(method_types.first, call_node, scope, param_overrides, scope_index)
             else
-              multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
+              multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides, scope_index)
             end
           return nil if mismatch && keyword_bearing?(method_types) && nil_tainted?(mismatch[:actual])
 
@@ -2726,22 +2729,23 @@ module Rigor
         #   stays deferred), and decides acceptance on the RBS param type
         #   ({#param_accepts_arg_class?}) so it sees through the `int` / `string`
         #   interface-aliases the translator degrades.
-        def multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
+        def multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides, scope_index)
           functions = method_types.map(&:type)
           return nil unless functions.all? { |function| argument_check_eligible?(function) }
 
           coerce_method = COERCE_DISPATCH_METHODS.include?(call_node.name)
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
-            arg_type = scope.type_of(arg)
+            arg_scope = argument_scope(arg, scope, scope_index)
+            arg_type = arg_scope.type_of(arg)
             params = checkable_overload_params(method_types, index, param_overrides, scope)
             next if params.nil?
 
             mismatch =
               if nil_member?(arg_type) # pure nil only — not a `T | nil` union
-                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
               elsif !coerce_method
-                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
               end
             return mismatch if mismatch
           end
@@ -3031,7 +3035,7 @@ module Rigor
           DeclarationSourcedGuard.marked?(arg, scope)
         end
 
-        def first_argument_mismatch(method_type, call_node, scope, param_overrides)
+        def first_argument_mismatch(method_type, call_node, scope, param_overrides, scope_index)
           function = method_type.type
           return nil unless argument_check_eligible?(function)
 
@@ -3041,10 +3045,15 @@ module Rigor
             param = params[index]
             next if param.nil? # arity mismatch is the wrong-arity rule's concern.
 
-            mismatch = single_argument_mismatch(param, arg, scope, param_overrides)
+            mismatch = single_argument_mismatch(param, arg, argument_scope(arg, scope, scope_index), param_overrides)
             return mismatch if mismatch
           end
           nil
+        end
+
+        # The scope `arg` is checked from: its own index entry ({#argument_mismatch}), else the call's.
+        def argument_scope(arg, call_scope, scope_index)
+          scope_index[arg] || call_scope
         end
 
         # The mismatch (or nil) for one positional argument against one

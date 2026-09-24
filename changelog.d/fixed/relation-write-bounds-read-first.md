@@ -1,1 +1,3 @@
 - **[plugins/rigor-activerecord]** Writers that query before or after their write, such as `find_or_create_by`, `destroy_all`, `update` and `update_all`, now carry `io.db.read` beside `io.db.write`, on a Relation and on the model class. ([#1314](https://github.com/rigortype/rigor/pull/1314))
+  - Class methods that had no bound and read as pure, such as `Model.first_or_create`, `Model.second!`, `Model.async_count` and `Model.update_counters`, now carry their database labels.
+  - `lock!` and `with_lock` now carry `io.db.read`, because they re-read the row with `SELECT … FOR UPDATE`.

@@ -80,7 +80,7 @@ module Rigor
         end
       end
 
-      # `x.class` — `Kernel#class` answers a class whatever the receiver is.
+      # `x.class` — `Kernel#class` answers the receiver's class, unless the receiver overrides it.
       def class_call?(node)
         node.name == :class && node.arguments.nil? && node.block.nil?
       end

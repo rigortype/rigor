@@ -29,7 +29,7 @@ errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plug
 | --- | --- | --- |
 | Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `plugin.activerecord.model-call` |
 | `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `plugin.activerecord.unknown-column` |
-| `Model.find` with 0 args | `:error` | `plugin.activerecord.wrong-arity` |
+| `Model.find` with 0 args and no block | `:error` | `plugin.activerecord.wrong-arity` |
 | No schema source (`db/schema.rb` or `db/structure.sql`) present — reduced mode | `:info` | `plugin.activerecord.load-error` |
 | A schema source that exists but cannot be read or parsed | `:warning` | `plugin.activerecord.load-error` |
 
@@ -67,7 +67,11 @@ Class-side: `User.find(1)` → `User`, `User.find(1, 2)` →
 stays `User` even when it is an Array (`User.find([1, 2])`), so
 that an untyped one, such as `params[:id]`, keeps the model type.
 A relation or association (`user.posts.find(1, 2)`) answers the
-same way.
+same way. With a block, `find` is `Enumerable#find` over the
+records, on the class and on a relation alike:
+`User.find { |u| u.admin? }` → `User | nil`, and it takes no id.
+The block's parameter is the model on a relation; on the class
+side it stays untyped.
 Instance-side: a column read (`user.name`) narrows to the
 column's value type, `user.admin?` to `bool`, and a singular
 association (`post.user`) to the target model.

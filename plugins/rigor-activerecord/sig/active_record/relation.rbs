@@ -279,7 +279,8 @@ module ActiveRecord
     def with: (*untyped) -> self
     def scoping: () { () -> untyped } -> untyped
 
-    # --- finders (return an element, or an Array of them) ---
+    # --- finders (return an element, or an Array of them; `find`
+    # with a block, the element or nil) ---
     # Two or more ids return an Array, unless dropping `nil`s and
     # duplicates leaves one. One argument returns an Array when it is an
     # Array of ids, but one record when it is a composite key's tuple
@@ -292,8 +293,18 @@ module ActiveRecord
     # splat and a `**` hash each count as one argument, so `find(*ids)`
     # is `Elem`, while `find(id, *ids)` and `find(*args, **opts)` are
     # Arrays even when the splat or the hash turns out empty.
+    #
+    # With a block `find` is `Enumerable#find` (`return super if
+    # block_given?`), so the id overloads do not apply: no argument
+    # returns the element or `nil`, and one argument is the `ifnone`
+    # callable, whose result joins the union. That form is rare, so
+    # it stays `untyped` rather than typing the callable. The
+    # class-side `Model.find { … }` reaches this same method through
+    # `all`.
     %a{rigor:v1:effect io.db.read}
-    def find: (untyped, untyped, *untyped) -> Array[Elem]
+    def find: () { (Elem) -> boolish } -> Elem?
+            | (untyped ifnone) { (Elem) -> boolish } -> untyped
+            | (untyped, untyped, *untyped) -> Array[Elem]
             | (?untyped id) -> Elem
     %a{rigor:v1:effect io.db.read}
     def find_by: (*untyped) -> Elem?

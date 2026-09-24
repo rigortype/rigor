@@ -121,6 +121,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     run_generation()
     seed_declaration_sourced_ivar(req:name,req:type)
     self_type()
+    shadowing_constant_names(req:name)
     singleton_class_body()
     singleton_class_body?()
     singleton_def_for(req:class_name,req:method_name)

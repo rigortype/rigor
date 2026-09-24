@@ -45,9 +45,10 @@ module Rigor
   # out of scope for the v0.0.7 first pass; v0.1.0's plugin API added it as a separate
   # concern.
   module Reflection
-    # #354 — thread-local slot for the per-run ancestor-scope memo. See {.ancestor_constant_scopes}.
-    ANCESTOR_SCOPES_KEY = :__rigor_ancestor_constant_scopes__
-    private_constant :ANCESTOR_SCOPES_KEY
+    # Issue #1290 — what {.constant_type_at} answers for a candidate the project writes but no source types, on
+    # a ladder that checks the census. Never a type: {.resolve_constant_type} replaces it before it returns.
+    WRITTEN_CANDIDATE = Object.new.freeze
+    private_constant :WRITTEN_CANDIDATE
 
     module_function
 
@@ -159,10 +160,25 @@ module Rigor
       # go stale. Over-recording is ADR-46's safe direction.
       record_constant_reference(name) if Analysis::DependencyRecorder.active?
       return constant_type_at(name, scope) if rooted
+
+      # Issue #1290 — a candidate the project writes but no source types is where Ruby's lookup stops, so it
+      # REPLACES what a lower rung answers, and nothing else. The first pass hands the census's shadowing
+      # names to the rungs ({.constant_type_at}); a stop is `Dynamic[top]` only when the plain ladder, run
+      # again, answers below it. When nothing below answers, the reference stays unresolved exactly as before,
+      # so the nil its caller turns into the fallback, the missing-constant edge and the gem-origin label stay.
+      hit = lexical_constant_type(name, scope, caller_derived, scope.shadowing_constant_names(name.to_s))
+      return hit unless hit.equal?(WRITTEN_CANDIDATE)
+
+      Type::Combinator.untyped if lexical_constant_type(name, scope, caller_derived, nil)
+    end
+
+    # {.resolve_constant_type}'s unrooted ladder. `shadows` is the census's shadowing names for the
+    # reference, which the rungs above the last check their candidates against, or nil for the plain ladder.
+    def lexical_constant_type(name, scope, caller_derived, shadows)
       # Issue #716 — a body whose `Module.nesting` was RECORDED EMPTY is definitively top level, and Ruby
       # resolves its constants there no matter which namespace calls it. Steps 1 and 2 both derive from the
       # caller and are both wrong for it, so it takes its own ladder.
-      return toplevel_first_constant_type(name, scope, caller_derived) if recorded_toplevel_nesting?(scope)
+      return toplevel_first_constant_type(name, scope, caller_derived, shadows) if recorded_toplevel_nesting?(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.
       #
@@ -180,19 +196,20 @@ module Rigor
       # beating the top-level whole-string answer is the point: `A::B` inside `P::Guard` with
       # `P::A < P::Base` is `P::Base::B`, and step 3's `A::B` is a real but different class.
       #
-      # Step 3 — the bare name (top level).
-      first_constant_hit(lexical_nesting_chain(scope), name, scope) ||
-        ancestor_constant_type(name, scope, enclosing_class_path(scope)) ||
-        constant_path_type(name, scope) ||
+      # Step 3 — the bare name (top level). It takes no `shadows`: nothing sits below it for a stop to replace.
+      first_constant_hit(lexical_nesting_chain(scope), name, scope, shadows) ||
+        ancestor_constant_type(name, scope, enclosing_class_path(scope), shadows) ||
+        constant_path_type(name, scope, shadows: shadows) ||
         constant_type_at(name, scope)
     end
+    private_class_method :lexical_constant_type
 
     # The first candidate `<entry>::<name>` any source knows, walking `entries` in order, or nil. The one
     # place a qualifying prefix is joined to a name, so every rung of the ladder consults its candidates
     # identically.
-    def first_constant_hit(entries, name, scope)
+    def first_constant_hit(entries, name, scope, shadows)
       entries.each do |entry|
-        hit = constant_type_at("#{entry}::#{name}", scope)
+        hit = constant_type_at("#{entry}::#{name}", scope, shadows)
         return hit if hit
       end
       nil
@@ -200,10 +217,10 @@ module Rigor
     private_class_method :first_constant_hit
 
     # Step 2's rung on its own: nil when there is no enclosing class path to take ancestors of.
-    def ancestor_constant_type(name, scope, prefix)
+    def ancestor_constant_type(name, scope, prefix, shadows)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope)
+      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope, shadows)
     end
     private_class_method :ancestor_constant_type
 
@@ -230,21 +247,25 @@ module Rigor
     # for `A::B` is the top level, and a whole-string hit there already means "`A` owns `B`". The
     # segment-wise walk only has something to add once that misses. Its head consults the caller's
     # ancestors, so under `caller_derived: false` it resolves the head at the top level alone.
-    def toplevel_first_constant_type(name, scope, caller_derived)
-      constant_type_at(name, scope) || (caller_derived && caller_derived_constant_type(name, scope)) ||
-        constant_path_type(name, scope, caller_derived: caller_derived)
+    #
+    # Issue #1290 — the top level is this ladder's FIRST rung, so a top-level name the project writes stops it
+    # ({.constant_type_at}) before a caller's `Plug::TOP` can answer a read Ruby gives to the top-level `TOP`.
+    def toplevel_first_constant_type(name, scope, caller_derived, shadows)
+      constant_type_at(name, scope, shadows) ||
+        (caller_derived && caller_derived_constant_type(name, scope, shadows)) ||
+        constant_path_type(name, scope, caller_derived: caller_derived, shadows: shadows)
     end
     private_class_method :toplevel_first_constant_type
 
     # The peel and its ancestors — {.resolve_constant_type}'s steps 1 and 2 as they answer for a scope with
     # no recorded chain, factored out so the top-level ladder above can consult them BELOW the top level
     # instead of above it.
-    def caller_derived_constant_type(name, scope)
+    def caller_derived_constant_type(name, scope, shadows)
       prefix = enclosing_class_path(scope)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(peeled_nesting(prefix), name, scope) ||
-        ancestor_constant_type(name, scope, prefix)
+      first_constant_hit(peeled_nesting(prefix), name, scope, shadows) ||
+        ancestor_constant_type(name, scope, prefix, shadows)
     end
     private_class_method :caller_derived_constant_type
 
@@ -252,7 +273,25 @@ module Rigor
     # `Singleton[C]`), source-discovered classes, in-source value constants, then RBS-side
     # constants. In-source values win over RBS constant decls because the user's source is
     # authoritative for its own constants. Returns nil when no source knows `candidate`.
-    def constant_type_at(candidate, scope)
+    #
+    # Issue #1290 — `shadows`, passed on every rung that has a rung below it, is the last source: a candidate
+    # no other source types answers {WRITTEN_CANDIDATE} when `shadows` holds it, and {.resolve_constant_type}
+    # settles that stop. `shadows` is `Scope#shadowing_constant_names` for the reference, whose last segment
+    # every candidate shares. Ruby's lookup stops at a constant that exists, whatever its value, and the
+    # cross-file table publishes only a frozen scalar one file writes: another file's `App::LIMIT = { n: 1 }`
+    # was missed by every source, and the ladder moved on to a published top-level `LIMIT = 5`, typing `LIMIT`
+    # inside `module App` as `5` and reporting `call.undefined-method` on correct code. The value is one the
+    # analyzer does not carry, so the stop is gradual.
+    #
+    # Only an EXACT census name stops a candidate. The census keeps a path write as written
+    # ([#690](https://github.com/rigortype/rigor/issues/690)), so a suffix match would reach the as-written
+    # `Foo::BAR` from `M::Foo::BAR`, but would also stop `Admin::UsersController::X` on a top-level
+    # `UsersController::X`, losing the answer an ordinary Rails layout gets from the namespaced controller's
+    # superclass. A name written only through `||=` does not shadow, however many files memoize it: `X ||= v`
+    # resolves `X` through this same lookup, so wherever a lower rung answers, the memo finds that constant and
+    # never creates the name. The answer moves with the project's write set for the last segment, which the
+    # `constant:` edge {.resolve_constant_type} records once per reference already covers.
+    def constant_type_at(candidate, scope, shadows = nil)
       env = scope.environment
 
       singleton = env.singleton_for_name(candidate)
@@ -272,7 +311,7 @@ module Rigor
         return in_source_value
       end
 
-      env.constant_for_name(candidate)
+      env.constant_for_name(candidate) || (WRITTEN_CANDIDATE if shadows&.include?(candidate))
     end
     private_class_method :constant_type_at
 
@@ -287,87 +326,6 @@ module Rigor
       Analysis::DependencyRecorder.read_name(:constant, segment) if segment
     end
     private_class_method :record_constant_reference
-
-    # #354 — the project classes and modules whose own constants `class_name` inherits, in Ruby's
-    # ancestor order: included / prepended modules before the superclass (Ruby places mixins nearer),
-    # transitively, breadth-first. `class_name` itself is excluded — step 1 already covered it.
-    #
-    # Only PROJECT ancestors appear. `Scope#superclass_of` / `#includes_of` carry as-written names
-    # from the discovery pre-pass, and an as-written name that resolves to no discovered class or
-    # module is dropped — so a `class Foo < ActiveRecord::Base` contributes nothing and a constant
-    # owned by an RBS-known ancestor still resolves only if the bare name reaches it at step 3. That
-    # gap is deliberate for this slice: widening to the RBS ancestor graph is a separate question
-    # with its own FP surface.
-    #
-    # Memoised per run because step 2 runs on every constant reference whose lexical candidates all
-    # miss — which is the common case for a core-class reference (`String` inside `class Foo`). The
-    # bucket keys on the identity of the runner-seeded run-generation token (ADR-84 WD2), falling
-    # back to the per-file discovery table for runner-less scopes, so a re-run in one process (LSP,
-    # ADR-62 warm loop) cannot hit stale entries.
-    def ancestor_constant_scopes(class_name, scope)
-      # ADR-46: `superclass_of` / `includes_of` record a cross-file class dependency per consumer
-      # file, and the memo is run-scoped rather than file-scoped — a hit would skip the recording and
-      # under-record the edge for every later file. Recording runs are rare (incremental only), so
-      # they simply bypass the memo rather than complicate its key.
-      return compute_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
-
-      generation = scope.run_generation || scope.discovered_superclasses
-      slot = Thread.current[ANCESTOR_SCOPES_KEY]
-      unless slot && slot[0].equal?(generation)
-        slot = [generation, {}]
-        Thread.current[ANCESTOR_SCOPES_KEY] = slot
-      end
-      bucket = slot[1]
-      bucket.fetch(class_name) { bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) }
-    end
-    private_class_method :ancestor_constant_scopes
-
-    def compute_ancestor_constant_scopes(class_name, scope)
-      queue = [class_name]
-      seen = { class_name => true }
-      out = []
-      until queue.empty?
-        current = queue.shift
-        # Mixins first, then the superclass — Ruby's ancestor order.
-        scope.includes_of(current).each do |raw|
-          resolved = resolve_ancestor_name(current, raw, scope)
-          next if resolved.nil? || seen[resolved]
-
-          seen[resolved] = true
-          out << resolved
-          queue << resolved
-        end
-        raw_super = scope.superclass_of(current)
-        next if raw_super.nil?
-
-        resolved_super = resolve_ancestor_name(current, raw_super, scope)
-        next if resolved_super.nil? || seen[resolved_super]
-
-        seen[resolved_super] = true
-        out << resolved_super
-        queue << resolved_super
-      end
-      out.freeze
-    end
-    private_class_method :compute_ancestor_constant_scopes
-
-    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) against the nesting in
-    # force where the subclass's header is written — `Scope#ancestor_name_candidates`, the single
-    # owner of that order, which `Scope#enqueue_ancestors` reads for method lookup and the
-    # override-visibility rule reads for its own walk. Returns nil when no candidate names a
-    # discovered project class or module.
-    def resolve_ancestor_name(subclass_qualified, raw, scope)
-      scope.ancestor_name_candidates(subclass_qualified, raw)
-           .find { |candidate| known_project_namespace?(candidate, scope) }
-    end
-    private_class_method :resolve_ancestor_name
-
-    def known_project_namespace?(name, scope)
-      scope.discovered_superclasses.key?(name) ||
-        scope.discovered_includes.key?(name) ||
-        scope.discovered_classes.key?(name)
-    end
-    private_class_method :known_project_namespace?
 
     # Pulls the enclosing qualified class name out of `scope.self_type` when one is set.
     # `Nominal[T]` and `Singleton[T]` both expose `class_name`. Returns nil at the top level.
@@ -518,6 +476,7 @@ module Rigor
   end
 end
 
-# Loaded last: the segment-wise path walk reopens the module above and reads its private candidate
-# lookups, so the facade has to exist first.
+# Loaded last: the ancestor walk and the segment-wise path walk reopen the module above and read its
+# private candidate lookups, so the facade has to exist first.
+require_relative "reflection/constant_ancestors"
 require_relative "reflection/constant_path"

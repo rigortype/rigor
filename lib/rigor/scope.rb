@@ -74,6 +74,15 @@ module Rigor
       @discovery.constant_writers[name.split("::").last] || EMPTY_BOUND_CONSTANT_NAMES
     end
 
+    # Issue #1290 — the census names sharing `name`'s last segment that some write other than a memo `||=`
+    # assigns: the ones that shadow an outer constant of the name, so the lexical ladder stops at them
+    # (`Reflection.resolve_constant_type`). That asks once per constant reference, so a bare name is looked up
+    # as it stands rather than split.
+    def shadowing_constant_names(name)
+      segment = name.include?("::") ? name.split("::").last : name
+      @discovery.constant_shadowers[segment] || EMPTY_BOUND_CONSTANT_NAMES
+    end
+
     EMPTY_BOUND_CONSTANT_NAMES = [].freeze
     private_constant :EMPTY_BOUND_CONSTANT_NAMES
 

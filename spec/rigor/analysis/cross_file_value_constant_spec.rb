@@ -51,6 +51,12 @@ RSpec.describe "cross-file value constants" do
     end
   end
 
+  def call_rules(files)
+    analysed(files, nil) do |result|
+      result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)
+    end
+  end
+
   # The `flow.always-truthy-condition` sites, as `basename:line` — the rule a value-pinned constant can make
   # fire at a reader that was previously silent.
   def flow_warnings(files, sig = nil)
@@ -861,6 +867,132 @@ RSpec.describe "cross-file value constants" do
     end
   end
 
+  # Issue #1290 — a candidate the census records as written is where Ruby's lookup stops, even when no source
+  # types it. Another file's `App::LIMIT = { n: 1 }` publishes nothing, so every source missed the candidate
+  # and the ladder moved on to a published top-level `LIMIT = 5`: `5` for Ruby's `{ n: 1 }`, and a
+  # `call.undefined-method` on correct code. The stop answers `Dynamic[top]`. Each positive is paired with a
+  # control whose runtime answer IS the lower rung, where the precise answer stays.
+  describe "a written candidate no source types (#1290)" do
+    let(:top_limit) { { "a.rb" => "LIMIT = 5\n" } }
+    let(:app_limit) { { "c.rb" => "module App\n  LIMIT = { n: 1 }\nend\n" } }
+
+    it "stops the nesting rung at another file's unpublishable write" do
+      # Runtime: `{ n: 1 }` inside `App`, `5` at the top level.
+      files = top_limit.merge(app_limit,
+                              "b.rb" => "module App\n  Rigor.dump_type(LIMIT)\nend\nRigor.dump_type(LIMIT)\n")
+      expect(dumps(files)).to eq(["Dynamic[top]", "5"])
+    end
+
+    it "does not report a call on the nested constant's value" do
+      expect(call_rules(top_limit.merge(app_limit, "b.rb" => "module App\n  LIMIT.fetch(:n)\nend\n"))).to eq([])
+    end
+
+    it "keeps the lower rung for a written name the read never tries" do
+      # Runtime: `5` for both. `Other::LIMIT` is off `App`'s lookup path, and `Outer::App` is not `App`: a
+      # census name that only ENDS like a candidate does not stop it.
+      files = top_limit.merge(
+        "c.rb" => "module Other\n  LIMIT = { n: 1 }\nend\nmodule App\n  LIMIT = { n: 1 }\nend\n",
+        "b.rb" => "module Outer\n  module App\n    Rigor.dump_type(LIMIT)\n  end\nend\n" \
+                  "module Mine\n  Rigor.dump_type(LIMIT)\nend\n"
+      )
+      expect(dumps(files)).to eq(%w[5 5])
+    end
+
+    it "stops the ancestor rung at a superclass's unpublishable write" do
+      # Runtime: `{ n: 1 }` in `Sub` (Ruby consults `Base::LIMIT` before the top level), `5` in `Other`.
+      files = top_limit.merge(
+        "c.rb" => "class Base\n  LIMIT = { n: 1 }\nend\n",
+        "b.rb" => "class Sub < Base\n  Rigor.dump_type(LIMIT)\nend\nclass Other\n  Rigor.dump_type(LIMIT)\nend\n"
+      )
+      expect(dumps(files)).to eq(["Dynamic[top]", "5"])
+    end
+
+    it "stops a top-level body's first rung at the top-level write" do
+      # Runtime: `{ n: 1 }` — a top-level `def` resolves `TOP` at the top level whoever calls it.
+      files = {
+        "a.rb" => "TOP = { n: 1 }\nmodule Plug\n  TOP = 5\nend\n",
+        "b.rb" => "def read_top = TOP\nmodule Plug\n  Rigor.dump_type(read_top)\nend\n"
+      }
+      expect(dumps(files)).to eq(["Dynamic[top]"])
+    end
+
+    it "stops a top-level body's caller-derived rungs at the caller's own write" do
+      # Ruby raises `NameError`: the top-level `def` resolves `TOP` at the top level, where nothing writes it. The
+      # caller-derived rungs are #716's deliberate silent answer, and they mirror steps 1 and 2, so the stop binds
+      # them too: the caller's own `Plug::TOP` is found before its superclass's published `Base::TOP`.
+      files = {
+        "a.rb" => "class Base\n  TOP = 5\nend\n",
+        "c.rb" => "class Plug < Base\n  TOP = { n: 1 }\nend\n",
+        "b.rb" => "def read_top = TOP\nclass Plug < Base\n  Rigor.dump_type(read_top)\nend\n"
+      }
+      expect(dumps(files)).to eq(["Dynamic[top]"])
+    end
+
+    it "keeps a top-level body's caller-derived rung where nothing writes the top-level name" do
+      # Ruby raises `NameError`; the caller's `Plug::TOP` is #716's deliberate silent answer, and it stays.
+      files = {
+        "a.rb" => "module Plug\n  TOP = 5\nend\n",
+        "b.rb" => "def read_top = TOP\nmodule Plug\n  Rigor.dump_type(read_top)\nend\n"
+      }
+      expect(dumps(files)).to eq(["5"])
+    end
+
+    it "stops a path's segment walk at the owner's own write before its superclass's" do
+      # Runtime: `{ n: 1 }` both times — `Klass::B` is found in `Klass` before `Base`.
+      files = {
+        "a.rb" => "class Base\n  B = 5\nend\nclass Klass < Base; end\n",
+        "c.rb" => "class Klass\n  B = { n: 1 }\nend\n",
+        "b.rb" => "Rigor.dump_type(Klass::B)\nmodule Wrap\n  Rigor.dump_type(Klass::B)\nend\n"
+      }
+      expect(dumps(files)).to eq(["Dynamic[top]", "Dynamic[top]"])
+    end
+
+    it "keeps the segment walk's inherited answer when the owner writes nothing" do
+      # Runtime: `5` — `Klass` inherits `B` from `Base`.
+      files = {
+        "a.rb" => "class Base\n  B = 5\nend\nclass Klass < Base; end\n",
+        "b.rb" => "module Wrap\n  Rigor.dump_type(Klass::B)\nend\n"
+      }
+      expect(dumps(files)).to eq(["5"])
+    end
+
+    it "stops at the reading file's own write that its typed table does not carry" do
+      # Runtime: `{ n: 1 }`. The census sees a multiple assignment; the per-file table holds plain writes only.
+      files = top_limit.merge("b.rb" => "module App\n  LIMIT, OTHER = { n: 1 }, 2\n  Rigor.dump_type(LIMIT)\nend\n")
+      expect(dumps(files)).to eq(["Dynamic[top]"])
+    end
+
+    it "lets an RBS declaration of the written name answer ahead of the stop" do
+      files = top_limit.merge(app_limit, "b.rb" => "module App\n  Rigor.dump_type(LIMIT)\nend\n")
+      expect(dumps(files, "module App\n  LIMIT: Hash[Symbol, Integer]\nend\n")).to eq(["Hash[Symbol, Integer]"])
+    end
+
+    it "does not stop at a memo, however many files memoize the name" do
+      # Runtime: `5`. `LIMIT ||= …` inside `App` finds the top-level `LIMIT`, so it never creates `App::LIMIT`,
+      # and `Other`'s memo is no different. Two files' memos bind a compound write's own reading (#617), which is
+      # a different question: here the lower rung that answers is exactly what each memo finds.
+      files = top_limit.merge(
+        "c.rb" => "module App\n  def self.limit = (LIMIT ||= { n: 1 })\nend\n",
+        "d.rb" => "module Other\n  def self.limit = (LIMIT ||= { n: 2 })\nend\n",
+        "b.rb" => "module App\n  Rigor.dump_type(LIMIT)\nend\n"
+      )
+      expect(dumps(files)).to eq(["5"])
+    end
+
+    it "keeps a rooted read at the top level" do
+      # Runtime: `5`. `::LIMIT` names the top-level constant whatever `App` writes.
+      expect(dumps(top_limit.merge(app_limit, "b.rb" => "module App\n  Rigor.dump_type(::LIMIT)\nend\n")))
+        .to eq(["5"])
+    end
+
+    it "reads a compound write's binding off the written candidate" do
+      # Runtime: `{ n: 1 }` — `App::LIMIT` is set, so the `||=` keeps it. Before #1290 the plain read resolved
+      # the top-level `5`, and #617's gradual binding never ran.
+      expect(dumps(top_limit.merge(app_limit, "b.rb" => "module App\n  Rigor.dump_type(LIMIT ||= 1)\nend\n")))
+        .to eq(["1 | Dynamic[top]"])
+    end
+  end
+
   # Issue #617's compound-write rule reads a constant's current binding off the plain-read ladder. A constant
   # another file writes has none there: an unpublishable value (a Hash) never publishes, and a publishable one
   # is withdrawn by the compound write itself, which the census counts as a second writer. Read as unbound,
@@ -868,12 +1000,6 @@ RSpec.describe "cross-file value constants" do
   # loaded yet. Its binding is gradual instead. Each positive is paired with a control whose name nothing
   # but a memo `||=` writes, or nothing the write resolves to, where the ADR-5 memo reading stays.
   describe "a compound write to a constant another file writes" do
-    def call_rules(files)
-      analysed(files, nil) do |result|
-        result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)
-      end
-    end
-
     def error_rules(files)
       analysed(files, nil) do |result|
         result.diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)

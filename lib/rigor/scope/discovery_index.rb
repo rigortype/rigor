@@ -34,6 +34,7 @@ module Rigor
       :discovered_class_sources,
       :constant_sources,
       :constant_writers,
+      :constant_shadowers,
       :published_constant_names,
       :local_constant_names,
       :published_constant_alias_names,
@@ -183,6 +184,10 @@ module Rigor
         # nothing: such a name is bound, just not to a value the analyzer carries. Seeded on every run, because
         # the question is a typing one rather than a recording one.
         constant_writers: EMPTY_TABLE,
+        # Issue #1290 — the censused names some write other than a memo `||=` assigns, grouped by LAST SEGMENT.
+        # `Scope#shadowing_constant_names` reads it for the lexical ladder: a candidate no source types but this
+        # table holds is where Ruby's lookup stops. Seeded on every run beside `constant_writers`.
+        constant_shadowers: EMPTY_TABLE,
         # Issue #644 — the two halves of `Scope#published_constant?`, the question
         # {Analysis::CheckRules::PublishedConstantGuard} asks. `published_constant_names` is the LAST
         # SEGMENTS of the project-wide published table (run-wide, seeded by the runner);

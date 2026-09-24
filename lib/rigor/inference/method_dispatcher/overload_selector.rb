@@ -3,6 +3,7 @@
 require_relative "../../type"
 require_relative "../acceptance"
 require_relative "../rbs_type_translator"
+require_relative "proven_overload"
 require_relative "receiver_affinity"
 
 module Rigor
@@ -118,7 +119,7 @@ module Rigor
           # `**shared` splat per pass allocated three objects per selection (#775).
           shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
-                     alias_expander: environment&.rbs_loader }
+                     alias_expander: environment&.rbs_loader, environment: environment }
 
           matches = run_selection_passes(declared, overloads, shared)
           return matches unless matches.empty?
@@ -177,7 +178,9 @@ module Rigor
           # matches on a `maybe`, take `Integer#+` of a `bot`, a `Dynamic[Integer | Float | …]` or an
           # unloadable class (612 call sites across the survey corpus).
           def run_selection_passes(declared, overloads, shared)
-            strict = find_proven_overload(declared, shared) || find_matching_overload(overloads, shared, strict: true)
+            # Unreordered, pass 0 can only pick what the strict pass picks, so it is skipped (#1344's allocations).
+            proven = find_proven_overload(declared, shared) unless overloads.equal?(declared)
+            strict = proven || find_matching_overload(overloads, shared, strict: true)
             return strict unless strict.empty?
 
             alias_hit = find_matching_overload_via_aliases(
@@ -205,17 +208,13 @@ module Rigor
           # `Rational#divmod`'s `(Integer | Float | Rational) -> [Integer, Rational]` for a Float remainder.
           def find_proven_overload(declared, shared)
             args = shared[:arg_types]
-            return nil if args.empty? || !args.all? { |arg| proven_arg?(arg) }
+            return nil unless ProvenOverload.applies?(args)
 
-            first = declared.find { |mt| engages_block_shape?(mt, shared[:block_required]) && matches?(mt, shared) }
-            [first] if first && strictly_typed_params?(first, args.size) && matches?(first, shared, strict: :proven)
+            index = declared.index { |mt| engages_block_shape?(mt, shared[:block_required]) && matches?(mt, shared) }
+            first = index && declared[index]
+            proven = first && strictly_typed_params?(first, args.size) && matches?(first, shared, strict: :proven)
+            [first] if proven && !ProvenOverload.contested?(declared, index, args, shared[:environment])
           end
-
-          def proven_arg?(type) = type.is_a?(Type::Constant) || (type.is_a?(Type::Nominal) && type.type_args.empty?)
-
-          def arg_class_name(arg) = arg.is_a?(Type::Constant) ? arg.value.class.name : arg.class_name
-
-          def names_arg_class?(param, arg) = param.is_a?(Type::Nominal) && param.class_name == arg_class_name(arg)
 
           # The shared "no overload matched" answer; every consumer only reads the list.
           NO_MATCH = [].freeze
@@ -456,7 +455,7 @@ module Rigor
             return false if untyped_arg?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
-            return result.yes? && names_arg_class?(param_type, arg) if strict == :proven
+            return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven
 
             # A record's `maybe` for a `Hash` with a gradual arm is no evidence for the overload: with
             # `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the

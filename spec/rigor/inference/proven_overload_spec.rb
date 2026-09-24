@@ -67,6 +67,32 @@ RSpec.describe "proven overload pass", type: :runner do
     expect(rules(source, sig: subclass_sig)).not_to include("call.undefined-method")
   end
 
+  it "does not skip an earlier arm the argument's class includes through project RBS" do
+    # Runtime: `"p"`. The analyzer process cannot load `Printable`, so acceptance reads `Integer`'s host ancestors
+    # and rules `(Printable)` out; taking the `(Integer)` arm after it typed the call `Integer` and reported `upcase`.
+    sig = { "money.rbs" => <<~RBS }
+      module Printable
+      end
+      class Integer
+        include Printable
+      end
+      class Money
+        def show: (Printable) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      module Printable; end
+      class Integer; include Printable; end
+      class Money
+        def show(x) = "p"
+      end
+      Money.new.show(1).upcase
+    RUBY
+    expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+  end
+
   it "does not take a union arm, where upstream RBS can be wrong, for Rational#divmod(Float)" do
     # Runtime: `Rational(3, 2).divmod(0.5)` is `[3, 0.0]`, a Float remainder. rbs declares
     # `(Integer | Float | Rational) -> [Integer, Rational]` first, and taking it made `when Float` unreachable.

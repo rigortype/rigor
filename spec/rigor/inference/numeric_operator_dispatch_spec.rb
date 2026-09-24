@@ -59,8 +59,11 @@ RSpec.describe "numeric operator dispatch" do
   end
 
   def divmod_admits?(type, quotient, remainder)
-    return true if type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top)
-    return true if type.is_a?(Rigor::Type::Nominal) && type.class_name == "Array"
+    return divmod_admits?(type.static_facet, quotient, remainder) if type.is_a?(Rigor::Type::Dynamic)
+    return true if type.is_a?(Rigor::Type::Top)
+    if type.is_a?(Rigor::Type::Nominal) && type.class_name == "Array"
+      return type.type_args.empty? || [quotient, remainder].all? { |name| admits?(type.type_args.first, name) }
+    end
     return false unless type.is_a?(Rigor::Type::Tuple) && type.elements.size == 2
 
     admits?(type.elements[0], quotient) && admits?(type.elements[1], remainder)

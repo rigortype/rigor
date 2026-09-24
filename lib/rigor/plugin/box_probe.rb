@@ -32,32 +32,59 @@ module Rigor
 
       EXPECTED_OUTPUT = "(3/4)"
 
+      # The reproducer answers in well under a second; a child still running after this is killed and
+      # counted as a failure, so a wedged probe cannot hang the launcher (or `rigor lsp` behind it).
+      DEADLINE_SECONDS = 10
+
       module_function
 
       # nil when `ruby` can run Rigor under `RUBY_BOX=1`; otherwise a short reason for the launcher's
-      # warning. Any failure to run the probe at all is a reason too, never a pass.
+      # warning. Only a child killed by a signal is blamed on the bug; any other failure to answer is
+      # reported as the probe failing, never as a pass.
       def unsupported_reason(ruby = RbConfig.ruby)
         output, status = run(ruby)
-        return "the Ruby::Box probe could not start #{ruby}" if status.nil?
+        return "the Ruby::Box probe could not run #{ruby}" if status.nil?
         return nil if status.success? && output == EXPECTED_OUTPUT
         return "Ruby::Box is not available in Ruby #{RUBY_VERSION}" if status.exitstatus == 2
+        return "the Ruby::Box probe failed (#{status})" unless status.signaled?
 
         "Ruby #{RUBY_VERSION} crashes running Ractor-shareable procs inside Ruby::Box " \
-          "(Ruby Bug #22260, fixed on CRuby master after 4.0.7)"
+          "(Ruby Bug #22260; a Ruby carrying its fix is needed)"
       end
 
+      # `RUBYOPT` is cleared so a `-r` of the caller's (bootsnap, a debugger, a coverage hook) cannot fail
+      # to load under `--disable-gems` and be mistaken for the crash; the probe needs nothing but core.
       def run(ruby)
         reader, writer = IO.pipe
-        pid = ::Process.spawn({ "RUBY_BOX" => "1" }, ruby, "--disable-gems", "-e", SCRIPT,
+        pid = ::Process.spawn({ "RUBY_BOX" => "1", "RUBYOPT" => nil }, ruby, "--disable-gems", "-e", SCRIPT,
                               in: File::NULL, out: writer, err: File::NULL)
         writer.close
-        output = reader.read
-        [output, ::Process.wait2(pid).last]
+        output = read_until_eof(reader)
+        return [output, ::Process.wait2(pid).last] if output
+
+        ::Process.kill(:KILL, pid)
+        ::Process.wait(pid)
+        [nil, nil]
       rescue ::SystemCallError
         [nil, nil]
       ensure
         writer&.close unless writer&.closed?
         reader&.close
+      end
+
+      # The child's whole stdout, or nil when it has not closed it by the deadline.
+      def read_until_eof(reader)
+        deadline = ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) + DEADLINE_SECONDS
+        output = +""
+        loop do
+          remaining = deadline - ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
+          return nil unless remaining.positive? && reader.wait_readable(remaining)
+
+          chunk = reader.read_nonblock(4096, exception: false)
+          return output if chunk.nil?
+
+          output << chunk if chunk.is_a?(String)
+        end
       end
     end
   end

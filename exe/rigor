@@ -22,8 +22,10 @@ rigor_wants_box = rigor_isolation == "ruby_box" || !ENV["RIGOR_BOX"].to_s.empty?
 if rigor_wants_box && ENV["RUBY_BOX"].to_s.empty?
   require_relative "../lib/rigor/plugin/box_probe"
   if (rigor_box_unsupported = Rigor::Plugin::BoxProbe.unsupported_reason)
-    warn "rigor: ruby_box plugin isolation is unavailable: #{rigor_box_unsupported}. " \
-         "Falling back to plugins_isolation from .rigor.yml (default: process)."
+    rigor_box_warning = "rigor: ruby_box plugin isolation is unavailable: #{rigor_box_unsupported}. " \
+                        "Falling back to the configured plugins_isolation strategy (default: process)."
+    # `$stderr.puts`, not `warn`: `-W0` silences `warn`, and this fallback must never be silent.
+    $stderr.puts rigor_box_warning # rubocop:disable Style/StderrPuts
     ENV.delete("RIGOR_PLUGIN_ISOLATION") if rigor_isolation == "ruby_box"
     ENV.delete("RIGOR_BOX")
   else

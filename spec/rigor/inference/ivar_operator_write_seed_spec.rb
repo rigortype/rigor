@@ -34,7 +34,7 @@ RSpec.describe "class ivar seed of an `op=` write", type: :runner do
   end
 
   %i[initialize shrink grow].permutation.each do |order|
-    it "keeps `x == 2.5` live with the methods in the order #{order.join(", ")}" do
+    it "keeps `x == 2.5` live with the methods in the order #{order.join(', ')}" do
       # Runtime: prints, since `shrink` then `grow` leaves `@x` at `2.5`.
       expect(flow_rules(scale(*order))).to be_empty
     end

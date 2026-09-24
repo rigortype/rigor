@@ -423,6 +423,27 @@ ivar only `&&=` writes stays unseeded, and the write reads as the
 unbound target `Dynamic[top] | v`, which is the statement evaluator's
 reading.
 
+**Status, 2026-09-24 — `op=` order closed (#1343).** The `op=` arm
+dispatched on the seed as the pre-pass had walked it so far, so its
+contribution depended on the order of the class's methods, which Ruby
+may call in any order. With `@x = 1`, `@x &&= 1.5` and `@x += 1` in
+three methods, the three orders that put the `+=` before the `&&=`
+dropped `Float` from the seed and folded `x == 2.5` always-falsey on a
+program that reaches it; #1340's read of the held `&&=` covered only
+one of them. Every `op=` write is now held like an `&&=` until the walk
+has seen the class. An ivar only `op=` writes is seeded from the
+widened rvalues first, and that seed counts as a write for `&&=`. The
+held writes are then dispatched on the complete seed, once per held
+write, which covers every chain one call of each method forms. ADR-56's
+`BodyFixpoint` was rejected for the chain: iterated to its fixed point,
+a counter's `@n += x` re-dispatched on its own `Dynamic[Integer | …]`
+result and gained `Dynamic[top]`, and the final widening pass dropped
+the literal it starts at, on 51 of 304 `op=`-written ivar seeds in the
+survey corpus. So a lone write is not applied to its own result:
+`@a = []; @a += [1]` still seeds `[] | [1]`, as before, and no rule was
+seen to fold on it. The corpus gate (18 targets) moved no diagnostic;
+9 of the 304 seeds change, as the PR itemises.
+
 ## Rejected / deferred alternatives
 
 - **Cross-method ivar definite assignment as the headline fix.**

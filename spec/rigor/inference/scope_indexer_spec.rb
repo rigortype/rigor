@@ -1482,26 +1482,29 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }
           end
 
-          scale = {
-            initialize: "def initialize = (@x = 1)",
-            shrink: "def shrink = (@x &&= 1.5)",
-            grow: "def grow = (@x += 1)"
-          }
+          def scale_seed(*order)
+            definitions = {
+              initialize: "def initialize = (@x = 1)",
+              shrink: "def shrink = (@x &&= 1.5)",
+              grow: "def grow = (@x += 1)"
+            }
+            seed_of(*definitions.values_at(*order))
+          end
 
-          scale.keys.permutation.each do |order|
-            it "dispatches on the value an `&&=` stores with the methods in the order #{order.join(", ")}" do
-              expect(float?(seed_of(*scale.values_at(*order)))).to be(true)
+          %i[initialize shrink grow].permutation.each do |order|
+            it "dispatches on the value an `&&=` stores with the methods in the order #{order.join(', ')}" do
+              expect(float?(scale_seed(*order))).to be(true)
             end
           end
 
           it "seeds the same type in every order" do
-            seeds = scale.keys.permutation.map { |order| seed_of(*scale.values_at(*order)) }
+            seeds = %i[initialize shrink grow].permutation.map { |order| scale_seed(*order) }
             expect(seeds.uniq.size).to eq(1)
           end
 
           it "adds no Float when nothing but the `&&=` literal stores one" do
             # The control: `1 | 1.5` is the whole runtime range without the `+=`.
-            expect(float?(seed_of(*scale.values_at(:initialize, :shrink)))).to be(false)
+            expect(float?(scale_seed(:initialize, :shrink))).to be(false)
           end
 
           it "dispatches on a seeding write that comes later, not on the rvalue" do

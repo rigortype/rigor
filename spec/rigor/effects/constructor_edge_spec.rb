@@ -69,6 +69,14 @@ RSpec.describe "a Const.new call in an effect summary" do
   # class method `new` never calls. Recorded as an instance-side include, it was the constructor the rule
   # found, and its write reached a caller whose `new` runs `BasicObject#initialize`.
   it "takes no constructor from a module included into the singleton class" do
+    namespace = Module.new
+    %w[base.rb constructors.rb].each do |file|
+      path = File.join(fixture, "lib", file)
+      namespace.module_eval(File.read(path), path)
+    end
+    eigen = namespace.const_get(:ConstructorEdge).const_get(:EigenSetup)
+    expect(eigen.instance_method(:initialize).owner).to equal(BasicObject)
+
     entry = table["ConstructorEdge::EigenClient#build"]
 
     expect(entry.proven).to be_empty

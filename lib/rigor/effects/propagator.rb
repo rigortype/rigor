@@ -471,6 +471,9 @@ module Rigor
         # `A::Foo` and `Foo`), so it cannot say whether a class includes one project module or one gem
         # module the project cannot see — and a module is free to define `initialize`. Such a class keeps
         # exactly today's behaviour: its `new` edge resolves to nothing and its callers stay unclaimed.
+        # The table holds instance-side includes only. A module mixed into the singleton class, by
+        # `extend` or by an `include` inside `class << self`, is not in it, so a `new` such a module
+        # supplies is not seen, and the walk can answer `true` for a class whose `new` does work.
         def empty_constructor?(class_name)
           queue = [class_name]
           seen = Set.new
@@ -546,8 +549,10 @@ module Rigor
         #
         # The includes are instance-side only. `include M` puts `M#m` between the class and its
         # superclass, which is exactly where `super` looks, while `M.m` is a singleton method `include`
-        # never contributes; a singleton `super` that really does reach a module went through `extend` or
-        # a `class << self` include, neither of which is collected, so it resolves to nothing and taints.
+        # never contributes. A singleton `super` that really does reach a module went through `extend` or
+        # a `class << self` include, neither of which is collected, so the walk steps over the module: it
+        # reaches the superclass chain's definition when there is one, without the module's labels, and
+        # resolves to nothing and taints when there is not.
         def resolve_super(class_name, separator, selector)
           queue = separator == "#" ? @includes.fetch(class_name, []).dup : []
           queue.concat(@superclasses.fetch(class_name, []))

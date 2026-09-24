@@ -142,10 +142,10 @@ module Rigor
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           @ancestry.record_constant_class(node, prefix)
         when Prism::AliasMethodNode
-          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node, context)
         when Prism::CallNode
           harvest_class_body_macro(node, prefix)
-          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
+          return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node, context)
           return record_declaration(node, prefix, context) if declaration?(node)
         end
 

@@ -74,10 +74,12 @@ module Rigor
       # written.
       #
       # Both are calls on `self`, like `define_method`. Where `self` is the singleton class — inside
-      # `class << self`, or `singleton_class.class_eval` — they mix the module into the singleton class,
-      # which is what `extend` does. The include table is the instance ancestry that `super` and the
-      # constructor rule walk, so such a call records nothing, and the collection is as blind to it as it
-      # is to `extend`.
+      # `class << self`, or a `class_eval` / `instance_eval` block on `singleton_class` — they mix the
+      # module into the singleton class, which is what `extend` does. The include table is the instance
+      # ancestry that `super` and the constructor rule walk, so such a call records nothing, and the
+      # collection is as blind to it as it is to `extend`. A block that makes another class `self`
+      # (`Class.new { … }`, `Struct.new(:a) { … }`, `Other.class_eval { … }`) is not modelled, and its
+      # include still files under the enclosing class.
       #
       # @param context — the {DefinitionContext} of the class-body position the call sits at
       def record_includes(class_name, node, prefix, context)
@@ -96,13 +98,20 @@ module Rigor
         (@includes[class_name] ||= []) << FileCollection::OPAQUE_ANCESTOR
       end
 
-      # Whether this node aliases `initialize`, in either spelling. A `CallNode` qualifies only as a
-      # receiver-less `alias_method` whose first symbol argument is the new name.
-      def alias_to_initialize?(node)
+      # Whether this node aliases the instance-side `initialize`, in either spelling. A `CallNode` qualifies
+      # only as a receiver-less `alias_method` whose first symbol argument is the new name.
+      #
+      # `alias` works on the default definee and `alias_method` on `self`, so the two part in an
+      # `instance_eval` block, and inside `class << self` both alias the singleton class's `initialize`,
+      # a class method `new` never calls.
+      #
+      # @param context — the {DefinitionContext} of the class-body position the node sits at
+      def alias_to_initialize?(node, context)
         case node
-        when Prism::AliasMethodNode then literal_name(node.new_name) == "initialize"
+        when Prism::AliasMethodNode then !context.definee_singleton && literal_name(node.new_name) == "initialize"
         when Prism::CallNode
-          node.receiver.nil? && node.name == :alias_method && literal_name(first_argument(node)) == "initialize"
+          node.receiver.nil? && node.name == :alias_method && !context.self_singleton_class? &&
+            literal_name(first_argument(node)) == "initialize"
         else false
         end
       end

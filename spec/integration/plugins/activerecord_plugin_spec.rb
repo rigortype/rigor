@@ -924,7 +924,7 @@ RSpec.describe "plugins/rigor-activerecord" do
   describe "an association proxy's overrides (a declaration holds for every run-time class)" do
     # `user.posts` types as `ActiveRecord::Relation[Post]` but returns a `CollectionProxy`, and a call on it is
     # checked against the parameter list the bundled `relation.rbs` declares. That list has to accept every
-    # argument a proxy override accepts (`docs/internal-spec/plugin.md` § Which channel a row belongs in):
+    # argument a proxy override accepts (`docs/internal-spec/plugin.md`, the `signature_paths` manifest row):
     # the proxy's `delete_all(dependent = nil)` used to draw `call.wrong-arity (given 1, expected 0)`.
 
     let(:association_models) do

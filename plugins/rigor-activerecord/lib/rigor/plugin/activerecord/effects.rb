@@ -80,8 +80,8 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
-        # The writers an association's `CollectionProxy` defines and a plain Relation does not (a plain
-        # Relation's own `delete` / `destroy` delete by id instead). Each adds records to the
+        # The writers an association's `CollectionProxy` defines, or for `delete` / `destroy` overrides (a
+        # plain Relation's own `delete` / `destroy` delete by id instead). Each adds records to the
         # association's in-memory target or removes them from it. Depending on whether the owner is saved
         # and on the association's `dependent:` option, it may also read, write, and open a transaction, so
         # the row names all three rather than the parent `io.db`, which `--label io.db.write` would not

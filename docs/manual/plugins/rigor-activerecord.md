@@ -258,11 +258,11 @@ close every model in the project.
   reduced index until it is invalidated, so use `rigor check
   --no-cache` (or `make cache-clean`) if you want to see the change
   immediately.
-- **An association and a plain relation share one signature.**
+- **Every kind of relation shares one signature.**
   `user.posts`, `user.posts.where(...)` and `Post.where(...)` all
   type as `ActiveRecord::Relation[Post]`, although only the first
   is an association's `CollectionProxy`, so the signature they share
-  takes the longest argument list among them.
+  accepts the widest argument list any of them takes.
   `user.posts.delete_all(:nullify)` is valid and not reported. The
   same call on the other two raises `ArgumentError` at run time, and
   is not reported either.

@@ -133,6 +133,45 @@
 # more than the declarations here. `delete` and `destroy`, whose
 # overrides take more arguments than the Relation's, stay undeclared
 # for the reasons above.
+#
+# ## A writer that also queries carries the read too
+#
+# `io.db.write` does not include `io.db.read`: they are sibling
+# leaves. So a writer that queries before its write, or after a failed
+# one, names both. In activerecord 8.1.3.1:
+#
+# - `find_or_create_by(!)` is `find_by || create_or_find_by`, and
+#   `first_or_create(!)` is `first || create`.
+# - `create_or_find_by(!)` rescues `RecordNotUnique` with `find_by!`.
+# - `destroy_all` is `records.each(&:destroy)`, which loads first, and
+#   `destroy_by` is `where(…).destroy_all`. `update(!)` walks `each`,
+#   or passes an id to the model's `update`, which calls `find`.
+# - `update_all` and `delete_all`, and so `touch_all` and `delete_by`,
+#   first `SELECT` the distinct primary keys when the relation
+#   eager-loads, has a limit or offset and no `group`, and eager-loads
+#   or joins a collection association (`apply_join_dependency`). The
+#   proxy's `delete_all` on a `has_many :through` loads the target
+#   before it deletes.
+# - `create(!)` on the proxy of a `has_many :through` a `has_one`
+#   builds the join record through the `has_one`, which loads the
+#   record it replaces.
+#
+# Two kinds of query are not counted. Schema reflection is one: the
+# column and index lookups the schema cache serves would otherwise
+# make `where` a read. The model's callbacks and validators are the
+# other, including those an association option such as `dependent:`
+# or `touch:` registers. They are not part of any bound here. The
+# plugin's callback edge carries only symbol-argument callback macros
+# and a uniqueness validator, and only on the model's own `save` /
+# `destroy`. Nothing carries the reads a required `belongs_to`,
+# `touch:` or `dependent:` registers.
+#
+# One case is not covered. On that same `has_many :through` a
+# `has_one`, `new` / `build` also build the join record when the
+# source reflection has an inverse, and so do `find_or_initialize_by`
+# and `first_or_initialize`, which reach `new`. The `has_one` then
+# replaces its record: it loads the old one, and even without a
+# save it can delete, destroy or save it.
 
 module ActiveRecord
   class Relation[Elem]
@@ -362,24 +401,24 @@ module ActiveRecord
     def arel: () -> untyped
 
     # --- whole-relation persistence ---
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def update_all: (untyped) -> Integer
     # The optional argument is the association proxy's `dependent`
     # (see the header). A plain Relation's and an AssociationRelation's
     # `delete_all` take none.
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def delete_all: (?untyped dependent) -> Integer
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.read, io.db.write}
     def update: (*untyped) -> untyped
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.read, io.db.write}
     def update!: (*untyped) -> untyped
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.read, io.db.write}
     def delete_by: (*untyped) -> Integer
-    %a{rigor:v1:effect io.db.write}
+    %a{rigor:v1:effect io.db.read, io.db.write}
     def destroy_by: (*untyped) -> Array[Elem]
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def touch_all: (*untyped) -> Integer
     %a{rigor:v1:effect io.db.write, mutate.self}
     def insert: (untyped, **untyped) -> untyped
@@ -399,23 +438,23 @@ module ActiveRecord
     def new: (*untyped) ?{ (Elem) -> void } -> Elem
     %a{rigor:v1:effect mutate.self}
     def build: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def create: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def create!: (*untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def find_or_create_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def find_or_create_by!: (untyped) ?{ (Elem) -> void } -> Elem
     %a{rigor:v1:effect io.db.read, mutate.self}
     def find_or_initialize_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def create_or_find_by: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def create_or_find_by!: (untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def first_or_create: (?untyped) ?{ (Elem) -> void } -> Elem
-    %a{rigor:v1:effect io.db.write, mutate.self}
+    %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def first_or_create!: (?untyped) ?{ (Elem) -> void } -> Elem
     %a{rigor:v1:effect io.db.read, mutate.self}
     def first_or_initialize: (?untyped) ?{ (Elem) -> void } -> Elem

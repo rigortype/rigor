@@ -131,8 +131,8 @@ colours, and through which of the two channels:
 
 | Channel | Rows |
 | --- | --- |
-| **Shipped RBS** — `sig/active_record/relation.rbs`, tier 1, discharging | every `ActiveRecord::Relation` method the file declares. The builder / materializer line is drawn there: `%a{pure}` on `where` / `joins` / `order` / `select` / `limit`, `%a{rigor:v1:effect io.db.read}` on `find` / `first` / `count` / `pluck` / `each` / `to_a`, `io.db.write` on `update_all` / `insert_all` / `create`. |
-| **`effect_attributions:`** — the manifest, first-party discharging | `ActiveRecord::Base`'s own surface (finders → `io.db.read`, persistence → `io.db.write`, `transaction` / `with_lock` → `io.db.transaction`); the `Enumerable` delegations on a Relation, which materialise by calling `each`; `connection.execute` / `exec_query` / `select_all`, narrowed by the statement's leading SQL verb; the migration DSL → `io.db.write` + `rails.schema.write`. |
+| **Shipped RBS** — `sig/active_record/relation.rbs`, tier 1, discharging | every `ActiveRecord::Relation` method the file declares. The builder / materializer line is drawn there: `%a{pure}` on `where` / `joins` / `order` / `select` / `limit`, `%a{rigor:v1:effect io.db.read}` on `find` / `first` / `count` / `pluck` / `each` / `to_a`, `io.db.write` on `insert_all` / `upsert_all`, and both on a writer that also queries (`find_or_create_by`, `destroy_all`, `update_all`, `create`). |
+| **`effect_attributions:`** — the manifest, first-party discharging | `ActiveRecord::Base`'s own surface (finders → `io.db.read`, persistence → `io.db.write`, a class-side writer that also queries → both, `transaction` → `io.db.transaction`, `lock!` / `with_lock` → `io.db.read` + `io.db.transaction`); the `Enumerable` delegations on a Relation, which materialise by calling `each`; `connection.execute` / `exec_query` / `select_all`, narrowed by the statement's leading SQL verb; the migration DSL → `io.db.write` + `rails.schema.write`. |
 
 An `ActiveRecord::Base` row reaches `User.find` through the project's
 own `User < ApplicationRecord < ActiveRecord::Base` lines, so one row
@@ -146,6 +146,31 @@ covers every model in the app.
 them ∅ because that is what the code *does* — and the truthful one
 wins: a presenter that builds and returns a scope has pure code, and
 the caller that materialises it gets the read.
+
+### A writer that also queries carries both labels
+
+`io.db.write` does not include `io.db.read`, so a writer that queries
+names both. `find_or_create_by` is `find_by` and then a create, and
+`create_or_find_by` falls back to `find_by!` when the insert hits a
+unique index. `destroy_all` / `destroy_by` load the records they
+destroy. `update(!)` finds or loads the records it updates.
+`update_all` / `delete_all`, and so `touch_all` / `delete_by`, first
+select the primary keys in some eager-loading, limited relations;
+`relation.rbs` states the full condition. The same holds for the
+class-side rows, because Rails delegates `Model.update_all` and the
+rest to `Model.all`. `reset_counters` counts before it writes.
+`create`, `insert_all`, `upsert_all`, `update_counters`,
+`increment_counter` and `decrement_counter` stay write-only on a model
+class. On a relation, `create` also reads, because on a
+`has_many :through` a `has_one` it loads the record the `has_one`
+replaces. `relation.rbs` cites the Rails path each read comes from.
+
+Schema reflection is not counted as a read, and neither are the
+model's validators and callbacks. The callback edge below carries a
+symbol-argument callback macro and a uniqueness validator, and only
+on the model's own `save` / `destroy`. Nothing carries the reads that
+a required `belongs_to`, a `touch:` option or a `dependent:` option
+registers.
 
 ### Association relations change their target
 

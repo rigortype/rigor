@@ -306,7 +306,8 @@ module Rigor
           )
         end
 
-        # A synthesised default summary — an `attr_*` writer's `mutate.self`, and the `Struct` / `Data`
+        # A synthesised default summary — an `attr_*` writer's `mutate.self` (`mutate.static` for a
+        # singleton one), and the `Struct` / `Data`
         # accessors that join it when discovery synthesises them — carries no information a reviewer acts
         # on: it restates the `attr_accessor` line. Recognised by its origins being exactly the synthesised
         # constructs, so a hand-written `def name=` keeps its row.

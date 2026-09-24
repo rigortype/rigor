@@ -44,6 +44,19 @@ RSpec.describe "the allocation witness behind mutate.local" do
             def retitled
               self.class.new.title = "x"
             end
+
+            # Methods of the class itself, although neither a `def self.` nor a `def` in `class << self` spells one.
+            class << self
+              define_method(:eigen_defined) do
+                new.title = "x"
+              end
+            end
+
+            singleton_class.class_eval do
+              def evaluated
+                new.title = "x"
+              end
+            end
           end
 
           # An association extension's shape: in an instance method, `self` is the proxy, and its `new` is the
@@ -60,6 +73,17 @@ RSpec.describe "the allocation witness behind mutate.local" do
             def draft_local
               post = new
               post.title = "x"
+            end
+
+            # Instance methods, although a singleton method defines them.
+            def self.define_drafts
+              def nested_draft
+                new.title = "x"
+              end
+
+              define_method(:defined_draft) do
+                new.title = "x"
+              end
             end
           end
 
@@ -127,6 +151,8 @@ RSpec.describe "the allocation witness behind mutate.local" do
             def self.fresh: () -> String
             def self.explicit_self: () -> String
             def self.eigen: () -> String
+            def self.eigen_defined: () -> String
+            def self.evaluated: () -> String
             def retitled: () -> String
           end
 
@@ -134,6 +160,9 @@ RSpec.describe "the allocation witness behind mutate.local" do
             def draft: () -> String
             def draft_self: () -> String
             def draft_local: () -> String
+            def self.define_drafts: () -> Symbol
+            def nested_draft: () -> String
+            def defined_draft: () -> String
           end
 
           class Writer
@@ -192,6 +221,25 @@ RSpec.describe "the allocation witness behind mutate.local" do
 
   it "reads `new` on `self` in a singleton-method body as an allocation, implicit or explicit" do
     %w[Draft.fresh Draft.explicit_self Draft.eigen].each { |key| expect_allocation(key) }
+  end
+
+  # The gate reads the unit's singleton bit, so it is only as good as the scanner's keying. A `def` and a
+  # `define_method` inside `def self.define_drafts` define instance methods, where `new` is the proxy's own.
+  it "does not read `new` as an allocation in an instance method a singleton method defines" do
+    %w[DraftPosts#nested_draft DraftPosts#defined_draft].each { |key| expect_unproven(key) }
+  end
+
+  it "reads `new` as an allocation in a singleton method `define_method` defines inside `class << self`" do
+    expect_allocation("Draft.eigen_defined")
+  end
+
+  # The typer does not type a body inside `singleton_class.class_eval` yet, so the unit also carries the taints of the
+  # calls it could not resolve. The gate's own part is the `mutate.local`, and no `unknown-ownership` beside it.
+  it "reads `new` as an allocation in a singleton method `singleton_class.class_eval` defines" do
+    entry = table["Draft.evaluated"]
+
+    expect(entry.proven.to_a).to eq(["mutate.local"])
+    expect(entry.causes.map(&:first)).not_to include("unknown-ownership")
   end
 
   it "reads `new` on a `class` call as an allocation" do

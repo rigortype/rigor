@@ -829,8 +829,8 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "keeps an earlier position's store in a `map` over the same `||=`" do
-      # Runtime `[1, 1]`; the pin answered `[1, 2]`.
-      expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 2 | Dynamic[top]]")
+      # Runtime `[1, 1]`; the pin answered `[1, 2]`. The first position has no earlier one, so it stays exact.
+      expect(dumped_type(<<~RUBY)).to eq("[1, 2 | Dynamic[top]]")
         cache = {}
         dump_type([1, 2].map { |e| cache[:first] ||= e })
       RUBY
@@ -971,6 +971,67 @@ RSpec.describe "block-return scope threading", type: :runner do
         expect([dumped_type(source), nil_receiver_rules(source)]).to eq(['"b"', []])
       end
 
+      it "withholds it only at the position whose key an earlier one shares" do
+        # Runtime `"b"`: the second position reads the `"a"` the first stored, and the third finds `"b"`. Marking every
+        # position answered `"a" | "b" | nil` and reported `f.upcase` as a possible nil receiver.
+        source = <<~RUBY
+          seen = {}
+          f = %w[a a b].find { |s| (seen[s] ||= s) == "b" }
+          dump_type(f)
+          puts f.upcase
+        RUBY
+        expect([dumped_type(source), nil_receiver_rules(source)]).to eq(['"a" | "b"', []])
+      end
+
+      it "keeps it for a key built from a captured local the body leaves alone" do
+        expect(dumped_type(<<~RUBY)).to eq('"b"')
+          pool = {}
+          prefix = "x"
+          dump_type(%w[a b].find { |k| (pool[prefix + k] ||= k) == "b" })
+        RUBY
+      end
+
+      it "keeps it for negative and mixed-class keys on a core Hash" do
+        expect(dumped_types(<<~RUBY)).to eq(["-2", '"b"'])
+          h = {}
+          dump_type([-1, -2].find { |i| (h[i] ||= i) == -2 })
+          g = {}
+          dump_type([:a, "b"].find { |k| (g[k] ||= k) == "b" })
+        RUBY
+      end
+
+      it "withholds it for a negative index on a receiver that may be an Array" do
+        # `a` is untyped, so `a[-1]` may name the slot `a[1]` names: `pick(Array.new(2))` answers `nil`.
+        expect(dumped_type(<<~RUBY)).to eq("[-1, :x] | [1, :y] | nil")
+          def pick(a) = dump_type([[-1, :x], [1, :y]].find { |i, v| (a[i] ||= v) == :y })
+        RUBY
+      end
+
+      it "withholds it for keys of two classes on a receiver that may normalise them" do
+        # With indifferent access `:a` and `"a"` name one slot, so the second position keeps the first's `1`.
+        expect(dumped_type(<<~RUBY)).to eq('["a", 2] | [:a, 1] | nil')
+          class IndifferentHash < Hash
+            def [](key)
+              super(key.to_s)
+            end
+
+            def []=(key, value)
+              super(key.to_s, value)
+            end
+          end
+          h = IndifferentHash.new
+          dump_type([[:a, 1], ["a", 2]].find { |k, v| (h[k] ||= v) == 2 })
+        RUBY
+      end
+
+      it "withholds it for a key the body rebinds" do
+        # `s = "k"` makes every position's key `"k"`, whatever the parameter held.
+        expect(dumped_type(<<~RUBY)).to eq('["a", 1] | ["b", 2] | nil')
+          pool = {}
+          dump_type([["a", 1], ["b", 2]].find { |s, n| s = "k"; (pool[s] ||= n) == 2 })
+        RUBY
+      end
+
       it "types a distinct-key memo under the Tuple, Range and per-pair folds" do
         expect(dumped_types(<<~RUBY)).to eq(['["A", "B"]', "[1, 4, 9]", "{ a: 10, b: 20 }"])
           pool = {}
@@ -984,7 +1045,7 @@ RSpec.describe "block-return scope threading", type: :runner do
 
       it "still withholds the reading for a key two positions share" do
         # Runtime `[1, 1]`: the second position reads the `:k` slot the first one filled.
-        expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 2 | Dynamic[top]]")
+        expect(dumped_type(<<~RUBY)).to eq("[1, 2 | Dynamic[top]]")
           c = {}
           dump_type([[:k, 1], [:k, 2]].map { |k, v| c[k] ||= v })
         RUBY
@@ -998,6 +1059,46 @@ RSpec.describe "block-return scope threading", type: :runner do
           found = %w[a b].find do |s|
             hit = (pool[s] ||= s) == "b"
             pool["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "keeps it beside a store into another instance variable" do
+        # `@log << s` reaches `@log`, never `@pool`, although neither is a binding the fold widens.
+        expect(dumped_type(<<~RUBY)).to eq('"b"')
+          class Registry
+            def initialize
+              @log = []
+              @pool = {}
+            end
+
+            def run = dump_type(%w[a b].find { |s| @log << s; (@pool[s] ||= s) == "b" })
+          end
+        RUBY
+      end
+
+      it "withholds it when the body stores through `send`" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool.send(:[]=, "b", "x")
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when the body rebinds the receiver to another hash" do
+        # Runtime `nil`: the second position reads `other`, whose `"b"` is `"x"`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          other = { "b" => "x" }
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool = other
             hit
           end
           puts "hit" if found == "b"
@@ -1020,6 +1121,24 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
     end
 
+    describe "the find fold past an undecided position" do
+      it "answers the candidates up to a decisive match, without nil" do
+        # The first position is undecided and the second always matches, so `find` never returns `nil`.
+        expect(dumped_types(<<~RUBY)).to eq(["1 | 2", "0 | 1"])
+          x = gets
+          dump_type([1, 2].find { |e| e == 2 || x.nil? })
+          dump_type([1, 2].find_index { |e| e == 2 || x.nil? })
+        RUBY
+      end
+
+      it "keeps the nil floor when no position matches decisively (control)" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          x = gets
+          dump_type([1, 2].find { |e| e == 3 || x.nil? })
+        RUBY
+      end
+    end
+
     describe "under the generic block-return pass" do
       it "keeps the memo reading for an isolated site (control)" do
         # The generic pass types the rvalue from the parameter's signature type, which covers every iteration's
@@ -1028,6 +1147,26 @@ RSpec.describe "block-return scope threading", type: :runner do
           pool = {}
           words = gets.to_s.split(",")
           dump_type(words.map { |w| pool[w] ||= w })
+        RUBY
+      end
+
+      it "keeps it beside stores into other objects (control)" do
+        # A store into `@log`, into an element of `@by_kind`, or into the `@cache[:names]` hash reaches no slot
+        # the site's own receiver holds.
+        expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "Array[Array]", "Array[String]"])
+          class Registry
+            def initialize
+              @log = []
+              @cache = {}
+              @by_kind = {}
+              @keys = gets.to_s.split(",")
+            end
+
+            def logged = dump_type(@keys.map { |k| @log << k; @cache[k] ||= build(k) })
+            def grouped = dump_type(@keys.map { |k| (@by_kind[k.size] ||= []) << k })
+            def nested = dump_type(@keys.map { |k| (@cache[:names] ||= {})[k] ||= build(k) })
+            def build(key) = key.upcase
+          end
         RUBY
       end
 

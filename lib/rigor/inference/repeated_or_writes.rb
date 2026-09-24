@@ -26,91 +26,209 @@ module Rigor
     # a constant, class variable, attribute reader or nested memo (`(cache[:a] ||= {})[:b] ||= e`) is no binding
     # the fold rebinds. A narrowing or a rebind of the receiver's variable leaves the mark where it is.
     #
-    # Every `||=` in the body is marked (at any depth, short of a nested `def` body, which runs only when called)
-    # except one whose receiver is fresh at every run — a hash or array literal, or a `.new` call on a constant —
-    # and one the pass shows no earlier run can reach:
+    # A site whose receiver is fresh at every run — a hash or array literal, or a `.new` call on a constant — is
+    # never marked. Otherwise:
     #
-    # - It must be ISOLATED ({.isolated?}): no other store in the body can fill its slot.
-    # - Under the per-element fold its rvalue is one position's, so it must also sit at the body's own level (not
-    #   in a nested block or loop, which runs it more than once per position) and take a key whose value differs
-    #   at every position ({.distinct_keys?}): `pool = {}; %w[a b].map { |s| pool[s] ||= s.upcase }` stores each
-    #   position under its own key, so the memo reading still types `["A", "B"]`.
     # - The generic block-return pass types the rvalue from the signature's parameter type, which covers every
-    #   run's store, so an isolated site is left unmarked there: `words.map { |w| pool[w] ||= w }` keeps
-    #   `Array[String]`. Two sites storing different rvalues into one slot are not isolated.
+    #   run's store, so it marks a site only when the site is not ISOLATED ({.isolated?}): some other store in the
+    #   body may fill its slot with something else. `words.map { |w| pool[w] ||= w }` keeps `Array[String]`.
+    # - The per-element fold types each position's rvalue on its own, so it marks per position ({Marks}). The
+    #   first position has no earlier one and is never marked. A later one is marked unless the site is isolated,
+    #   sits at the body's own level (not in a nested block or loop), and its key differs from every earlier
+    #   position's ({FreshKeys.positions}): `pool = {}; %w[a b].map { |s| pool[s] ||= s.upcase }` keeps `["A", "B"]`,
+    #   and `%w[a a b].find { |s| (pool[s] ||= s) == "b" }` marks only the second position.
     module RepeatedOrWrites
-      # A body walk's findings: the `||=` sites whose receiver is not fresh, every store node whose receiver is
-      # not fresh (those sites included), and the `||=` sites at the body's own level.
-      Scan = Data.define(:or_writes, :stores, :top_level)
+      NO_SITES = [].freeze
+
+      # The sites a pass marks at each run it types on its own. `shared` is marked at every run (the generic pass);
+      # `positional[i]` at the per-element fold's position `i` only. {#at} with a nil position — a caller that
+      # does not type one position — answers every site.
+      Marks = Data.define(:shared, :positional) do
+        def at(position)
+          return shared if positional.empty?
+          return positional.flatten.uniq if position.nil?
+
+          positional.fetch(position, NO_SITES)
+        end
+
+        def empty? = shared.empty? && positional.all?(&:empty?)
+      end
+
+      NO_MARKS = Marks.new(shared: NO_SITES, positional: NO_SITES)
+
+      # A store in the body and the object it stores into, as `[root, depth]`: the variable the receiver
+      # evaluates from (`[:ivar, :@cache]`) and how many element reads lie between the two (`@cache[k][j] = v`
+      # stores into depth 1). `path` is nil for a receiver no variable roots (a method call's result).
+      Store = Data.define(:node, :path)
+
+      # What the body holds: the `||=` sites to consider, the ones at the body's own level, how many stores that
+      # may reach an object an earlier run saw there are (those sites included) and how many reach each path,
+      # whether some store's object is unknown, and every local name the body writes.
+      Scan = Data.define(:or_writes, :top_level, :store_count, :path_counts, :unattributable, :written_locals)
+
+      # The walk's accumulators. `writes` maps each variable the body writes, as `[kind, name]`, to whether every
+      # write stores a fresh object into it.
+      Walk = Struct.new(:or_writes, :top_level, :stores, :written_locals, :writes)
 
       STORE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
+      INDEX_WRITE_NODES = IndexWriteWidening::NODE_CLASSES
+
+      # A call that can store through any method name, so into any slot of its receiver.
+      DYNAMIC_SEND = Set[:send, :public_send, :__send__].freeze
 
       # The nodes whose children run more than once for each run of the body that contains them.
       REPEATING_NODES = Set[
         Prism::BlockNode, Prism::LambdaNode, Prism::WhileNode, Prism::UntilNode, Prism::ForNode
       ].freeze
 
-      # The written forms a key expression may not contain; see {.fixed_parameter_key?}.
-      KEY_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
+      # Every variable read and write form, with the kind of variable it names.
+      VARIABLE_KINDS = {
+        local: [Prism::LocalVariableReadNode, *CapturedLocals::LOCAL_WRITE_NODES],
+        ivar: [
+          Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
+          Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
+        ],
+        cvar: [
+          Prism::ClassVariableReadNode, Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,
+          Prism::ClassVariableOrWriteNode, Prism::ClassVariableAndWriteNode, Prism::ClassVariableTargetNode
+        ],
+        gvar: [
+          Prism::GlobalVariableReadNode, Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
+          Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
+        ],
+        const: [
+          Prism::ConstantReadNode, Prism::ConstantWriteNode, Prism::ConstantOperatorWriteNode,
+          Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode, Prism::ConstantTargetNode
+        ]
+      }.flat_map { |kind, classes| classes.map { |node_class| [node_class, kind] } }.to_h.freeze
 
-      # The other nodes a key expression may not contain: a variable the body can rebind between positions, or a
-      # block or lambda.
-      KEY_UNFIXED_NODES = Set[
-        Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode,
-        Prism::BlockNode, Prism::LambdaNode
+      READ_NODES = Set[
+        Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode,
+        Prism::GlobalVariableReadNode, Prism::ConstantReadNode
       ].freeze
 
-      NONE = [].freeze
-      private_constant :STORE_NODES, :REPEATING_NODES, :KEY_WRITE_NODES, :KEY_UNFIXED_NODES, :NONE
+      # The writes that bind their value as it is: a plain write, and an `||=` (which keeps an object already set).
+      VALUE_WRITE_NODES = Set[
+        Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode,
+        Prism::GlobalVariableWriteNode, Prism::ConstantWriteNode,
+        Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode, Prism::ClassVariableOrWriteNode,
+        Prism::GlobalVariableOrWriteNode, Prism::ConstantOrWriteNode
+      ].freeze
+
+      private_constant :STORE_NODES, :INDEX_WRITE_NODES, :DYNAMIC_SEND, :REPEATING_NODES, :VARIABLE_KINDS,
+                       :READ_NODES, :VALUE_WRITE_NODES
 
       module_function
 
       # @param block — the repeating block.
       # @param stores — {CapturedLocals.content_mutations} of the block (with `non_locals: true`): the captured
-      #   variables its body mutates in place, each with its sites.
+      #   variables its body mutates in place, each with its sites; its callee stores count as stores here.
       # @param scope — the call-site scope, in which a per-element fold's positions bind their parameters.
       # @param element_types — the per-element fold's position types, one per position; nil for the generic
       #   block-return pass.
-      # @return the `IndexOrWriteNode` sites to mark, empty for the overwhelmingly common body with none.
+      # @return the {Marks} to lay, {NO_MARKS} for the overwhelmingly common body with no such site.
       def sites(block, stores, scope, element_types: nil)
         body = block.body
-        # One source slice is far cheaper than the walk, and a body that spells no `||=` holds no such site.
-        return NONE if body.nil? || !body.slice.include?("||=")
+        return NO_MARKS unless body && may_hold_or_write?(body)
 
-        found = scan(body)
-        return NONE if found.or_writes.empty?
+        found = scan(block, stores, scope)
+        return NO_MARKS if found.or_writes.empty?
+        return generic_marks(found) if element_types.nil?
 
-        attribution = attribution(stores)
-        found.or_writes.reject do |node|
-          next false unless isolated?(node, found, attribution, stores)
+        positional_marks(block, found, stores, scope, element_types)
+      end
 
-          element_types.nil? ||
-            (found.top_level.key?(node) && distinct_keys?(block, node, element_types, scope))
+      # One source slice is far cheaper than the walk, and a body that spells no `||=` holds no such site. A
+      # heredoc's text lies outside its node's location, so a body that opens one is walked regardless.
+      def may_hold_or_write?(body)
+        source = body.slice
+        source.include?("||=") || source.include?("<<")
+      end
+
+      def generic_marks(found)
+        Marks.new(shared: found.or_writes.reject { |node| isolated?(node, found) }, positional: NO_SITES)
+      end
+
+      def positional_marks(block, found, stores, scope, element_types)
+        positional = Array.new(element_types.size) { [] }
+        parameters = nil
+        found.or_writes.each do |node|
+          fresh = exempt_candidate?(node, found) &&
+                  FreshKeys.positions(block, node, found.written_locals, stores, scope, element_types,
+                                      parameters ||= CapturedLocals.introduced_locals(block))
+          (1...element_types.size).each { |index| positional[index] << node unless fresh && fresh[index] }
+        end
+        Marks.new(shared: NO_SITES, positional: positional)
+      end
+
+      def exempt_candidate?(node, found) = found.top_level.key?(node) && isolated?(node, found)
+
+      # Walks the body, then settles each store's object. A variable the body writes from anything but a fresh
+      # object may alias another, so a store through it is unattributable; a body-local every write of which is
+      # fresh holds a new object at every run, so a store through it reaches nothing an earlier run saw, and a site
+      # on it is dropped.
+      def scan(block, stores, scope)
+        walked = Walk.new([], {}.compare_by_identity, [], Set.new, {})
+        walk(block.body, true, walked)
+        fresh = fresh_roots(block, walked.writes, scope)
+        settled = (walked.stores + callee_stores(stores)).filter_map { |store| settle(store, walked.writes, fresh) }
+        or_writes = walked.or_writes.reject { |node| fresh.include?(receiver_path(node.receiver, 0)&.first) }
+        Scan.new(or_writes: or_writes, top_level: walked.top_level, store_count: settled.size,
+                 path_counts: settled.map(&:path).tally, unattributable: settled.any? { |store| store.path.nil? },
+                 written_locals: walked.written_locals)
+      end
+
+      # The locals the body alone binds — not captured, not a block parameter or block-local — whose every write
+      # stores a fresh object.
+      def fresh_roots(block, writes, scope)
+        introduced = nil
+        writes.each_with_object(Set.new) do |((kind, name), all_fresh), roots|
+          next unless all_fresh && kind == :local && !scope.locals.key?(name)
+
+          introduced ||= CapturedLocals.introduced_locals(block)
+          roots << [kind, name] unless introduced.include?(name)
         end
       end
 
-      def scan(body)
-        found = Scan.new(or_writes: [], stores: [], top_level: {}.compare_by_identity)
-        walk(body, true, found)
-        found
+      def settle(store, writes, fresh)
+        root = store.path&.first
+        return store if root.nil? || !writes.key?(root)
+        return nil if fresh.include?(root)
+
+        writes[root] ? store : Store.new(node: store.node, path: nil)
       end
 
       def walk(node, top_level, found)
         return unless node.is_a?(Prism::Node)
         return if node.is_a?(Prism::DefNode)
 
-        record(node, top_level, found)
+        record_write(node, found)
+        record_store(node, top_level, found)
         return if node.is_a?(Prism::DefinedNode)
 
         nested_level = top_level && !REPEATING_NODES.include?(node.class)
         node.rigor_each_child { |child| walk(child, nested_level, found) }
       end
 
-      def record(node, top_level, found)
+      def record_write(node, found)
+        kind = VARIABLE_KINDS[node.class]
+        return if kind.nil? || READ_NODES.include?(node.class)
+
+        found.written_locals << node.name if kind == :local
+        root = [kind, node.name]
+        fresh = VALUE_WRITE_NODES.include?(node.class) && fresh_receiver?(node.value)
+        found.writes[root] = found.writes.fetch(root, true) && fresh
+      end
+
+      def record_store(node, top_level, found)
+        if node.is_a?(Prism::CallNode) && DYNAMIC_SEND.include?(node.name)
+          found.stores << Store.new(node: node, path: nil)
+          return
+        end
         return unless store_node?(node)
         return if fresh_receiver?(node.receiver)
 
-        found.stores << node
+        found.stores << Store.new(node: node, path: store_path(node))
         return unless node.is_a?(Prism::IndexOrWriteNode)
 
         found.or_writes << node
@@ -121,6 +239,53 @@ module Rigor
         return true if STORE_NODES.include?(node.class)
 
         node.is_a?(Prism::CallNode) && (node.name == :[]= || MutationWidening::SHAPE_MUTATORS.include?(node.name))
+      end
+
+      # A call with no receiver stores into `self`.
+      def store_path(node)
+        return [[:self], 0] if node.receiver.nil?
+
+        receiver_path(node.receiver, 0)
+      end
+
+      # `[root, depth]` for the object `node` evaluates to, or nil when no variable roots it.
+      def receiver_path(node, depth)
+        case node
+        when Prism::ParenthesesNode then parenthesized_path(node, depth)
+        when Prism::SelfNode then [[:self], depth]
+        when Prism::ItLocalVariableReadNode then [%i[local it], depth]
+        when Prism::CallNode then element_read_path(node, depth)
+        when *INDEX_WRITE_NODES then receiver_path(node.receiver, depth + 1)
+        else variable_path(node, depth)
+        end
+      end
+
+      def parenthesized_path(node, depth)
+        statements = node.body
+        return nil unless statements.is_a?(Prism::StatementsNode) && statements.body.size == 1
+
+        receiver_path(statements.body.first, depth)
+      end
+
+      def element_read_path(node, depth)
+        return nil unless node.name == :[] && node.receiver && !node.safe_navigation?
+
+        receiver_path(node.receiver, depth + 1)
+      end
+
+      def variable_path(node, depth)
+        kind = VARIABLE_KINDS[node.class]
+        kind && [[kind, node.name], depth]
+      end
+
+      # {CapturedLocals.content_mutations}'s callee stores — a self-call passing a captured local to a parameter
+      # its callee mutates — as stores into that local.
+      def callee_stores(stores)
+        stores.flat_map do |name, sites|
+          sites.grep(UnknownStoreWidening::CalleeStore).map do |site|
+            Store.new(node: site.call, path: [[:local, name.to_sym], 0])
+          end
+        end
       end
 
       # A receiver that evaluates to a new object at every run: a hash or array literal, or `.new` called on a
@@ -135,89 +300,103 @@ module Rigor
         end
       end
 
-      # `{ node => [name, ...] }` for every site {CapturedLocals.content_mutations} files under a captured name.
-      def attribution(stores)
-        stores.each_with_object({}.compare_by_identity) do |(name, sites), by_node|
-          sites.each do |site|
-            node = site.is_a?(UnknownStoreWidening::CalleeStore) ? site.call : site
-            (by_node[node] ||= []) << name
+      # True when no other store in the body can fill `node`'s slot: no other store reaches the object `node` stores
+      # into (the same variable, at the same element depth), and every store names the object it reaches — a
+      # method call's result, a `send`, or a variable the body binds to another object may be any object, the
+      # site's own included. A site whose receiver no variable roots is isolated only as the body's sole store.
+      def isolated?(node, found)
+        path = receiver_path(node.receiver, 0)
+        return found.store_count == 1 if path.nil?
+
+        !found.unattributable && found.path_counts[path] == 1
+      end
+
+      # Whether an index `||=` site's key differs, position by position, from every earlier position's key under
+      # the per-element fold.
+      module FreshKeys
+        # The nodes a key expression may not contain; see {.fixed_key?}.
+        KEY_UNFIXED_NODES = Set[
+          Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode,
+          Prism::BlockNode, Prism::LambdaNode, *CapturedLocals::LOCAL_WRITE_NODES, *CapturedLocals::NON_LOCAL_WRITE_NODES
+        ].freeze
+
+        HASH_KEY_CLASSES = [Symbol, String, Integer].freeze
+        private_constant :KEY_UNFIXED_NODES, :HASH_KEY_CLASSES
+
+        module_function
+
+        # For each position, whether `node`'s key there is provably a value no earlier position's key equals; nil
+        # when the key cannot be typed position by position. The key must be a single index argument that reads no
+        # variable but ones the body never changes ({.fixed_key?}), so typing it under each position's parameter
+        # binding is typing what the position evaluates. The keys up to a position must be `Constant`s its receiver
+        # tells apart ({.distinguishable?}), and its own must equal none before it. A key that fails to type is not
+        # shown fresh anywhere, so the site stays marked, the wider answer.
+        def positions(block, node, written_locals, stores, scope, element_types, parameters)
+          key = sole_key(node)
+          return nil if key.nil? || !fixed_key?(key, parameters, written_locals, stores)
+
+          typed = element_types.map do |element_type|
+            position = BlockParameterBinder.new(expected_param_types: [element_type]).bind_onto(block, scope)
+            [position.type_of(key), receiver_kind(position.type_of(node.receiver))]
+          end
+          fresh_by_position(typed)
+        rescue StandardError
+          nil
+        end
+
+        def fresh_by_position(typed)
+          values = []
+          typed.each_with_index.map do |(key_type, receiver_kind), index|
+            return typed.map { false } unless key_type.is_a?(Type::Constant)
+
+            value = key_type.value
+            unseen = values.none? { |earlier| earlier.eql?(value) }
+            values << value
+            index.zero? || (unseen && distinguishable?(values, receiver_kind))
           end
         end
-      end
 
-      # True when no other store in the body can fill `node`'s slot. A site filed under captured names is isolated
-      # when it is the only site of each of them, callee stores included, and every store in the body is filed
-      # under some captured name (a store the scan cannot attribute may reach any object). Any other site — its
-      # receiver a constant, an attribute reader, a block parameter — is isolated only as the body's sole store.
-      def isolated?(node, found, attribution, stores)
-        names = attribution[node]
-        return found.stores.size == 1 if names.nil?
-
-        names.all? { |name| stores[name].size == 1 } && found.stores.all? { |store| attribution.key?(store) }
-      end
-
-      # True when `node`'s key is a distinct value at every position of the per-element fold, so no position reads
-      # a slot an earlier one stored. One position has no earlier one. Otherwise the key must be a single index
-      # argument that reads no variable but block parameters the body never writes ({.fixed_parameter_key?}), so
-      # typing it in each position's parameter binding is typing what the position evaluates. Every answer must
-      # be a `Constant` of one class — `Symbol`, `String`, or a non-negative `Integer`, since a negative index
-      # names a slot a non-negative one may name — and no two may be equal. A key that fails to type is not shown
-      # distinct, so the site stays marked, the wider answer.
-      def distinct_keys?(block, node, element_types, scope)
-        return true if element_types.size <= 1
-
-        key = sole_key(node)
-        return false if key.nil? || !fixed_parameter_key?(key, block)
-
-        values = element_types.map do |element_type|
-          type = BlockParameterBinder.new(expected_param_types: [element_type]).bind_onto(block, scope).type_of(key)
-          return false unless type.is_a?(Type::Constant)
-
-          type.value
+        # A core `Hash` tells apart any two `Symbol`, `String` or `Integer` keys `eql?` does, and a core `Array` any two
+        # non-negative indices. Any other receiver's `[]` may normalise a key (`with_indifferent_access`, a
+        # case-insensitive hash), so only non-negative `Integer`s, or keys all of one class, `Symbol` or `String`, pass.
+        def distinguishable?(values, receiver_kind)
+          case receiver_kind
+          when :hash then values.all? { |value| HASH_KEY_CLASSES.any? { |key_class| value.is_a?(key_class) } }
+          when :array then values.all? { |value| value.is_a?(Integer) && !value.negative? }
+          else
+            values.all? { |value| value.is_a?(Integer) && !value.negative? } ||
+              values.all?(Symbol) || values.all?(String)
+          end
         end
-        distinct_values?(values)
-      rescue StandardError
-        false
-      end
 
-      def sole_key(node)
-        arguments = node.arguments&.arguments
-        return nil unless arguments&.size == 1 && node.block.nil?
-
-        key = arguments.first
-        key.is_a?(Prism::SplatNode) || key.is_a?(Prism::KeywordHashNode) ? nil : key
-      end
-
-      # True when `key` reads no variable but the block's own parameters, none of which the body writes, and
-      # contains no write, instance-, class- or global-variable read, block or lambda.
-      def fixed_parameter_key?(key, block)
-        parameters = CapturedLocals.introduced_locals(block)
-        written = written_locals(block.body)
-        Source::NodeWalker.each(key) do |node|
-          return false if KEY_WRITE_NODES.include?(node.class) || KEY_UNFIXED_NODES.include?(node.class)
-          next unless node.is_a?(Prism::LocalVariableReadNode)
-          return false unless node.depth.zero? && parameters.include?(node.name) && !written.include?(node.name)
+        def receiver_kind(type)
+          case type
+          when Type::HashShape then :hash
+          when Type::Tuple then :array
+          when Type::Nominal then { "Hash" => :hash, "Array" => :array }[type.class_name]
+          end
         end
-        true
-      end
 
-      def written_locals(body)
-        names = Set.new
-        Source::NodeWalker.each(body) do |node|
-          names << node.name if CapturedLocals::LOCAL_WRITE_NODES.include?(node.class)
+        def sole_key(node)
+          arguments = node.arguments&.arguments
+          return nil unless arguments&.size == 1 && node.block.nil?
+
+          key = arguments.first
+          key.is_a?(Prism::SplatNode) || key.is_a?(Prism::KeywordHashNode) ? nil : key
         end
-        names
-      end
 
-      KEY_CLASSES = [Symbol, String, Integer].freeze
-      private_constant :KEY_CLASSES
-
-      def distinct_values?(values)
-        key_class = KEY_CLASSES.find { |candidate| values.first.is_a?(candidate) }
-        return false if key_class.nil? || !values.all?(key_class)
-        return false if key_class == Integer && values.any?(&:negative?)
-
-        values.uniq.size == values.size
+        # True when `key` reads no variable the body can change between positions: every local it reads is one of
+        # the block's `parameters` or a captured local, which the body neither writes nor mutates in place, and it
+        # contains no instance-, class- or global-variable read, no write, and no block or lambda.
+        def fixed_key?(key, parameters, written_locals, stores)
+          Source::NodeWalker.each(key) do |node|
+            return false if KEY_UNFIXED_NODES.include?(node.class)
+            next unless node.is_a?(Prism::LocalVariableReadNode)
+            return false if written_locals.include?(node.name)
+            return false unless node.depth.zero? ? parameters.include?(node.name) : !stores.key?(node.name)
+          end
+          true
+        end
       end
     end
   end

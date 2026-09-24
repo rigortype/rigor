@@ -4596,7 +4596,9 @@ module Rigor
       def per_element_body_results(block, element_types)
         captured = per_element_captured_bindings(block, element_types)
         results = lambda do
-          element_types.map { |element_type| type_block_body_with_param(block, [element_type], captured: captured) }
+          element_types.each_with_index.map do |element_type, position|
+            type_block_body_with_param(block, [element_type], captured: captured, position: position)
+          end
         end
         return results.call unless tail_only_walk?(element_types)
         return tail_only_body_floor(element_types) if unanswered_tail_dependency?(block, captured)
@@ -5236,28 +5238,40 @@ module Rigor
       # `find` / `detect`: returns the first receiver element whose block result is Ruby-truthy, or `nil`
       # when no position folds to truthy.
       #
-      # Folds tightly only when every per-position block result is a `Type::Constant` — otherwise we cannot
-      # decide which position (if any) is "the first matching one". When the first decisive truthy position
-      # is found, the answer is the corresponding receiver element. When every position folds to falsey,
-      # the answer is `Constant[nil]`.
+      # When the first decisive truthy position is found, the answer is the corresponding receiver element,
+      # joined with the element of every earlier position whose result is not a `Type::Constant`: such a
+      # position may match first, but the search ends at the truthy one whatever it answers, so the call
+      # never returns `nil`. When every position folds to falsey, the answer is `Constant[nil]`. With no
+      # decisive truthy position and some undecided one, it declines ({#undecided_fold_floor}).
       def assemble_find_result(per_position, element_types)
-        return nil unless per_position.all?(Type::Constant)
+        candidates = first_match_candidates(per_position)
+        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
 
-        first_truthy_index = per_position.index { |type| truthy_constant?(type) }
-        return Type::Combinator.constant_of(nil) if first_truthy_index.nil?
-
-        element_types[first_truthy_index]
+        Type::Combinator.union(*candidates.map { |index| element_types[index] })
       end
 
       # `find_index` / `index`: returns the index of the first truthy position, or `Constant[nil]` when
-      # nothing matches.
+      # nothing matches, on {#assemble_find_result}'s terms.
       def assemble_find_index_result(per_position)
-        return nil unless per_position.all?(Type::Constant)
+        candidates = first_match_candidates(per_position)
+        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
 
+        Type::Combinator.union(*candidates.map { |index| Type::Combinator.constant_of(index) })
+      end
+
+      NO_MATCH = Type::Combinator.constant_of(nil)
+      private_constant :NO_MATCH
+
+      # The positions `find` may stop at — the first decisive truthy one and every undecided one before it —
+      # `NO_MATCH` when every position folds falsey, or nil when an undecided position has no truthy one after it.
+      def first_match_candidates(per_position)
         first_truthy_index = per_position.index { |type| truthy_constant?(type) }
-        return Type::Combinator.constant_of(nil) if first_truthy_index.nil?
+        if first_truthy_index.nil?
+          return per_position.all?(Type::Constant) ? NO_MATCH : nil
+        end
 
-        Type::Combinator.constant_of(first_truthy_index)
+        undecided = (0...first_truthy_index).reject { |index| per_position[index].is_a?(Type::Constant) }
+        undecided + [first_truthy_index]
       end
 
       def truthy_constant?(type)
@@ -5317,8 +5331,8 @@ module Rigor
         return hash_shape_values_floor(shape) if tail_only_pairs_floored?(shape, block_arg, captured)
 
         new_pairs = {}
-        shape.pairs.each do |key, value|
-          new_value = apply_hash_block(block_arg, value, captured: captured)
+        shape.pairs.each_with_index do |(key, value), position|
+          new_value = apply_hash_block(block_arg, value, captured: captured, position: position)
           return nil if new_value.nil?
 
           new_pairs[key] = new_value
@@ -5332,8 +5346,9 @@ module Rigor
         return hash_keys_floor(shape) if tail_only_pairs_floored?(shape, block_arg, captured)
 
         new_pairs = {}
-        key_types.zip(shape.pairs.values).each do |key_type, value|
-          new_key = new_shape_key(apply_hash_block(block_arg, key_type, captured: captured), new_pairs)
+        key_types.zip(shape.pairs.values).each_with_index do |(key_type, value), position|
+          typed_key = apply_hash_block(block_arg, key_type, captured: captured, position: position)
+          new_key = new_shape_key(typed_key, new_pairs)
           return undecided_keys_floor(shape, block_arg, key_types, captured) if new_key.nil?
 
           new_pairs[new_key] = value
@@ -5381,7 +5396,9 @@ module Rigor
       def undecided_keys_floor(shape, block_arg, key_types, captured)
         return nil unless block_body_threading_suppressed?
 
-        new_key_types = key_types.map { |key_type| apply_hash_block(block_arg, key_type, captured: captured) }
+        new_key_types = key_types.each_with_index.map do |key_type, position|
+          apply_hash_block(block_arg, key_type, captured: captured, position: position)
+        end
         return hash_keys_floor(shape) if new_key_types.any?(&:nil?)
 
         Type::Combinator.nominal_of(
@@ -5436,11 +5453,12 @@ module Rigor
 
       # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to
       # `param_type` and returns the resulting type, or `nil` on failure. `captured:` is the pair-independent
-      # entry binding from {#hash_block_captured_bindings}.
-      def apply_hash_block(block_arg, param_type, captured: nil)
+      # entry binding from {#hash_block_captured_bindings}, and `position:` the pair's index, which picks the
+      # index `||=` sites that binding marks there.
+      def apply_hash_block(block_arg, param_type, captured: nil, position: nil)
         case block_arg
         when Prism::BlockNode
-          type_block_body_with_param(block_arg, [param_type], captured: captured)
+          type_block_body_with_param(block_arg, [param_type], captured: captured, position: position)
         when Prism::BlockArgumentNode
           expression = block_arg.expression
           return nil unless expression.is_a?(Prism::SymbolNode)
@@ -5460,8 +5478,10 @@ module Rigor
       # `captured:` — issue #587 (b): the per-name entry binding of every captured outer local and instance
       # variable the body rebinds, and of every captured local it mutates in place
       # ({#per_element_captured_bindings}), laid under the parameter bindings so a parameter still shadows.
-      def type_block_body_with_param(block_node, expected_param_types, captured: nil)
-        block_scope = captured ? captured.lay(scope) : scope
+      # `position:` is the element's index in the fold; the binding marks the index `||=` sites an earlier
+      # position may have filled there ({RepeatedOrWrites::Marks}).
+      def type_block_body_with_param(block_node, expected_param_types, captured: nil, position: nil)
+        block_scope = captured ? captured.lay(scope, position: position) : scope
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope, captured: captured)

@@ -154,6 +154,29 @@ RSpec.describe "proven overload pass", type: :runner do
     expect(rules(source, sig: sig)).not_to include("call.undefined-method")
   end
 
+  it "does not skip an earlier arm naming a project class that the source, not the RBS, includes" do
+    # Runtime: `"p"`. The RBS never includes `Printable` into `Integer`, so both orderings call them disjoint; only
+    # the source does (#1351). A project-declared parameter class is never proven out.
+    sig = { "money.rbs" => <<~RBS }
+      module Printable
+      end
+      class Money
+        def show: (Printable) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      module Printable; end
+      class Integer; include Printable; end
+      class Money
+        def show(x) = "p"
+      end
+      Money.new.show(1).upcase
+    RUBY
+    expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+  end
+
   it "does not take a union arm, where upstream RBS can be wrong, for Rational#divmod(Float)" do
     # Runtime: `Rational(3, 2).divmod(0.5)` is `[3, 0.0]`, a Float remainder. rbs declares
     # `(Integer | Float | Rational) -> [Integer, Rational]` first, and taking it made `when Float` unreachable.

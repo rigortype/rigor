@@ -16,7 +16,9 @@ module Rigor
       # class (through `?` and `|`), and both orderings — `Environment#class_ordering`, which asks the host class
       # registry first, and the RBS loader's own — call it disjoint from every argument's class. A type alias,
       # interface or variable proves nothing, and the host registry alone calls `Integer` and `Enumerable`
-      # disjoint where project RBS includes one into the other.
+      # disjoint where project RBS includes one into the other. Nor does a class or module the project's own RBS
+      # declares: the source can include it into the argument's class where the RBS does not say so, and neither
+      # ordering sees a source-only `include` (#1351).
       module ProvenOverload
         module_function
 
@@ -53,6 +55,8 @@ module Rigor
           case rbs_type
           when RBS::Types::ClassInstance
             name = rbs_type.name.to_s.delete_prefix("::")
+            return false if loader.project_declared_class?(name)
+
             arg_names.all? do |arg|
               environment.class_ordering(arg, name) == :disjoint && loader.class_ordering(arg, name) == :disjoint
             end

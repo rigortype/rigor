@@ -156,6 +156,10 @@
 #   builds the join record through the `has_one`, which loads the
 #   record it replaces.
 #
+# The `insert` and `insert_all` families stay `io.db.write` alone.
+# Each compiles one `INSERT` statement and queries nothing else: the
+# proxy's override reads only the target it already holds in memory.
+#
 # Two kinds of query are not counted. Schema reflection is one: the
 # column and index lookups the schema cache serves would otherwise
 # make `where` a read. The model's callbacks and validators are the

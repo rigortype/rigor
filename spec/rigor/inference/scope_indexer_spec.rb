@@ -1421,6 +1421,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(idx[program].class_ivars_for("C")).not_to have_key(:@y)
         end
 
+        it "skips a `||=` guard, whose rvalue never stores a value, beside a write that does" do
+          # `@settings ||= raise ...` leaves the ivar as it found it or raises. Seeded as `nil`, an
+          # instance method read its own guard as provably raising, and sig-gen declared `-> bot`.
+          program = parse(<<~RUBY)
+            class C
+              def settings = (@settings ||= raise("boot first"))
+              def token = (@token ||= raise("unset"))
+              def refresh
+                @token = "t"
+              end
+            end
+          RUBY
+          ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("C")
+          expect(ivars).not_to have_key(:@settings)
+          expect(ivars[:@token]).to eq(Rigor::Type::Combinator.constant_of("t"))
+        end
+
         it "seeds `@x &&= v` as the rvalue — the write only runs on an already-truthy ivar" do
           program = parse(<<~RUBY)
             class C

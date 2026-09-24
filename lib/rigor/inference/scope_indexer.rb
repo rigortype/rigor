@@ -1678,7 +1678,7 @@ module Rigor
         # Constant, `union(rvalue, Constant[nil])` collapses (for `nil`) or doesn't widen the type's truthiness profile
         # (for `false`) — the predicate `unless @x` then folds to a single `Constant[nil]` / `Constant[false]` and the
         # `flow.always-truthy-condition` / `-always-falsey-` rule false-fires on the no-op-but-documented-default idiom.
-        # Skip the seed contribution for this write — the sibling of `record_ivar_or_write`'s falsey-literal
+        # Skip the seed contribution for this write — the sibling of `record_ivar_or_write`'s no-truthy-rvalue
         # skip for `@x ||= <falsey>` (#1175). Other writes to the same ivar still contribute; the falsey-default
         # write carries no useful precision the predicate hasn't already given us. See tdiary-core HEAD `ee40c2b`
         # `lib/tdiary/configuration.rb:157` for the worked site.
@@ -1707,12 +1707,14 @@ module Rigor
       # alone would be an honest contribution; the `nil` member stands in for the read-before-write
       # state — a `||=`-only ivar is `nil` until the first call runs the write. (That same union is
       # what the `guarded` flag adds to a plain write, and for the same reason: the flow-insensitive
-      # seed has to know the predicate does not fold.) A falsey literal rvalue is skipped outright —
-      # `@x ||= false` can only leave `@x` falsey, the same "no useful precision" call the guarded
-      # `@x = nil unless @x` skip makes.
+      # seed has to know the predicate does not fold.) An rvalue with no truthy part is skipped outright
+      # — `@x ||= false` can only leave `@x` falsey, the same "no useful precision" call the guarded
+      # `@x = nil unless @x` skip makes, and `@x ||= raise "unset"` stores nothing at all. Seeded as
+      # `nil`, the guard bound its own ivar, and `ExpressionTyper#compound_write_value` read
+      # `truthy(nil) | bot` — an instance method that sig-gen declared `-> bot`.
       def record_ivar_or_write(node, scope, class_name, accumulator)
         rvalue_type = scope.type_of(node.value)
-        return if falsey_constant?(rvalue_type)
+        return if Narrowing.narrow_truthy(rvalue_type).is_a?(Type::Bot)
 
         accumulate_ivar_type(accumulator, class_name, node.name,
                              Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)))

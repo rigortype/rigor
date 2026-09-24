@@ -35,6 +35,21 @@ RSpec.describe "variable `||=` guard value", type: :runner do
       RUBY
     end
 
+    it "reads an instance method's guard the same way, whatever class writes the ivar" do
+      # The class-wide ivar seed must not bind the guard's own write: seeded `nil`, it read as provably raising.
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
+        module Configurable
+          def settings = dump_type(@settings ||= raise(NotImplementedError))
+        end
+
+        class Client
+          attr_writer :token
+
+          def token = dump_type(@token ||= raise("unset"))
+        end
+      RUBY
+    end
+
     it "gives the statement form the same answer as the expression form" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]"])
         class App
@@ -89,6 +104,15 @@ RSpec.describe "variable `||=` guard value", type: :runner do
         def settings
           conf = { a: 1 }
           dump_type(conf ||= raise("boot first"))
+        end
+      RUBY
+    end
+
+    it "keeps the value another method of the class stores past an instance method's guard" do
+      expect(dumped_types(<<~RUBY)).to eq(["{ a: 1 }"])
+        class App
+          def configure = (@conf = { a: 1 })
+          def conf = dump_type(@conf ||= raise("boot first"))
         end
       RUBY
     end

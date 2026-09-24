@@ -217,6 +217,26 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidates.find { |c| c.method_name == :default }.rbs).to eq("def self.default: () -> App")
     end
 
+    it "never declares an instance method's `||= raise` guard as returning bot" do
+      # The concern's ivar is written by whatever includes it; `token` by the `attr_writer`.
+      path = write_fixture("lib/guards.rb", <<~RUBY)
+        module Configurable
+          def settings = (@settings ||= raise(NotImplementedError))
+        end
+
+        class Client
+          attr_writer :token
+
+          def token = (@token ||= raise("unset"))
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.select { |c| %i[settings token].include?(c.method_name) }.map(&:skip_reason))
+        .to eq(%i[untyped_return untyped_return])
+    end
+
     it "skips top-level / DSL-block defs (no enclosing nameable class)" do
       path = write_fixture("lib/toplevel.rb", <<~RUBY)
         def at_root

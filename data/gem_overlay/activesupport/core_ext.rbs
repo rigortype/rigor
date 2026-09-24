@@ -762,6 +762,8 @@ class Array[unchecked out Elem]
   def fourth: () -> Elem?
   def fifth: () -> Elem?
   def forty_two: () -> Elem?
+  def second_to_last: () -> Elem?
+  def third_to_last: () -> Elem?
 
   # `core_ext/array/grouping`
   def in_groups_of: (Integer number, ?untyped fill_with) -> Array[Array[Elem]]
@@ -782,6 +784,9 @@ class Array[unchecked out Elem]
 
   # `core_ext/array/extract`
   def extract!: () { (Elem) -> bool } -> Array[Elem]
+
+  # `core_ext/array/extract_options`
+  def extract_options!: () -> Hash[untyped, untyped]
 
   # `core_ext/object/blank` / `core_ext/enumerable` — both
   # ActiveSupport additions, shipped on Array specifically.
@@ -810,6 +815,13 @@ module Enumerable[unchecked out Elem]
   def minimum: (Symbol | String) -> untyped
   def sole: () -> Elem
   def compact_blank: () -> Array[Elem]
+  def many?: () -> bool
+           | () { (Elem) -> boolish } -> bool
+  # `key` and `series` are untyped on purpose: the default `filter: true`
+  # path is `group_by(&key).values_at(*series)`, so a Proc key or a Set /
+  # Range series is correct Rails code. `filter:` is ActiveSupport 8.x;
+  # passing it on 7.x raises, which this unversioned row does not catch.
+  def in_order_of: (untyped key, untyped series, ?filter: boolish) -> Array[Elem]
 end
 
 # ---------------------------------------------------------------
@@ -863,6 +875,9 @@ class Hash[unchecked out K, unchecked out V]
   # `core_ext/object/blank` / `core_ext/hash`
   def compact_blank: () -> Hash[K, V]
   def compact_blank!: () -> self
+
+  # `core_ext/array/extract_options`
+  def extractable_options?: () -> bool
 
   # `core_ext/hash/reverse_merge`
   def reverse_merge: (Hash[K, V]) -> Hash[K, V]

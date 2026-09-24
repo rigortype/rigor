@@ -233,8 +233,8 @@ module ActiveRecord
     def references: (*untyped) -> self
     # With a block, `select` is Enumerable's and returns an Array. It
     # stays `self`: on this open receiver a method the file does not
-    # declare is not reported, while on `Array[Elem]` the ActiveSupport
-    # methods the bundled overlay leaves out, such as `many?`, would be.
+    # declare is not reported, while on `Array[Elem]` any ActiveSupport
+    # method the bundled overlay leaves out would be.
     %a{pure}
     def select: (*untyped) -> self
     %a{pure}

@@ -24,7 +24,9 @@ module Rigor
       # flow rules a non-nil nominal and license folds that draw diagnostics on correct templates — the
       # trap `Actionpack::STRONG_PARAMS_CHAIN_METHODS` documents at length for `Parameters#[]`. Anything
       # else assigns nothing, the ivar stays unseeded, and the template reads it as `Dynamic`, which
-      # taints honestly (ADR-5).
+      # taints honestly (ADR-5). A call on that list that returns, or may return, SEVERAL records —
+      # `find(a, b)`, `find([1, 2])`, `create([{…}, {…}])` — is excluded by the same rule; see
+      # {Builder#single_record?}.
       #
       # Two assignments of the same ivar that disagree drop it for that template, for the same reason.
       #
@@ -276,12 +278,48 @@ module Rigor
           def produced_type(value)
             return nil unless value.is_a?(Prism::CallNode)
             return nil unless NON_NIL_PRODUCERS.include?(value.name)
+            return nil unless single_record?(value)
 
             receiver = value.receiver
             return nil unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
 
             name = ControllerScan.constant_segments(receiver).join("::")
             name.empty? ? nil : name
+          end
+
+          # Argument shapes that can stand for several ids, or several attribute hashes, at once.
+          LIST_ARGUMENTS = [Prism::SplatNode, Prism::ArrayNode, Prism::ForwardingArgumentsNode].freeze
+          private_constant :LIST_ARGUMENTS
+
+          # Whether the call returns ONE record. A seed names a class and nothing more — `resolve` in
+          # `Analysis::TemplateUnits` looks the string up as a nominal — so an `Array[Model]` result has no
+          # spelling here, and seeding the element type would contradict rigor-activerecord, which types the
+          # controller's own `Model.find(a, b)` as `Array[Model]` (#1321).
+          #
+          # `find` therefore seeds only for exactly one plain positional argument and no block. Two or more
+          # ids return an Array. So may `find([1, 2])` and `find(*ids)`: rigor-activerecord keeps the model
+          # for both, because a composite key's tuple is one record, but the view declines where the runtime
+          # answer may be an Array, which leaves it `Dynamic` rather than contradicting the controller. A
+          # block hands the call to `Enumerable#find`, which the arity rule does not describe. One argument
+          # that merely EVALUATES to an Array (`find(params[:ids])`, `create(rows)`) cannot be told apart from
+          # one id or one attribute hash — the limit the bundled `Relation#find` RBS states too — and keeps
+          # the model, as it does there. `create` / `create!` given an Array of attribute hashes return one
+          # record per hash.
+          def single_record?(call)
+            arguments = call.arguments&.arguments || []
+            case call.name
+            when :find
+              arguments.size == 1 && call.block.nil? && !list_argument?(arguments.first) &&
+                !arguments.first.is_a?(Prism::KeywordHashNode)
+            when :create, :create!
+              arguments.none? { |argument| list_argument?(argument) }
+            else
+              true
+            end
+          end
+
+          def list_argument?(node)
+            LIST_ARGUMENTS.any? { |klass| node.is_a?(klass) }
           end
 
           # The implicit render plus every explicit one the body spells. An action that renders nothing

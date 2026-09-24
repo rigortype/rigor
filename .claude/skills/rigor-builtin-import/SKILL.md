@@ -191,8 +191,10 @@ Final gate before commit:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --no-cache exe bin
 ```
 
+`exe` and `bin` are outside both `make check` and CI's self-check, so the second line is theirs.
 A catalog change can move folding anywhere in `lib`, which a changed-files gate does not see; the CI
 self-check over the whole of `lib` is the gate for that, so push the Draft PR and read it.
 
@@ -256,7 +258,7 @@ Before declaring an import done:
 - [ ] Per-topic blocklist (`MethodCatalog.new(mutating_selectors: …)`) curated for false-positive `:leaf`s.
 - [ ] `MethodDispatcher::ConstantFolding#catalog_for` routes the new receiver class.
 - [ ] At least one self-asserting fixture under `spec/integration/fixtures/`.
-- [ ] `make verify-changed` clean locally; CI (including the self-check) green on the Draft PR.
+- [ ] `make verify-changed` and `rigor check exe bin` clean locally; CI (including the self-check) green on the Draft PR.
 - [ ] A `changelog.d/` fragment records the user-visible additions.
 - [ ] If a new refinement / directive lands, the matching ADR / spec doc is updated.
 

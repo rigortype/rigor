@@ -44,18 +44,24 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 Once the change is implemented and `make verify-changed` passes:
 
 1. **Push and open the Draft PR.** CI starts on the push and is the full gate; read the result for
-   the head commit, not the branch.
+   the head commit, not the branch. The changelog fragment needs the PR link, so it is a second
+   push.
 2. **Start the adversarial review at the same time**, not after CI: the two are independent, and a
    later push re-runs CI anyway. The reviewer is a fresh agent that did not write the change, on the
    strongest model the harness offers — Claude Opus 5.5 under Claude Code; elsewhere a model of that
-   class, such as Claude Opus 4.6 at high effort. Give it the base commit, the PR and its issue, and
-   this repository's rules (the Flake, read-only `references/`, no local full gates — a subagent does
-   not inherit them). Ask for findings ranked by severity, each with a concrete failure scenario,
-   and scope expansion labelled separately.
+   class, such as Claude Opus 4.6 at high effort. A harness that offers neither uses its strongest
+   model at its highest effort; one that cannot start a separate agent says so in the PR and leaves
+   it Draft — the review is never skipped silently. Give the reviewer the base commit, the PR and its
+   issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the
+   release gate — a subagent does not inherit them). Ask for findings ranked by severity, each with
+   a concrete failure scenario, and scope expansion labelled separately.
 3. **Triage.** Fix correctness defects and test gaps. Fix text and nits without calling for another
    round. File scope expansion as issues rather than growing the PR. Answer a finding you reject
-   with the reason in a PR comment.
-4. **Another round only if this round's fixes addressed a severe correctness defect.** Make it a
+   with the reason in a PR comment; rejecting a *severe* finding is a decision for the user, so the
+   PR stays Draft. Severity is the reviewer's ranking, not the implementer's. Severe means what
+   AGENTS.md's false-positive rule weighs: a diagnostic on correct code, a wrong inferred type or
+   claim, a crash, a gate that passes without checking, or guidance an agent would misapply.
+4. **Another round only if this round's fixes addressed a severe defect.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in
    rounds 2 and later had been introduced by the previous round's fixes, and a round after a severe
@@ -63,10 +69,13 @@ Once the change is implemented and `make verify-changed` passes:
 5. **Stop at three rounds.** If round 3 still finds a severe defect the design is not converging:
    stop and ask the user whether to take a conservative reading, split the PR, or file the rest.
 6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
-   review has stopped — when the landing point was settled before the work began: an issue or
-   request that states the expected outcome. When the PR instead embodies a decision nobody has
-   made — a trade-off between designs, a policy or spec change no issue asked for, a finding the
-   review left as a judgement call — leave it Draft and put the decision to the user.
+   review has stopped — when the landing point was settled before the work began: a
+   `ready-for-agent` issue, or a user request that states the expected outcome. When the PR instead
+   embodies a decision nobody has made, leave it Draft and put the decision to the user: a
+   `ready-for-human` issue, a trade-off between designs, an ADR, a spec edit that picks what the
+   issue left open (writing down behaviour the issue already stated is settled), or a severe finding
+   you rejected. A skill with its own landing rule (`rigor-release-prep`, `rigor-dependency-update`)
+   keeps it.
 
 ## Release Cadence
 

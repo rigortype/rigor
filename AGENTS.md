@@ -29,8 +29,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command <cmd>
 
 Use an interactive `nix … develop` shell when useful. The Flake owns Ruby 4.0.5 and the vendored
 `vendor/bundle`; `make setup` is the first-time setup. For isolated work, read
-[`rigor-worktree`](.claude/skills/rigor-worktree/SKILL.md). CI is the exception: it installs Ruby with
-`ruby/setup-ruby` and runs the targets `make verify` chains, plus further acceptance gates, directly.
+[`rigor-worktree`](.claude/skills/rigor-worktree/SKILL.md). CI is the exception: it installs Ruby
+with `ruby/setup-ruby` and runs the targets `make verify` chains, plus further acceptance gates.
 
 ## Validation
 
@@ -41,7 +41,8 @@ Local runs are targeted; the full gate is CI on the pull request.
   decides those.
 - Do not run `make verify`, `make check`, or the whole suite locally. Parallel sessions each running
   it were the bottleneck (five at once took 12–20 minutes each), and CI runs a superset. Run one
-  only to reproduce a failure CI does not explain, or for a Flake-environment change CI cannot see.
+  only to reproduce a failure CI does not explain, or where a skill's own gate requires it (release
+  prep, dependency and Ruby bumps).
 - A Markdown-only push straight to `master` skips CI: run `make docs-check` first. A Markdown-only
   PR runs it in CI. `make verify-sequential` is for investigating parallel-only flakes.
 
@@ -60,10 +61,11 @@ Before committing, pushing, opening/landing a PR, or preparing a release, read
 [`docs/agents/contribution-flow.md`](docs/agents/contribution-flow.md). It contains the conditional
 GitHub Markdown, branch, draft-PR, changelog-fragment, release, and reporter-credit rules.
 
-A change request ends at its landing, not at a local diff: push a Draft PR, run CI and an
-independent adversarial review in parallel, apply what they find, and merge when the landing point
-was settled in advance. The loop, its round rule, and the reviewer model are in § "Landing a pull
-request" there.
+Unless the user asks otherwise or it is a small docs fix pushed straight to `master`, a change
+request ends at its landing, not at a local diff: push a Draft PR, run CI and an independent
+adversarial review in parallel, apply what they find, and merge when the landing point was settled
+in advance. The loop, its round rule, and the reviewer model are in § "Landing a pull request"
+there.
 
 ## Implementation Guidelines
 

@@ -194,10 +194,12 @@ git status --short                              # expect: new ADR file + modifie
 nix … develop --command make docs-check         # gates the index rules (ADR-97)
 ```
 
-ADR authoring is docs-only, so `make verify` is not required for the ADR
+ADR authoring is docs-only, so the code gates are not required for the ADR
 itself. If the ADR lands *alongside* an implementation slice, that slice
-follows the normal `make verify` protocol (AGENTS.md) — but the ADR text
-does not gate on it.
+follows the normal protocol (AGENTS.md § "Validation": `make verify-changed`
+locally, CI on the Draft PR) — but the ADR text does not gate on it. An ADR
+records a decision, so its PR stays Draft for the user
+(`docs/agents/contribution-flow.md` § "Landing a pull request").
 
 Commit and release rules are in `docs/agents/contribution-flow.md`;
 `bundle exec rake release` needs explicit authorization. A new ADR is a

@@ -11,8 +11,8 @@ module Rigor
     #
     # Ruby has no by-ref parameters, so `mutate.local` cannot mean "a write into an out-parameter" as it
     # does in PHP. It means the mutated receiver is invisible to the caller, and that is an ownership
-    # question: a local whose every assignment allocates (`[]`, `{}`, `""`, `.new`, `.dup`) and which never
-    # escapes the body is one no caller can observe being mutated.
+    # question: a local whose every assignment allocates (`[]`, `{}`, `""`, `Foo.new`, `.dup`) and which
+    # never escapes the body is one no caller can observe being mutated.
     #
     # The analysis is deliberately **flow-insensitive and whole-body**: a local that escapes anywhere
     # disqualifies, even if the escape happens after the mutation. That is strictly more conservative than
@@ -23,10 +23,10 @@ module Rigor
     # This is the tracer slice's approximation, not the eventual answer. `ClosureEscapeAnalyzer` answers a
     # different question (fact retention, not "does the code contain") and is deliberately left alone.
     module LocalOwnership
-      # Assignment right-hand sides that witness a fresh allocation. `.new` and `.dup` / `.clone` follow
+      # Assignment right-hand sides that witness a fresh allocation. `.dup` / `.clone` follow
       # [ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md)'s reading of `dup` as the
-      # allocation witness.
-      ALLOCATING_SELECTORS = %i[new dup clone].to_set.freeze
+      # allocation witness; `.new` is {constructor?}'s, because only a class object's `new` is `Class#new`.
+      COPYING_SELECTORS = %i[dup clone].to_set.freeze
 
       module_function
 
@@ -53,10 +53,29 @@ module Rigor
              Prism::LambdaNode
           true
         when Prism::CallNode
-          ALLOCATING_SELECTORS.include?(node.name) || unary_plus_string?(node)
+          COPYING_SELECTORS.include?(node.name) || constructor?(node) || unary_plus_string?(node)
         else
           false
         end
+      end
+
+      # A `new` whose receiver the author wrote as a class object: a constant path, `self` (explicit or
+      # implicit), or `self.class`. Any other receiver may be an object whose `new` only shares the name —
+      # an ActiveRecord association's `new` builds a record into the association's own target, where the
+      # caller can reach it — and a gem's method gives no edge that would carry that to the caller.
+      def constructor?(node)
+        return false unless node.name == :new
+
+        receiver = node.receiver
+        case receiver
+        when nil, Prism::SelfNode, Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::CallNode then self_class?(receiver)
+        else false
+        end
+      end
+
+      def self_class?(node)
+        node.name == :class && node.receiver.is_a?(Prism::SelfNode) && node.arguments.nil? && node.block.nil?
       end
 
       # `+""` — the frozen-string-literal era's spelling of "a fresh mutable String".
@@ -125,8 +144,8 @@ module Rigor
         last.is_a?(Prism::LocalVariableReadNode) ? [last.name.to_s] : []
       end
 
-      private_class_method :collect, :record_assignment, :record_escapes, :stored_value, :note_read,
-                           :trailing_reads
+      private_class_method :self_class?, :collect, :record_assignment, :record_escapes, :stored_value,
+                           :note_read, :trailing_reads
     end
   end
 end

@@ -152,7 +152,7 @@ Generate the baseline (run from the rigor repo so the Nix flake
 resolves; `cd` into the target *inside* the command):
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bash -c 'cd ~/repo/ruby/rigor-survey/<name> && \
     BUNDLE_GEMFILE=<rigor>/Gemfile bundle exec <rigor>/exe/rigor \
     baseline generate --output=<rigor>/../rigor-survey/_<name>-sweep/baseline.yml'
@@ -167,7 +167,7 @@ Use [`scripts/sweep.sh`](scripts/sweep.sh) — set `RIGOR`, `TARGET`,
 `SWEEP`, and `TAGS` at the top, then:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bash .claude/skills/rigor-regression-sweep/scripts/sweep.sh
 ```
 
@@ -183,7 +183,7 @@ Use [`scripts/tabulate.rb`](scripts/tabulate.rb) (set the same paths
 + `TAGS`):
 
 ```sh
-nix … develop --command ruby \
+nix develop --command ruby \
   .claude/skills/rigor-regression-sweep/scripts/tabulate.rb
 ```
 
@@ -231,8 +231,8 @@ survey note (mirror the Mastodon one). Cover:
 
 `nix develop` resolves the flake from the **current directory**. The
 rigor flake is in the rigor repo, the target is elsewhere — so do
-**not** `cd` into the target before `nix develop`. Run `nix …
-develop --command bash -c 'cd <target> && …'` from the rigor repo,
+**not** `cd` into the target before `nix develop`. Run `nix develop
+--command bash -c 'cd <target> && …'` from the rigor repo,
 and pass `BUNDLE_GEMFILE=<rigor>/Gemfile` so `bundle exec
 <rigor>/exe/rigor` runs with rigor's gem environment while the target
 is the working directory (diagnostic paths then resolve

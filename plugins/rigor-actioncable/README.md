@@ -38,7 +38,7 @@ plugins/rigor-actioncable/
 
 ```sh
 cd plugins/rigor-actioncable/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```

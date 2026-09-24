@@ -36,7 +36,7 @@
 #                       — skip the `CATALOG_BY_CLASS` row (modules are not
 #                       receiver classes the dispatcher routes through)
 #                       and emit a different placeholder fixture banner.
-#   --extract           Run `make extract-builtin-catalogs` after scaffolding
+#   --extract           Run the extractor for TOPIC after scaffolding
 #   --dry-run           Print planned actions without writing
 #   -h / --help         Show this banner
 
@@ -361,10 +361,10 @@ end
 # 6. Optionally run the extractor for the new topic.
 if options[:extract] && !dry_run
   Dir.chdir(ROOT) do
-    cmd = "nix --extra-experimental-features 'nix-command flakes' develop --command " \
-          "bundle exec ruby tool/extract_builtin_catalog.rb #{topic}"
-    report("run     #{cmd}", dry_run: false)
-    system(cmd) || abort("[scaffold] extractor run failed")
+    # Already inside the Flake (the skill runs this script through `nix develop`), so no nested `nix`.
+    cmd = ["bundle", "exec", "ruby", "tool/extract_builtin_catalog.rb", topic]
+    report("run     #{cmd.join(" ")}", dry_run: false)
+    system(*cmd) || abort("[scaffold] extractor run failed")
   end
 end
 

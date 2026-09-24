@@ -37,8 +37,8 @@ See what is available first, then update within the existing gemspec
 constraints:
 
 ```sh
-nix ... develop --command bundle outdated
-nix ... develop --command bundle update
+nix develop --command bundle outdated
+nix develop --command bundle update
 ```
 
 `bundle update` re-resolves every gem to the latest version the
@@ -62,7 +62,7 @@ held by a transitive cap.
 ## Layer 2 — Nix Flake dev environment (`nix flake update`)
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' flake update
+nix flake update
 ```
 
 This bumps the single `nixpkgs` input to the latest `nixpkgs-unstable`
@@ -100,7 +100,7 @@ Rebuild the native extensions against the new Ruby before verifying:
 
 ```sh
 rm -rf vendor/bundle
-nix ... develop --command bundle install     # recompiles native ext against the new Ruby
+nix develop --command bundle install     # recompiles native ext against the new Ruby
 ```
 
 `vendor/bundle` is **gitignored** — this is a purely local artifact of the
@@ -122,8 +122,8 @@ The rebuild dependency makes the order matter when both layers move:
 ## Verify
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix develop --command make verify
+nix develop --command git diff --check
 ```
 
 `make verify` (test + lint + `check` + `check-plugins`) must be green under

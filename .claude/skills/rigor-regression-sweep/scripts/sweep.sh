@@ -4,7 +4,7 @@
 # Run inside the rigor Nix dev shell (Phase 6 of SKILL.md).
 #
 # Edit the four variables + TAGS for the target, then:
-#   nix … develop --command bash <this-script>
+#   nix develop --command bash <this-script>
 set -u
 
 # --- configure -------------------------------------------------------

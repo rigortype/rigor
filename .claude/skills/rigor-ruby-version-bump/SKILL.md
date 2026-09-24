@@ -62,7 +62,7 @@ ruby = (pkgs.mkRuby {
    ```
 2. Run the shell so Nix fetches and complains:
    ```sh
-   nix --extra-experimental-features 'nix-command flakes' develop --command true
+   nix develop --command true
    ```
 3. Nix prints a `hash mismatch` with a `got:` line — copy that value into `hash`:
    ```
@@ -76,7 +76,7 @@ ruby = (pkgs.mkRuby {
 Confirm the build:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command ruby -v
+nix develop --command ruby -v
 # => ruby 4.0.5 (...) +PRISM [...]
 ```
 
@@ -105,7 +105,7 @@ Then `grep -rn` the old version across `docs/` and update **live** docs (`docs/C
 ## Step 4 — Verify
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
+nix develop --command make verify
 ```
 
 `make verify` chains test + lint + the `rigor check lib` self-check. It must stay clean on the new Ruby. `bundle exec` reads the `Gemfile` `ruby` directive — because that directive is a range, the new patch satisfies it without a `Gemfile` edit.

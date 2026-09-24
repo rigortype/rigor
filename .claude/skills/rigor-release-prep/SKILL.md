@@ -10,7 +10,7 @@ metadata:
 Follow this workflow when preparing a new `rigor` gem release.
 
 All commands MUST run through the Flake per `AGENTS.md`. The examples below
-include the full `nix ... develop --command` prefix so each line is directly
+include the full `nix develop --command` prefix so each line is directly
 runnable from outside the Flake shell. Inside the Flake shell, drop the
 prefix.
 
@@ -329,8 +329,8 @@ and link addressability.
 Run before committing:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix develop --command make verify
+nix develop --command git diff --check
 ```
 
 `make verify` is the CI-equivalent gate (tests, lint, `check`, and
@@ -347,9 +347,9 @@ a `CHANGELOG.md` tweak made after a green verify can turn CI red, and
 final edit, re-run the two cheap gates that the prose can actually break:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec rspec spec/docs/changelog_conformance_spec.rb
-nix --extra-experimental-features 'nix-command flakes' develop --command make docs-check
+nix develop --command make docs-check
 ```
 
 That preserves the after-the-last-edit invariant at a fraction of a full rerun.
@@ -358,7 +358,7 @@ Also build the gem to confirm the gemspec is still valid for the bumped
 version:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command gem build rigortype.gemspec
+nix develop --command gem build rigortype.gemspec
 ```
 
 The build produces `rigortype-x.y.z.gem` in the working tree. Delete it before
@@ -484,7 +484,7 @@ RubyGems, and none of that can be undone.
 
 ```sh
 git switch master && git pull
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake release
+nix develop --command bundle exec rake release
 ```
 
 `rake release` verifies a clean working tree, tags the release as `vx.y.z`,
@@ -504,7 +504,7 @@ If the GitHub Release step fails after the gem is already published (transient
 is not republished:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake release:github
+nix develop --command bundle exec rake release:github
 ```
 
 The standalone task reads `Rigor::VERSION`, requires the matching `vx.y.z` tag
@@ -518,9 +518,9 @@ If publishing must be split across people or machines, build locally and
 hand the artefact to the publisher:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command gem build rigortype.gemspec
+nix develop --command gem build rigortype.gemspec
 # Hand off rigortype-x.y.z.gem, then on the publisher's machine:
-nix --extra-experimental-features 'nix-command flakes' develop --command gem push rigortype-x.y.z.gem
+nix develop --command gem push rigortype-x.y.z.gem
 ```
 
 In the split-publish case, push the `vx.y.z` tag manually after the gem is

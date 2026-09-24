@@ -5,7 +5,7 @@
 # prints the error-increase curve relative to the frozen baseline.
 #
 # Edit SWEEP + TAGS for the target, then:
-#   nix … develop --command ruby <this-script>
+#   nix develop --command ruby <this-script>
 require "json"
 
 # --- configure -------------------------------------------------------

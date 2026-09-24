@@ -49,7 +49,7 @@ of the analyzer whose behaviour is being sized.
 Inside the Flake shell, from the repo root:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec ruby tool/probe-693/census_gap_sites.rb <root> [subdir ...]
 ```
 
@@ -58,7 +58,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 The whole corpus at once (`SURVEY_ROOT` defaults to `~/repo/ruby/rigor-survey`):
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec ./tool/probe-693/run-corpus.sh
 ```
 

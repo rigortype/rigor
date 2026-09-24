@@ -40,7 +40,7 @@ plugins/rigor-sidekiq/
 
 ```sh
 cd plugins/rigor-sidekiq/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```

@@ -38,7 +38,7 @@ The flow has six stages. The first four are mechanical; the last two are decisio
 `tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of stages 1–4 and 7. Run it once and the manual work that remains is just the per-class judgement calls — blocklist curation, fixture body, and the changelog fragment.
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec ruby tool/scaffold_builtin_catalog.rb <topic> <ClassName> \
     --c-path references/ruby/<topic>.c \
     --rb-prelude references/ruby/<topic>.rb \
@@ -105,7 +105,7 @@ Common decisions at this stage:
 Run the extractor:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec ruby tool/extract_builtin_catalog.rb <topic>
 ```
 
@@ -114,7 +114,7 @@ The output prints a per-purity histogram; treat it as the first sanity check (e.
 ### Stage 3 — Regenerate the catalogue + commit the YAML
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   make extract-builtin-catalogs
 ```
 
@@ -190,8 +190,8 @@ The fixture's `assert_type` calls double as documentation; readers see the behav
 Final gate before commit:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --no-cache --fail-on=warning exe bin
+nix develop --command make verify-changed
+nix develop --command bundle exec exe/rigor check --no-cache --fail-on=warning exe bin
 ```
 
 `exe` and `bin` are outside both `make check` and CI's self-check, so the second line is theirs.

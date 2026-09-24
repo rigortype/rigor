@@ -51,7 +51,7 @@ runtime.
 
 ```sh
 cd plugins/rigor-actionpack/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib:$PWD/../../rigor-rails-routes/lib" \
   bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check

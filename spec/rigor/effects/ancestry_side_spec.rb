@@ -8,8 +8,9 @@ require "rigor/effects/scanner"
 # The effects collection's include table is the instance ancestry that `super` and the constructor rule walk.
 # `include`, `prepend` and `alias_method` are calls on `self`, and `alias` works on the default definee, so each
 # reaches that ancestry only where `self` (or the definee) is the class. Where it is the singleton class, `include`
-# does what `extend` does and an aliased `initialize` is a class method `new` never calls, so neither is recorded.
-# Each snippet is evaluated as well as scanned, so every expectation here is also Ruby's answer.
+# does what `extend` does and an aliased `initialize` is a class method `new` never calls. Where the syntax does not
+# say which class it is, the module or alias goes into a class no key names. Neither is recorded. Each snippet is
+# evaluated as well as scanned, so every expectation here is also Ruby's answer.
 RSpec.describe "which side an ancestry declaration in a class body reaches" do
   def scan(source)
     root = Prism.parse(source).value
@@ -30,11 +31,18 @@ RSpec.describe "which side an ancestry declaration in a class body reaches" do
     "class << self; prepend Mixin; end" => false,
     "class << self; class << self; include Mixin; end; end" => false,
     "class << self; class_eval { include Mixin }; end" => false,
-    "singleton_class.class_eval { include Mixin }" => false
+    "singleton_class.class_eval { include Mixin }" => false,
+    "singleton_class.instance_eval { include Mixin }" => false,
+    "singleton_class.instance_exec { include Mixin }" => false,
+    # The block defines into a class the call creates, or into another class, and nothing names it here.
+    "Class.new { include Mixin }" => false,
+    "Struct.new(:a) { include Mixin }" => false,
+    "Other.class_eval { include Mixin }" => false,
+    "class << Other; include Mixin; end" => false
   }.each do |body, instance_side|
     %w[class module].each do |keyword|
       it "#{instance_side ? 'records' : 'does not record'} `#{body}` in a #{keyword} body" do
-        source = "module Mixin; end\n#{keyword} Host\n  #{body}\nend\n"
+        source = "module Mixin; end\nclass Other; end\n#{keyword} Host\n  #{body}\nend\n"
         namespace = evaluate(source)
         expect(namespace.const_get(:Host).include?(namespace.const_get(:Mixin))).to be(instance_side)
 
@@ -52,7 +60,9 @@ RSpec.describe "which side an ancestry declaration in a class body reaches" do
     "class << self; def setup; end; alias_method :initialize, :setup; end" => false,
     # The two spellings part here: `alias` follows the definee and `alias_method` follows `self`.
     "def self.setup; end; instance_eval { alias initialize setup }" => false,
-    "def setup; end; instance_eval { alias_method :initialize, :setup }" => true
+    "def setup; end; instance_eval { alias_method :initialize, :setup }" => true,
+    "Class.new { def setup; end; alias initialize setup }" => false,
+    "Class.new { def setup; end; alias_method :initialize, :setup }" => false
   }.each do |body, instance_side|
     it "#{instance_side ? 'records' : 'does not record'} an unreadable constructor for `#{body}`" do
       source = "class Host\n  #{body}\nend\n"

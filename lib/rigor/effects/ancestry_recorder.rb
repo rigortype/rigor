@@ -73,17 +73,15 @@ module Rigor
       # A receiver-less `include` / `prepend` in `class_name`'s body, its constant arguments recorded as
       # written.
       #
-      # Both are calls on `self`, like `define_method`. Where `self` is the singleton class — inside
-      # `class << self`, or a `class_eval` / `instance_eval` block on `singleton_class` — they mix the
-      # module into the singleton class, which is what `extend` does. The include table is the instance
-      # ancestry that `super` and the constructor rule walk, so such a call records nothing, and the
-      # collection is as blind to it as it is to `extend`. A block that makes another class `self`
-      # (`Class.new { … }`, `Struct.new(:a) { … }`, `Other.class_eval { … }`) is not modelled, and its
-      # include still files under the enclosing class.
+      # Both are calls on `self`, like `define_method`, and the include table is the instance ancestry that
+      # `super` and the constructor rule walk, so a call is recorded only where `self` is the class the body
+      # opened (see {#instance_side_self?}). Inside `class << self`, or a `class_eval` / `instance_eval`
+      # block on `singleton_class`, it mixes the module into the singleton class, which is what `extend`
+      # does, and the collection is as blind to it as it is to `extend`.
       #
       # @param context — the {DefinitionContext} of the class-body position the call sits at
       def record_includes(class_name, node, prefix, context)
-        return if context.self_singleton_class?
+        return unless instance_side_self?(context)
 
         names = node.arguments&.arguments&.filter_map { |argument| Source::ConstantPath.qualified_name(argument) }
         candidates = (names || []).flat_map { |name| lexical_candidates(name, prefix) }
@@ -103,14 +101,16 @@ module Rigor
       #
       # `alias` works on the default definee and `alias_method` on `self`, so the two part in an
       # `instance_eval` block, and inside `class << self` both alias the singleton class's `initialize`,
-      # a class method `new` never calls.
+      # a class method `new` never calls. Where the syntax does not say which class either one is, the
+      # alias is another class's, and records nothing here.
       #
       # @param context — the {DefinitionContext} of the class-body position the node sits at
       def alias_to_initialize?(node, context)
         case node
-        when Prism::AliasMethodNode then !context.definee_singleton && literal_name(node.new_name) == "initialize"
+        when Prism::AliasMethodNode
+          context.definee_singleton == false && literal_name(node.new_name) == "initialize"
         when Prism::CallNode
-          node.receiver.nil? && node.name == :alias_method && !context.self_singleton_class? &&
+          node.receiver.nil? && node.name == :alias_method && instance_side_self?(context) &&
             literal_name(first_argument(node)) == "initialize"
         else false
         end
@@ -127,6 +127,19 @@ module Rigor
       end
 
       private
+
+      # Whether a call on `self` written here works on the class the enclosing body opened, or on `Object`
+      # through `main` at the top level, so what it declares is that class's instance ancestry.
+      #
+      # It is not where `self` is the singleton class, and not where the syntax does not say what `self` is:
+      # the block of `Class.new` and its kin, an eval on another receiver, `class << obj`. There the module
+      # goes into a class no key names. Filing it under the enclosing class would put it where `super` and
+      # the constructor rule look for that class. The price is `W.class_eval { include M }` inside `class W`
+      # itself, which the context reads as an eval on any other receiver: that include is missed, as an
+      # `extend` is.
+      def instance_side_self?(context)
+        !context.self_singleton_class? && context.self_kind != :unknown
+      end
 
       def opaque?(full_name)
         @superclasses.fetch(full_name, []).include?(FileCollection::OPAQUE_ANCESTOR)

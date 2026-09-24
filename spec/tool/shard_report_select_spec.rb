@@ -23,11 +23,13 @@ RSpec.describe "tool/shard_report_select.rb" do
   after { FileUtils.rm_rf(root) }
 
   # Lays out one artifact the way download-artifact does without `merge-multiple`.
-  def artifact(shard:, attempt:, timings:, report: { "selected_tests" => 1 })
-    dir = File.join(downloads, "binpacker-report-#{shard}-attempt-#{attempt}")
+  # `alone:` is the layout it uses when only one artifact matched: the files at the top level.
+  def artifact(shard:, attempt:, timings:, report: { "selected_tests" => 1 }, alone: false)
+    dir = alone ? downloads : File.join(downloads, "binpacker-report-#{shard}-attempt-#{attempt}")
     FileUtils.mkdir_p(dir)
-    File.write(File.join(dir, "binpacker-provenance-#{shard}.json"),
-               JSON.generate("shard" => shard, "run_attempt" => attempt, "timings_sha256" => timings))
+    provenance = { "shard" => shard, "run_attempt" => attempt, "timings_sha256" => timings,
+                   "timings_key" => "binpacker-timings-v2-Linux-ruby4.0-#{timings}" }
+    File.write(File.join(dir, "binpacker-provenance-#{shard}.json"), JSON.generate(provenance))
     File.write(File.join(dir, "binpacker-report-#{shard}.json"), JSON.generate(report)) if report
     dir
   end
@@ -53,14 +55,29 @@ RSpec.describe "tool/shard_report_select.rb" do
       artifact(shard: 3, attempt: 1, timings: "aaa")
 
       expect { ShardReportSelect.choose(downloads) }
-        .to raise_error(ShardReportSelect::Error, /different timing files.*shard 2: attempt 2, timings bbb/m)
+        .to raise_error(ShardReportSelect::Error, /shard 2: attempt 2, timings bbb.*A re-run shard restored/m)
     end
 
-    it "refuses shards of one attempt that restored different timing files" do
+    # Run 35974654728: a shard that started late restored a cache a concurrent run had just saved.
+    it "refuses shards of one attempt that restored different timing files, without blaming a rerun" do
       artifact(shard: 1, attempt: 1, timings: "aaa")
       artifact(shard: 2, attempt: 1, timings: "bbb")
 
-      expect { ShardReportSelect.choose(downloads) }.to raise_error(ShardReportSelect::Error, /different timing files/)
+      expect { ShardReportSelect.choose(downloads) }
+        .to raise_error(ShardReportSelect::Error, /The shards of one attempt restored different timing files/)
+    end
+
+    it "finds a lone artifact that download-artifact put at the top level" do
+      artifact(shard: 1, attempt: 1, timings: "aaa", alone: true)
+
+      expect(ShardReportSelect.choose(downloads).map(&:dir)).to eq([downloads])
+    end
+
+    it "refuses a provenance record whose shard contradicts its file name" do
+      dir = artifact(shard: 1, attempt: 1, timings: "aaa")
+      File.rename(File.join(dir, "binpacker-provenance-1.json"), File.join(dir, "binpacker-provenance-2.json"))
+
+      expect { ShardReportSelect.choose(downloads) }.to raise_error(ShardReportSelect::Error, /file name contradicts/)
     end
 
     it "accepts a cold start, where no shard restored a timing file" do

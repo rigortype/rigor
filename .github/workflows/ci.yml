@@ -84,6 +84,39 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── 0a. The timing file every shard partitions ──────────────────
+  # Shards agree on which tests are theirs only while they cut the SAME
+  # timing file (see the test job's cache step). Each shard used to
+  # prefix-match the newest cache on its own, and three jobs that do not
+  # start together can see different "newest" caches: in run 35974654728
+  # the third shard started 37s after its siblings and restored the cache
+  # a concurrent master run had saved in between. So the newest key is
+  # resolved ONCE, here, and every shard restores exactly that key.
+  #
+  # It also keeps "Re-run failed jobs" on one file: this job succeeded,
+  # so a partial rerun reuses its output and the re-run shard restores
+  # the file its siblings cut. Were that output ever lost, the shard
+  # would restore nothing and shard-coverage refuses the mismatch.
+  #
+  # Pinned to the test matrix's one Ruby; a second one needs its own key.
+  timing-cache:
+    name: Resolve the shards' timing cache
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      key: ${{ steps.lookup.outputs.cache-matched-key }}
+    steps:
+      - name: Find the newest timing cache
+        id: lookup
+        uses: actions/cache/restore@v6
+        with:
+          path: tmp/binpacker.timings
+          # Never saved, so only the restore-keys prefix can match.
+          key: binpacker-timings-v2-${{ runner.os }}-ruby4.0-lookup
+          restore-keys: binpacker-timings-v2-${{ runner.os }}-ruby4.0-
+          lookup-only: true
+
   # ── 1. RSpec suite (via binpacker) ──────────────────────────────
   # The suite is the workflow's critical path, and a runner's core count is
   # the ceiling on what workers alone can do with it — every other job here
@@ -103,7 +136,7 @@ jobs:
   # this floor the only lever is a cheaper `runner_spec.rb`.
   test:
     name: Tests (Ruby ${{ matrix.ruby }}, shard ${{ matrix.shard }}/3)
-    needs: changes
+    needs: [changes, timing-cache]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -128,24 +161,19 @@ jobs:
       # scheduling can use measured per-file runtimes to balance
       # workers. On a cache miss binpacker falls back to filesize
       # weighting automatically — no cold-start breakage. The file is
-      # written at the end of each successful run and picked up by the
-      # next. Key is unique per run-id so the post-step always saves
-      # fresh timing data; restore-keys prefix-matches the most recent.
+      # written at the end of each successful run and saved for the next.
       #
-      # The key carries the shard index because parallel jobs cannot all
-      # save the same key — the first wins and the rest warn. The RESTORE
-      # keys deliberately do NOT: every shard prefix-matches the same
-      # `binpacker-timings-<os>-ruby<v>-` namespace, so all three restore
-      # the same file and therefore cut the same partition. That is not a
-      # nicety — shards agree on which tests are theirs only while they
-      # agree on the timings, and the shard-coverage job below is what
-      # catches it when they do not.
+      # Every shard restores the ONE key the timing-cache job resolved,
+      # never a prefix match of its own, so all three cut the same
+      # partition. That is not a nicety — shards agree on which tests are
+      # theirs only while they agree on the timings, and the
+      # shard-coverage job below is what catches it when they do not. A
+      # cold start (nothing resolved) skips the restore in every shard.
       #
-      # The key carries the attempt as well, so that no shard ever hits
-      # its primary key. Without it, "Re-run all jobs" gave each shard
-      # that saved in the earlier attempt an exact hit on ITS OWN file
-      # while a shard that failed there fell back to the newest — three
-      # shards, up to three timing files, three different cuts.
+      # The SAVE key carries the shard index because parallel jobs cannot
+      # all save one key — the first wins and the rest warn — and the
+      # attempt so that a rerun saves fresh data instead of colliding
+      # with the key its earlier attempt already wrote.
       #
       # A shard's saved file stays complete rather than shrinking to its
       # own slice: binpacker APPENDS samples and compacts to the three most
@@ -164,22 +192,25 @@ jobs:
       # deviation 43.6%). Bump this token whenever a spec file is split,
       # renamed, or deleted; one run then re-measures from filesize weighting.
       - name: Restore binpacker timing file
-        uses: actions/cache@v6
+        if: needs.timing-cache.outputs.key != ''
+        uses: actions/cache/restore@v6
         with:
           path: tmp/binpacker.timings
-          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
-          restore-keys: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-
+          key: ${{ needs.timing-cache.outputs.key }}
+          fail-on-cache-miss: true
 
       # Which timing file this shard is about to partition, recorded
       # BEFORE the run: binpacker rewrites the file when it finishes.
-      # shard-coverage requires every shard's digest to agree, because
-      # one timing file is what makes the shards' cuts one partition.
-      # Written ahead of the tests, too, so a shard that ran always has
-      # a record to upload.
+      # shard-coverage requires every shard's digest to agree — the
+      # backstop for the restore above, since one timing file is what
+      # makes the shards' cuts one partition. Written ahead of the tests,
+      # too, so a shard that ran always has a record to upload.
       - name: Record shard provenance
+        shell: bash
         env:
           SHARD: ${{ matrix.shard }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          TIMINGS_KEY: ${{ needs.timing-cache.outputs.key }}
         run: |
           mkdir -p tmp
           if [[ -f tmp/binpacker.timings ]]; then
@@ -187,8 +218,9 @@ jobs:
           else
             digest=absent
           fi
-          jq -n --argjson shard "$SHARD" --argjson attempt "$RUN_ATTEMPT" --arg digest "$digest" \
-            '{shard: $shard, run_attempt: $attempt, timings_sha256: $digest}' \
+          jq -n --argjson shard "$SHARD" --argjson attempt "$RUN_ATTEMPT" \
+            --arg digest "$digest" --arg key "$TIMINGS_KEY" \
+            '{shard: $shard, run_attempt: $attempt, timings_sha256: $digest, timings_key: $key}' \
             | tee "tmp/binpacker-provenance-$SHARD.json"
 
       - name: Run tests
@@ -196,13 +228,21 @@ jobs:
           make test-binpacker
           BINPACKER_FLAGS="--shard ${{ matrix.shard }}/3 --report tmp/binpacker-report-${{ matrix.shard }}.json"
 
+      - name: Save binpacker timing file
+        uses: actions/cache/save@v6
+        with:
+          path: tmp/binpacker.timings
+          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+
       # Consumed by the shard-coverage job, which is the only place a
       # partition that dropped tests can be detected. The name carries
       # the attempt: a "Re-run failed jobs" attempt keeps the passed
       # shards' artifacts from the earlier attempt, and under one shared
       # name download-artifact resolved the re-run shard's duplicate to
       # the STALE report (run 35844873791), so the check never saw the
-      # attempt that ran.
+      # attempt that ran. (The stale one won because download-artifact
+      # keeps the highest artifact ID per name, and IDs do not follow
+      # creation order — so `latest` is no fix either.)
       - name: Upload shard run report
         if: always()
         uses: actions/upload-artifact@v7
@@ -265,22 +305,17 @@ jobs:
   # suite — same shard count, same whole-suite discovered count, every
   # index present exactly once, and the slices summing to the whole.
   #
-  # A partial rerun ("Re-run failed jobs") re-runs one shard, which
-  # restores a newer timing cache than the shards that already passed —
-  # they saved theirs at the end of the earlier attempt — and so cuts a
-  # different partition. `tool/shard_report_select.rb` stands in front of
-  # shards-check: it takes each shard's report from the newest attempt
-  # that ran it, and fails unless every chosen shard partitioned the same
-  # timing file (the digest each shard records before its run). Matching
-  # counts alone cannot vouch for two different cuts, so in practice a
-  # partial rerun is refused; re-run ALL jobs instead. Re-running only
-  # this job after it failed, with the matrix green, is still sound: the
-  # reports it selects are unchanged.
-  #
-  # The digest check also fails a whole run whose shards did not start
-  # together — one queued long enough to restore the cache a sibling (or
-  # a concurrent run) had just saved. That is the same hazard, not a
-  # false alarm: before the check it passed whenever the counts summed.
+  # A partial rerun ("Re-run failed jobs") re-runs one shard while the
+  # passed shards' reports stay from the earlier attempt.
+  # `tool/shard_report_select.rb` stands in front of shards-check: it
+  # takes each shard's report from the newest attempt that ran it, and
+  # fails unless every chosen shard partitioned the same timing file (the
+  # digest each shard records before its run). Matching counts alone
+  # cannot vouch for two different cuts. The timing-cache job makes the
+  # digests agree by construction, so a mismatch means that failed — a
+  # cache evicted mid-run, or a rerun that lost the resolved key; re-run
+  # ALL jobs. Re-running only this job, with the matrix green, re-checks
+  # the same reports; the artifacts expire after a day.
   #
   # Runs whenever the matrix was not outright cancelled, so a mismatch
   # still surfaces when one shard failed.
@@ -301,9 +336,10 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      # One directory per artifact, deliberately not `merge-multiple`:
-      # merged, every attempt's `binpacker-report-<shard>.json` lands on
-      # one path and which attempt survives is up to download order.
+      # Deliberately not `merge-multiple`: merged, every attempt's
+      # `binpacker-report-<shard>.json` lands on one path and only one
+      # attempt survives. Unmerged, each artifact gets its own directory
+      # (or `reports/` itself when only one matched).
       - name: Download shard run reports
         uses: actions/download-artifact@v8
         with:
@@ -704,13 +740,14 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates]
+    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: All checks passed
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          TIMING_CACHE_RESULT: ${{ needs.timing-cache.result }}
           TEST_RESULT: ${{ needs.test.result }}
           SHARD_COVERAGE_RESULT: ${{ needs.shard-coverage.result }}
           EXCLUDED_SPECS_RESULT: ${{ needs.excluded-specs.result }}
@@ -730,7 +767,7 @@ jobs:
           fi
           # A gated job that was skipped (Markdown-only PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT"; do
+          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

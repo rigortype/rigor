@@ -419,14 +419,13 @@ slice that regresses precision below it fails CI.
 After every implementation slice:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
 ```
 
-`make verify` is the CI-equivalent gate (tests, lint, `check`, `check-plugins`).
-`make check` runs `bundle exec exe/rigor check lib` — Rigor's self-check must stay clean.
+`make verify-changed` is the local gate; the full gate (tests, lint, `check`, `check-plugins`) is CI
+on the Draft PR. CI's self-check runs `rigor check lib` — Rigor's self-check must stay clean.
 
-If `make check` surfaces new diagnostics in `lib/`, the cause is almost always:
+If the self-check surfaces new diagnostics in `lib/`, the cause is almost always:
 - a method added to a UNARY/BINARY set that Rigor itself uses — check that the Rigor codebase
   is not calling the method on a non-literal receiver that now resolves differently; or
 - a blocklist entry missing for a method the catalog classifies as `:leaf` but is actually
@@ -462,8 +461,7 @@ Before declaring a coverage-uplift slice done:
 - [ ] Precision snapshots updated: `UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb`.
       Run this whenever you add or modify a fixture — the golden files in `spec/integration/snapshots/`
       must reflect the new precise types or the CI snapshot gate will fail.
-- [ ] `make verify` clean.
-- [ ] `make coverage` clean.
+- [ ] `make verify-changed` clean locally; CI green on the Draft PR (it runs `make coverage` too).
 - [ ] Changelog fragment under `changelog.d/<section>/` (user-visible description of the new folds).
 - [ ] Implemented 🔲 entries updated to ✅ in the coverage doc.
 

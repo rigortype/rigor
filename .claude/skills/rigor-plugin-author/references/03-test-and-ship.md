@@ -111,11 +111,12 @@ Per `docs/agents/contribution-flow.md` § "Release Cadence", add a one-sentence 
 Run the full Flake-mediated verification:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
 ```
 
-`make verify` must report:
+`make verify-changed` runs the plugin's integration specs, the two all-plugin conformance specs,
+RuboCop, and `rigor check` on the changed lib files. Then push the Draft PR; CI is the full gate and
+must report:
 
 - RSpec passing (the new integration spec adds N examples to the total).
 - RuboCop 0 offenses (the plugin's own source is excluded by `.rubocop.yml`'s `plugins/**/*` and `examples/**/*` rules, but the integration spec under `spec/integration/{plugins,examples}/` IS linted — keep it under the per-example length / multiple-expectations limits, or add inline `# rubocop:disable` with a reason).

@@ -88,7 +88,7 @@ Before declaring "the plugin is done":
 - [ ] Integration spec at `spec/integration/plugins/<id>_plugin_spec.rb` (or `spec/integration/examples/<id>_plugin_spec.rb` for a walkthrough) passes; covers every diagnostic shape the plugin emits.
 - [ ] README follows the structure in Phase 7.
 - [ ] Changelog fragment under `changelog.d/` (no direct `[Unreleased]` edit).
-- [ ] `make verify` clean.
+- [ ] `make verify-changed` clean locally; CI green on the Draft PR.
 - [ ] `.rigor.yml` sets `cache.path: tmp/.rigor/cache` and the demo carries a `/tmp/`-only `.gitignore`.
 - [ ] `git status` shows no `.rigor/cache/` or `tmp/` directories.
 - [ ] One commit, message follows `docs/agents/contribution-flow.md` style.

@@ -110,11 +110,15 @@ until you `bundle install` in it.
 
 ## Running gates in a worktree
 
-Foreground, generous timeout, never
-`run_in_background` (a backgrounded `make verify` is the known stall and
-a detached wait cannot always be woken); and **one full-suite / corpus
-job on the machine at a time** — four concurrent `make verify` runs
-OOM-killed the host. Implementation parallel, verification serial.
+The local gate in a worktree is `make verify-changed`; the full suite is
+CI's, on the Draft PR. When a heavy job must run locally anyway — a
+full-suite reproduction, a corpus `rigor check` — run it in the
+foreground with a generous timeout, never `run_in_background` (a
+backgrounded full run is the known stall, and a detached wait cannot
+always be woken), and **one heavy job on the machine at a time**: the
+host OOM on record (2026-09-01) struck while a corpus `rigor check` over
+eleven survey targets ran alongside four resumed workers. Implementation
+parallel, heavy verification serial.
 
 ## Removing a worktree
 

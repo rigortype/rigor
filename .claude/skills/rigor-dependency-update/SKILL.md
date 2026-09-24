@@ -143,7 +143,8 @@ The PR's `ci.yml` gate re-runs the full suite on a clean checkout (its own
 `bundle install`), which is the authoritative cross-environment check. The PR
 is created `--draft` and goes Ready (`gh pr ready <pr>`) only on the user's
 explicit instruction to land it, with CI green and no stop instruction standing
-(`docs/agents/contribution-flow.md` § "Branches and pull requests" — a GitHub
+(this skill's own landing rule, which `docs/agents/contribution-flow.md` § "Landing a pull
+request" defers to — a GitHub
 APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 
 ## Stays untouched (out of scope here)

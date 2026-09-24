@@ -455,8 +455,9 @@ gh pr ready <pr>                 # only on the user's explicit word, CI green, n
 gh pr merge <pr> --rebase --delete-branch
 ```
 
-The release PR is created `--draft` like every other PR
-(`docs/agents/contribution-flow.md` § "Branches and pull requests"): the user
+The release PR is created `--draft` like every other PR, but lands by this
+skill's own rule, which `docs/agents/contribution-flow.md` § "Landing a pull
+request" defers to: the user
 reviews the sealed section on the PR, and `gh pr ready` is the recorded
 hand-off from review to landing.
 

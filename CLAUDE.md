@@ -12,8 +12,9 @@
   it is not loaded here, references only the public `rigor` CLI, and several names appear in both
   trees (`rigor-plugin-author`). Each `SKILL.md`'s `description:` is what routes to it, so keep no
   catalogue here. Authoring either: [`docs/agents/skill-authoring.md`](docs/agents/skill-authoring.md).
-- A subagent does not inherit this contract. The Flake mandate, the `references/` read-only rule, and
-  the release gate bind it too — put them in the prompt, or it will run `bundle` on the host.
+- A subagent does not inherit this contract. The Flake mandate, the `references/` read-only rule, no
+  local full gates, and the release gate bind it too — put them in the prompt, or it will run
+  `bundle` on the host and `make verify` alongside every other session.
 - **Auto memory is clone-wide, not worktree-scoped.** It keys off the git repository, so a parallel
   session in a sibling worktree of this clone reads and writes the same `MEMORY.md` — a save here is
   visible, and racing, there too.

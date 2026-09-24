@@ -8,6 +8,8 @@ both directions, and a reproducible false positive on correct code is removed.
 
 **Follow-up (2026-09-24, [PR #1278](https://github.com/rigortype/rigor/pull/1278)) — literal hashes are no longer the example.** The Context's `MAP = { a: "x", b: "y" }.freeze; MAP[key]` no longer produces an optimistic carrier: a closed, non-empty `HashShape` now answers a computed key itself with the values `| nil` (`docs/internal-spec/inference-engine.md`, shape tier), so the read is honestly nilable. The decision is unchanged and still binds the reads that stay optimistic — a `Hash[K, V]` nominal, an open or empty shape, `Array#first`, a computed-index `Array#[]` — and the guard specs now build their carrier from those.
 
+**Follow-up (2026-09-24, [PR #1295](https://github.com/rigortype/rigor/pull/1295)) — the mark follows a destructure and a safe-navigation call.** Part of the deferred "further chains" row below is taken, on a reproducible false positive rather than corpus demand: `k, v = pairs.first` marks every fixed slot (a miss binds `nil` to each), a literal right-hand side marks slot by element, and `recv&.m` resolves to `recv`'s mark (it is `nil` whenever `recv` is). An element read stays outside — `pairs.first.last`, and `pairs.first&.last.abs`, since `&.` skips only one call — because it raises on a miss rather than producing a value. Measured over 19 survey targets plus Rigor's own tree: the new paths mark 49 distinct sites, diagnostics (7,335) and declined verdicts (285) are unchanged on every target. The binding rules are in `docs/internal-spec/inference-engine.md` (§ "That deferred-to answer…" and § Multi-Target Binder).
+
 Grounding: the [shape census](../notes/20260805-issue-286-if-unless-truthiness-elision-census.md) that
 found the third consumer, and the [provenance census](../notes/20260806-issue-286-optimistic-carrier-provenance-census.md)
 that measured it and retired the carrier-shape option. Both for
@@ -101,7 +103,7 @@ drops the arm that actually runs.
 | Decline for all non-`Constant` carriers | Rejected | Over- and under-declines simultaneously (WD3); the shape a carrier happens to have is not the property the judgment turns on. |
 | Tighten `falsey_nominal?` so `Object` / `BasicObject` / `Kernel` read as undecidable (#286 as originally filed) | Rejected | Measured zero firings in 41,836 predicates — Rigor's unknown carrier is `Dynamic`, not `Nominal[Object]`. An untested guard defending an empty set, whose acceptance criterion would be met vacuously. |
 | Honour `%a{implicitly-returns-nil}` at the source, typing the read `V?` | Rejected | The original 25-FP measurement stands; this ADR deliberately keeps the optimistic *type* and constrains only what a certainty judgment may conclude from it. |
-| Propagate the mark through method returns and further chains | Deferred | Demand-gated. The corpus's optimistic predicates are all direct reads or one binding hop; no evidence yet that a deeper channel pays for its complexity. |
+| Propagate the mark through method returns and further chains | Deferred (partly taken) | Demand-gated. The corpus's optimistic predicates are all direct reads or one binding hop; no evidence yet that a deeper channel pays for its complexity. Destructuring and a safe-navigation call were taken in PR #1295 (see the follow-up above); method returns are issue #1177. |
 
 ## Consequences
 

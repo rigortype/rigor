@@ -553,4 +553,267 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
   end
+
+  # A multiple assignment from an optimistically nil-free value binds `nil` to every fixed slot on a miss
+  # (`k, v = nil`), so each slot's nil-freeness is the same bet; a literal right-hand side hands each slot its
+  # own element's. A plain element read is the boundary: `pairs.first.last` raises on a miss rather than
+  # producing a value, so it keeps eliding, while `pairs.first&.last` is `nil` exactly on the miss — and
+  # `&.` skips only that one call, so `pairs.first&.last.abs` raises on the miss and keeps eliding too.
+  describe "destructuring or safe-navigating an optimistically nil-free value" do
+    def pairs
+      pair = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"),
+                                              Rigor::Type::Combinator.nominal_of("Integer"))
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [pair])
+    end
+
+    it "declines on every fixed slot of a destructured `Array#first`" do
+      %w[k v].each do |slot|
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          k, v = pairs.first
+          if #{slot} then 1 else "none" end
+        RUBY
+
+        expect(arms_of(type)).to contain_exactly(1, "none"), "for #{slot}"
+      end
+    end
+
+    it "declines when the destructured value was first bound to a local" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        pair = pairs.first
+        k, _v = pair
+        if k then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines through `.nil?` on a destructured slot" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        k, _v = pairs.first
+        if k.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on an instance-variable slot of a destructured `Array#first`" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        @k, _v = pairs.first
+        if @k then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on the slot a literal right-hand side fills from the marked element" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        x, _y = pairs.first, 1
+        if x then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a nested target under the marked element of a literal right-hand side" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        (k, _v), _w = pairs.first, 1
+        if k then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a trailing slot a literal right-hand side fills from the marked element after a rest" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        _a, *_mid, z = 1, 2, pairs.first
+        if z then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a safe-navigation read of the carrier" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        if pairs.first&.last then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines through `.nil?` over a safe-navigation read" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        if pairs.first&.last.nil? then "none" else 1 end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "declines on a local bound to a safe-navigation read of a dynamic-key Hash read" do
+      type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
+        v = h[key]&.upcase
+        if v then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
+    it "still elides on a plain element read, which raises on a miss rather than producing nil" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        if pairs.first.last then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on a plain call chained after the safe navigation, which Ruby sends to the nil and raises" do
+      # `&.` skips only the one call: on a miss `pairs.first&.last.abs` is `nil.abs`, a NoMethodError.
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        if pairs.first&.last.abs then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on a safe-navigation read of a proof-carrying receiver" do
+      type, = evaluate_with({ s: Rigor::Type::Combinator.nominal_of("String") }, <<~RUBY)
+        if s&.upcase then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on the slot a literal right-hand side fills from an unmarked element" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        _x, y = pairs.first, 1
+        if y then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides when a later unmarked slot rebinds the name a marked slot bound" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        a, a = pairs.first, 1
+        if a then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on a local bound to a whole literal element, which is an Array even on a miss" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        x, _y = [pairs.first], 1
+        if x then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on the unmarked sibling of a nested target under a marked element" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        (_k, _v), w = pairs.first, 1
+        if w then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on a slot past the destructured pair's end, which is nil on a hit too" do
+      type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+        _k, _v, w = pairs.first
+        if w then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("none"))
+    end
+
+    it "keeps a safe-navigation predicate's own `true`, since the miss answers nil rather than false" do
+      type, = evaluate_with({ pairs: pairs }, "pairs.first&.last&.integer?\n")
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "keeps `!` over a safe-navigation predicate that a miss answers the same way" do
+      # Hit: `!false`; miss: `!nil`. Both are `true`, so `bool` would invent a `false`.
+      type, = evaluate_with({ pairs: pairs }, "!pairs.first&.empty?\n")
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "still widens `!!` over a marked read, whose miss answers the other boolean" do
+      type, = evaluate_with({ h: hash_of("x") }, "!!h[key]\n")
+
+      expect(type.describe).to eq("bool")
+    end
+
+    it "still widens `.nil?` over a safe-navigation read, which a miss flips" do
+      type, = evaluate_with({ pairs: pairs }, "pairs.first&.last.nil?\n")
+
+      expect(type.describe).to eq("bool")
+    end
+
+    it "still elides on a destructured literal pair, whose slots are known to be present" do
+      type, = evaluate(<<~RUBY)
+        k, _v = ["x", 1]
+        if k then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "still elides on the rest of a destructured `Array#first`, which is an Array even on a miss" do
+      type, scope_after = evaluate_with({ pairs: pairs }, <<~RUBY)
+        _k, *rest = pairs.first
+        if rest then 1 else "none" end
+      RUBY
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+      # A miss makes the rest `[]`, so it is the arity-free `Array`, not the one-element Tuple of the pair.
+      expect(scope_after.local(:rest).describe).to eq("Array[Integer]")
+    end
+  end
+
+  describe ".resolve through a safe-navigation call" do
+    let(:marked) do
+      scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+           .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
+    def expression(source)
+      Prism.parse(source, scopes: [[:v]]).value.statements.body.first
+    end
+
+    it "resolves `v&.m`, `v&.m&.n` and `v&.m.nil?` to the receiver's mark" do
+      %w[v&.upcase v&.upcase&.size v&.upcase(1) v&.upcase.nil?].each do |source|
+        expect(described_class.resolve(expression(source), marked))
+          .to eq(described_class::IMPLICITLY_RETURNS_NIL), "for #{source}"
+      end
+    end
+
+    it "does not resolve a plain read, a plain call chained after `&.`, or an argument's safe navigation" do
+      %w[v.upcase v&.upcase.size v&.upcase(1).size (v&.upcase).size foo(v&.upcase)].each do |source|
+        expect(described_class.resolve(expression(source), marked)).to be_nil, "for #{source}"
+      end
+    end
+  end
+
+  describe ".destructuring_marks" do
+    let(:marked) do
+      scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+           .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
+    def value_of(source)
+      Prism.parse(source, scopes: [[:v]]).value.statements.body.first.value
+    end
+
+    it "answers true for a marked right-hand side, element marks for a literal one, and false otherwise" do
+      expect(described_class.destructuring_marks(value_of("a, b = v"), marked)).to be(true)
+      expect(described_class.destructuring_marks(value_of("a, b = 1, v"), marked)).to eq([false, true])
+      expect(described_class.destructuring_marks(value_of("a, (b, c) = 1, [v, 2]"), marked))
+        .to eq([false, [true, false]])
+      expect(described_class.destructuring_marks(value_of("a, b = 1, 2"), marked)).to be(false)
+      expect(described_class.destructuring_marks(value_of("a, b = *v, v"), marked)).to be(false)
+    end
+  end
 end

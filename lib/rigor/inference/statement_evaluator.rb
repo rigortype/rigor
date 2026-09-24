@@ -244,9 +244,12 @@ module Rigor
       #   were typed under, when {#eval_call} runs the rest of that call
       #   from the scope its operands left ({#invoke_call}); nil otherwise,
       #   where it is the receiver scope itself ({#operand_scope}).
+      # @param in_operand — true for an evaluator {#thread_operand} opened, and every evaluator it opens: the
+      #   calls it runs are inside another expression's operand, which {#invoke_call} leaves the resets of a
+      #   statement-position call out of.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
-                     operand_scope: nil)
+                     operand_scope: nil, in_operand: false)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
@@ -255,6 +258,7 @@ module Rigor
         @converged_loop_recording = converged_loop_recording
         @next_scope_sink = next_scope_sink
         @operand_scope = operand_scope
+        @in_operand = in_operand
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -913,7 +917,10 @@ module Rigor
       # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), a
       # union distributes over its members and a value with no implicit `to_ary` binds as `[rhs]` (issue #1094), and
       # other carriers fall back to `Dynamic[Top]` per slot. Instance-variable targets bind by the same rules, with the
-      # optimistic mark recorded per ivar (issue #1110). The expression value is the right-hand side type
+      # optimistic mark recorded per ivar (issue #1110). A right-hand side that is itself optimistically nil-free
+      # (`k, v = pairs.first`, or a local bound to one) marks every name it binds, and a literal one
+      # (`x, y = pairs.first, 1`) marks each slot by its element: a miss binds `nil` to every such slot
+      # ({Inference::OptimisticOrigin.destructuring_marks}). The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
       #
       # An index target (`h[:a], z = 1, 2`, nested or splatted too) stores its slot through `[]=`, so its receiver
@@ -937,7 +944,8 @@ module Rigor
       # rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep reading `"d"`.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
+        marks = Inference::OptimisticOrigin.destructuring_marks(node.value, post_rhs)
+        bound = MultiTargetBinder.bind_marked(node, rhs_type, optimistic: marks, scope: post_rhs)
         post = widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)
         [rhs_type, widen_attribute_targets(node, post)]
       end
@@ -2441,17 +2449,22 @@ module Rigor
       # applies because it might have done anything ({#invoke_call}): the class's narrowed instance variables and the
       # regex globals. A call in an operand never applied them before #1223, and applying them only when the operand
       # happens to write made `$stdout.puts(Integer(v = $2)); $1.upcase` report where `$stdout.puts(Integer($2))`
-      # does not.
+      # does not. The same holds for every call under an operand evaluated through its handler, so the evaluator
+      # carries `in_operand` into everything it opens: an in-place mutation counts as an effect, and threading
+      # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
+      # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone.
       def thread_operand(node, entry)
         return entry unless OperandEffects.any?(node)
-        return evaluator_at(entry, on_enter: nil).send(:call_effects, node) if node.is_a?(Prism::CallNode)
+
+        operand = evaluator_at(entry, on_enter: nil, in_operand: true)
+        return operand.send(:call_effects, node) if node.is_a?(Prism::CallNode)
         # A container is threaded child by child even when it has a handler: the handler types the whole literal,
         # which a nested literal would repeat once per level of nesting. A statement list or `(…)` inside an operand
         # runs its statements in order just the same, and evaluating it would type each statement it holds.
         if OPERAND_CONTAINERS.include?(node.class) || OPERAND_SEQUENCES.include?(node.class)
           return thread_operand_children(node, entry)
         end
-        return sub_eval(node, entry, on_enter: nil).last if HANDLERS.key?(node.class)
+        return operand.evaluate(node).last if HANDLERS.key?(node.class)
 
         entry
       end
@@ -2472,7 +2485,8 @@ module Rigor
 
       # The rest of {#eval_call}: the call's block and every effect the call leaves on the scope, from the receiver
       # scope, which is the scope its operands left. Returns the post-call scope. `call_type` is nil for a threaded
-      # operand, which applies no post-return narrowing ({#call_effects}).
+      # operand, which applies no post-return narrowing ({#call_effects}); nor does a call an operand evaluator
+      # types through a handler ({#thread_operand}).
       def invoke_call(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like `private def`, `public def`, `module_function def`)
@@ -2489,7 +2503,8 @@ module Rigor
         # scope; the spec MUST in § "Fact stability and mutation" names captured locals a first-class invalidation
         # category. (The escaping / unknown path already widened to Dynamic[top] via `record_closure_escape_if_any`.)
         post_scope = write_back_block_captures(node, post_scope)
-        post_scope = apply_post_return_narrowing(node, post_scope) unless call_type.nil?
+        statement_call = !call_type.nil? && !@in_operand
+        post_scope = apply_post_return_narrowing(node, post_scope) if statement_call
         # Flow-folding G1 / G2 — widen a local- or instance-variable binding when the call is an in-place mutator on it
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
@@ -2535,7 +2550,7 @@ module Rigor
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate
         # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
         # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
-        post_scope = invalidate_ivars_for_intervening_call(node, post_scope) unless call_type.nil?
+        post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
         # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
         # only when the call is match-CAPABLE (a regex-matching method, or an implicit-self / unknown-receiver call
@@ -2546,7 +2561,7 @@ module Rigor
         # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
         # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
         post_scope ||= scope
-        post_scope = post_scope.forget_match_globals if !call_type.nil? && match_capable_call?(node)
+        post_scope = post_scope.forget_match_globals if statement_call && match_capable_call?(node)
         post_scope
       end
 
@@ -3626,6 +3641,8 @@ module Rigor
         return if written.empty?
 
         sites.each do |name, nodes|
+          # A mixed `Array | Hash` seed reads as a Hash here: its key arguments are the Hash side's evidence, and a
+          # `Dynamic` index only makes the Array side read the store as both forms.
           array = content_kind(seeds[name]) == :array
           nodes.each do |site|
             names = store_value_reads(site, array) & written
@@ -3703,8 +3720,11 @@ module Rigor
       end
 
       # The evidence a content join reads, per collection kind: one element union for an Array, a key union and a
-      # value union for a Hash, and none for a String, which widens to `String` whatever it stored.
-      CONTENT_EVIDENCE_SLOTS = { array: %i[element].freeze, hash: %i[key value].freeze, string: [].freeze }.freeze
+      # value union for a Hash, all three for a seed carrying both ({ContentJoin.join_mixed_content}), and none for a
+      # String, which widens to `String` whatever it stored.
+      CONTENT_EVIDENCE_SLOTS = {
+        array: %i[element].freeze, hash: %i[key value].freeze, mixed: %i[key value element].freeze, string: [].freeze
+      }.freeze
       private_constant :CONTENT_EVIDENCE_SLOTS
 
       # The joined continuation carrier of each content-mutated name, shared by the block seam and
@@ -3755,11 +3775,12 @@ module Rigor
       end
 
       # The pre-state's collection kind, or nil when the join has no carrier to rederive — the dispatch
-      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states.
+      # {#join_content_for_param} makes, and the reason it answers nil for the same pre-states. A seed carrying both
+      # an Array and a Hash member is `:mixed`, and each side joins with its own class's evidence.
       def content_kind(pre_state)
         return nil if pre_state.nil?
         return :string if stringish?(pre_state)
-        return :hash if hashish?(pre_state)
+        return (arrayish?(pre_state) ? :mixed : :hash) if hashish?(pre_state)
 
         :array if arrayish?(pre_state)
       end
@@ -3876,12 +3897,14 @@ module Rigor
         kinds.each_with_object({}) do |(name, kind), evidence|
           case kind
           when :hash
-            pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
-            evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
-            evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+            record_pair_evidence(evidence, name, hash_pair_evidence(sites[name], evidence_scope, shadows))
           when :array
             evidence[[name, :element]] =
               Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
+          when :mixed
+            pairs, elements = mixed_content_evidence(sites[name], evidence_scope, shadows)
+            record_pair_evidence(evidence, name, pairs)
+            evidence[[name, :element]] = Type::Combinator.union(*elements.compact)
           end
         end
       end
@@ -3898,12 +3921,67 @@ module Rigor
         when :string
           Type::Combinator.nominal_of("String")
         when :hash
-          key = present_evidence(evidence[[name, :key]]).first
-          value = present_evidence(evidence[[name, :value]]).first
-          ContentJoin.join_hash_content(seed, key.nil? && value.nil? ? [] : [[key, value]])
+          ContentJoin.join_hash_content(seed, joined_pair_evidence(name, evidence))
+        when :mixed
+          ContentJoin.join_mixed_content(
+            seed, joined_pair_evidence(name, evidence), present_evidence(evidence[[name, :element]])
+          )
         else
           ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
         end
+      end
+
+      def record_pair_evidence(evidence, name, pairs)
+        evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
+        evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+      end
+
+      # The `[pairs, elements]` the `calls` on a mixed `Array | Hash` seed store, typed in `entry_scope`. The seam
+      # cannot tell which member a store reached, so an index store (`[]=` or an index write) is routed by its index.
+      # One no Array accepts — a Symbol, String, `nil` or boolean key, where `[1][:k] = v` raises `TypeError` — is the
+      # Hash side's alone. One that could reach either member floors BOTH sides to `Dynamic[top]`: read precisely, its
+      # value lands on the side it never reached, and a hand-written `-> Array[Integer] | Hash[Symbol, String]`
+      # rejects the `Array["t" | Integer]` a guarded `x[:b] = "t" if x.is_a?(Hash)` made of the Array member. Every
+      # other adder belongs to one class, and each side reads it as its single-class join does.
+      def mixed_content_evidence(calls, entry_scope, shadows = NO_SHADOWS)
+        index_stores, adders = calls.partition { |c| index_write?(c) || (c.is_a?(Prism::CallNode) && c.name == :[]=) }
+        hash_only, either = index_stores.partition do |site|
+          array_index_excluded?(site, site_evidence_scope(entry_scope, site, shadows))
+        end
+        pairs = hash_pair_evidence(adders + hash_only, entry_scope, shadows)
+        elements = array_element_evidence(adders, entry_scope, shadows)
+        return [pairs, elements] if either.empty?
+
+        untyped = Type::Combinator.untyped
+        [pairs + [[untyped, untyped]], elements + [untyped]]
+      end
+
+      # The classes an Array index never converts from: none defines `to_int`, and none is a Range.
+      NON_ARRAY_INDEX_CLASSES = %w[Symbol String NilClass TrueClass FalseClass].to_set.freeze
+      private_constant :NON_ARRAY_INDEX_CLASSES
+
+      # True when one of the index store `site`'s index arguments provably holds no value an Array accepts as an index.
+      # A splat, and a type with any member of another or unknown class, may hold one.
+      def array_index_excluded?(site, scope)
+        arguments = site.arguments
+        list = arguments.is_a?(Prism::ArgumentsNode) ? arguments.arguments : []
+        list = list.take(list.size - 1) if site.is_a?(Prism::CallNode)
+        list.any? do |arg|
+          next false if arg.is_a?(Prism::SplatNode)
+
+          ContentJoin.union_members(scope.type_of(arg, tracer: tracer)).all? do |member|
+            NON_ARRAY_INDEX_CLASSES.include?(ContentJoin.evidence_class(member))
+          end
+        end
+      rescue StandardError
+        false
+      end
+
+      # The Hash side's evidence as the one `[key, value]` pair its slots join to, or none.
+      def joined_pair_evidence(name, evidence)
+        key = present_evidence(evidence[[name, :key]]).first
+        value = present_evidence(evidence[[name, :value]]).first
+        key.nil? && value.nil? ? [] : [[key, value]]
       end
 
       def present_evidence(type)
@@ -4033,6 +4111,8 @@ module Rigor
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
+        elsif content_kind(pre_state) == :mixed
+          ContentJoin.join_mixed_content(pre_state, *mixed_content_evidence(calls, block_entry))
         elsif hashish?(pre_state)
           join_hash_param(calls, pre_state, block_entry)
         else
@@ -4318,24 +4398,9 @@ module Rigor
       # is unchanged by it.
       def unknown_store_binding(type, sites)
         widened = UnknownStoreWidening.widen(type, sites)
-        return widened unless value_pinned_collection?(widened)
+        return widened unless UnknownStoreWidening.value_pinned_collection?(widened)
 
         UnknownStoreWidening.gradual_content(widened)
-      end
-
-      # An `Array` / `Hash` nominal (alone, as a `Union` member, or as a refinement's base) with a value-pinned type
-      # argument. `Type::Combinator.widen_value_pinned` does not look inside type arguments, so each one is asked on
-      # its own. A `bool` or a literal union a signature declared (`Array[:a | :b]`) counts as pinned too; the arm it
-      # takes can only quiet a report, which is the accepted cost of reading every such binding past one iteration.
-      def value_pinned_collection?(type)
-        case type
-        when Type::Union then type.members.any? { |member| value_pinned_collection?(member) }
-        when Type::Difference then value_pinned_collection?(type.base)
-        when Type::Nominal
-          %w[Array Hash].include?(type.class_name) &&
-            type.type_args.any? { |arg| Type::Combinator.widen_value_pinned(arg) != arg }
-        else false
-        end
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the handler runs the body under `scope`, which the caller
@@ -4849,7 +4914,8 @@ module Rigor
       # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` is set only by
       # {#call_effects}, for the evaluator that runs a call from the scope its operands left.
       def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting,
-                       on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil)
+                       on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil,
+                       in_operand: @in_operand)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
@@ -4858,7 +4924,8 @@ module Rigor
           lexical_nesting: lexical_nesting,
           converged_loop_recording: @converged_loop_recording,
           next_scope_sink: next_scope_sink,
-          operand_scope: operand_scope
+          operand_scope: operand_scope,
+          in_operand: in_operand
         )
       end
 

@@ -426,6 +426,7 @@ module Rigor
         @project_constant_writes = {}.freeze
         @published_constant_name_set = nil
         @constant_writer_index = nil
+        @constant_shadower_index = nil
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         # Issue #992 — the cross-file parameter-envelope table `call.wrong-arity` reads for an undeclared `def`.
@@ -1466,6 +1467,7 @@ module Rigor
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
         @constant_writer_index = nil
+        @constant_shadower_index = nil
         @project_constant_sources = discovery.constant_sources
         @project_constant_writes = discovery.constant_writes
         @project_discovered_method_visibilities = discovery.discovered_method_visibilities
@@ -2016,9 +2018,12 @@ module Rigor
       #
       # Issue #617 — the census's binding writes, grouped by last segment, ride every run instead: a constant
       # compound write whose plain read resolves nothing reads its binding off them, a TYPE rather than an edge.
+      # Issue #1290's shadowing writes ride beside them for the lexical ladder, for the same reason.
       def seed_dependency_attribution_tables(tables)
         writers = constant_writer_index
         tables[:constant_writers] = writers unless writers.empty?
+        shadowers = constant_shadower_index
+        tables[:constant_shadowers] = shadowers unless shadowers.empty?
         return unless @record_dependencies
 
         tables[:discovered_class_sources] = @project_discovered_class_sources unless
@@ -2068,6 +2073,17 @@ module Rigor
             (index[segment] ||= []) << name
           end.each_value(&:freeze).freeze
         end
+      end
+
+      # Issue #1290 — the censused names some write other than a memo `||=` assigns, grouped by last segment
+      # (`Scope#shadowing_constant_names`): the ones that exist whether or not an outer constant of the name
+      # does, and so stop the lexical ladder above it. A memo-only name is left out however many files memoize
+      # it, unlike in {#constant_writer_index}: `X ||= v` resolves `X` through the very lookup whose lower rung
+      # the stop would replace, so wherever that rung answers, the memo finds it and never creates the name.
+      def constant_shadower_index
+        @constant_shadower_index ||= @project_constant_writes.each_with_object({}) do |(name, by_path), index|
+          (index[name.split("::").last] ||= []) << name unless memo_only?(by_path)
+        end.each_value(&:freeze).freeze
       end
 
       def memo_files_by_segment

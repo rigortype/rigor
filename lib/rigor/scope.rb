@@ -70,12 +70,17 @@ module Rigor
     # them (a `*::LIMIT` wildcard included), so the caller still decides which of them a reference resolves
     # to. A `||=`-only name is left out while no other file memoizes its segment: the memoization idiom's
     # own write, however often one file repeats it, is not what binds it.
-    #
-    # Issue #1290 — `Reflection.resolve_constant_type` asks this once per constant reference, so a bare name is
-    # looked up as it stands rather than split.
     def bound_constant_names(name)
+      @discovery.constant_writers[name.split("::").last] || EMPTY_BOUND_CONSTANT_NAMES
+    end
+
+    # Issue #1290 — the census names sharing `name`'s last segment that some write other than a memo `||=`
+    # assigns: the ones that shadow an outer constant of the name, so the lexical ladder stops at them
+    # (`Reflection.resolve_constant_type`). That asks once per constant reference, so a bare name is looked up
+    # as it stands rather than split.
+    def shadowing_constant_names(name)
       segment = name.include?("::") ? name.split("::").last : name
-      @discovery.constant_writers[segment] || EMPTY_BOUND_CONSTANT_NAMES
+      @discovery.constant_shadowers[segment] || EMPTY_BOUND_CONSTANT_NAMES
     end
 
     EMPTY_BOUND_CONSTANT_NAMES = [].freeze

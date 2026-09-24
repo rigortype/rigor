@@ -162,23 +162,23 @@ module Rigor
       return constant_type_at(name, scope) if rooted
 
       # Issue #1290 — a candidate the project writes but no source types is where Ruby's lookup stops, so it
-      # REPLACES what a lower rung answers, and nothing else. The first pass hands the census's binding names
-      # to the rungs ({.constant_type_at}); a stop is `Dynamic[top]` only when the plain ladder, run again,
-      # answers below it. When nothing below answers, the reference stays unresolved exactly as before, so
-      # the nil its caller turns into the fallback, the missing-constant edge and the gem-origin label is kept.
-      hit = lexical_constant_type(name, scope, caller_derived, scope.bound_constant_names(name))
+      # REPLACES what a lower rung answers, and nothing else. The first pass hands the census's shadowing
+      # names to the rungs ({.constant_type_at}); a stop is `Dynamic[top]` only when the plain ladder, run
+      # again, answers below it. When nothing below answers, the reference stays unresolved exactly as before,
+      # so the nil its caller turns into the fallback, the missing-constant edge and the gem-origin label stay.
+      hit = lexical_constant_type(name, scope, caller_derived, scope.shadowing_constant_names(name))
       return hit unless hit.equal?(WRITTEN_CANDIDATE)
 
       Type::Combinator.untyped if lexical_constant_type(name, scope, caller_derived, nil)
     end
 
-    # {.resolve_constant_type}'s unrooted ladder. `bound` is the census's binding names for the reference,
-    # which the rungs above the last check their candidates against, or nil for the plain ladder.
-    def lexical_constant_type(name, scope, caller_derived, bound)
+    # {.resolve_constant_type}'s unrooted ladder. `shadows` is the census's shadowing names for the
+    # reference, which the rungs above the last check their candidates against, or nil for the plain ladder.
+    def lexical_constant_type(name, scope, caller_derived, shadows)
       # Issue #716 — a body whose `Module.nesting` was RECORDED EMPTY is definitively top level, and Ruby
       # resolves its constants there no matter which namespace calls it. Steps 1 and 2 both derive from the
       # caller and are both wrong for it, so it takes its own ladder.
-      return toplevel_first_constant_type(name, scope, caller_derived, bound) if recorded_toplevel_nesting?(scope)
+      return toplevel_first_constant_type(name, scope, caller_derived, shadows) if recorded_toplevel_nesting?(scope)
 
       # Step 1 — `Module.nesting`, innermost first. Each entry contributes only its OWN constants.
       #
@@ -196,10 +196,10 @@ module Rigor
       # beating the top-level whole-string answer is the point: `A::B` inside `P::Guard` with
       # `P::A < P::Base` is `P::Base::B`, and step 3's `A::B` is a real but different class.
       #
-      # Step 3 — the bare name (top level). It takes no `bound`: nothing sits below it for a stop to replace.
-      first_constant_hit(lexical_nesting_chain(scope), name, scope, bound) ||
-        ancestor_constant_type(name, scope, enclosing_class_path(scope), bound) ||
-        constant_path_type(name, scope, bound: bound) ||
+      # Step 3 — the bare name (top level). It takes no `shadows`: nothing sits below it for a stop to replace.
+      first_constant_hit(lexical_nesting_chain(scope), name, scope, shadows) ||
+        ancestor_constant_type(name, scope, enclosing_class_path(scope), shadows) ||
+        constant_path_type(name, scope, shadows: shadows) ||
         constant_type_at(name, scope)
     end
     private_class_method :lexical_constant_type
@@ -207,9 +207,9 @@ module Rigor
     # The first candidate `<entry>::<name>` any source knows, walking `entries` in order, or nil. The one
     # place a qualifying prefix is joined to a name, so every rung of the ladder consults its candidates
     # identically.
-    def first_constant_hit(entries, name, scope, bound)
+    def first_constant_hit(entries, name, scope, shadows)
       entries.each do |entry|
-        hit = constant_type_at("#{entry}::#{name}", scope, bound)
+        hit = constant_type_at("#{entry}::#{name}", scope, shadows)
         return hit if hit
       end
       nil
@@ -217,10 +217,10 @@ module Rigor
     private_class_method :first_constant_hit
 
     # Step 2's rung on its own: nil when there is no enclosing class path to take ancestors of.
-    def ancestor_constant_type(name, scope, prefix, bound)
+    def ancestor_constant_type(name, scope, prefix, shadows)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope, bound)
+      first_constant_hit(ancestor_constant_scopes(prefix, scope), name, scope, shadows)
     end
     private_class_method :ancestor_constant_type
 
@@ -250,21 +250,22 @@ module Rigor
     #
     # Issue #1290 — the top level is this ladder's FIRST rung, so a top-level name the project writes stops it
     # ({.constant_type_at}) before a caller's `Plug::TOP` can answer a read Ruby gives to the top-level `TOP`.
-    def toplevel_first_constant_type(name, scope, caller_derived, bound)
-      constant_type_at(name, scope, bound) || (caller_derived && caller_derived_constant_type(name, scope, bound)) ||
-        constant_path_type(name, scope, caller_derived: caller_derived, bound: bound)
+    def toplevel_first_constant_type(name, scope, caller_derived, shadows)
+      constant_type_at(name, scope, shadows) ||
+        (caller_derived && caller_derived_constant_type(name, scope, shadows)) ||
+        constant_path_type(name, scope, caller_derived: caller_derived, shadows: shadows)
     end
     private_class_method :toplevel_first_constant_type
 
     # The peel and its ancestors — {.resolve_constant_type}'s steps 1 and 2 as they answer for a scope with
     # no recorded chain, factored out so the top-level ladder above can consult them BELOW the top level
     # instead of above it.
-    def caller_derived_constant_type(name, scope, bound)
+    def caller_derived_constant_type(name, scope, shadows)
       prefix = enclosing_class_path(scope)
       return nil if prefix.nil? || prefix.empty?
 
-      first_constant_hit(peeled_nesting(prefix), name, scope, bound) ||
-        ancestor_constant_type(name, scope, prefix, bound)
+      first_constant_hit(peeled_nesting(prefix), name, scope, shadows) ||
+        ancestor_constant_type(name, scope, prefix, shadows)
     end
     private_class_method :caller_derived_constant_type
 
@@ -273,24 +274,24 @@ module Rigor
     # constants. In-source values win over RBS constant decls because the user's source is
     # authoritative for its own constants. Returns nil when no source knows `candidate`.
     #
-    # Issue #1290 — `bound`, passed on every rung that has a rung below it, is the last source: a candidate no
-    # other source types answers {WRITTEN_CANDIDATE} when `bound` holds it, and {.resolve_constant_type}
-    # settles that stop. `bound` is `Scope#bound_constant_names` for the reference, whose last segment every
-    # candidate shares. Ruby's lookup stops at a constant that exists, whatever its value, and the cross-file
-    # table publishes only a frozen scalar one file writes: another file's `App::LIMIT = { n: 1 }` was missed
-    # by every source, and the ladder moved on to a published top-level `LIMIT = 5`, typing `LIMIT` inside
-    # `module App` as `5` and reporting `call.undefined-method` on correct code. The value is one the analyzer
-    # does not carry, so the stop is gradual.
+    # Issue #1290 — `shadows`, passed on every rung that has a rung below it, is the last source: a candidate
+    # no other source types answers {WRITTEN_CANDIDATE} when `shadows` holds it, and {.resolve_constant_type}
+    # settles that stop. `shadows` is `Scope#shadowing_constant_names` for the reference, whose last segment
+    # every candidate shares. Ruby's lookup stops at a constant that exists, whatever its value, and the
+    # cross-file table publishes only a frozen scalar one file writes: another file's `App::LIMIT = { n: 1 }`
+    # was missed by every source, and the ladder moved on to a published top-level `LIMIT = 5`, typing `LIMIT`
+    # inside `module App` as `5` and reporting `call.undefined-method` on correct code. The value is one the
+    # analyzer does not carry, so the stop is gradual.
     #
     # Only an EXACT census name stops a candidate. The census keeps a path write as written
     # ([#690](https://github.com/rigortype/rigor/issues/690)), so a suffix match would reach the as-written
     # `Foo::BAR` from `M::Foo::BAR`, but would also stop `Admin::UsersController::X` on a top-level
     # `UsersController::X`, losing the answer an ordinary Rails layout gets from the namespaced controller's
-    # superclass. A memo `||=` only one file writes is not a binding name (#617): Ruby's `X ||= v` inside a
-    # namespace sees a top-level `X` and never creates the nested one. The answer moves with the project's
-    # write set for the last segment, which the `constant:` edge {.resolve_constant_type} records once per
-    # reference already covers.
-    def constant_type_at(candidate, scope, bound = nil)
+    # superclass. A name written only through `||=` does not shadow, however many files memoize it: `X ||= v`
+    # resolves `X` through this same lookup, so wherever a lower rung answers, the memo finds that constant and
+    # never creates the name. The answer moves with the project's write set for the last segment, which the
+    # `constant:` edge {.resolve_constant_type} records once per reference already covers.
+    def constant_type_at(candidate, scope, shadows = nil)
       env = scope.environment
 
       singleton = env.singleton_for_name(candidate)
@@ -310,7 +311,7 @@ module Rigor
         return in_source_value
       end
 
-      env.constant_for_name(candidate) || (WRITTEN_CANDIDATE if bound&.include?(candidate))
+      env.constant_for_name(candidate) || (WRITTEN_CANDIDATE if shadows&.include?(candidate))
     end
     private_class_method :constant_type_at
 

@@ -916,6 +916,18 @@ RSpec.describe "cross-file value constants" do
       expect(dumps(files)).to eq(["Dynamic[top]"])
     end
 
+    it "stops a top-level body's caller-derived rungs at the caller's own write" do
+      # Ruby raises `NameError`: the top-level `def` resolves `TOP` at the top level, where nothing writes it. The
+      # caller-derived rungs are #716's deliberate silent answer, and they mirror steps 1 and 2, so the stop binds
+      # them too: the caller's own `Plug::TOP` is found before its superclass's published `Base::TOP`.
+      files = {
+        "a.rb" => "class Base\n  TOP = 5\nend\n",
+        "c.rb" => "class Plug < Base\n  TOP = { n: 1 }\nend\n",
+        "b.rb" => "def read_top = TOP\nclass Plug < Base\n  Rigor.dump_type(read_top)\nend\n"
+      }
+      expect(dumps(files)).to eq(["Dynamic[top]"])
+    end
+
     it "keeps a top-level body's caller-derived rung where nothing writes the top-level name" do
       # Ruby raises `NameError`; the caller's `Plug::TOP` is #716's deliberate silent answer, and it stays.
       files = {
@@ -955,10 +967,13 @@ RSpec.describe "cross-file value constants" do
       expect(dumps(files, "module App\n  LIMIT: Hash[Symbol, Integer]\nend\n")).to eq(["Hash[Symbol, Integer]"])
     end
 
-    it "does not stop at a memo only one file writes" do
-      # Runtime: `5`. `LIMIT ||= …` inside `App` finds the top-level `LIMIT`, so it never creates `App::LIMIT`.
+    it "does not stop at a memo, however many files memoize the name" do
+      # Runtime: `5`. `LIMIT ||= …` inside `App` finds the top-level `LIMIT`, so it never creates `App::LIMIT`,
+      # and `Other`'s memo is no different. Two files' memos bind a compound write's own reading (#617), which is
+      # a different question: here the lower rung that answers is exactly what each memo finds.
       files = top_limit.merge(
         "c.rb" => "module App\n  def self.limit = (LIMIT ||= { n: 1 })\nend\n",
+        "d.rb" => "module Other\n  def self.limit = (LIMIT ||= { n: 2 })\nend\n",
         "b.rb" => "module App\n  Rigor.dump_type(LIMIT)\nend\n"
       )
       expect(dumps(files)).to eq(["5"])

@@ -189,7 +189,7 @@ RSpec.describe Rigor::Reflection do
     # unresolved, because its caller's fallback, missing-constant edge and gem-origin label read that nil.
     describe "a written candidate no source types (#1290)" do
       def app_scope(in_source:, writers:)
-        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: in_source, constant_writers: writers)
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: in_source, constant_shadowers: writers)
         Rigor::Scope.empty.with_self_type(Rigor::Type::Combinator.nominal_of("App")).with_discovery(index)
       end
 

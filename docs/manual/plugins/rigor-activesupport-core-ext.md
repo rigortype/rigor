@@ -38,8 +38,8 @@ Roughly the top ~40 selectors plus their close neighbours, across:
 
 - **Object (universal)** — `#blank?`, `#present?`, `#presence`,
   `#presence_in`, `#try`, `#try!`, `#acts_like?`, `#deep_dup`, `#with`,
-  `#with_options`, `#html_safe?` (+ `NilClass` / `TrueClass` /
-  `FalseClass`).
+  `#with_options`, `#html_safe?`, `Kernel#class_eval` (+ `NilClass` /
+  `TrueClass` / `FalseClass`).
 - **Integer / Float** — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …).
 - **String** — inflections (`#underscore`, `#camelize`, `#classify`,

@@ -56,6 +56,7 @@ in-place extensions to Ruby's built-in classes:
   `to_time` / `to_date` / `to_datetime` / `to_hours`, `in_time_zone`,
   `from`, `to`, `first`, `last`
 - `Symbol` — `starts_with?` / `ends_with?`
+- `Kernel` — `class_eval` on any object (`singleton_class.class_eval`)
 - `Array` — `Array.wrap`, `#to_sentence`, `#in_groups_of`,
   `#in_groups`, `#split`, `#second` / `#third` / `#fourth`,
   `#second_to_last` / `#third_to_last`, `#from`, `#to`, `#extract!`,

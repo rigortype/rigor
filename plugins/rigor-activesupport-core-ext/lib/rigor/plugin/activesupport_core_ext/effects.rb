@@ -115,11 +115,18 @@ module Rigor
         # which is what earns `Date` its row here — the label is a fact about the module, not about the
         # receiver, and the three only ever differed in which spellings the bundle had got round to
         # declaring.
+        #
+        # `String#in_time_zone` is the exception: it has no instant to convert. It parses through
+        # `TimeZone#parse(str, now = now())`, whose default argument reads the clock on every call, or through
+        # `to_time` when no zone is set — so it takes `CLOCK`, not `ZONE_READ`.
         def in_time_zone_rows
           [TIME, DATE, DATETIME].map do |receiver|
             row(receiver, :in_time_zone, ZONE_READ,
                 why: "the default argument reads `Time.zone` when the caller doesn't name one explicitly")
-          end
+          end + [
+            row("String", :in_time_zone, CLOCK,
+                why: "parses in `Time.zone` (the default argument) and fills the parts from the zone's `now`")
+          ]
         end
 
         def current_rows

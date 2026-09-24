@@ -1,17 +1,17 @@
 # frozen_string_literal: true
 
-# The `core_ext/object`, `core_ext/string` and `core_ext/symbol` selectors the ADR-72 overlay
+# The `core_ext/object`, `core_ext/kernel`, `core_ext/string` and `core_ext/symbol` selectors the ADR-72 overlay
 # (`data/gem_overlay/activesupport/core_ext.rbs`) still had not declared after #1330, found by the same
 # runtime `public_instance_methods` diff against ActiveSupport 8.1: `Object#presence_in` / `#with` /
-# `#with_options` / `#html_safe?`, `String#acts_like_string?` / `#downcase_first` / `#in_time_zone` /
-# `#is_utf8?`, and the `Symbol#starts_with?` / `#ends_with?` aliases.
+# `#with_options` / `#html_safe?`, `Kernel#class_eval`, `String#acts_like_string?` / `#downcase_first` /
+# `#in_time_zone` / `#is_utf8?`, and the `Symbol#starts_with?` / `#ends_with?` aliases.
 #
 # Every example pins a resolved TYPE next to the absent diagnostic: a duplicate declaration collapses the
 # class to `Dynamic[top]`, which reports nothing, so an absence-only assertion passes on the wreck (#672).
 require "spec_helper"
 require "tmpdir"
 
-RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol rows" do
+RSpec.describe "ADR-72 ActiveSupport overlay — the Object, Kernel, String and Symbol rows" do
   def gemfile_lock
     <<~LOCK
       GEM
@@ -82,9 +82,12 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol r
     expect(dumps(result)).to eq(["2"])
   end
 
-  # Core `Data#with` is a subclass override, so the new `Object#with` row must not reach a `Data` receiver:
-  # the answer stays the member-updated instance with or without a block, never the block's value.
-  it "leaves core Data#with in charge of a Data receiver" do
+  # A pin on Rigor's own `Data#with` fold, which answers before RBS dispatch: the member-updated instance with
+  # or without a block, never the new `Object#with` row's block value. It cannot catch the row reaching a
+  # `Data` receiver through RBS — core `Data#with` overriding it there is RBS subclass precedence — and a
+  # collapsed `Object` leaves it green; it is here so a change to the fold does not silently hand the call
+  # to the row.
+  it "keeps the Data#with fold ahead of the Object#with row" do
     result = run_source(<<~RUBY)
       Point = Data.define(:x, :y)
       Rigor.dump_type(Point.new(x: 1, y: 2).with(x: 3))
@@ -93,6 +96,22 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol r
 
     expect(call_rules(result)).to be_empty
     expect(dumps(result)).to eq(["Point(x: 3, y: 2)", "Point(x: 3, y: 2)"])
+  end
+
+  # `Kernel#class_eval` is `singleton_class.class_eval`; a `Module` receiver keeps core `Module#class_eval`,
+  # whose block defines methods on the receiver itself.
+  it "types class_eval on any object, and leaves Module#class_eval to core" do
+    result = run_source(<<~RUBY)
+      class Post; end
+      Post.class_eval { def title = "t" }
+      Rigor.dump_type(Post.new.title)
+      Rigor.dump_type(Object.new.class_eval { 1 })
+      Rigor.dump_type("x".class_eval { :sym })
+      Object.new.class_eval("def hello; end")
+    RUBY
+
+    expect(call_rules(result)).to be_empty
+    expect(dumps(result)).to eq(['"t"', "1", ":sym"])
   end
 
   it "types the String rows" do
@@ -119,8 +138,9 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol r
     expect(dumps(result)).to eq(%w[bool bool bool])
   end
 
-  # The must-still-fire sibling. `Symbol` is newly reopened by the overlay and `Object` / `String` gain rows,
-  # so a row that collapsed any of the three would silence these at once. Each control is a method the
+  # The must-still-fire sibling. `Symbol` and `Kernel` are newly reopened by the overlay and `Object` / `String`
+  # gain rows, so a row that collapsed any of them would silence these at once (a collapsed `Kernel` takes
+  # every receiver down with it). Each control is a method the
   # overlay does not declare, answered through RBS dispatch rather than a literal fold, so it reads
   # `Dynamic[top]` on a collapsed class.
   it "still reports a genuinely undefined method on the receivers it just opened" do
@@ -139,7 +159,8 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol r
 
   # A project that does not lock activesupport sees the real `NoMethodError` Ruby would raise.
   it "leaves the new rows undefined when activesupport is not locked" do
-    source = "\"a\".presence_in([])\nObject.new.with(a: 1) { }\n\"a\".downcase_first\n:a.starts_with?(\"a\")\n"
+    source = "\"a\".presence_in([])\nObject.new.with(a: 1) { }\n\"a\".downcase_first\n:a.starts_with?(\"a\")\n" \
+             "Object.new.class_eval { }\n"
     result = Dir.mktmpdir("rigor-as-overlay-object-string-symbol-bare-") do |dir|
       File.write(File.join(dir, "code.rb"), source)
       Dir.chdir(dir) do
@@ -148,6 +169,6 @@ RSpec.describe "ADR-72 ActiveSupport overlay — the Object, String and Symbol r
       end
     end
 
-    expect(undefined_methods(result)).to eq(%w[presence_in with downcase_first starts_with?])
+    expect(undefined_methods(result)).to eq(%w[presence_in with downcase_first starts_with? class_eval])
   end
 end

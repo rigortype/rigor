@@ -103,9 +103,9 @@ class Object
   # is the common shape.
   def deep_dup: () -> self
 
-  # `core_ext/object/with` — sets each keyword through its public writer,
-  # yields `self`, and restores the old values in an `ensure`; the answer is
-  # the block's. There is no blockless form: `yield` without a block raises.
+  # `core_ext/object/with` (ActiveSupport 7.1+) — sets each keyword through
+  # its public writer, yields `self`, and restores the old values in an
+  # `ensure`; the answer is the block's. There is no blockless form: `yield` without a block raises.
   # ActiveSupport `undef_method`s it on `NilClass`, `TrueClass`, `FalseClass`,
   # `Integer`, `Float` and `Symbol`, which RBS cannot express, so `1.with(a: 1)`
   # resolves here where Ruby raises — a missed error, not a false one.
@@ -125,6 +125,20 @@ class Object
   # every `if x.html_safe?` an always-falsy branch on the subclasses that answer
   # true.
   def html_safe?: () -> bool
+end
+
+# ---------------------------------------------------------------
+# Kernel — `core_ext/kernel/singleton_class`
+# ---------------------------------------------------------------
+
+# `singleton_class.class_eval(*args, &block)` on any object. Declared on
+# `Kernel`, where ActiveSupport defines it; a `Module` receiver still answers
+# core `Module#class_eval`, which is its own alias of `module_eval`. The two
+# overloads mirror that `module_eval`: a string, or a block given the
+# singleton class.
+module Kernel
+  def class_eval: (string code, ?string? filename, ?int lineno) -> untyped
+                | [U] () { (untyped singleton_class) -> U } -> U
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -181,7 +195,7 @@ class String
   def titlecase: () -> String
   def dasherize: () -> String
   def upcase_first: () -> String
-  def downcase_first: () -> String
+  def downcase_first: () -> String # ActiveSupport 7.1+
 
   # `core_ext/string/behavior` — the `acts_like?(:string)` duck-type hook.
   def acts_like_string?: () -> true

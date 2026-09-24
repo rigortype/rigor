@@ -144,6 +144,7 @@ CORE_EXT_PURE_KEYS = (CORE_EXT_PURE_OTHER_KEYS + CORE_EXT_PURE_DATE_AND_TIME_KEY
 # over-claiming one is unsound. These two lines are what stops someone "completing" the sweep (#670).
 CORE_EXT_NOT_PURE_KEYS = %w[
   Object#as_json Object#try Object#try! Object#deep_dup Object#with Object#with_options
+  Kernel#class_eval
   String#constantize String#safe_constantize String#parameterize
   String#squish! String#remove! String#indent!
   String#to_time String#to_date String#to_datetime String#to_hours String#in_time_zone

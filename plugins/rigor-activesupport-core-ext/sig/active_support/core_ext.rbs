@@ -208,9 +208,9 @@ class Object
   # through `value.deep_dup` on every value and is bare for the same reason.
   def deep_dup: () -> self
 
-  # `core_ext/object/with` — sets each keyword through its public writer,
-  # yields `self`, and restores the old values in an `ensure`; the answer is
-  # the block's. There is no blockless form: `yield` without a block raises.
+  # `core_ext/object/with` (ActiveSupport 7.1+) — sets each keyword through
+  # its public writer, yields `self`, and restores the old values in an
+  # `ensure`; the answer is the block's. There is no blockless form: `yield` without a block raises.
   # ActiveSupport `undef_method`s it on `NilClass`, `TrueClass`, `FalseClass`,
   # `Integer`, `Float` and `Symbol`, which RBS cannot express, so `1.with(a: 1)`
   # resolves here where Ruby raises — a missed error, not a false one.
@@ -236,6 +236,22 @@ class Object
   # true. All three bodies are a constant or an ivar read.
   %a{pure}
   def html_safe?: () -> bool
+end
+
+# ---------------------------------------------------------------
+# Kernel — `core_ext/kernel/singleton_class`
+# ---------------------------------------------------------------
+
+# `singleton_class.class_eval(*args, &block)` on any object. Declared on
+# `Kernel`, where ActiveSupport defines it; a `Module` receiver still answers
+# core `Module#class_eval`, which is its own alias of `module_eval`. The two
+# overloads mirror that `module_eval`: a string, or a block given the
+# singleton class.
+module Kernel
+  # NOT `%a{pure}`: it evaluates a string or a block in the singleton class,
+  # and a block that defines methods is the point.
+  def class_eval: (string code, ?string? filename, ?int lineno) -> untyped
+                | [U] () { (untyped singleton_class) -> U } -> U
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -315,7 +331,7 @@ class String
   %a{pure}
   def upcase_first: () -> String
   %a{pure}
-  def downcase_first: () -> String
+  def downcase_first: () -> String # ActiveSupport 7.1+
   # NOT %a{pure}: transliterates through `I18n.transliterate`, which reads
   # `I18n.locale` when `locale:` is left at its `nil` default — a request-
   # scoped global read the inflection-table assumption does not cover.
@@ -391,9 +407,10 @@ class String
   # `core_ext/string/zones` — `Time.find_zone!(zone).parse(self)`, or
   # `to_time` when no zone is set. `untyped` like the `Time` / `Date` rows:
   # the parse answers an `ActiveSupport::TimeWithZone`, or `nil` on a string
-  # with no date parts. NOT `%a{pure}`, for `to_time`'s reason and one more:
-  # the default argument reads `Time.zone`, and `TimeZone#parse` defaults the
-  # missing parts from the zone's `now`.
+  # with no date parts. NOT `%a{pure}`: the default argument reads
+  # `Time.zone`, and `TimeZone#parse(str, now = now())` reads the clock on
+  # every call, whether or not the string names every part. The plugin's
+  # `effect_attributions:` carry both labels.
   def in_time_zone: (?untyped zone) -> untyped
 
   # `core_ext/string/access`
@@ -1573,10 +1590,11 @@ class Hash[unchecked out K, unchecked out V]
   def to_options!: () -> self
 
   # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the
-  # receiver. NOT `%a{pure}`: it calls `deep_dup` on every key and value, an
-  # ELEMENT of unknown class whose `dup` runs that class's own
-  # `initialize_copy` — the dispatch the purity rule at the top of this file
-  # excludes, and the reason `Object#deep_dup` above is bare.
+  # receiver. NOT `%a{pure}`: it calls `deep_dup` on every value, and on
+  # every key that is not a `String` or `Symbol` — an ELEMENT of unknown class
+  # whose `dup` runs that class's own `initialize_copy`. That is the dispatch
+  # the purity rule at the top of this file excludes, and the reason
+  # `Object#deep_dup` above is bare.
   def deep_dup: () -> Hash[K, V]
 
   # `core_ext/hash/deep_merge` — the block receives `(key, this_val,

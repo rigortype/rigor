@@ -442,9 +442,9 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
-  # The same runtime diff after #1330: the `Object`, `String` and `Symbol` rows. The overlay twin is
+  # The same runtime diff after #1330: the `Object`, `Kernel`, `String` and `Symbol` rows. The overlay twin is
   # `spec/rigor/environment/activesupport_overlay_object_string_symbol_spec.rb`.
-  describe "the Object, String and Symbol rows" do
+  describe "the Object, Kernel, String and Symbol rows" do
     def dumps(result)
       result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.sub("dump_type: ", "") }
     end
@@ -466,13 +466,25 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         Rigor.dump_type("a".is_utf8?)
         Rigor.dump_type(:abc.starts_with?(/a/, "b"))
         Rigor.dump_type(:abc.ends_with?("c"))
+        Rigor.dump_type("x".class_eval { :sym })
         "2026-01-01".in_time_zone
       RUBY
       result = run_plugin(source: source)
 
       expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
       expect(dumps(result)).to eq(
-        ["String?", "bool", "1", ":merged", "Point(x: 2)", "String", "true", "bool", "bool", "bool"]
+        ["String?", "bool", "1", ":merged", "Point(x: 2)", "String", "true", "bool", "bool", "bool", ":sym"]
+      )
+    end
+
+    # `String#in_time_zone` has no instant to convert: it parses through `TimeZone#parse(str, now = now())`,
+    # so it reads the clock as well as the zone, where the `Time` / `Date` / `DateTime` rows read the zone only.
+    it "attributes the clock and the zone to String#in_time_zone" do
+      rows = Rigor::Plugin::ActivesupportCoreExt::Effects.attributions.select { |a| a.method == :in_time_zone }
+
+      expect(rows.to_h { |a| [a.receiver, a.labels.sort] }).to eq(
+        "Time" => ["global.read"], "Date" => ["global.read"], "DateTime" => ["global.read"],
+        "String" => ["global.read", "nondet.time"]
       )
     end
 

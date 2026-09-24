@@ -537,6 +537,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         expect(fold_call(:seeded, [Rigor::Type::Combinator.constant_of(1)], block_type: block_type)).to eq(integer)
       end
 
+      # A plugin-built nominal may keep the absolute spelling.
+      it "reads a class name spelled with a leading `::`" do
+        expect(fold_call(:seeded, [seed], block_type: Rigor::Type::Combinator.nominal_of("::Integer"))).to eq(integer)
+      end
+
       it "widens a bounded float to its class" do
         float = Rigor::Type::Combinator.nominal_of(Float)
         block_type = Rigor::Type::Combinator.non_nan_float

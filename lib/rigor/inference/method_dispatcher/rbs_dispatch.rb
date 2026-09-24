@@ -161,10 +161,11 @@ module Rigor
         EMPTY_ARGUMENT_NODES = [].freeze
         private_constant :EMPTY_ARGUMENT_NODES
 
-        # The classes {#shared_value_class} admits. Each one's `+` answers its own class for every instance,
-        # subclass instances included (`String#+` answers a String; the numeric classes have no instances
-        # of a subclass). `class Name < String` is left out, since the `+` it inherits answers a plain
-        # String, and so is any class whose `coerce` may make `+` answer a third one.
+        # The classes {#shared_value_class} admits. Given an argument of the same class, each one's `+`
+        # answers that class for every receiver, subclass instances included (`String#+` answers a String;
+        # the numeric classes have no instances of a subclass). `class Name < String` is left out, since the
+        # `+` it inherits answers a plain String, and so is any class whose `coerce` may make `+` answer a
+        # third one.
         CLOSED_VALUE_CLASSES = Set["Integer", "Float", "Rational", "Complex", "String"].freeze
         private_constant :CLOSED_VALUE_CLASSES
 
@@ -1173,7 +1174,9 @@ module Rigor
           # The block's type is one typing of its body, so it covers every call only when nothing the block
           # receives depends on the variable ({#block_receives_variable?}). The argument binding's gate
           # applies ({#arg_binding_permitted?}), since this reads the argument. The positions must be static
-          # ({#arguments_at_variable}), and every side must widen to a class ({#value_classes}).
+          # ({#arguments_at_variable}), and every side must widen to a class ({#value_classes}). The block's
+          # type is trusted as far as the engine trusts it, so a hash filled through an alias, which reads
+          # narrower than it is, binds its narrower class here too.
           def shared_value_class(method_type, name, args, block_type, call_node)
             return nil if block_receives_variable?(method_type.block, name)
 
@@ -1192,7 +1195,7 @@ module Rigor
           # holds the argument on the first call and the block's own result after it, and the pass that
           # typed the block typed it once, as whatever reached it: the RBS probe leaves it untyped, but
           # `IteratorDispatch` hands an Array receiver's `inject` the seed, and a `&:+` block then reads
-          # `0.+`, so `[1.5, 2].inject(0, &:+)`, which is `3.5`, would join to `Integer`.
+          # `0.+`, so `[1.5, 2].inject(0, &:+)`, which is `3.5`, would bind `Integer`.
           def block_receives_variable?(block, name)
             return true if block.self_type && mentions_variable?(block.self_type, name)
 
@@ -1204,8 +1207,9 @@ module Rigor
           # arguments: after a `*splat` that turns out empty, the next argument lands one parameter earlier,
           # and a forwarded `...` or keyword arguments may land anywhere. The signature must name `name` only
           # as a whole leading positional parameter's type, and have no trailing positional parameter at
-          # all: a trailing one takes its argument from the end of the list, which pairing the leading
-          # parameters with the arguments in order would miss.
+          # all. One that names the variable takes its argument from the end of the list, which pairing the
+          # leading parameters with the arguments in order would miss; one that does not is declined too,
+          # conservatively.
           def arguments_at_variable(method_type, name, args, call_node)
             return nil unless plain_positional_arguments?(call_node, args.size)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The local pre-push gate: check only what this branch changed, in seconds.
+# The local pre-push gate: check only what this branch changed, in under a minute.
 #
 # The full gate (`make verify`) belongs to CI on the Draft PR: locally it runs
 # the whole suite, and several parallel sessions running it at once is what
@@ -12,7 +12,9 @@
 #   3. RSpec on the changed specs; the mirror spec of a changed lib/ or tool/ file;
 #      the specs that name a changed fixture; for a changed plugin or example,
 #      the integration specs that load it plus the two all-plugin conformance
-#      specs — the opt-in files in their own processes, as in `verify`;
+#      specs — the opt-in files in their own processes, as in `verify`; and
+#      for any engine change (lib/, sig/, data/) the four whole-engine drift
+#      specs that CI failures most often came from on untouched files (~30s);
 #   4. `spec/docs/` always — seconds, and it is where the Markdown gates live;
 #   5. `rigor check --fail-on=warning` on the changed lib files and the lib
 #      mirrors of changed sig/ files — the CI self-check caught a
@@ -99,10 +101,24 @@ add_specs_matching() {
   while IFS= read -r spec; do add_spec "$spec"; done < <(grep -rlE --include='*_spec.rb' "$1" spec)
 }
 lines() { printf '%s' "$1" | sort -u; }
+# Specs that read the whole engine rather than one file: a lib change anywhere
+# can move them. They were most of the CI failures (Sept 2026) that a
+# changed-files-only gate would have missed, and cost about 30s together.
+engine_drift_specs=(
+  spec/integration/precision_snapshot_spec.rb
+  spec/integration/type_construction_spec.rb
+  spec/rigor/public_api_drift_spec.rb
+  spec/rigor/ractor_readiness_spec.rb
+)
 
 for path in ${changed[@]+"${changed[@]}"}; do
   case "$path" in
     lib/* | spec/* | plugins/* | examples/* | apps/*) lint_files+="$path"$'\n' ;;
+  esac
+  case "$path" in
+    lib/* | sig/* | data/*)
+      for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
   esac
   case "$path" in
     spec/spec_helper.rb | spec/support/* | spec/*/support/*)

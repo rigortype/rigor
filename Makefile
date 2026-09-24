@@ -272,7 +272,7 @@ verify-sequential: test test-ractor-pool test-integration-plugins lint check che
 
 # The local pre-push gate: `git diff --check`, RuboCop, the affected specs,
 # `spec/docs/` and `rigor check` — each over only what the branch changed since
-# its merge base with origin/master (override with VERIFY_BASE=<ref>). About 20s
+# its merge base with origin/master (override with VERIFY_BASE=<ref>). 20-40s
 # for a small branch, where `verify` runs the whole suite and contends for the
 # host with every parallel session running it. It cannot see a regression in an untouched file, so the
 # full gate stays CI on the Draft PR; see bin/verify-changed.

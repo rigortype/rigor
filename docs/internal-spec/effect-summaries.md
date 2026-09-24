@@ -89,7 +89,9 @@ Catalogued origins are keyed by the callee key the row matched (`catalogue:Kerne
 
 ### Ownership
 
-A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS`) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
+A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `MutationClassifier::HASH_MUTATORS` / `StringMutation::MUTATORS`) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
+
+The Hash set is the one union the effect side keeps. The widening splits Hash mutators by what they change about a `HashShape`: `MutationWidening::HASH_MUTATORS` changes the pair set, and `HashLookupMutation::MUTATORS` (`compare_by_identity`, `default=`, `default_proc=`) changes what a read of the pairs answers. Either is a write to the receiver, and the classifier asks only that, so it reads both tables. It adds `rehash`, which is in neither because it changes no read a shape can state, but which rebuilds the receiver's table in place. `@h.compare_by_identity` is therefore `mutate.self`, and the predicate `@h.compare_by_identity?` is nothing. The set is exactly the public `Hash` methods that raise `FrozenError` on a frozen receiver, and a spec holds it there.
 
 The label then follows the receiver's ownership, which is a syntactic question:
 
@@ -187,7 +189,7 @@ An edge that reaches no project definition is dropped by the propagator, so keep
 
 ### Mutator sets, by reference
 
-A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS` — the same sets `MutationClassifier` reads, so no mutator list is kept twice. The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
+A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `MutationClassifier::HASH_MUTATORS` / `StringMutation::MUTATORS` — the same sets `MutationClassifier` reads, so no mutator list is kept twice and a posture's answer cannot disagree with the classifier's (§ Ownership). The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
 
 ### Argument-dependent narrowing
 

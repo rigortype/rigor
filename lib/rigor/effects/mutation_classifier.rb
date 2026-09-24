@@ -29,6 +29,19 @@ module Rigor
       # `foo=`, and deliberately not `==` / `<=` / `!=` / `===`.
       ATTRIBUTE_WRITER = /\A[a-z_][A-Za-z0-9_]*=\z/
 
+      # Every Hash method that mutates its receiver. The widening keeps two tables because they answer two different
+      # questions of a `HashShape` — `MutationWidening::HASH_MUTATORS` changes the pair set,
+      # `HashLookupMutation::MUTATORS` changes what a read of the pairs answers — but either is a write to the
+      # receiver, and that is all this asks: `h.compare_by_identity` raises `FrozenError` on a frozen hash exactly as
+      # `h.clear` does, and a method whose one effect was `@h.compare_by_identity` did not read as mutating while
+      # this cited the first table alone.
+      #
+      # `rehash` is in neither table because it changes no read a shape can state: a shape's keys are literals, which
+      # a rebuild never merges. It still rebuilds the receiver's table in place, and it is the one name spelt here.
+      HASH_MUTATORS = (
+        Inference::MutationWidening::HASH_MUTATORS | Inference::HashLookupMutation::MUTATORS | Set[:rehash]
+      ).freeze
+
       LABELS = {
         self_state: LabelSet.new(["mutate.self"]),
         static: LabelSet.new(["mutate.static"]),
@@ -52,7 +65,7 @@ module Rigor
         # (ADR-103 WD3): a list kept here drifted from the widening's, and missed `force_encoding`.
         case receiver_class
         when "Array" then Inference::MutationWidening::ARRAY_MUTATORS.include?(name)
-        when "Hash" then Inference::MutationWidening::HASH_MUTATORS.include?(name)
+        when "Hash" then HASH_MUTATORS.include?(name)
         when "String" then Inference::StringMutation::MUTATORS.include?(name)
         else false
         end

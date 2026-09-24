@@ -235,7 +235,7 @@ classes:
   Hash:
     posture: value
     mutators: hash
-    why: "a value class; mutation is ownership-classified from `MutationWidening::HASH_MUTATORS`"
+    why: "a value class; mutation is ownership-classified from `MutationClassifier::HASH_MUTATORS` — the widening's `HASH_MUTATORS` and `HashLookupMutation::MUTATORS` (`compare_by_identity`, `default=`, `default_proc=`), plus `rehash`"
 
   String:
     posture: value

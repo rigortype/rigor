@@ -11,8 +11,8 @@ module Rigor
     #
     # Ruby has no by-ref parameters, so `mutate.local` cannot mean "a write into an out-parameter" as it
     # does in PHP. It means the mutated receiver is invisible to the caller, and that is an ownership
-    # question: a local whose every assignment allocates (`[]`, `{}`, `""`, `.new`, `.dup`) and which never
-    # escapes the body is one no caller can observe being mutated.
+    # question: a local whose every assignment allocates (`[]`, `{}`, `""`, `Foo.new`, `.dup`) and which
+    # never escapes the body is one no caller can observe being mutated.
     #
     # The analysis is deliberately **flow-insensitive and whole-body**: a local that escapes anywhere
     # disqualifies, even if the escape happens after the mutation. That is strictly more conservative than
@@ -23,16 +23,17 @@ module Rigor
     # This is the tracer slice's approximation, not the eventual answer. `ClosureEscapeAnalyzer` answers a
     # different question (fact retention, not "does the code contain") and is deliberately left alone.
     module LocalOwnership
-      # Assignment right-hand sides that witness a fresh allocation. `.new` and `.dup` / `.clone` follow
+      # Assignment right-hand sides that witness a fresh allocation. `.dup` / `.clone` follow
       # [ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md)'s reading of `dup` as the
-      # allocation witness.
-      ALLOCATING_SELECTORS = %i[new dup clone].to_set.freeze
+      # allocation witness; `.new` is {constructor?}'s, because only a class object's `new` is `Class#new`.
+      COPYING_SELECTORS = %i[dup clone].to_set.freeze
 
       module_function
 
       # The set of frame-owned local names in `body`, given the method's parameter names (a parameter is
-      # never frame-owned — the caller holds the same object, so mutating it is `mutate.instance`).
-      def owned(body, parameter_names)
+      # never frame-owned — the caller holds the same object, so mutating it is `mutate.instance`) and
+      # whether `self` is a class there ({constructor?}).
+      def owned(body, parameter_names, singleton:)
         return Set.new if body.nil?
 
         assignments = {}
@@ -42,21 +43,46 @@ module Rigor
         assignments.filter_map do |name, values|
           next if escaped.include?(name) || parameter_names.include?(name)
 
-          name if values.all? { |value| allocation?(value) }
+          name if values.all? { |value| allocation?(value, singleton: singleton) }
         end.to_set
       end
 
       # Whether `node` is an expression that allocates a fresh object this frame is the sole holder of.
-      def allocation?(node)
+      # `singleton` is whether the enclosing unit's `self` is a class, as {constructor?} reads it.
+      def allocation?(node, singleton:)
         case node
         when Prism::ArrayNode, Prism::HashNode, Prism::StringNode, Prism::InterpolatedStringNode,
              Prism::LambdaNode
           true
         when Prism::CallNode
-          ALLOCATING_SELECTORS.include?(node.name) || unary_plus_string?(node)
+          COPYING_SELECTORS.include?(node.name) || constructor?(node, singleton: singleton) ||
+            unary_plus_string?(node)
         else
           false
         end
+      end
+
+      # A `new` whose receiver the author wrote as a class object: a constant path, a `class` call
+      # (`self.class`, `other.class`), or `self` — explicit or implicit — in a singleton-method body. Any
+      # other receiver may be an object whose `new` only shares the name: an ActiveRecord association's
+      # `new` builds a record into the association's own target, where the caller can reach it, and a
+      # gem's method gives no edge that would carry that to the caller. `self` in an instance method is
+      # such a receiver too — an association extension's `new` is the association's.
+      def constructor?(node, singleton:)
+        return false unless node.name == :new
+
+        receiver = node.receiver
+        case receiver
+        when nil, Prism::SelfNode then singleton
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::CallNode then class_call?(receiver)
+        else false
+        end
+      end
+
+      # `x.class` — `Kernel#class` answers the receiver's class, unless the receiver overrides it.
+      def class_call?(node)
+        node.name == :class && node.arguments.nil? && node.block.nil?
       end
 
       # `+""` — the frozen-string-literal era's spelling of "a fresh mutable String".
@@ -125,8 +151,8 @@ module Rigor
         last.is_a?(Prism::LocalVariableReadNode) ? [last.name.to_s] : []
       end
 
-      private_class_method :collect, :record_assignment, :record_escapes, :stored_value, :note_read,
-                           :trailing_reads
+      private_class_method :class_call?, :collect, :record_assignment, :record_escapes, :stored_value,
+                           :note_read, :trailing_reads
     end
   end
 end

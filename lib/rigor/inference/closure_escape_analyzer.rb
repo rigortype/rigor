@@ -30,13 +30,16 @@ module Rigor
     # therefore covers ONLY the core-and-stdlib surface where immediate invocation is part of the documented
     # contract:
     #
-    # - `Array`, `Hash`, `Range`, `Integer`, `Enumerator::Lazy` iteration methods (`each`, `map`, `select`,
-    #   `reject`, `flat_map`, `find`/`detect`, `any?`, `all?`, `none?`, `one?`, `count`, `inject`/`reduce`,
-    #   `each_with_index`, `each_with_object`, `min_by`, `max_by`, `sort_by`, `partition`, `group_by`,
-    #   `tally`, `sum`, `take_while`, `drop_while`, `chunk_while`, `slice_when`, `zip`, `collect`,
+    # - `Array`, `Hash`, `Range`, `Set`, `Enumerator`, `Enumerator::Lazy` iteration methods (`each`, `map`,
+    #   `select`, `reject`, `flat_map`, `find`/`detect`, `any?`, `all?`, `none?`, `one?`, `count`,
+    #   `inject`/`reduce`, `each_with_index`, `each_with_object`, `min_by`, `max_by`, `sort_by`, `partition`,
+    #   `group_by`, `tally`, `sum`, `take_while`, `drop_while`, `chunk_while`, `slice_when`, `zip`, `collect`,
     #   `collect_concat`, `filter`, `filter_map`).
     # - `Hash`-only iteration: `each_pair`, `each_key`, `each_value`, `transform_keys`, `transform_values`.
     # - `Integer#times`, `Integer#upto`, `Integer#downto`, `Range#each`, `Range#step`.
+    # - `IO` / `File` / `StringIO` line iteration (`each`, `each_line`, `each_byte`, `each_char`,
+    #   `each_codepoint`, the singleton `foreach`) and the same Enumerable methods minus
+    #   {DEFERRED_ENUMERATOR_METHODS}.
     # - `Object#tap`, `Object#then`, `Object#yield_self`. The stronger "yields exactly once, before returning"
     #   fact for these three lives in {BlockCallTiming}; that table is expected to move to the same
     #   `RBS::Extended` call-timing effect as this one.
@@ -151,8 +154,23 @@ module Rigor
       # `File.foreach(path) { case … when … then flag = true when … then return true if flag end }` classifies
       # `:unknown` and misses the loop-body re-narrowing, so a local written in one `when` arm reads its
       # pre-loop value in a sibling arm and a guarding condition folds to a spurious constant.
+      #
+      # The three are also `Enumerable[String]` over lines (rbs core declares it for `IO`;
+      # `data/core_overlay/string_io.rbs` for `StringIO`). An eager Enumerable method runs its block from inside
+      # the call, through `each`, so `io.each_with_index { … }` / `io.detect { … }` carry the same contract and
+      # take `ENUMERABLE_NON_ESCAPING` — minus {DEFERRED_ENUMERATOR_METHODS}, whose block outlives the call. On
+      # the `singleton(File)` / `singleton(IO)` side those names only ever meet `IO.select`, which takes no
+      # block and so never retains one. The key is the exact class name: a subclass (`Tempfile`, a user
+      # `StringIO` subclass) stays `:unknown`.
       IO_ITERATION = %i[each_line each each_byte each_char each_codepoint].freeze
       IO_SINGLETON_ITERATION = %i[foreach].freeze
+
+      # Enumerable methods that return an Enumerator holding the block and run it only when that Enumerator is
+      # consumed, so the block may run after locals it reads or writes have changed. They are NOT
+      # non-escaping. `ENUMERABLE_NON_ESCAPING` still lists them for the collection entries — a defect tracked
+      # as #1311; the stream entries below leave them out rather than inherit it.
+      DEFERRED_ENUMERATOR_METHODS = %i[chunk chunk_while slice_when slice_before slice_after].freeze
+      STREAM_ENUMERABLE_NON_ESCAPING = (ENUMERABLE_NON_ESCAPING - DEFERRED_ENUMERATOR_METHODS).freeze
 
       NON_ESCAPING = {
         "Array" => (ENUMERABLE_NON_ESCAPING + ARRAY_EXTRA).freeze,
@@ -162,9 +180,9 @@ module Rigor
         "Integer" => INTEGER_EXTRA,
         "Enumerator" => ENUMERABLE_NON_ESCAPING,
         "Enumerator::Lazy" => ENUMERABLE_NON_ESCAPING,
-        "IO" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
-        "File" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
-        "StringIO" => IO_ITERATION
+        "IO" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
+        "File" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
+        "StringIO" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION).freeze
       }.freeze
 
       # Methods that are documented to **retain** the block past the call. The block is stored or scheduled,

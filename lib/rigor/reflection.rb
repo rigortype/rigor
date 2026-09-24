@@ -45,10 +45,6 @@ module Rigor
   # out of scope for the v0.0.7 first pass; v0.1.0's plugin API added it as a separate
   # concern.
   module Reflection
-    # #354 — thread-local slot for the per-run ancestor-scope memo. See {.ancestor_constant_scopes}.
-    ANCESTOR_SCOPES_KEY = :__rigor_ancestor_constant_scopes__
-    private_constant :ANCESTOR_SCOPES_KEY
-
     module_function
 
     def class_known?(class_name, scope: Scope.empty)
@@ -288,87 +284,6 @@ module Rigor
     end
     private_class_method :record_constant_reference
 
-    # #354 — the project classes and modules whose own constants `class_name` inherits, in Ruby's
-    # ancestor order: included / prepended modules before the superclass (Ruby places mixins nearer),
-    # transitively, breadth-first. `class_name` itself is excluded — step 1 already covered it.
-    #
-    # Only PROJECT ancestors appear. `Scope#superclass_of` / `#includes_of` carry as-written names
-    # from the discovery pre-pass, and an as-written name that resolves to no discovered class or
-    # module is dropped — so a `class Foo < ActiveRecord::Base` contributes nothing and a constant
-    # owned by an RBS-known ancestor still resolves only if the bare name reaches it at step 3. That
-    # gap is deliberate for this slice: widening to the RBS ancestor graph is a separate question
-    # with its own FP surface.
-    #
-    # Memoised per run because step 2 runs on every constant reference whose lexical candidates all
-    # miss — which is the common case for a core-class reference (`String` inside `class Foo`). The
-    # bucket keys on the identity of the runner-seeded run-generation token (ADR-84 WD2), falling
-    # back to the per-file discovery table for runner-less scopes, so a re-run in one process (LSP,
-    # ADR-62 warm loop) cannot hit stale entries.
-    def ancestor_constant_scopes(class_name, scope)
-      # ADR-46: `superclass_of` / `includes_of` record a cross-file class dependency per consumer
-      # file, and the memo is run-scoped rather than file-scoped — a hit would skip the recording and
-      # under-record the edge for every later file. Recording runs are rare (incremental only), so
-      # they simply bypass the memo rather than complicate its key.
-      return compute_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
-
-      generation = scope.run_generation || scope.discovered_superclasses
-      slot = Thread.current[ANCESTOR_SCOPES_KEY]
-      unless slot && slot[0].equal?(generation)
-        slot = [generation, {}]
-        Thread.current[ANCESTOR_SCOPES_KEY] = slot
-      end
-      bucket = slot[1]
-      bucket.fetch(class_name) { bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) }
-    end
-    private_class_method :ancestor_constant_scopes
-
-    def compute_ancestor_constant_scopes(class_name, scope)
-      queue = [class_name]
-      seen = { class_name => true }
-      out = []
-      until queue.empty?
-        current = queue.shift
-        # Mixins first, then the superclass — Ruby's ancestor order.
-        scope.includes_of(current).each do |raw|
-          resolved = resolve_ancestor_name(current, raw, scope)
-          next if resolved.nil? || seen[resolved]
-
-          seen[resolved] = true
-          out << resolved
-          queue << resolved
-        end
-        raw_super = scope.superclass_of(current)
-        next if raw_super.nil?
-
-        resolved_super = resolve_ancestor_name(current, raw_super, scope)
-        next if resolved_super.nil? || seen[resolved_super]
-
-        seen[resolved_super] = true
-        out << resolved_super
-        queue << resolved_super
-      end
-      out.freeze
-    end
-    private_class_method :compute_ancestor_constant_scopes
-
-    # Resolves an ancestor name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) against the nesting in
-    # force where the subclass's header is written — `Scope#ancestor_name_candidates`, the single
-    # owner of that order, which `Scope#enqueue_ancestors` reads for method lookup and the
-    # override-visibility rule reads for its own walk. Returns nil when no candidate names a
-    # discovered project class or module.
-    def resolve_ancestor_name(subclass_qualified, raw, scope)
-      scope.ancestor_name_candidates(subclass_qualified, raw)
-           .find { |candidate| known_project_namespace?(candidate, scope) }
-    end
-    private_class_method :resolve_ancestor_name
-
-    def known_project_namespace?(name, scope)
-      scope.discovered_superclasses.key?(name) ||
-        scope.discovered_includes.key?(name) ||
-        scope.discovered_classes.key?(name)
-    end
-    private_class_method :known_project_namespace?
-
     # Pulls the enclosing qualified class name out of `scope.self_type` when one is set.
     # `Nominal[T]` and `Singleton[T]` both expose `class_name`. Returns nil at the top level.
     def enclosing_class_path(scope)
@@ -518,6 +433,7 @@ module Rigor
   end
 end
 
-# Loaded last: the segment-wise path walk reopens the module above and reads its private candidate
-# lookups, so the facade has to exist first.
+# Loaded last: the ancestor walk and the segment-wise path walk reopen the module above and read its
+# private candidate lookups, so the facade has to exist first.
+require_relative "reflection/constant_ancestors"
 require_relative "reflection/constant_path"

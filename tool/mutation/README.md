@@ -15,12 +15,12 @@ harness reuses it (one source of truth). What stays dev-only here is the survivo
 
 ```sh
 # single file — full per-mutant breakdown
-nix --extra-experimental-features 'nix-command flakes' develop -c \
+nix develop -c \
   bundle exec ruby tool/mutation/mutate.rb lib/rigor/<file>.rb --verbose
 
 # corpus sweep — one warm session over many files, survivors clustered into a
 # ranked false-negative backlog (text, or --json for an agent / jq)
-nix --extra-experimental-features 'nix-command flakes' develop -c \
+nix develop -c \
   bundle exec ruby tool/mutation/mutate.rb sweep lib/rigor plugins/*/lib --per-file 40
 ```
 

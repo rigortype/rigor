@@ -24,10 +24,18 @@ rather than stopping at the first plausible edit.
 Run every development command through the Nix Flake:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command <cmd>
+nix develop --command <cmd>
 ```
 
-Use an interactive `nix … develop` shell when useful. The Flake owns Ruby 4.0.5 and the vendored
+Nix must have the `nix-command` and `flakes` experimental features enabled — once per machine, in
+`~/.config/nix/nix.conf` (or `/etc/nix/nix.conf`):
+
+```
+experimental-features = nix-command flakes
+```
+
+Where that is not set, insert `--extra-experimental-features 'nix-command flakes'` after `nix`. Use an
+interactive `nix develop` shell when useful. The Flake owns Ruby 4.0.5 and the vendored
 `vendor/bundle`; `make setup` is the first-time setup. For isolated work, read
 [`rigor-worktree`](.claude/skills/rigor-worktree/SKILL.md). CI is the exception: it installs Ruby
 with `ruby/setup-ruby` and runs the targets `make verify` chains, plus further acceptance gates.

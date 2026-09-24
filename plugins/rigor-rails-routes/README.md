@@ -39,7 +39,7 @@ plugins/rigor-rails-routes/
 
 ```sh
 cd plugins/rigor-rails-routes/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```

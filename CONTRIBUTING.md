@@ -11,7 +11,17 @@ patch.
 - **Recommended:** Nix with the `nix-command` and `flakes`
   experimental features enabled. The Flake provides Ruby 4.0,
   Bundler 4, GNU Make, Git, and the rest of the build
-  toolchain at the exact versions CI uses.
+  toolchain at the exact versions CI uses. Enable the features
+  once in `~/.config/nix/nix.conf` (or `/etc/nix/nix.conf`):
+
+  ```
+  experimental-features = nix-command flakes
+  ```
+
+  The `nix` commands in this repository's docs assume that
+  setting. Without it, add
+  `--extra-experimental-features 'nix-command flakes'` right
+  after `nix`.
 - **Or, without Nix:** Ruby `>= 4.0.0, < 4.1` and a matching
   Bundler 4.x on `PATH`. CI runs through
   [`ruby/setup-ruby`](https://github.com/ruby/setup-ruby) and
@@ -27,7 +37,7 @@ cd rigor
 # With Nix (recommended). Single-command setup that installs
 # gems, applies safe submodule defaults, and pulls the
 # read-only references the engine ships against.
-nix --extra-experimental-features 'nix-command flakes' develop --command make setup
+nix develop --command make setup
 
 # Without Nix. Equivalent commands run directly:
 bundle install
@@ -48,10 +58,10 @@ clone bandwidth stays reasonable.
 
 ```sh
 # With Nix (recommended).
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
+nix develop --command make verify
 
 # Or inside the Flake shell:
-nix --extra-experimental-features 'nix-command flakes' develop
+nix develop
 make verify
 
 # Without Nix, the same target works directly:

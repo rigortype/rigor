@@ -384,12 +384,12 @@ Run once before implementation begins and again after each slice to confirm the 
 
 ```sh
 # Before implementing the slice:
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec exe/rigor coverage --format json \
   spec/integration/fixtures/<name>/demo.rb > /tmp/before.json
 
 # After implementing:
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec exe/rigor coverage --format json \
   spec/integration/fixtures/<name>/demo.rb > /tmp/after.json
 
@@ -405,7 +405,7 @@ ruby -r json -e '
 For a broader signal (impact on all of `lib/`):
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   bundle exec exe/rigor coverage lib
 ```
 
@@ -419,7 +419,7 @@ slice that regresses precision below it fails CI.
 After every implementation slice:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
+nix develop --command make verify-changed
 ```
 
 `make verify-changed` is the local gate; the full gate (tests, lint, `check`, `check-plugins`) is CI

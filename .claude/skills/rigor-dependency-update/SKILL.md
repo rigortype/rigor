@@ -62,7 +62,7 @@ held by a transitive cap.
 ## Layer 2 — Nix Flake dev environment (`nix flake update`)
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' flake update
+nix flake update
 ```
 
 This bumps the single `nixpkgs` input to the latest `nixpkgs-unstable`
@@ -122,8 +122,8 @@ The rebuild dependency makes the order matter when both layers move:
 ## Verify
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix develop --command make verify
+nix develop --command git diff --check
 ```
 
 `make verify` (test + lint + `check` + `check-plugins`) must be green under

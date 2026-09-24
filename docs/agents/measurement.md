@@ -20,7 +20,7 @@ the Rigor repo instead writes `../rigor-survey/...` into `.rigor-baseline.yml`, 
 match the diagnostic stream, and the baseline silently suppresses nothing.
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bash -c '
+nix develop --command bash -c '
   cd ~/repo/ruby/rigor-survey/<project> &&
   BUNDLE_GEMFILE=<rigor>/Gemfile bundle exec <rigor>/exe/rigor <subcommand>'
 ```

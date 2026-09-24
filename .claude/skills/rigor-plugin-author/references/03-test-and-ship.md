@@ -111,7 +111,7 @@ Per `docs/agents/contribution-flow.md` § "Release Cadence", add a one-sentence 
 Run the full Flake-mediated verification:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
+nix develop --command make verify-changed
 ```
 
 `make verify-changed` runs the plugin's integration specs, the two all-plugin conformance specs,

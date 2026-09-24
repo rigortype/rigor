@@ -43,7 +43,7 @@ plugins/rigor-rails-i18n/
 
 ```sh
 cd plugins/rigor-rails-i18n/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```

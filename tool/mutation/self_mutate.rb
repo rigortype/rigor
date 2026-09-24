@@ -32,7 +32,7 @@
 # the broad-fuzz / robustness variant where rule-parity does not matter; not needed for this fused measure.
 #
 # Run inside the Flake:
-#   nix --extra-experimental-features 'nix-command flakes' develop -c \
+#   nix develop -c \
 #     bundle exec ruby tool/mutation/self_mutate.rb lib/rigor/cli/ci_detector.rb
 #
 # Flags: --type-only        skip the test axis (Phase 1 — no disk writes, fast)

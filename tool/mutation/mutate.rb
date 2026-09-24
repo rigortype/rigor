@@ -22,7 +22,7 @@
 # Marginal cost per mutant ≈ re-analysing one file's body.
 #
 # Run inside the Flake:
-#   nix --extra-experimental-features 'nix-command flakes' develop -c \
+#   nix develop -c \
 #     bundle exec ruby tool/mutation/mutate.rb lib/rigor/<some_file>.rb
 #
 # By default a type-aware filter (Phase 1.5) keeps only mutations whose anchor — the call receiver whose contract the

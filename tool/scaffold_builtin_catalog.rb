@@ -361,8 +361,7 @@ end
 # 6. Optionally run the extractor for the new topic.
 if options[:extract] && !dry_run
   Dir.chdir(ROOT) do
-    cmd = "nix --extra-experimental-features 'nix-command flakes' develop --command " \
-          "bundle exec ruby tool/extract_builtin_catalog.rb #{topic}"
+    cmd = "nix develop --command bundle exec ruby tool/extract_builtin_catalog.rb #{topic}"
     report("run     #{cmd}", dry_run: false)
     system(cmd) || abort("[scaffold] extractor run failed")
   end

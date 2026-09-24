@@ -29,7 +29,7 @@ additively under the same plugin id.
 
 ```sh
 cd plugins/rigor-factorybot/demo
-nix --extra-experimental-features 'nix-command flakes' develop --command \
+nix develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
 ```

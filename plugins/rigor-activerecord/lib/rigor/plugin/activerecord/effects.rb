@@ -93,7 +93,9 @@ module Rigor
         # from the callee's side instead, and say `mutate.self`.
         #
         # A saved owner's `<<` saves the record, which runs the model's `before_save` / `after_commit`
-        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has.
+        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has: the
+        # call site's receiver is `Relation[Post]`, and the edge that would reach `Post#save` needs the type
+        # argument, which the collector does not record (#1313).
         PROXY_WRITERS = %w[<< push append concat replace delete destroy clear].freeze
         PROXY_WRITE = ["io.db.read", "io.db.write", "io.db.transaction", "mutate"].freeze
 

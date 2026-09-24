@@ -71,10 +71,11 @@
 #   not yet saved. So do `update_all` and `touch_all`: the proxy does
 #   not override them, and Relation's version ends with
 #   `.tap { reset }`, which reaches the proxy's `reset`.
-# - `insert_all`, `insert_all!` and `upsert_all` on the proxy reset
-#   the target only when it holds no unsaved record. Rails 8.1
-#   deprecates the other branch and says those records will be lost
-#   in 8.2. The bound is written for 8.2, and it over-states 8.1.
+# - `insert`, `insert!` and `upsert`, and their `_all` forms, on the
+#   proxy reset the target only when it holds no unsaved record.
+#   Rails 8.1 deprecates the other branch and says those records will
+#   be lost in 8.2. The bound is written for 8.2, and it over-states
+#   8.1.
 #
 # So `user.posts.build` changes an object the caller can still reach
 # through `user`: `user.posts.size` counts the new record, and
@@ -91,6 +92,12 @@
 # is: the receiver changes itself. A caller imports the label
 # unchanged, so in the caller's row it names the proxy it called,
 # not the caller's own `self`.
+#
+# `insert`, `insert!` and `upsert` are declared here, beside their
+# `_all` forms, because a plain Relation defines them too. The
+# declaration changes no result type: an undeclared method on this
+# open receiver already types as `untyped`. Its parameter list admits
+# every call Rails accepts.
 #
 # The writers a plain Relation does not define (`<<`, `push`,
 # `append`, `concat`, `replace`, `clear`) are rows in the plugin's
@@ -344,9 +351,15 @@ module ActiveRecord
     %a{rigor:v1:effect io.db.write, mutate.self}
     def touch_all: (*untyped) -> Integer
     %a{rigor:v1:effect io.db.write, mutate.self}
+    def insert: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all: (untyped, **untyped) -> untyped
     %a{rigor:v1:effect io.db.write, mutate.self}
+    def insert!: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all!: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
+    def upsert: (untyped, **untyped) -> untyped
     %a{rigor:v1:effect io.db.write, mutate.self}
     def upsert_all: (untyped, **untyped) -> untyped
 

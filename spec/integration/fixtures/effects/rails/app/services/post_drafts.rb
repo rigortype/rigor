@@ -35,6 +35,12 @@ class PostDrafts
   def via_insert_all!(rows) = @posts.insert_all!(rows)
   def via_upsert_all(rows) = @posts.upsert_all(rows)
 
+  # The single-row forms go through the same proxy override. `call.wrong-arity` skips a call that passes a
+  # keyword, so `via_insert` is the one that checks the declared parameter list.
+  def via_insert(title) = @posts.insert({ title: title })
+  def via_insert!(title) = @posts.insert!({ title: title }, record_timestamps: false)
+  def via_upsert(title) = @posts.upsert({ title: title }, unique_by: :title)
+
   # Writers a plain Relation does not define.
   def via_shovel(post) = @posts << post
   def via_push(post) = @posts.push(post)

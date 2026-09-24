@@ -156,18 +156,22 @@ every bound in `relation.rbs` must also hold for them. Their `build` /
 `first_or_*` builders add the record to the association's in-memory
 target. On the proxy, `reset`, `reload`, `delete_all`, `destroy_all`,
 `update_all` and `touch_all` discard unsaved records from it, and so
-will `insert_all`, `insert_all!` and `upsert_all` from Rails 8.2. Those
-bounds carry `mutate.self`, so `user.posts.build` reads as a change to
-an object the caller can still reach through `user`. A plain Relation's
-`new` changes nothing, and the same bound over-states it, because the
-type cannot tell the receivers apart.
+will `insert`, `insert!`, `upsert` and their `_all` forms from Rails
+8.2. Those bounds carry `mutate.self`, so `user.posts.build` reads as a
+change to an object the caller can still reach through `user`. A plain
+Relation's `new` changes nothing, and the same bound over-states it,
+because the type cannot tell the receivers apart.
 
 The proxy's own writers (`<<`, `push`, `append`, `concat`, `replace`,
 `delete`, `destroy`, `clear`) are `effect_attributions:` rows carrying
 `io.db.read`, `io.db.write`, `io.db.transaction` and `mutate`. Bare
 `mutate` is used because a row describes the call, and the proxy is not
-the caller's `self`. A saved owner's `<<` also runs the model's save
-callbacks, and no edge carries those yet.
+the caller's `self`.
+
+A saved owner's `<<` also runs the model's save callbacks, and so do
+`create` and the `find_or_*` builders on any Relation. No edge carries
+those callbacks to the caller yet
+([#1313](https://github.com/rigortype/rigor/issues/1313)).
 
 ### Framework edges
 

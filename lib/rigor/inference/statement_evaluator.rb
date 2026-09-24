@@ -2332,9 +2332,10 @@ module Rigor
         walk = OperandWalk.new(walk_recorder)
         after_expression = thread_operand(node.expression, scope, walk, scope)
         # The arm is threaded outside the walk: its entry nil-injects a local `expr` first binds, which is the
-        # sound join for the scope after the modifier but would read `u` as `String?` in `Float(u = s) rescue
-        # u.strip`, where the arm only runs after the write. Neither it nor anything in it is recorded or typed
-        # from there.
+        # sound join (the raise may come before the write) but reads `u` as `String?` in `Float(u = s) rescue
+        # u.strip`, where the raise almost always comes from `Float` after it. Neither the arm nor anything in it
+        # is recorded or typed from there, which keeps it where it was before #1256: an ADR-5 trade of the rare
+        # raise-before-write path for no false positive on the common one.
         arm_entry = join_with_nil_injection(scope, after_expression)
         after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
         type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))

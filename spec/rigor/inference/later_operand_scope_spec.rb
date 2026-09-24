@@ -132,8 +132,9 @@ RSpec.describe "later operands read the scope the earlier ones left", type: :run
       RUBY
     end
 
-    # The arm runs only after `expr` raised, possibly after its writes, so the scope after the modifier
-    # nil-injects a local `expr` first binds; the arm itself, and the modifier's value, must not read it that way.
+    # The arm runs after `expr` raised, before or after its writes, so the scope after the modifier nil-injects a
+    # local `expr` first binds. The arm itself, and the modifier's value, keep reading it as they did before #1256
+    # (ADR-5): the raise almost always comes after the write.
     it "does not read a `rescue` modifier's arm from the nil-injected join" do
       expect(receiver_rules(<<~RUBY)).to be_empty
         z = (Float(u = gets.to_s) rescue u.strip)

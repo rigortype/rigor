@@ -2736,15 +2736,16 @@ module Rigor
           coerce_method = COERCE_DISPATCH_METHODS.include?(call_node.name)
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
-            arg_type = argument_scope(arg, scope, scope_index).type_of(arg)
+            arg_scope = argument_scope(arg, scope, scope_index)
+            arg_type = arg_scope.type_of(arg)
             params = checkable_overload_params(method_types, index, param_overrides, scope)
             next if params.nil?
 
             mismatch =
               if nil_member?(arg_type) # pure nil only — not a `T | nil` union
-                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
               elsif !coerce_method
-                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
               end
             return mismatch if mismatch
           end

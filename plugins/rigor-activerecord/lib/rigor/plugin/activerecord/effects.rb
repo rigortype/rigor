@@ -103,12 +103,13 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
-        # The writers an association's `CollectionProxy` defines, or for `delete` / `destroy` overrides. A
-        # plain Relation's own `delete` / `destroy` are `where(id:).delete_all` and `find(id).destroy`, both
-        # inside this row's labels. Each adds records to the association's in-memory target or removes them
-        # from it. Depending on whether the owner is saved and on the association's `dependent:` option, it
-        # may also read, write, and open a transaction, so the row names all three rather than the parent
-        # `io.db`, which `--label io.db.write` would not match.
+        # The writers an association's `CollectionProxy` defines, plus its `delete` / `destroy`, which
+        # override a plain Relation's own `delete(id_or_array)` / `destroy(id)`. Those are
+        # `where(id:).delete_all` and `find(id).destroy`, both inside this row's labels. Each adds records
+        # to the association's in-memory target or removes them from it. Depending on whether the owner is
+        # saved and on the association's `dependent:` option, it may also read, write, and open a
+        # transaction, so the row names all three rather than the parent `io.db`, which
+        # `--label io.db.write` would not match.
         #
         # The mutation is spelt from the call site, as every row here is, and bare `mutate` is the label
         # for a receiver that is not the caller's `self`: the proxy is an object the caller holds, like the
@@ -116,7 +117,9 @@ module Rigor
         # from the callee's side instead, and say `mutate.self`.
         #
         # A saved owner's `<<` saves the record, which runs the model's `before_save` / `after_commit`
-        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has.
+        # callbacks. No edge carries those to the caller, which is the same gap `Relation#create` has: the
+        # call site's receiver is `Relation[Post]`, and the edge that would reach `Post#save` needs the type
+        # argument, which the collector does not record (#1313).
         PROXY_WRITERS = %w[<< push append concat replace delete destroy clear].freeze
         PROXY_WRITE = ["io.db.read", "io.db.write", "io.db.transaction", "mutate"].freeze
 

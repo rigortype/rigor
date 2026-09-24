@@ -1,0 +1,2 @@
+- **[plugins/rigor-activerecord]** `insert`, `insert!` and `upsert` on a relation or an association reader, such as `@posts.insert(row)`, now carry `io.db.write` like `insert_all` instead of reading as pure. ([#1315](https://github.com/rigortype/rigor/pull/1315))
+  - The bundled `ActiveRecord::Relation` signature now declares them. A project that declared any of them on `ActiveRecord::Relation` in its own `sig/` should remove that declaration: the two collide as `RBS::DuplicatedMethodDefinitionError`, and relation calls then lose their types.

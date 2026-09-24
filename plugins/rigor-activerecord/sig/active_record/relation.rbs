@@ -71,10 +71,11 @@
 #   not yet saved. So do `update_all` and `touch_all`: the proxy does
 #   not override them, and Relation's version ends with
 #   `.tap { reset }`, which reaches the proxy's `reset`.
-# - `insert_all`, `insert_all!` and `upsert_all` on the proxy reset
-#   the target only when it holds no unsaved record. Rails 8.1
-#   deprecates the other branch and says those records will be lost
-#   in 8.2. The bound is written for 8.2, and it over-states 8.1.
+# - `insert`, `insert!` and `upsert`, and their `_all` forms, on the
+#   proxy reset the target only when it holds no unsaved record.
+#   Rails 8.1 deprecates the other branch and says those records will
+#   be lost in 8.2. The bound is written for 8.2, and it over-states
+#   8.1.
 #
 # So `user.posts.build` changes an object the caller can still reach
 # through `user`: `user.posts.size` counts the new record, and
@@ -91,6 +92,14 @@
 # is: the receiver changes itself. A caller imports the label
 # unchanged, so in the caller's row it names the proxy it called,
 # not the caller's own `self`.
+#
+# `insert`, `insert!` and `upsert` are declared here, beside their
+# `_all` forms, because a plain Relation defines them too. The
+# declaration changes no result type: an undeclared method on this
+# open receiver already types as `untyped`. It adds the checks any
+# declared method gets, `call.wrong-arity` and
+# `call.possible-nil-receiver`, and its parameter list admits every
+# call Rails accepts.
 #
 # The writers a plain Relation does not define (`<<`, `push`,
 # `append`, `concat`, `replace`, `clear`) are rows in the plugin's
@@ -116,14 +125,14 @@
 # AssociationRelation (`user.posts.where(…)`), neither of which
 # overrides it, raises `ArgumentError` and goes unreported.
 #
-# Of the rest, the `insert_all` family's `(...)` methods and the
-# proxy's `delegate … to: :scope` block (the query builders and
-# `scoping`) forward their arguments unchanged to the Relation's own
-# methods, and the proxy's other overrides (`find`, `last`, `take`,
-# `build`, `create`, `calculate`, `pluck`, …) take no more than the
-# declarations here. `delete` and `destroy`, whose overrides take
-# more arguments than the Relation's, stay undeclared for the
-# reasons above.
+# Of the rest, the `(...)` methods of the `insert` and `insert_all`
+# families and the proxy's `delegate … to: :scope` block (the query
+# builders and `scoping`) forward their arguments unchanged to the
+# Relation's own methods, and the proxy's other overrides (`find`,
+# `last`, `take`, `build`, `create`, `calculate`, `pluck`, …) take no
+# more than the declarations here. `delete` and `destroy`, whose
+# overrides take more arguments than the Relation's, stay undeclared
+# for the reasons above.
 #
 # ## A writer that also queries carries the read too
 #
@@ -146,6 +155,10 @@
 # - `create(!)` on the proxy of a `has_many :through` a `has_one`
 #   builds the join record through the `has_one`, which loads the
 #   record it replaces.
+#
+# The `insert` and `insert_all` families stay `io.db.write` alone.
+# Each compiles one `INSERT` statement and queries nothing else: the
+# proxy's override reads only the target it already holds in memory.
 #
 # Two kinds of query are not counted. Schema reflection is one: the
 # column and index lookups the schema cache serves would otherwise
@@ -412,9 +425,15 @@ module ActiveRecord
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def touch_all: (*untyped) -> Integer
     %a{rigor:v1:effect io.db.write, mutate.self}
+    def insert: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all: (untyped, **untyped) -> untyped
     %a{rigor:v1:effect io.db.write, mutate.self}
+    def insert!: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
     def insert_all!: (untyped, **untyped) -> untyped
+    %a{rigor:v1:effect io.db.write, mutate.self}
+    def upsert: (untyped, **untyped) -> untyped
     %a{rigor:v1:effect io.db.write, mutate.self}
     def upsert_all: (untyped, **untyped) -> untyped
 

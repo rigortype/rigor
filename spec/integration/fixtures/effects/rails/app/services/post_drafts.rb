@@ -35,6 +35,13 @@ class PostDrafts
   def via_insert_all!(rows) = @posts.insert_all!(rows)
   def via_upsert_all(rows) = @posts.upsert_all(rows)
 
+  # The single-row forms go through the same proxy override. `call.wrong-arity` skips a call that passes a
+  # keyword, so each passes its row positionally and nothing else; that is the call that checks the declared
+  # parameter list.
+  def via_insert(title) = @posts.insert({ title: title })
+  def via_insert!(title) = @posts.insert!({ title: title })
+  def via_upsert(title) = @posts.upsert({ title: title })
+
   # Each runs on a relation of its own, or on the records it loads, and leaves the proxy's target alone.
   def via_update(title) = @posts.update(title: title)
   def via_update!(title) = @posts.update!(title: title)

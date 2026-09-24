@@ -61,6 +61,7 @@ RSpec.describe "the Rails effect layer" do
   def self.table
     @table ||= begin
       runner = nil
+      result = nil
       Dir.chdir(File.expand_path("../../integration/fixtures/effects/rails", __dir__)) do
         runner = Rigor::Analysis::Runner.new(
           configuration: Rigor::Configuration.new(
@@ -71,14 +72,15 @@ RSpec.describe "the Rails effect layer" do
           cache_store: nil, plugin_requirer: RAILS_PLUGIN_REQUIRER
         )
         # Class-level memo, so it runs outside example scope where the `GuardedAnalysis` mixin lives.
-        InternalAnalyzerErrorGuard.check!(runner.run(["app"]), context: "rails_layer_spec .table")
+        result = InternalAnalyzerErrorGuard.check!(runner.run(["app"]), context: "rails_layer_spec .table")
       end
-      [runner.effect_table, runner.effect_plugin_facts]
+      [runner.effect_table, runner.effect_plugin_facts, result.diagnostics]
     end
   end
 
-  let(:table) { self.class.table.first }
-  let(:facts) { self.class.table.last }
+  let(:table) { self.class.table[0] }
+  let(:facts) { self.class.table[1] }
+  let(:diagnostics) { self.class.table[2] }
 
   def entry(key)
     table[key] or raise "no effect-table entry for #{key.inspect}"
@@ -136,7 +138,8 @@ RSpec.describe "the Rails effect layer" do
       "via_delete_all" => read_write, "via_destroy_all" => read_write,
       "via_update_all" => read_write, "via_touch_all" => read_write,
       "via_insert_all" => ["io.db.write"], "via_insert_all!" => ["io.db.write"],
-      "via_upsert_all" => ["io.db.write"]
+      "via_upsert_all" => ["io.db.write"],
+      "via_insert" => ["io.db.write"], "via_insert!" => ["io.db.write"], "via_upsert" => ["io.db.write"]
     }.freeze
 
     # Writers that run on a relation of their own, or on the records they load, so the proxy's target is
@@ -180,6 +183,14 @@ RSpec.describe "the Rails effect layer" do
         expect(Rigor::SigGen::EffectAnnotation.decide(entry("PostDrafts##{method}")))
           .to eq([[], :withheld_declared])
       end
+    end
+
+    # `insert`, `insert!` and `upsert` used to be undeclared, so the open receiver typed them as `untyped`
+    # with no argument check. The declaration keeps that result type, and its parameter list must accept
+    # every call Rails does, or the bound would cost a false `call.wrong-arity`.
+    it "declares the single-row inserts without a call diagnostic on a call Rails accepts" do
+      drafts = diagnostics.select { |diagnostic| diagnostic.path.to_s.end_with?("app/services/post_drafts.rb") }
+      expect(drafts.map(&:rule).compact.grep(/\Acall\./)).to be_empty
     end
 
     # The control: a query builder changes nothing, on a proxy as anywhere else, and stays emit-able.

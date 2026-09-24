@@ -113,7 +113,7 @@ module Rigor
       def scan_template_unit(root)
         summary, edges = UnitScan.new(
           singleton: false, parameters: [], block_parameter: nil,
-          owned_locals: LocalOwnership.owned(root, []), calls: @calls,
+          owned_locals: LocalOwnership.owned(root, [], singleton: false), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
           owner_class: @unit_owner, method_name: @unit_key
         ).run(root)
@@ -239,7 +239,7 @@ module Rigor
         scan = UnitScan.new(
           singleton: singleton, parameters: names,
           block_parameter: block_parameter_name(parameters),
-          owned_locals: LocalOwnership.owned(body, names), calls: @calls,
+          owned_locals: LocalOwnership.owned(body, names, singleton: singleton), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
           owner_class: class_name, method_name: method_name, non_public: non_public
         )

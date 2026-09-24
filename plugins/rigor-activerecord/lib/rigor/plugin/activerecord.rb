@@ -65,9 +65,9 @@ module Rigor
         id: "activerecord",
         target_gems: ["activerecord"],
         # 0.13.0, 2026-09-24 (#1321) — the class-side `Model.find` with two or more arguments returns
-        # `Array[Model]` instead of the model, unless the model defines its own `self.find`, and its
-        # `model-call` note says so. No producer payload changed shape; the bump records the type change as
-        # the 0.11.0 and 0.12.0 entries do.
+        # `Array[Model]` instead of the model, and its `model-call` note says so. A model that defines its own
+        # `self.find` keeps its own answer; the note reads syntax alone and does not see that override. No
+        # producer payload changed shape; the bump records the type change as the 0.11.0 and 0.12.0 entries do.
         #
         # 0.12.0, 2026-09-19 (#1089) — a written-receiver read of an enum-backed column returns the enum's
         # KEY type (the key String constants, or `String` for an empty key list) instead of the column's

@@ -815,8 +815,11 @@ project's source.
     `Rigor::Plugin::BoxProbe` runs the minimal reproducer of Ruby Bug
     #22260 (a class-body proc isolated by `Ractor.make_shareable` loses
     its box and segfaults on its first method call) in a child Ruby under
-    `RUBY_BOX=1`. When the child crashes, prints the wrong answer, cannot
-    start, or reports `Ruby::Box` inactive, the launcher warns on stderr,
+    `RUBY_BOX=1` with an empty `RUBYOPT` and a ten-second deadline. Only
+    a child killed by a signal is reported as the bug; one that prints the
+    wrong answer, exits non-zero, cannot start, times out, or reports
+    `Ruby::Box` inactive is reported as such. Either way the launcher
+    writes a notice to stderr (`$stderr.puts`, so `-W0` cannot hide it),
     drops `RIGOR_PLUGIN_ISOLATION=ruby_box` / `RIGOR_BOX`, and runs under
     the configured strategy. The probe is skipped when `RUBY_BOX` is
     already set, since the process has booted inside the box by then.

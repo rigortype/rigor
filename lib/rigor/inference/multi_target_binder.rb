@@ -239,34 +239,29 @@ module Rigor
           lefts = node.lefts || []
           rest = node.rest
           rights = node.rights || []
+          rest_present = !rest.nil?
 
           fronts, rest_type, backs, slots_optimistic =
-            decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?, context: context)
+            decompose(rhs_type, lefts.size, rights.size, rest_present: rest_present, context: context)
           rest_type = arity_free_rest(rest_type) if optimistic == true
-          front_marks, back_marks = slot_marks(optimistic, rhs_type, lefts.size, rights.size, rest_present: !rest.nil?)
-          lefts.each_with_index do |t, i|
-            bind_target(t, fronts[i], front_marks[i] || slots_optimistic, bindings, marked, context)
-          end
+          front_marks, back_marks =
+            slot_marks(optimistic || slots_optimistic, rhs_type, lefts.size, rights.size, rest_present: rest_present)
+          lefts.each_with_index { |t, i| bind_target(t, fronts[i], front_marks[i], bindings, marked, context) }
           bind_rest_target(rest, rest_type, bindings, marked) if rest
-          rights.each_with_index do |t, i|
-            bind_target(t, backs[i], back_marks[i] || slots_optimistic, bindings, marked, context)
-          end
+          rights.each_with_index { |t, i| bind_target(t, backs[i], back_marks[i], bindings, marked, context) }
         end
 
         # The `[front_marks, back_marks]` pair a visit hands its fixed slots. A boolean `optimistic`
         # applies to every slot. A per-element Array applies only to the `Type::Tuple` a literal
         # right-hand side types as, of the same arity, and each slot picks its element at the offset
-        # {decompose_tuple} reads; any other carrier leaves the slots unmarked, and a slot past the
-        # literal's end binds an exact `nil` that no mark qualifies.
+        # {decompose_tuple} reads ({slot_offsets}); any other carrier leaves the slots unmarked, and a
+        # slot past the literal's end binds an exact `nil` that no mark qualifies.
         def slot_marks(optimistic, rhs_type, front_count, back_count, rest_present:)
-          return [Array.new(front_count, optimistic), Array.new(back_count, optimistic)] unless optimistic.is_a?(Array)
-          unless rhs_type.is_a?(Type::Tuple) && rhs_type.elements.size == optimistic.size
-            return [Array.new(front_count, false), Array.new(back_count, false)]
-          end
+          return [[optimistic] * front_count, [optimistic] * back_count] unless optimistic.is_a?(Array)
 
-          back_start = rest_present ? [optimistic.size - back_count, front_count].max : front_count
-          [Array.new(front_count) { |i| optimistic.fetch(i, false) },
-           Array.new(back_count) { |i| optimistic.fetch(back_start + i, false) }]
+          elements = rhs_type.is_a?(Type::Tuple) && rhs_type.elements.size == optimistic.size ? optimistic : []
+          slot_offsets(elements.size, front_count, back_count, rest_present: rest_present)
+            .map { |offsets| offsets.map { |i| elements.fetch(i, false) } }
         end
 
         # Every member walks the same target tree, so each binds the same names; the first member's
@@ -350,17 +345,19 @@ module Rigor
 
         def decompose_tuple(tuple, front_count, back_count, rest_present:, soften:)
           elements = tuple.elements
-          fronts = Array.new(front_count) { |i| slot_type(elements, i, soften) }
-          if rest_present
-            middle_end = [elements.size - back_count, front_count].max
-            middle = elements[front_count...middle_end] || []
-            rest_type = Type::Combinator.tuple_of(*middle)
-            backs = Array.new(back_count) { |i| slot_type(elements, middle_end + i, soften) }
-          else
-            rest_type = nil
-            backs = Array.new(back_count) { |i| slot_type(elements, front_count + i, soften) }
-          end
-          [fronts, rest_type, backs]
+          fronts, backs = slot_offsets(elements.size, front_count, back_count, rest_present: rest_present)
+                          .map { |offsets| offsets.map { |i| slot_type(elements, i, soften) } }
+          # A reversed range (a short source) slices to `[]`, and one starting past the end to `nil`.
+          middle = elements[front_count...(elements.size - back_count)] || []
+          [fronts, rest_present ? Type::Combinator.tuple_of(*middle) : nil, backs]
+        end
+
+        # The element offsets a `[fronts, backs]` pair of fixed slots reads out of `size` elements: the
+        # back slots follow the middle a rest absorbs, and follow the fronts directly without one. An
+        # offset past `size` is a slot the source is too short to fill.
+        def slot_offsets(size, front_count, back_count, rest_present:)
+          back_start = rest_present ? [size - back_count, front_count].max : front_count
+          [Array.new(front_count) { |i| i }, Array.new(back_count) { |i| back_start + i }]
         end
 
         # The per-slot type for index `i` of a tuple decomposition, FP-safely softened: a
@@ -413,26 +410,27 @@ module Rigor
         # A per-element Array mark reaches a name only through a nested target: a name bound to a
         # whole literal array holds an Array, which is never `nil`.
         def bind_target(target, type, optimistic, bindings, marked, context)
-          case target
-          when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
-            bind_name(target.name, type, optimistic == true, bindings, marked)
-          when Prism::IndexTargetNode
-            bind_name(target, type, false, bindings, marked)
-          when Prism::MultiTargetNode
-            visit(target, type, optimistic, bindings, marked, context)
-          end
+          return visit(target, type, optimistic, bindings, marked, context) if target.is_a?(Prism::MultiTargetNode)
+
+          key = binding_key(target)
+          bind_name(key, type, optimistic == true, bindings, marked) if key
         end
 
         # The rest is an `Array` even when the right-hand side is short, so it is never marked.
         def bind_rest_target(splat_node, type, bindings, marked)
           return unless splat_node.is_a?(Prism::SplatNode)
 
-          expression = splat_node.expression
-          case expression
+          key = binding_key(splat_node.expression)
+          bind_name(key, type, false, bindings, marked) if key
+        end
+
+        # A named target's name, an index target's node (it binds no name, see {bind_name}), or nil for
+        # a target that contributes nothing to the scope.
+        def binding_key(target)
+          case target
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
-            bind_name(expression.name, type, false, bindings, marked)
-          when Prism::IndexTargetNode
-            bind_name(expression, type, false, bindings, marked)
+            target.name
+          when Prism::IndexTargetNode then target
           end
         end
 

@@ -720,8 +720,10 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   end
 
   describe ".resolve through a safe-navigation chain" do
-    let(:marked) { scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
-                        .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL) }
+    let(:marked) do
+      scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+           .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+    end
 
     def expression(source)
       Prism.parse(source, scopes: [[:v]]).value.statements.body.first
@@ -742,8 +744,10 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   end
 
   describe ".destructuring_marks" do
-    let(:marked) { scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
-                        .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL) }
+    let(:marked) do
+      scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+           .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+    end
 
     def value_of(source)
       Prism.parse(source, scopes: [[:v]]).value.statements.body.first.value

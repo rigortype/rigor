@@ -231,6 +231,10 @@ module ActiveRecord
     def left_outer_joins: (*untyped) -> self
     %a{pure}
     def references: (*untyped) -> self
+    # With a block, `select` is Enumerable's and returns an Array. It
+    # stays `self`: on this open receiver a method the file does not
+    # declare is not reported, while on `Array[Elem]` the ActiveSupport
+    # methods the bundled overlay leaves out, such as `many?`, would be.
     %a{pure}
     def select: (*untyped) -> self
     %a{pure}
@@ -275,9 +279,22 @@ module ActiveRecord
     def with: (*untyped) -> self
     def scoping: () { () -> untyped } -> untyped
 
-    # --- finders (return an element) ---
+    # --- finders (return an element, or an Array of them) ---
+    # Two or more ids return an Array, unless dropping `nil`s and
+    # duplicates leaves one. One argument returns an Array when it is an
+    # Array of ids, but one record when it is a composite key's tuple
+    # (`[shop_id, id]`), and nothing here can tell those apart. An
+    # overload keyed on an `Array` argument would be selected for every
+    # untyped id too (`find(params[:id])`). Its return would be joined
+    # with this one's into `Dynamic[Array[Elem] | Elem]`, on which a
+    # following `update` or `save` no longer resolves on the model and
+    # loses its `io.db.write`. So a single argument stays `Elem`. A
+    # splat and a `**` hash each count as one argument, so `find(*ids)`
+    # is `Elem`, while `find(id, *ids)` and `find(*args, **opts)` are
+    # Arrays even when the splat or the hash turns out empty.
     %a{rigor:v1:effect io.db.read}
-    def find: (*untyped) -> Elem
+    def find: (untyped, untyped, *untyped) -> Array[Elem]
+            | (?untyped id) -> Elem
     %a{rigor:v1:effect io.db.read}
     def find_by: (*untyped) -> Elem?
     %a{rigor:v1:effect io.db.read}
@@ -402,7 +419,7 @@ module ActiveRecord
     %a{pure}
     def table: () -> untyped
     %a{pure}
-    def arel: () -> untyped
+    def arel: (?untyped aliases) -> untyped
 
     # --- whole-relation persistence ---
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
@@ -412,6 +429,11 @@ module ActiveRecord
     # `delete_all` take none.
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def delete_all: (?untyped dependent) -> Integer
+    # On a plain `has_many`, the proxy's `destroy_all` returns `nil`
+    # when a `before_remove` callback throws `:abort`. A `:through` one,
+    # which includes `has_and_belongs_to_many`, still returns the
+    # records. `Array[Elem]?` would report `call.possible-nil-receiver`
+    # on every `destroyed.each` for a case only such a callback reaches.
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]
     %a{rigor:v1:effect io.db.read, io.db.write}
@@ -438,6 +460,9 @@ module ActiveRecord
     def upsert_all: (untyped, **untyped) -> untyped
 
     # --- instantiating builders (return an element) ---
+    # Given an Array of attribute hashes, `new`, `build`, `create` and
+    # `create!` return an Array of records. No overload says so, for
+    # the reason `find` gives: an untyped argument would select it too.
     %a{rigor:v1:effect mutate.self}
     def new: (*untyped) ?{ (Elem) -> void } -> Elem
     %a{rigor:v1:effect mutate.self}

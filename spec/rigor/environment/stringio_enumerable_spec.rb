@@ -3,10 +3,11 @@
 # `StringIO` is `Enumerable[String]`, as `IO` is.
 #
 # CRuby's `ext/stringio/stringio.c` runs `rb_include_module(StringIO, rb_mEnumerable)` in `Init_stringio`, and
-# `StringIO#each` yields the stream's lines. Upstream rbs's `stdlib/stringio` declares `class StringIO` with no
-# `include`, so `StringIO.new(s).detect { ... }`, `.map`, `.each_with_index` and the rest of Enumerable's surface
-# reported `call.undefined-method` on correct code, and `.select { ... }` resolved to `Kernel#select` and reported
-# `call.wrong-arity`. `data/core_overlay/stringio.rbs` adds the mixin.
+# `StringIO#each` yields the stream's lines. ruby/rbs declares `class StringIO` with no `include` (in
+# `core/string_io.rbs` before 3.7, in `stdlib/stringio` from 3.7), so `StringIO.new(s).detect { ... }`, `.map`,
+# `.each_with_index` and the rest of Enumerable's surface reported `call.undefined-method` on correct code, and
+# `.select { ... }` resolved to `Kernel#select` and reported `call.wrong-arity`. `data/core_overlay/string_io.rbs`
+# adds the mixin.
 #
 # This file lives under `spec/rigor/environment` because that is what CI's "RBS compatibility (RBS 3.x)" job runs.
 require "spec_helper"
@@ -19,11 +20,12 @@ RSpec.describe "StringIO includes Enumerable[String]" do
       loader.instance_method(class_name: "StringIO", method_name: name)
     end
 
-    it "puts Enumerable in StringIO's ancestry, ahead of Object and Kernel" do
+    # An include, not a prepend: behind the class, ahead of Object and Kernel, as at runtime.
+    it "puts Enumerable in StringIO's ancestry between the class and Object" do
       ancestors = loader.instance_definition("StringIO").ancestors.ancestors.map { |a| a.name.to_s }
+      expected_order = %w[::StringIO ::Enumerable ::Object ::Kernel]
 
-      expect(ancestors).to include("::Enumerable")
-      expect(ancestors.index("::Enumerable")).to be < ancestors.index("::Kernel")
+      expect(ancestors & expected_order).to eq(expected_order)
     end
 
     it "binds Enumerable's element type to String" do
@@ -40,8 +42,9 @@ RSpec.describe "StringIO includes Enumerable[String]" do
       expect(stringio_method(:select).defined_in.to_s).to eq("::Enumerable")
     end
 
-    # The paired control: a method StringIO declares itself keeps StringIO's own signature — the mixin sits
-    # behind the class in the ancestry, it does not replace what upstream declares.
+    # The overlay adds the mixin and nothing else: it redeclares none of StringIO's own methods, so upstream's
+    # signatures stand. (No StringIO method shares a name with Enumerable's, so this does not test ordering; the
+    # ancestry example above does.)
     it "keeps StringIO's own iteration methods" do
       %i[each each_line each_char each_byte readlines].each do |name|
         expect(stringio_method(name).defined_in.to_s).to eq("::StringIO"), "#{name} left StringIO"
@@ -91,8 +94,8 @@ RSpec.describe "StringIO includes Enumerable[String]" do
       RUBY
     end
 
-    # StringIO's own `each_line` wins over anything the mixin could contribute, so its declared `self` return
-    # is unchanged.
+    # The inference-side counterpart of "keeps StringIO's own iteration methods": `each_line` still answers
+    # upstream's declared `self`.
     it "keeps StringIO's own each_line" do
       expect(dumped_types(<<~RUBY)).to eq(["StringIO"])
         require "stringio"

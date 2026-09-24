@@ -119,6 +119,8 @@ RSpec.describe "bundled RBS definition builds" do
       expect(accepted.join(" | ")).to include("Symbol")
     end
 
+    # Neither degraded nor gated: `core_overlay/string_io.rbs` loads unconditionally (see "narrow environments"
+    # below), and its mixin must land in the full environment all the same.
     it "resolves StringIO's Enumerable mixin" do
       definition = builder.build_instance(RBS::TypeName.parse("::StringIO"))
 
@@ -170,7 +172,7 @@ RSpec.describe "bundled RBS definition builds" do
       expect(env.class_decls).not_to have_key(RBS::TypeName.parse("::Resolv"))
     end
 
-    # Why `core_overlay/stringio.rbs` is NOT gated: rbs declares `StringIO` in every environment built with a
+    # Why `core_overlay/string_io.rbs` is NOT gated: rbs declares `StringIO` in every environment built with a
     # core root — in core before 3.7, and from 3.7 on by adding the `stringio` library itself — so its
     # `Enumerable` mixin must apply even when no library names it. The overlay would declare a bare `StringIO`
     # on its own, so it is upstream's `#each` that proves the premise; if a future rbs stops loading it, this

@@ -101,8 +101,8 @@ module Rigor
       #
       # `alias` works on the default definee and `alias_method` on `self`, so the two part in an
       # `instance_eval` block, and inside `class << self` both alias the singleton class's `initialize`,
-      # a class method `new` never calls. Where the syntax does not say which class either one is, the
-      # alias is another class's, and records nothing here.
+      # a class method `new` never calls. Where the syntax does not say which class either one is, it
+      # records nothing here, as an include there does not (see {#instance_side_self?}).
       #
       # @param context — the {DefinitionContext} of the class-body position the node sits at
       def alias_to_initialize?(node, context)
@@ -128,15 +128,16 @@ module Rigor
 
       private
 
-      # Whether a call on `self` written here works on the class the enclosing body opened, or on `Object`
-      # through `main` at the top level, so what it declares is that class's instance ancestry.
+      # Whether the syntax shows that a call on `self` written here works on the class the enclosing body
+      # opened, or on `Object` through `main` at the top level, so what it declares is that class's instance
+      # ancestry.
       #
-      # It is not where `self` is the singleton class, and not where the syntax does not say what `self` is:
-      # the block of `Class.new` and its kin, an eval on another receiver, `class << obj`. There the module
-      # goes into a class no key names. Filing it under the enclosing class would put it where `super` and
-      # the constructor rule look for that class. The price is `W.class_eval { include M }` inside `class W`
-      # itself, which the context reads as an eval on any other receiver: that include is missed, as an
-      # `extend` is.
+      # It does not where `self` is the singleton class, nor where the syntax does not say what `self` is:
+      # the block of `Class.new` and its kin, an eval on another receiver, `class << obj`. The syntax does not
+      # name the class the module goes into there, and filing it under the enclosing class would put it
+      # where `super` and the constructor rule look for that class. The class Ruby does put it in misses it,
+      # as it would an `extend`, and so does `W` for a `W.class_eval { include M }` inside `class W`, which
+      # the context reads as an eval on any other receiver (#1322).
       def instance_side_self?(context)
         !context.self_singleton_class? && context.self_kind != :unknown
       end

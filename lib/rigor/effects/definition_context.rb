@@ -74,7 +74,8 @@ module Rigor
         CLASS_SELVES.include?(self_kind)
       end
 
-      # Whether a `define_method` or an `attr_*` macro written here defines singleton methods.
+      # Whether `self` is the singleton class here, so a call on it (`define_method`, an `attr_*` macro,
+      # `include`, `prepend`, `alias_method`) works on the singleton class rather than the class.
       def self_singleton_class?
         self_kind == :singleton_class
       end

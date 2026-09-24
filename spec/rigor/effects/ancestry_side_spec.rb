@@ -7,10 +7,10 @@ require "rigor/effects/scanner"
 
 # The effects collection's include table is the instance ancestry that `super` and the constructor rule walk.
 # `include`, `prepend` and `alias_method` are calls on `self`, and `alias` works on the default definee, so each
-# reaches that ancestry only where `self` (or the definee) is the class. Where it is the singleton class, `include`
-# does what `extend` does and an aliased `initialize` is a class method `new` never calls. Where the syntax does not
-# say which class it is, the module or alias goes into a class no key names. Neither is recorded. Each snippet is
-# evaluated as well as scanned, so every expectation here is also Ruby's answer.
+# reaches that ancestry only where the syntax shows `self` (or the definee) is the class. Where it is the singleton
+# class, `include` does what `extend` does and an aliased `initialize` is a class method `new` never calls. Where the
+# syntax does not say which class it is, the module or alias goes into a class the syntax does not name. Neither is
+# recorded. Each snippet is evaluated as well as scanned, so every expectation here is also Ruby's answer.
 RSpec.describe "which side an ancestry declaration in a class body reaches" do
   def scan(source)
     root = Prism.parse(source).value
@@ -73,5 +73,19 @@ RSpec.describe "which side an ancestry declaration in a class body reaches" do
       expect(scan(source).fetch("Host", []).include?(Rigor::Effects::FileCollection::OPAQUE_ANCESTOR))
         .to be(instance_side)
     end
+  end
+
+  # Ruby includes the module and aliases the constructor on `Host` itself, but the context reads `Host.class_eval`
+  # inside `class Host` as an eval on any other receiver, so both are missed, as an `extend` is. Flip this when #1322
+  # is fixed.
+  it "misses an include and an alias through a class_eval on the class's own name" do
+    source = "module Mixin; end\nclass Host\n  def setup; end\n  " \
+             "Host.class_eval { include Mixin; alias_method :initialize, :setup }\nend\n"
+    namespace = evaluate(source)
+    host = namespace.const_get(:Host)
+    expect(host.include?(namespace.const_get(:Mixin))).to be(true)
+    expect(host.private_method_defined?(:initialize, false)).to be(true)
+
+    expect(scan(source).fetch("Host", [])).to be_empty
   end
 end

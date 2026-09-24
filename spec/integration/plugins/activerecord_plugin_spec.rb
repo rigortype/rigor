@@ -1056,18 +1056,20 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(dumped(source)).to eq(["dump_type: Post"])
     end
 
-    it "makes no Array note for a model's own two-argument `self.find`" do
+    it "makes no Array note for a model's own two-argument `self.find`, and keeps the one-id note" do
+      # One id still types as the model under an override, so its note stays.
       source = <<~RUBY
         class Post
           def self.find(owner, id) = where(user: owner).find_by!(id: id)
         end
         Post.find(User.find(1), 1)
         Post.find
+        Post.find(1)
       RUBY
       diags = find_diagnostics(source)
       expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
-      expect(diags.select { |d| d.rule == "model-call" }.map(&:message))
-        .to eq(["`User.find` returns User (table: `users`)"])
+      expect(diags.select { |d| d.rule == "model-call" }.map { |d| [d.line, d.message] })
+        .to eq([[4, "`User.find` returns User (table: `users`)"], [6, "`Post.find` returns Post (table: `posts`)"]])
     end
 
     it "names the Array in the class-side `find`'s model-call note" do
@@ -1180,8 +1182,10 @@ RSpec.describe "plugins/rigor-activerecord" do
           def self.find(*) = :own
         end
         Post.find { |post| post.title == "x" }
+        Post.find(1)
       RUBY
-      expect(rule_hits(source, "model-call")).to be_empty
+      notes = rule_hits(source, "model-call")
+      expect(notes.map { |d| [d.line, d.message] }).to eq([[5, "`Post.find` returns Post (table: `posts`)"]])
     end
 
     it "names the nil arm in the model-call note, and makes none for the `ifnone` form" do

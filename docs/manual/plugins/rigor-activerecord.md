@@ -29,17 +29,20 @@ errors_demo.rb:24:1: error: `User.find` expects at least 1 argument, got 0 [plug
 | --- | --- | --- |
 | Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `plugin.activerecord.model-call` |
 | `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `plugin.activerecord.unknown-column` |
-| `Model.find` with 0 args and no block | `:error` | `plugin.activerecord.wrong-arity` |
+| `Model.find` with 0 args and no block (unless the model defines `self.find`) | `:error` | `plugin.activerecord.wrong-arity` |
 | No schema source (`db/schema.rb` or `db/structure.sql`) present — reduced mode | `:info` | `plugin.activerecord.load-error` |
 | A schema source that exists but cannot be read or parsed | `:warning` | `plugin.activerecord.load-error` |
 
 Did-you-mean suggestions use `DidYouMean` fuzzy matching against
 the resolved table's column names.
 
-A model that defines its own `self.find` owns that method's arity
-and result. The plugin reports no `wrong-arity` for it, and no note
-for the several-id or block form, where the call types as the
-model's method rather than Rails' `find`.
+A model that defines its own `self.find` owns that method's arity.
+The plugin reports no `wrong-arity` for it, and no note for the
+several-id or block form, where the call types as the model's
+method rather than Rails' `find`. A single id is still noted as the
+model, which is how it types. In an editor, a `self.find` in the
+same file is not yet seen here, so the note and the error still
+appear there ([#1329](https://github.com/rigortype/rigor/issues/1329)).
 
 ## Configuration
 

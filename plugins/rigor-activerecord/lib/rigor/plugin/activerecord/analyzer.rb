@@ -37,8 +37,9 @@ module Rigor
 
         attr_reader :diagnostics
 
-        # `scope` is the file's entry scope, seeded with the project's discovered methods; it answers
-        # whether a model defines its own `self.find`.
+        # `scope` is the file's entry scope, which carries the project's discovered methods; it answers
+        # whether a model defines its own `self.find`. An editor run seeds none, so there the check misses
+        # even a same-file `self.find` the typer sees (#1329).
         def initialize(path:, model_index:, scope:)
           @path = path
           @model_index = model_index
@@ -106,7 +107,8 @@ module Rigor
                     "`#{entry.class_name}.find` returns #{entry.class_name} | nil (table: `#{entry.table_name}`)")
         end
 
-        # The predicate `Activerecord#finder_return_type` declines on, so the note and the type agree.
+        # The predicate `Activerecord#finder_return_type` declines on, so the note and the type agree in a
+        # CLI run. In an editor run this scope lacks the file's own methods (#1329).
         def own_find?(entry)
           @scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
         end

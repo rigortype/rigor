@@ -459,20 +459,9 @@ module Rigor
       # exactly as an unbound variable does — unless a write other than a memo binds it
       # ({#written_constant_binding}). A path whose base renders no static name (`klass::X`, `self::X`) names
       # no binding the resolver can look up, and reads as unbound too, on the same condition.
-      #
-      # One exception is the index rule's: an unbound `||=` whose rvalue has no truthy part is a guard, not a
-      # memo. `SETTINGS ||= raise "boot first"` returns only when something the analyzer did not see set
-      # `SETTINGS`, so its value is that unseen binding, not the rvalue's `bot`.
       def type_of_compound_constant_write(node)
         rhs = type_of(node.value)
-        current = compound_write_constant_binding(node)
-        current ||= dynamic_top if constant_or_write_guard?(node, rhs)
-        compound_write_value(node, current, rhs)
-      end
-
-      def constant_or_write_guard?(node, rhs)
-        (node.is_a?(Prism::ConstantOrWriteNode) || node.is_a?(Prism::ConstantPathOrWriteNode)) &&
-          Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+        compound_write_value(node, compound_write_constant_binding(node), rhs)
       end
 
       def compound_write_value(node, current, rhs)
@@ -484,7 +473,18 @@ module Rigor
           # has written the variable on any path the analyzer saw, so the stored value is the rvalue.
           # Reading it as `Dynamic[top] | rhs` would skip every memoized singleton in `sig-gen`
           # (ADR-5 optimism; three `.default` readers went `sig.skipped.untyped-return` without this).
-          return rhs if current.nil?
+          #
+          # The index rule's exception applies: an rvalue with no truthy part makes the write a guard, not a
+          # memo. `@settings ||= raise "boot first"` returns only when something the analyzer did not see set
+          # `@settings`, and `@verbose ||= false` answers `true` once one did, so the value is that unseen
+          # binding — `Dynamic[top]`, the statement evaluator's reading of an unbound target — never the
+          # rvalue's `bot` or `false` alone. A local is no exception: the scope a loop body is typed from does
+          # not carry what the previous iteration stored.
+          if current.nil?
+            return rhs unless Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
+
+            current = dynamic_top
+          end
 
           Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
         when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,

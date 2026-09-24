@@ -200,6 +200,23 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.skip_reason).to eq(:untyped_return)
     end
 
+    it "never declares a `||= raise` guard reader as returning bot, and keeps the memoized singleton" do
+      # `settings` returns whatever `configure` stored; only an unconfigured call raises.
+      path = write_fixture("lib/app.rb", <<~RUBY)
+        class App
+          def self.settings = (@settings ||= raise("boot first"))
+          def self.configure(h) = (@settings = h)
+          def self.default = (@default ||= new)
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      settings = candidates.find { |c| c.method_name == :settings }
+      expect(settings.skip_reason).to eq(:untyped_return)
+      expect(candidates.find { |c| c.method_name == :default }.rbs).to eq("def self.default: () -> App")
+    end
+
     it "skips top-level / DSL-block defs (no enclosing nameable class)" do
       path = write_fixture("lib/toplevel.rb", <<~RUBY)
         def at_root

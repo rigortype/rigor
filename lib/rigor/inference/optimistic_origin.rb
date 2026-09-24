@@ -49,6 +49,9 @@ module Rigor
       # other value folds from the carrier's value and stays out, for the reason the value predicates do.
       NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
 
+      # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
+      UNKNOWN_MISS = Object.new.freeze
+
       module_function
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
@@ -57,8 +60,8 @@ module Rigor
       # spec binds cannot drift apart.
       #
       # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read (or
-      # a write in value position, `if (x = MAP[k])`) resolves through, then the predicate-fold derivation
-      # issue #313 added.
+      # a write in value position, `if (x = MAP[k])`) resolves through, then a safe-navigation call and the
+      # predicate-fold derivation issue #313 added.
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
 
@@ -69,36 +72,80 @@ module Rigor
         when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
         when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
         when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
-        when Prism::CallNode then resolve_through_predicate(node, scope)
+        when Prism::CallNode then resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope)
         when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
         end
       end
 
-      # `recv.nil?` / `!recv` — the fold is a statement about `recv`, so it is exactly as optimistic as `recv`
-      # is. A block or any argument means this is not the unary predicate it looks like (`x.!(y)` is a
-      # user-defined operator), and the derivation declines.
-      def resolve_through_predicate(node, scope)
-        return nil unless node.block.nil?
-        return resolve_through_nil_comparison(node, scope) if NIL_COMPARISONS.include?(node.name)
-        return nil unless NIL_COLLAPSING_PREDICATES.include?(node.name)
-        return nil unless node.arguments.nil? || node.arguments.arguments.empty?
-
-        resolve(node.receiver, scope)
+      # `recv&.m` is `nil` exactly when `recv` is (or when `m` answers `nil`), so it restates `recv`'s presence
+      # and is as optimistic as `recv`. Only the call carrying the `&.` is derived: Ruby skips that one call and
+      # no more, so `recv&.m.n` sends `n` to the `nil` and raises (or answers `NilClass#n`), and neither it nor
+      # a plain read `recv.m` produces the `nil` a miss would — their own nil-freeness rests on the method's
+      # answer. A nil-collapsing predicate over the call (`recv&.m.nil?`) still resolves, through
+      # {.resolve_through_predicate} and back here.
+      def resolve_through_safe_navigation(node, scope)
+        resolve(node.receiver, scope) if node.safe_navigation?
       end
 
-      # `x == nil` / `nil == x` — resolves the non-`nil` operand. Declines unless there is exactly one
-      # positional argument and exactly one side is the `nil` literal (`nil == nil` states nothing about a
-      # carrier).
-      def resolve_through_nil_comparison(node, scope)
-        arguments = node.arguments&.arguments
-        return nil unless arguments&.size == 1
+      # `recv.nil?` / `!recv` / `recv == nil` — the fold is a statement about `recv`, so it is exactly as
+      # optimistic as `recv` is.
+      def resolve_through_predicate(node, scope)
+        operand = nil_question_operand(node)
+        operand && resolve(operand, scope)
+      end
 
-        receiver = node.receiver
-        argument = arguments.first
+      # The operand a nil-collapsing predicate restates the nil-ness of, or nil when `node` is not one. A block
+      # or any argument means `nil?` / `!` is not the unary predicate it looks like (`x.!(y)` is a user-defined
+      # operator). A comparison needs exactly one positional argument and exactly one `nil` literal side, and
+      # answers the other side (`nil == nil` states nothing about a carrier).
+      def nil_question_operand(node)
+        return nil unless node.block.nil?
+
+        arguments = node.arguments&.arguments || []
+        if NIL_COLLAPSING_PREDICATES.include?(node.name)
+          node.receiver if arguments.empty?
+        elsif NIL_COMPARISONS.include?(node.name) && arguments.size == 1
+          nil_comparison_operand(node.receiver, arguments.first)
+        end
+      end
+
+      def nil_comparison_operand(receiver, argument)
         if argument.is_a?(Prism::NilNode) && !receiver.nil? && !receiver.is_a?(Prism::NilNode)
-          resolve(receiver, scope)
+          receiver
         elsif receiver.is_a?(Prism::NilNode) && !argument.is_a?(Prism::NilNode)
-          resolve(argument, scope)
+          argument
+        end
+      end
+
+      # What a marked expression answers when the carrier its mark rests on misses, or {UNKNOWN_MISS}. The
+      # carrier itself — the read the mark is recorded on, or a `recv&.m` over a marked receiver — answers `nil`,
+      # and each nil-collapsing predicate over it answers what it answers for that value: `!` its negation,
+      # `nil?` / `== nil` whether it is `nil`, `!= nil` the reverse. A binding, an `&&` / `||` and anything else
+      # is unknown. `ExpressionTyper` widens a predicate's folded boolean only when the miss answers the other
+      # boolean (or cannot be told), so `!recv&.empty?` — `!false` on a hit, `!nil` on a miss — stays `true`.
+      def miss_answer(node, scope)
+        return nil if scope.optimistic_origins[node]
+
+        case node
+        when Prism::CallNode then miss_answer_of_call(node, scope)
+        when Prism::ParenthesesNode
+          body = node.body
+          body.is_a?(Prism::StatementsNode) && body.body.size == 1 ? miss_answer(body.body.first, scope) : UNKNOWN_MISS
+        else UNKNOWN_MISS
+        end
+      end
+
+      def miss_answer_of_call(node, scope)
+        return nil if node.safe_navigation? && resolve(node.receiver, scope)
+
+        operand = nil_question_operand(node)
+        inner = operand ? miss_answer(operand, scope) : UNKNOWN_MISS
+        return UNKNOWN_MISS if inner.equal?(UNKNOWN_MISS)
+
+        case node.name
+        when :! then !inner
+        when :!= then !inner.nil?
+        else inner.nil?
         end
       end
 
@@ -110,6 +157,21 @@ module Rigor
         return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
 
         resolve(body.body.first, scope)
+      end
+
+      # The mark a multiple assignment's right-hand side hands to the slots it fills, in the shape
+      # `MultiTargetBinder.bind_marked`'s `optimistic:` takes. `true` when the whole right-hand side resolves
+      # to a mark: a miss makes it `nil`, and `k, v = nil` binds `nil` to every fixed slot, so each slot's
+      # nil-freeness is the same bet (the rule a nested target under an optimistic slot already follows). A
+      # literal array right-hand side (`x, y = h[k], 1`) is judged element-wise instead — an Array of each
+      # element's own marks, nested for a nested literal — since each element is its slot's value; a splat
+      # element makes the slot positions unknowable and declines. `false` when nothing is marked.
+      def destructuring_marks(node, scope)
+        return true if resolve(node, scope)
+        return false unless node.is_a?(Prism::ArrayNode) && node.elements.none?(Prism::SplatNode)
+
+        marks = node.elements.map { |element| destructuring_marks(element, scope) }
+        marks.any? { |mark| mark != false } ? marks : false
       end
 
       # Whether the overload the selector actually picked carries the ignored annotation. The judgment is

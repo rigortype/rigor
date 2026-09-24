@@ -1776,6 +1776,11 @@ module Rigor
         return type if scope.optimistic_origins[node]
         return type if OptimisticOrigin.resolve(node, scope).nil?
 
+        # Widen only toward what a miss really answers: a safe-navigation call answers `nil`, and
+        # `!recv&.empty?` answers `true` either way, so widening either would invent the other boolean.
+        miss = OptimisticOrigin.miss_answer(node, scope)
+        return type unless miss.equal?(OptimisticOrigin::UNKNOWN_MISS) || miss == !type.value
+
         Type::Combinator.union(Type::Combinator.constant_of(true), Type::Combinator.constant_of(false))
       end
 

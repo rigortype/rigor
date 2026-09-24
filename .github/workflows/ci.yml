@@ -141,6 +141,12 @@ jobs:
       # agree on the timings, and the shard-coverage job below is what
       # catches it when they do not.
       #
+      # The key carries the attempt as well, so that no shard ever hits
+      # its primary key. Without it, "Re-run all jobs" gave each shard
+      # that saved in the earlier attempt an exact hit on ITS OWN file
+      # while a shard that failed there fell back to the newest — three
+      # shards, up to three timing files, three different cuts.
+      #
       # A shard's saved file stays complete rather than shrinking to its
       # own slice: binpacker APPENDS samples and compacts to the three most
       # recent per test, so a shard's write leaves its siblings' entries
@@ -161,8 +167,29 @@ jobs:
         uses: actions/cache@v6
         with:
           path: tmp/binpacker.timings
-          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ matrix.shard }}
+          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           restore-keys: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-
+
+      # Which timing file this shard is about to partition, recorded
+      # BEFORE the run: binpacker rewrites the file when it finishes.
+      # shard-coverage requires every shard's digest to agree, because
+      # one timing file is what makes the shards' cuts one partition.
+      # Written ahead of the tests, too, so a shard that ran always has
+      # a record to upload.
+      - name: Record shard provenance
+        env:
+          SHARD: ${{ matrix.shard }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          mkdir -p tmp
+          if [[ -f tmp/binpacker.timings ]]; then
+            digest=$(sha256sum tmp/binpacker.timings | cut -d' ' -f1)
+          else
+            digest=absent
+          fi
+          jq -n --argjson shard "$SHARD" --argjson attempt "$RUN_ATTEMPT" --arg digest "$digest" \
+            '{shard: $shard, run_attempt: $attempt, timings_sha256: $digest}' \
+            | tee "tmp/binpacker-provenance-$SHARD.json"
 
       - name: Run tests
         run: >-
@@ -170,13 +197,21 @@ jobs:
           BINPACKER_FLAGS="--shard ${{ matrix.shard }}/3 --report tmp/binpacker-report-${{ matrix.shard }}.json"
 
       # Consumed by the shard-coverage job, which is the only place a
-      # partition that dropped tests can be detected.
+      # partition that dropped tests can be detected. The name carries
+      # the attempt: a "Re-run failed jobs" attempt keeps the passed
+      # shards' artifacts from the earlier attempt, and under one shared
+      # name download-artifact resolved the re-run shard's duplicate to
+      # the STALE report (run 35844873791), so the check never saw the
+      # attempt that ran.
       - name: Upload shard run report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: binpacker-report-${{ matrix.shard }}
-          path: tmp/binpacker-report-${{ matrix.shard }}.json
+          name: binpacker-report-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: |
+            tmp/binpacker-report-${{ matrix.shard }}.json
+            tmp/binpacker-provenance-${{ matrix.shard }}.json
+          if-no-files-found: error
           retention-days: 1
 
   # ── 1a. Specs binpacker deliberately excludes ───────────────────
@@ -230,6 +265,23 @@ jobs:
   # suite — same shard count, same whole-suite discovered count, every
   # index present exactly once, and the slices summing to the whole.
   #
+  # A partial rerun ("Re-run failed jobs") re-runs one shard, which
+  # restores a newer timing cache than the shards that already passed —
+  # they saved theirs at the end of the earlier attempt — and so cuts a
+  # different partition. `tool/shard_report_select.rb` stands in front of
+  # shards-check: it takes each shard's report from the newest attempt
+  # that ran it, and fails unless every chosen shard partitioned the same
+  # timing file (the digest each shard records before its run). Matching
+  # counts alone cannot vouch for two different cuts, so in practice a
+  # partial rerun is refused; re-run ALL jobs instead. Re-running only
+  # this job after it failed, with the matrix green, is still sound: the
+  # reports it selects are unchanged.
+  #
+  # The digest check also fails a whole run whose shards did not start
+  # together — one queued long enough to restore the cache a sibling (or
+  # a concurrent run) had just saved. That is the same hazard, not a
+  # false alarm: before the check it passed whenever the counts summed.
+  #
   # Runs whenever the matrix was not outright cancelled, so a mismatch
   # still surfaces when one shard failed.
   shard-coverage:
@@ -249,15 +301,20 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
+      # One directory per artifact, deliberately not `merge-multiple`:
+      # merged, every attempt's `binpacker-report-<shard>.json` lands on
+      # one path and which attempt survives is up to download order.
       - name: Download shard run reports
         uses: actions/download-artifact@v8
         with:
           pattern: binpacker-report-*
-          merge-multiple: true
           path: reports
 
+      - name: Select each shard's newest report and require one timing file
+        run: bundle exec ruby tool/shard_report_select.rb reports selected
+
       - name: Assert the shards covered the whole suite
-        run: bundle exec binpacker shards-check reports/binpacker-report-*.json
+        run: bundle exec binpacker shards-check selected/binpacker-report-*.json
 
   # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
   rbs-compat:

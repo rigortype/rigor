@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental check-mutation-cache docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental check-mutation-cache docs-check verify verify-changed verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -269,6 +269,15 @@ verify: test-binpacker test-ractor-pool test-integration-plugins lint check chec
 # runs single-process. Slower but bit-for-bit reproducible
 # without inter-worker scheduling effects.
 verify-sequential: test test-ractor-pool test-integration-plugins lint check check-plugins
+
+# The local pre-push gate: `git diff --check`, RuboCop, the affected specs,
+# `spec/docs/` and `rigor check` — each over only what the branch changed since
+# its merge base with origin/master (override with VERIFY_BASE=<ref>). 20-40s
+# for a small branch, where `verify` runs the whole suite and contends for the
+# host with every parallel session running it. It cannot see a regression in an untouched file, so the
+# full gate stays CI on the Draft PR; see bin/verify-changed.
+verify-changed:
+	@bin/verify-changed
 
 # Backward-compatible alias for the previous `verify-parallel`
 # target name. Identical to `verify` now that parallel is the

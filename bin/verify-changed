@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# The local pre-push gate: check only what this branch changed, in under a minute.
+#
+# The full gate (`make verify`) belongs to CI on the Draft PR: locally it runs
+# the whole suite, and several parallel sessions running it at once is what
+# stalls the host (five at once took 12-20 minutes each in September 2026). This script covers the checks a session
+# can answer cheaply before pushing, over the files changed since the merge base
+# (committed, uncommitted and untracked):
+#
+#   1. whitespace errors (`git diff --check`, and the same check on untracked files);
+#   2. RuboCop on the changed files `make lint` covers;
+#   3. RSpec on the changed specs; the mirror spec of a changed lib/ or tool/ file;
+#      the specs that name a changed fixture; for a changed plugin or example,
+#      the integration specs that load it plus the two all-plugin conformance
+#      specs — the opt-in files in their own processes, as in `verify`; and
+#      for any engine change (lib/, sig/, data/) the four whole-engine drift
+#      specs that CI failures most often came from on untouched files (~30s);
+#   4. `spec/docs/` always — seconds, and it is where the Markdown gates live;
+#   5. `rigor check --fail-on=warning` on the changed lib files and the lib
+#      mirrors of changed sig/ files — the CI self-check caught a
+#      `String | Symbol` argument on PR #1301 that every spec passed.
+#
+# What it cannot see — a regression in a file the branch did not touch, which is
+# what an engine change or a deletion risks — is the reason CI stays the gate.
+# Changes it knows it cannot cover are listed at the end instead of passing
+# silently.
+#
+# Usage: bin/verify-changed [base]   (base defaults to origin/master; run it
+# inside the Flake, e.g. via `make verify-changed`)
+
+set -uo pipefail
+
+base_ref="${1:-${VERIFY_BASE:-origin/master}}"
+if ! merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
+  echo "verify-changed: cannot find a merge base with $base_ref (git fetch origin?)" >&2
+  exit 2
+fi
+
+# NUL-separated reads keep spaces and non-ASCII names intact (core.quotePath
+# would otherwise hand back a quoted name that fails every -f test).
+changed=()
+while IFS= read -r -d '' path; do
+  [[ -f "$path" ]] && changed+=("$path")
+done < <({ git diff -z --name-only --diff-filter=d "$merge_base"; git ls-files -z --others --exclude-standard; } | sort -zu)
+untracked=()
+while IFS= read -r -d '' path; do untracked+=("$path"); done < <(git ls-files -z --others --exclude-standard)
+deleted=()
+while IFS= read -r -d '' path; do deleted+=("$path"); done < <(git diff -z --name-only --diff-filter=D "$merge_base")
+
+echo "verify-changed: ${#changed[@]} changed and ${#deleted[@]} deleted file(s)" \
+  "since $(git rev-parse --short "$merge_base") ($base_ref)"
+
+failures=()
+step() {
+  local name="$1"
+  shift
+  echo
+  echo "== $name"
+  echo "\$ $*"
+  "$@" || failures+=("$name")
+}
+
+# `git diff --check` never sees an untracked file; `--no-index` against
+# /dev/null does, and exits 1 for any difference, so judge by its output.
+check_untracked_whitespace() {
+  local path out status=0
+  for path in "$@"; do
+    out="$(git diff --no-index --check /dev/null "$path")"
+    if [[ -n "$out" ]]; then
+      printf '%s\n' "$out"
+      status=1
+    fi
+  done
+  return "$status"
+}
+
+step "git diff --check" git diff --check "$merge_base"
+if ((${#untracked[@]})); then
+  step "whitespace (untracked files)" check_untracked_whitespace "${untracked[@]}"
+fi
+
+# Newline-separated lists, de-duplicated by `lines` below: the host's /bin/bash
+# is 3.2 (no namerefs, and an empty "${a[@]}" trips `set -u`), so no array sets.
+lint_files=""
+specs=""
+pool_specs=""
+plugin_specs=""
+check_files=""
+uncovered=""
+add_spec() {
+  case "$1" in
+    spec/rigor/analysis/runner_pool_spec.rb) pool_specs+="$1"$'\n' ;;
+    spec/integration/plugins/*_spec.rb) plugin_specs+="$1"$'\n' ;;
+    *) specs+="$1"$'\n' ;;
+  esac
+}
+add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
+# add_specs_matching <extended regex>: every spec file whose text matches.
+add_specs_matching() {
+  local spec
+  while IFS= read -r spec; do add_spec "$spec"; done < <(grep -rlE --include='*_spec.rb' "$1" spec)
+}
+lines() { printf '%s' "$1" | sort -u; }
+# Specs that read the whole engine rather than one file: a lib change anywhere
+# can move them. They were most of the CI failures (Sept 2026) that a
+# changed-files-only gate would have missed, and cost about 30s together.
+engine_drift_specs=(
+  spec/integration/precision_snapshot_spec.rb
+  spec/integration/type_construction_spec.rb
+  spec/rigor/public_api_drift_spec.rb
+  spec/rigor/ractor_readiness_spec.rb
+)
+
+for path in ${changed[@]+"${changed[@]}"}; do
+  case "$path" in
+    lib/* | spec/* | plugins/* | examples/* | apps/*) lint_files+="$path"$'\n' ;;
+  esac
+  case "$path" in
+    lib/* | sig/* | data/*)
+      for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
+  esac
+  case "$path" in
+    spec/spec_helper.rb | spec/support/* | spec/*/support/*)
+      uncovered+="$path (shared spec setup: the suite depends on it)"$'\n'
+      ;;
+    spec/*_spec.rb) add_spec "$path" ;;
+    spec/*)
+      # A fixture: run the specs that name it.
+      stem="$(basename "$path")"
+      stem="${stem%%.*}"
+      before="$specs$pool_specs$plugin_specs"
+      add_specs_matching "$stem"
+      [[ "$specs$pool_specs$plugin_specs" == "$before" ]] && uncovered+="$path (no spec names it)"$'\n'
+      ;;
+    lib/*.rb)
+      mirror="spec/${path#lib/}"
+      add_mirror_spec "${mirror%.rb}_spec.rb"
+      check_files+="$path"$'\n'
+      ;;
+    tool/*.rb)
+      mirror="spec/${path}"
+      add_mirror_spec "${mirror%.rb}_spec.rb"
+      ;;
+    sig/*.rbs)
+      mirror="lib/${path#sig/}"
+      mirror="${mirror%.rbs}.rb"
+      [[ -f "$mirror" ]] && check_files+="$mirror"$'\n'
+      ;;
+    plugins/rigor-*/* | examples/rigor-*/*)
+      gem="${path#*/}"
+      gem="${gem%%/*}"
+      id="${gem#rigor-}"
+      id="${id//-/_}"
+      case "$path" in
+        plugins/*) dir=spec/integration/plugins ;;
+        *) dir=spec/integration/examples ;;
+      esac
+      for spec in "$dir/${id}"_*spec.rb; do
+        [[ -f "$spec" ]] && add_spec "$spec"
+      done
+      # Specs that load it by gem name (ffi_plugins_spec, the cross-plugin rows).
+      add_specs_matching "${gem}([^a-z0-9_-]|\$)"
+      add_spec spec/integration/all_plugins_load_spec.rb
+      add_spec spec/integration/plugin_contract_conformance_spec.rb
+      case "$path" in
+        */lib/*.rb) check_files+="$path"$'\n' ;;
+      esac
+      ;;
+  esac
+done
+for path in ${deleted[@]+"${deleted[@]}"}; do
+  case "$path" in
+    *.md) ;;
+    *) uncovered+="$path (deleted: its dependents are not checked locally)"$'\n' ;;
+  esac
+done
+
+# `run_on <step name> <list> <command...>`: append the list's entries to the
+# command and run it as a step, or skip the step when the list is empty.
+run_on() {
+  local name="$1" list="$2"
+  shift 2
+  [[ -z "$list" ]] && return
+  local files=()
+  while IFS= read -r path; do files+=("$path"); done < <(lines "$list")
+  step "$name" "$@" "${files[@]}"
+}
+
+# `--only-recognized-file-types` drops a named file RuboCop would not pick up on
+# its own (a .md, a .yml), while still taking config.ru, Gemfile and *.gemspec.
+run_on "rubocop (changed files)" "$lint_files" \
+  bundle exec rubocop --force-exclusion --only-recognized-file-types
+run_on "rspec (affected specs)" "$specs" bundle exec rspec
+run_on "rspec (runner pool)" "$pool_specs" env RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec
+run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
+step "rspec spec/docs/" bundle exec rspec spec/docs/
+run_on "rigor check (changed lib files)" "$check_files" \
+  bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning
+
+echo
+if [[ -n "$uncovered" ]]; then
+  echo "verify-changed: not covered locally — CI on the Draft PR decides these:"
+  lines "$uncovered" | sed 's/^/  - /'
+fi
+if ((${#failures[@]})); then
+  echo "verify-changed: FAILED — ${failures[*]}"
+  exit 1
+fi
+echo "verify-changed: OK. The full gate is CI on the Draft PR."

@@ -1454,8 +1454,12 @@ module Enumerable[unchecked out Elem]
   %a{pure}
   def many?: () -> bool
            | () { (Elem) -> boolish } -> bool
+  # `key` and `series` are untyped on purpose: the default `filter: true`
+  # path is `group_by(&key).values_at(*series)`, so a Proc key or a Set /
+  # Range series is correct Rails code. `filter:` is ActiveSupport 8.x;
+  # passing it on 7.x raises, which this unversioned row does not catch.
   %a{pure}
-  def in_order_of: (Symbol | String key, Array[untyped] series, ?filter: bool) -> Array[Elem]
+  def in_order_of: (untyped key, untyped series, ?filter: boolish) -> Array[Elem]
 end
 
 # ---------------------------------------------------------------

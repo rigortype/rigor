@@ -55,15 +55,18 @@ in-place extensions to Ruby's built-in classes:
   `to_time` / `to_date` / `to_datetime` / `to_hours`, `from`, `to`,
   `first`, `last`
 - `Array` — `Array.wrap`, `#to_sentence`, `#in_groups_of`,
-  `#in_groups`, `#split`, `#second` / `#third` / `#fourth`, `#from`,
-  `#to`, `#extract!`, `#to_query`, `#to_param`, `#to_xml`, `#inquiry`,
+  `#in_groups`, `#split`, `#second` / `#third` / `#fourth`,
+  `#second_to_last` / `#third_to_last`, `#from`, `#to`, `#extract!`,
+  `#extract_options!`, `#to_query`, `#to_param`, `#to_xml`, `#inquiry`,
   `#compact_blank`, `#exclude?`
 - `Hash` — `#deep_dup`, `#deep_merge`, `#deep_merge!`,
   `#symbolize_keys` / `#stringify_keys` (+ deep / bang variants),
   `#assert_valid_keys`, `#except!`, `#to_query`, `#to_param`,
-  `#to_xml`, `#with_indifferent_access`, `#deep_transform_keys`
+  `#to_xml`, `#with_indifferent_access`, `#deep_transform_keys`,
+  `#extractable_options?`
 - `Enumerable` — `#index_by`, `#index_with`, `#pluck`, `#pick`,
-  `#exclude?`, `#including`, `#excluding`, `#without`, `#sole`
+  `#exclude?`, `#including`, `#excluding`, `#without`, `#sole`,
+  `#many?`, `#in_order_of`, `#maximum`, `#minimum`, `#compact_blank`
 - `Object` (universal) — `#blank?`, `#present?`, `#presence`,
   `#try`, `#try!`, `#acts_like?`, `#to_param`, `#to_query`,
   `#duplicable?`, `#instance_values`, `#instance_variable_names` plus

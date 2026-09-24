@@ -817,7 +817,11 @@ module Enumerable[unchecked out Elem]
   def compact_blank: () -> Array[Elem]
   def many?: () -> bool
            | () { (Elem) -> boolish } -> bool
-  def in_order_of: (Symbol | String key, Array[untyped] series, ?filter: bool) -> Array[Elem]
+  # `key` and `series` are untyped on purpose: the default `filter: true`
+  # path is `group_by(&key).values_at(*series)`, so a Proc key or a Set /
+  # Range series is correct Rails code. `filter:` is ActiveSupport 8.x;
+  # passing it on 7.x raises, which this unversioned row does not catch.
+  def in_order_of: (untyped key, untyped series, ?filter: boolish) -> Array[Elem]
 end
 
 # ---------------------------------------------------------------

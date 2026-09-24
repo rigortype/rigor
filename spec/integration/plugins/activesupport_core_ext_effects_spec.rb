@@ -94,18 +94,19 @@ CORE_EXT_PURE_OTHER_KEYS = %w[
   ActiveSupport::Duration#to_f ActiveSupport::Duration#to_i
   ActiveSupport::TimeWithZone#time_zone
   Array#compact_blank Array#exclude? Array#fifth Array#forty_two Array#fourth Array#from
-  Array#in_groups Array#in_groups_of Array#inquiry Array#second Array#split Array#third Array#to
+  Array#in_groups Array#in_groups_of Array#inquiry Array#second Array#second_to_last Array#split
+  Array#third Array#third_to_last Array#to
   Array.wrap
-  Enumerable#compact_blank Enumerable#exclude? Enumerable#excluding Enumerable#including
-  Enumerable#index_by Enumerable#index_with Enumerable#maximum Enumerable#minimum Enumerable#pick
-  Enumerable#pluck Enumerable#sole Enumerable#without
+  Enumerable#compact_blank Enumerable#exclude? Enumerable#excluding Enumerable#in_order_of
+  Enumerable#including Enumerable#index_by Enumerable#index_with Enumerable#many? Enumerable#maximum
+  Enumerable#minimum Enumerable#pick Enumerable#pluck Enumerable#sole Enumerable#without
   FalseClass#blank? FalseClass#present? FalseClass#to_param
   Float#byte Float#bytes Float#day Float#days Float#gigabyte Float#gigabytes Float#hour Float#hours
   Float#kilobyte Float#kilobytes Float#megabyte Float#megabytes Float#minute Float#minutes
   Float#month Float#months Float#second Float#seconds Float#week Float#weeks Float#year Float#years
   Hash#assert_valid_keys Hash#compact_blank Hash#deep_dup Hash#deep_merge Hash#deep_stringify_keys
-  Hash#deep_symbolize_keys Hash#deep_transform_keys Hash#deep_transform_values Hash#reverse_merge
-  Hash#stringify_keys Hash#symbolize_keys Hash#with_indifferent_access Hash#without
+  Hash#deep_symbolize_keys Hash#deep_transform_keys Hash#deep_transform_values Hash#extractable_options?
+  Hash#reverse_merge Hash#stringify_keys Hash#symbolize_keys Hash#with_indifferent_access Hash#without
   Integer#byte Integer#bytes Integer#day Integer#days Integer#exabyte Integer#exabytes
   Integer#fortnight Integer#fortnights Integer#gigabyte Integer#gigabytes Integer#hour Integer#hours
   Integer#kilobyte Integer#kilobytes Integer#megabyte Integer#megabytes Integer#minute
@@ -169,7 +170,7 @@ CORE_EXT_NOT_PURE_KEYS = %w[
   DateTime#last_week DateTime#next_weekday DateTime#all_week DateTime#localtime
   DateTime#getlocal DateTime#utc_to_local_returns_utc_offset_times
   Array#to_sentence Array#to_formatted_s Array#to_fs Array#to_xml Array#extract!
-  Array#compact_blank!
+  Array#compact_blank! Array#extract_options!
   Hash#symbolize_keys! Hash#deep_symbolize_keys! Hash#stringify_keys! Hash#deep_stringify_keys!
   Hash#deep_transform_keys! Hash#deep_transform_values! Hash#deep_merge! Hash#except!
   Hash#to_query Hash#to_param Hash#to_xml Hash#compact_blank! Hash#reverse_merge! Hash#slice!

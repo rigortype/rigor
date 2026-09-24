@@ -66,21 +66,25 @@ RSpec.describe "ADR-72 ActiveSupport overlay — core_ext/enumerable and core_ex
     expect(dumps(result)).to eq(%w[bool bool bool bool bool])
   end
 
+  # The Proc key and the Set / Range series are correct Rails code (`group_by(&key).values_at(*series)`),
+  # so no `call.*` rule may fire on them — no argument-type mismatch any more than an undefined method.
   it "types the Array and Enumerable readers by their element" do
     result = run_source(<<~RUBY)
       xs = [1, 2, 3].map { |n| n * 2 }
       Rigor.dump_type(xs.in_order_of(:itself, [4, 2]))
       Rigor.dump_type(xs.in_order_of(:itself, [4, 2], filter: false))
+      Rigor.dump_type(xs.in_order_of(->(n) { n % 3 }, Set[0, 1]))
+      Rigor.dump_type(xs.in_order_of(:itself, 2..4))
       Rigor.dump_type(xs.second_to_last)
       Rigor.dump_type(xs.third_to_last)
       Rigor.dump_type([1, { a: 1 }].extract_options!)
       Rigor.dump_type({ a: 1 }.extractable_options?)
     RUBY
 
-    expect(undefined_methods(result)).to be_empty
+    expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
     expect(dumps(result)).to eq(
-      ["Array[2 | 4 | 6]", "Array[2 | 4 | 6]", "2 | 4 | 6 | nil", "2 | 4 | 6 | nil",
-       "Hash[Dynamic[top], Dynamic[top]]", "bool"]
+      ["Array[2 | 4 | 6]", "Array[2 | 4 | 6]", "Array[2 | 4 | 6]", "Array[2 | 4 | 6]",
+       "2 | 4 | 6 | nil", "2 | 4 | 6 | nil", "Hash[Dynamic[top], Dynamic[top]]", "bool"]
     )
   end
 

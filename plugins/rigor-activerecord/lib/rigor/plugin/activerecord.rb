@@ -537,6 +537,8 @@ module Rigor
       def finder_return_type(call_node, entry, scope)
         case call_node.name
         when :find
+          return block_find_return_type(call_node, entry, scope) if call_node.block
+
           arity = call_argument_count(call_node)
           return nil if arity.zero?
 
@@ -574,6 +576,28 @@ module Rigor
           # `table_name` the exact string is not derivable from project source even when the bare name is.
           Rigor::Type::Combinator.nominal_of("String")
         end
+      end
+
+      # `Model.find { |m| … }` / `Model.find(&:pred?)` never reaches the id lookup: `Core.find` passes a
+      # block to `super` (`all.find`), whose `Relation#find` does `return super if block_given?`, landing on
+      # `Enumerable#find` over the loaded records. So the
+      # answer is the element or `nil`, exactly what the bundled `Relation#find` block overload says and
+      # what the engine already answers for `Array#find`. The `nil` arm is the search miss, not a
+      # worst-case reading: corpus call sites guard it (`&.`, `||`, `while (x = …)`).
+      #
+      # Declining here is not neutral: when the model is RBS-known, a decline falls through to
+      # `singleton(Model)`, which declares no `find`, and fires `call.undefined-method` on working code.
+      # An argument next to the block is `Enumerable#find`'s `ifnone` callable, whose result joins the
+      # union, so that form answers `untyped` rather than a guess. A project `self.find` keeps its own
+      # answer, as it does for the multi-id form.
+      def block_find_return_type(call_node, entry, scope)
+        return nil if scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
+        return Rigor::Type::Combinator.untyped unless call_argument_count(call_node).zero?
+
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of(entry.class_name),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
       end
 
       # `Model.table_name` is a String either way; whether it is safe to VALUE-PIN turns on how the name was

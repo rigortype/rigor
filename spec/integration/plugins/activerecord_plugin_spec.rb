@@ -1093,6 +1093,83 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "the block form of `find`" do
+    # With a block, `Model.find` and `Relation#find` are `Enumerable#find` over the loaded records: no id, and
+    # the element or `nil` back. The class-side form drew `wrong-arity`, and, where the model has an RBS
+    # signature, `call.undefined-method` too: the plugin declined it and `singleton(Post)` declares no `find`.
+
+    def block_find_diagnostics(source, post_sig: false)
+      files = ASSOCIATION_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA)
+      files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
+      run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
+    end
+
+    def dumped(source)
+      block_find_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def rule_hits(source, rule, post_sig: true)
+      block_find_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
+    end
+
+    it "reports neither `wrong-arity` nor an undefined `find` on the block form" do
+      source = <<~RUBY
+        Post.find { |post| post.title == "x" }
+        Post.find(&:title)
+      RUBY
+      expect(rule_hits(source, "wrong-arity")).to be_empty
+      expect(rule_hits(source, "call.undefined-method")).to be_empty
+    end
+
+    it "STILL reports `Post.find` with no arguments and no block" do
+      # The same harness and signature as the example above, so that one cannot pass by never running the check.
+      hits = rule_hits("Post.find\n", "wrong-arity")
+      expect(hits.map(&:message)).to eq(["`Post.find` expects at least 1 argument, got 0"])
+    end
+
+    it "types the block form as the element or nil, on either side of the model" do
+      source = <<~RUBY
+        user = User.find(1)
+        Rigor.dump_type(Post.find { |post| post.title == "x" })
+        Rigor.dump_type(Post.find(&:title))
+        Rigor.dump_type(Post.where(title: "x").find { |post| post.title == "x" })
+        Rigor.dump_type(user.posts.find { |post| post.title == "x" })
+        class Post
+          def self.titled = Rigor.dump_type(find { |post| post.title == "x" })
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Post?"] * 5)
+    end
+
+    it "yields the element to a relation's block" do
+      source = "Post.all.find { |post| Rigor.dump_type(post) }\n"
+      expect(dumped(source)).to eq(["dump_type: Post"])
+    end
+
+    it "does not claim a type for the `ifnone` argument's form" do
+      source = <<~RUBY
+        Rigor.dump_type(Post.find(-> { 0 }) { |post| post.title == "x" })
+        Rigor.dump_type(Post.all.find(-> { 0 }) { |post| post.title == "x" })
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Dynamic[top]"] * 2)
+    end
+
+    it "leaves a model's own `self.find` to the model" do
+      source = <<~RUBY
+        class Post
+          def self.find(*) = :own
+        end
+        Rigor.dump_type(Post.find { |post| post.title == "x" })
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: :own"])
+    end
+
+    it "names the nil arm in the model-call note" do
+      notes = rule_hits("Post.find { |post| post.title == \"x\" }\n", "model-call").map(&:message)
+      expect(notes).to eq(["`Post.find` returns Post | nil (table: `posts`)"])
+    end
+  end
+
   describe "structure.sql fallback (schema_format = :sql)" do
     # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
     # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.

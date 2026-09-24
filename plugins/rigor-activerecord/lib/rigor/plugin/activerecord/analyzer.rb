@@ -69,7 +69,11 @@ module Rigor
           end
         end
 
+        # A block turns `find` into `Enumerable#find` over `all` (see `Activerecord#block_find_return_type`),
+        # which takes no id, so the zero-argument check applies only to the block-less id lookup.
         def validate_find(node, entry)
+          return validate_block_find(node, entry) if node.block
+
           arity = call_argument_count(node)
           if arity.zero?
             push_error(node, "wrong-arity",
@@ -80,6 +84,13 @@ module Rigor
           returned = arity >= 2 ? "Array[#{entry.class_name}]" : entry.class_name
           push_info(node, "model-call",
                     "`#{entry.class_name}.find` returns #{returned} (table: `#{entry.table_name}`)")
+        end
+
+        def validate_block_find(node, entry)
+          return unless call_argument_count(node).zero?
+
+          push_info(node, "model-call",
+                    "`#{entry.class_name}.find` returns #{entry.class_name} | nil (table: `#{entry.table_name}`)")
         end
 
         def validate_column_hash_call(node, entry)

@@ -292,8 +292,16 @@ module ActiveRecord
     # splat and a `**` hash each count as one argument, so `find(*ids)`
     # is `Elem`, while `find(id, *ids)` and `find(*args, **opts)` are
     # Arrays even when the splat or the hash turns out empty.
+    #
+    # With a block `find` is `Enumerable#find` (`return super if
+    # block_given?`), so the id overloads do not apply: no argument
+    # returns the element or `nil`, and one argument is the `ifnone`
+    # callable, whose result joins the union. The class-side
+    # `Model.find { … }` reaches this same method through `all`.
     %a{rigor:v1:effect io.db.read}
-    def find: (untyped, untyped, *untyped) -> Array[Elem]
+    def find: () { (Elem) -> boolish } -> Elem?
+            | (untyped ifnone) { (Elem) -> boolish } -> untyped
+            | (untyped, untyped, *untyped) -> Array[Elem]
             | (?untyped id) -> Elem
     %a{rigor:v1:effect io.db.read}
     def find_by: (*untyped) -> Elem?

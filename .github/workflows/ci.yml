@@ -451,6 +451,34 @@ jobs:
       - name: Run lint
         run: make lint
 
+  # ── 3a. Docs check for a Markdown-only PR ───────────────────────
+  # The `changes` gate above skips every code job for a Markdown-only PR —
+  # including the spec suite, which is where `spec/docs/` (link integrity,
+  # agent-index and ADR budgets, changelog fragments, handbook snippets)
+  # normally runs. Without this job such a PR reported "CI required" green
+  # having checked nothing. It runs exactly when the suite does not, so a
+  # code PR does not pay for `spec/docs/` twice. `make docs-check` is
+  # seconds; the Ruby setup is most of the job.
+  docs-check:
+    name: Docs check
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Run docs check
+        run: make docs-check
+
   # ── 4. Rigor self-check (warm + cold) ───────────────────────────
   # Two matrix variants run in parallel:
   #   warm — restores .rigor/cache from the previous run so Rigor
@@ -740,7 +768,7 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates]
+    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -753,6 +781,7 @@ jobs:
           EXCLUDED_SPECS_RESULT: ${{ needs.excluded-specs.result }}
           RBS_COMPAT_RESULT: ${{ needs.rbs-compat.result }}
           LINT_RESULT: ${{ needs.lint.result }}
+          DOCS_CHECK_RESULT: ${{ needs.docs-check.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
           SELF_CHECK_BLEEDING_EDGE_RESULT: ${{ needs.self-check-bleeding-edge.result }}
@@ -765,9 +794,10 @@ jobs:
             echo "Change detection did not succeed (result: $CHANGES_RESULT)"
             failed=1
           fi
-          # A gated job that was skipped (Markdown-only PR) is acceptable;
+          # A gated job that was skipped (the code jobs on a Markdown-only
+          # PR, Docs check on a code PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT"; do
+          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

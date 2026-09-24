@@ -1003,6 +1003,7 @@ module Rigor
             record_dispatch_provenance(method_definition, candidates.first, scope, call_node, call_site)
             join_candidate_returns(
               candidates,
+              method_definition: method_definition,
               self_type: self_type, instance_type: instance_type, type_vars: type_vars,
               args: args, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
               alias_expander: environment.rbs_loader
@@ -1042,17 +1043,20 @@ module Rigor
           # A candidate whose return does not translate leaves the join incomplete — decline (fail-soft
           # to Dynamic downstream) rather than answer a join missing an arm the runtime can take.
           # rubocop:disable-next Metrics/ParameterLists
-          def join_candidate_returns(candidates, self_type:, instance_type:, type_vars:, args:, block_type:,
-                                     scope:, call_node:, call_site:, alias_expander: nil)
+          def join_candidate_returns(candidates, method_definition:, self_type:, instance_type:, type_vars:, args:,
+                                     block_type:, scope:, call_node:, call_site:, alias_expander: nil)
             returns = candidates.map do |method_type|
               full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
-              RbsTypeTranslator.translate(
+              returned = RbsTypeTranslator.translate(
                 method_type.type.return_type,
                 self_type: self_type,
                 instance_type: instance_type,
                 type_vars: full_type_vars,
                 alias_expander: alias_expander
               )
+              next returned unless combining_overload?(method_definition, method_type, call_site)
+
+              class_level_sum(returned, method_type, args)
             end
             return returns.first if returns.size == 1
             return nil if returns.any?(&:nil?)
@@ -1067,6 +1071,109 @@ module Rigor
             vars = compose_block_type_vars(method_type, type_vars, block_type, args)
             compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
                                                            call_site: call_site)
+          end
+
+          # Whether the overload is one `Enumerable` declares for `sum`, whose declared return the tier reads
+          # at class level ({#class_level_sum}). Every overload spells its return as a union of the sides the
+          # method adds together: `() -> (E | Integer)`, `[T] () { (E) -> T } -> (Integer | T)`,
+          # `[T] (?T) -> (E | T)` and `[U] (?U) { (E) -> U } -> U`. A value is not closed under that
+          # addition, so the value-pinned bindings of `E` (from the receiver), `T` (from the argument, issue
+          # #303) and the block's type do not describe the result: `[1, 2].each.sum(0.0)` is `3.0`, which
+          # `0.0 | 1 | 2` misses. `Array#fetch: [T] (int, T default) -> (E | T)` is spelled the same way but
+          # returns the default object itself, so the signature alone cannot tell the two apart and the
+          # declaring module does. A class that declares its own `sum` states its own contract and keeps it.
+          def combining_overload?(method_definition, method_type, call_site)
+            return false unless call_site[1] == :sum
+
+            type_def = OptimisticOrigin.matching_type_def(method_definition, method_type)
+            !type_def.nil? && type_def.defined_in.to_s.delete_prefix("::") == "Enumerable"
+          end
+
+          # CRuby's `enum_sum` adds each value to an accumulator that starts at the seed. Between two of these
+          # classes `+` answers the later one (`1 + 0.5` and `0.5 + 1` are Floats, `1 + 1r` is a Rational),
+          # so the accumulator's class only ever moves up this order.
+          SUM_PROMOTION_RANKS = { "Integer" => 0, "Rational" => 1, "Float" => 2, "Complex" => 3 }.freeze
+          private_constant :SUM_PROMOTION_RANKS
+
+          # CRuby's seed when the call passes none.
+          SUM_DEFAULT_SEED = [Type::Combinator.nominal_of("Integer")].freeze
+          private_constant :SUM_DEFAULT_SEED
+
+          # The class-level reading of a `sum` overload's translated return, or `Dynamic[top]` when a member
+          # has no class to state ({#class_level_member}). A class, not a value, is what the addition keeps
+          # closed: `sum` over `0.0` and `1 | 2` is `3.0`, a Float, and over `1.5 | 2.5` is `4.0`.
+          #
+          # The union of the members' classes would still read wider than the runtime, because the seed
+          # promotes every value it absorbs: `ints.each.sum(0.0)` is always a Float, and `Float | Integer`
+          # fires `def.return-type-mismatch` against a declared `-> Float` on correct code. So each class is
+          # taken as the class the accumulator reaches from each seed class ({#promoted_class}), and the seed
+          # itself stays for a receiver that yields nothing: `ints.each.sum(0.0)` reads `Float`, and
+          # `floats.each.sum(0)` reads `Float | Integer`, whose Integer is the empty receiver's `0`.
+          def class_level_sum(type, method_type, args)
+            return nil if type.nil?
+
+            members = class_level_members(type)
+            seeds = members && sum_seed_classes(method_type, args)
+            return Type::Combinator.untyped if seeds.nil?
+
+            promoted = seeds.flat_map { |seed| members.map { |member| promoted_class(seed, member) } }
+            Type::Combinator.union(*seeds, *promoted)
+          end
+
+          # The classes of the value `sum` starts from: the argument when the overload takes one and the call
+          # passes it, and CRuby's `0` otherwise.
+          def sum_seed_classes(method_type, args)
+            fun = method_type.type
+            return SUM_DEFAULT_SEED if args.empty? || !fun.respond_to?(:required_positionals)
+            return SUM_DEFAULT_SEED if fun.required_positionals.empty? && fun.optional_positionals.empty?
+
+            class_level_members(args.first)
+          end
+
+          # The class the accumulator reaches when a `member` value is added to a `seed`-class one. A class
+          # outside {SUM_PROMOTION_RANKS} keeps the class the signature states, as every RBS-declared return
+          # does.
+          def promoted_class(seed, member)
+            seed_rank = sum_promotion_rank(seed)
+            member_rank = sum_promotion_rank(member)
+            return member if seed_rank.nil? || member_rank.nil?
+
+            seed_rank > member_rank ? seed : member
+          end
+
+          def sum_promotion_rank(type)
+            type.is_a?(Type::Nominal) ? SUM_PROMOTION_RANKS[type.class_name.delete_prefix("::")] : nil
+          end
+
+          # The classes `type` contributes, one per union member, or nil when a member has none.
+          def class_level_members(type)
+            members = type.is_a?(Type::Union) ? type.members : [type]
+            classes = members.map { |member| class_level_member(member) }
+            classes.all? ? classes : nil
+          end
+
+          # A value-pinned or bounded type widens to its class; a refinement or a difference to its base's.
+          # `true` and `false` are already their classes' only value. A generic class declines, since
+          # `[["a"]].sum([1])` concatenates into an `Array[Integer | String]` that neither side's class
+          # contains, and so does every carrier with no class (a tuple, a hash shape, `Dynamic`). So does
+          # `nil`: a `nil` seed is the result only when the receiver yields nothing, and a `nil` arm would
+          # fire `call.possible-nil-receiver` on the result where `Array#max` or `#first` bet on a non-empty
+          # receiver and stay silent.
+          def class_level_member(type)
+            case type
+            when Type::Nominal then type.type_args.empty? ? type : nil
+            when Type::Constant then constant_class(type)
+            when Type::IntegerRange, Type::FloatRange then Type::Combinator.widen_value_pinned(type)
+            when Type::Refined, Type::Difference then class_level_member(type.base)
+            end
+          end
+
+          def constant_class(type)
+            value = type.value
+            return nil if value.nil?
+            return type if true.equal?(value) || false.equal?(value)
+
+            Type::Combinator.widen_value_pinned(type)
           end
 
           # Record the `void → top` recovery when the selected overload declares `-> void` and both `scope` and

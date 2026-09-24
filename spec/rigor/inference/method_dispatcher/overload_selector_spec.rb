@@ -367,6 +367,47 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(param_class).to be_a(RBS::Types::ClassInstance)
         expect(param_class.name.relative!.to_s).to eq("Float")
       end
+
+      # Issue #1344 — a precise argument that a declared arm matches takes the first such arm in declaration
+      # order. `Rational#+` declares `(Float) -> Float | (Complex) -> Complex | (Numeric) -> Rational`; moved to the
+      # front, the receiver-affinity `(Numeric)` arm matched the Float too and typed `Rational(1, 2) + 0.5` as
+      # `Rational` where Ruby answers `1.0`.
+      {
+        ["Rational", :+, "Float"] => "Float",
+        ["Rational", :-, "Complex"] => "Complex",
+        ["Float", :*, "Complex"] => "Complex"
+      }.each do |(receiver, method_name, arg), param|
+        it "routes #{receiver}##{method_name}(#{arg}) to the declared (#{param}) arm ahead of (Numeric)" do
+          mt = select_with_env(receiver, method_name, [Rigor::Type::Combinator.nominal_of(arg)])
+          expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq(param)
+        end
+      end
+
+      # Declared order only for an argument that proves its arm: in declared order the strict pass let the
+      # `bigdecimal` reopen's `(BigDecimal)` arm, which accepts these on a `maybe` or vacuously, take them.
+      {
+        "bot" => Rigor::Type::Combinator.bot,
+        "Dynamic[Integer | Float]" => Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                        Rigor::Type::Combinator.nominal_of("Float"))
+        ),
+        "an unloadable class" => Rigor::Type::Combinator.nominal_of("Definitely::Not::Loaded")
+      }.each do |label, arg|
+        it "keeps Integer#+ off the (BigDecimal) arm for #{label}" do
+          mt = select_with_env("Integer", :+, [arg])
+          expect(mt.type.required_positionals.first.type.name.relative!.to_s).not_to eq("BigDecimal")
+        end
+      end
+
+      it "routes Integer#+(BigDecimal) to the (BigDecimal) arm, which is what Ruby returns" do
+        mt = select_with_env("Integer", :+, [Rigor::Type::Combinator.nominal_of("BigDecimal")])
+        expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("BigDecimal")
+      end
+
+      it "still prefers the receiver-affinity arm for an untyped argument on Rational#+" do
+        mt = select_with_env("Rational", :+, [Rigor::Type::Combinator.untyped])
+        expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("Numeric")
+      end
     end
 
     describe "value-pinning params vs untyped args (hash_shape.rb:182 regression)" do

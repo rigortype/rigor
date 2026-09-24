@@ -95,8 +95,8 @@ module Rigor
         # @return matching overloads; empty when the definition declares none.
         def select_candidates(method_definition, arg_types:, self_type:, instance_type:, type_vars: {},
                               block_required: false, environment: nil)
-          overloads = method_definition.method_types
-          return [] if overloads.empty?
+          declared = method_definition.method_types
+          return [] if declared.empty?
 
           # `rigor:v1:param: <name> <refinement>` annotations on this method override the RBS-declared
           # parameter type at the matching name. The map is consumed inside `accepts_param?` so overload
@@ -106,8 +106,9 @@ module Rigor
           # Pre-sort: demote overloads whose param class is a disjoint sibling of the receiver class (e.g.
           # `Integer#+(BigDecimal) -> BigDecimal` from the `bigdecimal` RBS reopen). Honors the coerce
           # convention so `5 + ?` for unknown `?` resolves to the receiver-class-preserving arm rather than
-          # an arbitrary sibling-class arm that only wins by overload-list position.
-          overloads = ReceiverAffinity.reorder(overloads, self_type: self_type, environment: environment)
+          # an arbitrary sibling-class arm that only wins by overload-list position. The proven pass keeps
+          # the declared order (see `run_selection_passes`).
+          overloads = ReceiverAffinity.reorder(declared, self_type: self_type, environment: environment)
 
           # One keyword bundle for the pass pipeline (see `run_selection_passes`); a block retry rebuilds it
           # with the block flag cleared. Built once and passed positionally -- the previous lambda plus a
@@ -116,7 +117,7 @@ module Rigor
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
                      alias_expander: environment&.rbs_loader }
 
-          matches = run_selection_passes(overloads, shared)
+          matches = run_selection_passes(declared, overloads, shared)
           return matches unless matches.empty?
 
           # A block at the call site that no block-declaring overload matched: Ruby ignores a block handed
@@ -125,7 +126,7 @@ module Rigor
           # `define_command(:x) do … end` against `def define_command: (Symbol) -> Symbol`) degraded to
           # `Dynamic[Top]` — and on a self-send suppressed the whole method's return type.
           if block_required
-            matches = run_selection_passes(overloads, shared.merge(block_required: false))
+            matches = run_selection_passes(declared, overloads, shared.merge(block_required: false))
             return matches unless matches.empty?
           end
 
@@ -163,8 +164,19 @@ module Rigor
           #   duck-typed params still resolve when nothing stricter applies.
           # `shared` is the caller-assembled keyword bundle for `find_matching_overload` — hash-shaped
           # because the pass pipeline forwards it twice and RuboCop's parameter-list budget is real.
-          def run_selection_passes(overloads, shared)
-            strict = find_matching_overload(overloads, shared, strict: true)
+          #
+          # Pass 0 (proven, #1344) comes first and reads the overloads in declared order; every later pass
+          # reads them in receiver-affinity order (`ReceiverAffinity`). An argument that is a plain value of a
+          # known class proves which arms take it, and RBS resolves two arms that both take it by declaration
+          # order: `Rational#+` declares `(Float) -> Float` before `(Numeric) -> Rational`, and the affinity
+          # order, which moves the `(Numeric)` arm first, typed `Rational(1, 2) + 0.5` as `Rational` where Ruby
+          # answers `1.0`. The affinity order is kept for every argument that proves nothing: in declared
+          # order the strict pass let the `bigdecimal` reopen's `(BigDecimal) -> BigDecimal` arm, which it
+          # matches on a `maybe`, take `Integer#+` of a `bot`, a `Dynamic[Integer | Float | …]` or an
+          # unloadable class (612 call sites across the survey corpus).
+          def run_selection_passes(declared, overloads, shared)
+            strict = find_matching_overload(declared, shared, strict: :proven)
+            strict = find_matching_overload(overloads, shared, strict: true) if strict.empty?
             return strict unless strict.empty?
 
             alias_hit = find_matching_overload_via_aliases(
@@ -182,6 +194,19 @@ module Rigor
             matches
           end
 
+          # Pass 0 (`strict: :proven`) takes the first strictly typed overload whose params each accept their
+          # argument with a `yes`, and only when every argument is a plain value: a `Constant`, or a `Nominal`
+          # with no type arguments. A `maybe` (a class the process cannot load), a `bot`, a `Dynamic` or a
+          # union proves nothing and leaves the call to the affinity-ordered passes.
+          def proven_arg?(type) = type.is_a?(Type::Constant) || (type.is_a?(Type::Nominal) && type.type_args.empty?)
+
+          def strict_pass_applies?(arg_types, strict)
+            return true unless strict
+            return false if arg_types.any? { |t| imprecise_arg?(t) }
+
+            strict != :proven || (!arg_types.empty? && arg_types.all? { |t| proven_arg?(t) })
+          end
+
           # The shared "no overload matched" answer; every consumer only reads the list.
           NO_MATCH = [].freeze
           private_constant :NO_MATCH
@@ -190,7 +215,7 @@ module Rigor
           # type_vars, block_required, param_overrides, alias_expander).
           def find_matching_overload(overloads, shared, strict:)
             arg_types = shared[:arg_types]
-            return NO_MATCH if strict && arg_types.any? { |t| imprecise_arg?(t) }
+            return NO_MATCH unless strict_pass_applies?(arg_types, strict)
 
             block_required = shared[:block_required]
             # Strict keeps its historical first-match short-circuit (a dispatch hot path); the gradual
@@ -199,7 +224,7 @@ module Rigor
               found = overloads.find do |method_type|
                 engages_block_shape?(method_type, block_required) &&
                   strictly_typed_params?(method_type, arg_types.size) &&
-                  matches?(method_type, shared, strict: true)
+                  matches?(method_type, shared, strict: strict)
               end
               return found ? [found] : NO_MATCH
             end
@@ -339,6 +364,7 @@ module Rigor
           end
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
+          # `strict:` is `false` (gradual), `true` (strict pass) or `:proven` (pass 0: a `yes` only).
           def matches?(method_type, shared, strict: false)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
@@ -420,6 +446,8 @@ module Rigor
             return false if untyped_arg?(arg) && value_pinning?(param_type)
 
             result = param_type.accepts(arg, mode: :gradual)
+            return result.yes? if strict == :proven
+
             # A record's `maybe` for a `Hash` with a gradual arm is no evidence for the overload: with
             # `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
             # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.

@@ -51,8 +51,9 @@ module Rigor
       #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
       #   such as `-> Array[T]`). A variable reachable only through a container position (`Array[T] arg`),
       #   a rest positional (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
-      #   A block-return variable that a parameter also names stays unbound once the call passes an
-      #   argument (see {compose_block_type_vars}).
+      #   A block-return variable that a parameter also names takes the value class the argument and the
+      #   block share once the call passes an argument, or stays unbound when they share none (see
+      #   {compose_block_type_vars}).
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
       # rubocop:disable-next Metrics/ModuleLength
@@ -157,6 +158,16 @@ module Rigor
         private_constant :EMPTY_TYPE_PARAM_NAMES
         NO_BINDING = [nil, nil].freeze
         private_constant :NO_BINDING
+        EMPTY_ARGUMENT_NODES = [].freeze
+        private_constant :EMPTY_ARGUMENT_NODES
+
+        # The classes {#shared_value_class} admits. Given an argument of the same class, each one's `+`
+        # answers that class for every receiver, subclass instances included (`String#+` answers a String;
+        # the numeric classes have no instances of a subclass). `class Name < String` is left out, since the
+        # `+` it inherits answers a plain String, and so is any class whose `coerce` may make `+` answer a
+        # third one.
+        CLOSED_VALUE_CLASSES = Set["Integer", "Float", "Rational", "Complex", "String"].freeze
+        private_constant :CLOSED_VALUE_CLASSES
 
         # Both spellings a resolved `RBS::Types::ClassInstance#name` — or a `Nominal#class_name` built
         # from one — may carry for `Range`; core signatures absolutise, but a plugin-contributed one
@@ -1064,7 +1075,8 @@ module Rigor
           end
 
           def compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
-            vars = compose_block_type_vars(method_type, type_vars, block_type, args)
+            vars = compose_block_type_vars(method_type, type_vars, block_type, args,
+                                           scope: scope, call_node: call_node, call_site: call_site)
             compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
                                                            call_site: call_site)
           end
@@ -1120,21 +1132,25 @@ module Rigor
           # passes an argument. `Enumerable#sum: [U] (?U) { (E) -> U } -> U` adds the block's values to the
           # argument, `Enumerable#inject: [A] (A initial) { (A, E) -> A } -> A` returns the argument for an
           # empty receiver, and `Hash#transform_keys: [K2] (hash[_Key, K2]) { (K) -> K2 } -> Hash[K2, V]`
-          # takes a mapping hit's value without yielding. The variable is then bound to `Dynamic[top]`.
-          # `Dynamic[block_type]` would not do: a `Dynamic` receiver dispatches through its static facet
-          # and answers exactly, so a facet that misses the runtime value is wrong one call later
-          # (`(h.sum(0.0) { |_k, v| v } / h.size).nan?` read `Integer#nan?`). Nor would joining in the
-          # argument as it stands, since `[1, 2].each.sum(0.0) { |x| x }` is `3.0`, which neither side
-          # contains. The key stays in the map so {#compose_arg_type_vars} does not bind the variable from
-          # the argument alone.
-          def compose_block_type_vars(method_type, type_vars, block_type, args)
+          # takes a mapping hit's value without yielding. `Dynamic[block_type]` would not do: a `Dynamic`
+          # receiver dispatches through its static facet and answers exactly, so a facet that misses the
+          # runtime value is wrong one call later (`(h.sum(0.0) { |_k, v| v } / h.size).nan?` read
+          # `Integer#nan?`). Nor would joining in the argument as it stands, since
+          # `[1, 2].each.sum(0.0) { |x| x }` is `3.0`, which neither side contains. The variable is bound
+          # to {#shared_value_class} where both sides have one, and to `Dynamic[top]` otherwise. The key
+          # stays in the map either way so {#compose_arg_type_vars} does not bind the variable from the
+          # argument alone.
+          def compose_block_type_vars(method_type, type_vars, block_type, args, scope:, call_node:, call_site:)
             return type_vars if block_type.nil?
 
             block_var_name = method_type_block_return_variable(method_type)
             return type_vars if block_var_name.nil?
+            return type_vars.merge(block_var_name => block_type) unless
+              argument_reaches_variable?(method_type, block_var_name, args)
 
-            shared = argument_reaches_variable?(method_type, block_var_name, args)
-            type_vars.merge(block_var_name => shared ? Type::Combinator.untyped : block_type)
+            shared = shared_value_class(method_type, block_var_name, args, block_type, call_node)
+            bound = shared && arg_binding_permitted?(scope, call_node, call_site) ? shared : Type::Combinator.untyped
+            type_vars.merge(block_var_name => bound)
           end
 
           # Whether an argument the call passes may land in a parameter whose type names `name`, anywhere
@@ -1145,6 +1161,116 @@ module Rigor
             return false if args.empty?
 
             method_type.type.each_param.any? { |param| mentions_variable?(param.type, name) }
+          end
+
+          # The one value class that the arguments landing in `name`'s parameters and the block's type all
+          # share, or nil to leave the variable `Dynamic[top]`. A class, not a value, because a combining
+          # method keeps a class closed and not a value: `[1, 2].each.sum(1) { |x| -x }` is `-2`, which
+          # neither `1` nor `-1 | -2` contains. RBS reads `[U] (?U) { (E) -> U } -> U` the same way, as a
+          # `U` that covers the argument and the block alike. One class and not a union of several, because
+          # `sum` absorbs: over Integers, `sum(0.0)` answers a Float every time, and `Float | Integer` would
+          # fire `def.return-type-mismatch` against a declared `-> Float`.
+          #
+          # The block's type is one typing of its body, so it covers every call only when nothing the block
+          # receives depends on the variable ({#block_receives_variable?}). The argument binding's gate
+          # applies ({#arg_binding_permitted?}), since this reads the argument. The positions must be static
+          # ({#arguments_at_variable}), and every side must widen to a class ({#value_classes}). The block's
+          # type is trusted as far as the engine trusts it, so a hash filled through an alias, which reads
+          # narrower than it is, binds its narrower class here too.
+          def shared_value_class(method_type, name, args, block_type, call_node)
+            return nil if block_receives_variable?(method_type.block, name)
+
+            reaching = arguments_at_variable(method_type, name, args, call_node)
+            return nil if reaching.nil?
+
+            sides = [*reaching, block_type].map { |type| value_classes(type) }
+            return nil unless sides.all?
+
+            classes = sides.flatten(1).uniq
+            classes.size == 1 ? Type::Combinator.nominal_of(classes.first) : nil
+          end
+
+          # Whether the block's parameters or its `self` name the variable, as `inject`'s accumulator
+          # (`{ (A, E) -> A }`) and `produce`'s previous element (`{ (T prev) -> T }`) do. Such a parameter
+          # holds the argument on the first call and the block's own result after it, and the pass that
+          # typed the block typed it once, as whatever reached it: the RBS probe leaves it untyped, but
+          # `IteratorDispatch` hands an Array receiver's `inject` the seed, and a `&:+` block then reads
+          # `0.+`, so `[1.5, 2].inject(0, &:+)`, which is `3.5`, would bind `Integer`.
+          def block_receives_variable?(block, name)
+            return true if block.self_type && mentions_variable?(block.self_type, name)
+
+            block.type.each_param.any? { |param| mentions_variable?(param.type, name) }
+          end
+
+          # The arguments that land in a positional parameter whose whole type is `name`, or nil when the
+          # call's positions or the signature's shape leave that open. The call must pass plain positional
+          # arguments: after a `*splat` that turns out empty, the next argument lands one parameter earlier,
+          # and a forwarded `...` or keyword arguments may land anywhere. The signature must name `name` only
+          # as a whole leading positional parameter's type, and have no trailing positional parameter at
+          # all. One that names the variable takes its argument from the end of the list, which pairing the
+          # leading parameters with the arguments in order would miss; one that does not is declined too,
+          # conservatively.
+          def arguments_at_variable(method_type, name, args, call_node)
+            return nil unless plain_positional_arguments?(call_node, args.size)
+
+            fun = method_type.type
+            return nil unless fun.respond_to?(:trailing_positionals) && fun.trailing_positionals.empty?
+            return nil if named_outside_positionals?(fun, name)
+
+            positionals = fun.required_positionals + fun.optional_positionals
+            positionals.zip(args).each_with_object([]) do |(param, arg), reaching|
+              type = param.type
+              next unless mentions_variable?(type, name)
+              return nil unless type.is_a?(RBS::Types::Variable)
+
+              reaching << arg unless arg.nil?
+            end
+          end
+
+          def plain_positional_arguments?(call_node, count)
+            return false unless call_node.is_a?(Prism::CallNode)
+
+            arguments = call_node.arguments&.arguments || EMPTY_ARGUMENT_NODES
+            arguments.size == count && arguments.none? do |argument|
+              case argument
+              when Prism::SplatNode, Prism::ForwardingArgumentsNode, Prism::KeywordHashNode then true
+              else false
+              end
+            end
+          end
+
+          def named_outside_positionals?(fun, name)
+            others = [fun.rest_positionals, fun.rest_keywords].compact +
+                     fun.required_keywords.values + fun.optional_keywords.values
+            others.any? { |param| mentions_variable?(param.type, name) }
+          end
+
+          # The class names `type`'s union members widen to, or nil when a member widens to none of
+          # {CLOSED_VALUE_CLASSES}.
+          def value_classes(type)
+            members = type.is_a?(Type::Union) ? type.members : [type]
+            classes = members.map { |member| value_class(member) }
+            classes.all? ? classes : nil
+          end
+
+          # A literal widens to its value's class, a bounded number to `Integer` or `Float`, and a refinement
+          # or a difference to its base's class. Everything else declines: a generic class (`[] + [:a]`
+          # concatenates elements rather than keeping either side's), a carrier with no class (a tuple, a
+          # hash shape, `Dynamic`), and `nil` or `NilClass`, whose arm would fire
+          # `call.possible-nil-receiver` where `Array#max` and `#first` bet on a non-empty receiver.
+          def value_class(type)
+            case type
+            when Type::Nominal then closed_value_class(type.class_name)
+            when Type::Constant then closed_value_class(type.value.class.name)
+            when Type::IntegerRange then "Integer"
+            when Type::FloatRange then "Float"
+            when Type::Refined, Type::Difference then value_class(type.base)
+            end
+          end
+
+          def closed_value_class(class_name)
+            name = class_name&.delete_prefix("::")
+            CLOSED_VALUE_CLASSES.include?(name) ? name : nil
           end
 
           # A signature nested past {RETURN_TYPE_UNWRAP_DEPTH} counts as naming the variable, which is the

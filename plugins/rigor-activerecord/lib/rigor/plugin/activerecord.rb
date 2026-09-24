@@ -525,16 +525,20 @@ module Rigor
         !entry.column(column_name).nil?
       end
 
-      # Class-side finders + the class-side relation entry points. `find` / `find_by!` return the model;
-      # `find_by` adds the `nil` arm; `where` / `all` / `order` / `limit` / `none` open a relation. The
-      # relation then carries its element type through any further chained query method via the bundled
-      # `ActiveRecord::Relation` RBS.
+      # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of
+      # them for two or more ids; `find_by!` returns the model; `find_by` adds the `nil` arm; `where` /
+      # `all` / `order` / `limit` / `none` open a relation. The relation then carries its element type
+      # through any further chained query method via the bundled `ActiveRecord::Relation` RBS.
       def finder_return_type(call_node, entry)
         case call_node.name
         when :find
-          return nil if call_argument_count(call_node).zero?
+          arity = call_argument_count(call_node)
+          return nil if arity.zero?
 
-          Rigor::Type::Combinator.nominal_of(entry.class_name)
+          # `Model.find` is `all.find`, so it answers by arity exactly as the bundled `Relation#find`
+          # overloads do, and the comment there says why one argument stays the model.
+          model = Rigor::Type::Combinator.nominal_of(entry.class_name)
+          arity >= 2 ? Rigor::Type::Combinator.nominal_of("Array", type_args: [model]) : model
         when :find_by!
           # The bang variant raises `RecordNotFound` instead of returning `nil`, so the result is
           # non-nullable.

@@ -279,17 +279,19 @@ module ActiveRecord
     def with: (*untyped) -> self
     def scoping: () { () -> untyped } -> untyped
 
-    # --- finders (return an element) ---
+    # --- finders (return an element, or an Array of them) ---
     # Two or more ids return an Array, unless dropping `nil`s and
-    # duplicates leaves one. One argument returns an Array only when it
-    # is an Array and the model's key is not composite, which nothing
-    # here can see. An overload keyed on an `Array` argument would be
-    # selected for every untyped id too (`find(params[:id])`). Its
-    # return would be joined with this one's, which loses the element
-    # type there, and with it the `io.db.write` of a following `update`
-    # or `save`. So a single argument stays `Elem`. A splat counts as
-    # one argument, so `find(*ids)` is `Elem` and `find(id, *ids)` an
-    # Array.
+    # duplicates leaves one. One argument returns an Array when it is an
+    # Array of ids, but one record when it is a composite key's tuple
+    # (`[shop_id, id]`), and nothing here can tell those apart. An
+    # overload keyed on an `Array` argument would be selected for every
+    # untyped id too (`find(params[:id])`). Its return would be joined
+    # with this one's into `Dynamic[Array[Elem] | Elem]`, on which a
+    # following `update` or `save` no longer resolves on the model and
+    # loses its `io.db.write`. So a single argument stays `Elem`. A
+    # splat and a `**` hash each count as one argument, so `find(*ids)`
+    # is `Elem`, while `find(id, *ids)` and `find(*args, **opts)` are
+    # Arrays even when the splat or the hash turns out empty.
     %a{rigor:v1:effect io.db.read}
     def find: (untyped, untyped, *untyped) -> Array[Elem]
             | (?untyped id) -> Elem
@@ -427,8 +429,10 @@ module ActiveRecord
     # `delete_all` take none.
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def delete_all: (?untyped dependent) -> Integer
-    # The proxy's returns `nil` when a `before_remove` callback throws
-    # `:abort`. `Array[Elem]?` would report `call.possible-nil-receiver`
+    # On a plain `has_many`, the proxy's `destroy_all` returns `nil`
+    # when a `before_remove` callback throws `:abort`. A `:through` one,
+    # which includes `has_and_belongs_to_many`, still returns the
+    # records. `Array[Elem]?` would report `call.possible-nil-receiver`
     # on every `destroyed.each` for a case only such a callback reaches.
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]

@@ -385,7 +385,7 @@ module Rigor
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
-        merge_ivar_and_writes!(accumulator)
+        merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
@@ -1727,13 +1727,47 @@ module Rigor
       # possible-nil at reads the pre-existing writes already typed).
       #
       # For the same reason the contribution counts only beside a write that can give the ivar a value,
-      # so it waits under {AND_WRITE_CONTRIBUTIONS} until {#merge_ivar_and_writes!} sees the whole class:
+      # so it waits under {AND_WRITE_CONTRIBUTIONS} until {#merge_held_ivar_writes!} sees the whole class:
       # that write may come later in source order. An ivar only `&&=` writes stays unseeded, the unbound
       # target `ExpressionTyper#compound_write_value` reads as `Dynamic[top]`. Seeded as the rvalue, the
       # `&&=` bound itself, and `if (@x &&= 1)` folded always-truthy on an ivar that is `nil` at runtime.
       def record_ivar_and_write(node, scope, class_name, accumulator)
         pending = (accumulator[AND_WRITE_CONTRIBUTIONS] ||= {})
         accumulate_ivar_type(pending, class_name, node.name, scope.type_of(node.value))
+      end
+
+      # `@x op= v` stores `@x op v`, so its contribution is the operator dispatched on what the class's
+      # other writes store. Those writes sit in methods Ruby may call in any order, so the write waits
+      # under {OPERATOR_WRITE_CONTRIBUTIONS} until {#merge_held_ivar_writes!} has them all. Dispatched on
+      # the seed as the walk had it so far, a `+=` written above `@x &&= 1.5` never saw the `1.5`, `Float`
+      # fell out of the seed, and `x == 2.5` folded always-falsey on a program that reaches it.
+      def record_ivar_operator_write(node, scope, class_name, accumulator)
+        pending = ((accumulator[OPERATOR_WRITE_CONTRIBUTIONS] ||= {})[class_name] ||= {})
+        (pending[node.name] ||= []) << [node.binary_operator, scope.type_of(node.value), scope.environment]
+      end
+
+      # Folds the held `&&=` and `op=` writes into the seed once the walk has seen every write of the class.
+      # An ivar only `op=` writes is seeded first, from the widened rvalues: the receiver would read as `nil`,
+      # and `nil + v` raises at runtime, so the seed is unconstrained there and the rvalue is the right answer
+      # for the dominant `+=` / `-=` / `|=` families. That seed counts as a write for the `&&=` merge, and the
+      # `op=` results then join on top of the complete seed.
+      def merge_held_ivar_writes!(accumulator)
+        operator_writes = accumulator.delete(OPERATOR_WRITE_CONTRIBUTIONS) || {}
+        seed_operator_only_ivars!(accumulator, operator_writes)
+        merge_ivar_and_writes!(accumulator)
+        merge_ivar_operator_writes!(accumulator, operator_writes)
+      end
+
+      def seed_operator_only_ivars!(accumulator, operator_writes)
+        operator_writes.each do |class_name, ivars|
+          ivars.each do |ivar_name, writes|
+            next if accumulator.dig(class_name, ivar_name)
+
+            rvalues = writes.map { |(_operator, rvalue_type, _environment)| rvalue_type }
+            accumulate_ivar_type(accumulator, class_name, ivar_name,
+                                 Type::Combinator.widen_value_pinned(Type::Combinator.union(*rvalues)))
+          end
+        end
       end
 
       # Folds the held `&&=` contributions into the seed of every ivar another write seeds, and drops the rest.
@@ -1748,40 +1782,94 @@ module Rigor
         end
       end
 
-      # The accumulator key {#record_ivar_and_write} holds its contributions under until the walk ends. Every
-      # other key is a qualified class name, a String, so a Symbol can never collide with one.
-      AND_WRITE_CONTRIBUTIONS = :and_write_contributions
-      private_constant :AND_WRITE_CONTRIBUTIONS
-
-      # `@x op= v` stores `@x op v`. The receiver for the dispatch is the accumulator's current union
-      # for the ivar — an over-approximation of the live value, which is the right direction for a
-      # seed — widened off its value-pinned members first, or `Constant[0] + Constant[1]` would fold
-      # to a `Constant[1]` that pins the ivar to one literal. The result is widened for the same
-      # reason. When nothing else has written the ivar the receiver reads as `nil` — `nil + v` raises
-      # at runtime, so the seed is unconstrained there — or the dispatch fails (`bool + 1`); either
-      # way the fallback is the widened rvalue, which is the right answer for the dominant `+=` /
-      # `-=` / `|=` families and an under-report elsewhere rather than a folded wrong claim.
-      #
-      # The union includes the `&&=` contributions {#record_ivar_and_write} still holds: a `+=` walked
-      # after `@x &&= 1.5` would otherwise dispatch on `1` alone, drop `Float` from the seed, and fold
-      # `x == 2.5` always-falsey on a program that reaches it.
-      def record_ivar_operator_write(node, scope, class_name, accumulator)
-        rvalue_type = scope.type_of(node.value)
-        seeded = accumulator.dig(class_name, node.name)
-        held = accumulator.dig(AND_WRITE_CONTRIBUTIONS, class_name, node.name)
-        current = seeded && held ? Type::Combinator.union(seeded, held) : seeded || held
-        result =
-          if current
-            MethodDispatcher.dispatch(
-              receiver_type: Type::Combinator.widen_value_pinned(current),
-              method_name: node.binary_operator.to_sym,
-              arg_types: [rvalue_type],
-              environment: scope.environment
-            )
-          end
-        result = Type::Combinator.widen_value_pinned(result || rvalue_type)
-        accumulate_ivar_type(accumulator, class_name, node.name, result)
+      # The `op=` results join the complete seed. The methods run in any order, so a result is itself the
+      # receiver of another held write: the dispatch repeats once per held write, which covers every chain one
+      # call of each method can form, and stops early once a pass adds nothing. Not ADR-56's {BodyFixpoint}:
+      # iterated to its fixed point, a lone counter's `@n += x` re-dispatched on its own `Dynamic[Integer | …]`
+      # result and gained `Dynamic[top]`, and the widening pass that forces convergence dropped the `0` it
+      # starts at — on nearly every counter ivar in the survey corpus. A chain that has to go on from a receiver
+      # wider than {OPERATOR_CHAIN_UNION_CAP} floors to `Dynamic[top]` instead: each further pass dispatches
+      # every held write on that union, and distinct tuple literals (`@a += [:s1]`, `@a += [:s2]`, …) grow it
+      # by two members per write.
+      def merge_ivar_operator_writes!(accumulator, operator_writes)
+        operator_writes.each do |class_name, ivars|
+          seeded = accumulator[class_name]
+          ivars.each { |ivar_name, writes| seeded[ivar_name] = chain_operator_writes(seeded[ivar_name], writes) }
+        end
       end
+
+      def chain_operator_writes(seed, writes)
+        writes.size.times do |pass|
+          if pass.positive? && union_arity(Type::Combinator.widen_value_pinned(seed)) > OPERATOR_CHAIN_UNION_CAP
+            return Type::Combinator.untyped
+          end
+
+          joined = Type::Combinator.union(seed, operator_write_results(seed, writes))
+          break if joined == seed
+
+          seed = joined
+        end
+        seed
+      end
+
+      def union_arity(type) = type.is_a?(Type::Union) ? type.members.size : 1
+
+      # A cost guard local to this chain, not ADR-41's `union_size` budget, which stays unwired: it floors
+      # silently, as {BodyFixpoint} does. Forty is the low end of the pathology band ADR-41's Slice 2a names for
+      # such a valve; the widest `op=`-written ivar seed in the survey corpus has seven members.
+      OPERATOR_CHAIN_UNION_CAP = 40
+      private_constant :OPERATOR_CHAIN_UNION_CAP
+
+      # The union of what each held `op=` write stores when `@x` holds `current`. The receiver is widened off
+      # its value-pinned members first, or `Constant[0] + Constant[1]` would fold to a `Constant[1]` that pins
+      # the ivar to one literal; the result is widened for the same reason.
+      def operator_write_results(current, writes)
+        receiver = Type::Combinator.widen_value_pinned(current)
+        results = writes.map do |(operator, rvalue_type, environment)|
+          dispatch = lambda do |type|
+            MethodDispatcher.dispatch(receiver_type: type, method_name: operator, arg_types: [rvalue_type],
+                                      environment: environment)
+          end
+          stored = dispatch.call(receiver) || partial_operator_result(receiver, rvalue_type, environment, dispatch)
+          Type::Combinator.widen_value_pinned(stored)
+        end
+        Type::Combinator.union(*results)
+      end
+
+      # A union the dispatch declines as a whole because one member does (`nil + 1`, `:none + 1`, a `Dynamic`, a
+      # class the pre-pass cannot resolve). The members it does type are dispatched together; a union with none
+      # falls back to the rvalue. Declined whole, a `reset` storing `nil` beside `@x = 0.5` and `@x += 1` sent
+      # the `+=` to its rvalue, `Float` left the seed, and `l > 1.0` under `l.is_a?(Float)` folded always-falsey.
+      # The typed members are not dispatched one by one: a union of tuples dispatches to one `Array[…]`, member by
+      # member to a tuple per chain.
+      #
+      # A declining member whose class the environment knows lacks the operator, so the write raises and stores
+      # nothing; joined for it, the rvalue put an `Integer` no run can store beside `0.5 | Float | nil`, and a
+      # sibling `def level = @x` declared `-> Float?` reported `def.return-type-mismatch`. Any other declining
+      # member stores what the pre-pass cannot see, and keeps the rvalue it fell back to before. "Lacks" is
+      # read from the RBS: a source monkey patch of a core operator, or an operator the RBS omits, reads as
+      # raising, and so does an unwritten ivar's `nil`, which the seed does not model (`nil ^ true` is `true`).
+      def partial_operator_result(receiver, rvalue_type, environment, dispatch)
+        return rvalue_type unless receiver.is_a?(Type::Union)
+
+        typed, declined = receiver.members.partition { |member| dispatch.call(member) }
+        result = dispatch.call(Type::Combinator.union(*typed)) unless typed.empty?
+        return rvalue_type if result.nil?
+        return result if declined.all? { |member| lacks_operator?(member, environment) }
+
+        Type::Combinator.union(result, rvalue_type)
+      end
+
+      def lacks_operator?(member, environment)
+        member.is_a?(Type::Constant) || (member.is_a?(Type::Nominal) && environment.class_known?(member.class_name))
+      end
+
+      # The accumulator keys {#record_ivar_and_write} and {#record_ivar_operator_write} hold their writes under
+      # until the walk ends. Every other key is a qualified class name, a String, so a Symbol can never collide
+      # with one.
+      AND_WRITE_CONTRIBUTIONS = :and_write_contributions
+      OPERATOR_WRITE_CONTRIBUTIONS = :operator_write_contributions
+      private_constant :AND_WRITE_CONTRIBUTIONS, :OPERATOR_WRITE_CONTRIBUTIONS
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.

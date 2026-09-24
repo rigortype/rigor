@@ -1468,23 +1468,167 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include("init", "refreshed")
         end
 
-        it "lets a later `op=` dispatch on an `&&=` contribution the walk still holds" do
-          # Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the `1.5` the `&&=` stores.
-          program = parse(<<~RUBY)
-            class C
-              def initialize
-                @x = 1
-              end
-              def shrink
-                @x &&= 1.5
-              end
-              def grow
-                @x += 1
-              end
+        describe "an `op=` write, whatever the source order" do
+          # The methods holding an ivar's writes run in any order, so the seed must not depend on the order the
+          # pre-pass walks them in. Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the
+          # `1.5` the `&&=` stores wherever the `+=` is written.
+          def seed_of(*definitions)
+            program = parse("class C\n#{definitions.join("\n")}\nend\n")
+            described_class.index(program, default_scope: default_scope)[program].class_ivars_for("C")[:@x]
+          end
+
+          def float?(type)
+            members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+            members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }
+          end
+
+          def scale_seed_definitions(order)
+            definitions = {
+              initialize: "def initialize = (@x = 1)",
+              shrink: "def shrink = (@x &&= 1.5)",
+              grow: "def grow = (@x += 1)",
+              reset: "def reset = (@x = nil)"
+            }
+            definitions.values_at(*order)
+          end
+
+          def scale_seed(*order) = seed_of(*scale_seed_definitions(order))
+
+          %i[initialize shrink grow].permutation.each do |order|
+            it "dispatches on the value an `&&=` stores with the methods in the order #{order.join(', ')}" do
+              expect(float?(scale_seed(*order))).to be(true)
             end
-          RUBY
-          members = seed_members(program, "C", :@x)
-          expect(members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }).to be(true)
+          end
+
+          it "seeds the same type in every order" do
+            seeds = %i[initialize shrink grow].permutation.map { |order| scale_seed(*order) }
+            expect(seeds.uniq.size).to eq(1)
+          end
+
+          it "adds no Float when nothing but the `&&=` literal stores one" do
+            # The control: `1 | 1.5` is the whole runtime range without the `+=`.
+            expect(float?(scale_seed(:initialize, :shrink))).to be(false)
+          end
+
+          it "dispatches on a seeding write that comes later, not on the rvalue" do
+            # `@x` is never an Integer here: `initialize` stores `1.5` before any `+=` can run.
+            grow_first = seed_of("def grow = (@x += 1)", "def initialize = (@x = 1.5)")
+            expect(grow_first).to eq(seed_of("def initialize = (@x = 1.5)", "def grow = (@x += 1)"))
+            expect(grow_first).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1.5),
+                                            Rigor::Type::Combinator.nominal_of("Float"))
+            )
+          end
+
+          it "chains several `op=` writes the same way in either order" do
+            # Only `op=` writes: each falls back to its widened rvalue and dispatches on the others' results.
+            forward = seed_of("def a = (@x += 1)", "def b = (@x += 2.5)")
+            expect(forward).to eq(seed_of("def b = (@x += 2.5)", "def a = (@x += 1)"))
+            expect(forward).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                            Rigor::Type::Combinator.nominal_of("Float"))
+            )
+          end
+
+          it "merges an `&&=` into an ivar only `op=` seeds, in either order" do
+            op_first = seed_of("def grow = (@x += 1)", "def shrink = (@x &&= 1.5)")
+            expect(op_first).to eq(seed_of("def shrink = (@x &&= 1.5)", "def grow = (@x += 1)"))
+            expect(float?(op_first)).to be(true)
+          end
+
+          it "chains one held write's result into another's dispatch, in either order" do
+            # Runtime: `[1, "s"]` after `a` then `b`, `["s", 1]` after `b` then `a`. The second pass dispatches on the
+            # union the first built, which the dispatcher answers with an `Array[…]` that accepts both; the one-pass
+            # `[] | [1] | ["s"]` accepts neither.
+            one = Rigor::Type::Combinator.constant_of(1)
+            str = Rigor::Type::Combinator.constant_of("s")
+            [%w[a b], %w[b a]].each do |order|
+              writes = { "a" => "def a = (@x += [1])", "b" => %(def b = (@x += ["s"])) }.values_at(*order)
+              seed = seed_of("def initialize = (@x = [])", *writes)
+              expect(seed.accepts(Rigor::Type::Combinator.tuple_of(one, str)).yes?).to be(true)
+              expect(seed.accepts(Rigor::Type::Combinator.tuple_of(str, one)).yes?).to be(true)
+            end
+          end
+
+          %w[nil false :none].each do |declining|
+            it "dispatches on the members the operator types beside a `#{declining}` it cannot" do
+              # Runtime: `1.5` after `bump`, whatever `clear` stores. Dispatched on the whole union, `#{declining} + 1`
+              # has no method, so every member fell back to the rvalue and the seed lost `Float`.
+              seed = seed_of("def initialize = (@x = 0.5)", "def bump = (@x += 1)", "def clear = (@x = #{declining})")
+              expect(float?(seed)).to be(true)
+            end
+          end
+
+          it "adds no rvalue for a member the operator cannot take, which stores nothing" do
+            # `nil + 1` raises, so `@x` is never an Integer. With the rvalue joined, a sibling `def level = @x`
+            # declared `-> Float?` reported `def.return-type-mismatch` in the order master kept clean.
+            seed = seed_of("def initialize = (@x = 0.5)", "def bump = (@x += 1)", "def clear = (@x = nil)")
+            expect(seed).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(0.5),
+                                            Rigor::Type::Combinator.nominal_of("Float"),
+                                            Rigor::Type::Combinator.constant_of(nil))
+            )
+          end
+
+          it "keeps the rvalue for a member whose operator the pre-pass cannot see" do
+            # `Vec#+` is defined in source the pre-pass does not dispatch through, and a `Dynamic` member's result is
+            # unknown: what either stores the rvalue is the only stand-in for, as it was when the whole write fell back.
+            program = parse(<<~RUBY)
+              class Vec
+                def +(other) = self
+              end
+              class C
+                def initialize = (@x = Vec.new)
+                def bump = (@x += 1)
+                def reset = (@x = 0.5)
+              end
+            RUBY
+            vec = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("C")[:@x]
+            expect(vec.members).to include(Rigor::Type::Combinator.nominal_of("Vec"),
+                                           Rigor::Type::Combinator.nominal_of("Integer"),
+                                           Rigor::Type::Combinator.nominal_of("Float"))
+            counter = seed_of("def initialize = (@x = 0)", "def up(n) = (@x += n)", "def down(n) = (@x -= n)")
+            expect(counter.members).to include(Rigor::Type::Combinator.untyped)
+          end
+
+          it "seeds the same type in every order beside a `nil` write" do
+            seeds = %i[initialize shrink grow reset].permutation.map { |order| scale_seed(*order) }
+            expect(seeds.uniq.size).to eq(1)
+            expect(float?(seeds.first)).to be(true)
+          end
+
+          it "floors to `Dynamic[top]` rather than chain on an ever wider union of tuples" do
+            # Thirty distinct tuple writes add two members each: a third pass would dispatch thirty writes on a
+            # 61-member union.
+            writes = (1..30).map { |i| "def m#{i} = (@x += [:s#{i}])" }
+            expect(seed_of("def initialize = (@x = [])", *writes)).to eq(Rigor::Type::Combinator.untyped)
+          end
+
+          it "measures the chain guard on the receiver it dispatches, not on the literals it widens away" do
+            # Forty-five integer literals widen to one `Integer` receiver; the second `op=` must not floor them.
+            writes = (1..45).map { |i| "def w#{i} = (@x = #{i})" }
+            seed = seed_of(*writes, "def up = (@x += 1)", "def down = (@x -= 1)")
+            expect(seed).not_to eq(Rigor::Type::Combinator.untyped)
+            expect(seed.members).to include(Rigor::Type::Combinator.constant_of(45),
+                                            Rigor::Type::Combinator.nominal_of("Integer"))
+          end
+
+          it "does not floor a lone `op=` on a wide seed, which never takes a second pass" do
+            # Forty-five distinct tuples stay forty-five members after widening.
+            writes = (1..45).map { |i| "def w#{i} = (@x = [#{i}])" }
+            seed = seed_of(*writes, "def add = (@x += [0])")
+            expect(seed).not_to eq(Rigor::Type::Combinator.untyped)
+            expect(seed.members).to include(Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(45)))
+          end
+
+          it "dispatches a lone `op=` once, so a counter keeps the literal it starts at" do
+            # Re-dispatched on its own `Dynamic[Integer | …]` result, `@n += n` added `Dynamic[top]`; a fixpoint's
+            # widening pass then dropped the `0`.
+            seed = seed_of("def initialize = (@x = 0)", "def add(n) = (@x += n)")
+            members = seed.is_a?(Rigor::Type::Union) ? seed.members : [seed]
+            expect(members.grep(Rigor::Type::Constant).map(&:value)).to eq([0])
+            expect(members).not_to include(Rigor::Type::Combinator.untyped)
+          end
         end
 
         it "does not seed an `&&=`-only ivar — the write cannot give the ivar its first value" do

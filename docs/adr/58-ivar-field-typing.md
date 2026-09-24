@@ -423,6 +423,52 @@ ivar only `&&=` writes stays unseeded, and the write reads as the
 unbound target `Dynamic[top] | v`, which is the statement evaluator's
 reading.
 
+**Status, 2026-09-24 — `op=` order closed (#1343).** The `op=` arm
+dispatched on the seed as the pre-pass had walked it so far, so its
+contribution depended on the order of the class's methods, which Ruby
+may call in any order. With `@x = 1`, `@x &&= 1.5` and `@x += 1` in
+three methods, the three orders that put the `+=` before the `&&=`
+dropped `Float` from the seed and folded `x == 2.5` always-falsey on a
+program that reaches it; #1340's read of the held `&&=` covered only
+one of them. Every `op=` write is now held like an `&&=` until the walk
+has seen the class. An ivar only `op=` writes is seeded from the
+widened rvalues first, and that seed counts as a write for `&&=`. The
+held writes are then dispatched on the complete seed, once per held
+write, which covers every chain one call of each method forms.
+
+Two consequences of dispatching on the complete seed needed handling.
+A member the operator cannot take (`nil + 1`, from a `reset` or any
+`||=`) made the dispatcher decline the whole union, so every write
+fell back to its rvalue. The members it can type are now dispatched
+together. A declining member whose class the environment knows lacks
+the operator, so its write raises and adds nothing; any other (a
+`Dynamic`, a class only source defines) keeps the rvalue it fell back
+to before. Joining the rvalue for a `nil` too put an `Integer` no run
+can store beside `0.5 | Float | nil`, and a `-> Float?` reader reported
+`def.return-type-mismatch`. And distinct tuple literals (`@a += [:s1]`,
+`@a += [:s2]`, …) grow the seed by two members per write, so a chain
+that would go on from a receiver wider than 40 members floors to
+`Dynamic[top]`. That is a cost guard local to the chain, not ADR-41's
+unwired `union_size` budget; 40 is the low end of the pathology band
+ADR-41's Slice 2a names, and the survey corpus's widest `op=`-written
+seed has seven members. The seed then holds what every source order
+produced, except the rvalue master fell back to when no other write
+stood in the receiver, or when a member that raises made the dispatch
+decline. "Raises" is read from the RBS: a source monkey patch of a core
+operator, an operator the RBS omits, and the `nil` of an ivar no write
+reached yet (`nil ^ true` is `true`), which the seed never modelled,
+all read as raising.
+
+ADR-56's `BodyFixpoint` was rejected for the chain: iterated to its
+fixed point, a lone counter's `@n += x` re-dispatched on its own
+`Dynamic[Integer | …]` result and gained `Dynamic[top]`, and the
+widening pass that forces convergence dropped the literal it starts at,
+on 51 of 304 `op=`-written ivar seeds in the survey corpus. A lone
+write is therefore not applied to its own result: `@a = []; @a += [1]`
+still seeds `[] | [1]`, as before, and no rule was seen to fold on it.
+The corpus gate (18 targets, plus gitlab's 97 files with an ivar `op=`)
+moved no diagnostic; the PR itemises the 39 seeds that change.
+
 ## Rejected / deferred alternatives
 
 - **Cross-method ivar definite assignment as the headline fix.**

@@ -259,6 +259,31 @@ RSpec.describe "cross-file value constants — incremental" do
     end
   end
 
+  it "re-checks a nested reader as another file's unpublishable write of the nested name comes and goes" do
+    # Issue #1290 — the written `App::LIMIT` stops the ladder only while some file writes it, so the reader's
+    # answer moves with a file it has no other relationship with. The top-level declarer is never touched.
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "a.rb"), "LIMIT = 5\n")
+      reader = File.join(dir, "b.rb")
+      writer = File.join(dir, "c.rb")
+      File.write(reader, "module App\n  def self.probe = LIMIT.fetch(:n)\nend\n")
+      session = session_for(dir)
+      expect(rules(guarded_baseline(session))).to eq(["b.rb:call.undefined-method"])
+
+      File.write(writer, "module App\n  LIMIT = { n: 1 }\nend\n")
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(reader)
+      expect(rules(recheck.diagnostics)).to eq([])
+      expect(full_run(dir)).to eq([])
+
+      File.write(writer, "module App\n  OTHER = { n: 1 }\nend\n")
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(reader)
+      expect(rules(recheck.diagnostics)).to eq(["b.rb:call.undefined-method"])
+      expect(full_run(dir)).to eq(["b.rb:call.undefined-method"])
+    end
+  end
+
   describe "Incremental.changed_constant_publications" do
     it "reports a name whose descriptor moved, and nothing for one that did not" do
       before = { "b.rb" => { "KEPT" => [1], "MOVED" => [1] } }

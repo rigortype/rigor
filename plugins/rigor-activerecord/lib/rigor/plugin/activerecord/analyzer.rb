@@ -13,6 +13,7 @@ module Rigor
       # | Method | Recognised arg shape | Validation |
       # | --- | --- | --- |
       # | `Model.find(id)` | any positional | arity check (1+ args) |
+      # | `Model.find { … }` | a block, no args | none (`Enumerable#find`) |
       # | `Model.find_by(col: v, ...)` | keyword args | each key must be a column |
       # | `Model.where(col: v, ...)` | keyword args | each key must be a column |
       # | `Model.where(string)` | String literal | parser-side; not validated |

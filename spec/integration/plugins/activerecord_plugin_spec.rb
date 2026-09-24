@@ -125,6 +125,14 @@ RSpec.describe "plugins/rigor-activerecord" do
     result.diagnostics.find { |d| d.rule == "unknown-column" }
   end
 
+  # The association models, optionally with an RBS signature for `Post`: where the model is RBS-known, a call
+  # the plugin declines falls through to `singleton(Post)` / `Post` and can draw `call.undefined-method`.
+  def find_diagnostics(source, post_sig: false)
+    files = ASSOCIATION_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA)
+    files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
+    run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
+  end
+
   describe "recognised AR finder calls" do
     it "annotates `Model.find(id)` with the resolved table" do
       diags = plugin_diagnostics(run_ar("User.find(1)\n"))
@@ -997,18 +1005,12 @@ RSpec.describe "plugins/rigor-activerecord" do
     # `Post.find(1, 2)`, which the plugin types itself, answered the same way. A single argument keeps the
     # element type on purpose: see the comment on `find` in `relation.rbs`.
 
-    def relation_diagnostics(source, post_sig: false)
-      files = ASSOCIATION_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA)
-      files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
-      run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
-    end
-
     def dumped(source)
-      relation_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      find_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
     end
 
     def rule_hits(source, rule, post_sig: false)
-      relation_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
+      find_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
     end
 
     it "types two or more ids as an Array of the element, on either side of the model" do
@@ -1098,18 +1100,12 @@ RSpec.describe "plugins/rigor-activerecord" do
     # the element or `nil` back. The class-side form drew `wrong-arity`, and, where the model has an RBS
     # signature, `call.undefined-method` too: the plugin declined it and `singleton(Post)` declares no `find`.
 
-    def block_find_diagnostics(source, post_sig: false)
-      files = ASSOCIATION_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA)
-      files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
-      run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
-    end
-
     def dumped(source)
-      block_find_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      find_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
     end
 
     def rule_hits(source, rule, post_sig: true)
-      block_find_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
+      find_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
     end
 
     it "reports neither `wrong-arity` nor an undefined `find` on the block form" do
@@ -1164,9 +1160,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(dumped(source)).to eq(["dump_type: :own"])
     end
 
-    it "names the nil arm in the model-call note" do
-      notes = rule_hits("Post.find { |post| post.title == \"x\" }\n", "model-call").map(&:message)
-      expect(notes).to eq(["`Post.find` returns Post | nil (table: `posts`)"])
+    it "names the nil arm in the model-call note, and makes none for the `ifnone` form" do
+      source = <<~RUBY
+        Post.find { |post| post.title == "x" }
+        Post.find(-> { 0 }) { |post| post.title == "x" }
+      RUBY
+      notes = rule_hits(source, "model-call")
+      expect(notes.map { |d| [d.line, d.message] }).to eq([[1, "`Post.find` returns Post | nil (table: `posts`)"]])
     end
   end
 

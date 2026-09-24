@@ -70,6 +70,8 @@ A relation or association (`user.posts.find(1, 2)`) answers the
 same way. With a block, `find` is `Enumerable#find` over the
 records, on the class and on a relation alike:
 `User.find { |u| u.admin? }` → `User | nil`, and it takes no id.
+The block's parameter is the model on a relation; on the class
+side it stays untyped.
 Instance-side: a column read (`user.name`) narrows to the
 column's value type, `user.admin?` to `bool`, and a singular
 association (`post.user`) to the target model.

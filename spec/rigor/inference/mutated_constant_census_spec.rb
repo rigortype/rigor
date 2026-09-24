@@ -81,6 +81,48 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
+    # A seed that is already a nominal (`tap` answers its receiver, `Hash[Symbol, Integer]`) pinned its value type the
+    # same way.
+    it "does not draw an undefined-method error on a value a mutation stored into a nominal seed" do
+      expect(rules(<<~RUBY)).to eq([[5, "call.undefined-method"]])
+        H = { a: 1 }.tap { }
+        H[:a] = "s"
+        puts H[:a].upcase
+        K = { a: 1 }.tap { }
+        puts K[:a].upcase
+      RUBY
+    end
+
+    # Issue #1238's reproduction: the store sits in the class's own `[]=`, and both reads go through its `[]`.
+    it "does not fold a read through a project `[]` of a constant its `[]=` stores into" do
+      expect(rules(<<~RUBY)).to eq([[24, "flow.always-truthy-condition"]])
+        class Table
+          DATA = { a: 1, b: 2 }
+          def [](k) = DATA[k]
+          def []=(k, v)
+            DATA[k] = v
+          end
+        end
+
+        class Counter
+          def initialize(table) = @table = table
+          def bump(k) = (@table[k] += 10)
+        end
+
+        t = Table.new
+        Counter.new(t).bump(:a)
+        x = (t[:a] += 1)
+        puts "twelve" if x == 12
+        puts "plain" if t[:a] == 12
+
+        class Frozen
+          DATA = { a: 1, b: 2 }
+          def [](k) = DATA[k]
+        end
+        puts "plain" if Frozen.new[:a] == 12
+      RUBY
+    end
+
     # The census's own shape: the mutation sits in a method body, where no straight-line seam reaches the read.
     it "does not fold a key a sibling method stores" do
       expect(rules(<<~RUBY)).to eq([[12, "flow.always-truthy-condition"]])
@@ -132,6 +174,16 @@ RSpec.describe "Mutated constant census widening", type: :runner do
         puts A.first.upcase
         K = [1]
         puts K.first.upcase
+      RUBY
+    end
+
+    it "does not draw an undefined-method error on an element a mutation added to a nominal seed" do
+      expect(rules(<<~RUBY)).to eq([[5, "call.undefined-method"]])
+        A = [1, 2].tap { }
+        A << "x"
+        puts A.last.upcase
+        K = [1, 2].tap { }
+        puts K.last.upcase
       RUBY
     end
 

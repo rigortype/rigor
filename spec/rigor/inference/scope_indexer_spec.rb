@@ -3963,6 +3963,31 @@ end
       expect(cvars[:@@h].describe).to eq("Dynamic[{ a: 1, ... }]")
       expect(cvars[:@@k].describe).to eq("{ a: 1 }")
     end
+
+    # An RBS overload join over an untyped argument wraps its candidates before the census sees them, so the facet of
+    # an entry that is already `Dynamic` is unpinned too. The overload set is RBS's, so the members are asserted by
+    # kind rather than spelled out.
+    it "unpins the facet of an entry that is already Dynamic" do
+      program = parse(<<~RUBY)
+        X = 7.divmod(UNRESOLVED)
+        X << 1
+        Y = 7.divmod(UNRESOLVED)
+      RUBY
+      table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .in_source_constants
+
+      expect(table["X"].static_facet.members).to all(be_a(Rigor::Type::Nominal))
+      expect(table["Y"].static_facet.members).to all(be_a(Rigor::Type::Tuple))
+    end
+
+    # `clear` empties a `non-empty-array`, so the removal is not kept either.
+    it "drops a removal a mutation can falsify along with the element pin" do
+      combinator = Rigor::Type::Combinator
+      non_empty = combinator.non_empty_array(combinator.nominal_of("Integer"))
+
+      expect(described_class.send(:census_mutated_type, non_empty).describe)
+        .to eq("Dynamic[Array[Dynamic[top] | Integer]]")
+    end
   end
 
   # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in

@@ -19,6 +19,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
 require_relative "struct_fold_safety"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -2201,7 +2202,7 @@ module Rigor
         widened = accumulator.dup
         mutated_names.each do |name|
           existing = widened[name]
-          next if existing.nil? || existing.is_a?(Type::Dynamic)
+          next if existing.nil?
 
           widened[name] = census_mutated_type(existing)
         end
@@ -2219,7 +2220,7 @@ module Rigor
           updated = table.dup
           names.each do |cvar|
             existing = updated[cvar]
-            next if existing.nil? || existing.is_a?(Type::Dynamic)
+            next if existing.nil?
 
             updated[cvar] = census_mutated_type(existing)
           end
@@ -2230,19 +2231,24 @@ module Rigor
 
       # The type a mutated constant or class variable is read as. The census records the NAME a call mutated and not
       # the call, so it cannot say what was stored, and `Dynamic` alone does not say it either: a read resolves through
-      # the static facet's RBS projection, where a closed `HashShape` answers its known values for any key and a
-      # `Tuple` its known elements for any index. `H = { a: 1 }; H.default = 0` read `H[:b]` as `1`, and
-      # `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
+      # the static facet's RBS projection, where a closed `HashShape` answers its known values for any key, a `Tuple`
+      # its known elements for any index and an `Array[Integer]` `Integer`. `H = { a: 1 }; H.default = 0` read
+      # `H[:b]` as `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
       #
-      # Each carrier member therefore stops claiming its contents are complete, as it would under an unknown store: a
-      # shape reopens (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values,
-      # and a tuple becomes the `Array` of its elements plus the same arm. The known values stay, so a present key
-      # still reads its seed next to the arm; the arm is what keeps a rewrite of it from folding.
+      # Each carrier member of the facet therefore stops claiming its contents are complete: a shape reopens
+      # (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values, a tuple becomes
+      # the `Array` of its elements plus the same arm, and an `Array` / `Hash` nominal gains the arm on every type
+      # argument. A read still answers the known values (every key's, since the projection is not keyed) beside the
+      # arm, which is what keeps a stored or rewritten value from folding. An entry already `Dynamic` is unpinned
+      # through its facet, so a carrier an RBS overload join wrapped is not left pinned.
       def census_mutated_type(type)
+        type = type.static_facet if type.is_a?(Type::Dynamic)
         members = type.is_a?(Type::Union) ? type.members : [type]
         Type::Combinator.dynamic(Type::Combinator.union(*members.map { |member| census_unpinned_carrier(member) }))
       end
 
+      # A `Difference` / `Refined` member drops to its unpinned base: a mutation can falsify the removed value or the
+      # refinement as well (`clear` empties a `non-empty-array`).
       def census_unpinned_carrier(member)
         case member
         when Type::HashShape then HashLookupMutation.open_shape(member) || member
@@ -2250,6 +2256,8 @@ module Rigor
           Type::Combinator.nominal_of(
             "Array", type_args: [Type::Combinator.union(*member.elements, Type::Combinator.untyped)]
           )
+        when Type::Nominal then UnknownStoreWidening.gradual_content(member)
+        when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
         else member
         end
       end

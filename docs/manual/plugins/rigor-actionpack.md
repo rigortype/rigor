@@ -154,8 +154,11 @@ actions that render the template — the implicit render
 (`UsersController#show` → `users/show`) and explicit
 `render :edit` / `render "admin/form"`. Two restrictions keep a seed
 from claiming a type the template will not find: only assignments
-whose right-hand side cannot be `nil` contribute (`User.find`,
-`Model.new`; never `find_by`), and only assignments the action
+whose right-hand side is one record and cannot be `nil` contribute
+(`User.find(id)`, `Model.new`; never `find_by`, and never a call
+that returns several records, such as `User.find(a, b)`,
+`User.find([1, 2])`, `User.find(*ids)` or `User.create([…])`), and
+only assignments the action
 reaches on **every** path — not one inside an `if`, a `case`, a
 `rescue`, a loop or a block, and nothing from a `before_action`
 carrying `if:` / `unless:`. Anything else leaves the ivar unseeded,

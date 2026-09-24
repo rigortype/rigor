@@ -279,6 +279,45 @@ RSpec.describe "plugins/rigor-actionpack — ERB template units (#393)" do
       expect(Rigor::Plugin::Actionpack::ViewAssigns::NON_NIL_PRODUCERS).not_to include(:find_by)
     end
 
+    it "refuses a `find` or `create` that returns several records, which a class-name seed cannot spell" do
+      # rigor-activerecord types `Widget.find(a, b)` as `Array[Widget]` in the controller (#1321); seeding
+      # `"Widget"` would hand the template the element type for what is an Array at runtime.
+      seeds = build_assigns(<<~RUBY)
+        class WidgetsController < ApplicationController
+          def show
+            @two_ids = Widget.find(params[:a], params[:b])
+            @id_list = Widget.find([1, 2])
+            @splatted = Widget.find(*params[:ids])
+            @blocked = Widget.find { |w| w.id == 1 }
+            @no_id = Widget.find
+            @created_list = Widget.create([{ name: "a" }, { name: "b" }])
+            @created_splat = Widget.create!(*rows)
+          end
+        end
+      RUBY
+
+      expect(seeds).to be_empty
+    end
+
+    it "still seeds a `find` of one id and a `create` of one attribute hash as the model" do
+      seeds = build_assigns(<<~RUBY)
+        class WidgetsController < ApplicationController
+          def show
+            @by_param = Widget.find(params[:id])
+            @by_literal = Widget.find(1)
+            @created = Widget.create(name: "a")
+            @created_bang = Widget.create!({ name: "b" })
+            @built = Widget.new
+          end
+        end
+      RUBY
+
+      expect(seeds).to eq(
+        "@by_param" => "Widget", "@by_literal" => "Widget", "@created" => "Widget",
+        "@created_bang" => "Widget", "@built" => "Widget"
+      )
+    end
+
     it "refuses a conditional assignment and a conditional filter, for the same reason" do
       seeds = build_assigns(<<~RUBY)
         class WidgetsController < ApplicationController

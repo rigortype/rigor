@@ -101,9 +101,10 @@ The label then follows the receiver's ownership, which is a syntactic question:
 | a `@@cvar` | `mutate.static` |
 | a parameter | `mutate.instance` |
 | a local whose every assignment allocates and which never escapes the body | `mutate.local` |
+| an allocation itself (`{}.compare_by_identity`, `[].push(x)`, `Hash.new.rehash`) | `mutate.local` |
 | anything else | **nothing** — the `unknown-ownership` taint |
 
-`mutate.local` requires the local to be freshly allocated (`[]`, `{}`, `""`, `+""`, `.new`, `.dup`, `.clone`, a lambda) and never to escape. The escape analysis is flow-insensitive and whole-body: a local that escapes anywhere disqualifies, even after the mutation. That is strictly more conservative than "escaped before the mutating call", which is the direction the false-positive budget runs ([ADR-5](../adr/5-robustness-principle.md)).
+`mutate.local` requires the local to be freshly allocated (`[]`, `{}`, `""`, `+""`, `.new`, `.dup`, `.clone`, a lambda) and never to escape. A receiver that is itself one of those allocations needs no escape analysis: nothing else can hold the object before the call, so the mutation is over before anything could observe it. Without this, `@refs = {}.compare_by_identity` read as `unknown-ownership`, and so did every method that built an identity hash, with the taint reaching each constructor caller through `.new`. The escape analysis is flow-insensitive and whole-body: a local that escapes anywhere disqualifies, even after the mutation. That is strictly more conservative than "escaped before the mutating call", which is the direction the false-positive budget runs ([ADR-5](../adr/5-robustness-principle.md)).
 
 An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 

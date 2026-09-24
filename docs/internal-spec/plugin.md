@@ -907,6 +907,13 @@ plain Relation's `build` changes nothing. A writer that only the subclass define
 an `effect_attributions:` row keyed on the base class. A bound that fits only the base class would give
 `%a{pure}` to a method that changes an object its caller still holds.
 
+The rule holds for types as well as bounds. `call.wrong-arity` and `call.argument-type-mismatch` check a
+call on the subclass against the parameter list the base declares, so that list MUST accept every argument
+a subclass override accepts. The proxy's `delete_all(dependent = nil)` is why `Relation#delete_all`
+declares an optional argument that a plain Relation's does not take. The check then misses a plain
+Relation's `delete_all(:nullify)`, which is the same over-wide direction as `build`'s `mutate.self`: a
+declaration that fits only the base class reports `call.wrong-arity` on valid Rails.
+
 ##### `EffectAttribution`
 
 `Rigor::Plugin::EffectAttribution.new(receiver:, method:, labels:, why:, singleton: false, narrow: nil,

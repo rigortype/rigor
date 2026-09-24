@@ -98,6 +98,19 @@
 # cover `delete` / `destroy`, which a plain Relation hands to the
 # model class. Declaring them here would claim a Relation defines
 # them, and would change how they type.
+#
+# ## Every parameter list here also admits the overrides
+#
+# The rule above holds for types as well as effect bounds. A call on
+# the proxy is checked against the parameter list declared here, so
+# a declaration must accept every argument an override accepts, or
+# valid Rails draws `call.wrong-arity`. Of the overrides this file
+# declares, only the proxy's `delete_all(dependent = nil)` accepts
+# more than a plain Relation's. It takes `:nullify` or `:delete_all`,
+# so `delete_all` declares an optional argument, and the plain
+# Relation's `delete_all(:nullify)`, which raises `ArgumentError`,
+# goes unreported. The `insert_all` family's `(...)` overrides pass
+# their arguments on to the Relation's own methods.
 
 module ActiveRecord
   class Relation[Elem]
@@ -329,8 +342,10 @@ module ActiveRecord
     # --- whole-relation persistence ---
     %a{rigor:v1:effect io.db.write, mutate.self}
     def update_all: (untyped) -> Integer
+    # The optional argument is the association proxy's `dependent`
+    # (see the header); a plain Relation's `delete_all` takes none.
     %a{rigor:v1:effect io.db.write, mutate.self}
-    def delete_all: () -> Integer
+    def delete_all: (?untyped dependent) -> Integer
     %a{rigor:v1:effect io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]
     %a{rigor:v1:effect io.db.write}

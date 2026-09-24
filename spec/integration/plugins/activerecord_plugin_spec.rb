@@ -921,6 +921,63 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "an association proxy's overrides (a declaration holds for every run-time class)" do
+    # `user.posts` types as `ActiveRecord::Relation[Post]` but returns a `CollectionProxy`, and a call on it is
+    # checked against the parameter list the bundled `relation.rbs` declares. That list has to accept every
+    # argument a proxy override accepts (`docs/internal-spec/plugin.md` § Which channel a row belongs in):
+    # the proxy's `delete_all(dependent = nil)` used to draw `call.wrong-arity (given 1, expected 0)`.
+
+    let(:association_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => "class User < ApplicationRecord\n  has_many :posts\nend\n",
+        "app/models/post.rb" => "class Post < ApplicationRecord\n  belongs_to :user\nend\n"
+      }
+    end
+
+    def association_diagnostics(source)
+      run_ar(source, models: association_models).diagnostics
+    end
+
+    it "does not fire wrong-arity on a proxy call Rails accepts" do
+      source = <<~RUBY
+        user = User.find(1)
+        post = Post.find(1)
+        user.posts.delete_all
+        user.posts.delete_all(:delete_all)
+        user.posts.delete_all(:nullify)
+        user.posts.last(2)
+        user.posts.take(2)
+        user.posts.find(1, 2)
+        user.posts.size
+        user.posts.include?(post)
+        user.posts.delete(post)
+        user.posts.destroy(post)
+        user.posts.reload
+        user.posts.reset
+        user.posts.build(title: "x")
+        user.posts.create(title: "x")
+        user.posts.create!(title: "x")
+        user.posts.destroy_all
+      RUBY
+      expect(association_diagnostics(source).select { |d| d.rule == "call.wrong-arity" }).to be_empty
+    end
+
+    it "keeps the declared return type when the proxy's argument is passed" do
+      diags = association_diagnostics("Rigor.dump_type(User.find(1).posts.delete_all(:nullify))\n")
+      dumped = diags.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      expect(dumped).to eq(["dump_type: Integer"])
+    end
+
+    it "STILL fires wrong-arity past the proxy's own arity" do
+      # Without this sibling, the examples above would pass if arity checking were switched off for the Relation.
+      diags = association_diagnostics("User.find(1).posts.delete_all(:nullify, 1)\n")
+      arity = diags.select { |d| d.rule == "call.wrong-arity" }
+      expect(arity.size).to eq(1)
+      expect(arity.first.message).to include("`delete_all'")
+    end
+  end
+
   describe "structure.sql fallback (schema_format = :sql)" do
     # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
     # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.

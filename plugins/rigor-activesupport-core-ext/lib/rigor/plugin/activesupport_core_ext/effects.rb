@@ -8,7 +8,7 @@ module Rigor
       # rigor-activesupport-core-ext's effect contract (ADR-103 WD10; design note § 11.2; issue #387).
       #
       # **Scope note.** This is the *impure* half of ActiveSupport only: the clock, the notification bus and
-      # `CurrentAttributes`. The `%a{pure}` sweep over `blank?` / `present?` / `deep_dup` and the rest of
+      # `CurrentAttributes`. The `%a{pure}` sweep over `blank?` / `present?` / `presence` and the rest of
       # the core_ext predicate surface — the single cheapest purity win in a Rails app, per WD10 — is issue
       # #388 and lands in this plugin's shipped RBS, not here (`try` was audited and skipped: it dispatches
       # to whatever method the caller names, so its purity is a fact about the call site, not about `try`).

@@ -163,6 +163,10 @@ class Object
   # exception to the try-shaped-dispatch rule above (design note § 11.2).
   %a{pure}
   def in?: (untyped) -> bool
+  # `in?(another_object) ? self : nil` — `params[:kind].presence_in(%w[a b])`.
+  # The same `#include?` dispatch as `in?`, and the same exception.
+  %a{pure}
+  def presence_in: (untyped) -> self?
 
   # Issue #673 — `core_ext/object/to_query`, `core_ext/object/duplicable` and
   # `core_ext/object/instance_variables` all hang off `Object`, so every
@@ -200,10 +204,38 @@ class Object
   #
   # NOT `%a{pure}`: on `Object` the `dup` runs the receiver class's own
   # `initialize_copy`, an unknown-at-this-declaration dispatch like the one
-  # that keeps `as_json` bare. A deliberate under-claim, and not consistent
-  # with `Hash#deep_dup` below, whose `%a{pure}` predates this row although
-  # it reaches the same `dup` through `value.deep_dup` on every value.
+  # that keeps `as_json` bare. `Hash#deep_dup` below reaches the same `dup`
+  # through `value.deep_dup` on every value and is bare for the same reason.
   def deep_dup: () -> self
+
+  # `core_ext/object/with` — sets each keyword through its public writer,
+  # yields `self`, and restores the old values in an `ensure`; the answer is
+  # the block's. There is no blockless form: `yield` without a block raises.
+  # ActiveSupport `undef_method`s it on `NilClass`, `TrueClass`, `FalseClass`,
+  # `Integer`, `Float` and `Symbol`, which RBS cannot express, so `1.with(a: 1)`
+  # resolves here where Ruby raises — a missed error, not a false one.
+  # `Data#with` (core) is a subclass override and keeps its own `-> self`.
+  #
+  # NOT `%a{pure}`: it writes the receiver's attributes through `public_send`.
+  def with: [T] (**untyped attributes) { (self) -> T } -> T
+
+  # `core_ext/object/with_options` — without a block, the
+  # `ActiveSupport::OptionMerger` proxy (not declared here); with one, the
+  # block's value. A zero-arity block is `instance_eval`ed on the proxy, the
+  # `with_options dependent: :destroy do has_many … end` model-body shape.
+  #
+  # NOT `%a{pure}`: the proxy forwards every call to the receiver through
+  # `method_missing`, a dispatch this audit cannot see.
+  def with_options: (untyped options) -> untyped
+                  | [T] (untyped options) { (?) -> T } -> T
+
+  # `core_ext/string/output_safety` — `false` on `Object`, `true` on
+  # `Numeric`, the buffer's own state on `ActiveSupport::SafeBuffer`. `bool`
+  # for the reason `duplicable?` is: `-> false` on the universal receiver makes
+  # every `if x.html_safe?` an always-falsy branch on the subclasses that answer
+  # true. All three bodies are a constant or an ivar read.
+  %a{pure}
+  def html_safe?: () -> bool
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -282,6 +314,8 @@ class String
   def dasherize: () -> String
   %a{pure}
   def upcase_first: () -> String
+  %a{pure}
+  def downcase_first: () -> String
   # NOT %a{pure}: transliterates through `I18n.transliterate`, which reads
   # `I18n.locale` when `locale:` is left at its `nil` default — a request-
   # scoped global read the inflection-table assumption does not cover.
@@ -296,6 +330,11 @@ class String
   def singularize: (?Symbol locale) -> String
   %a{pure}
   def humanize: (?capitalize: bool, ?keep_id_suffix: bool) -> String
+
+  # `core_ext/string/behavior` — the `acts_like?(:string)` duck-type hook, a
+  # hardcoded `true`.
+  %a{pure}
+  def acts_like_string?: () -> true
 
   # `core_ext/string/filters`
   %a{pure}
@@ -349,6 +388,14 @@ class String
   # follow-up to confirm and either implement or remove the declaration.
   def to_hours: () -> Float
 
+  # `core_ext/string/zones` — `Time.find_zone!(zone).parse(self)`, or
+  # `to_time` when no zone is set. `untyped` like the `Time` / `Date` rows:
+  # the parse answers an `ActiveSupport::TimeWithZone`, or `nil` on a string
+  # with no date parts. NOT `%a{pure}`, for `to_time`'s reason and one more:
+  # the default argument reads `Time.zone`, and `TimeZone#parse` defaults the
+  # missing parts from the zone's `now`.
+  def in_time_zone: (?untyped zone) -> untyped
+
   # `core_ext/string/access`
   %a{pure}
   def at: (Integer | Range[Integer] | Regexp position) -> String?
@@ -368,10 +415,27 @@ class String
   # `core_ext/string/multibyte`
   %a{pure}
   def mb_chars: () -> untyped
+  # Reads `encoding` / `valid_encoding?`; the `ASCII-8BIT` branch
+  # `force_encoding`s a `dup`, never the receiver.
+  %a{pure}
+  def is_utf8?: () -> bool
 
   # `core_ext/string/inquiry`
   %a{pure}
   def inquiry: () -> untyped # ActiveSupport::StringInquirer
+end
+
+# ---------------------------------------------------------------
+# Symbol — `core_ext/symbol/starts_ends_with`
+# ---------------------------------------------------------------
+
+# `alias_method`s of core `start_with?` / `end_with?`, declared with the core
+# parameter lists.
+class Symbol
+  %a{pure}
+  def starts_with?: (*Regexp | string prefixes) -> bool
+  %a{pure}
+  def ends_with?: (*string suffixes) -> bool
 end
 
 # ---------------------------------------------------------------
@@ -1509,8 +1573,10 @@ class Hash[unchecked out K, unchecked out V]
   def to_options!: () -> self
 
   # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the
-  # receiver.
-  %a{pure}
+  # receiver. NOT `%a{pure}`: it calls `deep_dup` on every key and value, an
+  # ELEMENT of unknown class whose `dup` runs that class's own
+  # `initialize_copy` — the dispatch the purity rule at the top of this file
+  # excludes, and the reason `Object#deep_dup` above is bare.
   def deep_dup: () -> Hash[K, V]
 
   # `core_ext/hash/deep_merge` — the block receives `(key, this_val,

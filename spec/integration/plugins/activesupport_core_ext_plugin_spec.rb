@@ -442,6 +442,56 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # The same runtime diff after #1330: the `Object`, `String` and `Symbol` rows. The overlay twin is
+  # `spec/rigor/environment/activesupport_overlay_object_string_symbol_spec.rb`.
+  describe "the Object, String and Symbol rows" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:method_name)
+    end
+
+    it "resolves the new rows to real types" do
+      source = <<~RUBY
+        Point = Data.define(:x)
+        Rigor.dump_type("a".presence_in(%w[a b]))
+        Rigor.dump_type(1.html_safe?)
+        Rigor.dump_type(Object.new.with(timeout: 1) { |o| 1 })
+        Rigor.dump_type(Object.new.with_options(presence: true) { |o| :merged })
+        Rigor.dump_type(Point.new(x: 1).with(x: 2))
+        Rigor.dump_type("Abc".downcase_first)
+        Rigor.dump_type("a".acts_like_string?)
+        Rigor.dump_type("a".is_utf8?)
+        Rigor.dump_type(:abc.starts_with?(/a/, "b"))
+        Rigor.dump_type(:abc.ends_with?("c"))
+        "2026-01-01".in_time_zone
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      expect(dumps(result)).to eq(
+        ["String?", "bool", "1", ":merged", "Point(x: 2)", "String", "true", "bool", "bool", "bool"]
+      )
+    end
+
+    it "still witnesses a genuinely undefined method on an Object, a String and a Symbol receiver" do
+      source = <<~RUBY
+        Rigor.dump_type(Object.new.frozen?)
+        Rigor.dump_type("a".encoding)
+        Rigor.dump_type(:abc.to_proc)
+        Object.new.presence_inn([1])
+        "a".downcase_firstt
+        :abc.starts_withh?("a")
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(dumps(result)).to eq(%w[bool Encoding Proc])
+      expect(undefined_methods(result)).to eq(%w[presence_inn downcase_firstt starts_withh?])
+    end
+  end
+
   # Issue #670 — the `Date` / `DateTime` half of #658. Both are CLOSED core classes carrying the same
   # undeclared `DateAndTime::Calculations` / `Zones` surface, so the same omission-is-a-false-positive
   # rule applies. What makes it more than "#658 again for two more classes" is that `DateTime < Date`:

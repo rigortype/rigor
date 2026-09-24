@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# The local pre-push gate: check only what this branch changed, in seconds.
+#
+# The full gate (`make verify`) belongs to CI on the Draft PR: locally it runs
+# the whole suite, and several parallel sessions running it at once is what
+# stalls (and once OOM-killed) the host. This script covers the checks a session can
+# answer cheaply before pushing:
+#
+#   1. `git diff --check` against the merge base (committed + uncommitted work);
+#   2. RuboCop on the changed Ruby files (`--force-exclusion` keeps .rubocop.yml's
+#      excludes in force for explicitly named files);
+#   3. RSpec on the changed spec files, each lib file's mirror spec
+#      (lib/rigor/a/b.rb -> spec/rigor/a/b_spec.rb) and each changed plugin's
+#      integration specs, the opt-in files in their own processes as in `verify`;
+#   4. `spec/docs/` always — seconds, and CI's code jobs skip a Markdown-only PR;
+#   5. `rigor check --fail-on=warning` on the changed lib files, and on the files
+#      whose sig/ mirror changed — the CI self-check caught a `String | Symbol`
+#      argument on PR #1301 that every spec passed.
+#
+# What it cannot see — a regression in a file the branch did not touch, which is
+# what an engine change risks — is the reason CI stays the gate.
+#
+# Usage: bin/verify-changed [base]   (base defaults to origin/master; run it
+# inside the Flake, e.g. via `make verify-changed`)
+
+set -uo pipefail
+
+base_ref="${1:-${VERIFY_BASE:-origin/master}}"
+if ! merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
+  echo "verify-changed: cannot find a merge base with $base_ref (git fetch origin?)" >&2
+  exit 2
+fi
+
+changed=()
+while IFS= read -r path; do
+  [[ -n "$path" && -f "$path" ]] && changed+=("$path")
+done < <({ git diff --name-only --diff-filter=d "$merge_base"; git ls-files --others --exclude-standard; } | sort -u)
+
+echo "verify-changed: ${#changed[@]} changed file(s) since $(git rev-parse --short "$merge_base") ($base_ref)"
+
+failures=()
+step() {
+  local name="$1"
+  shift
+  echo
+  echo "== $name"
+  echo "\$ $*"
+  "$@" || failures+=("$name")
+}
+
+step "git diff --check" git diff --check "$merge_base"
+
+# Newline-separated lists, de-duplicated by `lines` below: the host's /bin/bash
+# is 3.2 (no namerefs, and an empty "${a[@]}" trips `set -u`), so no array sets.
+ruby_files=""
+specs=""
+pool_specs=""
+plugin_specs=""
+check_files=""
+add_spec() {
+  case "$1" in
+    spec/rigor/analysis/runner_pool_spec.rb) pool_specs+="$1"$'\n' ;;
+    spec/integration/plugins/*_spec.rb) plugin_specs+="$1"$'\n' ;;
+    *) specs+="$1"$'\n' ;;
+  esac
+}
+lines() { printf '%s' "$1" | sort -u; }
+
+for path in ${changed[@]+"${changed[@]}"}; do
+  case "$path" in
+    lib/*.rb | spec/*.rb | plugins/*.rb | examples/*.rb | apps/*.rb) ruby_files+="$path"$'\n' ;;
+  esac
+  case "$path" in
+    spec/fixtures/* | spec/integration/fixtures/*) ;;
+    spec/*_spec.rb) add_spec "$path" ;;
+  esac
+  case "$path" in
+    lib/*.rb)
+      mirror="spec/${path#lib/}"
+      mirror="${mirror%.rb}_spec.rb"
+      [[ -f "$mirror" ]] && add_spec "$mirror"
+      check_files+="$path"$'\n'
+      ;;
+    sig/*.rbs)
+      mirror="lib/${path#sig/}"
+      mirror="${mirror%.rbs}.rb"
+      [[ -f "$mirror" ]] && check_files+="$mirror"$'\n'
+      ;;
+    plugins/rigor-*/* | examples/rigor-*/*)
+      id="${path#*/rigor-}"
+      id="${id%%/*}"
+      id="${id//-/_}"
+      for spec in spec/integration/plugins/"${id}"_*spec.rb; do
+        [[ -f "$spec" ]] && add_spec "$spec"
+      done
+      case "$path" in
+        */lib/*.rb) check_files+="$path"$'\n' ;;
+      esac
+      ;;
+  esac
+done
+
+# `run_on <step name> <list> <command...>`: append the list's entries to the
+# command and run it as a step, or skip the step when the list is empty.
+run_on() {
+  local name="$1" list="$2"
+  shift 2
+  [[ -z "$list" ]] && return
+  local files=()
+  while IFS= read -r path; do files+=("$path"); done < <(lines "$list")
+  step "$name" "$@" "${files[@]}"
+}
+
+run_on "rubocop (changed files)" "$ruby_files" bundle exec rubocop --force-exclusion
+run_on "rspec (changed + mirror specs)" "$specs" bundle exec rspec
+run_on "rspec (runner pool)" "$pool_specs" env RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec
+run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
+step "rspec spec/docs/" bundle exec rspec spec/docs/
+run_on "rigor check (changed lib files)" "$check_files" \
+  bundle exec exe/rigor check --no-cache --no-ci-detect --fail-on=warning
+
+echo
+if ((${#failures[@]})); then
+  echo "verify-changed: FAILED — ${failures[*]}"
+  exit 1
+fi
+echo "verify-changed: OK. The full gate is CI on the Draft PR."

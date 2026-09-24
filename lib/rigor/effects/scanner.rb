@@ -6,6 +6,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "ancestry_recorder"
 require_relative "attribution"
+require_relative "definition_context"
 require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "local_ownership"
@@ -23,8 +24,9 @@ module Rigor
     # The scanner owns **identity** — which effect units the file defines and what each is keyed as — and
     # delegates each unit's body to {UnitScan}. Keys follow the existing symbol tables (ADR-103 WD14):
     # `Class#m` for an instance method, `Class.m` for a singleton one, and `<toplevel>#m` for a `def`
-    # outside any class body. Reopenings in one file join here; reopenings across files join when the
-    # runner merges the collections.
+    # outside any class body. The side is the one Ruby defines the method on, which the enclosing method
+    # does not decide: {DefinitionContext} carries it down the walk. Reopenings in one file join here;
+    # reopenings across files join when the runner merges the collections.
     #
     # Three kinds of unit exist beyond a plain `def`:
     #
@@ -32,7 +34,8 @@ module Rigor
     #   skip it, so this is the minimal extension WD14 calls for, made here rather than in `ScopeIndexer`
     #   because nothing outside effects needs it yet.
     # - `attr_reader` / `attr_writer` / `attr_accessor` — synthesised: a reader is ∅, a writer is
-    #   `mutate.self`. Without them a caller's edge into an accessor would read as unresolved.
+    #   `mutate.self` (`mutate.static` inside `class << self`, where it writes the class object's ivar).
+    #   Without them a caller's edge into an accessor would read as unresolved.
     # - a nested `def` — its own unit under the same class, never contained in the enclosing method.
     #
     # **This walk exists only when collection is on.** ADR-103 WD13 prefers riding `ScopeIndexer`'s
@@ -50,12 +53,15 @@ module Rigor
       DECLARATION_MACROS = %i[include prepend attr_reader attr_writer attr_accessor define_method].to_set.freeze
 
       MUTATE_SELF = LabelSet.new(["mutate.self"])
-      private_constant :MUTATE_SELF
+      MUTATE_STATIC = LabelSet.new(["mutate.static"])
+      private_constant :MUTATE_SELF, :MUTATE_STATIC
 
       # A synthesised writer's summary is the same value at every `attr_accessor` in the project, so it is
-      # built once rather than per accessor.
+      # built once rather than per accessor. A singleton writer sets an ivar on the class object, which is
+      # what an ivar write in a singleton-method body reads as.
       WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_SELF })
-      private_constant :WRITER_SUMMARY
+      SINGLETON_WRITER_SUMMARY = Summary.new(bundles: { Origin.construct("attr-writer") => MUTATE_STATIC })
+      private_constant :WRITER_SUMMARY, :SINGLETON_WRITER_SUMMARY
 
       # Every argument is one collection input the scan reads; a context object would move the same list
       # one call further out.
@@ -96,7 +102,7 @@ module Rigor
       def scan(root)
         return scan_template_unit(root) if @unit_key
 
-        walk(root, [], false)
+        walk(root, [], DefinitionContext::CLASS_BODY)
         synthesize_framework_units
         FileCollection.new(
           path: @path, summaries: @summaries, edges: @edges,
@@ -112,7 +118,7 @@ module Rigor
       # origin in the file.
       def scan_template_unit(root)
         summary, edges = UnitScan.new(
-          singleton: false, parameters: [], block_parameter: nil,
+          context: DefinitionContext::INSTANCE_METHOD_BODY, parameters: [], block_parameter: nil,
           owned_locals: LocalOwnership.owned(root, [], singleton: false), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
           owner_class: @unit_owner, method_name: @unit_key
@@ -123,16 +129,16 @@ module Rigor
         FileCollection.new(path: @path, summaries: { @unit_key => Summary.tainted("collector-error", @unit_key) })
       end
 
-      def walk(node, prefix, singleton)
+      # `context` is the {DefinitionContext} of the class-body position `node` sits at. A `class <<` body
+      # and a block that rebinds `self` move it; a nested namespace starts afresh.
+      def walk(node, prefix, context)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           return walk_namespace(node, prefix)
-        when Prism::SingletonClassNode
-          return walk(node.body, prefix, true) if node.body
         when Prism::DefNode
-          return enter_def(node, prefix, singleton)
+          return enter_def(node, prefix, context)
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
           @ancestry.record_constant_class(node, prefix)
         when Prism::AliasMethodNode
@@ -140,28 +146,28 @@ module Rigor
         when Prism::CallNode
           harvest_class_body_macro(node, prefix)
           return record_initialize_alias(prefix) if @ancestry.alias_to_initialize?(node)
-          return record_declaration(node, prefix) if declaration?(node)
+          return record_declaration(node, prefix, context) if declaration?(node)
         end
 
-        node.rigor_each_child { |child| walk(child, prefix, singleton) }
+        node.rigor_each_child { |child| walk(child, prefix, context.for_child(node, child)) }
       end
 
       def walk_namespace(node, prefix)
         nested = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
-        return node.rigor_each_child { |child| walk(child, prefix, false) } if nested.nil?
+        return node.rigor_each_child { |child| walk(child, prefix, DefinitionContext::CLASS_BODY) } if nested.nil?
 
         @ancestry.record_superclass(nested.join("::"), node, prefix) if node.is_a?(Prism::ClassNode)
         return if node.body.nil?
 
         @non_public[nested.join("::")] = Visibility.non_public_names(node.body)
-        walk(node.body, nested, false)
+        walk(node.body, nested, DefinitionContext::CLASS_BODY)
       end
 
-      def enter_def(node, prefix, singleton)
-        own_singleton = singleton || !node.receiver.nil?
-        scan = add_unit(class_name_for(prefix), node.name.to_s, own_singleton, node.body, node.parameters,
-                        non_public: non_public?(prefix, node.name.to_s))
-        harvest_def(prefix, node.name.to_s, own_singleton, scan) if @harvest && !prefix.empty?
+      def enter_def(node, prefix, context)
+        singleton, body_context = context.def_target(node)
+        scan = add_unit(class_name_for(prefix), node.name.to_s, singleton, body_context, node.body,
+                        node.parameters, non_public: non_public?(prefix, node.name.to_s))
+        harvest_def(prefix, node.name.to_s, singleton, scan) if @harvest && !prefix.empty?
       end
 
       # What the framework strategies need to know about a `def` the class body spelled out itself: that it
@@ -232,22 +238,26 @@ module Rigor
       # per unit (ADR-103 WD13): a unit the scanner cannot finish is recorded as non-exhaustive with
       # `collector-error` and its siblings are unaffected.
       #
+      # `singleton` is the side the unit is keyed on and `context` the {DefinitionContext} its body runs
+      # under. The body's own bit does not decide where the units nested in it land: `def self.outer` is
+      # scanned as a singleton method, and a `def inner` inside it is `Class#inner`.
+      #
       # @return the finished scan, or nil when the unit failed soft
-      def add_unit(class_name, method_name, singleton, body, parameters, non_public: false)
+      def add_unit(class_name, method_name, singleton, context, body, parameters, non_public: false)
         key = "#{class_name}#{singleton ? '.' : '#'}#{method_name}"
         names = parameter_names(parameters)
         scan = UnitScan.new(
-          singleton: singleton, parameters: names,
+          context: context, parameters: names,
           block_parameter: block_parameter_name(parameters),
-          owned_locals: LocalOwnership.owned(body, names, singleton: singleton), calls: @calls,
+          owned_locals: LocalOwnership.owned(body, names, singleton: context.singleton?), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
           owner_class: class_name, method_name: method_name, non_public: non_public
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)
-        scan.nested.each do |name, nested_singleton, nested_body, nested_parameters|
+        scan.nested.each do |name, nested_singleton, nested_context, nested_body, nested_parameters|
           # A `def` inside a method is never an action, whatever the enclosing body's visibility.
-          add_unit(class_name, name, singleton || nested_singleton, nested_body, nested_parameters,
+          add_unit(class_name, name, nested_singleton, nested_context, nested_body, nested_parameters,
                    non_public: true)
         end
         scan
@@ -263,29 +273,31 @@ module Rigor
         node.receiver.nil? && DECLARATION_MACROS.include?(node.name)
       end
 
-      def record_declaration(node, prefix)
+      def record_declaration(node, prefix, context)
         class_name = class_name_for(prefix)
         case node.name
         when :include, :prepend then @ancestry.record_includes(class_name, constant_arguments(node), prefix)
-        when :define_method then declare_define_method(class_name, node)
-        else synthesize_accessors(class_name, node)
+        when :define_method then declare_define_method(class_name, node, context)
+        else synthesize_accessors(class_name, node, context.self_singleton_class?)
         end
       end
 
-      def declare_define_method(class_name, node)
-        unit = UnitScan.define_method_unit(node)
-        return if unit.nil?
+      def declare_define_method(class_name, node, context)
+        name, body, parameters = UnitScan.define_method_unit(node)
+        return if name.nil?
 
-        name, singleton, body, parameters = unit
-        add_unit(class_name, name, singleton, body, parameters)
+        add_unit(class_name, name, *context.define_method_target, body, parameters)
       end
 
-      def synthesize_accessors(class_name, node)
+      # `attr_*` is a call on `self`, as `define_method` is, so inside `class << self` it defines the
+      # class's own accessors.
+      def synthesize_accessors(class_name, node, singleton)
+        separator = singleton ? "." : "#"
         symbol_arguments(node).each do |name|
-          merge_unit("#{class_name}##{name}", Summary.empty, []) unless node.name == :attr_writer
+          merge_unit("#{class_name}#{separator}#{name}", Summary.empty, []) unless node.name == :attr_writer
           next if node.name == :attr_reader
 
-          merge_unit("#{class_name}##{name}=", WRITER_SUMMARY, [])
+          merge_unit("#{class_name}#{separator}#{name}=", singleton ? SINGLETON_WRITER_SUMMARY : WRITER_SUMMARY, [])
         end
       end
 

@@ -7,6 +7,7 @@ require_relative "../source/node_children"
 require_relative "attribution"
 require_relative "callee_rule"
 require_relative "catalog"
+require_relative "definition_context"
 require_relative "envelope_index"
 require_relative "file_collection"
 require_relative "label_set"
@@ -118,9 +119,10 @@ module Rigor
       # declaration wherever it appears: in a class body it is the only way that method exists, and inside
       # another method it is a definition the enclosing method performs (`mutate.static`) rather than code
       # the enclosing method contains. A non-literal name has no key to file the block under, so it stays
-      # contained in the enclosing method and this returns nil.
+      # contained in the enclosing method and this returns nil. Which side the method lands on is the
+      # {DefinitionContext}'s to say.
       #
-      # @return `[name, singleton, body, parameters]`
+      # @return `[name, body, parameters]`
       def self.define_method_unit(node)
         return nil unless node.name == :define_method && node.receiver.nil?
 
@@ -130,11 +132,13 @@ module Rigor
         block = node.block
         return nil unless block.is_a?(Prism::BlockNode)
 
-        [first.unescaped, false, block.body, block.parameters]
+        [first.unescaped, block.body, block.parameters]
       end
 
-      # @param singleton — whether the unit's `self` is the class object (`def self.x`,
-      #   `class << self`) — the axis that separates `mutate.self` from `mutate.static` on an ivar write
+      # @param context — the {DefinitionContext} the body runs under. Its singleton bit — whether the
+      #   unit's `self` is a class object (`def self.x`, a `def` in `class << self`) — is the axis that
+      #   separates `mutate.self` from `mutate.static` on an ivar write; the rest says where the units
+      #   nested in the body land
       # @param block_parameter — the unit's `&blk` parameter name, if any; a call on it is
       #   forwarding, not an opaque callable
       # @param calls — node-identity table of {Collector::CallRecord}s
@@ -151,11 +155,15 @@ module Rigor
       #   controller's PUBLIC instance methods, so a private helper is never implicitly rendered — while
       #   a project that happens to ship a template of the same name would otherwise hand that
       #   template's effects to the helper.
-      def initialize(singleton:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
+      def initialize(context:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
                      attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
                      plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil,
                      non_public: false)
+        singleton = context.singleton?
         @singleton = singleton
+        # The context at the walk's current position. It starts as the body's own and moves only inside a
+        # block or `class << self` body that rebinds `self`; the unit's singleton bit does not move with it.
+        @context = context
         @block_parameter = block_parameter
         @calls = calls
         @attribution = attribution
@@ -208,7 +216,8 @@ module Rigor
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
-      # block becomes that method's body. Each is `[name, singleton, body_node, parameters_node]`.
+      # block becomes that method's body. Each is `[name, keyed singleton, body context, body_node,
+      # parameters_node]`, the side and context being the {DefinitionContext}'s answer at the definition.
       attr_reader :nested
 
       # Whether this body reaches `super` — an override that delegates upward still runs whatever the
@@ -281,9 +290,22 @@ module Rigor
           @block_stack.push(node)
           node.rigor_each_child { |child| walk(child) }
           @block_stack.pop
+        elsif node.is_a?(Prism::CallNode) || node.is_a?(Prism::SingletonClassNode)
+          walk_rebinding(node)
         else
           node.rigor_each_child { |child| walk(child) }
         end
+      end
+
+      # The children of a node one of which may run under another {DefinitionContext} — a `class_eval`
+      # block, a `class << self` body — so a unit nested there is keyed where Ruby defines it.
+      def walk_rebinding(node)
+        outer = @context
+        node.rigor_each_child do |child|
+          @context = outer.for_child(node, child)
+          walk(child)
+        end
+        @context = outer
       end
 
       # Whether the walk is entering a construct whose body may not run. A `BlockNode` answers from the
@@ -300,13 +322,16 @@ module Rigor
       def unit_boundary?(node)
         case node
         when Prism::DefNode
-          @nested << [node.name.to_s, !node.receiver.nil?, node.body, node.parameters]
+          singleton, context = @context.def_target(node)
+          @nested << [node.name.to_s, singleton, context, node.body, node.parameters]
           true
         when Prism::CallNode
           declared = self.class.define_method_unit(node)
           return false unless declared
 
-          @nested << declared
+          name, body, parameters = declared
+          singleton, context = @context.define_method_target
+          @nested << [name, singleton, context, body, parameters]
           add(DEFINE_METHOD, MUTATE_STATIC)
           true
         else

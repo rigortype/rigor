@@ -41,14 +41,34 @@ Effect units are keyed by the existing symbol tables:
 | Unit | Key |
 | --- | --- |
 | instance method | `Class#method` |
-| singleton method (`def self.x`, a `class << self` body) | `Class.method` |
+| singleton method (`def self.x`, a `def` in `class << self`, and the other shapes in § Which side a definition lands on) | `Class.method` |
 | `def` outside any class body | `<toplevel>#method` (`ScopeIndexer::TOP_LEVEL_DEF_KEY`) |
-| `define_method(:literal) { … }` | `Class#literal`, the block as its body |
-| `attr_reader` / `attr_accessor` reader | `Class#name`, synthesised ∅ |
-| `attr_writer` / `attr_accessor` writer | `Class#name=`, synthesised `mutate.self` |
+| `define_method(:literal) { … }` | `Class#literal`, or `Class.literal` where `self` is the singleton class; the block as its body |
+| `attr_reader` / `attr_accessor` reader | `Class#name`, synthesised ∅ (`Class.name` where `self` is the singleton class) |
+| `attr_writer` / `attr_accessor` writer | `Class#name=`, synthesised `mutate.self` (`Class.name=` and `mutate.static` where `self` is the singleton class, since it writes the class object's ivar) |
 | a **template unit** (#392) | `view:<logical_name>` — the whole compiled file as one unit |
 
 Reopenings **union**: every `def` of one key, in any file, joins into one summary. Runtime last-wins is unknowable at analysis time, so the union is the sound reading.
+
+### Which side a definition lands on
+
+A unit is keyed on the side Ruby defines the method on. It also carries a second bit: whether its body runs on a class. That is the singleton bit § Origins and § Ownership read. `Effects::DefinitionContext` computes both from two facts that Ruby keeps apart:
+
+- A receiver-less `def` lands on the **default definee**. That is the class the lexically enclosing body opened, or its singleton class inside `class << self`. A method body does not move it, and neither does an ordinary block. So `def inner` inside `def self.outer` defines `Class#inner`, and inside a `def` in `class << self` it defines `Class.inner`. A method of the singleton class runs on the class, and a method of the class runs on an instance.
+- `define_method` and `attr_*` are calls on **`self`**. They define instance methods of whatever module `self` is: `Class#x` inside `def self.setup`, where `self` is the class, and `Class.x` inside `class << self`, where `self` is the singleton class. A `define_method` block keeps the default definee it closed over.
+
+A nested unit's side is read from the context at its definition, never from the enclosing unit's bit. `def self.outer` runs on the class, but a `def` nested in it defines an instance method.
+
+Only syntax that names the new `self` moves either fact. That is `class << self`, and a block given to `class_eval`, `instance_eval` or one of their aliases (`class_exec`, `module_eval`, `module_exec`, `instance_exec`) whose receiver is `self`, spelled or implicit, or `singleton_class`. `class_eval` makes its receiver both `self` and the definee. `instance_eval` makes its receiver `self` and the receiver's singleton class the definee, so a `def` inside `instance_eval` in a class body is `Class.x` while a `define_method` there is `Class#x`. These are the rules [`macro-substrate.md`](macro-substrate.md) states for `ScopeIndexer`'s tables. Those tables record fewer of these shapes (no nested `def`, for one), and where they record a shape they put it on the same side.
+
+What the syntax does not decide keeps the enclosing context, and the unit stays keyed under the enclosing class:
+
+- `Other.class_eval { def x }` and `obj.instance_eval { def x }` define on a class or an object the scanner does not key.
+- A `def self.x` in an instance method defines a method on one object. No key names that, so it stays `Class.x`, and its body is scanned as running on an instance, because it does. This is the one shape whose key and body bit differ.
+- A `def self.x` inside `class << self` defines a method on the singleton class's own singleton class, and stays `Class.x`.
+- A `define_method` in an instance method raises at run time unless the instance is a module, and stays `Class#x`.
+
+A `class << expr` in a class body is read as `class << self` whatever `expr` is, as it always has been.
 
 A `define_method` with a literal name is a discovery extension made in the effects scanner, not in `ScopeIndexer`: the def-node tables skip it, and nothing outside effects needs it yet.
 
@@ -78,12 +98,12 @@ Language constructs, by origin name:
 | `$g = …` and its operator forms | `gvar-write` | `global.write` |
 | `@@cv` read | `cvar-read` | `global.read` |
 | `@@cv` write | `cvar-write` | `mutate.static` |
-| `@iv` write in an instance-method body | `ivar-write` | `mutate.self` |
-| `@iv` write in a singleton-method body | `ivar-write` | `mutate.static` |
+| `@iv` write in a body that runs on an instance (§ Which side a definition lands on) | `ivar-write` | `mutate.self` |
+| `@iv` write in a body that runs on a class | `ivar-write` | `mutate.static` |
 | `alias` / `undef` in a body | `alias` / `undef` | `mutate.static` |
 | `define_method` in a body | `define-method` | `mutate.static` |
 | a mutating call, by receiver ownership | `receiver-mutation` | `mutate.self` / `mutate.instance` / `mutate.local` / `mutate.static` |
-| an `attr_writer`'s synthesised body | `attr-writer` | `mutate.self` |
+| an `attr_writer`'s synthesised body | `attr-writer` | `mutate.self` (`mutate.static` for one in `class << self`) |
 
 Catalogued origins are keyed by the callee key the row matched (`catalogue:Kernel#puts`, `catalogue:Time.now`).
 
@@ -108,9 +128,9 @@ The label then follows the receiver's ownership, which is a syntactic question:
 
 A receiver that is itself one of those allocations (`{}.compare_by_identity`, `raw.dup.force_encoding(e)`) is `mutate.local` with no escape analysis: each evaluation allocates a new object, and a core mutator hands its receiver to no other code, so nothing can observe the object change. Without this, `@refs = {}.compare_by_identity` read as `unknown-ownership`, and so did every method that built an identity hash, with the taint reaching each constructor caller through `.new`.
 
-`new` witnesses an allocation only on a receiver the author wrote as a class object: a constant path (`Foo.new`, `Foo::Bar.new`), a `class` call (`self.class.new`, `other.class.new`), or `self`, explicit or implicit, in a singleton-method body (`LocalOwnership.constructor?`). On any other receiver it may be a method that only shares the name. An ActiveRecord association's `new` builds a record into the association's own target, so `user.posts.new.title = "x"` changes an object the caller reaches through `user`; the gem's `new` gives no edge that would carry that to the caller, so the write could read as `mutate.local`, exhaustive and trivial. `self` in an instance method is the same receiver spelt differently, because an association extension's `new` is the association's. Each is `unknown-ownership` instead, in both the receiver form and the local form (`post = user.posts.new`). The price is a class the spelling does not show: one held in a variable (`klass.new`), returned by a call (`formatter_for(x).new`, `Class.new(Base).new`), chosen by an expression (`(cond ? A : B).new`), or `self` in a method keyed as an instance method although it runs on a class (a `define_method` inside `class << self`, a `def` inside `singleton_class.class_eval`, `module ClassMethods`, `class_methods do`). A method whose only write is to such an object is no longer trivial, and `sig-gen` withholds the `%a{pure}` it used to emit for it. Across the survey corpus the narrowing moved 5 of 45,437 units, every one already non-exhaustive for another reason, and changed no unit's exhaustiveness. It cannot change a finding in either direction: a taint never produces one, and `mutate.local` is tolerated by every envelope. What it corrects is the proven lane that `rigor effects --pure`, the report's trivial reading and the snapshot's omission rule read. `sig-gen` reads that lane too, but its unclaimed-callee gate already withheld `%a{pure}` from the association case unless that `new` carries a bound of its own. With rigor-activerecord loaded it does carry one, and the bound is `mutate.self`, not `%a{pure}`: the plugin types an association reader as `Relation`, and the proxy it returns builds into the association's target. So the `new` call adds a declared `mutate.self` that withholds the annotation as well. `dup` and `clone` stay allocating on any receiver ([ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md)).
+`new` witnesses an allocation only on a receiver the author wrote as a class object: a constant path (`Foo.new`, `Foo::Bar.new`), a `class` call (`self.class.new`, `other.class.new`), or `self`, explicit or implicit, in a body that runs on a class (`LocalOwnership.constructor?`). On any other receiver it may be a method that only shares the name. An ActiveRecord association's `new` builds a record into the association's own target, so `user.posts.new.title = "x"` changes an object the caller reaches through `user`; the gem's `new` gives no edge that would carry that to the caller, so the write could read as `mutate.local`, exhaustive and trivial. `self` in an instance method is the same receiver spelt differently, because an association extension's `new` is the association's. Each is `unknown-ownership` instead, in both the receiver form and the local form (`post = user.posts.new`). The price is a class the spelling does not show: one held in a variable (`klass.new`), returned by a call (`formatter_for(x).new`, `Class.new(Base).new`), chosen by an expression (`(cond ? A : B).new`), or `self` in a method that runs on a class although it is an instance method of a module. That module is extended onto the class at run time (`module ClassMethods` with `base.extend`, ActiveSupport's `class_methods do`), and the syntax of the method does not say onto which class. A method whose only write is to such an object is no longer trivial, and `sig-gen` withholds the `%a{pure}` it used to emit for it. Across the survey corpus the narrowing moved 5 of 45,437 units, every one already non-exhaustive for another reason, and changed no unit's exhaustiveness. It cannot change a finding in either direction: a taint never produces one, and `mutate.local` is tolerated by every envelope. What it corrects is the proven lane that `rigor effects --pure`, the report's trivial reading and the snapshot's omission rule read. `sig-gen` reads that lane too, but its unclaimed-callee gate already withheld `%a{pure}` from the association case unless that `new` carries a bound of its own. With rigor-activerecord loaded it does carry one, and the bound is `mutate.self`, not `%a{pure}`: the plugin types an association reader as `Relation`, and the proxy it returns builds into the association's target. So the `new` call adds a declared `mutate.self` that withholds the annotation as well. `dup` and `clone` stay allocating on any receiver ([ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md)).
 
-The receiver form rests on the same allocation witness as the local rule, and shares its remaining holes. A class's `new` can still return an object something else holds (a caching `def self.new`), an `initialize` can publish `self` (`@@all << self`), an object can override `class` to answer something that is not a class, and a project `dup` can return `self`. The singleton gate trusts the unit's key, which is singleton in three places where Ruby's `self` is not a class: a `def` nested in `def self.outer`, a literal-name `define_method` in a singleton method (both define instance methods), and a block that rebinds `self` (`posts.instance_exec { new }`). Where that method is the project's own, its summary still reaches the caller through its edge (`mutate.self`, `mutate.static`), so the caller is not trivial on the strength of the `mutate.local` alone; a gem's method gives no such edge.
+The receiver form rests on the same allocation witness as the local rule, and shares its remaining holes. A class's `new` can still return an object something else holds (a caching `def self.new`), an `initialize` can publish `self` (`@@all << self`), an object can override `class` to answer something that is not a class, and a project `dup` can return `self`. The singleton gate reads the bit the unit's body is scanned with (§ Which side a definition lands on), and there is one bit per unit. A block inside the body that rebinds `self` keeps it, so in a singleton method `posts.instance_exec { new }` reads the proxy's `new` as the class's. Where that method is the project's own, its summary still reaches the caller through its edge (`mutate.self`, `mutate.static`), so the caller is not trivial on the strength of the `mutate.local` alone; a gem's method gives no such edge.
 
 An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 

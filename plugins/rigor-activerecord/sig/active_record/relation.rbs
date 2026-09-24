@@ -94,12 +94,36 @@
 #
 # The writers a plain Relation does not define (`<<`, `push`,
 # `append`, `concat`, `replace`, `clear`) are rows in the plugin's
-# `effect_attributions:` rather than declarations here. Declaring
-# them here would claim a Relation defines them, and would change
-# how they type. The same rows cover `delete` / `destroy`. A plain
-# Relation does define those, as `where(id:).delete_all` and
-# `find(id).destroy`, and the rows' labels cover both. They are not
-# declared here because that too would change how they type.
+# `effect_attributions:` rather than declarations here. The same rows
+# cover `delete` / `destroy`, which a Relation does define, as
+# `delete(id_or_array)` and `destroy(id)`, but the proxy overrides as
+# `delete(*records)` and `destroy(*records)`. A declaration here
+# would need a parameter list and a return wide enough for both, and
+# it would give the two methods a second effect channel next to
+# their rows.
+#
+# ## Every parameter list here also admits the overrides
+#
+# The rule above holds for parameter lists as well as effect bounds.
+# A call on the proxy or on an AssociationRelation is checked against
+# the parameter list declared here, so a declaration must accept
+# every argument an override accepts, or valid Rails draws
+# `call.wrong-arity`. Of the overrides this file declares, only the
+# proxy's `delete_all(dependent = nil)` accepts more than the
+# Relation's `delete_all`. It takes `:nullify` or `:delete_all`, so
+# `delete_all` declares an optional argument. The price is that
+# `delete_all(:nullify)` on a plain Relation or on an
+# AssociationRelation (`user.posts.where(…)`), neither of which
+# overrides it, raises `ArgumentError` and goes unreported.
+#
+# Of the rest, the `insert_all` family's `(...)` methods and the
+# proxy's `delegate … to: :scope` block (the query builders and
+# `scoping`) forward their arguments unchanged to the Relation's own
+# methods, and the proxy's other overrides (`find`, `last`, `take`,
+# `build`, `create`, `calculate`, `pluck`, …) take no more than the
+# declarations here. `delete` and `destroy`, whose overrides take
+# more arguments than the Relation's, stay undeclared for the
+# reasons above.
 #
 # ## A writer that also queries carries the read too
 #
@@ -370,8 +394,11 @@ module ActiveRecord
     # --- whole-relation persistence ---
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def update_all: (untyped) -> Integer
+    # The optional argument is the association proxy's `dependent`
+    # (see the header). A plain Relation's and an AssociationRelation's
+    # `delete_all` take none.
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
-    def delete_all: () -> Integer
+    def delete_all: (?untyped dependent) -> Integer
     %a{rigor:v1:effect io.db.read, io.db.write, mutate.self}
     def destroy_all: () -> Array[Elem]
     %a{rigor:v1:effect io.db.read, io.db.write}

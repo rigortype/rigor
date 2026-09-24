@@ -103,13 +103,12 @@ module Rigor
           all? any? none? one? include? member? first count sum
         ].freeze
 
-        # The writers an association's `CollectionProxy` defines and a plain Relation does not, plus `delete`
-        # / `destroy`, which a plain Relation defines too: as `where(id:).delete_all` and `find(id).destroy`,
-        # both inside this row's labels. Each adds records to the
-        # association's in-memory target or removes them from it. Depending on whether the owner is saved
-        # and on the association's `dependent:` option, it may also read, write, and open a transaction, so
-        # the row names all three rather than the parent `io.db`, which `--label io.db.write` would not
-        # match.
+        # The writers an association's `CollectionProxy` defines, or for `delete` / `destroy` overrides. A
+        # plain Relation's own `delete` / `destroy` are `where(id:).delete_all` and `find(id).destroy`, both
+        # inside this row's labels. Each adds records to the association's in-memory target or removes them
+        # from it. Depending on whether the owner is saved and on the association's `dependent:` option, it
+        # may also read, write, and open a transaction, so the row names all three rather than the parent
+        # `io.db`, which `--label io.db.write` would not match.
         #
         # The mutation is spelt from the call site, as every row here is, and bare `mutate` is the label
         # for a receiver that is not the caller's `self`: the proxy is an object the caller holds, like the
@@ -188,9 +187,9 @@ module Rigor
             rows(RELATION, PROXY_WRITERS, PROXY_WRITE,
                  why: "a CollectionProxy writer: it changes the association's target and, for a saved " \
                       "owner, the rows behind it. Keyed on Relation because that is the type the plugin " \
-                      "gives an association reader. A plain Relation either has no such method or, for " \
-                      "`delete` / `destroy`, deletes by id or finds and destroys, which stays inside the " \
-                      "bound. The model's save callbacks are not edged")
+                      "gives an association reader. A plain Relation either has no such method or, through " \
+                      "its own `delete` / `destroy`, deletes by id or finds and destroys, which stays inside " \
+                      "the bound. The model's save callbacks are not edged")
         end
 
         # Two rows per selector, because raw SQL is written two ways and only one of them names a type.

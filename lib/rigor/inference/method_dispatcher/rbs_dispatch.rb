@@ -1014,6 +1014,7 @@ module Rigor
             record_dispatch_provenance(method_definition, candidates.first, scope, call_node, call_site)
             join_candidate_returns(
               candidates,
+              method_definition: method_definition,
               self_type: self_type, instance_type: instance_type, type_vars: type_vars,
               args: args, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
               alias_expander: environment.rbs_loader
@@ -1053,17 +1054,20 @@ module Rigor
           # A candidate whose return does not translate leaves the join incomplete — decline (fail-soft
           # to Dynamic downstream) rather than answer a join missing an arm the runtime can take.
           # rubocop:disable-next Metrics/ParameterLists
-          def join_candidate_returns(candidates, self_type:, instance_type:, type_vars:, args:, block_type:,
-                                     scope:, call_node:, call_site:, alias_expander: nil)
+          def join_candidate_returns(candidates, method_definition:, self_type:, instance_type:, type_vars:, args:,
+                                     block_type:, scope:, call_node:, call_site:, alias_expander: nil)
             returns = candidates.map do |method_type|
               full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
-              RbsTypeTranslator.translate(
+              returned = RbsTypeTranslator.translate(
                 method_type.type.return_type,
                 self_type: self_type,
                 instance_type: instance_type,
                 type_vars: full_type_vars,
                 alias_expander: alias_expander
               )
+              next returned unless combining_overload?(method_definition, method_type, call_site)
+
+              class_level_sum(returned, method_type, args)
             end
             return returns.first if returns.size == 1
             return nil if returns.any?(&:nil?)
@@ -1079,6 +1083,94 @@ module Rigor
                                            scope: scope, call_node: call_node, call_site: call_site)
             compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
                                                            call_site: call_site)
+          end
+
+          # Whether the overload is one `Enumerable` declares for `sum`, whose declared return the tier reads
+          # at class level ({#class_level_sum}). Every overload spells its return as the sides the method adds
+          # together, as a union or as one variable that covers both: `() -> (E | Integer)`,
+          # `[T] () { (E) -> T } -> (Integer | T)`, `[T] (?T) -> (E | T)` and `[U] (?U) { (E) -> U } -> U`.
+          # A value is not closed under that addition, so the value-pinned bindings of `E` (from the
+          # receiver), `T` (from the argument, issue #303) and the block's type do not describe the result:
+          # `[1, 2].each.sum(0.0)` is `3.0`, which `0.0 | 1 | 2` misses. `Array#fetch: [T] (int, T default)
+          # -> (E | T)` is spelled the same way but
+          # returns the default object itself, so the signature alone cannot tell the two apart and the
+          # declaring module does. A class that declares its own `sum` states its own contract and keeps it.
+          def combining_overload?(method_definition, method_type, call_site)
+            return false unless call_site[1] == :sum
+
+            type_def = OptimisticOrigin.matching_type_def(method_definition, method_type)
+            !type_def.nil? && type_def.defined_in.to_s.delete_prefix("::") == "Enumerable"
+          end
+
+          # Apart from the range shortcut ({#range_coerced_seed?}), CRuby's `enum_sum` adds each value to an
+          # accumulator that starts at the seed. Between two of these classes `+` answers the later one
+          # (`1 + 0.5` and `0.5 + 1` are Floats, `1 + 1r` is a Rational), so the accumulator's class only ever
+          # moves up this order.
+          SUM_PROMOTION_RANKS = { "Integer" => 0, "Rational" => 1, "Float" => 2, "Complex" => 3 }.freeze
+          private_constant :SUM_PROMOTION_RANKS
+
+          # CRuby's seed when the call passes none.
+          SUM_DEFAULT_SEED = ["Integer"].freeze
+          private_constant :SUM_DEFAULT_SEED
+
+          # The seeds CRuby's integer-range shortcut adds to with plain `+` ({#range_coerced_seed?}).
+          RANGE_ADDED_SEEDS = Set["Integer", "Float"].freeze
+          private_constant :RANGE_ADDED_SEEDS
+
+          # The class-level reading of a `sum` overload's translated return, or `Dynamic[top]` when a member
+          # widens to none of the value classes {#value_classes} admits. A class, not a value, is what the
+          # addition keeps closed: `sum` over `0.0` and `1 | 2` is `3.0`, a Float, and over `1.5 | 2.5` is
+          # `4.0`.
+          #
+          # The union of the members' classes would still read wider than the runtime, because the seed
+          # promotes every value it absorbs: `ints.each.sum(0.0)` is always a Float, and `Float | Integer`
+          # fires `def.return-type-mismatch` against a declared `-> Float` on correct code. So each class is
+          # taken as the class the accumulator reaches from each seed class ({#promoted_class}), and the seed
+          # itself stays for a receiver that yields nothing: `ints.each.sum(0.0)` reads `Float`, and
+          # `floats.each.sum(0)` reads `Float | Integer`, whose Integer is the empty receiver's `0`.
+          def class_level_sum(type, method_type, args)
+            return nil if type.nil?
+
+            members = value_classes(type)
+            return Type::Combinator.untyped if members.nil?
+
+            seeds = sum_seed_classes(method_type, args)
+            return Type::Combinator.untyped if seeds.nil? || range_coerced_seed?(method_type, seeds)
+
+            reached = seeds.flat_map { |seed| members.map { |member| promoted_class(seed, member) } }
+            Type::Combinator.union(*(seeds | reached).map { |name| Type::Combinator.nominal_of(name) })
+          end
+
+          # Whether CRuby may skip the accumulator and read the seed as a Float. With no block and a seed that
+          # is not a Float, `enum_sum` sums a range with Integer endpoints by Gauss's formula and adds the
+          # result to the seed. An Integer seed takes plain `+`; any other goes through `Integer#coerce`, which
+          # converts it with `Float()`: `(1..3).sum(0r)` is `6.0` and `(1..3).sum("1.5")` is `7.5`. Any object
+          # that answers `begin`, `end` and `exclude_end?` takes the same path, so the receiver's class cannot
+          # rule it out.
+          def range_coerced_seed?(method_type, seeds)
+            method_type.block.nil? && seeds.any? { |seed| !RANGE_ADDED_SEEDS.include?(seed) }
+          end
+
+          # The classes of the value `sum` starts from: the argument when the overload takes one and the call
+          # passes it, and CRuby's `0` otherwise.
+          def sum_seed_classes(method_type, args)
+            fun = method_type.type
+            return SUM_DEFAULT_SEED if args.empty? || !fun.respond_to?(:required_positionals)
+            return SUM_DEFAULT_SEED if fun.required_positionals.empty? && fun.optional_positionals.empty?
+
+            value_classes(args.first)
+          end
+
+          # The class the accumulator reaches when a `member` value is added to a `seed`-class one. `+` does not
+          # add a String and a number (`"" + 1` and `1 + ""` raise), so such a pair keeps the member's class,
+          # which reads wider than the runtime rather than narrower. The range shortcut that does convert a
+          # String seed never reaches here ({#range_coerced_seed?}).
+          def promoted_class(seed, member)
+            seed_rank = SUM_PROMOTION_RANKS[seed]
+            member_rank = SUM_PROMOTION_RANKS[member]
+            return member if seed_rank.nil? || member_rank.nil?
+
+            seed_rank > member_rank ? seed : member
           end
 
           # Record the `void → top` recovery when the selected overload declares `-> void` and both `scope` and

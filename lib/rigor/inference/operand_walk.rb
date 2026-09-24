@@ -57,9 +57,17 @@ module Rigor
 
         types = {}.compare_by_identity
         @entries.reverse_each do |node, entry, type|
-          types[node] = type || entry.type_of(node, tracer: tracer, operand_types: types)
+          types[node] = type || self.class.type_of(entry, node, tracer, types)
         end
         types
+      end
+
+      # `node`'s type from `scope`, answering each node `operand_types` holds with its value there. `Scope#type_of`
+      # itself is plugin-facing and keeps its surface, so the table goes to the typer directly.
+      def self.type_of(scope, node, tracer, operand_types)
+        return scope.type_of(node, tracer: tracer) if operand_types.nil?
+
+        ExpressionTyper.new(scope: scope, tracer: tracer, operand_types: operand_types).type_of(node)
       end
     end
   end

@@ -2318,7 +2318,7 @@ module Rigor
 
         walk = OperandWalk.new(walk_recorder)
         after = thread_operand_children(node, scope, walk, scope)
-        [scope.type_of(node, tracer: tracer, operand_types: walk.types(tracer)), after]
+        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), after]
       end
 
       # `expr rescue alt`. The rescue arm runs only when `expr` raised, possibly after some of its writes, so the arm
@@ -2333,7 +2333,7 @@ module Rigor
         after_expression = thread_operand(node.expression, scope, walk, scope)
         after_rescue = thread_operand(node.rescue_expression, join_with_nil_injection(scope, after_expression), walk,
                                       scope)
-        type = scope.type_of(node, tracer: tracer, operand_types: walk.types(tracer))
+        type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
         return [type, after_expression] if branch_unconditionally_exits?(node.rescue_expression)
 
         [type, join_with_nil_injection(after_expression, after_rescue)]
@@ -2427,7 +2427,7 @@ module Rigor
         walk = OperandWalk.new(walk_recorder)
         invoked = call_operand_scope(node, walk, scope)
         operand_types = walk.types(tracer)
-        call_type = scope.type_of(node, tracer: tracer, operand_types: operand_types)
+        call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
         # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
         # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
         # block-param and adopt it as the call's return type.
@@ -2526,7 +2526,7 @@ module Rigor
       # A call operand's type, read from where the call's operands were typed ({#operand_scope}), with each later
       # operand's own value ({OperandWalk}) where the call has one.
       def type_operand(node)
-        operand_scope.type_of(node, tracer: tracer, operand_types: @operand_types)
+        OperandWalk.type_of(operand_scope, node, tracer, @operand_types)
       end
 
       # The scope this evaluator types a call's receiver and arguments under: where they were evaluated, which
@@ -4387,7 +4387,7 @@ module Rigor
           # arity-unknown rather than as the untyped index it would type as (issue #1140).
           next nil if call_node.name == :[]= && i < list.size - 1 && arg.is_a?(Prism::SplatNode)
 
-          block_entry.type_of(arg, tracer: tracer, operand_types: operand_types)
+          OperandWalk.type_of(block_entry, arg, tracer, operand_types)
         end
       rescue StandardError
         []

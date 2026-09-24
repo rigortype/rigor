@@ -155,14 +155,15 @@ names both. `find_or_create_by` is `find_by` and then a create, and
 unique index. `destroy_all` / `destroy_by` load the records they
 destroy. `update(!)` finds or loads the records it updates.
 `update_all` / `delete_all`, and so `touch_all` / `delete_by`, first
-select the primary keys when the relation eager-loads a collection
-under a limit or offset. The same holds for the class-side rows,
-because Rails delegates `Model.update_all` and the rest to
-`Model.all`. `create`, `insert_all`, `upsert_all` and the counter
-writers stay write-only on a model class. On a relation, `create`
-also reads, because on a `has_many :through` a `has_one` it loads the
-record the `has_one` replaces. `relation.rbs` cites the Rails path
-each read comes from.
+select the primary keys in some eager-loading, limited relations;
+`relation.rbs` states the full condition. The same holds for the
+class-side rows, because Rails delegates `Model.update_all` and the
+rest to `Model.all`. `reset_counters` counts before it writes.
+`create`, `insert_all`, `upsert_all`, `update_counters`,
+`increment_counter` and `decrement_counter` stay write-only on a model
+class. On a relation, `create` also reads, because on a
+`has_many :through` a `has_one` it loads the record the `has_one`
+replaces. `relation.rbs` cites the Rails path each read comes from.
 
 Schema reflection is not counted as a read, and neither are the
 model's validators and callbacks. The callback edge below carries a

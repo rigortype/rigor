@@ -3932,6 +3932,39 @@ end
     end
   end
 
+  # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are
+  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper. Asserted
+  # on the tables because a read declines to project a `Union` facet at all, so no read tells the two apart there.
+  # The read-side face is `spec/rigor/inference/mutated_constant_census_spec.rb`.
+  describe "census widening of a mutated entry" do
+    it "unpins each carrier member of a mutated constant, and leaves an unmutated twin exact" do
+      program = parse(<<~RUBY)
+        V = ENV["X"] ? { a: 1 } : [1]
+        V << 2
+        W = ENV["X"] ? { a: 1 } : [1]
+      RUBY
+      table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .in_source_constants
+
+      expect(table["V"].describe).to eq("Dynamic[Array[1 | Dynamic[top]] | { a: 1, ... }]")
+      expect(table["W"].describe).to eq("[1] | { a: 1 }")
+    end
+
+    it "opens a mutated class variable's shape, and leaves an unmutated twin closed" do
+      program = parse(<<~RUBY)
+        class C
+          def init = (@@h = { a: 1 }) && (@@k = { a: 1 })
+          def mutate = @@h.default = 0
+        end
+      RUBY
+      cvars = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
+                             .class_cvars_for("C")
+
+      expect(cvars[:@@h].describe).to eq("Dynamic[{ a: 1, ... }]")
+      expect(cvars[:@@k].describe).to eq("{ a: 1 }")
+    end
+  end
+
   # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
   # instance-ancestor SEARCH order. It adds the prepend ORDER and KIND the include table cannot carry
   # (that one keeps every mixin in search order since #1173 — prepends ahead of includes — but is read

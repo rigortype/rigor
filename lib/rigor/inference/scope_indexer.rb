@@ -116,7 +116,7 @@ module Rigor
         # the file's OWN mutations of it: `ISPELL_STATUS = {}` with a sibling method writing
         # `ISPELL_STATUS[:key] = param` must not fold reads through the closed empty shape. One census walk
         # collects the mutated names; the two accumulators below widen their entries to the Dynamic-wrapped
-        # form so reads stay honest without licensing the negative rules.
+        # form, contents unpinned ({#census_mutated_type}), so reads stay honest without licensing the negative rules.
         literal_mutations = collect_literal_receiver_mutations(root)
 
         class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
@@ -2203,7 +2203,7 @@ module Rigor
           existing = widened[name]
           next if existing.nil? || existing.is_a?(Type::Dynamic)
 
-          widened[name] = Type::Combinator.dynamic(existing)
+          widened[name] = census_mutated_type(existing)
         end
         widened.freeze
       end
@@ -2221,11 +2221,37 @@ module Rigor
             existing = updated[cvar]
             next if existing.nil? || existing.is_a?(Type::Dynamic)
 
-            updated[cvar] = Type::Combinator.dynamic(existing)
+            updated[cvar] = census_mutated_type(existing)
           end
           widened[class_name] = updated.freeze
         end
         widened.freeze
+      end
+
+      # The type a mutated constant or class variable is read as. The census records the NAME a call mutated and not
+      # the call, so it cannot say what was stored, and `Dynamic` alone does not say it either: a read resolves through
+      # the static facet's RBS projection, where a closed `HashShape` answers its known values for any key and a
+      # `Tuple` its known elements for any index. `H = { a: 1 }; H.default = 0` read `H[:b]` as `1`, and
+      # `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
+      #
+      # Each carrier member therefore stops claiming its contents are complete, as it would under an unknown store: a
+      # shape reopens (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values,
+      # and a tuple becomes the `Array` of its elements plus the same arm. The known values stay, so a present key
+      # still reads its seed next to the arm; the arm is what keeps a rewrite of it from folding.
+      def census_mutated_type(type)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        Type::Combinator.dynamic(Type::Combinator.union(*members.map { |member| census_unpinned_carrier(member) }))
+      end
+
+      def census_unpinned_carrier(member)
+        case member
+        when Type::HashShape then HashLookupMutation.open_shape(member) || member
+        when Type::Tuple
+          Type::Combinator.nominal_of(
+            "Array", type_args: [Type::Combinator.union(*member.elements, Type::Combinator.untyped)]
+          )
+        else member
+        end
       end
 
       # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the

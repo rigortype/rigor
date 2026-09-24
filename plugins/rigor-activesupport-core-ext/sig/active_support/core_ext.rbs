@@ -1369,6 +1369,10 @@ class Array[unchecked out Elem]
   def fifth: () -> Elem?
   %a{pure}
   def forty_two: () -> Elem?
+  %a{pure}
+  def second_to_last: () -> Elem?
+  %a{pure}
+  def third_to_last: () -> Elem?
 
   # `core_ext/array/grouping`
   %a{pure}
@@ -1399,6 +1403,9 @@ class Array[unchecked out Elem]
 
   # `core_ext/array/extract`
   def extract!: () { (Elem) -> bool } -> Array[Elem] # NOT %a{pure}: bang, mutates in place.
+
+  # `core_ext/array/extract_options`
+  def extract_options!: () -> Hash[untyped, untyped] # NOT %a{pure}: pops the trailing options Hash.
 
   # `core_ext/object/blank` / `core_ext/enumerable` — both
   # ActiveSupport additions, shipped on Array specifically.
@@ -1444,6 +1451,11 @@ module Enumerable[unchecked out Elem]
   def sole: () -> Elem
   %a{pure}
   def compact_blank: () -> Array[Elem]
+  %a{pure}
+  def many?: () -> bool
+           | () { (Elem) -> boolish } -> bool
+  %a{pure}
+  def in_order_of: (Symbol | String key, Array[untyped] series, ?filter: bool) -> Array[Elem]
 end
 
 # ---------------------------------------------------------------
@@ -1521,6 +1533,10 @@ class Hash[unchecked out K, unchecked out V]
   %a{pure}
   def compact_blank: () -> Hash[K, V]
   def compact_blank!: () -> self # NOT %a{pure}: bang (`delete_if`), mutates in place.
+
+  # `core_ext/array/extract_options`
+  %a{pure}
+  def extractable_options?: () -> bool
 
   # `core_ext/hash/reverse_merge`
   %a{pure}

@@ -366,6 +366,42 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     end
   end
 
+  # `many?` and the rest of the `core_ext/enumerable` / `core_ext/array` rows the bundle had not declared —
+  # the plugin twin of `spec/rigor/environment/activesupport_overlay_enumerable_spec.rb`.
+  describe "the core_ext/enumerable and core_ext/array gaps" do
+    def dumps(result)
+      result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:method_name)
+    end
+
+    it "resolves many?, in_order_of and the Array readers to real types" do
+      source = <<~RUBY
+        Rigor.dump_type([1, 2].many?)
+        Rigor.dump_type({ a: 1 }.many? { |k, v| v > 0 })
+        Rigor.dump_type([1, 2].in_order_of(:itself, [2, 1]))
+        Rigor.dump_type([1, 2].second_to_last)
+        Rigor.dump_type([1, 2].third_to_last)
+        Rigor.dump_type([1, { a: 1 }].extract_options!)
+        Rigor.dump_type({ a: 1 }.extractable_options?)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(undefined_methods(result)).to be_empty
+      expect(dumps(result)).to eq(
+        ["bool", "bool", "Array[1 | 2]", "1 | 2 | nil", "1 | 2 | nil", "Hash[Dynamic[top], Dynamic[top]]", "bool"]
+      )
+    end
+
+    it "still witnesses a genuinely undefined method on an Array and a Hash receiver" do
+      result = run_plugin(source: "[1, 2].many_things?\n{ a: 1 }.no_such_method_here\n")
+
+      expect(undefined_methods(result)).to eq(%w[many_things? no_such_method_here])
+    end
+  end
+
   # Issue #670 — the `Date` / `DateTime` half of #658. Both are CLOSED core classes carrying the same
   # undeclared `DateAndTime::Calculations` / `Zones` surface, so the same omission-is-a-false-positive
   # rule applies. What makes it more than "#658 again for two more classes" is that `DateTime < Date`:

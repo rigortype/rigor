@@ -120,6 +120,17 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
 
   # Issue #1093. Every decline below is paired with a neighbour that still decomposes, so a construction
   # error that widens everything to `Dynamic[top]` cannot pass the declines on its own.
+  describe ".bind with more back slots than the Tuple has elements" do
+    # The rest's end is clamped at the fronts; left unclamped, a negative end counts from the tuple's end.
+    it "binds an empty rest, as Ruby does" do
+      three = tuple(constant(1), constant(2), constant(3))
+      { "*r, a, b, c, d = xs" => [], "q, *r, e, f, g, h = xs" => [], "*r, i, j, k, l, m = xs" => [],
+        "*r, a, b = xs" => [constant(1)], "a, *r, b, c, d = xs" => [] }.each do |source, middle|
+        expect(described_class.bind(parse_multi_write(source), three)[:r]).to eq(tuple(*middle)), "for #{source}"
+      end
+    end
+  end
+
   describe ".bind_marked over an Array[T] right-hand side" do
     let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:string) { Rigor::Type::Combinator.nominal_of("String") }
@@ -191,6 +202,21 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
         expect(result.types).to eq(a: dyn, r: dyn), "for #{carrier.describe}"
         expect(result.optimistic).to be_empty
       end
+    end
+
+    it "does not mark a slot an optimistic parent leaves exactly nil, past the Tuple's end" do
+      node = parse_multi_write("a, b, c = pair")
+      result = described_class.bind_marked(node, tuple(integer, string), optimistic: true)
+      expect(result.types).to eq(a: integer, b: string, c: constant(nil))
+      expect(result.optimistic).to contain_exactly(:a, :b)
+    end
+
+    it "marks each slot by its element's mark for a literal right-hand side, only through a nested target" do
+      node = parse_multi_write("(p, q), r, s = [pair, 1], [pair], 2")
+      rhs = tuple(tuple(integer, string), tuple(tuple(integer, string)), constant(2))
+      result = described_class.bind_marked(node, rhs, optimistic: [[true, false], [true], false])
+      expect(result.optimistic).to contain_exactly(:p)
+      expect(result.types[:r]).to eq(tuple(tuple(integer, string)))
     end
 
     it "leaves Tuple decomposition unmarked" do

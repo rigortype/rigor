@@ -1,6 +1,6 @@
 ---
 locals:
-  s: '"hi"'
+  s: String
 assertions:
   '1': '"h"'
   '2': 'true'

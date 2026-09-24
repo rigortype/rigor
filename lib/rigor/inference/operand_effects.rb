@@ -4,7 +4,10 @@ require "prism"
 
 require_relative "../source/node_children"
 require_relative "captured_locals"
+require_relative "element_read_widening"
 require_relative "jump_targets"
+require_relative "mutation_widening"
+require_relative "receiver_alias"
 
 module Rigor
   module Inference
@@ -22,9 +25,16 @@ module Rigor
     # expression ({JumpTargets}). A `def`, class or module body is a scope of its own, and `defined?`
     # evaluates nothing, so neither is looked into.
     #
-    # Allocation-free and short-circuiting: the evaluator asks it of every call's operands, and asks it
-    # again of each operand it threads. A found effect stops the recursion without a `return` out of the
-    # child block, which would allocate once per frame it unwinds and make a deep literal quadratic.
+    # An in-place mutation counts on the same terms as a write ({.outliving_mutation?}): a call to a name the
+    # straight-line widening responds to ({MutationWidening::SHAPE_MUTATORS}) on a receiver naming a variable
+    # that outlives the expression. The mutator's widening runs in the evaluator's post-call effects, which a
+    # pure-value operand never reached, so a chained `b.push(2).size`, an argument `puts(b.push(2))` or
+    # `d.map!.with_index { … }` left `b` / `d` on the literal their assignment wrote.
+    #
+    # Short-circuiting and allocation-free outside a mutator-named call: the evaluator asks it of every call's
+    # operands, and asks it again of each operand it threads. A found effect stops the recursion without a
+    # `return` out of the child block, which would allocate once per frame it unwinds and make a deep literal
+    # quadratic.
     module OperandEffects
       LOCAL_WRITE_NODES = CapturedLocals::LOCAL_WRITE_NODES
       OUTLIVING_WRITE_NODES = (
@@ -68,6 +78,7 @@ module Rigor
         return true if LOCAL_WRITE_NODES.include?(klass) && node.depth >= nesting
         return true if OUTLIVING_WRITE_NODES.include?(klass)
         return true if jumps && JUMP_NODES.include?(klass)
+        return true if klass == Prism::CallNode && outliving_mutation?(node, nesting)
         return false if OPAQUE_NODES.include?(klass)
 
         nesting += 1 if SCOPE_NODES.include?(klass)
@@ -77,6 +88,36 @@ module Rigor
         found
       end
       private_class_method :effect?
+
+      # True when `node` is a call the straight-line widening would answer for a variable that outlives the
+      # expression: a {MutationWidening::SHAPE_MUTATORS} name on a receiver whose {ReceiverAlias.mutated_reads},
+      # or the local an element read is rooted at ({ElementReadWidening.element_read_path}, `a[0] << e`), reach
+      # past the blocks between `node` and the expression's root. A block's own local — its parameter, a name it
+      # introduces — is that block's to widen.
+      def outliving_mutation?(node, nesting)
+        return false unless MutationWidening::SHAPE_MUTATORS.include?(node.name)
+
+        receiver = node.receiver
+        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        path = ElementReadWidening.element_read_path(receiver)
+        return outliving_read?(path.first, nesting) if path
+
+        ReceiverAlias.mutated_reads(receiver).any? { |read| outliving_read?(read, nesting) }
+      end
+      private_class_method :outliving_mutation?
+
+      # A local read reaches the expression's own scope when its `depth` does; an `it` read is always the
+      # innermost block's parameter, so only one outside every block in the expression does. An instance
+      # variable, class variable or global always outlives it.
+      def outliving_read?(read, nesting)
+        case read
+        when Prism::LocalVariableReadNode then read.depth >= nesting
+        when Prism::ItLocalVariableReadNode then nesting.zero?
+        else true
+        end
+      end
+      private_class_method :outliving_read?
 
       # The locals (bare names), instance variables and globals (sigil-prefixed names, as {CapturedLocals.bind}
       # reads them) `node` writes on the terms {.any?} counts a write, in first-write order.

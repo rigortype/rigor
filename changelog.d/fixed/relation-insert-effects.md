@@ -1,0 +1,1 @@
+- **[plugins/rigor-activerecord]** `insert`, `insert!` and `upsert` on a relation or an association reader, such as `@posts.insert(row)`, now carry `io.db.write` like `insert_all` instead of reading as pure. ([#1315](https://github.com/rigortype/rigor/pull/1315))

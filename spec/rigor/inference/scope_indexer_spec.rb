@@ -1468,23 +1468,74 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include("init", "refreshed")
         end
 
-        it "lets a later `op=` dispatch on an `&&=` contribution the walk still holds" do
-          # Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the `1.5` the `&&=` stores.
-          program = parse(<<~RUBY)
-            class C
-              def initialize
-                @x = 1
-              end
-              def shrink
-                @x &&= 1.5
-              end
-              def grow
-                @x += 1
-              end
+        describe "an `op=` write, whatever the source order" do
+          # The methods holding an ivar's writes run in any order, so the seed must not depend on the order the
+          # pre-pass walks them in. Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the
+          # `1.5` the `&&=` stores wherever the `+=` is written.
+          def seed_of(*definitions)
+            program = parse("class C\n#{definitions.join("\n")}\nend\n")
+            described_class.index(program, default_scope: default_scope)[program].class_ivars_for("C")[:@x]
+          end
+
+          def float?(type)
+            members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+            members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }
+          end
+
+          scale = {
+            initialize: "def initialize = (@x = 1)",
+            shrink: "def shrink = (@x &&= 1.5)",
+            grow: "def grow = (@x += 1)"
+          }
+
+          scale.keys.permutation.each do |order|
+            it "dispatches on the value an `&&=` stores with the methods in the order #{order.join(", ")}" do
+              expect(float?(seed_of(*scale.values_at(*order)))).to be(true)
             end
-          RUBY
-          members = seed_members(program, "C", :@x)
-          expect(members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }).to be(true)
+          end
+
+          it "seeds the same type in every order" do
+            seeds = scale.keys.permutation.map { |order| seed_of(*scale.values_at(*order)) }
+            expect(seeds.uniq.size).to eq(1)
+          end
+
+          it "adds no Float when nothing but the `&&=` literal stores one" do
+            # The control: `1 | 1.5` is the whole runtime range without the `+=`.
+            expect(float?(seed_of(*scale.values_at(:initialize, :shrink)))).to be(false)
+          end
+
+          it "dispatches on a seeding write that comes later, not on the rvalue" do
+            # `@x` is never an Integer here: `initialize` stores `1.5` before any `+=` can run.
+            grow_first = seed_of("def grow = (@x += 1)", "def initialize = (@x = 1.5)")
+            expect(grow_first).to eq(seed_of("def initialize = (@x = 1.5)", "def grow = (@x += 1)"))
+            expect(grow_first).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1.5),
+                                            Rigor::Type::Combinator.nominal_of("Float"))
+            )
+          end
+
+          it "chains several `op=` writes the same way in either order" do
+            # Only `op=` writes: each falls back to its widened rvalue and dispatches on the others' results.
+            forward = seed_of("def a = (@x += 1)", "def b = (@x += 2.5)")
+            expect(forward).to eq(seed_of("def b = (@x += 2.5)", "def a = (@x += 1)"))
+            expect(forward).to eq(
+              Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                            Rigor::Type::Combinator.nominal_of("Float"))
+            )
+          end
+
+          it "merges an `&&=` into an ivar only `op=` seeds, in either order" do
+            op_first = seed_of("def grow = (@x += 1)", "def shrink = (@x &&= 1.5)")
+            expect(op_first).to eq(seed_of("def shrink = (@x &&= 1.5)", "def grow = (@x += 1)"))
+            expect(float?(op_first)).to be(true)
+          end
+
+          it "iterates a compounding `op=` past its first result" do
+            # `add` twice leaves `[1, 1]`, which the one-pass `[] | [1]` seed said the ivar could never hold.
+            seed = seed_of("def initialize = (@x = [])", "def add = (@x += [1])")
+            one = Rigor::Type::Combinator.constant_of(1)
+            expect(seed.accepts(Rigor::Type::Combinator.tuple_of(one, one)).yes?).to be(true)
+          end
         end
 
         it "does not seed an `&&=`-only ivar — the write cannot give the ivar its first value" do

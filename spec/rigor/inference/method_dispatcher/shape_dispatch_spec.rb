@@ -901,19 +901,6 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
-  describe "non-empty-hash#first" do
-    it "answers the `[K, V]` pair, which the witness proves is there" do
-      non_empty = Rigor::Type::Combinator.non_empty_hash(
-        Rigor::Type::Combinator.nominal_of("Symbol"), Rigor::Type::Combinator.nominal_of("Integer")
-      )
-      expect(dispatch(receiver: non_empty, method_name: :first)).to eq(
-        tuple(Rigor::Type::Combinator.nominal_of("Symbol"), Rigor::Type::Combinator.nominal_of("Integer"))
-      )
-      expect(dispatch(receiver: non_empty, method_name: :first, args: [constant(2)])).to be_nil
-      expect(dispatch(receiver: non_empty.base, method_name: :first)).to be_nil
-    end
-  end
-
   describe "HashShape#dig (Slice 5 phase 2 sub-phase 2)" do
     it "chains HashShape -> HashShape lookups" do
       inner = hash_shape(zip: constant("00000"))

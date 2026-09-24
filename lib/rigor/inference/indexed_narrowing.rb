@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "mutation_widening"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -35,9 +36,8 @@ module Rigor
     # - The receiver variable is rebound (handled inside `Scope#with_local` / `Scope#with_ivar`).
     # - An intervening `receiver[key] = value` writes the same slot — `:[]=` could rebind the
     #   slot to nil; conservative drop.
-    # - An intervening mutator from {MutationWidening::HASH_MUTATORS} or
-    #   {MutationWidening::ARRAY_MUTATORS} runs against the receiver (e.g. `params.delete(:f)`,
-    #   `params.clear`).
+    # - An intervening mutator from {MutationWidening::SHAPE_MUTATORS} runs against the receiver
+    #   (e.g. `params.delete(:f)`, `params.clear`, `params.default = 0`, `buf.delete_prefix!("x")`).
     #
     # All three are implemented in `StatementEvaluator#eval_call`'s post-dispatch path through
     # {.invalidate_after_call}.
@@ -116,8 +116,10 @@ module Rigor
       #
       # - `receiver[key] = value` (a `:[]=` against a stable address): drop the specific
       #   `(receiver, key)` entry.
-      # - Any mutator from `HASH_MUTATORS` / `ARRAY_MUTATORS` against a stable receiver: drop
-      #   EVERY entry rooted at that receiver, because the mutator could rebind any slot.
+      # - Any mutator from `SHAPE_MUTATORS` against a stable receiver: drop EVERY entry rooted at
+      #   that receiver, because the mutator could rebind any slot. A {HashLookupMutation} name
+      #   rebinds none, but it changes what a read of one answers — a missing slot's default, or
+      #   whether a literal key still finds its pair — so it drops them too.
       #
       # Returns the updated scope. Always-safe (only forgets; never invents).
       def invalidate_after_call(call_node:, current_scope:)
@@ -132,9 +134,9 @@ module Rigor
         end
       end
 
+      # The String table too: `s[0] ||= "x"; s.delete_prefix!("x")` leaves `s[0]` nil.
       def mutator?(method_name)
-        MutationWidening::HASH_MUTATORS.include?(method_name) ||
-          MutationWidening::ARRAY_MUTATORS.include?(method_name)
+        MutationWidening::SHAPE_MUTATORS.include?(method_name)
       end
 
       def invalidate_indexed_write(call_node, current_scope)
@@ -168,10 +170,24 @@ module Rigor
         recorded = current_scope.indexed_narrowing(*address)
         return current_scope if recorded.nil?
 
-        widened = MutationWidening.widen_for_mutator(recorded, call_node.name)
+        widened = MutationWidening.widen_for_mutator(recorded, call_node.name) ||
+                  string_slot_floor(recorded, call_node.name)
         return current_scope.without_indexed_narrowing(*address) if widened.nil?
 
         current_scope.with_indexed_narrowing(*address, widened)
+      end
+
+      # A String mutator the widening declines on a String slot — a `String` nominal it may not grow, a refinement it
+      # does not model — still leaves the same object in the slot, so the `||=` proof that the slot is non-nil stands.
+      # The narrowing is kept, floored to `String` so no value or refinement pin outlives the rewrite. Dropping it read
+      # `h[:name]` back as the declared `String?` after `h[:name].strip!` and reported a nil receiver on correct code.
+      def string_slot_floor(recorded, method_name)
+        return nil unless StringMutation::MUTATORS.include?(method_name)
+
+        members = recorded.is_a?(Type::Union) ? recorded.members : [recorded]
+        return nil unless members.all? { |member| UnknownStoreWidening.carrier_class(member) == "String" }
+
+        Type::Combinator.nominal_of("String")
       end
 
       ELEMENT_WRITE_NODES = [Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode].freeze

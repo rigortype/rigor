@@ -22,6 +22,7 @@ require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "element_read_widening"
+require_relative "hash_lookup_mutation"
 require_relative "indexed_narrowing"
 require_relative "index_write_widening"
 require_relative "method_dispatcher"
@@ -31,6 +32,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
+require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
 require_relative "version_guard"
 
@@ -89,6 +91,9 @@ module Rigor
         Prism::IndexOrWriteNode => :eval_index_or_write,
         Prism::IndexAndWriteNode => :eval_index_write,
         Prism::IndexOperatorWriteNode => :eval_index_write,
+        Prism::CallOrWriteNode => :eval_attribute_compound_write,
+        Prism::CallAndWriteNode => :eval_attribute_compound_write,
+        Prism::CallOperatorWriteNode => :eval_attribute_compound_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::ConstantWriteNode => :eval_constant_write,
         Prism::ConstantPathWriteNode => :eval_constant_write,
@@ -868,8 +873,11 @@ module Rigor
         ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
       end
 
+      # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
       def mutator_arg_types(call_node, current_scope)
-        return MutationWidening::NO_ARG_TYPES unless ContentJoin::CONTENT_ADDERS.include?(call_node.name)
+        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name)
+          return MutationWidening::NO_ARG_TYPES
+        end
         unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||
                ElementReadWidening.joinable_element_read?(call_node.receiver, current_scope)
           return MutationWidening::NO_ARG_TYPES
@@ -930,7 +938,39 @@ module Rigor
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
-        [rhs_type, widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)]
+        post = widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)
+        [rhs_type, widen_attribute_targets(node, post)]
+      end
+
+      # `recv.attr ||= v` / `&&=` / `op=` calls the writer `attr=` on `recv`, so a writer the mutation widening
+      # responds to widens the receiver as the plain call does: `h.default ||= 0` reopens `h` as `h.default = 0`
+      # does ({HashLookupMutation}). The node's value is typed as before; the widening is its only scope effect.
+      def eval_attribute_compound_write(node)
+        [scope.type_of(node, tracer: tracer), widen_attribute_write(node.receiver, node.write_name, scope)]
+      end
+
+      # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
+      # the receiver-wide drop of recorded `receiver[key]` narrowings `IndexedNarrowing` makes after a mutator call.
+      def widen_attribute_write(receiver, writer, current_scope)
+        widened = MutationWidening.widen_receiver_aliases(receiver, writer, current_scope)
+        stable = IndexedNarrowing.stable_receiver(receiver)
+        return widened unless stable && IndexedNarrowing.mutator?(writer)
+
+        widened.without_indexed_narrowings_for(*stable)
+      end
+
+      # The attribute targets of a multi-write (`h.default, x = 0, 1`), nested ones included, each widening its
+      # receiver as the plain writer call would.
+      def widen_attribute_targets(node, post)
+        targets = [*node.lefts, node.rest, *node.rights]
+        targets.reduce(post) do |acc, target|
+          target = target.expression if target.is_a?(Prism::SplatNode)
+          case target
+          when Prism::CallTargetNode then widen_attribute_write(target.receiver, target.name, acc)
+          when Prism::MultiTargetNode then widen_attribute_targets(target, acc)
+          else acc
+          end
+        end
       end
 
       # Widens the receiver of every index target a {MultiTargetBinder} result reports, over the scope its bindings
@@ -1888,9 +1928,14 @@ module Rigor
         end
         return post_loop if mutations.empty?
 
+        rewrites = local_rewrites(statements) { true }
         mutations.reduce(post_loop) do |acc, (name, calls)|
-          joined = join_content_for_local(name, calls, content_seed_scope(name, acc, pre_body, rebound), post_loop)
-          joined.nil? ? acc : acc.with_local(name, joined)
+          seed_scope = content_seed_scope(name, acc, pre_body, rebound)
+          seed = lookup_mutated_seed(statements, name, seed_scope.local(name)) { |depth, nesting| depth == nesting }
+          joined = join_content_for_param(calls, seed, post_loop)
+          next acc if joined.nil?
+
+          acc.with_local(name, rewritten_capture(joined, seed, rewrites.fetch(name, NO_REWRITES)))
         end
       end
 
@@ -3063,8 +3108,18 @@ module Rigor
           next acc unless acc.locals.key?(argument.name)
 
           floored = content_floor_for(acc.local(argument.name))
-          floored.nil? ? acc : acc.with_local(argument.name, floored)
+          floored.nil? ? acc : with_floored_local(acc, argument.name, floored)
         end
+      end
+
+      # A floor rebinds a local to the same object with its contents forgotten, which is not a flow-live write, so the
+      # marks a write drops stay: ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark.
+      # With a plain `with_local`, a `String?` copied from a declaration-seeded ivar and floored after a closure or
+      # callee mutated it (`r = @name; -> { r.upcase! }.call`) lost the first, and `r.size` reported a nil receiver.
+      def with_floored_local(scope, name, floored)
+        rebound = scope.with_local(name, floored)
+        rebound = rebound.with_local_declaration_mark(name) if scope.declaration_sourced?(:local, name)
+        rebound.with_optimistic_local(name, scope.optimistic_local(name))
       end
 
       # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
@@ -3251,7 +3306,7 @@ module Rigor
 
         mutations.keys.reduce(post_scope) do |acc, name|
           floored = content_floor_for(acc.local(name))
-          floored.nil? ? acc : acc.with_local(name, floored)
+          floored.nil? ? acc : with_floored_local(acc, name, floored)
         end
       end
 
@@ -3279,6 +3334,10 @@ module Rigor
       # accept: the mutation can empty or rewrite it as it can a plain `String`.
       def content_floor_for(type)
         return nil if type.nil?
+        # A union with a String member floors member by member, so neither carrier swallows the other and a member no
+        # mutation can fill (`nil`) stays: taken whole, `Array | String` floored to `Array[untyped]` and `String?` to
+        # nothing at all.
+        return UnknownStoreWidening.content_floor(type) if string_union?(type)
 
         if UnknownStoreWidening.carrier_class(type) == "String"
           Type::Combinator.nominal_of("String")
@@ -3505,10 +3564,43 @@ module Rigor
         mutations = captured_content_mutations(block, shadows)
         return post_scope if mutations.empty?
 
-        seeds = mutations.to_h { |name, _calls| [name, seed_scope.local(name)] }
+        seeds = mutations.to_h do |name, _calls|
+          [name, lookup_mutated_seed(body, name, seed_scope.local(name)) { |depth, nesting| depth > nesting }]
+        end
         shadow_rebound_reads(block, mutations, seeds, shadows)
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
-        joined.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        rewrites = local_rewrites(block.body) { |receiver, ancestors| receiver.depth > scope_nesting(ancestors) }
+        joined.reduce(post_scope) do |acc, (name, type)|
+          acc.with_local(name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
+        end
+      end
+
+      NO_REWRITES = [].freeze
+      private_constant :NO_REWRITES
+
+      # The {RewriteMutation} names `root` calls on each local its block admits — `a.map!(&:to_s)` beside an `a << x`.
+      # The receiver test is the one the caller's content-mutation walk applies.
+      def local_rewrites(root)
+        rewrites = {}
+        Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
+          next unless node.is_a?(Prism::CallNode) && RewriteMutation.rewriter?(node.name)
+
+          receiver = node.receiver
+          next unless receiver.is_a?(Prism::LocalVariableReadNode) && yield(receiver, ancestors)
+
+          (rewrites[receiver.name] ||= []) << node.name
+        end
+        rewrites
+      end
+
+      # The slice-C join (and the loop seam's) rebuilds a collection from its SEED, so the rewrite the body's own
+      # widening applied is gone from it: `a = [1]; [0].each { a.map!(&:to_s); a << "x" }` read `Array["x" | 1]`, and
+      # `a[0] == "1"` folded always-falsey. Each rewrite the body makes on the local is re-applied here, on the seam's
+      # terms: a seed the straight-line widening may not grow (a precise nominal, #561) is left as the join answered it.
+      def rewritten_capture(type, seed, method_names)
+        return type if method_names.empty? || !MutationWidening.shape_carrier?(seed)
+
+        method_names.uniq.reduce(type) { |acc, method_name| RewriteMutation.arm_through(acc, method_name) }
       end
 
       # Adds to each store's `shadows` every local it reads that the block body writes and the block-entry scope binds:
@@ -3794,7 +3886,14 @@ module Rigor
         end
       end
 
+      # A collection seed with a String member (`[1] | "ab"`) joins that member as `String` and the rest as the
+      # collection it is ({#join_string_members}); joined whole, the String member survived with its value pinned
+      # although a String mutator in the body is what put the name here.
       def join_content_evidence(seed, kind, name, evidence)
+        if kind != :string && string_union?(seed)
+          return join_string_members(seed) { |others| join_content_evidence(others, kind, name, evidence) }
+        end
+
         case kind
         when :string
           Type::Combinator.nominal_of("String")
@@ -3844,8 +3943,31 @@ module Rigor
         calls = body_content_mutations_on(body, memo_param, shadows)
         return call_type if calls.empty?
 
-        joined = join_memo_content(call_node, memo_param, calls, scope.type_of(memo_arg, tracer: tracer), shadows)
+        pre_state = lookup_mutated_seed(body, memo_param, scope.type_of(memo_arg, tracer: tracer)) do |depth, nesting|
+          depth == nesting
+        end
+        joined = join_memo_content(call_node, memo_param, calls, pre_state, shadows)
         joined || call_type
+      end
+
+      # `seed` as the {HashLookupMutation} calls `body` makes on `name` leave it. They add no content, so the join
+      # never sees them as sites, and a seed read before `widen_after_block` is still the closed shape whose known
+      # values answer every missing key: `b = { a: 1 }; [1].each { b.default = 0; b[:c] = 2 }` read `b[:zz]` as
+      # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores, and a `while` body. The
+      # block receives a read's `depth` and its enclosing block count, and says whether the read is the variable
+      # `seed` describes. A `def` opens a scope of its own, so nothing under one is.
+      def lookup_mutated_seed(body, name, seed)
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless node.is_a?(Prism::CallNode) && HashLookupMutation::MUTATORS.include?(node.name)
+          next if ancestors.any?(Prism::DefNode)
+
+          receiver = node.receiver
+          next unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
+          next unless yield(receiver.depth, scope_nesting(ancestors))
+
+          seed = MutationWidening.widen_for_mutator(seed, node.name) || seed
+        end
+        seed
       end
 
       # The memo's joined carrier. The captured collections the block content-mutates join alongside it, and only the
@@ -3885,7 +4007,7 @@ module Rigor
         calls = []
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
           next unless descendant.is_a?(Prism::CallNode)
-          next unless ContentJoin::CONTENT_ADDERS.include?(descendant.name)
+          next unless CONTENT_MUTATORS.include?(descendant.name)
 
           receiver = descendant.receiver
           next unless receiver.is_a?(Prism::LocalVariableReadNode)
@@ -3905,6 +4027,7 @@ module Rigor
       # Dynamic out: a shapeless pre-state falls through to `join_array_param`, which declines it.
       def join_content_for_param(calls, pre_state, block_entry)
         return nil if pre_state.nil?
+        return join_string_union(calls, pre_state, block_entry) if string_union?(pre_state)
 
         if stringish?(pre_state)
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
@@ -3915,6 +4038,33 @@ module Rigor
         else
           join_array_param(calls, pre_state, block_entry)
         end
+      end
+
+      # A union with a String member (`Array | String`, `String?`) joins member by member: the String members widen to
+      # `String`, which has no element evidence to join, and the rest join as a union of their own. Joined whole, the
+      # union reached the Array or Hash join, which dropped the String member and read a String mutator's arguments as
+      # elements — `x.force_encoding(e)` on an `Array | String` capture typed it `Array[1 | Encoding]`.
+      def join_string_union(calls, union, block_entry)
+        join_string_members(union) { |others| join_content_for_param(calls, others, block_entry) }
+      end
+
+      # `String` for the String members of `union`, beside what the block answers for the rest (as a union of their
+      # own), or the rest unchanged when the block answers nil.
+      def join_string_members(union)
+        rest = union.members.reject { |member| string_member?(member) }
+        string = Type::Combinator.nominal_of("String")
+        return string if rest.empty?
+
+        others = Type::Combinator.union(*rest)
+        Type::Combinator.union(string, yield(others) || others)
+      end
+
+      def string_union?(type)
+        type.is_a?(Type::Union) && type.members.any? { |member| string_member?(member) }
+      end
+
+      def string_member?(type)
+        UnknownStoreWidening.carrier_class(type) == "String"
       end
 
       def join_hash_param(calls, pre_state, block_entry)
@@ -3991,6 +4141,17 @@ module Rigor
       INDEX_WRITE_NODES = IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES
       private_constant :INDEX_WRITE_NODES
 
+      # Every call name a content scan counts: the adders the joins read evidence from, and the String mutators no
+      # Array or Hash table lists. A String carries no element parameter, so a join answers a String pre-state with the
+      # bare `String` whatever the name, and a floor floors it; without them `def strip(s) = s.delete_prefix!("a")` and
+      # an escaping `-> { s.upcase! }` left the caller's `+"ab"` pinned. A name an Array or Hash table also lists stays
+      # with those tables' adders: a scan cannot see the receiver's class, and the Array join reads a non-adder's
+      # arguments as appended elements (`slice!(0)`'s index).
+      CONTENT_MUTATORS = (ContentJoin::CONTENT_ADDERS |
+                          (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
+                           MutationWidening::HASH_MUTATORS)).freeze
+      private_constant :CONTENT_MUTATORS
+
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh
       # `[nil, nil]` per decline was one of the largest allocation sites in the evaluator.
@@ -4001,7 +4162,7 @@ module Rigor
       # (depth predicate), else the frozen `[nil, nil]`. Covers `[]=`-style CallNode mutators and the index-write node
       # forms.
       def content_mutation_target(node)
-        is_call_mutator = node.is_a?(Prism::CallNode) && ContentJoin::CONTENT_ADDERS.include?(node.name)
+        is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
         return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver
@@ -4009,13 +4170,6 @@ module Rigor
         return NO_CONTENT_MUTATION unless yield(receiver)
 
         [receiver.name, node]
-      end
-
-      # Computes the joined continuation collection type for one captured local from its content-mutator calls. Returns
-      # `nil` (no overlay) when the pre-state is neither an Array-ish nor a Hash-ish binding — e.g. a String
-      # accumulator, whose `<<` carries no element parameter and whose binding already types as `String`.
-      def join_content_for_local(name, calls, post_scope, block_entry)
-        join_content_for_param(calls, post_scope.local(name), block_entry)
       end
 
       def index_write?(node)
@@ -4061,6 +4215,10 @@ module Rigor
 
           return [[key, Type::Combinator.untyped]]
         end
+
+        # Only a Hash adder stores a pair; a String mutator a content scan counted (`x.sub!("a", "b")` on a
+        # `Hash | String` capture) stores none.
+        return [] unless ContentJoin::HASH_CONTENT_ADDERS.include?(node.name)
 
         args = content_arg_types(node, block_entry)
         return [] if args.size < 2

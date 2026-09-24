@@ -4,7 +4,7 @@ locals:
   buf: Array[1 | 2]
   counts: Hash[:a | Symbol, 0 | Dynamic[top]]
   first: 0?
-  got: Dynamic[top] | Integer | nil
+  got: Dynamic[top]?
   head: Dynamic[top] | Integer | nil
   last: 0 | Dynamic[top] | nil
   len: 0 | non-negative-int
@@ -20,7 +20,7 @@ locals:
   queue: Array[0 | 1 | 2 | Dynamic[top] | Integer]
   seen: 0 | Dynamic[top] | Integer
   stack: Array[0 | 1 | 2]
-  store: Hash[:k | Symbol, "x" | "y" | 0]
+  store: Hash[Dynamic[top], Dynamic[top]]
   tail: Array[0 | 1 | 2]
   tail2: "[0]"
   text: String

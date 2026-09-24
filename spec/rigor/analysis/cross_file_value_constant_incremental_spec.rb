@@ -211,6 +211,54 @@ RSpec.describe "cross-file value constants — incremental" do
     end
   end
 
+  it "re-checks a compound write as the constant it reads gains and loses a writer in another file" do
+    # The compound write's binding is gradual once another file writes the name, so the Integer arm's
+    # `[]` mismatch fires exactly while no other file does. The writing file is never touched.
+    Dir.mktmpdir do |dir|
+      memo = File.join(dir, "a.rb")
+      writer = File.join(dir, "b.rb")
+      File.write(memo, "def probe\n  (H2 ||= 0)[:x]\nend\n")
+      session = session_for(dir)
+      expect(rules(guarded_baseline(session))).to eq(["a.rb:call.argument-type-mismatch"])
+
+      File.write(writer, "H2 = { x: 1 }\n")
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(memo)
+      expect(rules(recheck.diagnostics)).to eq([])
+      expect(full_run(dir)).to eq([])
+
+      FileUtils.rm(writer)
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(memo)
+      expect(rules(recheck.diagnostics)).to eq(["a.rb:call.argument-type-mismatch"])
+      expect(full_run(dir)).to eq(["a.rb:call.argument-type-mismatch"])
+    end
+  end
+
+  it "re-checks a compound write through an unnamed base as another file's write of the segment comes and goes" do
+    # `klass::H9 ||= 0` names no constant, so it never reaches the resolver that records every other form's
+    # `constant:` edge; without its own edge the recheck kept serving the reading from before b.rb changed.
+    Dir.mktmpdir do |dir|
+      memo = File.join(dir, "a.rb")
+      writer = File.join(dir, "b.rb")
+      File.write(memo, "def probe(klass)\n  (klass::H9 ||= 0)[:x]\nend\n")
+      session = session_for(dir)
+      expect(rules(guarded_baseline(session))).to eq(["a.rb:call.argument-type-mismatch"])
+
+      File.write(writer, "class Foo\n  H9 = { x: 1 }\nend\n")
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(memo)
+      expect(rules(recheck.diagnostics)).to eq([])
+      expect(full_run(dir)).to eq([])
+
+      FileUtils.rm(writer)
+      recheck = guarded_recheck(session)
+      expect(recheck.affected).to include(memo)
+      expect(rules(recheck.diagnostics)).to eq(["a.rb:call.argument-type-mismatch"])
+      expect(full_run(dir)).to eq(["a.rb:call.argument-type-mismatch"])
+    end
+  end
+
   describe "Incremental.changed_constant_publications" do
     it "reports a name whose descriptor moved, and nothing for one that did not" do
       before = { "b.rb" => { "KEPT" => [1], "MOVED" => [1] } }

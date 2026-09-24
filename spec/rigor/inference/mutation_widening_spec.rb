@@ -218,9 +218,11 @@ RSpec.describe Rigor::Inference::MutationWidening do
 
     it "widens a non-empty-array refinement under every Array mutator that can empty it" do
       non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      # `replace` rewrites every element too, so its base is the rewritten one.
       %i[pop shift delete_if reject! clear replace select!].each do |mutator|
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
-          eq(non_empty.base), "expected #{mutator} to widen non-empty-array to its base"
+          eq(Rigor::Inference::RewriteMutation.arm(non_empty.base, mutator)),
+          "expected #{mutator} to widen non-empty-array to its base"
         )
       end
     end
@@ -271,6 +273,45 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(described_class.widen_for_mutator(non_empty, :sort!)).to be_nil
     end
 
+    # The two halves `RefinementMutation` keeps apart, read off the tables so a witness-keeper added
+    # to `EMPTY_PRESERVING` is checked against the answer its kind calls for. A reorder answers the
+    # pre-state and declines; a total rewrite (`RewriteMutation::REPLACED`) keeps the witness but not
+    # the element; a partial one (`RewriteMutation::JOINED`) keeps both beside a gradual arm. Only the
+    # plain adders are set aside: `ContentJoin::ARRAY_CONTENT_ADDERS` also lists `fill` and `replace`,
+    # and subtracting it whole would drop a rewriter from the check before it is classified.
+    # Keeping the element was the #1253 review's finding: `ys.map!(&:to_sym)` left
+    # `non-empty-array[String]` over Symbols, and `ys.first.to_proc` drew `call.undefined-method`.
+    it "keeps the whole refinement under a reorder and only the witness under a rewrite" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      replaced = Rigor::Inference::RewriteMutation::REPLACED["Array"].keys
+      joined = Rigor::Inference::RewriteMutation::JOINED["Array"].keys
+      plain_adders = Rigor::Inference::ContentJoin::ARRAY_CONTENT_ADDERS.to_a - replaced - joined
+      keepers = Rigor::Inference::RefinementMutation::EMPTY_PRESERVING["Array"].to_a - plain_adders
+      rewriters = keepers & replaced
+      joiners = keepers & joined
+      reorderers = keepers - rewriters - joiners
+      expect(rewriters).to include(:map!, :collect!)
+      expect(reorderers).to include(:sort!, :reverse!)
+      expected = reorderers.to_h { |m| [m, nil] }
+                           .merge(rewriters.to_h { |m| [m, "non-empty-array[Dynamic[top]]"] })
+                           .merge(joiners.to_h { |m| [m, "non-empty-array[Dynamic[top] | String]"] })
+      actual = expected.keys.to_h { |m| [m, described_class.widen_for_mutator(non_empty, m)&.describe] }
+      expect(actual).to eq(expected)
+    end
+
+    it "rewrites only the side a non-empty-hash refinement's transform rewrites, keeping the witness" do
+      non_empty = Rigor::Type::Combinator.non_empty_hash(
+        Rigor::Type::Combinator.nominal_of("Symbol"),
+        Rigor::Type::Combinator.nominal_of("Integer")
+      )
+      expect(described_class.widen_for_mutator(non_empty, :transform_values!)&.describe).to(
+        eq("non-empty-hash[Symbol, Dynamic[top]]")
+      )
+      expect(described_class.widen_for_mutator(non_empty, :transform_keys!)&.describe).to(
+        eq("non-empty-hash[Dynamic[top], Integer]")
+      )
+    end
+
     it "keeps the non-empty-array refinement under readers and non-mutating siblings" do
       non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
       expect(described_class.widen_for_mutator(non_empty, :size)).to be_nil
@@ -300,46 +341,12 @@ RSpec.describe Rigor::Inference::MutationWidening do
       )
       emptying = described_class::HASH_MUTATORS.to_a - Rigor::Inference::RefinementMutation::EMPTY_PRESERVING["Hash"].to_a
       expect(emptying).to include(:shift)
+      # A mutator its arguments do not describe (`replace`) also gives the sides it rewrites the gradual arm.
       emptying.each do |mutator|
         expect(described_class.widen_for_mutator(non_empty, mutator)).to(
-          eq(non_empty.base), "expected #{mutator} to widen non-empty-hash to its base"
+          eq(Rigor::Inference::RewriteMutation.arm(non_empty.base, mutator)),
+          "expected #{mutator} to widen non-empty-hash to its base"
         )
-      end
-    end
-
-    # `default=` / `default_proc=` / `compare_by_identity` change what a miss reads and nothing else, so a
-    # literal shape widens (its computed-key `values | nil` no longer holds) but keeps its key and value
-    # evidence and its non-emptiness, and a nominal — already optimistic about a miss — is left alone.
-    describe "a miss-rule mutator" do
-      let(:shape) { Rigor::Type::Combinator.hash_shape_of(a: Rigor::Type::Combinator.constant_of(1)) }
-      let(:symbol) { Rigor::Type::Combinator.nominal_of("Symbol") }
-      let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
-
-      it "widens the values off their pins, joins a typed default's class, and keeps the shape non-empty" do
-        widened = described_class.widen_for_mutator(
-          shape, :default=, arg_types: [Rigor::Type::Combinator.constant_of("x")]
-        )
-        string = Rigor::Type::Combinator.nominal_of("String")
-        value = Rigor::Type::Combinator.union(integer, string)
-        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, value))
-      end
-
-      it "joins an untyped arm for a default the seam did not type, and for a default proc" do
-        with_untyped = Rigor::Type::Combinator.union(integer, Rigor::Type::Combinator.untyped)
-        expect(described_class.widen_for_mutator(shape, :default=).base.type_args.last).to eq(with_untyped)
-        expect(described_class.widen_for_mutator(shape, :default_proc=).base.type_args.last).to eq(with_untyped)
-      end
-
-      it "only widens the value pins for `compare_by_identity`, under which a declared key can still miss" do
-        widened = described_class.widen_for_mutator(shape, :compare_by_identity)
-        expect(widened).to eq(Rigor::Type::Combinator.non_empty_hash(symbol, integer))
-      end
-
-      it "leaves a Hash nominal and a non-empty-hash refinement untouched" do
-        nominal = Rigor::Type::Combinator.nominal_of("Hash", type_args: [symbol, integer])
-        expect(described_class.widen_for_mutator(nominal, :default=, arg_types: [integer])).to be_nil
-        non_empty = Rigor::Type::Combinator.non_empty_hash(symbol, integer)
-        expect(described_class.widen_for_mutator(non_empty, :compare_by_identity)).to be_nil
       end
     end
 

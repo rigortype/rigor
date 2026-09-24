@@ -12,6 +12,7 @@ require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
@@ -49,6 +50,13 @@ module Rigor
       # A Symbol, so it is distinguishable from a `[literal]` descriptor by class alone and rides the ADR-85
       # seed bundle through `Marshal` unchanged.
       CONSTANT_UNPUBLISHABLE = :unpublishable
+
+      # Issue #617 — the descriptor for a name a file writes ONLY through `||=`. It publishes nothing either,
+      # and it is the memoization idiom rather than a binding while no other file memoizes the name: a
+      # constant compound write keeps its memo reading beside it ({Scope#bound_constant_names}), where every
+      # other form makes that write read the constant as bound. A second write of any other form in the same
+      # file retracts it to {CONSTANT_UNPUBLISHABLE}.
+      CONSTANT_MEMO = :memo
 
       # Issue #668 — the census key a constant write through a base no name reaches is filed under:
       # `*::LIMIT` for `k::LIMIT = 7`. `*` is not a constant character, so the key can never collide with a
@@ -531,9 +539,9 @@ module Rigor
         per_class[receiver.name]
       end
 
-      # Walks the post-collected accumulator and widens any Tuple / HashShape entry for an ivar that observed a mutator
-      # call anywhere in the same class body. The mutation evidence comes from `gather_ivar_writes` recording every
-      # `@ivar.<method>(...)` call whose method is in `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      # Walks the post-collected accumulator and widens any Tuple / HashShape / String-literal entry for an ivar that
+      # observed a mutator call anywhere in the same class body. The mutation evidence comes from `gather_ivar_writes`
+      # recording every `@ivar.<method>(...)` call whose method is in `MutationWidening::SHAPE_MUTATORS`.
       #
       # The widening uses `MutationWidening.widen_for_mutator` — the same primitive
       # `Inference::StatementEvaluator#eval_call` applies for per-method-body widening on a local / ivar receiver. The
@@ -558,8 +566,9 @@ module Rigor
         end
       end
 
-      # Walks a class-ivar accumulator entry (which may be a `Union` of multiple write rvalues) and widens any `Tuple`
-      # or `HashShape` member whose corresponding mutator family was observed against the ivar somewhere in the class.
+      # Walks a class-ivar accumulator entry (which may be a `Union` of multiple write rvalues) and widens any `Tuple`,
+      # `HashShape` or String-valued `Constant` member whose corresponding mutator family was observed against the ivar
+      # somewhere in the class.
       # Class-level widening is more aggressive than the per-method-body `MutationWidening` primitive: it widens both
       # the SHAPE carrier (Tuple → Array, HashShape → Hash) AND the element types to `Dynamic[Top]`. The justification —
       # once any method mutates the ivar, its post-mutation contents are statically unknown across method boundaries, so
@@ -578,12 +587,33 @@ module Rigor
 
           Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::HashShape
-          return member unless observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+          if observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+            return Type::Combinator.nominal_of("Hash",
+                                               type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          end
 
-          Type::Combinator.nominal_of("Hash",
-                                      type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+          widen_member_for_lookup_mutators(member, observed_methods)
+        when Type::Constant
+          # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every
+          # other method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`.
+          return member unless StringMutation.constant?(member) &&
+                               observed_methods.any? { |m| StringMutation::MUTATORS.include?(m) }
+
+          Type::Combinator.nominal_of("String")
         else
           member
+        end
+      end
+
+      # A `HashShape` ivar seed some method gave a default, a default proc or identity keys, and no method stored
+      # into, removed from or rewrote: its pairs are the seed's own, so it takes the per-method {HashLookupMutation}
+      # widening rather than the untyped floor above — a present key keeps its value across methods, a missing one
+      # stops reading `nil`.
+      def widen_member_for_lookup_mutators(member, observed_methods)
+        observed_methods.reduce(member) do |acc, method_name|
+          next acc unless acc.is_a?(Type::HashShape)
+
+          HashLookupMutation.widen_shape(acc, method_name) || acc
         end
       end
 
@@ -1101,7 +1131,7 @@ module Rigor
         end
       end
 
-      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS`.
       # The class-ivar pre-pass uses the resulting set to widen the post-collected accumulator entries (see
       # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
       # ignored at finalization.
@@ -1109,8 +1139,7 @@ module Rigor
         method_name, receiver = mutation_target(node)
         return if method_name.nil?
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return unless MutationWidening::ARRAY_MUTATORS.include?(method_name) ||
-                      MutationWidening::HASH_MUTATORS.include?(method_name)
+        return unless MutationWidening::SHAPE_MUTATORS.include?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
@@ -2146,8 +2175,7 @@ module Rigor
         when Prism::CallNode
           return nil if node.receiver.nil?
           return node.receiver if node.attribute_write?
-          return node.receiver if MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
-                                  MutationWidening::HASH_MUTATORS.include?(node.name)
+          return node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
 
           nil
         end
@@ -6525,10 +6553,13 @@ module Rigor
         end)
       end
 
-      # `[literal]` renders its value; an unpublishable write renders as `?`. Both halves matter: a write
-      # appearing or vanishing moves the signature, and so does the same name's value changing.
+      # `[literal]` renders its value, a `||=`-only name `||`, and an unpublishable write `?`. All three halves
+      # matter: a write appearing or vanishing moves the signature, and so does the same name's value or
+      # memo status changing.
       def constant_descriptor_signature(descriptor)
-        descriptor.is_a?(Array) ? descriptor.first.inspect : "?"
+        return descriptor.first.inspect if descriptor.is_a?(Array)
+
+        descriptor == CONSTANT_MEMO ? "||" : "?"
       end
 
       # The class-declaration + ancestry + member-layout surface of the declaration signature (declared class
@@ -7124,16 +7155,19 @@ module Rigor
 
       # Issue #644 — the cross-file VALUE-constant pre-pass, the twin of {#record_class_sources} for plain
       # constant ASSIGNMENTS. Returns one file's **publication census**: `{qualified name => descriptor}`,
-      # where the descriptor is either `[literal]` (a publishable frozen scalar) or {CONSTANT_UNPUBLISHABLE}.
+      # where the descriptor is `[literal]` (a publishable frozen scalar), {CONSTANT_MEMO}, or
+      # {CONSTANT_UNPUBLISHABLE}.
       #
       # EVERY constant write is censused, whatever its rvalue and whatever its form, because the census is
-      # three things at once and only the first cares about the value:
+      # four things at once and only the first cares about the value:
       #
       # 1. the published table ({#finalize_constant_writes}: a name publishes only when exactly one file
       #    writes it and that write is a literal),
-      # 2. the attribution the ADR-46 positive edge reads, and
+      # 2. the attribution the ADR-46 positive edge reads,
       # 3. the producer whose per-file DIFF re-checks readers on an incremental run
-      #    ({Analysis::Incremental.changed_constant_publications}).
+      #    ({Analysis::Incremental.changed_constant_publications}), and
+      # 4. the writes a constant compound write finds its binding among when its plain read resolves nothing
+      #    ({Scope#bound_constant_names}), which is why a `||=`-only name carries its own descriptor.
       #
       # A write the census cannot see does not merely lose precision — it silently bypasses the conflict rule
       # and publishes a value the program does not have. That is why the operator / multi-assign / chained /
@@ -7299,7 +7333,8 @@ module Rigor
         when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
           return if singleton_cref
 
-          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables)
+          record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s), nil, tables,
+                                       memo: node.is_a?(Prism::ConstantOrWriteNode))
         when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
           census_path_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
         when Prism::MultiWriteNode
@@ -7311,7 +7346,9 @@ module Rigor
         return if singleton_cref && singleton_self_write?(node.target, self_owner)
 
         record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
-                                     nil, tables, nameable: nameable_write_target?(node.target, self_owner))
+                                     nil, tables,
+                                     nameable: nameable_write_target?(node.target, self_owner),
+                                     memo: node.is_a?(Prism::ConstantPathOrWriteNode))
       end
 
       # A `self`-anchored write target under a self the walk cannot name — inside `class <<`
@@ -7418,13 +7455,22 @@ module Rigor
       # ([#710](https://github.com/rigortype/rigor/issues/710)). The two are separate tables rather than one
       # richer descriptor because a name can be written both ways in one file, and then the file DID declare
       # it however the two writes are ordered.
-      def record_constant_write_census(full, literal, tables, nameable: true, alias_of: nil)
+      #
+      # `memo` marks a `||=` write, which files {CONSTANT_MEMO} for as long as every write of the name in this
+      # file is one.
+      def record_constant_write_census(full, literal, tables, nameable: true, alias_of: nil, memo: false)
         return if full.nil?
 
         tables.declared << full if nameable
         first_write = tables.seen.add?(full)
-        tables.writes[full] = first_write ? (literal || CONSTANT_UNPUBLISHABLE) : CONSTANT_UNPUBLISHABLE
+        tables.writes[full] = census_descriptor(tables.writes[full], first_write, literal, memo)
         record_constant_alias_census(full, alias_of, tables, first_write && nameable)
+      end
+
+      def census_descriptor(previous, first_write, literal, memo)
+        return literal || (memo ? CONSTANT_MEMO : CONSTANT_UNPUBLISHABLE) if first_write
+
+        memo && previous == CONSTANT_MEMO ? CONSTANT_MEMO : CONSTANT_UNPUBLISHABLE
       end
 
       # Issue #667 — a name written TWICE is not an alias of anything the walk can name, exactly as it is

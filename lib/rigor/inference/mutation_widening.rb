@@ -5,10 +5,11 @@ require "prism"
 require_relative "../type"
 require_relative "../source/node_children"
 require_relative "content_join"
+require_relative "hash_lookup_mutation"
 require_relative "mutation_rejoin"
-require_relative "miss_rule_mutation"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
+require_relative "rewrite_mutation"
 require_relative "string_mutation"
 
 module Rigor
@@ -95,20 +96,18 @@ module Rigor
       # only the receiver-mutating methods are listed. A name both classes define is listed in
       # both tables — being in `ARRAY_MUTATORS` does not put it here, and `shift`'s absence let
       # `k = { a: 1 }; k.shift` keep the literal shape of a hash that is empty at runtime.
-      # {MissRuleMutation::MUTATORS} change no entry but change what a miss reads, which a closed shape's
-      # computed-key `values | nil` answer assumes; that module owns what they widen a shape to.
       HASH_MUTATORS = %i[
         []= store
         shift delete delete_if reject! select! filter! keep_if
         clear compact! merge! update transform_keys! transform_values!
         replace
-      ].to_set.merge(MissRuleMutation::MUTATORS).freeze
+      ].to_set.freeze
 
       # Every method name {#widen_for_mutator} responds to — the one set a body scan asks "could an
       # in-place call on this name change its binding?" against (issue #587: the block-return
-      # threading gate). Derived from the two tables above rather than spelled out, so the scan and
-      # the widening it predicts cannot drift apart.
-      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | StringMutation::MUTATORS).freeze
+      # threading gate). Derived from the tables rather than spelled out, so the scan and the
+      # widening it predicts cannot drift apart.
+      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS).freeze
 
       # Methods that return the receiver (or a shallow copy) and cannot mutate it. They must not
       # trigger widening or any other receiver-fact invalidation. The list is intentionally
@@ -120,9 +119,7 @@ module Rigor
 
       # True when `method_name` is a pure self-returner that must
       # not invalidate the receiver's facts.
-      def pure_self_returner?(method_name)
-        PURE_SELF_RETURNERS.include?(method_name)
-      end
+      def pure_self_returner?(method_name) = PURE_SELF_RETURNERS.include?(method_name)
 
       # Returns a scope with the call's receiver widened, for every variable the receiver expression
       # can evaluate to ({ReceiverAlias.candidates}) whose current binding is a literal-shape carrier
@@ -287,9 +284,9 @@ module Rigor
       # nominal, whose element set is a claim this seam may not grow — see {MutationRejoin.regrowable_carrier?}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
+        values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
-        return MissRuleMutation.widen(type, method_name, arg_types) if MissRuleMutation.applies?(type, method_name)
 
         case type
         when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
@@ -298,12 +295,13 @@ module Rigor
 
           join_added_elements(widen_tuple(type, values: values), method_name, arg_types, type.elements)
         when Type::HashShape
-          return nil unless HASH_MUTATORS.include?(method_name)
+          return HashLookupMutation.widen_shape(type, method_name) unless HASH_MUTATORS.include?(method_name)
 
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
         when Type::Constant then StringMutation.widen_constant(type, method_name)
-        when Type::Difference then widen_difference(type, method_name, arg_types: arg_types)
+        when Type::Difference
+          widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
           widen_union(type, method_name, values: values, arg_types: arg_types)
         end
@@ -340,10 +338,12 @@ module Rigor
       end
 
       # True when the mutator's own class stands for `member` — the absorbed side of
-      # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call.
+      # {ContentJoin.array_residue} / {ContentJoin.hash_residue}, whichever table names the call. A
+      # {HashLookupMutation} name stands for a Hash member as a Hash mutator does.
       def mutation_carrier?(member, method_name)
         (ARRAY_MUTATORS.include?(method_name) && ContentJoin.array_residue(member).empty?) ||
-          (HASH_MUTATORS.include?(method_name) && ContentJoin.hash_residue(member).empty?) ||
+          ((HASH_MUTATORS.include?(method_name) || HashLookupMutation::MUTATORS.include?(method_name)) &&
+            ContentJoin.hash_residue(member).empty?) ||
           (StringMutation::MUTATORS.include?(method_name) && StringMutation.constant?(member))
       end
 
@@ -370,7 +370,11 @@ module Rigor
       # **The join records what it saw; it never CLOSES the parameter.** That is
       # {#gradual_floor}'s job, and the reason is the seam this method sits on rather than anything
       # about Array or Hash.
+      #
+      # A mutator whose arguments do not describe what it stores ({RewriteMutation}) takes that module's gradual
+      # arm first, on every path that reaches this join: the literal arms, the refinement arm, and the re-join.
       def join_added_elements(widened, method_name, arg_types, seed_elements)
+        widened = RewriteMutation.arm(widened, method_name)
         return widened unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name)
 
         added = value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
@@ -419,8 +423,10 @@ module Rigor
 
       # The Hash-side twin of {#join_added_elements}: `h[k] = v` / `h.store(k, v)` join the stored
       # key and value into the widened `Hash[K, V]` carrier, each admitted against its OWN side's
-      # seed evidence (a foreign key does not make the value gradual, or the reverse).
+      # seed evidence (a foreign key does not make the value gradual, or the reverse). {RewriteMutation}'s arm lands
+      # first, as it does in {#join_added_elements}.
       def join_added_pairs(widened, method_name, arg_types, seed_pairs)
+        widened = RewriteMutation.arm(widened, method_name)
         return widened unless ContentJoin::HASH_CONTENT_ADDERS.include?(method_name)
         return widened if arg_types.size < 2
 
@@ -509,7 +515,7 @@ module Rigor
       # here, so a refinement joins the mutator's added content on exactly the terms the `Tuple` /
       # `HashShape` arms above do (issue #936, ADR-56 WD2.9's deferred branch).
       def widen_difference(difference, method_name, arg_types: NO_ARG_TYPES)
-        RefinementMutation.widen(difference, method_name) do |base|
+        RefinementMutation.widen(difference, method_name, arg_types) do |base|
           if base.class_name == "Array"
             ARRAY_MUTATORS.include?(method_name) &&
               join_added_elements(base, method_name, arg_types, ContentJoin.collection_element_types(base))
@@ -538,16 +544,17 @@ module Rigor
         Type::Combinator.nominal_of("Array", type_args: [element_type])
       end
 
-      # `HashShape` (closed or open) → `Nominal[Hash, [Kunion, Vunion]]`. Empty / extra-keys-only
-      # shapes degrade to a fully-untyped Hash. Values widen their pinning the same way
-      # {#widen_tuple}'s elements do (issue #560): `opts = {headers: false}` then
-      # `opts[:encoding] = v` must not keep `false` as the whole value bound — redmine's
-      # `import.rb:274` read the stored key back through it and drew a false always-falsey.
+      # Closed `HashShape` → `Nominal[Hash, [Kunion, Vunion]]`. An empty or an open shape degrades to
+      # a fully-untyped Hash: an open shape's unseen keys may hold any value, and one {HashLookupMutation}
+      # opened reads its DEFAULT for a missing key, so a bound built from the known values alone would
+      # pin that read to one of them (`{ a: 1 }` under `default = 0` then `delete(:a)` read `h[:b]` as
+      # `1`). Values widen their pinning the same way {#widen_tuple}'s elements do (issue #560):
+      # `opts = {headers: false}` then `opts[:encoding] = v` must not keep `false` as the whole value
+      # bound — redmine's `import.rb:274` read the stored key back through it and drew a false
+      # always-falsey.
       def widen_hash_shape(shape, values: :widen)
-        if shape.pairs.empty?
-          return Type::Combinator.nominal_of("Hash",
-                                             type_args: [Type::Combinator.untyped,
-                                                         Type::Combinator.untyped])
+        if shape.pairs.empty? || shape.open?
+          return Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
         end
 
         key_type = key_union_for(shape.pairs.keys)
@@ -562,9 +569,7 @@ module Rigor
       # `key_union_for` is delegated rather than duplicated: {#widen_hash_shape} and
       # `ContentJoin.hash_shape_key_values` must map a literal key set the SAME way, or a widened
       # carrier and the join that reads it back disagree about the key parameter.
-      def key_union_for(keys)
-        ContentJoin.key_union_for(keys)
-      end
+      def key_union_for(keys) = ContentJoin.key_union_for(keys)
     end
   end
 end

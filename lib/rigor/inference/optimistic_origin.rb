@@ -31,14 +31,9 @@ module Rigor
       # The core-RBS annotation `RbsDispatch` reads the return type past.
       ANNOTATION = "implicitly-returns-nil"
 
-      # The cause for a read typed past the annotation. Kept as a symbol (rather than a bare `true`) so
-      # further optimistic families can be told apart without changing the table's shape.
+      # The single cause carried today. Kept as a symbol (rather than a bare `true`) so a later slice can
+      # distinguish further optimistic families without changing the table's shape.
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
-
-      # `non-empty-hash#first`, which `ShapeDispatch` answers nil-free from the refinement alone: the same bet
-      # `Array#first` makes on a `non-empty-array`, spelled by `Enumerable#first` as `?` rather than as the
-      # annotation, so `RbsDispatch` would not mark it.
-      NON_EMPTY_REFINEMENT = :non_empty_refinement
 
       # The argument-free unary predicates whose folded result is a statement about the receiver's
       # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:

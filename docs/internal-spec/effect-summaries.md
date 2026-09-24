@@ -89,7 +89,7 @@ Catalogued origins are keyed by the callee key the row matched (`catalogue:Kerne
 
 ### Ownership
 
-A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS`, and String's) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
+A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS`) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
 
 The label then follows the receiver's ownership, which is a syntactic question:
 
@@ -187,7 +187,7 @@ An edge that reaches no project definition is dropped by the propagator, so keep
 
 ### Mutator sets, by reference
 
-A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `MutationClassifier::STRING_MUTATORS`. The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
+A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS` — the same sets `MutationClassifier` reads, so no mutator list is kept twice. The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
 
 ### Argument-dependent narrowing
 

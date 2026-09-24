@@ -60,7 +60,7 @@ module Rigor
       end
 
       def describe(verbosity = :short)
-        return "{}" if pairs.empty?
+        return "{}" if pairs.empty? && closed?
 
         rendered = pairs.map { |k, v| render_entry(k, v, verbosity) }
         rendered << "..." if open?

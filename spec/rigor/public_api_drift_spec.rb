@@ -30,6 +30,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ambiguous_ancestor_resolutions(req:subclass_qualified,req:raw_ancestor)
     ancestor_name_candidates(req:subclass_qualified,req:raw_ancestor)
     bindable_top_level_def_for(req:method_name)
+    bound_constant_names(req:name)
     class_cvars()
     class_cvars_for(req:class_name)
     class_ivars()

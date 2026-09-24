@@ -240,7 +240,7 @@ classes:
   String:
     posture: value
     mutators: string
-    why: "a value class; mutation is ownership-classified from `MutationClassifier::STRING_MUTATORS`"
+    why: "a value class; mutation is ownership-classified from `StringMutation::MUTATORS`"
 
   Symbol: { posture: value, why: "immutable value class" }
   Integer: { posture: value, why: "immutable value class" }

@@ -2,7 +2,6 @@
 
 require_relative "../../type"
 require_relative "call_context"
-require_relative "../optimistic_origin"
 
 module Rigor
   module Inference
@@ -220,18 +219,7 @@ module Rigor
           handler = RECEIVER_HANDLERS[receiver.class]
           return nil unless handler
 
-          result = send(handler, receiver, method_name, args)
-          record_refinement_bet(context) if result && method_name == :first && receiver.is_a?(Type::Difference)
-          result
-        end
-
-        # `non-empty-hash#first`'s nil-freeness rests on the refinement, which the analysis does not keep
-        # current through an alias or a callee (`g = h; g.clear`) — the same bet `Array#first` makes on a
-        # `non-empty-array`, whose answer `RbsDispatch` marks. Unmarked, the branch elision read it as proof.
-        def record_refinement_bet(context)
-          return unless context.scope && context.call_node
-
-          context.scope.record_optimistic_origin(context.call_node, OptimisticOrigin::NON_EMPTY_REFINEMENT)
+          send(handler, receiver, method_name, args)
         end
 
         # Tightens `Array#size` / `Array#length` / `String#length` / `String#bytesize` / `Hash#size` etc.
@@ -564,18 +552,8 @@ module Rigor
 
             return difference if base.class_name == "String" &&
                                  NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
-            return non_empty_hash_first(base) if method_name == :first && base.class_name == "Hash"
 
             non_zero_int_unary_projection(difference, base, method_name)
-          end
-
-          # `non-empty-hash[K, V]#first` is a `[K, V]` pair. The RBS answer is `Enumerable#first`'s `Elem?`,
-          # which spells the empty case as `?` rather than as the annotation `Array#first` carries, so without
-          # this the witness is lost on the read that most often relies on it.
-          def non_empty_hash_first(base)
-            return nil unless base.type_args.size == 2
-
-            Type::Combinator.tuple_of(*base.type_args)
           end
 
           def non_zero_int_unary_projection(difference, base, method_name)
@@ -1634,14 +1612,18 @@ module Rigor
             Type::Combinator.constant_of(found)
           end
 
-          # `shape.default` / `default_proc` — a literal `HashShape` carries no default value or proc, so
-          # both fold to `Constant[nil]`. `default` accepts an optional key argument (still returns the
+          # `shape.default` / `default_proc` — a closed literal `HashShape` carries no default value or proc,
+          # so both fold to `Constant[nil]`. `default` accepts an optional key argument (still returns the
           # default), `default_proc` takes none — the `args.size <= 1` guard covers both.
-          def hash_default(shape, _method_name, args)
+          #
+          # An open shape's `default` is `untyped`. The default is what an unseen key reads, which the known
+          # values do not bound — the RBS answer `V?` would bound it by them, so `h = { a: 1 }; h.default = 0`
+          # (which opens the shape, see `HashLookupMutation`) read `h.default` as `1?`. `default_proc` defers.
+          def hash_default(shape, method_name, args)
             return nil unless args.size <= 1
-            return nil unless shape.closed?
+            return Type::Combinator.constant_of(nil) if shape.closed?
 
-            Type::Combinator.constant_of(nil)
+            Type::Combinator.untyped if method_name == :default
           end
 
           # `shape < other` / `<=` / `>` / `>=` — Hash containment comparison. Both sides must be closed

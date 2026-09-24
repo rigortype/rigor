@@ -84,7 +84,7 @@ RSpec.describe "the shipped core effect catalogue" do
     {
       "Array" => Rigor::Inference::MutationWidening::ARRAY_MUTATORS,
       "Hash" => Rigor::Inference::MutationWidening::HASH_MUTATORS,
-      "String" => Rigor::Effects::MutationClassifier::STRING_MUTATORS
+      "String" => Rigor::Inference::StringMutation::MUTATORS
     }.each do |class_name, selectors|
       it "marks every #{class_name} mutator as a receiver mutation" do
         selectors.each do |selector|

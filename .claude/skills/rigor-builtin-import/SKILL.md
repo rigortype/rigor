@@ -191,7 +191,7 @@ Final gate before commit:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command make verify-changed
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --no-cache exe bin
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --no-cache --fail-on=warning exe bin
 ```
 
 `exe` and `bin` are outside both `make check` and CI's self-check, so the second line is theirs.

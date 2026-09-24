@@ -41,8 +41,8 @@ Local runs are targeted; the full gate is CI on the pull request.
   decides those.
 - Do not run `make verify`, `make check`, or the whole suite locally. Parallel sessions each running
   it were the bottleneck (five at once took 12–20 minutes each), and CI runs a superset. Run one
-  only to reproduce a failure CI does not explain, or where a skill's own gate requires it (release
-  prep, dependency and Ruby bumps).
+  only to reproduce a failure CI does not explain, for a Flake-environment change CI cannot see, or
+  where a skill's own gate requires it (release prep, dependency and Ruby bumps).
 - A Markdown-only push straight to `master` skips CI: run `make docs-check` first. A Markdown-only
   PR runs it in CI. `make verify-sequential` is for investigating parallel-only flakes.
 

@@ -59,8 +59,10 @@ Once the change is implemented and `make verify-changed` passes:
    round. File scope expansion as issues rather than growing the PR. Answer a finding you reject
    with the reason in a PR comment; rejecting a *severe* finding is a decision for the user, so the
    PR stays Draft. Severity is the reviewer's ranking, not the implementer's. Severe means what
-   AGENTS.md's false-positive rule weighs: a diagnostic on correct code, a wrong inferred type or
-   claim, a crash, a gate that passes without checking, or guidance an agent would misapply.
+   AGENTS.md's false-positive rule weighs: a diagnostic on correct code, a wrong inferred type, a
+   crash, a gate that passes without checking, or guidance that would lead an agent into a wrong
+   irreversible or gate-skipping action (a merge, a push, a publish, a skipped gate). Imprecise or
+   unclear wording is not severe.
 4. **Another round only if this round's fixes addressed a severe defect.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in
@@ -74,8 +76,10 @@ Once the change is implemented and `make verify-changed` passes:
    embodies a decision nobody has made, leave it Draft and put the decision to the user: a
    `ready-for-human` issue, a trade-off between designs, an ADR, a spec edit that picks what the
    issue left open (writing down behaviour the issue already stated is settled), or a severe finding
-   you rejected. A skill with its own landing rule (`rigor-release-prep`, `rigor-dependency-update`)
-   keeps it.
+   you rejected. Anything not settled by one of the former stays Draft; naming an issue adopts its
+   outcome only when it is `ready-for-agent`. A skill with its own landing rule
+   (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule; the review in steps 2–5 still
+   runs.
 
 ## Release Cadence
 

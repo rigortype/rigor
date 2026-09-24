@@ -846,6 +846,26 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
+    it "still fires on a memo hash a block-local holds afresh at every position (control)" do
+      # `c` is bound only by the body and only to a new hash, so no position sees another's store: Ruby answers `2`.
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        found = [1, 2].find { |e| c = Hash.new; (c[:first] ||= e) == 2 }
+        puts "hit" if found == 2
+      RUBY
+    end
+
+    it "does not take a block-local for fresh below its own slots" do
+      # `box` is new at every position, but `box[0]` is `shared`, which the first position filled. Runtime `nil`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        shared = Hash.new
+        found = [1, 2].find do |e|
+          box = [shared]
+          (box[0][:first] ||= e) == 2
+        end
+        puts "hit" if found == 2
+      RUBY
+    end
+
     it "answers wider than Ruby when the body rebinds the captured name to a fresh hash first" do
       # Ruby answers `2`: every position's `||=` reads a new hash. The mark belongs to the site, not to the
       # binding, so the rebind does not lift it. Wider, never narrower: nothing is reported.
@@ -1099,6 +1119,83 @@ RSpec.describe "block-return scope threading", type: :runner do
           found = %w[a b].find do |s|
             hit = (pool[s] ||= s) == "b"
             pool = other
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when a nested block's parameter may name the receiver" do
+        # Each block parameter holds `pool` at runtime, so each store puts `"x"` under `"b"`: every `find` answers nil.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          a = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; pool.tap { |h| h["b"] = "x" }; hit }
+          b = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; [pool].each { it["b"] = "x" }; hit }
+          c = %w[a b].find { |s| hit = (pool[s] ||= s) == "b"; [pool].each { _1.store("b", "x") }; hit }
+          puts "hit" if a == "b" || b == "b" || c == "b"
+        RUBY
+      end
+
+      it "withholds it when the fold's own parameter may name the receiver" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = [[pool, "a"], [pool, "b"]].find do |h, s|
+            hit = (pool[s] ||= s) == "b"
+            h["b"] = "x"
+            hit
+          end
+          puts "hit" if found
+        RUBY
+      end
+
+      it "withholds it when a store through a fresh container may reach the receiver" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            box = [pool]
+            box[0]["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when a store above the site may swap in a filled hash" do
+        # The first position replaces `pool[:a]` with `shared`, whose `"b"` is `"x"`. Runtime `nil`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          shared = Hash.new
+          shared["b"] = "x"
+          pool = { a: Hash.new }
+          found = %w[a b].find do |s|
+            hit = (pool[:a][s] ||= s) == "b"
+            pool[:a] = shared
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it when the body takes a store method as an object" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = Hash.new
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool.method(:[]=).call("b", "x")
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "withholds it for a key built from a captured local the body mutates" do
+        # The typed keys are `"ab"` and `"b"`, but `prefix << "a"` makes the second one `"ab"` too. Runtime `nil`.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          prefix = +""
+          found = %w[ab b].find do |s|
+            hit = (pool[prefix + s] ||= s) == "b"
+            prefix << "a"
             hit
           end
           puts "hit" if found == "b"

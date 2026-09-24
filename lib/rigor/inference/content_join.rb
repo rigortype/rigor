@@ -141,8 +141,8 @@ module Rigor
       # had it: an unwidened literal `Tuple` / `HashShape`, so what the body did to it was gone — `x =
       # gets ? [1] : { a: 1 }; [0].each { x.map!(&:to_s) if x.is_a?(Array); x[:k] = 2 if
       # x.is_a?(Hash) }` read `[1]`, and `x.first.upcase` drew `undefined method` on correct code. The
-      # seam cannot tell which member a store reached, so a selector in both adder tables (`[]=`) is
-      # evidence for both sides, as the straight-line widening's memberwise rule reads it (#645).
+      # caller routes the evidence: a store may reach either member, and only the caller sees its
+      # index (`StatementEvaluator#mixed_content_evidence`).
       def join_mixed_content(pre_state, added_pairs, added_elements)
         members = pre_state.is_a?(Type::Union) ? pre_state.members : [pre_state]
         arrays, rest = members.partition { |member| array_residue(member).empty? }

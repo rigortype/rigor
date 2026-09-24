@@ -3778,7 +3778,7 @@ module Rigor
         movable = kinds.reject { |_name, kind| kind == :string }.keys
         movable.select do |name|
           sites[name].any? do |node|
-            (kinds[name] != :hash && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
+            (kinds[name] == :array && IndexWriteWidening.index_write?(node)) || store_arguments_read?(node, movable)
           end
         end
       end
@@ -3880,14 +3880,16 @@ module Rigor
       # to reads `bot`.
       def content_evidence(sites, kinds, evidence_scope, shadows)
         kinds.each_with_object({}) do |(name, kind), evidence|
-          if %i[hash mixed].include?(kind)
-            pairs = hash_pair_evidence(sites[name], evidence_scope, shadows)
-            evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
-            evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
-          end
-          if %i[array mixed].include?(kind)
+          case kind
+          when :hash
+            record_pair_evidence(evidence, name, hash_pair_evidence(sites[name], evidence_scope, shadows))
+          when :array
             evidence[[name, :element]] =
               Type::Combinator.union(*array_element_evidence(sites[name], evidence_scope, shadows).compact)
+          when :mixed
+            pairs, elements = mixed_content_evidence(sites[name], evidence_scope, shadows)
+            record_pair_evidence(evidence, name, pairs)
+            evidence[[name, :element]] = Type::Combinator.union(*elements.compact)
           end
         end
       end
@@ -3912,6 +3914,52 @@ module Rigor
         else
           ContentJoin.join_array_content(seed, present_evidence(evidence[[name, :element]]))
         end
+      end
+
+      def record_pair_evidence(evidence, name, pairs)
+        evidence[[name, :key]] = Type::Combinator.union(*pairs.map(&:first).compact)
+        evidence[[name, :value]] = Type::Combinator.union(*pairs.map(&:last).compact)
+      end
+
+      # The `[pairs, elements]` the `calls` on a mixed `Array | Hash` seed store, typed in `entry_scope`. The seam
+      # cannot tell which member a store reached, so an index store (`[]=` or an index write) is routed by its index.
+      # One no Array accepts — a Symbol, String, `nil` or boolean key, where `[1][:k] = v` raises `TypeError` — is the
+      # Hash side's alone. One that could reach either member floors BOTH sides to `Dynamic[top]`: read precisely, its
+      # value lands on the side it never reached, and a hand-written `-> Array[Integer] | Hash[Symbol, String]`
+      # rejects the `Array["t" | Integer]` a guarded `x[:b] = "t" if x.is_a?(Hash)` made of the Array member. Every
+      # other adder belongs to one class, and each side reads it as its single-class join does.
+      def mixed_content_evidence(calls, entry_scope, shadows = NO_SHADOWS)
+        index_stores, adders = calls.partition { |c| index_write?(c) || (c.is_a?(Prism::CallNode) && c.name == :[]=) }
+        hash_only, either = index_stores.partition do |site|
+          array_index_excluded?(site, site_evidence_scope(entry_scope, site, shadows))
+        end
+        pairs = hash_pair_evidence(adders + hash_only, entry_scope, shadows)
+        elements = array_element_evidence(adders, entry_scope, shadows)
+        return [pairs, elements] if either.empty?
+
+        untyped = Type::Combinator.untyped
+        [pairs + [[untyped, untyped]], elements + [untyped]]
+      end
+
+      # The classes an Array index never converts from: none defines `to_int`, and none is a Range.
+      NON_ARRAY_INDEX_CLASSES = %w[Symbol String NilClass TrueClass FalseClass].to_set.freeze
+      private_constant :NON_ARRAY_INDEX_CLASSES
+
+      # True when one of the index store `site`'s index arguments provably holds no value an Array accepts as an index.
+      # A splat, and a type with any member of another or unknown class, may hold one.
+      def array_index_excluded?(site, scope)
+        arguments = site.arguments
+        list = arguments.is_a?(Prism::ArgumentsNode) ? arguments.arguments : []
+        list = list[0...-1] if site.is_a?(Prism::CallNode)
+        list.any? do |arg|
+          next false if arg.is_a?(Prism::SplatNode)
+
+          ContentJoin.union_members(scope.type_of(arg, tracer: tracer)).all? do |member|
+            NON_ARRAY_INDEX_CLASSES.include?(ContentJoin.evidence_class(member))
+          end
+        end
+      rescue StandardError
+        false
       end
 
       # The Hash side's evidence as the one `[key, value]` pair its slots join to, or none.
@@ -4049,9 +4097,7 @@ module Rigor
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
         elsif content_kind(pre_state) == :mixed
-          ContentJoin.join_mixed_content(
-            pre_state, hash_pair_evidence(calls, block_entry), array_element_evidence(calls, block_entry)
-          )
+          ContentJoin.join_mixed_content(pre_state, *mixed_content_evidence(calls, block_entry))
         elsif hashish?(pre_state)
           join_hash_param(calls, pre_state, block_entry)
         else

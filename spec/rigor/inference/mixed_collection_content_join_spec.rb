@@ -12,8 +12,8 @@ require "spec_helper"
 # Each "does not fire" example is paired with a control in the same position that must still fire, so a seam that
 # stopped typing the Array member at all would not pass.
 RSpec.describe "content join over a mixed Array | Hash seed", type: :runner do
-  def diagnostics(source)
-    analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source})).diagnostics
+  def diagnostics(source, sig: {})
+    analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig).diagnostics
   end
 
   def dumped_types(source)
@@ -22,8 +22,17 @@ RSpec.describe "content join over a mixed Array | Hash seed", type: :runner do
     end
   end
 
-  def rules(source, prefix)
-    diagnostics(source).filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?(prefix) }
+  def rules(source, prefix, sig: {})
+    diagnostics(source, sig: sig).filter_map do |diagnostic|
+      diagnostic.rule if diagnostic.rule.to_s.start_with?(prefix)
+    end
+  end
+
+  # The `def.` rules `Maker#call` draws, its body `body` and its hand-written signature `(params) -> ret`.
+  def return_rules(body, ret, params: "")
+    sig = { "maker.rbs" => "class Maker\n  def call: (#{params}) -> (#{ret})\nend\n" }
+    arg = params.empty? ? "" : "(p)"
+    rules("class Maker\n  def call#{arg}\n#{body.gsub(/^/, '    ')}  end\nend\n", "def.", sig: sig)
   end
 
   # The body under each seam: a block, and the same statements as a `while` body.
@@ -76,23 +85,54 @@ RSpec.describe "content join over a mixed Array | Hash seed", type: :runner do
           z[:k] = 2 if z.is_a?(Hash)
         RUBY
         expect(dumped_types("z = gets ? [1] : { a: 1 }\n#{body}dump_type(z)\n"))
-          .to eq(["Array[\"s\" | 1 | 2] | Hash[:k | Symbol, 1 | 2]"])
+          .to eq(["Array[\"s\" | 1] | Hash[:k | Symbol, 1 | 2]"])
+      end
+
+      # An index store may reach either member. Read precisely, its value lands on the side it never reached, and a
+      # hand-written signature rejects the member a guarded store on the other class made.
+      it "keeps a Hash-keyed store off the Array member, which the signature accepts" do
+        body = seams("x[:b] = \"t\" if x.is_a?(Hash)\n")[seam]
+        ret = "Array[Integer] | Hash[Symbol, String]"
+        expect(return_rules("x = gets ? [1] : { a: \"s\" }\n#{body}x\n", ret)).to be_empty
+        # The control: the same store's value is still joined into the Hash member it reached.
+        expect(return_rules("x = gets ? [1] : { a: \"s\" }\n#{body}x\n", "Array[Integer] | Hash[Symbol, Symbol]"))
+          .to eq(["def.return-type-mismatch"])
+      end
+
+      it "floors a store whose index may reach either member on both sides" do
+        body = seams("x[0] = 5 if x.is_a?(Array)\n")[seam]
+        expect(return_rules("x = gets ? [1] : { a: \"s\" }\n#{body}x\n", "Array[Integer] | Hash[Symbol, String]"))
+          .to be_empty
+        body = seams("l[0] += 1 if l.is_a?(Array)\n")[seam]
+        expect(rules("l = gets ? [1] : { a: 1 }\n#{body}puts \"3\" if l.is_a?(Array) && l[0] == 3\n", "flow."))
+          .to be_empty
       end
     end
   end
 
   # The #586 reason the seam reads its seed before `widen_after_block`: the widening spells an empty `[]` as
   # `Array[untyped]`, which read back is a declared gradual arm. The mixed seed's Array member is read from the same
-  # pre-widen seed, so an empty literal still contributes no element. (`2` is the `[]=` store: the seam cannot tell
-  # which member a store reached, so a selector in both adder tables is evidence for both sides.)
+  # pre-widen seed, so an empty literal still contributes no element.
   it "adds no gradual arm for an empty Array member" do
-    expect(dumped_types(<<~RUBY)).to eq(["Array[1 | 2] | Hash[:k, 2]"])
+    expect(dumped_types(<<~RUBY)).to eq(["Array[1] | Hash[:k, 2]"])
       e = gets ? [] : {}
       [0].each do
         e << 1 if e.is_a?(Array)
         e[:k] = 2 if e.is_a?(Hash)
       end
       dump_type(e)
+    RUBY
+  end
+
+  it "keeps a Hash-keyed store off a declared parameter's Array member" do
+    ret = "Array[Integer] | Hash[Symbol, String]"
+    expect(return_rules("[0].each { p[:z] = \"q\" if p.is_a?(Hash) }\np\n", ret, params: ret)).to be_empty
+  end
+
+  it "keeps an each_with_object memo's Hash stores off its Array member" do
+    expect(return_rules(<<~RUBY, "Array[Integer] | Hash[Integer, String]")).to be_empty
+      r = [1, 2].each_with_object(gets ? [] : {}) { |v, acc| acc.is_a?(Array) ? acc << v : acc[v] = v.to_s }
+      r
     RUBY
   end
 end

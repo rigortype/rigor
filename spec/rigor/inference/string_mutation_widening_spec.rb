@@ -501,7 +501,7 @@ RSpec.describe "String mutation widening", type: :runner do
   # everywhere at once.
   describe "the mutator table" do
     let(:mutators) { Rigor::Inference::StringMutation::MUTATORS }
-    let(:bang_methods) { String.public_instance_methods(false).grep(/!\z/) }
+    let(:bang_methods) { CoreMethods.public_instance_methods(String).grep(/!\z/) }
 
     # Every bang method String defines rewrites the receiver in place, so none is exempt.
     it "lists every bang method String defines" do
@@ -514,7 +514,7 @@ RSpec.describe "String mutation widening", type: :runner do
     # checks for frozenness only when it has something to replace.
     it "lists exactly the methods that refuse a frozen receiver" do
       argument_shapes = [[], ["a"], [0], %w[a b], [0, "a"], [0, 1], [0, 1, "a"], [:nfd]]
-      refusing = String.public_instance_methods(false).select do |name|
+      refusing = CoreMethods.public_instance_methods(String).select do |name|
         ["ab", "a\xFF"].any? do |receiver|
           argument_shapes.any? do |arguments|
             receiver.dup.freeze.public_send(name, *arguments) { "" }

@@ -89,7 +89,9 @@ Catalogued origins are keyed by the callee key the row matched (`catalogue:Kerne
 
 ### Ownership
 
-A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS`) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
+A mutating call is claimed only when the selector settles it: `[]=` and an attribute writer on any receiver, and the per-class mutator sets (`MutationWidening::ARRAY_MUTATORS` / `MutationClassifier::HASH_MUTATORS` / `StringMutation::MUTATORS`) when the typer named the receiver's class. `<<` on an unnamed class is deliberately **not** claimed — it is `Integer`'s bit shift and `IO`'s write as readily as `Array`'s append.
+
+The Hash set is the one union the effect side keeps. The widening splits Hash mutators by what they change about a `HashShape`: `MutationWidening::HASH_MUTATORS` changes the pair set, and `HashLookupMutation::MUTATORS` (`compare_by_identity`, `default=`, `default_proc=`) changes what a read of the pairs answers. Either is a write to the receiver, and the classifier asks only that, so it reads both tables. It adds `rehash`, which is in neither because it changes no read a shape can state, but which rebuilds the receiver's table in place. `@h.compare_by_identity` is therefore `mutate.self`, and the predicate `@h.compare_by_identity?` is nothing. The set is exactly the public `Hash` methods that raise `FrozenError` on a frozen receiver, and a spec holds it there.
 
 The label then follows the receiver's ownership, which is a syntactic question:
 
@@ -99,9 +101,14 @@ The label then follows the receiver's ownership, which is a syntactic question:
 | a `@@cvar` | `mutate.static` |
 | a parameter | `mutate.instance` |
 | a local whose every assignment allocates and which never escapes the body | `mutate.local` |
+| an allocation itself (`{}.compare_by_identity`, `[].push(x)`, `Hash.new.rehash`) | `mutate.local` |
 | anything else | **nothing** — the `unknown-ownership` taint |
 
 `mutate.local` requires the local to be freshly allocated (`[]`, `{}`, `""`, `+""`, `.new`, `.dup`, `.clone`, a lambda) and never to escape. The escape analysis is flow-insensitive and whole-body: a local that escapes anywhere disqualifies, even after the mutation. That is strictly more conservative than "escaped before the mutating call", which is the direction the false-positive budget runs ([ADR-5](../adr/5-robustness-principle.md)).
+
+A receiver that is itself one of those allocations (`{}.compare_by_identity`, `raw.dup.force_encoding(e)`) is `mutate.local` with no escape analysis: each evaluation allocates a new object, and a core mutator hands its receiver to no other code, so nothing can observe the object change. Without this, `@refs = {}.compare_by_identity` read as `unknown-ownership`, and so did every method that built an identity hash, with the taint reaching each constructor caller through `.new`.
+
+The receiver form rests on the same allocation witness as the local rule ([ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md) reads `new` / `dup` / `clone` as allocating), and shares its known holes. A project `new` can return an object something else holds (`user.posts.new`, where the association keeps what it builds, or a caching `def self.new`), an `initialize` can publish `self` (`@@all << self`), and a project `dup` can return `self`. Where that method is the project's own, its summary still reaches the caller through its edge (`mutate.self`, `mutate.static`), so the caller is not trivial on the strength of the `mutate.local` alone; a gem's method gives no such edge.
 
 An unprovable ownership MUST taint rather than produce a proven bare `mutate`.
 
@@ -187,7 +194,7 @@ An edge that reaches no project definition is dropped by the propagator, so keep
 
 ### Mutator sets, by reference
 
-A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `HASH_MUTATORS` / `StringMutation::MUTATORS` — the same sets `MutationClassifier` reads, so no mutator list is kept twice. The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
+A value class names `mutators: array | hash | string` and the loader resolves it to `MutationWidening::ARRAY_MUTATORS` / `MutationClassifier::HASH_MUTATORS` / `StringMutation::MUTATORS` — the same sets `MutationClassifier` reads, so no mutator list is kept twice and a posture's answer cannot disagree with the classifier's (§ Ownership). The data file MUST NOT re-spell a selector list; a spec pins the agreement in both directions.
 
 ### Argument-dependent narrowing
 

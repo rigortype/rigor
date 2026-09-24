@@ -1761,9 +1761,15 @@ module Rigor
       # at runtime, so the seed is unconstrained there — or the dispatch fails (`bool + 1`); either
       # way the fallback is the widened rvalue, which is the right answer for the dominant `+=` /
       # `-=` / `|=` families and an under-report elsewhere rather than a folded wrong claim.
+      #
+      # The union includes the `&&=` contributions {#record_ivar_and_write} still holds: a `+=` walked
+      # after `@x &&= 1.5` would otherwise dispatch on `1` alone, drop `Float` from the seed, and fold
+      # `x == 2.5` always-falsey on a program that reaches it.
       def record_ivar_operator_write(node, scope, class_name, accumulator)
         rvalue_type = scope.type_of(node.value)
-        current = accumulator.dig(class_name, node.name)
+        seeded = accumulator.dig(class_name, node.name)
+        held = accumulator.dig(AND_WRITE_CONTRIBUTIONS, class_name, node.name)
+        current = seeded && held ? Type::Combinator.union(seeded, held) : seeded || held
         result =
           if current
             MethodDispatcher.dispatch(

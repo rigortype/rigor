@@ -414,12 +414,14 @@ declared `-> bot` on a reader whose ivar another class or an
 
 **Status, 2026-09-24 — `&&=` boundary closed (#1340).** The `&&=`
 arm's boundary above was not harmless: seeded as the rvalue, the
-`&&=` bound its own ivar, so `if (@x &&= 1)` folded always-truthy and
-`@x &&= raise "b"` read `bot` in every method of the class. An `&&=`
-contribution now counts only beside another write of the ivar, in
-either source order; an ivar only `&&=` writes stays unseeded, and the
-write reads as the unbound target `Dynamic[top] | v`, which is the
-statement evaluator's reading.
+`&&=` bound its own ivar, so `if (@x &&= 1)` could fold always-truthy
+and `@x &&= raise "b"` could read `bot` (a direct `@x` read elsewhere
+in the class added the read-before-write `nil`, which hid both). An
+`&&=` contribution now counts only beside another write of the ivar,
+in either source order, and a later `op=` still dispatches on it; an
+ivar only `&&=` writes stays unseeded, and the write reads as the
+unbound target `Dynamic[top] | v`, which is the statement evaluator's
+reading.
 
 ## Rejected / deferred alternatives
 

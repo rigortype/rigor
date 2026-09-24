@@ -1468,6 +1468,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include("init", "refreshed")
         end
 
+        it "lets a later `op=` dispatch on an `&&=` contribution the walk still holds" do
+          # Runtime: `@x` is `2.5` after `shrink` then `grow`, so the `+=` must see the `1.5` the `&&=` stores.
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @x = 1
+              end
+              def shrink
+                @x &&= 1.5
+              end
+              def grow
+                @x += 1
+              end
+            end
+          RUBY
+          members = seed_members(program, "C", :@x)
+          expect(members.any? { |m| m.is_a?(Rigor::Type::Nominal) && m.class_name == "Float" }).to be(true)
+        end
+
         it "does not seed an `&&=`-only ivar — the write cannot give the ivar its first value" do
           # Seeded as the rvalue, `if (@token &&= 1)` folded always-truthy on an ivar that is `nil` at runtime.
           program = parse(<<~RUBY)

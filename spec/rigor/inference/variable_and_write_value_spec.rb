@@ -74,6 +74,10 @@ RSpec.describe "variable `&&=` value", type: :runner do
           def local
             if (conf &&= 1) then :yes else :no end
           end
+
+          def registry
+            if (@@registry &&= 1) then :yes else :no end
+          end
         end
       RUBY
     end
@@ -107,6 +111,22 @@ RSpec.describe "variable `&&=` value", type: :runner do
           def refresh = dump_type(@token &&= "refreshed")
           def initialize = (@token = "init")
           def peek = dump_type(@token)
+        end
+      RUBY
+    end
+
+    it "keeps a later `+=` dispatching on the value an `&&=` stores" do
+      # Runtime: prints, since `shrink` then `grow` leaves `@x` at `2.5`.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        class Scale
+          def initialize = (@x = 1)
+          def shrink = (@x &&= 1.5)
+          def grow = (@x += 1)
+
+          def check
+            x = @x
+            puts "two and a half" if x.is_a?(Float) && x == 2.5
+          end
         end
       RUBY
     end

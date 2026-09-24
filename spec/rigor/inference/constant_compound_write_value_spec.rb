@@ -161,6 +161,8 @@ RSpec.describe "constant compound write value", type: :runner do
     it "reads an unbound `&&=` as the unseen binding beside the rvalue, as a variable target does" do
       # Runtime: NameError. An unset constant raises on the `&&=` read, so the write returns only where something
       # the analyzer did not see set the constant; the rvalue alone is its value only when that binding is truthy.
+      # A whole run reaches the same reading earlier: its publication census counts the `&&=` itself as a binding
+      # write, so only this single-source path, which skips project discovery, ever read the constant as unbound.
       expect(dumped_type("dump_type(AND_ONLY &&= 1)")).to eq("1 | Dynamic[top]")
     end
 

@@ -990,6 +990,89 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "the Relation signature's `find` by arity, and `arel`'s argument" do
+    # `find(1, 2)` returns an Array, and the bundled signature typed it as the element. Where the model has an
+    # RBS signature, an Array method on the result drew `call.undefined-method`. A single argument keeps the
+    # element type on purpose: see the comment on `find` in `relation.rbs`.
+
+    let(:association_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => "class User < ApplicationRecord\n  has_many :posts\nend\n",
+        "app/models/post.rb" => "class Post < ApplicationRecord\n  belongs_to :user\nend\n"
+      }
+    end
+
+    def relation_diagnostics(source, post_sig: false)
+      files = association_models.merge("db/schema.rb" => DEFAULT_SCHEMA)
+      files["sig/post.rbs"] = "class Post\n  attr_accessor title: String\nend\n" if post_sig
+      run_plugin(source: source, files: files, signature_paths: post_sig ? ["sig"] : nil).diagnostics
+    end
+
+    def dumped(source)
+      relation_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    def rule_hits(source, rule, post_sig: false)
+      relation_diagnostics(source, post_sig: post_sig).select { |d| d.rule == rule }
+    end
+
+    it "types two or more ids as an Array of the element" do
+      source = <<~RUBY
+        user = User.find(1)
+        Rigor.dump_type(user.posts.find(1, 2))
+        Rigor.dump_type(user.posts.find(1, 2, 3))
+        Rigor.dump_type(Post.where(title: "x").find(1, 2))
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Array[Post]"] * 3)
+    end
+
+    it "keeps one id, an untyped id, a lone splat and the block form as the element" do
+      # `find(id)` is the pin that matters. An overload keyed on an Array argument would also be selected for
+      # this untyped `id`, and the joined return would lose `Post`.
+      source = <<~RUBY
+        class Lookup
+          def self.run(id, ids)
+            user = User.find(1)
+            Rigor.dump_type(user.posts.find(1))
+            Rigor.dump_type(user.posts.find(id))
+            Rigor.dump_type(user.posts.find(*ids))
+            Rigor.dump_type(user.posts.find { |post| post.title == "x" })
+          end
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Post"] * 4)
+    end
+
+    it "does not report an Array method on the result of several ids" do
+      source = <<~RUBY
+        user = User.find(1)
+        user.posts.find(1, 2).each { |post| post.title }
+        user.posts.find(1, 2, 3).map(&:title)
+      RUBY
+      expect(rule_hits(source, "call.undefined-method", post_sig: true)).to be_empty
+    end
+
+    it "STILL reports an Array method on the result of one id" do
+      # Without this sibling, the example above would pass if the model's signature were never loaded.
+      hits = rule_hits("User.find(1).posts.find(1).each { |post| post.title }\n", "call.undefined-method",
+                       post_sig: true)
+      expect(hits.map(&:message)).to eq(["undefined method `each' for Post"])
+    end
+
+    it "accepts `arel`'s optional argument, and no more" do
+      source = <<~RUBY
+        user = User.find(1)
+        user.posts.arel(nil)
+        Post.where(title: "x").arel(nil)
+        Post.all.arel(nil, 1)
+      RUBY
+      arity = rule_hits(source, "call.wrong-arity")
+      expect(arity.map(&:line)).to eq([4])
+      expect(arity.first.message).to include("`arel'", "expected 0..1")
+    end
+  end
+
   describe "structure.sql fallback (schema_format = :sql)" do
     # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
     # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.

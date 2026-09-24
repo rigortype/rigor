@@ -2331,8 +2331,12 @@ module Rigor
 
         walk = OperandWalk.new(walk_recorder)
         after_expression = thread_operand(node.expression, scope, walk, scope)
-        after_rescue = thread_operand(node.rescue_expression, join_with_nil_injection(scope, after_expression), walk,
-                                      scope)
+        # The arm is threaded outside the walk: its entry nil-injects a local `expr` first binds, which is the
+        # sound join for the scope after the modifier but would read `u` as `String?` in `Float(u = s) rescue
+        # u.strip`, where the arm only runs after the write. Neither it nor anything in it is recorded or typed
+        # from there.
+        arm_entry = join_with_nil_injection(scope, after_expression)
+        after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
         type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
         return [type, after_expression] if branch_unconditionally_exits?(node.rescue_expression)
 
@@ -2441,9 +2445,12 @@ module Rigor
       # 2) + …`), and each through the callee's return inference. For the same reason it applies no post-return
       # narrowing ({#invoke_call}): each of those resolves the method by typing the receiver, the same subtree
       # again. They only narrow, and a call in an operand never applied them before #1223, so leaving them out is
-      # the sound side. Its own later operands join `walk`, which the enclosing root types.
+      # the sound side. Its own later operands join `walk` and are typed as soon as they are all taken, so its
+      # invocation reads them ({#type_operand}) and the enclosing root does not type them again.
       def call_effects(node, walk, typed_from)
-        invoke_from(node, call_operand_scope(node, walk, typed_from), nil, nil)
+        mark = walk.mark
+        invoked = call_operand_scope(node, walk, typed_from)
+        invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
       end
 
       # The rest of the call from `invoked`, the scope its operands left, with each later operand's own value in
@@ -2490,9 +2497,14 @@ module Rigor
       def thread_operand(node, entry, walk, typed_from)
         return entry unless node.is_a?(Prism::Node)
 
-        slot = walk.later(node, entry) unless entry.equal?(typed_from)
+        taken = !entry.equal?(typed_from)
+        slot = walk.later(node, entry) if taken
         typed_from = entry if slot
-        return entry unless OperandEffects.any?(node)
+        unless OperandEffects.any?(node)
+          # A taken position with no value of its own leaves its children to be taken: nothing types it whole.
+          thread_operand_children(node, entry, walk, typed_from) if taken && slot.nil?
+          return entry
+        end
 
         operand = evaluator_at(entry, on_enter: nil, in_operand: true, operand_recorder: walk.recorder)
         return operand.send(:call_effects, node, walk, typed_from) if node.is_a?(Prism::CallNode)

@@ -26,6 +26,11 @@ RSpec.describe "later operands read the scope the earlier ones left", type: :run
     diagnostics(source).filter_map { |diagnostic| diagnostic.rule if diagnostic.rule.to_s.start_with?(prefix) }
   end
 
+  # Every `call.` rule but the toplevel-resolution one the `include Rigor::Testing` header draws.
+  def receiver_rules(source)
+    rules(source, "call.") - ["call.unresolved-toplevel"]
+  end
+
   def flow_messages(source)
     diagnostics(source).filter_map do |diagnostic|
       diagnostic.message[/condition is always \w+/] if diagnostic.rule.to_s.start_with?("flow.")
@@ -89,6 +94,60 @@ RSpec.describe "later operands read the scope the earlier ones left", type: :run
         puts(n += 1, (x = [c.dup, c.first.upcase]))
       RUBY
     end
+
+    it "reads a splatted argument after an earlier argument's write" do
+      expect(rules(<<~RUBY, "call.undefined")).to be_empty
+        n = nil
+        puts(n = "s", *[n.upcase])
+      RUBY
+      expect(rules(<<~RUBY, "call.undefined")).to eq(["call.undefined-method"])
+        n = nil
+        puts(m = "s", *[n.upcase])
+      RUBY
+    end
+
+    it "records a later operand inside a block that a threaded operand runs" do
+      expect(rules(<<~RUBY, "call.undefined")).to be_empty
+        b = [1]
+        puts([1].each { |_| puts(b.unshift("s"), b.first.upcase) })
+      RUBY
+      expect(rules(<<~RUBY, "call.undefined")).to eq(["call.undefined-method"])
+        b = [1]
+        puts([1].each { |_| puts(b.dup, b.first.upcase) })
+      RUBY
+    end
+
+    it "checks a call's own argument from the scope its receiver left" do
+      expect(rules(<<~RUBY, "call.argument")).to be_empty
+        def probe
+          k = :s
+          (k = 0; 5)[k]
+        end
+      RUBY
+      expect(rules(<<~RUBY, "call.argument")).to eq(["call.argument-type-mismatch"])
+        def probe
+          k = :s
+          (z = 0; 5)[k]
+        end
+      RUBY
+    end
+
+    # The arm runs only after `expr` raised, possibly after its writes, so the scope after the modifier
+    # nil-injects a local `expr` first binds; the arm itself, and the modifier's value, must not read it that way.
+    it "does not read a `rescue` modifier's arm from the nil-injected join" do
+      expect(receiver_rules(<<~RUBY)).to be_empty
+        z = (Float(u = gets.to_s) rescue u.strip)
+        x = (Integer(v = gets.to_s) rescue v)
+        x.succ
+      RUBY
+      expect(receiver_rules(<<~RUBY)).to eq(%w[call.undefined-method call.possible-nil-receiver])
+        u = nil
+        z = (Float(gets.to_s) rescue u.strip)
+        v = nil
+        x = (Integer(gets.to_s) rescue v)
+        x.succ
+      RUBY
+    end
   end
 
   describe "the value of a later operand" do
@@ -147,6 +206,68 @@ RSpec.describe "later operands read the scope the earlier ones left", type: :run
         def second(_a, b) = b
         a = :init
         r = second(z = 1, a)
+        dump_type(r)
+      RUBY
+    end
+
+    it "types a hash value after an earlier value's write" do
+      expect(dumped_types(<<~RUBY)).to eq(["{ a: 1, b: 1 }"])
+        g = :init
+        h = { a: (g = 1), b: g }
+        dump_type(h)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["{ a: 1, b: :init }"])
+        g = :init
+        h = { a: (z = 1), b: g }
+        dump_type(h)
+      RUBY
+    end
+
+    it "passes an argument after a receiver's write to the callee" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        class W
+          def id(x) = x
+        end
+        a = :init
+        r = (a = 1; W.new).id(a)
+        dump_type(r)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq([":init"])
+        class W
+          def id(x) = x
+        end
+        a = :init
+        r = (z = 1; W.new).id(a)
+        dump_type(r)
+      RUBY
+    end
+
+    it "passes a keyword argument after an earlier keyword's write to the callee" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        def kw(k: nil, b: nil) = b
+        k = :init
+        r = kw(k: (k = 1), b: k)
+        dump_type(r)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq([":init"])
+        def kw(k: nil, b: nil) = b
+        k = :init
+        r = kw(k: (z = 1), b: k)
+        dump_type(r)
+      RUBY
+    end
+
+    it "passes a double splat after an earlier argument's write to the callee" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        def kw(_x, b: nil) = b
+        hh = { b: :old }
+        r = kw(hh = { b: 1 }, **hh)
+        dump_type(r)
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq([":old"])
+        def kw(_x, b: nil) = b
+        hh = { b: :old }
+        r = kw(z = { b: 1 }, **hh)
         dump_type(r)
       RUBY
     end

@@ -21,8 +21,11 @@ module Rigor
     class OperandWalk
       # Positions `ExpressionTyper` gives no value of their own: it reads their children directly, never the node,
       # so a later one is recorded but not typed, and its children are compared against its ancestor's scope.
+      # A keyword hash is typed whole only as a plain hash: the `**h` form reads the splatted value itself
+      # (`ExpressionTyper#double_splat_hash_shape`), so its children are taken instead.
       NON_VALUE_NODES = Set[
-        Prism::ArgumentsNode, Prism::AssocNode, Prism::AssocSplatNode, Prism::BlockArgumentNode, Prism::SplatNode
+        Prism::ArgumentsNode, Prism::AssocNode, Prism::AssocSplatNode, Prism::BlockArgumentNode, Prism::SplatNode,
+        Prism::KeywordHashNode
       ].freeze
       private_constant :NON_VALUE_NODES
 
@@ -32,6 +35,12 @@ module Rigor
       def initialize(recorder)
         @recorder = recorder
         @entries = nil
+        @types = nil
+      end
+
+      # The position the next taken operand lands at, for {#types}' `since:`.
+      def mark
+        @entries.nil? ? 0 : @entries.size
       end
 
       # Takes `node`, entered from `entry`. Answers the slot {#resolve} fills, or nil for a {NON_VALUE_NODES}
@@ -50,16 +59,21 @@ module Rigor
       end
 
       # The identity-comparing table of every taken operand's value, for `ExpressionTyper`'s `operand_types:`, or
-      # nil when the walk took none. An operand the evaluator did not type is typed from its entry here, after
-      # every operand below it.
-      def types(tracer)
-        return nil if @entries.nil?
+      # nil when the walk took none at or after `since` (a {#mark}). An operand the evaluator did not type is typed
+      # from its entry here, after every operand below it. A threaded call below the root asks for the operands
+      # taken under it once they are all taken; they are typed then and only then, and the table keeps growing,
+      # so the root's own request types only what is left.
+      def types(tracer, since: 0)
+        return nil if @entries.nil? || @entries.size <= since
 
-        types = {}.compare_by_identity
-        @entries.reverse_each do |node, entry, type|
-          types[node] = type || self.class.type_of(entry, node, tracer, types)
+        @types ||= {}.compare_by_identity
+        (@entries.size - 1).downto(since) do |index|
+          node, entry, type = @entries[index]
+          next if @types.key?(node)
+
+          @types[node] = type || self.class.type_of(entry, node, tracer, @types)
         end
-        types
+        @types
       end
 
       # `node`'s type from `scope`, answering each node `operand_types` holds with its value there. `Scope#type_of`

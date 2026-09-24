@@ -31,8 +31,9 @@ module Rigor
       module_function
 
       # The set of frame-owned local names in `body`, given the method's parameter names (a parameter is
-      # never frame-owned — the caller holds the same object, so mutating it is `mutate.instance`).
-      def owned(body, parameter_names)
+      # never frame-owned — the caller holds the same object, so mutating it is `mutate.instance`) and
+      # whether `self` is a class there ({constructor?}).
+      def owned(body, parameter_names, singleton:)
         return Set.new if body.nil?
 
         assignments = {}
@@ -42,40 +43,46 @@ module Rigor
         assignments.filter_map do |name, values|
           next if escaped.include?(name) || parameter_names.include?(name)
 
-          name if values.all? { |value| allocation?(value) }
+          name if values.all? { |value| allocation?(value, singleton: singleton) }
         end.to_set
       end
 
       # Whether `node` is an expression that allocates a fresh object this frame is the sole holder of.
-      def allocation?(node)
+      # `singleton` is whether the enclosing unit's `self` is a class, as {constructor?} reads it.
+      def allocation?(node, singleton:)
         case node
         when Prism::ArrayNode, Prism::HashNode, Prism::StringNode, Prism::InterpolatedStringNode,
              Prism::LambdaNode
           true
         when Prism::CallNode
-          COPYING_SELECTORS.include?(node.name) || constructor?(node) || unary_plus_string?(node)
+          COPYING_SELECTORS.include?(node.name) || constructor?(node, singleton: singleton) ||
+            unary_plus_string?(node)
         else
           false
         end
       end
 
-      # A `new` whose receiver the author wrote as a class object: a constant path, `self` (explicit or
-      # implicit), or `self.class`. Any other receiver may be an object whose `new` only shares the name —
-      # an ActiveRecord association's `new` builds a record into the association's own target, where the
-      # caller can reach it — and a gem's method gives no edge that would carry that to the caller.
-      def constructor?(node)
+      # A `new` whose receiver the author wrote as a class object: a constant path, a `class` call
+      # (`self.class`, `other.class`), or `self` — explicit or implicit — in a singleton-method body. Any
+      # other receiver may be an object whose `new` only shares the name: an ActiveRecord association's
+      # `new` builds a record into the association's own target, where the caller can reach it, and a
+      # gem's method gives no edge that would carry that to the caller. `self` in an instance method is
+      # such a receiver too — an association extension's `new` is the association's.
+      def constructor?(node, singleton:)
         return false unless node.name == :new
 
         receiver = node.receiver
         case receiver
-        when nil, Prism::SelfNode, Prism::ConstantReadNode, Prism::ConstantPathNode then true
-        when Prism::CallNode then self_class?(receiver)
+        when nil, Prism::SelfNode then singleton
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::CallNode then class_call?(receiver)
         else false
         end
       end
 
-      def self_class?(node)
-        node.name == :class && node.receiver.is_a?(Prism::SelfNode) && node.arguments.nil? && node.block.nil?
+      # `x.class` — `Kernel#class` answers a class whatever the receiver is.
+      def class_call?(node)
+        node.name == :class && node.arguments.nil? && node.block.nil?
       end
 
       # `+""` — the frozen-string-literal era's spelling of "a fresh mutable String".
@@ -144,7 +151,7 @@ module Rigor
         last.is_a?(Prism::LocalVariableReadNode) ? [last.name.to_s] : []
       end
 
-      private_class_method :self_class?, :collect, :record_assignment, :record_escapes, :stored_value,
+      private_class_method :class_call?, :collect, :record_assignment, :record_escapes, :stored_value,
                            :note_read, :trailing_reads
     end
   end

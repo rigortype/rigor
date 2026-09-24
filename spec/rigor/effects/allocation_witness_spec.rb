@@ -12,8 +12,8 @@ require "rigor/analysis/runner"
 # reaches through `user` — and read as `[mutate.local]`, exhaustive and trivial, because a gem's `new` gives no edge
 # that would carry the association's effect to the caller.
 #
-# `new` now counts only on a receiver written as a class object: a constant path, `self` (explicit or implicit), or
-# `self.class`. `dup` and `clone` are untouched (ADR-76 reads them as allocating).
+# `new` now counts only on a receiver written as a class object: a constant path, a `class` call, or `self` (explicit
+# or implicit) in a singleton-method body. `dup` and `clone` are untouched (ADR-76 reads them as allocating).
 RSpec.describe "the allocation witness behind mutate.local" do
   def configuration
     data = { "paths" => ["lib"], "parallel" => { "workers" => 0 }, "effects" => {} }
@@ -35,8 +35,31 @@ RSpec.describe "the allocation witness behind mutate.local" do
               self.new.title = "x"
             end
 
+            class << self
+              def eigen
+                new.title = "x"
+              end
+            end
+
             def retitled
               self.class.new.title = "x"
+            end
+          end
+
+          # An association extension's shape: in an instance method, `self` is the proxy, and its `new` is the
+          # proxy's own.
+          class DraftPosts < Posts
+            def draft
+              new.title = "x"
+            end
+
+            def draft_self
+              self.new.title = "x"
+            end
+
+            def draft_local
+              post = new
+              post.title = "x"
             end
           end
 
@@ -50,13 +73,21 @@ RSpec.describe "the allocation witness behind mutate.local" do
               post.title = "x"
             end
 
-            def through_constant
+            def through_bare_constant
+              Note.new.title = "x"
+            end
+
+            def through_constant_path
               Blog::Record.new.title = "x"
             end
 
             def through_constant_local
               post = Blog::Record.new
               post.title = "x"
+            end
+
+            def through_class_of(post)
+              post.class.new.title = "x"
             end
 
             def through_class_parameter(klass)
@@ -68,10 +99,14 @@ RSpec.describe "the allocation witness behind mutate.local" do
             end
           end
         RUBY
-        # `Blog::Record` and `Posts` have signatures and no Ruby body: they stand in for a gem's model and association
-        # proxy, whose methods the project cannot see into and whose effects therefore reach no caller through an
-        # edge. `Draft#title=` is declared the same way, so its edge carries nothing back either.
+        # `Note`, `Blog::Record` and `Posts` have signatures and no Ruby body: they stand in for a gem's models and
+        # association proxy, whose methods the project cannot see into and whose effects therefore reach no caller
+        # through an edge. `Draft#title=` is declared the same way, so its edge carries nothing back either.
         File.write("sig/writer.rbs", <<~RBS)
+          class Note
+            attr_accessor title: String
+          end
+
           module Blog
             class Record
               attr_accessor title: String
@@ -91,14 +126,23 @@ RSpec.describe "the allocation witness behind mutate.local" do
 
             def self.fresh: () -> String
             def self.explicit_self: () -> String
+            def self.eigen: () -> String
             def retitled: () -> String
+          end
+
+          class DraftPosts < Posts
+            def draft: () -> String
+            def draft_self: () -> String
+            def draft_local: () -> String
           end
 
           class Writer
             def through_association: (User user) -> String
             def through_association_local: (User user) -> String
-            def through_constant: () -> String
+            def through_bare_constant: () -> String
+            def through_constant_path: () -> String
             def through_constant_local: () -> String
+            def through_class_of: (Blog::Record post) -> String
             def through_class_parameter: (singleton(Blog::Record) klass) -> String
             def through_dup: (Blog::Record post) -> String
           end
@@ -111,49 +155,56 @@ RSpec.describe "the allocation witness behind mutate.local" do
     end
   end
 
+  def expect_unproven(key)
+    entry = table[key]
+
+    expect(entry.proven).to be_empty, "#{key}: #{entry.proven.to_a}"
+    expect(entry).not_to be_exhaustive
+    expect(entry.causes.map(&:first)).to eq(["unknown-ownership"]), "#{key}: #{entry.causes.to_a}"
+  end
+
+  def expect_allocation(key)
+    entry = table[key]
+
+    expect(entry.proven.to_a).to eq(["mutate.local"]), "#{key}: #{entry.proven.to_a}"
+    expect(entry).to be_trivial
+  end
+
   # The hole: the record the association builds is reachable from the parameter, so its write is not frame-local and
   # the method is not effect-free.
   it "does not read an association's `new` as an allocation" do
-    entry = table["Writer#through_association"]
-
-    expect(entry.proven).to be_empty
-    expect(entry).not_to be_exhaustive
-    expect(entry.causes.map(&:first)).to eq(["unknown-ownership"])
+    expect_unproven("Writer#through_association")
   end
 
   it "does not let an association's `new` make a local frame-owned" do
-    entry = table["Writer#through_association_local"]
-
-    expect(entry.proven).to be_empty
-    expect(entry).not_to be_exhaustive
-    expect(entry.causes.map(&:first)).to eq(["unknown-ownership"])
+    expect_unproven("Writer#through_association_local")
   end
 
-  it "reads `new` on a written constant path as an allocation" do
-    %w[Writer#through_constant Writer#through_constant_local].each do |key|
-      expect(table[key].proven.to_a).to eq(["mutate.local"])
-      expect(table[key]).to be_trivial
+  it "does not read `new` on `self` in an instance method as an allocation, implicit, explicit or through a local" do
+    %w[DraftPosts#draft DraftPosts#draft_self DraftPosts#draft_local].each { |key| expect_unproven(key) }
+  end
+
+  it "reads `new` on a constant, bare or a path, as an allocation" do
+    %w[Writer#through_bare_constant Writer#through_constant_path Writer#through_constant_local].each do |key|
+      expect_allocation(key)
     end
   end
 
-  it "reads `new` on `self`, implicit or explicit, and on `self.class` as an allocation" do
-    %w[Draft.fresh Draft.explicit_self Draft#retitled].each do |key|
-      expect(table[key].proven.to_a).to eq(["mutate.local"])
-      expect(table[key]).to be_trivial
-    end
+  it "reads `new` on `self` in a singleton-method body as an allocation, implicit or explicit" do
+    %w[Draft.fresh Draft.explicit_self Draft.eigen].each { |key| expect_allocation(key) }
+  end
+
+  it "reads `new` on a `class` call as an allocation" do
+    %w[Draft#retitled Writer#through_class_of].each { |key| expect_allocation(key) }
   end
 
   # The cost of reading syntax: a class held in a parameter or a local is a class object at run time, but the
   # receiver's spelling cannot tell it from an association, so its write is a taint rather than a proven label.
   it "leaves `new` on a class held in a parameter unproven" do
-    entry = table["Writer#through_class_parameter"]
-
-    expect(entry.proven).to be_empty
-    expect(entry.causes.map(&:first)).to eq(["unknown-ownership"])
+    expect_unproven("Writer#through_class_parameter")
   end
 
   it "keeps `dup` as an allocation, as ADR-76 reads it" do
-    expect(table["Writer#through_dup"].proven.to_a).to eq(["mutate.local"])
-    expect(table["Writer#through_dup"]).to be_trivial
+    expect_allocation("Writer#through_dup")
   end
 end

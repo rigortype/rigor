@@ -88,7 +88,7 @@ module Rigor
           @singleton ? :static : :self_state
         when Prism::ClassVariableReadNode then :static
         when Prism::LocalVariableReadNode then local_ownership(receiver.name.to_s)
-        else :local if LocalOwnership.allocation?(receiver)
+        else :local if LocalOwnership.allocation?(receiver, singleton: @singleton)
         end
       end
 

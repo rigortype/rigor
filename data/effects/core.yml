@@ -173,7 +173,7 @@ classes:
       instance_variable_set:
         effects: []
         mutates: receiver
-        why: "writes another object's state; the label follows the receiver's ownership (mutate.self on self, mutate.instance on a parameter, taint otherwise)"
+        why: "writes another object's state; the label follows the receiver's ownership (effect-summaries.md § Ownership)"
       instance_variable_get: { effects: [], why: "reads an ivar — object state, not global state" }
       hash: { effects: [], why: "per-process SipHash salt makes it irreproducible (`NON_REPRODUCIBLE_SELECTORS`), but irreproducibility is a fold hazard, not an observable effect" }
       object_id: { effects: [], why: "per-process identity — a fold hazard (`NON_REPRODUCIBLE_SELECTORS`), not an effect" }

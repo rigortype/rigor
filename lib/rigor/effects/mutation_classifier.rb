@@ -20,8 +20,8 @@ module Rigor
     # 2. **Who owns the receiver?** `self` and its ivars are `mutate.self` (`mutate.static` in singleton
     #    context), a class variable is `mutate.static`, a parameter is `mutate.instance`, a frame-owned
     #    local is `mutate.local`, and so is a receiver that is itself an allocation (`{}.compare_by_identity`,
-    #    `Hash.new.rehash`): nothing else can hold the object before the call, so no caller sees it
-    #    change. **Anything else answers nil**, and the caller records an
+    #    `raw.dup.force_encoding(e)`) by the local rule's own witness ({LocalOwnership.allocation?}): each
+    #    evaluation is a new object no caller holds yet. **Anything else answers nil**, and the caller records an
     #    `unknown-ownership` taint rather than a proven bare `mutate`: Ruby's ownership is a dataflow
     #    question, and a proven parent label on a fresh-but-unproven receiver would put findings on correct
     #    code (WD14).

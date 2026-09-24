@@ -53,6 +53,14 @@ RSpec.describe "a Hash receiver mutation in an effect summary" do
               def memo
                 @memo ||= Hash.new.compare_by_identity
               end
+
+              def via_helper
+                build.compare_by_identity
+              end
+
+              def build
+                {}
+              end
             end
           RUBY
           # The parameter needs a declared type: a class's mutator set applies only when the typer named the
@@ -68,6 +76,8 @@ RSpec.describe "a Hash receiver mutation in an effect summary" do
               def adopt: (Hash[Symbol, Integer] table) -> Hash[Symbol, Integer]
               def fresh: () -> Hash[untyped, untyped]
               def memo: () -> Hash[untyped, untyped]
+              def via_helper: () -> Hash[untyped, untyped]
+              def build: () -> Hash[untyped, untyped]
             end
           RBS
 
@@ -118,6 +128,16 @@ RSpec.describe "a Hash receiver mutation in an effect summary" do
 
       expect(entry.proven.to_a).to eq(%w[mutate.local mutate.self])
       expect(entry).to be_exhaustive
+    end
+
+    # The rule reads the receiver's syntax, not its provenance: a hash a helper returns is as fresh at run time, but
+    # nothing here proves it, so it stays a taint rather than a proven label.
+    it "keeps a receiver the syntax does not show allocating as unknown-ownership" do
+      entry = table["Registry#via_helper"]
+
+      expect(entry.proven).to be_empty
+      expect(entry).not_to be_exhaustive
+      expect(entry.causes.map(&:first)).to eq(["unknown-ownership"])
     end
   end
 

@@ -239,9 +239,14 @@ module Rigor
       NO_STATIC_HASH_KEY = Object.new.freeze
       private_constant :NO_STATIC_HASH_KEY
 
-      def initialize(scope:, tracer: nil)
+      # `operand_types` is the identity-comparing `Prism::Node => Rigor::Type` table of the later operands a
+      # threading `StatementEvaluator` root typed from the scope the earlier operands left (issue #1256), or nil.
+      # It is consulted only by this typer's own descent: a node it holds is the same node typed from its own
+      # entry scope, so answering it here is what typing it there would answer.
+      def initialize(scope:, tracer: nil, operand_types: nil)
         @scope = scope
         @tracer = tracer
+        @operand_types = operand_types
         @typing_node = nil
       end
 
@@ -265,6 +270,9 @@ module Rigor
         # bypasses fail-soft tracing on a recognised match.
         declared = scope.declared_types[node]
         return declared if declared
+
+        threaded = @operand_types&.[](node)
+        return threaded if threaded
 
         return type_of_virtual(node) if node.is_a?(AST::Node)
 

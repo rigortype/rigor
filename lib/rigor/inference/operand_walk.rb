@@ -1,0 +1,66 @@
+# frozen_string_literal: true
+
+require "prism"
+
+module Rigor
+  module Inference
+    # Issue #1256 — the later operands of one expression `StatementEvaluator` threads and types as a whole (a
+    # call, a literal, a `rescue` modifier): the operands entered from a scope an earlier operand moved, rather
+    # than from the one the whole expression is typed from. `puts(b.unshift("s"), b.first.upcase)` enters
+    # `b.first.upcase` after the `unshift` widened `b`, and `[n += 1, n += 1]` its second element after the first
+    # write.
+    #
+    # Each such operand is recorded into the per-node scope index with the scope it was entered from, so the
+    # diagnostics read it there, and typed from that scope once, so the whole expression's value holds it
+    # ({#types}). The operand holding a write is still typed from its own entry: `out << (n += 1)` appends `1`.
+    #
+    # The walk takes an operand before anything below it, and compares an operand's entry against the scope its
+    # nearest taken ancestor is typed from, so each later operand is typed exactly once: from the bottom up, each
+    # holding the values of the ones below it. A threaded call below the root is still not typed as a whole
+    # (`StatementEvaluator#call_effects`); its later operands join the root's walk.
+    class OperandWalk
+      # Positions `ExpressionTyper` gives no value of their own: it reads their children directly, never the node,
+      # so a later one is recorded but not typed, and its children are compared against its ancestor's scope.
+      NON_VALUE_NODES = Set[
+        Prism::ArgumentsNode, Prism::AssocNode, Prism::AssocSplatNode, Prism::BlockArgumentNode, Prism::SplatNode
+      ].freeze
+      private_constant :NON_VALUE_NODES
+
+      # The per-node scope index's `(node, scope) ->` recorder, or nil for an unrecorded pass.
+      attr_reader :recorder
+
+      def initialize(recorder)
+        @recorder = recorder
+        @entries = nil
+      end
+
+      # Takes `node`, entered from `entry`. Answers the slot {#resolve} fills, or nil for a {NON_VALUE_NODES}
+      # position.
+      def later(node, entry)
+        @recorder&.call(node, entry)
+        return nil if NON_VALUE_NODES.include?(node.class)
+
+        (@entries ||= []) << [node, entry, nil]
+        @entries.size - 1
+      end
+
+      # The value the handler that evaluated the operand in `slot` typed it to, from its entry.
+      def resolve(slot, type)
+        @entries[slot][2] = type
+      end
+
+      # The identity-comparing table of every taken operand's value, for `ExpressionTyper`'s `operand_types:`, or
+      # nil when the walk took none. An operand the evaluator did not type is typed from its entry here, after
+      # every operand below it.
+      def types(tracer)
+        return nil if @entries.nil?
+
+        types = {}.compare_by_identity
+        @entries.reverse_each do |node, entry, type|
+          types[node] = type || entry.type_of(node, tracer: tracer, operand_types: types)
+        end
+        types
+      end
+    end
+  end
+end

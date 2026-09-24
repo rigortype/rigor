@@ -1564,8 +1564,8 @@ module Rigor
       facts_for(target: Analysis::FactStore::Target.local(name), bucket: bucket)
     end
 
-    def type_of(node, tracer: nil)
-      Inference::ExpressionTyper.new(scope: self, tracer: tracer).type_of(node)
+    def type_of(node, tracer: nil, operand_types: nil)
+      Inference::ExpressionTyper.new(scope: self, tracer: tracer, operand_types: operand_types).type_of(node)
     end
 
     # ADR-89 WD2 — the inferred return type of `def_node` called with `receiver` / `arg_types`, computed

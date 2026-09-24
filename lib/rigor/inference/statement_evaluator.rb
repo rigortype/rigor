@@ -913,7 +913,10 @@ module Rigor
       # element-wise, an `Array[T]` binds each fixed slot to `T` with the optimistic-nil-free mark (issue #1093), a
       # union distributes over its members and a value with no implicit `to_ary` binds as `[rhs]` (issue #1094), and
       # other carriers fall back to `Dynamic[Top]` per slot. Instance-variable targets bind by the same rules, with the
-      # optimistic mark recorded per ivar (issue #1110). The expression value is the right-hand side type
+      # optimistic mark recorded per ivar (issue #1110). A right-hand side that is itself optimistically nil-free
+      # (`k, v = pairs.first`, or a local bound to one) marks every name it binds, and a literal one
+      # (`x, y = pairs.first, 1`) marks each slot by its element: a miss binds `nil` to every such slot
+      # ({Inference::OptimisticOrigin.destructuring_marks}). The expression value is the right-hand side type
       # (matching Ruby's semantics: `(a, b = [1, 2])` evaluates to `[1, 2]`).
       #
       # An index target (`h[:a], z = 1, 2`, nested or splatted too) stores its slot through `[]=`, so its receiver
@@ -937,7 +940,8 @@ module Rigor
       # rebind, so `m[:a] ||= "d"; m[:a], y = 1, 2` would otherwise keep reading `"d"`.
       def eval_multi_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        bound = MultiTargetBinder.bind_marked(node, rhs_type, scope: post_rhs)
+        marks = Inference::OptimisticOrigin.destructuring_marks(node.value, post_rhs)
+        bound = MultiTargetBinder.bind_marked(node, rhs_type, optimistic: marks, scope: post_rhs)
         post = widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)
         [rhs_type, widen_attribute_targets(node, post)]
       end

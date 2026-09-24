@@ -137,8 +137,11 @@ module Rigor
       end
 
       # @param optimistic — whether `rhs_type` itself is an optimistic slot of an enclosing
-      #   decomposition (a block's `|(g, h)|` fed from an auto-splatted `Array[T]`), in which case
-      #   every name bound under it inherits the mark.
+      #   decomposition (a block's `|(g, h)|` fed from an auto-splatted `Array[T]`) or an
+      #   optimistically nil-free value (`k, v = xs.first`), in which case every name bound under it
+      #   inherits the mark. It may instead be the per-element Array
+      #   {OptimisticOrigin.destructuring_marks} builds for a literal right-hand side
+      #   (`x, y = xs.first, 1`), which marks the names under each fixed slot by that slot's element.
       # @param soften_slots — false keeps a present `X | nil` tuple slot and a union member's bare
       #   `nil` in the binding instead of applying the ADR-57 softening of {slot_type} /
       #   {join_member_bindings}. That softening is only honest together with the optimistic mark
@@ -239,11 +242,31 @@ module Rigor
 
           fronts, rest_type, backs, slots_optimistic =
             decompose(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?, context: context)
-          rest_type = arity_free_rest(rest_type) if optimistic
-          slot_mark = optimistic || slots_optimistic
-          lefts.each_with_index { |t, i| bind_target(t, fronts[i], slot_mark, bindings, marked, context) }
+          rest_type = arity_free_rest(rest_type) if optimistic == true
+          front_marks, back_marks = slot_marks(optimistic, rhs_type, lefts.size, rights.size, rest_present: !rest.nil?)
+          lefts.each_with_index do |t, i|
+            bind_target(t, fronts[i], front_marks[i] || slots_optimistic, bindings, marked, context)
+          end
           bind_rest_target(rest, rest_type, bindings, marked) if rest
-          rights.each_with_index { |t, i| bind_target(t, backs[i], slot_mark, bindings, marked, context) }
+          rights.each_with_index do |t, i|
+            bind_target(t, backs[i], back_marks[i] || slots_optimistic, bindings, marked, context)
+          end
+        end
+
+        # The `[front_marks, back_marks]` pair a visit hands its fixed slots. A boolean `optimistic`
+        # applies to every slot. A per-element Array applies only to the `Type::Tuple` a literal
+        # right-hand side types as, of the same arity, and each slot picks its element at the offset
+        # {decompose_tuple} reads; any other carrier leaves the slots unmarked, and a slot past the
+        # literal's end binds an exact `nil` that no mark qualifies.
+        def slot_marks(optimistic, rhs_type, front_count, back_count, rest_present:)
+          return [Array.new(front_count, optimistic), Array.new(back_count, optimistic)] unless optimistic.is_a?(Array)
+          unless rhs_type.is_a?(Type::Tuple) && rhs_type.elements.size == optimistic.size
+            return [Array.new(front_count, false), Array.new(back_count, false)]
+          end
+
+          back_start = rest_present ? [optimistic.size - back_count, front_count].max : front_count
+          [Array.new(front_count) { |i| optimistic.fetch(i, false) },
+           Array.new(back_count) { |i| optimistic.fetch(back_start + i, false) }]
         end
 
         # Every member walks the same target tree, so each binds the same names; the first member's
@@ -387,12 +410,14 @@ module Rigor
           ]
         end
 
+        # A per-element Array mark reaches a name only through a nested target: a name bound to a
+        # whole literal array holds an Array, which is never `nil`.
         def bind_target(target, type, optimistic, bindings, marked, context)
           case target
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode, Prism::InstanceVariableTargetNode
-            bind_name(target.name, type, optimistic, bindings, marked)
+            bind_name(target.name, type, optimistic == true, bindings, marked)
           when Prism::IndexTargetNode
-            bind_name(target, type, optimistic, bindings, marked)
+            bind_name(target, type, false, bindings, marked)
           when Prism::MultiTargetNode
             visit(target, type, optimistic, bindings, marked, context)
           end

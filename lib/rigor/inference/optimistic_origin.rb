@@ -57,8 +57,8 @@ module Rigor
       # spec binds cannot drift apart.
       #
       # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read (or
-      # a write in value position, `if (x = MAP[k])`) resolves through, then the predicate-fold derivation
-      # issue #313 added.
+      # a write in value position, `if (x = MAP[k])`) resolves through, then the safe-navigation chain and the
+      # predicate-fold derivation issue #313 added.
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
 
@@ -69,9 +69,22 @@ module Rigor
         when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
         when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
         when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
-        when Prism::CallNode then resolve_through_predicate(node, scope)
+        when Prism::CallNode then resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope)
         when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
         end
+      end
+
+      # `recv&.m`, and every plain call chained after it (`recv&.m.n`), which Ruby's short-circuit skips as
+      # well: the chain is `nil` exactly when `recv` is, so it restates `recv`'s presence and is as optimistic
+      # as `recv`. A plain read `recv.m` is deliberately not derived — on a miss it raises `NoMethodError`
+      # instead of producing a value, so its own nil-freeness rests on `m`'s answer — and a parenthesised
+      # `(recv&.m).n` ends the short-circuit, so the walk stops at anything that is not a call.
+      def resolve_through_safe_navigation(node, scope)
+        current = node
+        current = current.receiver while current.is_a?(Prism::CallNode) && !current.safe_navigation?
+        return nil unless current.is_a?(Prism::CallNode)
+
+        resolve(current.receiver, scope)
       end
 
       # `recv.nil?` / `!recv` — the fold is a statement about `recv`, so it is exactly as optimistic as `recv`
@@ -110,6 +123,21 @@ module Rigor
         return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
 
         resolve(body.body.first, scope)
+      end
+
+      # The mark a multiple assignment's right-hand side hands to the slots it fills, in the shape
+      # `MultiTargetBinder.bind_marked`'s `optimistic:` takes. `true` when the whole right-hand side resolves
+      # to a mark: a miss makes it `nil`, and `k, v = nil` binds `nil` to every fixed slot, so each slot's
+      # nil-freeness is the same bet (the rule a nested target under an optimistic slot already follows). A
+      # literal array right-hand side (`x, y = h[k], 1`) is judged element-wise instead — an Array of each
+      # element's own marks, nested for a nested literal — since each element is its slot's value; a splat
+      # element makes the slot positions unknowable and declines. `false` when nothing is marked.
+      def destructuring_marks(node, scope)
+        return true if resolve(node, scope)
+        return false unless node.is_a?(Prism::ArrayNode) && node.elements.none?(Prism::SplatNode)
+
+        marks = node.elements.map { |element| destructuring_marks(element, scope) }
+        marks.any? { |mark| mark != false } ? marks : false
       end
 
       # Whether the overload the selector actually picked carries the ignored annotation. The judgment is

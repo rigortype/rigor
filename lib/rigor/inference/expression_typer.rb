@@ -34,6 +34,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
+require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
 require_relative "stored_block_call"
 require_relative "struct_fold_safety"
@@ -4730,28 +4731,26 @@ module Rigor
       # The generic block-return pass lays the same binding ({#block_entry_scope}), with the fixpoint's block
       # parameters bound to the signature's instead of to the elements' union.
       #
-      # Every name the body mutates in place is also marked in each position's entry scope
-      # (`Scope#with_fold_stored`), whether or not its widening moved it. The widening cannot say that a slot
-      # holds an earlier position's store: `{}` widens to `Hash[Dynamic[top], Dynamic[top]]` and a bare `Hash`
-      # declines, so `cache[:first]` reads wholly gradual, which is the memoizing `||=` reading's "no evidence
-      # about the slot" (`StatementEvaluator#index_compound_write_value`). That reading answers the rvalue, and
-      # here the rvalue is one position's element: `(cache[:first] ||= e) == 2` answered `2 == 2` at the second
-      # position and folded `find` to `2` where Ruby, keeping the first iteration's `1`, answers `nil`. The mark
-      # withholds the reading. The generic pass marks nothing: it types the rvalue from the signature's
-      # parameter type, which covers every iteration's store, so the memo reading still describes the slot.
+      # The binding also marks the index `||=` sites whose slot an earlier position may have filled
+      # ({RepeatedOrWrites}), so the memoizing `||=` reading (`StatementEvaluator#index_compound_write_value`)
+      # does not take such a slot's lone `Dynamic` for "no evidence about the slot" and answer one position's
+      # rvalue: `cache = {}; [1, 2].find { |e| (cache[:first] ||= e) == 2 }` answered `2 == 2` at the second
+      # position and folded `find` to `2` where Ruby, keeping the first iteration's `1`, answers `nil`.
       #
       # Returns `nil` (no binding to apply) for the overwhelmingly common body that rebinds and mutates nothing
-      # captured.
+      # captured and holds no such site.
       def per_element_captured_bindings(block, element_types)
-        captured_block_bindings(block, [Type::Combinator.union(*element_types)], mark_stored: true)
+        captured_block_bindings(block, [Type::Combinator.union(*element_types)], element_types: element_types)
       end
 
       # The #587 (b) binding for `block`, with the fixpoint's block parameters bound to `param_types`.
-      # `mark_stored` marks the names the body mutates in place ({#per_element_captured_bindings}).
-      def captured_block_bindings(block, param_types, mark_stored: false)
+      # `element_types` is the per-element fold's positions, which {RepeatedOrWrites} reads; nil for the generic
+      # block-return pass.
+      def captured_block_bindings(block, param_types, element_types: nil)
         stores = CapturedLocals.content_mutations(block, scope, non_locals: true)
         names = CapturedLocals.writes(block, scope, non_locals: true)
-        return nil if stores.empty? && names.empty?
+        repeated = RepeatedOrWrites.sites(block, stores, scope, element_types: element_types)
+        return nil if stores.empty? && names.empty? && repeated.empty?
 
         stored = stored_capture_bindings(stores)
         types = stored.dup
@@ -4761,14 +4760,10 @@ module Rigor
             types[name] = stores.key?(name) ? UnknownStoreWidening.widen(converged, stores[name]) : converged
           end
         end
-        marked = mark_stored ? stores.keys : NO_STORED_NAMES
-        return nil if types.empty? && marked.empty?
+        return nil if types.empty? && repeated.empty?
 
-        CapturedLocals::Bindings.new(types: types, marks: marks, stored: marked)
+        CapturedLocals::Bindings.new(types: types, marks: marks, repeated: repeated)
       end
-
-      NO_STORED_NAMES = [].freeze
-      private_constant :NO_STORED_NAMES
 
       # Only a binding the widening MOVED is recorded. One it declined (a precise nominal, a refinement under
       # `sort!`) is still the entry binding, which says nothing about later iterations; recording it would make the

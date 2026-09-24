@@ -16,6 +16,8 @@ module Rigor
     attr_reader optimistic_origins: Hash[untyped, Symbol]
     attr_reader optimistic_locals: Hash[Symbol, Symbol]
     attr_reader optimistic_ivars: Hash[Symbol, Symbol]
+    # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter reaches `untyped`.
+    attr_reader repeated_or_writes: Hash[untyped, bool]
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -77,6 +79,10 @@ module Rigor
 
     def record_plugin_typed_call: (untyped node) -> Scope
     def plugin_typed_call?: (untyped node) -> bool
+
+    def with_repeated_or_writes: (untyped nodes) -> Rigor::Scope
+    # sig-gen gap: #1154 — `Hash#key?` over that reader reaches `untyped`, so the `bool` is hand-written.
+    def repeated_or_write?: (untyped node) -> bool
 
     class DiscoveryIndex
       attr_reader declared_types: Hash[untyped, Type::t]
@@ -170,12 +176,6 @@ module Rigor
     # sig-gen gap: #1152 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
-    def with_fold_stored: (untyped) -> Rigor::Scope
-    # sig-gen gap: #1151 — a reader over an ivar holding a frozen Set literal types `untyped`, as the
-    # `published_constant_sourced` row does.
-    def fold_stored: () -> Set[Symbol]
-    # sig-gen gap: #1151 — `Set#include?` over that untyped reader types `untyped`, so the `bool` is hand-written.
-    def fold_stored?: (String | Symbol name) -> bool
     def declaration_sourced: () -> Set[[Symbol, Symbol]]
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope

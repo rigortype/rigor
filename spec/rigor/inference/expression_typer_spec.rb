@@ -2295,16 +2295,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
     end
 
-    it "keeps the slot on a receiver the per-element fold's body stores into" do
-      # The fold marks it: an earlier position may have filled the slot, so its gradual type is no memo's.
-      bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped).with_fold_stored(:@cache)
-      expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7 | Dynamic[top]")
+    it "keeps the slot at a site a block-return pass marked as repeated" do
+      # An earlier run of the block may have filled the slot, so its gradual type is no memo's.
+      node = parse_expression("@cache[:k] ||= 7")
+      bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped).with_repeated_or_writes([node])
+      expect(bound.type_of(node).describe).to eq("7 | Dynamic[top]")
     end
 
-    it "keeps the slot under an element read rooted at such a receiver" do
-      bound = scope.with_local(:cache, Rigor::Type::Combinator.untyped).with_fold_stored(:cache)
-      node = parse_expression("cache[:a][:b] ||= 7", scopes: [[:cache]])
-      expect(bound.type_of(node).describe).to eq("7 | Dynamic[top]")
+    it "keeps the memo reading at an unmarked site of the same text (control)" do
+      marked = scope.with_repeated_or_writes([parse_expression("@cache[:k] ||= 7")])
+      expect(marked.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
     end
 
     it "gives an operator write on an untracked slot no optimistic reading (control)" do

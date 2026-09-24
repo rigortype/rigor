@@ -800,10 +800,17 @@ RSpec.describe "block-return scope threading", type: :runner do
 
   # The one-statement form of the probe above. The in-place widening binds `cache` to `Hash[Dynamic[top],
   # Dynamic[top]]` at every position, so the slot reads wholly gradual, and the value-position `||=` read that as
-  # the memoization idiom's "no evidence about the slot" (issue #1202): each position answered its OWN `e`.
-  # Under the per-element fold the gradual slot is what an earlier position stored, so the memo reading must not
-  # apply there; the memo reading of an untracked receiver, and of a hash the block builds afresh, must stay.
-  describe "a memoizing index `||=` as a per-element fold's whole predicate" do
+  # the memoization idiom's "no evidence about the slot" (issue #1202): each position answered its OWN `e`. A
+  # block-return pass now marks every such site an earlier run may have filled (`RepeatedOrWrites`), whatever the
+  # receiver; a site on a fresh receiver, one whose key differs at every position, and an isolated site under the
+  # generic pass keep the memo reading.
+  describe "a memoizing index `||=` as a repeating block's whole predicate" do
+    def nil_receiver_rules(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      rules = result.diagnostics.map(&:rule)
+      rules.select { |rule| rule.to_s == "call.possible-nil-receiver" }
+    end
+
     it "does not pin a captured hash the one-statement `||=` fills" do
       # THE REPORTED PROBE: Ruby keeps the first iteration's `1`, so `find` answers `nil`; the pin answered `2 == 2`
       # at the second position, folded `find` to `2`, and reported `found == 2` always-truthy.
@@ -831,23 +838,23 @@ RSpec.describe "block-return scope threading", type: :runner do
 
     it "still fires on a memo hash the block builds afresh at every position (control)" do
       # The fold is exact here: every position's `Hash.new` is empty, so Ruby answers `2 == 2` at the second one,
-      # `find` returns `2`, and `found == 2` is always true. The slot reads wholly gradual, so this is the memo
-      # reading on an untracked receiver, which the fix keeps.
+      # `find` returns `2`, and `found == 2` is always true. A `.new` receiver is fresh at every run, so the site
+      # keeps the memo reading.
       expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
         found = [1, 2].find { |e| (Hash.new[:first] ||= e) == 2 }
         puts "hit" if found == 2
       RUBY
     end
 
-    it "still fires when the body rebinds the captured name to a fresh hash first (control)" do
-      # A statement rebind replaces the in-place widening, so the `||=` reads a hash no earlier position filled.
-      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+    it "answers wider than Ruby when the body rebinds the captured name to a fresh hash first" do
+      # Ruby answers `2`: every position's `||=` reads a new hash. The mark belongs to the site, not to the
+      # binding, so the rebind does not lift it. Wider, never narrower: nothing is reported.
+      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
         cache = {}
-        found = [1, 2].find do |e|
+        dump_type([1, 2].find do |e|
           cache = Hash.new
           (cache[:first] ||= e) == 2
-        end
-        puts "hit" if found == 2
+        end)
       RUBY
     end
 
@@ -877,17 +884,6 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "does not pin an instance-variable hash either" do
-      expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
-        class Memo
-          def run
-            @cache = {}
-            dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
-          end
-        end
-      RUBY
-    end
-
     it "does not pin a captured hash the per-pair transform_values fold fills" do
       # Runtime `{ x: 1, y: 1 }`; the pin answered `{ x: 1, y: 2 }`, so `r[:y] == 2` folded always-truthy.
       expect(flow_rules(<<~RUBY)).to be_empty
@@ -897,14 +893,154 @@ RSpec.describe "block-return scope threading", type: :runner do
       RUBY
     end
 
-    it "keeps the memo reading under the generic block-return pass (control)" do
-      # The generic pass types the rvalue from the parameter's signature type, which covers every iteration's
-      # store, so the memo reading still describes the slot there.
-      expect(dumped_type(<<~RUBY)).to eq("Array[String]")
-        pool = {}
-        words = gets.to_s.split(",")
-        dump_type(words.map { |w| pool[w] ||= w })
+    it "does not pin the slot when a narrowing rebinds the receiver's name" do
+      # `c &&` narrows `c`, which rebinds it; a mark kept on the binding was dropped with it.
+      expect(flow_rules(<<~RUBY)).to be_empty
+        c = {}
+        found = [1, 2].find { |e| c && (c[:first] ||= e) == 2 }
+        puts "hit" if found == 2
       RUBY
+    end
+
+    describe "whatever the receiver" do
+      it "does not pin an instance-variable hash the method assigns" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            def run
+              @cache = {}
+              dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin an instance-variable hash another method assigns" do
+        # The ADR-58 declaration seed is no binding the fold widens, but its slot reads a lone `Dynamic` all the same.
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            def initialize = @cache = {}
+
+            def run
+              dump_type([1, 2].find { |e| (@cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin a constant hash" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          CACHE = {}
+          found = [1, 2].find { |e| (CACHE[:first] ||= e) == 2 }
+          puts "hit" if found == 2
+        RUBY
+      end
+
+      it "does not pin a hash an attribute reader returns" do
+        expect(dumped_type(<<~RUBY)).to eq("1 | 2 | nil")
+          class Memo
+            attr_reader :cache
+
+            def initialize = @cache = {}
+
+            def run
+              dump_type([1, 2].find { |e| (cache[:first] ||= e) == 2 })
+            end
+          end
+        RUBY
+      end
+
+      it "does not pin the inner slot of a nested memo" do
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = {}
+          found = [1, 2].find { |e| ((cache[:a] ||= {})[:b] ||= e) == 2 }
+          puts "hit" if found == 2
+        RUBY
+      end
+    end
+
+    describe "a key that differs at every position" do
+      it "keeps the memo reading, since no position reads another's slot" do
+        # Ruby stores each position under its own key, so `find` answers `"b"`, never nil. Withholding the reading
+        # here answered `"a" | "b" | nil` and reported `f.upcase` as a possible nil receiver.
+        source = <<~RUBY
+          pool = {}
+          f = %w[a b].find { |s| (pool[s] ||= s) == "b" }
+          dump_type(f)
+          puts f.upcase
+        RUBY
+        expect([dumped_type(source), nil_receiver_rules(source)]).to eq(['"b"', []])
+      end
+
+      it "types a distinct-key memo under the Tuple, Range and per-pair folds" do
+        expect(dumped_types(<<~RUBY)).to eq(['["A", "B"]', "[1, 4, 9]", "{ a: 10, b: 20 }"])
+          pool = {}
+          dump_type(%w[a b].map { |s| pool[s] ||= s.upcase })
+          squares = {}
+          dump_type((1..3).map { |i| squares[i] ||= i * i })
+          memo = {}
+          dump_type({ a: 1, b: 2 }.transform_values { |v| memo[v] ||= v * 10 })
+        RUBY
+      end
+
+      it "still withholds the reading for a key two positions share" do
+        # Runtime `[1, 1]`: the second position reads the `:k` slot the first one filled.
+        expect(dumped_type(<<~RUBY)).to eq("[1 | Dynamic[top], 2 | Dynamic[top]]")
+          c = {}
+          dump_type([[:k, 1], [:k, 2]].map { |k, v| c[k] ||= v })
+        RUBY
+      end
+
+      it "still withholds the reading when another store in the body can fill the slot" do
+        # Runtime `nil`: the first position stores `"x"` under `"b"` after its own `||=`, and the second position's
+        # `||=` then keeps that `"x"`. The store comes second, so no threaded write narrows the slot first.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            pool["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+
+      it "still withholds the reading when a store the scan cannot attribute may reach the slot" do
+        # `other` aliases `pool` inside the body, where the content scan does not follow it, so its store is filed
+        # under no captured name and may reach any object. Runtime `nil`, as above.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          pool = {}
+          found = %w[a b].find do |s|
+            hit = (pool[s] ||= s) == "b"
+            other = pool
+            other["b"] = "x"
+            hit
+          end
+          puts "hit" if found == "b"
+        RUBY
+      end
+    end
+
+    describe "under the generic block-return pass" do
+      it "keeps the memo reading for an isolated site (control)" do
+        # The generic pass types the rvalue from the parameter's signature type, which covers every iteration's
+        # store, so the memo reading still describes the slot there.
+        expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+          pool = {}
+          words = gets.to_s.split(",")
+          dump_type(words.map { |w| pool[w] ||= w })
+        RUBY
+      end
+
+      it "withholds it when two sites store different values into one slot" do
+        # Ruby with input `a,,b` prints `hit`: the empty element stores `:e`, and a later one keeps it and compares
+        # it with `:e`. Each site's rvalue alone made both arms provably false.
+        expect(flow_rules(<<~RUBY)).to be_empty
+          cache = Hash.new
+          xs = gets.to_s.split(",")
+          hit = xs.any? { |x| x.empty? ? (cache[:k] ||= :e) == :f : (cache[:k] ||= :f) == :e }
+          puts "hit" if hit
+        RUBY
+      end
     end
   end
 

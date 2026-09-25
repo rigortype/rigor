@@ -72,8 +72,8 @@ assertions:
   '64': String?
   '65': String?
   '66': String?
-  '67': String
-  '68': String?
+  '67': String?
+  '68': String
   '69': String?
   '70': String?
   '71': String?
@@ -92,3 +92,11 @@ assertions:
   '84': String?
   '85': String?
   '86': String?
+  '87': String?
+  '88': String?
+  '89': String?
+  '90': String?
+  '91': String?
+  '92': String?
+  '93': String
+  '94': String?

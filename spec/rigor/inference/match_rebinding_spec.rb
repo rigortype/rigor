@@ -302,6 +302,36 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(fallback?("def m(&) = each(&)")).to be(false)
     end
 
+    # Round-2 review of #1364: a Regexp constant from another file does not resolve (#1373), and a lambda, a `yield`
+    # or a call on the method's own block in a block the frame hands out may rebind it as well.
+    it "reads an unresolved constant as a possible Regexp, where the block scan reads it as a class" do
+      source = "helper { |l| l.index(Pats::HEADER) }"
+
+      expect(fallback?(source)).to be(true)
+      expect(fallback?("helper { |l| case l when Pats::HEADER then l end }")).to be(true)
+      expect(fallback?("helper { |l| case l when *Pats::ALL then l end }")).to be(true)
+      expect(described_class.may_match?(last_statement(source).block.body, scope)).to be(false)
+      expect(fallback?("helper { |l| case l when String then l end }")).to be(false)
+    end
+
+    it "reads a lambda literal broadly, and counts a `yield` or an own-block call in a block" do
+      expect(fallback?("@b = ->(l, pattern) { l.index(pattern) }")).to be(true)
+      expect(fallback?("helper { |a, b| yield a, b }")).to be(true)
+      expect(forward?("def m(&blk) = helper { |a, b| blk.call(a, b) }", :blk)).to be(true)
+      expect(forward?("def m(other, &blk) = helper { |a, b| other.call(a, b) }", :blk)).to be(false)
+    end
+
+    it "keeps its answer on the frame while the scope's local and instance-variable tables stay the same" do
+      def_node = last_statement("def m(s) = log(s)")
+      frame = Rigor::Inference::MatchRebinding::Frame.new(def_node.body, def_node.parameters)
+      allow(described_class).to receive(:self_call_fallback?).and_call_original
+
+      2.times { frame.self_call_fallback?(scope) }
+      frame.self_call_fallback?(scope.with_local(:s, Rigor::Type::Combinator.nominal_of("String")))
+
+      expect(described_class).to have_received(:self_call_fallback?).with(def_node.body, nil, anything).twice
+    end
+
     it "answers for a method's parameter defaults on the frame" do
       def_node = last_statement("def m(s, f = on { |l| l =~ /(z)/ }) = log(s)")
 
@@ -368,6 +398,14 @@ RSpec.describe Rigor::Inference::MatchRebinding do
 
     it "keeps them for a body that cannot match, since the block shares the frame" do
       expect(described_class.block_entry(narrowed, block("items.each { |i| $1 }"))).to equal(narrowed)
+    end
+
+    # A `tap` / `then` / `yield_self` block runs once, before the call returns, so no earlier run rebound them.
+    it "keeps them for a body that may match when the owning call runs it exactly once" do
+      call = last_statement("line.then { |l| r = $1; l !~ /x/ }")
+
+      expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed)
+      expect(described_class.block_entry(narrowed, call.block).global(:$1)).to be_nil
     end
 
     it "forgets them for any body in a frame that makes a closure that may match" do

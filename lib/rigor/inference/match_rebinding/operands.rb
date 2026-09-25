@@ -18,7 +18,8 @@ module Rigor
       #   a Regexp counts ({.regexp_argument?}).
       #
       # A constant resolves through the scope. One that does not resolve is read as a class, the usual CamelCase
-      # referent, so it does not count either way.
+      # referent, so it does not count either way — except under the `broad` reading, where it may be a Regexp
+      # defined in another file (#1373) and counts ({MatchRebinding.broad_may_match?}).
       module Operands
         REGEX_LITERALS = Set[Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode].freeze
         # Values whose `===` cannot run a match. An interpolated String or Symbol is still a String or Symbol; the
@@ -40,30 +41,33 @@ module Rigor
 
         # True when a `===` receiver or a `when` condition may be a Regexp: a regex literal, a constant bound to
         # one, a splat of a constant holding one, or any other expression (`when re`), but not a literal that is
-        # not one.
-        def pattern_value?(node, scope)
+        # not one. `broad` counts an unresolved constant too.
+        def pattern_value?(node, scope, broad: false)
           klass = node.class
           return true if REGEX_LITERALS.include?(klass)
           return false if non_regexp_literal?(node)
-          return constant_regexp?(constant_type(node, scope)) if CONSTANT_NODES.include?(klass)
-          return splat_regexp?(node, scope) if node.is_a?(Prism::SplatNode)
+          return constant_may_be_regexp?(constant_type(node, scope), broad) if CONSTANT_NODES.include?(klass)
+          return splat_regexp?(node, scope, broad) if node.is_a?(Prism::SplatNode)
 
           true
         end
 
         # True when an `in` / `=>` pattern holds a value that may be a Regexp: a regex literal, a pinned variable
         # or expression, or a constant bound to one. Its structure, captures and other literals run no match, and
-        # an `if` / `unless` guard is ordinary code, scanned with the rest of the body.
-        def pattern_matches?(node, scope)
+        # an `if` / `unless` guard is ordinary code, scanned with the rest of the body. `broad` counts an unresolved
+        # constant too.
+        def pattern_matches?(node, scope, broad: false)
           return false if node.nil?
 
           klass = node.class
           return true if REGEX_LITERALS.include?(klass) || PINNED_NODES.include?(klass)
-          return constant_regexp?(constant_type(node, scope)) if CONSTANT_NODES.include?(klass)
-          return pattern_matches?(node.statements, scope) if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
+          return constant_may_be_regexp?(constant_type(node, scope), broad) if CONSTANT_NODES.include?(klass)
+          if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
+            return pattern_matches?(node.statements, scope, broad: broad)
+          end
 
           found = false
-          node.rigor_each_child { |child| found ||= pattern_matches?(child, scope) }
+          node.rigor_each_child { |child| found ||= pattern_matches?(child, scope, broad: broad) }
           found
         end
 
@@ -84,11 +88,12 @@ module Rigor
         end
 
         # `when *KEYS` runs `===` on each element of `KEYS`; a splat of anything but a constant counts.
-        def splat_regexp?(splat, scope)
+        def splat_regexp?(splat, scope, broad)
           expression = splat.expression
           return true unless CONSTANT_NODES.include?(expression.class)
 
-          elements_regexp?(constant_type(expression, scope))
+          type = constant_type(expression, scope)
+          (broad && unresolved?(type)) || elements_regexp?(type)
         end
         private_class_method :splat_regexp?
 
@@ -117,6 +122,21 @@ module Rigor
           nil
         end
         private_class_method :constant_type
+
+        def constant_may_be_regexp?(type, broad)
+          constant_regexp?(type) || (broad && unresolved?(type))
+        end
+        private_class_method :constant_may_be_regexp?
+
+        # A constant that does not resolve reads as `Dynamic`, or as nil without a scope.
+        def unresolved?(type)
+          case type
+          when nil, Type::Dynamic then true
+          when Type::Union then type.members.any? { |member| unresolved?(member) }
+          else false
+          end
+        end
+        private_class_method :unresolved?
 
         # True when a constant's type may be a Regexp. A class or module, a Tuple or HashShape, any other value,
         # and a constant that does not resolve do not.

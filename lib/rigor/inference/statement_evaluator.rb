@@ -4562,7 +4562,7 @@ module Rigor
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node)
+        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

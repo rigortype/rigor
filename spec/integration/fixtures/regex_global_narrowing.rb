@@ -517,6 +517,15 @@ def operand_send(str, u)
   end
 end
 
+# A `yield` in an argument runs the caller's block there, which may be a C-function proc (Ruby: nil for
+# `operand_yield("a1", &:=~)`).
+def operand_yield(str)
+  if str =~ /(\d+)/
+    log_1364(yield("zz", /(q)/))
+    assert_type("String?", $1)
+  end
+end
+
 def operand_read(line)
   if line =~ /^(\w+)=(.*)$/
     log_1364("#{$2.strip}: parsed")
@@ -634,6 +643,16 @@ class CalleeFrameEmitter
     end
   end
 
+  # The broad reading counts an `eval` in a kept block, which runs in this frame (Ruby: nil for
+  # `CalleeFrameEmitter.new.kept_eval("a1")`).
+  def kept_eval(str)
+    on { |src| eval(src) }
+    if str =~ /(\d+)/
+      emit(%q("zz" =~ /(q)/))
+      assert_type("String?", $1)
+    end
+  end
+
   # The block scan reads `!~` and a Regexp-valued `start_with?`, and the frame's broad reading counts a lookup whose
   # Regexp arrives as a block parameter (Ruby: nil for each with `str = "a1"`).
   def kept_not_match(str)
@@ -687,6 +706,38 @@ def kept_lazy(str, items)
   end
 end
 
+# A lambda literal is read broadly too, and so are a `yield` and a call on the method's own block inside a block the
+# frame hands out, which run the caller's block, perhaps a C-function proc, in this frame (Ruby: nil for
+# `CalleeFrameLambda.new.stored_lambda("a1")`, `yield_in_block_arg("a1", &:=~)` and
+# `block_call_in_block_arg("a1", &:=~)`).
+class CalleeFrameLambda
+  def run_b(*args) = @b.call(*args)
+
+  def stored_lambda(str)
+    @b = ->(l, pattern) { l.index(pattern) }
+    if str =~ /(\d+)/
+      run_b("zz", /(q)/)
+      assert_type("String?", $1)
+    end
+  end
+end
+
+def run_pair_1364 = yield("zz", /(q)/)
+
+def yield_in_block_arg(str)
+  if str =~ /(\d+)/
+    run_pair_1364 { |a, b| yield a, b }
+    assert_type("String?", $1)
+  end
+end
+
+def block_call_in_block_arg(str, &blk)
+  if str =~ /(\d+)/
+    run_pair_1364 { |a, b| blk.call(a, b) }
+    assert_type("String?", $1)
+  end
+end
+
 # So does a frame that makes a `binding` in any spelling, which lets another method eval in this frame, or forwards
 # its own block, which may be a C-function proc (Ruby: nil for `frame_binding("a1")`, `proc_binding("a1")`,
 # `sent_binding("a1")` and `forwarded_block("a1", &:=~)`).
@@ -716,6 +767,28 @@ end
 def forwarded_block(str, &blk)
   if str =~ /(\d+)/
     instance_exec("zz", /(q)/, &blk)
+    assert_type("String?", $1)
+  end
+end
+
+# `...` forwards the block as well (Ruby: nil for `forwarded_all("a1", "zz", /(q)/, &:=~)`).
+def forwarded_all(str, ...)
+  if str =~ /(\d+)/
+    instance_exec(...)
+    assert_type("String?", $1)
+  end
+end
+
+# Control: a `then` / `tap` / `yield_self` block runs once, before the call returns, so its body reads the call site's
+# narrowing even when it matches after the read; the call still forgets it afterwards (Ruby: "AB" for
+# `once_block("ab=c")`).
+def once_block(line)
+  if line =~ /^(\w+)=/
+    line.then do |l|
+      k = $1
+      assert_type("String", k)
+      k.upcase if l !~ /x/
+    end
     assert_type("String?", $1)
   end
 end

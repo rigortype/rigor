@@ -45,14 +45,17 @@ module Rigor
 
         # True when an implicit-self call in this frame forgets the match globals as it did before issue #1364,
         # because the body or a parameter default hands the frame's slot to code the analyzer does not trace
-        # ({MatchRebinding.self_call_fallback?}).
+        # ({MatchRebinding.self_call_fallback?}). Kept as {#memo} keeps a scan: the broad reading resolves constants
+        # and the variables a lookup argument names through `scope`.
         def self_call_fallback?(scope = nil)
-          if @self_call_fallback.nil?
-            block_name = block_parameter_name
-            @self_call_fallback = MatchRebinding.self_call_fallback?(@body, block_name, scope) ||
-                                  MatchRebinding.self_call_fallback?(@parameters, block_name, scope)
-          end
-          @self_call_fallback
+          return fallback_in_frame?(scope) if scope.nil?
+
+          kept = @self_call_fallback
+          return kept[2] if kept && kept[0].equal?(scope.locals) && kept[1].equal?(scope.ivars)
+
+          result = fallback_in_frame?(scope)
+          @self_call_fallback = [scope.locals, scope.ivars, result]
+          result
         end
 
         # True when `name` is the method's own `&block` parameter and the body never binds that name — no write, no
@@ -79,6 +82,12 @@ module Rigor
         end
 
         private
+
+        def fallback_in_frame?(scope)
+          block_name = block_parameter_name
+          MatchRebinding.self_call_fallback?(@body, block_name, scope) ||
+            MatchRebinding.self_call_fallback?(@parameters, block_name, scope)
+        end
 
         def forwarded_block_name
           name = block_parameter_name

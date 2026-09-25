@@ -28,7 +28,8 @@ diverge. On Ruby 4.0.5:
 - **Idiom** — all three hold an `IO`. Tests assign an IO-compatible object for a while, usually a
   `StringIO` (which is not an `IO` subclass), and put the original back.
 
-Code that checks a stream's class at run time is uncommon. Where code does check, the check must keep Rigor quiet (WD1).
+Code that checks a stream's class at run time is uncommon. Where code does check, the check
+must keep Rigor quiet (WD1).
 
 `$_` depends on the stream in a sharper way. A C-implemented reader sets its caller's `$_`, but a
 reader defined in Ruby does not: `Tempfile#gets`, `Reline`'s `readline`, a test double. `Kernel#gets`
@@ -52,13 +53,16 @@ set. The type specification already names the governing principle
 3. **Default, not opt-in.** The expectation holds without any configuration, and making it opt-in is
    the posture Rigor rejects. Evidence that changes it comes from what the analysed code and its
    configuration literally say. The engine never infers it from a file's name or a framework
-   convention.
+   convention. A class guard in the code (`is_a?`, `respond_to?`, `case … when`) is such
+   evidence: no report and no certainty verdict (a dropped arm, an unreachable clause) may rest on the
+   idiomatic type against it.
 4. **Earned reports.** A report the expectation adds must hold under the idiomatic occupant. An exact
    dead-condition report, such as `puts "tail" if $_` after a `while $stdin.gets` loop, is intended.
 
 ### Working decisions
 
-- **WD1 — Reads.** An unbound `$stdin`, `$stdout` or `$stderr` reads as `IO` (#1366). `$>` is the same variable as `$stdout` and reads and joins as it does.
+- **WD1 — Reads.** An unbound `$stdin`, `$stdout` or `$stderr` reads as `IO` (#1366). `$>` is the same
+  variable as `$stdout` and reads and joins as it does.
   - This is the expectation, not a claim about the runtime class. Application code may be running with
     a `StringIO` behind `$stdout` and has no business knowing it.
   - A write the file makes joins its value (#1362).
@@ -101,8 +105,8 @@ set. The type specification already names the governing principle
   - a reader defined by a String `class_eval` in the file (`IO.class_eval("def gets(*) = 'x'")`).
 - **WD5 — Implicit-self readers** (`while gets`) narrow under WD4's assumption and decline on evidence
   the file shows about `self`. #1415 holds the canonical list and the acceptance criteria.
-- **WD6 — A declined or forgotten `$_` reads `Dynamic[top]`, never its RBS type.** `Scope#forget_last_line`
-  unbinds `$_` wherever a reader may have run. An RBS fallback (`$_: String?`) there would report
+- **WD6 — A declined or forgotten `$_` reads `Dynamic[top]`, never its RBS type.**
+  `Scope#forget_last_line` unbinds `$_` wherever a reader may have run. An RBS fallback (`$_: String?`) there would report
   correct code such as `if $stdin.gets; items.each(&h); $_.chomp; end`. #1366 MUST exclude `$_` or bind
   it as `untyped_last_line` does, and its `$_` part comes after #1415.
 

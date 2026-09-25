@@ -1,0 +1,4 @@
+---
+locals: {}
+assertions:
+  '1': Integer

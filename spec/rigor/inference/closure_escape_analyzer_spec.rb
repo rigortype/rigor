@@ -142,5 +142,61 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
       result = described_class.classify(receiver_type: array_nominal, method_name: :each, environment: env)
       expect(result).to eq(:non_escaping)
     end
+
+    it "leaves a class outside the catalogue :unknown without a scope to follow its ancestry" do
+      shelf = Rigor::Type::Combinator.nominal_of("Shelf")
+      expect(classify(shelf, :find)).to eq(:unknown)
+    end
+  end
+
+  # Issue #1234 — the name reading, carrier by carrier. Without a project defining anything, a carrier the
+  # audit resolves reads the name as repetition; one it cannot resolve does not.
+  describe ".repeats_by_name?" do
+    let(:scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    def repeats?(type, method = :find)
+      described_class.repeats_by_name?(receiver_type: type, method_name: method, scope: scope)
+    end
+
+    it "reads the name on a receiver Rigor cannot see" do
+      expect(repeats?(Rigor::Type::Dynamic.new(Rigor::Type::Top.instance))).to be(true)
+      expect(repeats?(Rigor::Type::Top.instance)).to be(true)
+    end
+
+    it "reads it on a class the project does not define the method on" do
+      expect(repeats?(Rigor::Type::Combinator.nominal_of("Shelf"))).to be(true)
+      expect(repeats?(Rigor::Type::Combinator.singleton_of("Shelf"))).to be(true)
+      expect(repeats?(Rigor::Type::Combinator.constant_of("s"), :each_char)).to be(true)
+    end
+
+    it "does not read it on an anonymous struct value, whose class it cannot name" do
+      expect(repeats?(Rigor::Type::StructInstance.new({ a: Rigor::Type::Top.instance }))).to be(false)
+    end
+
+    it "does not read it on a union with a member it cannot resolve" do
+      anonymous = Rigor::Type::StructInstance.new({ a: Rigor::Type::Top.instance })
+      union = Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Shelf"), anonymous)
+      expect(repeats?(union)).to be(false)
+    end
+
+    it "does not read a name no catalogue entry lists" do
+      expect(repeats?(Rigor::Type::Dynamic.new(Rigor::Type::Top.instance), :frobnicate)).to be(false)
+      expect(repeats?(Rigor::Type::Dynamic.new(Rigor::Type::Top.instance), :then)).to be(false)
+    end
+  end
+
+  # Issue #1234 — the name-only reading the captured-binding pass takes of an `:unknown` receiver.
+  describe ".iterator_name?" do
+    it "accepts a name some catalogue entry iterates with" do
+      %i[each map find all? each_with_index times each_line foreach transform_values].each do |m|
+        expect(described_class.iterator_name?(m)).to be(true), "expected #{m} to be an iterator name"
+      end
+    end
+
+    it "rejects the run-once entries and names no entry lists" do
+      %i[tap then yield_self synchronize frobnicate define_method].each do |m|
+        expect(described_class.iterator_name?(m)).to be(false), "expected #{m} not to be an iterator name"
+      end
+    end
   end
 end

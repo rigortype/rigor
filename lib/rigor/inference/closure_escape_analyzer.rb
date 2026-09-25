@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require_relative "../type"
+require_relative "../reflection"
+require_relative "external_ancestor_resolution"
+require_relative "project_method_ownership"
 
 module Rigor
   module Inference
@@ -51,6 +54,14 @@ module Rigor
     # retained. False positives in this catalogue would silently weaken the soundness of fact retention in
     # later sub-phases.
     #
+    # Issue #1234 — a project class is outside the catalogue by name, yet `class Shelf; include Enumerable`
+    # answers `find` with `Enumerable#find` all the same. Given the `scope:` whose discovery tables know the
+    # project, a `Nominal` receiver of a project class classifies through its ancestry
+    # ({.ancestry_non_escaping?}): the method must be one the project does not define anywhere in that
+    # ancestry, and the first ancestor outside the project that declares it must be a catalogued class or
+    # `Enumerable` ({MIXIN_NON_ESCAPING}). An ancestor the RBS environment does not know could declare
+    # anything, so meeting one first declines.
+    #
     # The analyzer is a pure query. It MUST NOT mutate the receiver type or scope, MUST NOT raise on
     # unrecognised inputs, and MUST be deterministic for a given input.
     module ClosureEscapeAnalyzer
@@ -58,22 +69,64 @@ module Rigor
 
       # @param environment — reserved for the future sub-phase that consults
       #   `RBS::Extended` call-timing effects; sub-phase 3a ignores it.
+      # @param scope — the project's discovery tables, for the ancestry step; without it a project class
+      #   stays `:unknown`.
       # @return one of `:non_escaping`, `:escaping`, `:unknown`.
-      def classify(receiver_type:, method_name:, environment: nil) # rubocop:disable Lint/UnusedMethodArgument
+      def classify(receiver_type:, method_name:, environment: nil, scope: nil) # rubocop:disable Lint/UnusedMethodArgument
         return :unknown if receiver_type.nil?
 
-        class_name = receiver_class_name(receiver_type)
-        return :unknown if class_name.nil?
-
         method_sym = method_name.to_sym
-        return :non_escaping if non_escaping?(class_name, method_sym)
-        return :escaping if escaping?(class_name, method_sym)
+        class_name = receiver_class_name(receiver_type)
+        if class_name
+          return :non_escaping if non_escaping?(class_name, method_sym)
+          return :escaping if escaping?(class_name, method_sym)
+        end
 
-        :unknown
+        instance_class = instance_carrier_class_name(receiver_type)
+        return :unknown if instance_class.nil?
+
+        ancestry_non_escaping?(instance_class, method_sym, scope) ? :non_escaping : :unknown
+      end
+
+      # Issue #1234 — whether some catalogue entry lists `method_name` as an iteration method: a name that runs
+      # its block once per element wherever the catalogue knows the receiver. `tap` / `then` / `yield_self` are
+      # left out, as they run the block exactly once. This is a fact about the NAME, for the one consumer that
+      # asks it of an `:unknown` receiver (`ExpressionTyper#block_may_repeat?`); it proves nothing about escape.
+      def iterator_name?(method_name)
+        ITERATOR_NAMES.include?(method_name)
+      end
+
+      # Issue #1234 — whether the NAME of a catalogued iterator is the only thing Rigor knows about the method
+      # `receiver_type` answers `method_name` with, so the captured-binding pass may read it as repetition
+      # (`ExpressionTyper#block_may_repeat?`, for an `:unknown` receiver). It holds for a receiver Rigor cannot
+      # see at all (`Dynamic`, `Top`), and for a class it can see whose method the project does not define.
+      #
+      # A method the project defines under a catalogued name is the project's, not the iterator, so the name
+      # says nothing about how often it yields: `class Vault; def select(key) = yield(key.to_s); end` runs its
+      # block once. "Defines" is a `def`, `define_method` or `attr_*` anywhere in a project class's ancestry
+      # (instance side, or singleton side for a class-object receiver), or a signature whose declaring owner
+      # is a project class or module. A carrier this does not recognise, or one whose class it cannot name
+      # (an anonymous `Struct.new` value), answers false: when Rigor cannot tell whether the project owns the
+      # method, it does not assume repetition. {ProjectMethodOwnership.targets} carries the carrier audit.
+      def repeats_by_name?(receiver_type:, method_name:, scope:)
+        method_sym = method_name.to_sym
+        return false unless ITERATOR_NAMES.include?(method_sym)
+
+        targets = ProjectMethodOwnership.targets(receiver_type)
+        return false if targets.nil?
+
+        targets.none? { |class_name, kind| ProjectMethodOwnership.defines?(class_name, method_sym, kind, scope) }
       end
 
       class << self
         private
+
+        # The instance-side class a `Nominal` or an ADR-48 member carrier names, for the ancestry step.
+        def instance_carrier_class_name(receiver_type)
+          case receiver_type
+          when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver_type.class_name&.to_s
+          end
+        end
 
         # Resolve a single concrete class name for catalogue lookup. Returns `nil` when the receiver carrier
         # does not name a single class (e.g. `Top`, `Dynamic[Top]`, `Union[...]`, `Bot`). `Tuple` projects to
@@ -118,6 +171,64 @@ module Rigor
 
         def escaping?(class_name, method_sym)
           methods = ESCAPING[class_name]
+          methods ? methods.include?(method_sym) : false
+        end
+
+        # Issue #1234 — a project class answers `method_sym` through the catalogued ancestor Ruby dispatches it
+        # to. The cheap gates come first: the name must be a catalogued iteration method, and the receiver a
+        # class the project declares. A definition anywhere in the project ancestry — the class's own `def
+        # find`, a project module's, a reopened `Enumerable`'s — is not the catalogued method and declines.
+        # A class the project's `sig/` declares asks its RBS definition where the method comes from; one
+        # without RBS walks the ancestors outside the project in method-resolution order.
+        def ancestry_non_escaping?(class_name, method_sym, scope)
+          return false if scope.nil? || !ITERATOR_NAMES.include?(method_sym)
+          return false unless scope.known_user_class?(class_name)
+
+          by_method = (ProjectMethodOwnership.memo(scope)[:ancestry][class_name] ||= {})
+          return by_method[method_sym] if by_method.key?(method_sym)
+
+          by_method[method_sym] = compute_ancestry_non_escaping?(class_name, method_sym, scope)
+        end
+
+        def compute_ancestry_non_escaping?(class_name, method_sym, scope)
+          return false if ProjectMethodOwnership.defines?(class_name, method_sym, :instance, scope)
+
+          if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+            return catalogued_declaration?(method_definition(class_name, method_sym, :instance, scope), method_sym)
+          end
+
+          external_ancestry_non_escaping?(class_name, method_sym, scope)
+        end
+
+        # The RBS definition, or nil — a malformed signature is a gap, and
+        # {ExternalAncestorResolution.method_definition} is the one place that rescues it.
+        def method_definition(class_name, method_sym, kind, scope)
+          ExternalAncestorResolution.method_definition(class_name, method_sym, kind, scope: scope)
+        end
+
+        # The first external ancestor that declares the method decides. One the environment does not know may
+        # declare it, so it declines rather than being skipped; one that does not declare it is skipped.
+        def external_ancestry_non_escaping?(class_name, method_sym, scope)
+          scope.external_ancestor_name_candidates(class_name).each do |candidates|
+            known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+            return false if known.nil?
+            return true if catalogued_owner?(known, method_sym)
+
+            definition = method_definition(known, method_sym, :instance, scope)
+            return catalogued_declaration?(definition, method_sym) if definition
+          end
+          false
+        end
+
+        def catalogued_declaration?(definition, method_sym)
+          return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+          owner = definition.defined_in
+          !owner.nil? && catalogued_owner?(owner.to_s.delete_prefix("::"), method_sym)
+        end
+
+        def catalogued_owner?(name, method_sym)
+          methods = NON_ESCAPING[name] || MIXIN_NON_ESCAPING[name]
           methods ? methods.include?(method_sym) : false
         end
       end
@@ -184,6 +295,19 @@ module Rigor
         "File" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
         "StringIO" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION).freeze
       }.freeze
+
+      # Issue #1234 — the catalogued modules a project class reaches only through its ancestry, read only by
+      # {.ancestry_non_escaping?} after the project has been ruled out as the method's owner. `Enumerable`'s
+      # methods run the block from inside the call, through the includer's `each` — minus
+      # {DEFERRED_ENUMERATOR_METHODS}, whose Enumerator outlives it, and minus `each` itself, which
+      # `Enumerable` does not declare: the includer supplies it, so nothing here speaks for it. For that
+      # reason a receiver typed as the bare module is not a key of {NON_ESCAPING} either.
+      MIXIN_NON_ESCAPING = {
+        "Enumerable" => (STREAM_ENUMERABLE_NON_ESCAPING - %i[each]).freeze
+      }.freeze
+
+      # Every name a {NON_ESCAPING} entry lists as iteration, for {.iterator_name?} and the ancestry gate.
+      ITERATOR_NAMES = (NON_ESCAPING.values.flatten.to_set - OBJECT_NON_ESCAPING).freeze
 
       # Methods that are documented to **retain** the block past the call. The block is stored or scheduled,
       # so outer narrowing facts on writeable captured locals cannot survive.

@@ -115,7 +115,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
 | ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive case shipped 2026-07-19 as VoidTailSummary; budget ids deferred) |
-| ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
+| ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions; partially superseded by ADR-117) |
 | ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Accepted (`rigor unused` shipped in v0.3.4; all eight working decisions settled; partially supersedes ADR-21 Track 3) |
 | ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Accepted (effect system shipped as the v0.3.4 headline; 13 of 18 implementation issues closed under #376) |
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
@@ -131,6 +131,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-114 | [Inherited dispatch into core and stdlib RBS](114-core-stdlib-ancestor-dispatch.md) | Accepted (#527 slice 1 landed: instance-side superclass walk; slices 2/3/5/6 out of scope, partially supersedes ADR-43's rejected alternative A) |
 | ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (thin `agents/pi-harness/` stubs; WD6 parallel path unproven) |
 | ADR-116 | [Restructuring the engine's hot files: declare each growing kind once, walk each traversal once](116-hot-file-restructuring.md) | Accepted (scheduled for after the v0.4.0 cut; WD0–WD7 not started) |
+| ADR-117 | [Standard streams: typed by idiom, checked by runtime contract](117-standard-streams-typed-by-idiom.md) | Accepted (`$_` explicit readers since #1405; open: #1362, #1366, #1367, #1415, #1423, #1426, #1427, #1429) |
 
 ## Adding a New ADR
 

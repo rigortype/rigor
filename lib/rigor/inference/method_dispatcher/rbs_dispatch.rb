@@ -1424,9 +1424,14 @@ module Rigor
           # value-pinned members. The bound constrains a class, and `Rational#*: [T < Numeric](T) -> T` returns a
           # value of the argument's class, not the argument, so `r * 0.5` read the literal `0.5`. An unbounded
           # variable keeps the literal (`Ractor.make_shareable("x")` is `"x"`); a bounded identity return
-          # (`String#setbyte`) gives its literal up.
+          # (`String#setbyte`) gives its literal up. Any bound counts: `upper_bound` answers only a class, singleton
+          # or interface bound, so an alias, union, intersection or optional bound is read through
+          # `upper_bound_type` where the rbs version has it.
           def upper_bounded?(method_type, name)
-            method_type.type_params.any? { |type_param| type_param.name == name && type_param.upper_bound }
+            method_type.type_params.any? do |type_param|
+              type_param.name == name &&
+                (type_param.respond_to?(:upper_bound_type) ? type_param.upper_bound_type : type_param.upper_bound)
+            end
           end
 
           # The `(variable name, bound type)` a positional parameter contributes, or {NO_BINDING} when it

@@ -141,8 +141,10 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
-    it "keeps the known values beside an untyped arm, and the unmutated twin exact" do
-      expect(dumped_types(<<~RUBY)).to eq(["1 | Dynamic[top]", "1 | Dynamic[top]", "nil", "1"])
+    # Issue #1297 — the floor: the literal's known values are not kept beside the arm (the projection is not keyed, so
+    # they answered every key's), while the unmutated twin keeps its exact per-key answers.
+    it "floors every read to untyped, and keeps the unmutated twin exact" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "Dynamic[top]", "nil", "1"])
         T = { a: 1 }
         T[:b] = 2
         dump_type(T[:b])
@@ -195,8 +197,8 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
-    it "keeps the known elements beside an untyped arm, and the unmutated twin exact" do
-      expect(dumped_types(<<~RUBY)).to eq(["1 | Dynamic[top]", "1"])
+    it "floors every read to untyped, and keeps the unmutated twin exact" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]", "1"])
         A = [1]
         A << 2
         dump_type(A.last)
@@ -204,6 +206,87 @@ RSpec.describe "Mutated constant census widening", type: :runner do
         K = [1]
         dump_type(K.last)
       RUBY
+    end
+  end
+
+  # Issue #1297 — a read of a mutated constant answered the literal's known values beside the `Dynamic[top]` arm, and
+  # the projection is not keyed, so `STATUS[:name]` answered `:active`'s `false` too. A method declared `-> String`
+  # returning it drew `def.return-type-mismatch` although `set` can store anything under either key. The census floors
+  # the literal to its gradual nominal instead, as ADR-58's ivar census does.
+  describe "a declared return of a mutated constant's read" do
+    def return_mismatches(source, sig)
+      analyze(source, sig: { "st.rbs" => sig }).diagnostics.filter_map do |diagnostic|
+        next unless diagnostic.rule.to_s == "def.return-type-mismatch"
+
+        [diagnostic.line, diagnostic.message.delete_prefix("return-type mismatch on ")]
+      end
+    end
+
+    it "does not report a read of a hash a sibling method stores into, and still reports the unmutated twin" do
+      expect(return_mismatches(<<~RUBY, <<~RBS)).to eq([[12, "`kname': declared String, inferred nil"]])
+        module St
+          STATUS = { active: false, name: nil }
+          KSTATUS = { name: nil }
+
+          def self.set(v)
+            STATUS[:active] = v
+            STATUS[:name] = "x"
+          end
+
+          def self.active? = STATUS[:active]
+          def self.name = STATUS[:name]
+          def self.kname = KSTATUS[:name]
+        end
+      RUBY
+        module St
+          def self.active?: () -> bool
+          def self.set: (bool) -> void
+          def self.name: () -> String
+          def self.kname: () -> String
+        end
+      RBS
+    end
+
+    it "does not report a read of a hash a `merge!` rewrote, and still reports the unmutated twin" do
+      expect(return_mismatches(<<~RUBY, <<~RBS)).to eq([[10, "`kport': declared String, inferred 30"]])
+        module Conf
+          DEFAULTS = { host: "localhost", port: 30 }
+          KDEFAULTS = { host: "localhost", port: 30 }
+
+          def self.configure(opts)
+            DEFAULTS.merge!(opts)
+          end
+
+          def self.host = DEFAULTS[:host]
+          def self.kport = KDEFAULTS[:port]
+        end
+      RUBY
+        module Conf
+          def self.configure: (Hash[Symbol, untyped]) -> void
+          def self.host: () -> String
+          def self.kport: () -> String
+        end
+      RBS
+    end
+
+    it "does not report a read of an array a sibling method appends to, and still reports the unmutated twin" do
+      expect(return_mismatches(<<~RUBY, <<~RBS)).to eq([[8, "`kfirst': declared String, inferred 1"]])
+        module Seq
+          ITEMS = [1]
+          KITEMS = [1]
+
+          def self.add(v) = ITEMS << v
+
+          def self.first = ITEMS[0]
+          def self.kfirst = KITEMS[0]
+        end
+      RUBY
+        module Seq
+          def self.add: (String) -> void
+          def self.first: () -> String
+          def self.kfirst: () -> String
+        end
+      RBS
     end
   end
 

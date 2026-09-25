@@ -473,6 +473,15 @@ not the other way around. The reverse direction (Sorbet
 wins) would let third-party-DSL annotations override
 authored RBS, which inverts the trust model.
 
+> **Partially superseded by [ADR-2](2-extension-api.md) § "Amendment 2026-09-26 — a
+> `dynamic_return` answer outranks the RBS return" ([#700](https://github.com/rigortype/rigor/issues/700)).**
+> The tier ordering this WD relied on never made RBS win: the plugin's `dynamic_return` tier runs
+> ahead of RBS dispatch, so a translated Sorbet `sig` has typed the call site over an RBS
+> signature for the same method since the plugin shipped. ADR-2 now records that a plugin answer
+> replaces the RBS return by decision. The RBS still binds the `def` body, which is checked
+> against the declared return. Whether `rigor-sorbet` should decline a method the RBS declares is
+> a plugin-side choice this amendment does not make.
+
 ### WD4 — Why a separate `dynamic.sorbet.*` family for
 unsupported constructs?
 

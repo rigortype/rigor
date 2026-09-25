@@ -4241,11 +4241,12 @@ end
   end
 
   # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are
-  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper. Asserted
+  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper — a literal
+  # shape or tuple floors to its gradual nominal (#1297), a value-pinned nominal gains an untyped arm. Asserted
   # on the tables because a read declines to project a `Union` facet at all, so no read tells the two apart there.
   # The read-side face is `spec/rigor/inference/mutated_constant_census_spec.rb`.
   describe "census widening of a mutated entry" do
-    it "unpins each carrier member of a mutated constant, and leaves an unmutated twin exact" do
+    it "floors each literal carrier member of a mutated constant, and leaves an unmutated twin exact" do
       program = parse(<<~RUBY)
         V = ENV["X"] ? { a: 1 } : [1]
         V << 2
@@ -4254,11 +4255,11 @@ end
       table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .in_source_constants
 
-      expect(table["V"].describe).to eq("Dynamic[Array[1 | Dynamic[top]] | { a: 1, ... }]")
+      expect(table["V"].describe).to eq("Dynamic[Array[Dynamic[top]] | Hash[Dynamic[top], Dynamic[top]]]")
       expect(table["W"].describe).to eq("[1] | { a: 1 }")
     end
 
-    it "opens a mutated class variable's shape, and leaves an unmutated twin closed" do
+    it "floors a mutated class variable's shape, and leaves an unmutated twin closed" do
       program = parse(<<~RUBY)
         class C
           def init = (@@h = { a: 1 }) && (@@k = { a: 1 })
@@ -4268,13 +4269,13 @@ end
       cvars = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .class_cvars_for("C")
 
-      expect(cvars[:@@h].describe).to eq("Dynamic[{ a: 1, ... }]")
+      expect(cvars[:@@h].describe).to eq("Dynamic[Hash[Dynamic[top], Dynamic[top]]]")
       expect(cvars[:@@k].describe).to eq("{ a: 1 }")
     end
 
     # An RBS overload join over an untyped argument wraps its candidates before the census sees them, so the facet of
-    # an entry that is already `Dynamic` is unpinned too. The overload set is RBS's, so the members are asserted by
-    # kind rather than spelled out.
+    # an entry that is already `Dynamic` is unpinned too: its tuples floor to the one `Array[untyped]`. The overload
+    # set is RBS's, so the unmutated twin's members are asserted by kind rather than spelled out.
     it "unpins the facet of an entry that is already Dynamic" do
       program = parse(<<~RUBY)
         X = 7.divmod(UNRESOLVED)
@@ -4284,7 +4285,7 @@ end
       table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .in_source_constants
 
-      expect(table["X"].static_facet.members).to all(be_a(Rigor::Type::Nominal))
+      expect(table["X"].static_facet.describe).to eq("Array[Dynamic[top]]")
       expect(table["Y"].static_facet.members).to all(be_a(Rigor::Type::Tuple))
     end
 

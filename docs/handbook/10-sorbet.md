@@ -277,8 +277,9 @@ warnings until the engine's case narrowing improves.
 
 ## Tier ordering — what wins on conflict
 
-When a method has both a Sorbet `sig` and an RBS sig, RBS
-wins. Sorbet sigs sit at Rigor's plugin tier:
+When a method has both a Sorbet `sig` and an RBS sig, the
+Sorbet `sig` types the call site. Sorbet sigs sit at Rigor's
+plugin tier, which answers before RBS dispatch:
 
 1. **Precision tiers** — constant fold, shape dispatch,
    block fold, etc.
@@ -289,14 +290,12 @@ wins. Sorbet sigs sit at Rigor's plugin tier:
 4. **Dependency-source inference** (ADR-10's opt-in walker).
 5. **User-class fallback** (`Object` / `Class` ancestors).
 
-The contribution merger (a v0.1.0 substrate documented in
-[`docs/internal-spec/flow-contribution-merger.md`](../internal-spec/flow-contribution-merger.md))
-keeps RBS authoritative on conflict — the Sorbet sig is
-allowed to refine but not contradict it. Users who want
-their Sorbet sig to override should remove the conflicting
-RBS, not the other way around. The reverse direction
-(Sorbet wins) would let third-party-DSL annotations
-override authored RBS, which inverts the trust model.
+A plugin's return type replaces the RBS return with no
+diagnostic ([ADR-2](../adr/2-extension-api.md) § "Amendment
+2026-09-26"), so where the two sigs disagree, callers see the
+Sorbet return. The RBS still binds the method's body, which
+is checked against the declared return. Keep the two
+signatures in agreement; remove the one you no longer mean.
 
 ## Migration patterns
 

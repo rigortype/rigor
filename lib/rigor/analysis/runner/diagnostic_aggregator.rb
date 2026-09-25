@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "../check_rules/rule_ids"
 require_relative "../crash_signature"
 require_relative "../diagnostic"
 require_relative "../severity_stamp"
@@ -884,8 +885,27 @@ module Rigor
           return [] if @source_rbs_synthesis_reporter.empty?
 
           @source_rbs_synthesis_reporter.entries.map do |entry|
-            entry.kind == :not_honoured ? not_honoured_diagnostic(entry) : synthesis_failed_diagnostic(entry)
+            case entry.kind
+            when :not_honoured then not_honoured_diagnostic(entry)
+            when :contradiction then contradicting_signature_diagnostic(entry)
+            else synthesis_failed_diagnostic(entry)
+            end
           end
+        end
+
+        # ADR-112 WD5 / issue #1075 — a member whose two declarations contradict, or whose refinement is
+        # outside its own declared type. An error in every profile: the false-positive discipline is carried
+        # by the rule's narrow definition of a contradiction, never by the severity (ADR-112 WD5). The message
+        # is composed where the record is read ({Environment.record_member_consistency}), since only there
+        # are both sources' paths at hand.
+        def contradicting_signature_diagnostic(entry)
+          Diagnostic.new(
+            path: entry.path, line: entry.line || 1, column: 1,
+            message: entry.message,
+            severity: :error,
+            rule: CheckRules::RULE_CONTRADICTING_SIGNATURE,
+            source_family: :builtin
+          )
         end
 
         def synthesis_failed_diagnostic(entry)

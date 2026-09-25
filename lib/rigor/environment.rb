@@ -362,13 +362,14 @@ module Rigor
           # the bundle walk and `rbs collection install` all stay authoritative.
           deferred_signature_paths: plugin_sig_paths
         )
-        # Issue #824 / ADR-32 WD13 — one `:info` per inline member the loader stood down against the
-        # project's own `sig/`. Recorded HERE because this is where the reporter is: the run's
-        # `source_rbs_synthesis` stream already carries WD12's "parsed but not honoured" rows, drains out of
-        # pool workers, and is regenerated (never cached) on every run, so the member-level stand-down needs
-        # no plumbing of its own. Costs nothing for a project with no inline RBS: the loader's reader
-        # short-circuits on an empty `virtual_rbs`.
-        record_inline_member_standdowns(loader, source_rbs_synthesis_reporter, root)
+        # Issues #824 / #1075 — the rows ADR-112 WD5's consistency rule reports for members the project's
+        # own `sig/` and an inline source both declare: an error per contradiction (or per refinement that
+        # exceeds its own declared type), an `:info` per inline member dropped undecided. Recorded HERE
+        # because this is where the reporter is: the run's `source_rbs_synthesis` stream already carries
+        # WD12's "parsed but not honoured" rows, drains out of pool workers, and is regenerated (never cached)
+        # on every run, so the member-level outcome needs no plumbing of its own. Costs nothing for a project
+        # with no inline RBS: the loader's reader short-circuits on an empty `virtual_rbs`.
+        record_member_consistency(loader, source_rbs_synthesis_reporter, root)
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost
@@ -574,27 +575,72 @@ module Rigor
         reporter&.record(plugin_id: plugin.manifest.id, path: path, message: message.to_s, kind: kind)
       end
 
-      # ADR-32 WD13 — turn each {Environment::RbsLoader#inline_member_standdowns} record into a WD12
-      # `:not_honoured` entry, so the run's `plugin.rbs-inline.source-rbs-annotation-not-honoured` row names
-      # BOTH sources and which one won. WD12's rule is what makes this necessary rather than optional: an
-      # annotation Rigor parses and does not honour is reported, never swallowed — and a silent per-member
-      # strip is exactly the shape that rule forbids.
-      #
-      # The row is positioned at the annotated `.rb` (line 1, as every entry on this stream is): the member's
-      # own position lives in the synthesized RBS buffer, which describes a document nobody has, and the
-      # ADR-54 environment cache drops positions anyway, so a line read off it would differ warm and cold.
-      def record_inline_member_standdowns(loader, reporter, root)
+      # ADR-112 WD5 / issue #1075 — turn each reported {MemberConsistency::Record} into a row on the
+      # synthesis stream. A contradiction, or a refinement outside its own declared type, is a `:contradiction`
+      # entry ({Analysis::CheckRules::RULE_CONTRADICTING_SIGNATURE}, an error), positioned at the `.rbs`
+      # member when there is one: that file is real and its line is exact, where the inline member's position
+      # lives in the synthesized RBS buffer, a document nobody has. An undecided pair keeps ADR-32 WD12's
+      # `:not_honoured` row at the annotated `.rb` (line 1, as every entry on that stream is): the inline
+      # signature was parsed and dropped, and WD12 forbids swallowing that. The silent outcomes — equal, or
+      # merged to the more precise side — record nothing.
+      def record_member_consistency(loader, reporter, root)
         return if reporter.nil?
 
-        loader.inline_member_standdowns.each do |class_name, method_name, kind, signature_path, virtual_name|
-          plugin_id, path = split_virtual_source_name(virtual_name)
-          next if path.nil?
-
-          reporter.record(
-            plugin_id: plugin_id, path: path, kind: :not_honoured,
-            message: inline_member_standdown_message(class_name, method_name, kind, signature_path, root)
-          )
+        loader.member_consistency.each do |record|
+          case record.outcome
+          when :contradiction then record_member_contradiction(reporter, record, root)
+          when :refinement then record_refinement_contradiction(reporter, record, root)
+          when :undecided then record_member_undecided(reporter, record, root)
+          end
         end
+      end
+
+      def record_member_contradiction(reporter, record, root)
+        plugin_id, path = split_virtual_source_name(record.virtual_name)
+        return if path.nil?
+
+        reporter.record(
+          plugin_id: plugin_id, path: path_relative_to(record.signature_path, root), line: record.signature_line,
+          kind: :contradiction,
+          message: "`#{member_label(record)}` is declared here and by an inline annotation in " \
+                   "`#{path_relative_to(path, root)}`, and the two contradict: #{record.detail}. Rigor reads " \
+                   "this `.rbs` declaration. Regenerate the signature, or fix the annotation, so that one " \
+                   "of the two refines the other."
+        )
+      end
+
+      def record_refinement_contradiction(reporter, record, root)
+        plugin_id, path = split_virtual_source_name(record.virtual_name)
+        path = record.signature_path if path.nil?
+        return if path.nil?
+
+        reporter.record(
+          plugin_id: plugin_id.to_s, path: path_relative_to(path, root), line: record.signature_line,
+          kind: :contradiction,
+          message: "`#{member_label(record)}` refines its own signature to a type outside it: " \
+                   "#{record.detail}. A `rigor:v1:` refinement may narrow the ordinary RBS contract, never " \
+                   "contradict it, so one of the two is wrong."
+        )
+      end
+
+      def record_member_undecided(reporter, record, root)
+        plugin_id, path = split_virtual_source_name(record.virtual_name)
+        return if path.nil?
+
+        reporter.record(
+          plugin_id: plugin_id, path: path, kind: :not_honoured,
+          message: "`#{member_label(record)}` is also declared in " \
+                   "`#{path_relative_to(record.signature_path, root)}`, and Rigor cannot tell which of the two " \
+                   "is the more precise (#{record.detail}), so the `.rbs` declaration binds and the inline " \
+                   "signature was dropped. Left to collide the two would fail the class's definition build, " \
+                   "and every call on it — real methods and typos alike — would read `Dynamic[top]`. Make " \
+                   "one of the two a refinement of the other, or remove one, to settle which binds."
+        )
+      end
+
+      def member_label(record)
+        separator = record.kind == :singleton ? "." : "#"
+        "#{record.class_name}#{separator}#{record.method_name}"
       end
 
       # Splits a virtual buffer name back into the pair {.collect_virtual_rbs} composed it from
@@ -605,16 +651,6 @@ module Rigor
         return [nil, nil] unless prefix == "virtual" && plugin_id && !plugin_id.empty? && path && !path.empty?
 
         [plugin_id, path]
-      end
-
-      def inline_member_standdown_message(class_name, method_name, kind, signature_path, root)
-        separator = kind == :singleton ? "." : "#"
-        "`#{class_name}#{separator}#{method_name}` is also declared in " \
-          "`#{path_relative_to(signature_path, root)}`, and an explicit `.rbs` declaration wins over an " \
-          "inline annotation for the same member, so the inline signature was dropped. Left to collide the " \
-          "two would fail the class's definition build, and every call on it — real methods and typos " \
-          "alike — would read `Dynamic[top]`. Remove one of the two declarations to make the inline " \
-          "annotation bind."
       end
 
       def path_relative_to(path, root)

@@ -21,7 +21,12 @@ module Rigor
       # dropping an annotation it parsed. They are not the same news — the first says the file contributed
       # nothing, the second that it contributed all but one thing — so they carry distinct diagnostic ids.
       # Defaults to `:failed`, the pre-WD12 meaning, so an older caller records what it always did.
-      Entry = Data.define(:plugin_id, :path, :message, :kind)
+      #
+      # `:contradiction` (ADR-112 WD5, issue #1075) is the consistency rule's error: a member two sources
+      # declare in ways that contradict, or a refinement outside its own declared type. It is the one kind
+      # positioned at a real line (`line`, nil for every other kind), because it usually sits in a `.rbs`
+      # file whose positions are exact; the others are file-level rows at line 1.
+      Entry = Data.define(:plugin_id, :path, :message, :kind, :line)
 
       def initialize
         @entries = []
@@ -34,12 +39,13 @@ module Rigor
       # file list and then drains each worker's stream into this one reporter, so without the dedup a
       # `--workers N` run printed N copies of a row a `--workers=0` run printed once. The same collapse the
       # {RbsExtended::Reporter} drain documents, for the same reason.
-      def record(plugin_id:, path:, message:, kind: :failed)
+      def record(plugin_id:, path:, message:, kind: :failed, line: nil)
         entry = Entry.new(
           plugin_id: plugin_id.to_s.dup.freeze,
           path: path.to_s.dup.freeze,
           message: message.to_s.dup.freeze,
-          kind: kind
+          kind: kind,
+          line: line
         )
         return nil if @seen.key?(entry)
 

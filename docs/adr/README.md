@@ -46,7 +46,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground v0.1.10–0.1.11; in-browser ruby.wasm build shipped 2026-06-14/15) |
 | ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Accepted |
 | ADR-31 | [Contribution and Supply-chain Policy](31-contribution-and-supply-chain-policy.md) | Accepted (in force) |
-| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13 gives a `sig/` declaration precedence over an inline one, per member, 2026-09-08; WD2/WD10 default partially superseded by ADR-93) |
+| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13's per-member `sig/` precedence superseded by ADR-112 WD5, 2026-09-26; WD2/WD10 default partially superseded by ADR-93) |
 | ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10). WD5's seven-tool partition is stale against the current CLI verb surface. |
 | ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Accepted (implemented in v0.1.13; ADR-29 Playground `severity_profile: strict` wiring shipped too). Its unresolved questions name `flow_contribution_for`, deleted by ADR-52. |
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
@@ -126,7 +126,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-109 | [Ruby range literals as the notation and the semantics of numeric range refinements](109-ruby-native-range-notation.md) | Accepted (implemented: `Integer[1..10]` in #830, `Float[R]` in #844, Float narrowing in #846, the `int<a, b>` deprecation row in #854, the Float folds) |
 | ADR-110 | [An inherited declaration does not outrank the receiver's own `def`](110-inherited-declaration-precedence.md) | Accepted (WD1 + WD3 implemented in #856; measured zero new diagnostics across 25 corpus targets) |
 | ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Superseded (by ADR-112; the probe measurements stand) |
-| ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
+| ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (WD5 implemented for `sig/` against inline, 2026-09-26; the rest not yet implemented) |
 | ADR-113 | [`rigor lens`: a declaration map with type provenance, for agents and tools](113-rigor-lens.md) | Accepted (nothing implemented yet) |
 | ADR-114 | [Inherited dispatch into core and stdlib RBS](114-core-stdlib-ancestor-dispatch.md) | Accepted (#527 slice 1 landed: instance-side superclass walk; slices 2/3/5/6 out of scope, partially supersedes ADR-43's rejected alternative A) |
 | ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (thin `agents/pi-harness/` stubs; WD6 parallel path unproven) |

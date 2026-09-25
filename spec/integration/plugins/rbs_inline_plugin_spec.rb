@@ -1008,11 +1008,12 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
-  # Issue #824 / ADR-32 WD13 — a method declared by BOTH `sig/` and an inline annotation. rbs merges the two
-  # sources into one `ClassEntry` and ranks neither, so before this the definition build raised
-  # `RBS::DuplicatedMethodDefinitionError` and the whole class lost its method surface. `sig/` now wins per
-  # member, and the drop is reported rather than swallowed (WD12).
-  describe "precedence against sig/ (issue #824)" do
+  # Issue #824 / ADR-32 WD13, replaced by #1075 / ADR-112 WD5 — a method declared by BOTH `sig/` and an
+  # inline annotation. rbs merges the two sources into one `ClassEntry` and ranks neither, so before #824 the
+  # definition build raised `RBS::DuplicatedMethodDefinitionError` and the whole class lost its method
+  # surface. The two are now compared: consistent declarations merge to the more precise side, and a
+  # contradiction keeps the `sig/` side and is an error.
+  describe "consistency against sig/ (issues #824, #1075)" do
     let(:sig_and_inline) do
       run_plugin(
         source: <<~RUBY,
@@ -1048,12 +1049,74 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         .not_to include("rbs.coverage.definition-build-failed")
     end
 
-    it "reports one info row naming the member, the .rbs that won, and the annotated file" do
-      rows = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+    # ADR-32 WD13's reproduction contradicts in both positions, so it is now an error at the `.rbs` member
+    # rather than WD13's `:info` at the annotated file.
+    it "reports one rbs.contradicting-signature error at the sig/ member, naming the annotated file" do
+      rows = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "rbs.contradicting-signature" }
       expect(rows.size).to eq(1)
-      expect(rows.first.severity).to eq(:info)
-      expect(rows.first.path).to end_with("demo.rb")
-      expect(rows.first.message).to include("`Demo#shared`", "sig/demo.rbs", "inline signature was dropped")
+      expect(rows.first.severity).to eq(:error)
+      expect(rows.first.path).to end_with("sig/demo.rbs")
+      expect(rows.first.line).to eq(2)
+      expect(rows.first.message).to include("`Demo#shared`", "demo.rb", "parameter 1")
+      expect(sig_and_inline.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-annotation-not-honoured")
+    end
+
+    # The issue's merge: the inline side is the narrower contract, so it binds and a call outside it fires.
+    # Under WD13 `sig/`'s `Symbol` won and `:up` passed.
+    it "merges a consistent pair to the more precise inline side, silently" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs dir: :asc | :desc
+            def order(dir) = nil
+          end
+
+          Demo.new.order(:up)
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def order: (::Symbol dir) -> void\nend\n" },
+        signature_paths: ["sig"]
+      )
+      rules = result.diagnostics.map(&:qualified_rule)
+      expect(rules).to include("call.argument-type-mismatch")
+      expect(rules).not_to include("rbs.contradicting-signature", "source-rbs-annotation-not-honoured",
+                                   "rbs.coverage.definition-build-failed")
+    end
+
+    # rbs-extended.md: a refinement outside its own declared type is a contradiction too, with or without
+    # a `sig/` twin. Same-line `%a{}` spelling, the one the manual shows.
+    it "reports an inline refinement outside its own declared return at the annotated file" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs %a{rigor:v1:return: positive-int} () -> String
+            def label = "x"
+          end
+        RUBY
+        files: {}
+      )
+      rows = result.diagnostics.select { |d| d.qualified_rule == "rbs.contradicting-signature" }
+      expect(rows.size).to eq(1)
+      expect([File.basename(rows.first.path), rows.first.line, rows.first.severity]).to eq(["demo.rb", 1, :error])
+      expect(rows.first.message).to include("`Demo#label`", "rigor:v1:return:", "String")
+    end
+
+    # ADR-93's herb shape: `sig/` says `-> untyped`, the annotation says `-> void`. Both are the top type.
+    it "stays quiet for sig/ `-> untyped` beside an inline `-> void`" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            #: () -> void
+            def run = nil
+          end
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def run: () -> untyped\nend\n" },
+        signature_paths: ["sig"]
+      )
+      expect(result.diagnostics.map(&:qualified_rule))
+        .not_to include("rbs.contradicting-signature", "source-rbs-annotation-not-honoured")
     end
 
     # The rest of the file is unaffected — the same promise WD12's `module-self` row makes.

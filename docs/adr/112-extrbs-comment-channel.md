@@ -1,6 +1,6 @@
 # ADR-112 — `@extrbs`: a Rigor-read comment channel for what RBS cannot say
 
-Status: **Accepted, 2026-09-19. Nothing implemented yet.** Rules on
+Status: **Accepted, 2026-09-19. WD5 implemented for `sig/` against inline `@rbs` / `#:` on 2026-09-26 ([#1075](https://github.com/rigortype/rigor/issues/1075)); the `@extrbs` half of WD5 and WD1–WD4 not yet implemented.** Rules on
 [#996](https://github.com/rigortype/rigor/issues/996) the other way from
 [ADR-111](111-inline-refinement-carrier.md)'s recommendation. ADR-111 is superseded as a whole, and
 its probe is this ADR's grounding. This ADR partially supersedes [ADR-32](32-rbs-inline-comment-ingestion.md)

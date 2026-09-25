@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "../../rbs_extended"
 
 module Rigor
   module Inference
@@ -17,14 +18,23 @@ module Rigor
       # are selected one by one, and the distinct picks come back together for the dispatch layer's join, wrapped in
       # `Dynamic` when their returns differ (#521).
       #
-      # Only sealed members are read ({.sealed?}): a literal, or a plain instance of a core class no subclass can
-      # instantiate. Such a member's runtime value is of exactly its class, so reading it is reading a plain argument
-      # of that class, with no hazard a plain argument lacks. Any other member's value may be of a subclass and take an
-      # arm the member itself skips: `Numeric` in `2 ** v`'s `Complex | Numeric` skipped a project `(real) -> Float`,
-      # whose `real` alias names `Integer`, for a catch-all `(untyped) -> nil`, and `.floor` on the call reported
-      # `call.undefined-method`. Scanning the parameters for a subclass of the member caught a plain class name and
-      # missed aliases, `instance`, type variables, intersections, singletons and modules, so such a facet keeps the
-      # wrapper instead.
+      # Only sealed members are read ({.sealed?}): a literal, or a plain instance of a core class whose `new` and
+      # `allocate` are undefined. Such a member's runtime value is of exactly its class, where any other member's may be
+      # of a subclass and take an arm the member itself skips: `Numeric` in `2 ** v`'s `Complex | Numeric` skipped a
+      # project `(real) -> Float`, whose `real` alias names `Integer`, for a catch-all `(untyped) -> nil`, and `.floor`
+      # on the call reported `call.undefined-method`. Scanning the parameters for a subclass of the member caught a
+      # plain class name and missed aliases, `instance`, type variables, intersections, singletons and modules.
+      #
+      # Even a sealed member is read only where acceptance can rule it out ({.provable?}). Acceptance reads class
+      # relations from the analyzer's own process, so it answers `no` for `Integer` against a `(Printable)` that project
+      # RBS or source includes into `Integer` (#1352). A plain argument shares that, but the wrapper hid it from a
+      # `Dynamic` one: with `(Printable) -> String | (Integer) -> Integer`, reading the member typed
+      # `fmt(Integer(v)).upcase` as `Integer` and fired `call.undefined-method` where master read `String`. So every
+      # overload's positional parameters must be spelled in forms whose answer does not depend on an `include`: a
+      # declared class, `untyped`, `top`, `nil`, `bool` or a literal, through `?` and `|`. Anything else, a module, a
+      # stubbed name, an alias, an interface, a type variable, `instance`, `self`, an intersection or a singleton, keeps
+      # the wrapper. The list names what is provable rather than what is not, so a form it has not met falls back to
+      # master's reading.
       #
       # A wider facet keeps the wrapper and the receiver's arm, as before. It is usually itself a #521 join
       # (`Dynamic[BigDecimal | Complex | Float | Integer | Rational]` from `n * untyped`), and read member by member it
@@ -35,8 +45,9 @@ module Rigor
         MEMBER_LIMIT = 2
         # Member-wise argument lists beyond this keep their wrappers.
         CAP = 8
-        # Core classes that undefine their allocator, so no subclass has an instance and a value of one of them is of
-        # exactly that class. `NilClass` leaves with the facet's `nil`.
+        # Core classes whose `new` and `allocate` are undefined, so plain Ruby cannot make an instance of a subclass
+        # (`Integer`, `Float`, `Symbol`, `true` and `false` have no allocator at all; a `Rational` or `Complex` subclass
+        # instance takes `Marshal.load` or a rebound `Class#allocate`). `NilClass` leaves with the facet's `nil`.
         SEALED_CLASSES = %w[Integer Float Rational Complex Symbol TrueClass FalseClass].freeze
 
         module_function
@@ -44,15 +55,15 @@ module Rigor
         # Whether any argument is a `Dynamic` whose facet selection reads; the cheap guard of the hot path.
         def faceted?(arg_types) = arg_types.any? { |arg| arg.is_a?(Type::Dynamic) && facet_members(arg) }
 
-        # Selects through the block, called as `yield(arg_types, member)`. When every facet selection reads has one
-        # member, it yields once with the members standing in. Otherwise, with `member_wise`, it yields once per
-        # member-wise list (`member` true, where the block answers only a genuine match); without it (the singular
-        # `select`, whose one answer a member order would decide), or when any list matches nothing or there are
-        # more than {CAP}, it yields once with the arguments as given.
-        def select(arg_types, member_wise:, &)
+        # Selects through the block, called as `yield(arg_types, member)`. It yields once per member-wise list, one
+        # member standing in for each faceted argument, with `member` true so the block answers only a genuine match.
+        # It yields once with the arguments as given instead when the overloads are not {.provable?}, when an argument
+        # has two members and the caller is the singular `select` (`member_wise` false, whose one answer a member order
+        # would decide), when there are more than {CAP} lists, or when any list matches nothing.
+        def select(arg_types, definition, member_wise:, environment:, &)
           choices = arg_types.map { |arg| facet_members(arg) || [arg] }
-          return yield(choices.map(&:first), false) if choices.all? { |members| members.size == 1 }
-          return yield(arg_types, false) unless member_wise
+          return yield(arg_types, false) unless member_wise || choices.all? { |members| members.size == 1 }
+          return yield(arg_types, false) unless provable?(definition, environment)
 
           picks = picks_by_member(choices, &)
           picks.empty? ? yield(arg_types, false) : picks
@@ -64,6 +75,40 @@ module Rigor
 
           lists = choices.first.product(*choices.drop(1)).map { |combination| yield(combination, true) }
           lists.any?(&:empty?) ? [] : lists.flatten(1).uniq(&:object_id)
+        end
+
+        # Whether acceptance's answer for a sealed member at every overload's positional parameters, rest included, is
+        # free of `include`s it cannot see; a `rigor:v1:param:` override proves nothing either.
+        def provable?(definition, environment)
+          loader = environment&.rbs_loader
+          return false if loader.nil?
+          return false unless RbsExtended.param_type_override_map(definition, environment: environment).empty?
+
+          definition.method_types.all? do |method_type|
+            fun = method_type.type
+            next false unless fun.respond_to?(:required_positionals)
+
+            params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
+            params += [fun.rest_positionals] if fun.rest_positionals
+            params.all? { |param| provable_param?(param.type, loader) }
+          end
+        end
+
+        def provable_param?(rbs_type, loader)
+          case rbs_type
+          when RBS::Types::ClassInstance then declared_class?(rbs_type.name.to_s.delete_prefix("::"), loader)
+          when RBS::Types::Optional then provable_param?(rbs_type.type, loader)
+          when RBS::Types::Union then rbs_type.types.all? { |member| provable_param?(member, loader) }
+          when RBS::Types::Literal, RBS::Types::Bases::Any, RBS::Types::Bases::Top, RBS::Types::Bases::Nil,
+               RBS::Types::Bases::Bool then true
+          else false
+          end
+        end
+
+        # A class RBS declares, not a module and not a name Rigor stubbed because no RBS declares it: a class cannot be
+        # included, and a sealed class's ancestry is fixed, so acceptance's `no` against it holds.
+        def declared_class?(name, loader)
+          loader.class_known?(name) && !loader.rbs_module?(name) && !loader.synthesized_type_names.include?(name)
         end
 
         # A `Dynamic` argument's facet members other than `nil`, or nil when selection keeps the wrapper: not a

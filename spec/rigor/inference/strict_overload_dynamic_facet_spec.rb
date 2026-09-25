@@ -123,6 +123,53 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     end
   end
 
+  context "with overloads acceptance cannot rule a member out of" do
+    let(:sig) do
+      { "fmt.rbs" => <<~RBS }
+        module Printable
+        end
+
+        class Integer
+          include Printable
+        end
+
+        class Fmt
+          def self.fmt: (Printable) -> String
+                      | (Integer) -> Integer
+          def self.stub: (SomeGem::IntegerExt) -> String
+                       | (untyped) -> nil
+          def self.arity: () -> Symbol
+                        | (String) -> Integer
+        end
+      RBS
+    end
+
+    it "keeps the wrapper when an overload names a module the member's class may include" do
+      # Runtime: `Integer` includes `Printable`, so `fmt` returns a String. Acceptance reads class relations from the
+      # analyzer's own process, where it does not (#1352), so the member skipped `(Printable)` for `(Integer)` and
+      # `.upcase` reported `call.undefined-method`. `SomeGem::IntegerExt` is a name no RBS declares, which the source
+      # may include into `Integer` just the same.
+      dumps, rules = dumped_and_rules(<<~RUBY)
+        def run(v)
+          dump_type(Fmt.fmt(Integer(v)))
+          dump_type(Fmt.stub(Integer(v)))
+          Fmt.fmt(Integer(v)).upcase
+        end
+      RUBY
+      expect(dumps).to eq(%w[String String])
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    it "keeps the wrapper when the member matches no overload" do
+      # No overload takes an Integer. The member reading answers only a genuine match, so the call reads through the
+      # wrapper's `(String)` arm, as on master, not the arity-blind first-overload fallback's `() -> Symbol`.
+      dumps, = dumped_and_rules(<<~RUBY)
+        def run(v) = dump_type(Fmt.arity(Integer(v)))
+      RUBY
+      expect(dumps).to eq(["Integer"])
+    end
+  end
+
   it "keeps joining every arm for an untyped argument" do
     # The #521 join: an untyped argument cannot tell the arms apart.
     dumps, = dumped_and_rules(<<~RUBY)

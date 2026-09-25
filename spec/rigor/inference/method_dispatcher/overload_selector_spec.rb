@@ -420,6 +420,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(params).to contain_exactly("Numeric", "Float")
       end
 
+      it "selects member by member for a Complex member, which no subclass can instantiate either" do
+        # `Integer + Dynamic[Complex | Float]`: the affinity order's `(Integer)` arm takes neither member at runtime.
+        definition = env.rbs_loader.instance_definition("Integer")
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        arg = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Complex"),
+                                        Rigor::Type::Combinator.nominal_of("Float"))
+        )
+        candidates = described_class.select_candidates(
+          definition.methods[:+], arg_types: [arg], self_type: integer, instance_type: integer, environment: env
+        )
+        params = candidates.map { |mt| mt.type.required_positionals.first.type.name.relative!.to_s }
+        expect(params).to contain_exactly("Complex", "Float")
+      end
+
       def rational_plus(arg, singular: false)
         method = env.rbs_loader.instance_definition("Rational").methods[:+]
         rational = Rigor::Type::Combinator.nominal_of("Rational")

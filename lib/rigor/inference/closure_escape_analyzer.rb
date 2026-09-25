@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../type"
+require_relative "../reflection"
 
 module Rigor
   module Inference
@@ -51,6 +52,14 @@ module Rigor
     # retained. False positives in this catalogue would silently weaken the soundness of fact retention in
     # later sub-phases.
     #
+    # Issue #1234 — a project class is outside the catalogue by name, yet `class Shelf; include Enumerable`
+    # answers `find` with `Enumerable#find` all the same. Given the `scope:` whose discovery tables know the
+    # project, a `Nominal` receiver of a project class classifies through its ancestry
+    # ({.ancestry_non_escaping?}): the method must be one the project does not define anywhere in that
+    # ancestry, and the first ancestor outside the project that declares it must be a catalogued class or
+    # `Enumerable` ({MIXIN_NON_ESCAPING}). An ancestor the RBS environment does not know could declare
+    # anything, so meeting one first declines.
+    #
     # The analyzer is a pure query. It MUST NOT mutate the receiver type or scope, MUST NOT raise on
     # unrecognised inputs, and MUST be deterministic for a given input.
     module ClosureEscapeAnalyzer
@@ -58,8 +67,10 @@ module Rigor
 
       # @param environment — reserved for the future sub-phase that consults
       #   `RBS::Extended` call-timing effects; sub-phase 3a ignores it.
+      # @param scope — the project's discovery tables, for the ancestry step; without it a project class
+      #   stays `:unknown`.
       # @return one of `:non_escaping`, `:escaping`, `:unknown`.
-      def classify(receiver_type:, method_name:, environment: nil) # rubocop:disable Lint/UnusedMethodArgument
+      def classify(receiver_type:, method_name:, environment: nil, scope: nil) # rubocop:disable Lint/UnusedMethodArgument
         return :unknown if receiver_type.nil?
 
         class_name = receiver_class_name(receiver_type)
@@ -68,8 +79,17 @@ module Rigor
         method_sym = method_name.to_sym
         return :non_escaping if non_escaping?(class_name, method_sym)
         return :escaping if escaping?(class_name, method_sym)
+        return :unknown unless receiver_type.is_a?(Type::Nominal)
 
-        :unknown
+        ancestry_non_escaping?(class_name, method_sym, scope) ? :non_escaping : :unknown
+      end
+
+      # Issue #1234 — whether some catalogue entry lists `method_name` as an iteration method: a name that runs
+      # its block once per element wherever the catalogue knows the receiver. `tap` / `then` / `yield_self` are
+      # left out, as they run the block exactly once. This is a fact about the NAME, for the one consumer that
+      # asks it of an `:unknown` receiver (`ExpressionTyper#block_may_repeat?`); it proves nothing about escape.
+      def iterator_name?(method_name)
+        ITERATOR_NAMES.include?(method_name)
       end
 
       class << self
@@ -118,6 +138,54 @@ module Rigor
 
         def escaping?(class_name, method_sym)
           methods = ESCAPING[class_name]
+          methods ? methods.include?(method_sym) : false
+        end
+
+        # Issue #1234 — a project class answers `method_sym` through the catalogued ancestor Ruby dispatches it
+        # to. The cheap gates come first: the name must be a catalogued iteration method, and the receiver a
+        # class the project declares. A definition anywhere in the project ancestry — the class's own `def
+        # find`, a project module's, a reopened `Enumerable`'s — is not the catalogued method and declines.
+        # A class the project's `sig/` declares asks its RBS definition where the method comes from; one
+        # without RBS walks the ancestors outside the project in method-resolution order.
+        def ancestry_non_escaping?(class_name, method_sym, scope)
+          return false if scope.nil? || !ITERATOR_NAMES.include?(method_sym)
+          return false unless scope.known_user_class?(class_name)
+          return false if scope.discovered_method_through_ancestors?(class_name, method_sym, :instance)
+          return false if scope.user_def_through_ancestors(class_name, method_sym).first
+
+          if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+            definition = Rigor::Reflection.instance_method_definition(class_name, method_sym, scope: scope)
+            return catalogued_declaration?(definition, method_sym)
+          end
+
+          external_ancestry_non_escaping?(class_name, method_sym, scope)
+        rescue StandardError
+          false
+        end
+
+        # The first external ancestor that declares the method decides. One the environment does not know may
+        # declare it, so it declines rather than being skipped; one that does not declare it is skipped.
+        def external_ancestry_non_escaping?(class_name, method_sym, scope)
+          scope.external_ancestor_name_candidates(class_name).each do |candidates|
+            known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
+            return false if known.nil?
+            return true if catalogued_owner?(known, method_sym)
+
+            definition = Rigor::Reflection.instance_method_definition(known, method_sym, scope: scope)
+            return catalogued_declaration?(definition, method_sym) if definition
+          end
+          false
+        end
+
+        def catalogued_declaration?(definition, method_sym)
+          return false if definition.nil? || !definition.respond_to?(:defined_in)
+
+          owner = definition.defined_in
+          !owner.nil? && catalogued_owner?(owner.to_s.delete_prefix("::"), method_sym)
+        end
+
+        def catalogued_owner?(name, method_sym)
+          methods = NON_ESCAPING[name] || MIXIN_NON_ESCAPING[name]
           methods ? methods.include?(method_sym) : false
         end
       end
@@ -184,6 +252,19 @@ module Rigor
         "File" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION | IO_SINGLETON_ITERATION).freeze,
         "StringIO" => (STREAM_ENUMERABLE_NON_ESCAPING | IO_ITERATION).freeze
       }.freeze
+
+      # Issue #1234 — the catalogued modules a project class reaches only through its ancestry, read only by
+      # {.ancestry_non_escaping?} after the project has been ruled out as the method's owner. `Enumerable`'s
+      # methods run the block from inside the call, through the includer's `each` — minus
+      # {DEFERRED_ENUMERATOR_METHODS}, whose Enumerator outlives it, and minus `each` itself, which
+      # `Enumerable` does not declare: the includer supplies it, so nothing here speaks for it. For that
+      # reason a receiver typed as the bare module is not a key of {NON_ESCAPING} either.
+      MIXIN_NON_ESCAPING = {
+        "Enumerable" => (STREAM_ENUMERABLE_NON_ESCAPING - %i[each]).freeze
+      }.freeze
+
+      # Every name a {NON_ESCAPING} entry lists as iteration, for {.iterator_name?} and the ancestry gate.
+      ITERATOR_NAMES = (NON_ESCAPING.values.flatten.to_set - OBJECT_NON_ESCAPING).freeze
 
       # Methods that are documented to **retain** the block past the call. The block is stored or scheduled,
       # so outer narrowing facts on writeable captured locals cannot survive.

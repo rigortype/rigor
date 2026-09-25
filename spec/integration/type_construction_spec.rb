@@ -2303,6 +2303,25 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #1234 — the captured-binding pass lays its cross-iteration binding only under a call that may
+    # run its block more than once, and that answer keyed on the receiver's class. A `Dynamic` receiver
+    # and a project `Enumerable` answered "unknown", so the block kept the first iteration's pins.
+    describe "fixtures/unknown_receiver_iterator_repeat.rb — an iterator on an unclassified receiver" do
+      let(:harness) { harness_for("unknown_receiver_iterator_repeat") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion: the three repros are decided at runtime, and the
+      # control whose block rebinds nothing still folds.
+      it "silences the first-iteration folds without silencing the genuine one" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+      end
+    end
+
     describe "fixtures/loop_body_fixpoint.rb — ADR-56 slice B loop-body fixpoint" do
       let(:harness) { harness_for("loop_body_fixpoint") }
 

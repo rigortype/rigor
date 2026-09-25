@@ -142,5 +142,25 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
       result = described_class.classify(receiver_type: array_nominal, method_name: :each, environment: env)
       expect(result).to eq(:non_escaping)
     end
+
+    it "leaves a class outside the catalogue :unknown without a scope to follow its ancestry" do
+      shelf = Rigor::Type::Combinator.nominal_of("Shelf")
+      expect(classify(shelf, :find)).to eq(:unknown)
+    end
+  end
+
+  # Issue #1234 — the name-only reading the captured-binding pass takes of an `:unknown` receiver.
+  describe ".iterator_name?" do
+    it "accepts a name some catalogue entry iterates with" do
+      %i[each map find all? each_with_index times each_line foreach transform_values].each do |m|
+        expect(described_class.iterator_name?(m)).to be(true), "expected #{m} to be an iterator name"
+      end
+    end
+
+    it "rejects the run-once entries and names no entry lists" do
+      %i[tap then yield_self synchronize frobnicate define_method].each do |m|
+        expect(described_class.iterator_name?(m)).to be(false), "expected #{m} not to be an iterator name"
+      end
+    end
   end
 end

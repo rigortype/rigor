@@ -779,9 +779,9 @@ def forwarded_all(str, ...)
   end
 end
 
-# Control: a `then` / `tap` / `yield_self` block runs once, before the call returns, so its body reads the call site's
-# narrowing even when it matches after the read; the call still forgets it afterwards (Ruby: "AB" for
-# `once_block("ab=c")`).
+# Control: the entry of a `then` / `tap` / `yield_self` block reads its body as every block's was read before #1364,
+# without `!~` and the Regexp-valued `start_with?` family, so it stays as it was; the call still forgets afterwards
+# (Ruby: "AB" for `once_block("ab=c")`).
 def once_block(line)
   if line =~ /^(\w+)=/
     line.then do |l|
@@ -790,6 +790,52 @@ def once_block(line)
       k.upcase if l !~ /x/
     end
     assert_type("String?", $1)
+  end
+end
+
+# The same block with `=~` enters with the globals forgotten, as it did before #1364 (#1370's per-iteration rule):
+# Kernel's `then` runs it once and Ruby reads "ab" (`once_match("ab=c")`), but the name alone cannot show that — a
+# user `then` may keep the block, and a loop runs the call again (#1375).
+def once_match(line)
+  if line =~ /^(\w+)=/
+    line.then do |l|
+      k = $1
+      assert_type("String?", k)
+      l =~ /x/
+    end
+  end
+end
+
+# Ruby: `deferred_then("a1", CalleeFrameDeferred.new)` reads "1" on the first `resolve` and nil on the second, and
+# `loop_then("a1", %w[q q])` reads "1" on the first pass and nil on the second.
+class CalleeFrameDeferred
+  def then(&blk) = (@blk = blk; self)
+  def resolve(value) = @blk.call(value)
+end
+
+def deferred_then(str, deferred)
+  if str =~ /(\d+)/
+    deferred.then do |v|
+      k = $1
+      assert_type("String?", k)
+      v =~ /(z)/
+    end
+    deferred.resolve("q")
+    deferred.resolve("q")
+  end
+end
+
+def loop_then(str, items)
+  if str =~ /(\d+)/
+    i = 0
+    while i < items.size
+      items[i].then do |v|
+        k = $1
+        assert_type("String?", k)
+        v =~ /(z)/
+      end
+      i += 1
+    end
   end
 end
 

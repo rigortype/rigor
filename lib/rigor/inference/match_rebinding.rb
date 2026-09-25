@@ -43,6 +43,9 @@ module Rigor
       MATCHING_SYMBOL_PROCS = (ALWAYS_MATCHING | Set[:===]).to_set(&:to_s).freeze
       # The broad reading ({.broad_may_match?}) also counts these with any argument that may be a Regexp.
       BROAD_ARGUMENT = (REGEXP_ARGUMENT | Set[:[]=]).freeze
+      # The names issue #1364 added to the block scan. The entry of a `tap` / `then` / `yield_self` block reads its
+      # body without them ({.block_entry}).
+      ADDED_NAMES = Set[:!~, :start_with?, :byteindex, :byterindex, :any?, :all?, :none?, :one?].freeze
       # The calls on the method's own `&block` parameter that run it, which the broad reading counts.
       BLOCK_INVOCATIONS = Set[:call, :yield, :[], :===].freeze
 
@@ -57,7 +60,7 @@ module Rigor
         Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
       ].freeze
       private_constant :ALWAYS_MATCHING, :REGEXP_ARGUMENT, :BLOCK_FORM_ONLY, :MATCHING_SYMBOL_PROCS, :BROAD_ARGUMENT,
-                       :BLOCK_INVOCATIONS,
+                       :ADDED_NAMES, :BLOCK_INVOCATIONS,
                        :OWN_FRAME_NODES, :LAST_LINE_MATCHES, :GLOBAL_WRITES
 
       module_function
@@ -77,22 +80,23 @@ module Rigor
         frame.memo(node, scope) { scan(node, scope) }
       end
 
-      def scan(node, scope)
-        return true if matching_node?(node, scope)
+      # `base` reads the body without {ADDED_NAMES}.
+      def scan(node, scope, base: false)
+        return true if matching_node?(node, scope, base: base)
         return false if OWN_FRAME_NODES.include?(node.class)
 
         found = false
-        node.rigor_each_child { |child| found ||= scan(child, scope) }
+        node.rigor_each_child { |child| found ||= scan(child, scope, base: base) }
         found
       end
       private_class_method :scan
 
       # `broad` reads an unresolved constant as a possible Regexp ({Operands}).
-      def matching_node?(node, scope, broad: false)
+      def matching_node?(node, scope, broad: false, base: false)
         case node
-        when Prism::CallNode then call_matches?(node, scope, broad: broad)
+        when Prism::CallNode then call_matches?(node, scope, broad: broad, base: base)
         when Prism::CaseNode then case_matches?(node, scope, broad: broad)
-        when Prism::BlockArgumentNode then block_argument_may_match?(node, scope)
+        when Prism::BlockArgumentNode then block_argument_may_match?(node, scope, base: base)
         # `case … in`, `expr in pat` and `expr => pat` run `===` on each value in the pattern.
         when Prism::InNode, Prism::MatchPredicateNode, Prism::MatchRequiredNode
           Operands.pattern_matches?(node.pattern, scope, broad: broad)
@@ -105,8 +109,9 @@ module Rigor
       # A call that rebinds `$~` in the frame it is made in: an {ALWAYS_MATCHING} name, a {REGEXP_ARGUMENT} name
       # with a known Regexp argument, or `===` on a receiver that may be a Regexp — `a === b` is `a`'s method, so
       # `String === re` runs no match.
-      def call_matches?(node, scope, broad: false)
+      def call_matches?(node, scope, broad: false, base: false)
         name = node.name
+        return false if base && ADDED_NAMES.include?(name)
         return true if ALWAYS_MATCHING.include?(name)
 
         if name == :===
@@ -236,11 +241,13 @@ module Rigor
       # own `&block` parameter while the body never rebinds or shadows it ({Frame#forwarded_block?}): either
       # forwards the block the caller made, in the caller's frame. Not a `&:name` whose method cannot match
       # ({MATCHING_SYMBOL_PROCS}).
-      def block_argument_may_match?(block_argument, scope)
+      def block_argument_may_match?(block_argument, scope, base: false)
         expression = block_argument.expression
         case expression
         when nil then false
-        when Prism::SymbolNode then MATCHING_SYMBOL_PROCS.include?(expression.unescaped)
+        when Prism::SymbolNode
+          name = expression.unescaped
+          MATCHING_SYMBOL_PROCS.include?(name) && !(base && name == "!~")
         when Prism::LocalVariableReadNode
           frame = scope&.match_frame
           frame.nil? || !frame.forwarded_block?(expression.name)
@@ -305,18 +312,25 @@ module Rigor
       # match, or when the frame makes a closure that may. The body can run on a later iteration, after an earlier
       # one — or a call to that closure — rebound them, so no iteration may read the narrowing the call site holds.
       # A body with neither keeps it: blocks share the frame, so `s =~ /(\d+)/; items.map { $1 }` reads the
-      # guard's `$1`. So does the body of a block `call_node` runs exactly once, before returning (`tap`, `then`,
-      # `yield_self`, taken to be Kernel's by name: {BlockCallTiming}), which has no earlier run. Both block-entry
-      # passes ({StatementEvaluator#build_block_entry_scope} and the block-return pass in {ExpressionTyper}) enter
-      # through here, so they cannot disagree.
+      # guard's `$1`. The block of a call named `tap`, `then` or `yield_self` ({BlockCallTiming}) is read as the scan
+      # read every block before issue #1364, without {ADDED_NAMES}, so its entry is what it was: the name alone
+      # cannot show the block runs once (a user `then` may keep it, and a loop runs the call again, #1375). Both
+      # block-entry passes ({StatementEvaluator#build_block_entry_scope} and the block-return pass in
+      # {ExpressionTyper}) enter through here, so they cannot disagree.
       def block_entry(scope, block_node, call_node = nil)
         return scope unless scope.match_globals_bound?
-        return scope.forget_match_globals if scope.match_rebinding_closure?
-        return scope if call_node.is_a?(Prism::CallNode) && BlockCallTiming.candidate_name?(call_node.name)
-        return scope unless may_match?(block_node.body, scope)
+        return scope unless entry_may_match?(block_node.body, scope, call_node) || scope.match_rebinding_closure?
 
         scope.forget_match_globals
       end
+
+      def entry_may_match?(body, scope, call_node)
+        return may_match?(body, scope) unless call_node.is_a?(Prism::CallNode) &&
+                                              BlockCallTiming.candidate_name?(call_node.name)
+
+        body.is_a?(Prism::Node) && scan(body, scope, base: true)
+      end
+      private_class_method :entry_may_match?
     end
   end
 end

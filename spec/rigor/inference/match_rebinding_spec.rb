@@ -400,12 +400,15 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(described_class.block_entry(narrowed, block("items.each { |i| $1 }"))).to equal(narrowed)
     end
 
-    # A `tap` / `then` / `yield_self` block runs once, before the call returns, so no earlier run rebound them.
-    it "keeps them for a body that may match when the owning call runs it exactly once" do
+    # The name cannot show a `tap` / `then` / `yield_self` block runs once (#1375), so its entry reads the body as
+    # every block's was read before #1364, without `!~` and the Regexp-valued `start_with?` family.
+    it "reads a `tap` / `then` / `yield_self` body without the names #1364 added" do
       call = last_statement("line.then { |l| r = $1; l !~ /x/ }")
+      matching = last_statement("line.then { |l| r = $1; l =~ /x/ }")
 
       expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed)
       expect(described_class.block_entry(narrowed, call.block).global(:$1)).to be_nil
+      expect(described_class.block_entry(narrowed, matching.block, matching).global(:$1)).to be_nil
     end
 
     it "forgets them for any body in a frame that makes a closure that may match" do

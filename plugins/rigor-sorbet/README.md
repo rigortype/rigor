@@ -261,9 +261,10 @@ The full order is:
    fold, kernel dispatch, block fold.
 2. **Plugin return-type contributions** — including
    `rigor-sorbet`'s sig and assertion translations. Plugins
-   that disagree about the same call site land in the
-   contribution merger, which reports the conflict rather
-   than letting one source silently override another.
+   that answer the same call site land in the contribution
+   merger, which intersects compatible answers. For disjoint
+   ones it keeps the first in plugin-id order and records a
+   conflict that is not reported yet (#922).
 3. RBS-backed dispatch (project `sig/`, `RBS::Inline`,
    bundled stdlib).
 4. Dependency-source inference (ADR-10's opt-in walker).

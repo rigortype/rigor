@@ -249,11 +249,13 @@ user code, and a wrong override types a call site wrongly.
 
 **Context.** `MethodDispatcher#resolve` (`lib/rigor/inference/method_dispatcher.rb`) has consulted
 `try_plugin_contribution` (~L126) ahead of `RbsDispatch.try_dispatch` (~L179) since v0.1.1 Track 2
-slice 7, and returns the plugin's type as soon as one answers. Only the precision tiers run first:
-`MethodFolding.try_backward` and `dispatch_precise_tiers` (Data and Struct folding,
-meta-introspection, constant, literal-string and shape folding). The RBS return never enters
-`FlowContribution::Merger`, so no tier comparison happens, and an incompatible plugin return
-replaces the declared one with no diagnostic. The bullets above said the opposite, and
+slice 7. It collects every gated plugin's contribution, merges them through
+`FlowContribution::Merger`, and returns the merged return type as soon as it is non-`nil`. Only
+the precision tiers run first: `MethodFolding.try_backward` and `dispatch_precise_tiers` (e.g. Data
+and Struct folding, meta-introspection, constant, literal-string and shape folding, the stdlib
+singleton folders, the Kernel intrinsics and the `PRECISE_TIERS_TAIL` block folds). The RBS return
+never enters the merge, so no tier comparison happens, and an incompatible plugin return replaces
+the declared one with no diagnostic. The bullets above said the opposite, and
 [`docs/internal-spec/plugin.md`](../internal-spec/plugin.md) recorded the disagreement as open.
 Bundled plugins depend on the shipped order. `rigor-activesupport-core-ext`'s `%i[+ - *]` rule
 answers over the fully declared core `Time#-` and `Integer#*`, because the RBS projection is wrong
@@ -261,13 +263,14 @@ once a `Duration` is the operand (`Time.now - 30.minutes` projects `Float`). `ri
 narrows the `Result#to_h` its own `sig/` declares per contract. `rigor-sorbet` answers a method from
 its translated Sorbet `sig`, ahead of an RBS signature for the same method.
 
-**Decision.** A plugin's `dynamic_return` answer is the call site's return type. It replaces the
-RBS return whether it narrows it or contradicts it, and the engine reports nothing. The criterion:
+**Decision.** A plugin's `dynamic_return` answer replaces the RBS return, whether it narrows it or
+contradicts it, and the engine reports nothing. The criterion:
 RBS describes a library's declared surface, and a plugin rule describes the runtime the project
 actually loads — a monkey patch, a per-contract shape, a DSL-generated return. When the two
 disagree the plugin is usually the one that is right about the project, and the user can fix
 neither source. Whether an override is intended is a property of the plugin, not of the analyzed
-code, so it is checked where the plugin is built: in its test suite, not in the user's run.
+code, so it belongs where the plugin is built: in its test suite (#1413, planned), not in the
+user's run.
 
 **Safeguard** ([#1413](https://github.com/rigortype/rigor/issues/1413), not yet built). The suite
 checks every bundled plugin's `dynamic_return` answer in its integration fixtures against the RBS
@@ -283,7 +286,7 @@ slots still merge by the tiers above. Two plugins answering the same call still 
 ([#922](https://github.com/rigortype/rigor/issues/922)). The RBS still binds where the analyzer
 reads a resolved signature rather than a call's type: a `def` body is checked against its declared
 return, and `call.wrong-arity` and `call.argument-type-mismatch` still validate a plugin-answered
-call against the RBS today (the internal spec leaves whether they should open). A plugin answer
+call against the RBS today (the internal spec leaves open whether they should). A plugin answer
 suppresses that site's `call.undefined-method` ([#653](https://github.com/rigortype/rigor/issues/653)).
 
 | Alternative | Status | Reason |

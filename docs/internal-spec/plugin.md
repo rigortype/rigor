@@ -598,18 +598,22 @@ the block carries logic and runs through `instance_exec`:
     issue #700). `MethodDispatcher#resolve` consults the plugin tier
     after the precision tiers (`MethodFolding.try_backward`,
     `dispatch_precise_tiers`) and ahead of every RBS-backed tier, ending
-    in `RbsDispatch.try_dispatch`, and returns the first plugin answer.
-    The answer is the call site's type whether it narrows the declared
-    return or contradicts it, and the engine MUST NOT report the
-    difference: the RBS return never enters `FlowContribution::Merger`,
-    so there is no tier comparison. An RBS `def self.logger: () ->
-    Integer` alongside a plugin answering `Frameworkish::Logger` types
-    the site `Frameworkish::Logger`
-    (`spec/integration/plugin_typed_call_undefined_method_spec.rb`).
-    Bundled plugins rely on this: `rigor-activesupport-core-ext`'s
-    `%i[+ - *]` rule answers over the fully declared core `Time#-` /
-    `Integer#*`, because the RBS projection is wrong once a `Duration`
-    is the operand (`Time.now - 30.minutes` projects `Float`), and
+    in `RbsDispatch.try_dispatch`. `try_plugin_contribution` collects
+    every gated plugin's contribution for the call and returns
+    `FlowContribution::Merger.merge(contributions).return_type`, the
+    intersection of the answers (see
+    [flow-contribution.md](flow-contribution.md)). When that is
+    non-`nil` it replaces the RBS return, whether it narrows the
+    declared return or contradicts it, and the engine does not report
+    the difference: the RBS return never enters the merge, so there is
+    no tier comparison. Bundled plugins rely on this:
+    `rigor-activesupport-core-ext`'s `%i[+ - *]` rule answers over the
+    fully declared core `Time#-` / `Integer#*`, because the RBS
+    projection is wrong once a `Duration` is the operand
+    (`Time.now - 30.minutes` projects `Float`; `2 * 1.day` typing as
+    `ActiveSupport::Duration` is pinned in
+    `spec/integration/plugins/activesupport_core_ext_plugin_spec.rb`
+    § "the arithmetic correction"), and
     `rigor-dry-validation` narrows the `Result#to_h` its own `sig/`
     declares per contract.
     - **The rule covers the return type only.** A `def` body is still

@@ -590,8 +590,8 @@ RSpec.describe Rigor::Inference::MatchRebinding do
 
       # A deeply nested literal would overflow the scan's recursion, so it is read by its tokens.
       it "reads code nested too deeply, or too long, by its tokens without raising" do
-        deep = "#{"[" * 3000}1#{"]" * 3000}"
-        matching = "#{"[" * 3000}\"zz\" =~ /(q)/#{"]" * 3000}"
+        deep = "#{'[' * 3000}1#{']' * 3000}"
+        matching = "#{'[' * 3000}\"zz\" =~ /(q)/#{']' * 3000}"
         expect(rebinds?("Kernel.eval('#{deep}')")).to be(false)
         expect(rebinds?("Kernel.eval('#{matching}')")).to be(true)
         expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}')")).to be(false)
@@ -599,7 +599,7 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       end
 
       it "does not parse code past the bounds" do
-        node = call("Kernel.eval('#{"[" * 3000}1#{"]" * 3000}')")
+        node = call("Kernel.eval('#{'[' * 3000}1#{']' * 3000}')")
         allow(Prism).to receive(:parse).and_call_original
         described_class.rebinds?(node, typed)
         expect(Prism).not_to have_received(:parse)

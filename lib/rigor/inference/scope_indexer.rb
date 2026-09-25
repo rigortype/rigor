@@ -14,6 +14,8 @@ require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
 require_relative "last_line"
+require_relative "last_status"
+require_relative "error_info"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -2084,11 +2086,12 @@ module Rigor
       end
 
       # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
-      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in.
+      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in and
+      # whether it may set `$?` to nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
-        program_globals, patched_line_readers = build_program_global_index(root, seeded_scope)
+        program_globals, census = build_program_global_index(root, seeded_scope)
         seeded_scope = seeded_scope.with_discovery(
-          seeded_scope.discovery.with(program_globals: program_globals, patched_line_readers: patched_line_readers)
+          seeded_scope.discovery.with(program_globals: program_globals, **census)
         )
         program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
         seeded_scope
@@ -2102,28 +2105,36 @@ module Rigor
       # of the method, class, module or file body that writes them, so a write binds only that body and its blocks,
       # which the flow binding already carries, and every other body starts from its own slot.
       FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
-      private_constant :FRAME_LOCAL_GLOBALS
+      # Issue #1360 — nor `$!`, `$@` and `$?`, which hold no program-wide value either: the first two are the rescue
+      # clause's that is running, and `$?` the thread's. Ruby refuses a write to `$!` or `$?` (`NameError`), and a
+      # write to `$@` sets the backtrace of the exception being rescued.
+      UNSEEDED_GLOBALS = (FRAME_LOCAL_GLOBALS + %i[$! $@ $?]).freeze
+      private_constant :FRAME_LOCAL_GLOBALS, :UNSEEDED_GLOBALS
 
       #
       # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
-      # ({LastLine.patched_readers}), which it reaches in every node too.
-      # @return the `[program_globals, patched_line_readers]` pair
+      # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
+      # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
+      # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        patched = Set.new
-        gather_global_writes(root, default_scope, accumulator, patched)
-        [accumulator.freeze, patched.freeze]
+        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false }
+        gather_global_writes(root, default_scope, accumulator, census)
+        census[:patched_line_readers] = census[:patched_line_readers].freeze
+        [accumulator.freeze, census]
       end
 
-      def gather_global_writes(node, scope, accumulator, patched)
+      def gather_global_writes(node, scope, accumulator, census)
         return unless node.is_a?(Prism::Node)
 
-        if node.is_a?(Prism::GlobalVariableWriteNode) && !FRAME_LOCAL_GLOBALS.include?(node.name)
+        if node.is_a?(Prism::GlobalVariableWriteNode) && !UNSEEDED_GLOBALS.include?(node.name)
           record_global_write(node, scope, accumulator)
         end
         readers = LastLine.patched_readers(node)
-        patched.merge(readers) if readers
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, patched) }
+        census[:patched_line_readers].merge(readers) if readers
+        census[:clears_last_status] ||= LastStatus.clears?(node)
+        census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census) }
       end
 
       def record_global_write(node, scope, accumulator)
@@ -8574,6 +8585,14 @@ module Rigor
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         when Prism::CallNode
           propagate_call(node, table, current_scope)
+        when Prism::RescueNode, Prism::EnsureNode
+          # Issue #1360 — a clause the evaluator did not enter (a `begin` in a value position) reads `$!`, `$@` and
+          # `$?` unbound, not the enclosing clause's; one it entered keeps what it recorded.
+          child_scope = current_scope.forget_error_info.forget_last_status
+          node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        when Prism::RescueModifierNode
+          propagate(node.expression, table, current_scope)
+          propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
@@ -8584,7 +8603,9 @@ module Rigor
       # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
       # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
       # statement's narrowing. Issue #1359 — nor does such a block read a `$_` narrowing it or the call's operands may
-      # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it.
+      # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it. Issue #1360 —
+      # and the block of a call that keeps it, a closure, reads `$!`, `$@` and `$?` unbound
+      # ({FreshFrameBlocks.closure_entry}).
       def propagate_call(node, table, current_scope)
         block = node.block
         entry = unentered_block_entry(node, block, table, current_scope)
@@ -8600,7 +8621,7 @@ module Rigor
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
         return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
 
-        LastLine.block_entry(current_scope, block, node)
+        LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level
@@ -8618,8 +8639,10 @@ module Rigor
       # signature's parameter type: this walk evaluates nothing, and a body write to the name is never threaded,
       # so any narrower claim could be stale. A name the enclosing scope does not bind is left unbound, which
       # reads the same `Dynamic[top]`. Captured names — outer locals the body reads or rebinds without
-      # redeclaring them — keep the enclosing binding.
+      # redeclaring them — keep the enclosing binding. Issue #1360 — a `->` body and its parameter defaults run
+      # whenever the lambda is called, so they read `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
       def closure_scope(closure, scope)
+        scope = FreshFrameBlocks.closure_entry(scope, closure, nil)
         scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
         closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }
       end

@@ -133,6 +133,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[method_body].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
     end
 
+    # Issue #1360 — `$!` / `$@` belong to the rescue clause running and `$?` to the thread; a write to `$!` or `$?`
+    # raises, and one to `$@` sets the rescued exception's backtrace. None is a program-wide value.
+    it "keeps `$!`, `$@` and `$?` out of the program-wide globals" do
+      program, idx = index_for(<<~RUBY)
+        $! = RuntimeError.new
+        $@ = ["x"]
+        $? = nil
+        $verbose = true
+        def m = [$!, $@, $?]
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+
+      expect(idx[program].program_globals.keys).to eq([:$verbose])
+      expect([idx[method_body].global(:$!), idx[method_body].global(:$@), idx[method_body].global(:$?)])
+        .to eq([nil, nil, nil])
+    end
+
     it "shows branch-internal bindings inside their branch only" do
       program, idx = index_for(<<~RUBY)
         if cond

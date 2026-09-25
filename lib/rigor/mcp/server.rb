@@ -94,7 +94,7 @@ module Rigor
                 type: "string",
                 enum: %w[untyped observed],
                 description: "Parameter policy: untyped (default) or observed " \
-                             "(harvests call-site argument types from spec/)"
+                             "(harvests call-site argument types from the configured test_paths)"
               },
               config: { type: "string", description: "Path to .rigor.yml (optional)" }
             }

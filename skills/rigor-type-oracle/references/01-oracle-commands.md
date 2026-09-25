@@ -101,7 +101,7 @@ rigor sig-gen [paths]
 | `--overwrite` | Allow a tighter return to replace user-authored RBS. |
 | `--include-private` | Emit private / protected instance methods too (default: public only). |
 | `--params=untyped\|observed\|observed-strict` | Parameter policy. Default `untyped`. `observed-strict` is reserved and currently a usage error. |
-| `--observe=PATH` | Directory / file to scan for call-site observations. Repeatable. Defaults to `spec/` when present. |
+| `--observe=PATH` | Directory / file to scan for call-site observations. Repeatable. Defaults to the configured `test_paths:` (unset: whichever of `spec/` and `test/` exist). |
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--format=text\|json` | Text RBS, or the structured candidate report. |
 | `--config=PATH` | Explicit `.rigor.yml`. |
@@ -257,7 +257,9 @@ Two shape differences from the CLI worth knowing:
 - `rigor_sig_gen` returns the **JSON candidate report**, always — there
   is no `--print` text mode and no `--diff`. Read `rbs` per candidate.
 - `rigor_sig_gen` exposes `params` but **not** `observe`; observation
-  falls back to `spec/` when present. Point it elsewhere from the CLI.
+  reads the configured `test_paths:` (unset: whichever of `spec/` and
+  `test/` exist). To observe anything else, declare it in `test_paths:`
+  or use the CLI's `--observe`.
 
 `rigor_triage` and `rigor_coverage` are also served, and belong to
 `rigor-baseline-reduce` / `rigor-protection-uplift` rather than here.

@@ -352,7 +352,7 @@ two are wired today, one is reserved.
 | Policy | Behaviour |
 | --- | --- |
 | `untyped` (default) | Every parameter is spelled `untyped`. No inference-derived parameter contract is imposed on future callers. The user retains complete authorship over parameter typing. |
-| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to `spec/` when present), union per parameter position, erase to RBS, emit the union. |
+| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist, sig-gen says so on stderr. |
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 The default deliberately favours `untyped` because of
@@ -439,7 +439,7 @@ output it got before.
 
 ## RSpec-aware observations
 
-When you point `--observe` at a `spec/` directory, the
+When the observed test roots hold an RSpec suite, the
 generator recognises three RSpec-shaped binding patterns
 and uses them to type receivers that would otherwise
 degrade to `Dynamic[top]`:
@@ -464,6 +464,13 @@ and `described_class.new(...)`. Same-name `let` bindings
 across nested scopes are last-wins; the recogniser does not
 re-implement RSpec's full scope rules — the typical
 one-spec-file shape is the target.
+
+A Minitest suite under `test/` is observed too, with no
+recogniser of its own: a call whose receiver types to one
+class counts. A receiver assigned in `setup` is the gap —
+inside a `test_*` method it reads as `Foo | nil`, and such
+a call is not observed yet
+([#1389](https://github.com/rigortype/rigor/issues/1389)).
 
 The recogniser is part of the generator itself; you do not
 need to install `rigor-rspec` to benefit from it. If you
@@ -538,8 +545,8 @@ A typical iteration on a new file:
 # 1. See what Rigor would propose.
 rigor sig-gen lib/calc.rb
 
-# 2. Run with the observed-params policy to use spec/ as
-#    a parameter-type signal.
+# 2. Run with the observed-params policy to use the test
+#    roots (`test_paths:`) as a parameter-type signal.
 rigor sig-gen --params=observed lib/calc.rb
 
 # 3. Compare against the current sig/ tree.

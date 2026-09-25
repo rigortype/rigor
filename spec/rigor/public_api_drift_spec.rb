@@ -144,6 +144,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     top_level_def_for(req:method_name)
     toplevel?()
     type_of(req:node,key:tracer)
+    untyped_match_globals()
     user_def_for(req:class_name,req:method_name)
     user_def_site_for(req:class_name,req:method_name)
     user_def_through_ancestors(req:class_name,req:method_name,key:name_memo)

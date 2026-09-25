@@ -762,8 +762,10 @@ full run, so the snapshot can never wedge or stale an analysis.
 ### Two-level gating
 
 1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:)`
-   is a SHA-256 over the engine version + `SCHEMA`, the configuration hash,
-   the analysis **roots** (not the expanded file list — so adding/removing a
+   is a SHA-256 over the engine version + `SCHEMA`, the configuration hash
+   (`configuration.to_h`, which omits the keys that change no diagnostic —
+   `effects:`, below, and `test_paths:`, which only `sig-gen` reads), the
+   analysis **roots** (not the expanded file list — so adding/removing a
    file under a root does not drop the snapshot), `Gemfile.lock`,
    `rbs_collection.lock.yaml`, and the project's `signature_paths` RBS —
    but **not** the analyzed source contents. A mismatch drops the snapshot.

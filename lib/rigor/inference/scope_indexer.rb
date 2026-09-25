@@ -12,6 +12,7 @@ require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "fresh_frame_blocks"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -8490,7 +8491,8 @@ module Rigor
       # `eval_if`'s narrowing path.
       #
       # A block or lambda the evaluator never entered is special-cased too ({#closure_scope}): its own locals shadow
-      # the enclosing bindings of the same names.
+      # the enclosing bindings of the same names. Such a block of a call {FreshFrameBlocks} names enters as the
+      # evaluator enters it ({#propagate_call}).
       def propagate(node, table, parent_scope)
         return unless node.is_a?(Prism::Node)
 
@@ -8516,9 +8518,29 @@ module Rigor
           entered = recorded && node.is_a?(Prism::BlockNode)
           child_scope = entered ? current_scope : closure_scope(node, current_scope)
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        when Prism::CallNode
+          propagate_call(node, table, current_scope)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
+      end
+
+      # Issue #1361 — the block of `Thread.new`, `Fiber.new`, `define_method` and the other calls
+      # {FreshFrameBlocks.fresh_entry?} names does not read the match-global narrowing of the body it is written in.
+      # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
+      # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
+      # statement's narrowing.
+      def propagate_call(node, table, current_scope)
+        block = node.block
+        fresh = block.is_a?(Prism::BlockNode) && !table.key?(block) &&
+                FreshFrameBlocks.fresh_entry?(node, current_scope)
+        unless fresh
+          node.rigor_each_child { |child| propagate(child, table, current_scope) }
+          return
+        end
+
+        entry = FreshFrameBlocks.entry(current_scope, node)
+        node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level

@@ -73,6 +73,11 @@ unknown library name, an inert suppression, an unrecognised top-level key.
 Tier 3 warns and never errors, because a partial or forward-looking config is a valid setup, and it
 never fires on an unset default.
 
+Tier 3 audits only what an analysis reads. `test_paths:` is outside it: `rigor check` never reads the
+test roots, and a checkout that legitimately lacks them (a sparse checkout, a container image without
+`spec/`) would otherwise warn on every run and fail `rigor doctor` over a correct config. Their one
+reader, `rigor sig-gen --params=observed`, names a declared root that does not exist on its own stderr.
+
 One tier-3 finding widens "resolves to nothing" by a step, to a value that resolves to *part* of what
 it looks like: a `signature_paths:` entry naming a **bundled plugin's own `sig/`** while `plugins:`
 does not name that plugin. The RBS loads and the manifest does not, so the ADR-26 `open_receivers:`

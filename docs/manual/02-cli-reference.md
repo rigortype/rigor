@@ -502,7 +502,7 @@ rigor sig-gen [paths]
 | `--overwrite` | Allow tighter-return updates to replace user-authored RBS. |
 | `--include-private` | Emit private and protected methods too. |
 | `--params=untyped\|observed\|observed-strict` | Parameter-typing policy. Default `untyped`. |
-| `--observe=PATH` | Scan `PATH` for call-site observations. Repeatable. |
+| `--observe=PATH` | Scan `PATH` for call-site observations. Repeatable. Default: the configured `test_paths:` (unset: whichever of `spec/` and `test/` exist). |
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--effect-envelopes` | Also emit `%a{rigor:v1:effect …}` for effectful methods. Needs the `effects:` opt-in. |
 | `--no-cache` | Do not read or write the analysis cache. Only effect collection uses it. |

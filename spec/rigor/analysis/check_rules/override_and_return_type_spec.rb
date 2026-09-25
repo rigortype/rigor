@@ -261,6 +261,40 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       end
     end
 
+    # #541 seeds an `attr_writer` ivar as the hand-written setter's `@x = v` seeds it, so a writer-only
+    # ivar read before any write is `Dynamic[top] | nil`, and its `nil` fails a declared `-> Integer`. The
+    # hand-written setter fired this before #541; the attr writer now fires it too. Flip this when #1406 is
+    # fixed: the RBS `attr_writer x: Integer` then seeds `Integer` and neither class reports.
+    describe "a writer-backed ivar against a declared reader return (#541)" do
+      it "reports the attr writer and the hand-written setter alike" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Attr
+            attr_writer :x
+            def x_value = @x
+          end
+
+          class Hand
+            def x=(v)
+              @x = v
+            end
+            def x_value = @x
+          end
+        RUBY
+          class Attr
+            attr_writer x: Integer
+            def x_value: () -> Integer
+          end
+
+          class Hand
+            def x=: (Integer) -> Integer
+            def x_value: () -> Integer
+          end
+        RBS
+        message = "return-type mismatch on `x_value': declared Integer, inferred Dynamic[top]?"
+        expect(return_diags(result).map { |d| [d.line, d.message] }).to eq([[3, message], [10, message]])
+      end
+    end
+
     # ADR-110 WD3 / #856. `Reflection`'s lookup reads RBS's fully resolved method table, so a signature
     # written about a base answers for every subclass that inherits the name. Before the `defined_on?`
     # gate this rule compared an override's body against that inherited contract and reported the

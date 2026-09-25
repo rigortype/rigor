@@ -328,7 +328,14 @@ list is the current state):
   RBS.
 - **`attr_reader` / `attr_writer` / `attr_accessor`** with
   literal Symbol arguments. The return type is the
-  accumulated ivar type from `Scope#class_ivars_for`. The
+  accumulated ivar type from `Scope#class_ivars_for`. A
+  writer stores whatever its caller passes, so an
+  `attr_writer` / `attr_accessor` ivar reads untyped.
+  The accessor, and any other method returning that
+  ivar, is skipped even beside a concrete write such as
+  `@logger = Logger.new`, unless `--params=observed`
+  types the constructor parameter the ivar is assigned
+  from. The
   generator emits the long-form `def name: () -> T`
   spelling so the writer's merge path applies unchanged;
   existing short-form `attr_reader name: T` declarations

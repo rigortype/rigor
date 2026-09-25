@@ -65,6 +65,11 @@ head -40 sig/lib/your_class.rbs
 At this point, `attr_reader` and `attr_accessor` methods that rely on
 ivar types set from `initialize` parameters will likely still be
 absent (skipped as `sig.skipped.untyped-return`). Step 5-c fixes that.
+An `attr_writer` or `attr_accessor` stays skipped even then unless its
+ivar is assigned from an `initialize` parameter: the writer stores
+whatever its caller passes, so the ivar reads untyped. That covers
+`@count = 0` and `@logger = Logger.new` alike, and any other method
+that returns the ivar.
 
 ## Step 5-c — Precision uplift with --params=observed
 

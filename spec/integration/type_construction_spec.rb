@@ -403,6 +403,27 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/attr_writer_ivar_seed.rb — an `attr_writer` / `attr_accessor` declaration writes its ivar" do
+    let(:harness) { harness_for("attr_writer_ivar_seed") }
+
+    # Issue #541. The `Radio` class is the external report. The controls — a reader, no accessor, the
+    # singleton side's accessor, a splatted name list — must still fold, which keeps the "went quiet" half
+    # from passing because the rule stopped firing altogether.
+    it "folds the controls' guards and no guard on a declared-writable ivar" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
+    end
+
+    it "reports no call on a declared-writable ivar as a call on `nil`, and no assert_type mismatch" do
+      expect(harness.errors).to be_empty
+    end
+
+    it "seeds the Radio report's ivar as the hand-written setter seeds it" do
+      class_scope = harness.index[harness.tree]
+      expect(class_scope.class_ivars_for("Radio")[:@cb]).to eq(class_scope.class_ivars_for("HandSetter")[:@cb])
+    end
+  end
+
   describe "fixtures/retry_edge_widening.rb — `tries += 1; retry` widens the counter" do
     let(:harness) { harness_for("retry_edge_widening") }
 

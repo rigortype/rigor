@@ -182,6 +182,9 @@ module Rigor
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope
+    # `rigor sig-gen --params=observed` output; the siblings' hand-written `String | Symbol` / `Type::t`
+    # parameters are not inferred here either.
+    def with_mutated_local: (untyped name, untyped type) -> Scope
     def declaration_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_inferred_param_mark: (String | Symbol name) -> Scope
     def without_inferred_param_mark: (String | Symbol name) -> Scope

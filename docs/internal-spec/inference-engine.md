@@ -445,6 +445,8 @@ Slice 7 phase 3 extends `StatementEvaluator` with **compound writes** for every 
 
 - `Scope#with_ivar` drops `(:ivar, name)`. Its callers are the method-local ivar write, every `Rigor::Inference::Narrowing` rewrite of an ivar binding (truthiness, nil-guard, `is_a?`, the receiver-chain rewrite), the mutation-widening path, and the ADR-56 block paths — each write-back fixpoint pass's block entry, the write-back continuation, and the escaping-block drop. Those never reach a marked ivar: `Inference::CapturedLocals.writes` leaves out an ivar still on its declaration seed. A narrowing therefore un-marks the ivar even when it leaves the type unchanged.
 - `Scope#with_local` drops `(:local, name)` on **any** rebinding of the name.
+- **An in-place mutation is not a flow-live write.** A rebind that stands for mutating the object the local already holds MUST go through `Scope#with_mutated_local`, which keeps the local's mark, and issue #286's optimistic nil-freeness mark, when the scope it rebinds carries them, and adds neither when it does not. Its callers are the mutation-widening rebind of `r << x` (straight-line, and from a block body), the ADR-56 slice-C content write-backs after a non-escaping block and after a loop, the element-read widening of `c[0] << x`, the `Struct` member-setter write-back, and the ADR-57 callee and ADR-56 escaping-closure content floors. Through `with_local`, `r = @x; r << y; r.foo` fired on a declaration-only nil ([#1287](https://github.com/rigortype/rigor/issues/1287)).
+- A `retry` re-entry widens the entry binding by the binding at each `retry` and raise point. That rebind is a join, so it MUST keep the local's mark only when both the accumulated entry scope and the re-entered scope carry it: `up(r)` in the body floors `r` in place and keeps it, while `r = other` in the rescue arm drops it. A re-entered binding the entry already accepts is not rebound, so the entry's mark stands then even when the re-entered scope lacks it; that over-retention can only withhold a firing.
 - `Scope#join` **intersects** the `:ivar` and `:local` refs: a ref is marked after a merge only when both branches mark it. If either path made the binding flow-live, the merge is flow-live.
 
 **Non-transitivity, and its exact boundary.** The mark propagates across at most **one** ivar-to-local hop, because `eval_local_write` recognises exactly one right-hand-side shape: a bare `Prism::InstanceVariableReadNode`. Nothing derives a mark from another mark. An implementation MUST NOT widen this by inference at a consumer; widening it is a decision to be taken at `eval_local_write` (or at a documented successor), gated on the ADR-58 WD4 zero-new-firing protocol, and not a slip to be repaired ad hoc — ADR-58's WD1 status records the same conclusion for the broader method-return-transit shape, which was measured, scoped as WD1b, and then demand-gated rather than approximated.
@@ -455,6 +457,7 @@ The following shapes carry the mark (verified by probe — `call.possible-nil-re
 - `r = @x; r = @x; r.foo` — each write is judged on its own right-hand side, so a rebind from the same pure read re-establishes the mark that `with_local` just dropped.
 - `r = s = @x; s.foo` — the inner write's value is the bare ivar read, so `s` is marked; `r`, whose value node is a write node, is not.
 - `if c then r = @x else r = @x end; r.foo` — both branches stamp `(:local, :r)` and the join's intersection keeps it.
+- `r = @x; r << y; r.foo`, and the same mutation from a block, a loop body or a retried `begin` — an in-place mutation rebinds through `with_mutated_local`.
 
 The following carry no mark and MUST keep firing:
 
@@ -462,6 +465,7 @@ The following carry no mark and MUST keep firing:
 - `r = @x if c` and `if c then r = @x else r = nil end` — an asymmetric join, dropped by the intersection.
 - `r ||= @x` in any position, and `r = begin; @x; end` or `r = (@x)` — a compound-write node, a `Prism::BeginNode` and a `Prism::ParenthesesNode` are all "not a bare ivar read".
 - `@x = nil if c; r = @x; r.foo` and `if @x then … end; r = @x; r.foo` — a preceding flow-live write or narrowing un-marked the ivar, so the copy inherits nothing.
+- `r = @x; r << y; r = other; r.foo` — the write after the mutation drops the mark the mutation kept.
 
 **Consumers.** Every consumer MUST ask the question through `Rigor::Analysis::CheckRules::DeclarationSourcedGuard.marked?(node, scope)` — the single predicate that maps a Prism node to the right carrier kind (`InstanceVariableReadNode` → `:ivar`, `LocalVariableReadNode` → `:local`, everything else → false) — and MUST NOT re-derive it from `Scope#declaration_sourced?` or from a node-shape test of its own. That indirection is the fix for issue #324 and the reason this section exists. Today's consumers are four gates across two rules:
 

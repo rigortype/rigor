@@ -45,7 +45,7 @@ module Rigor
         widened = widen_through_path(current_scope.local(read.name), steps, call_node.name, arg_types)
         return current_scope if widened.nil?
 
-        current_scope.with_local(read.name, widened)
+        current_scope.with_mutated_local(read.name, widened)
       end
 
       # True when `receiver` is an element read whose target element is a literal-shape carrier —

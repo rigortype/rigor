@@ -551,6 +551,17 @@ module Rigor
       rebuild(declaration_sourced: add_declaration_sourced(:local, name))
     end
 
+    # Issue #1287 — rebinds `name` for an in-place mutation of the object it already holds: a mutator's widening
+    # (`r << x`), a content floor after a closure or callee mutated it, an element or member write through it. The
+    # binding still names the same object, so this is not a flow-live write, and the marks `with_local` drops stay:
+    # ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark. A source-level write keeps
+    # going through `with_local`, which drops both.
+    def with_mutated_local(name, type)
+      rebound = with_local(name, type)
+      rebound = rebound.with_local_declaration_mark(name) if declaration_sourced?(:local, name)
+      rebound.with_optimistic_local(name, optimistic_local(name))
+    end
+
     # Issue #667 — record that `name` is currently bound to a value copied out of a foreign published
     # constant. Always applied AFTER the `with_local` / `with_ivar` that binds the value (both drop the mark
     # unconditionally), exactly as {#with_local_declaration_mark} is.

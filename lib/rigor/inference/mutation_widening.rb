@@ -248,10 +248,11 @@ module Rigor
       # The arms per kind of binding differ only in which pair of `Scope` accessors they use, so they are read out
       # of one table rather than written once per kind: a carrier the widening responds to must not be widened on
       # one kind of binding and left on another. `$g << x; $g == "k"` folded always-truthy on a `$g` Ruby holds
-      # as `"kx"` while the table had only the local and ivar rows.
+      # as `"kx"` while the table had only the local and ivar rows. A local rebinds through `with_mutated_local`: the
+      # mutated binding names the same object, so it keeps the marks a write drops (issue #1287).
       ALIAS_ACCESSORS = Ractor.make_shareable({
-                                                Prism::LocalVariableReadNode => %i[local with_local],
-                                                Prism::ItLocalVariableReadNode => %i[local with_local],
+                                                Prism::LocalVariableReadNode => %i[local with_mutated_local],
+                                                Prism::ItLocalVariableReadNode => %i[local with_mutated_local],
                                                 Prism::InstanceVariableReadNode => %i[ivar with_ivar],
                                                 Prism::ClassVariableReadNode => %i[cvar with_cvar],
                                                 Prism::GlobalVariableReadNode => %i[global with_global]

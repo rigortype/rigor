@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/node_children"
 require_relative "../type"
 require_relative "block_call_timing"
+require_relative "fresh_frame_blocks"
 require_relative "stored_block_call"
 require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
@@ -18,7 +19,9 @@ module Rigor
     # slot, and every block and closure made in the method reaches that same slot, so a match a block body runs
     # rebinds the enclosing method's `$~` (issue #1358). A `def`, class or module body runs in a frame of its own,
     # and so does every call into a method defined in Ruby: a match in the callee writes the callee's slot, never
-    # its caller's (issue #1364).
+    # its caller's (issue #1364). A thread, fiber or ractor keeps a slot of its own for the root block it runs
+    # ({FreshFrameBlocks}, issue #1361), so no scan here counts what that block runs; what it makes can still reach
+    # this frame's slot from the creator's thread, so the frame-wide rules keep reading inside it.
     #
     # The block and closure scans are syntactic, resolving only constants and the variables a lookup argument
     # names, through the scope they are given. The code a statement runs outside a block is read call by call
@@ -93,9 +96,7 @@ module Rigor
         return true if matching_node?(node, scope, base: base)
         return false if OWN_FRAME_NODES.include?(node.class)
 
-        found = false
-        node.rigor_each_child { |child| found ||= scan(child, scope, base: base) }
-        found
+        FreshFrameBlocks.any_frame_child?(node, scope) { |child| scan(child, scope, base: base) }
       end
       private_class_method :scan
 
@@ -166,9 +167,7 @@ module Rigor
         end
         return false if OWN_FRAME_NODES.include?(node.class)
 
-        found = false
-        node.rigor_each_child { |child| found ||= operand_may_match?(child, scope) }
-        found
+        FreshFrameBlocks.any_frame_child?(node, scope) { |child| operand_may_match?(child, scope) }
       end
 
       # True when `node`, a frame's body or parameters, hands its match globals to code the analyzer does not trace,
@@ -176,15 +175,18 @@ module Rigor
       # lambda literal whose body may match by the broad reading ({.broad_may_match?}), since the call it is passed
       # to may keep it and run it from any later call; `binding` in any spelling, whose `eval` runs in this frame
       # wherever it is called; or a forward of the method's own block (`&blk` for the method's `&blk`, `&`, `...`),
-      # which may be a C-function proc such as `&:=~`. `block_name` is the method's `&block` parameter.
+      # which may be a C-function proc such as `&:=~`. `block_name` is the method's `&block` parameter. The root block
+      # of a thread, fiber or ractor ({FreshFrameBlocks.root_block}) is not handed to such code: it runs with a slot
+      # of its own. A block, lambda or `binding` inside it is read as anywhere else, since it may be handed back to
+      # this frame's thread (`Thread.new { -> { s =~ re } }.value.call` rebinds the creator's `$~`).
       def self_call_fallback?(node, block_name, scope = nil)
         return false unless node.is_a?(Prism::Node)
         return true if fallback_node?(node, block_name, scope)
         return false if OWN_FRAME_NODES.include?(node.class)
 
-        found = false
-        node.rigor_each_child { |child| found ||= self_call_fallback?(child, block_name, scope) }
-        found
+        FreshFrameBlocks.any_frame_child?(node, scope, into_root: true) do |child|
+          self_call_fallback?(child, block_name, scope)
+        end
       end
 
       def fallback_node?(node, block_name, scope)
@@ -210,9 +212,7 @@ module Rigor
         return true if broad_matching_node?(node, scope, block_name)
         return false if OWN_FRAME_NODES.include?(node.class)
 
-        found = false
-        node.rigor_each_child { |child| found ||= broad_may_match?(child, scope, block_name) }
-        found
+        FreshFrameBlocks.any_frame_child?(node, scope) { |child| broad_may_match?(child, scope, block_name) }
       end
 
       def broad_matching_node?(node, scope, block_name)
@@ -236,9 +236,15 @@ module Rigor
       private_class_method :broad_matching_node?, :own_block_call?
 
       # True when the block `call_node` passes may rebind the frame's match globals while the call runs: a block
-      # literal whose body {.may_match?}, or a block argument that {.block_argument_may_match?}.
+      # literal whose body {.may_match?}, or a block argument that {.block_argument_may_match?}. The root block of a
+      # thread, fiber or ractor never does ({FreshFrameBlocks.root_call?}); a root `&expr` argument's expression runs
+      # here first, as an operand does ({.value_may_rebind?}).
       def block_may_match?(call_node, scope = nil)
         block = call_node.block
+        if FreshFrameBlocks.root_call?(call_node, scope)
+          return block.is_a?(Prism::BlockArgumentNode) && value_may_rebind?(block.expression, scope)
+        end
+
         case block
         when Prism::BlockNode then may_match?(block.body, scope)
         when Prism::BlockArgumentNode then block_argument_may_match?(block, scope)
@@ -299,16 +305,16 @@ module Rigor
         end
         return false if OWN_FRAME_NODES.include?(node.class)
 
-        found = false
-        node.rigor_each_child { |child| found ||= value_may_rebind?(child, scope) }
-        found
+        FreshFrameBlocks.any_frame_child?(node, scope) { |child| value_may_rebind?(child, scope) }
       end
 
       # True when `node`, a frame's body or parameters, makes a closure that may rebind the frame's match globals
       # whenever it is invoked: a `->` literal, or the block of a call that keeps it to run later
       # ({StoredBlockCall}: `lambda`, `proc`, `Proc.new`, `define_method`, …), whose body {.may_match?}.
       # Invocations are not traced — the closure can be called through any later call, or run by a method it was
-      # handed to — so {Frame} answers for the whole frame.
+      # handed to — so {Frame} answers for the whole frame. The root block of a thread or fiber is kept too, but it
+      # only ever runs as that thread's or fiber's root, with a slot of its own ({FreshFrameBlocks}); a closure made
+      # inside it still counts, since it may be handed back to this frame's thread.
       def matching_closure?(node, scope = nil)
         return false unless node.is_a?(Prism::Node)
         return false if OWN_FRAME_NODES.include?(node.class)
@@ -324,7 +330,8 @@ module Rigor
         block = call_node.block
         return false unless block.is_a?(Prism::BlockNode)
 
-        StoredBlockCall.stores_block?(call_node) && may_match?(block.body, scope)
+        StoredBlockCall.stores_block?(call_node) && !FreshFrameBlocks.root_call?(call_node, scope) &&
+          may_match?(block.body, scope)
       end
       private_class_method :stored_matching_block?
 
@@ -341,8 +348,12 @@ module Rigor
       # {StatementEvaluator#build_block_entry_scope} and the block-return and `break` passes in {ExpressionTyper}
       # pass the call. The per-element fold and the captured-local fixpoint pass none; they run under
       # `ExpressionTyper#rebound_operand_typer`, whose scope has already forgotten the globals when the operands
-      # may rebind them, so no pass disagrees.
+      # may rebind them, so no pass disagrees. Neither runs for the block of a call {FreshFrameBlocks} names, which is
+      # no iterator's; that block enters as {FreshFrameBlocks.entry} gives (issue #1361): a thread's, fiber's or
+      # ractor's root block with the globals unbound, since it reads a slot of its own, and a `define_method` body
+      # with a narrowed global untyped, since it reads the definer's slot whenever the method is called.
       def block_entry(scope, block_node, call_node = nil)
+        return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
         return scope unless scope.match_globals_bound?
         return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
                             (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))

@@ -245,6 +245,25 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # Issue #1361 — a `define_method` body reads the definer's slot whenever the method is called.
+  describe "#untyped_match_globals" do
+    it "rebinds each bound match-data global to `Dynamic[top]` and leaves the rest alone" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+      narrowed = scope.with_global(:$1, str).with_global(:$LOAD_PATH, str)
+
+      untyped = narrowed.untyped_match_globals
+
+      expect(untyped.global(:$1)).to eq(Rigor::Type::Combinator.untyped)
+      expect(untyped.global(:$2)).to be_nil
+      expect(untyped.global(:$LOAD_PATH)).to eq(str)
+      expect(untyped.match_globals_bound?).to be(true)
+    end
+
+    it "returns the same scope when no match globals are present" do
+      expect(scope.untyped_match_globals).to equal(scope)
+    end
+  end
+
   describe "#match_globals_bound?" do
     it "is true only while a match-data global holds a binding" do
       str = Rigor::Type::Combinator.nominal_of("String")

@@ -331,12 +331,18 @@ module Rigor
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
-        return send(handler, node) if handler
-
-        # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
-        # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
-        # may rebind (`super(line.sub(re, ""))`, issue #1365).
-        [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
+        result =
+          if handler
+            send(handler, node)
+          else
+            # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
+            # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in
+            # it may rebind (`super(line.sub(re, ""))`, issue #1365).
+            [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
+          end
+        raise_site = RAISE_SITES[node.class]
+        record_raise_site(raise_site, node, result.last) if raise_site
+        result
       end
 
       # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
@@ -440,16 +446,15 @@ module Rigor
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope
       # effects are preserved.
       #
-      # Inside the primary body of a `begin` with a rescue chain or an `ensure`, the scopes around each statement are
-      # also points the body can raise from ({#record_raise_points}).
+      # Inside the primary body of a `begin` with a rescue chain or an `ensure`, the scope before each statement that
+      # can raise is also a point the body can raise from ({#record_raise_points}).
       def eval_statements(node)
         result_type = Type::Combinator.constant_of(nil)
         current = scope
         raising = Thread.current[RETRY_FRAMES_KEY]
         node.body.each do |stmt|
-          before = current
+          record_raise_points(raising, stmt, current) if raising
           result_type, current = sub_eval(stmt, current)
-          record_raise_points(raising, node, stmt, before, current) if raising
         end
         [result_type, current]
       end
@@ -1179,6 +1184,7 @@ module Rigor
       # nil-injection so half-bound names degrade to `T | nil`.
       def eval_case(node)
         subject_type, post_pred = node.predicate ? sub_eval(node.predicate, scope) : [nil, scope]
+        record_case_tests(node, post_pred)
         branch_results, falsey_scope = eval_case_when_branches(subject_type, node.predicate, node.conditions, post_pred)
         if pattern_case_matches_every_path?(node, branch_results)
           return unmatched_pattern_result(branch_results, node.conditions)
@@ -1449,7 +1455,7 @@ module Rigor
       end
 
       # B2.1 — what one pass over a `begin` whose rescue chain retries collects: the `retry` nodes that target it, the
-      # arms holding them, the statement lists of its primary body's frame and the names that frame writes, and the
+      # arms holding them, the nodes of its primary body's frame and the names that frame writes, and the
       # scopes control carries back into the primary body — at each point the body can raise from (`raise_scopes`), and
       # at each of those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
       #
@@ -1534,17 +1540,16 @@ module Rigor
       RETRY_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
       private_constant :RETRY_WRITE_NODES
 
-      # Collects into `frame` the statement lists of the primary body that run in its own frame — a nested block or
-      # lambda keeps its own locals (a block parameter can shadow the counter) — and into `writes`, when given, every
-      # variable name the body writes, a block's included (it may write an outer local). A `def` or class body runs
-      # nothing here.
+      # Collects into `frame` the nodes of the primary body that run in its own frame — a nested block or lambda keeps
+      # its own locals (a block parameter can shadow the counter) — and into `writes`, when given, every variable name
+      # the body writes, a block's included (it may write an outer local). A `def` or class body runs nothing here.
       def walk_primary_frame(node, in_frame, frame, writes)
         return if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
 
         in_frame &&= SCOPE_NESTING_NODES.none? { |klass| node.is_a?(klass) }
         return unless in_frame || writes
 
-        frame << node if in_frame && node.is_a?(Prism::StatementsNode)
+        frame << node if in_frame
         writes << node.name if writes && RETRY_WRITE_NODES.include?(node.class)
         node.rigor_each_child { |child| walk_primary_frame(child, in_frame, frame, writes) }
       end
@@ -1621,81 +1626,115 @@ module Rigor
         end
       end
 
-      # The scopes before and after each statement of a primary body's frame are points the body can raise from.
-      # Together they carry every rebind a rescue arm, an `ensure` or a retry can see, including one on a branch that
-      # then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a write threaded
-      # into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a nested block
-      # or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect on this frame
-      # shows in the post-scope of the statement holding it. Recording from the evaluator rather than `on_enter` keeps
-      # a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
+      # Issue #1231 — a point the primary body can raise from is a scope that something able to raise runs from: the
+      # scope before a node that can raise and, for a call-like node that dispatches after its operands ran, the scope
+      # after it. Nothing else is one: a write, a branch or a whole construct is never a raise point for holding a
+      # write, and the scope after a write is one only when something that can raise runs after it. So `state = s;
+      # Integer(s)` rescues with `state` already `s`, `Integer(s); state = s` with `state` at its entry value, and
+      # `foo; x = nil if c` with `x` at its entry value (`c` runs before the write), while `x = nil if c; foo` sees
+      # both. A call's post-scope carries a write threaded into its own operands (`raise Retry.new(tries += 1) if
+      # flaky?`), a write its block makes before raising (the block's effect on this frame shows there), and an
+      # instance variable a self call may have set. The raise sites are recorded where the evaluator reaches them
+      # ({#record_raise_site}); the scope before each statement that can raise ({#may_raise?}) covers one it types
+      # whole without reaching. A node of a nested block or lambda body is not in the frame (a block parameter can
+      # shadow the counter). Recording from the evaluator rather than `on_enter` keeps a node reached with the index
+      # recorder off (a threaded operand, a loop fixpoint pass).
       #
-      # Some statements contribute less. A write of a literal or a variable read ({#inert_statement?}) is taken not to
-      # raise (a frozen `self` and asynchronous exceptions aside), so the scope before it is no raise point of its own:
-      # `state = s; Integer(s)` rescues with `state` already `s`. The scope after a statement is one of its own only
-      # where something inside the statement can raise after changing the scope, and no statement list of the frame
-      # records it ({#effect_before_raise?}); otherwise it is one only as the next statement's pre-scope. A variable
-      # write whose value has no effect on the scope raises, if at all, before it binds: `Integer(s); state = s`
-      # rescues with `state` still at its entry value. An `if` or `case` whose tests write nothing changes the scope
-      # only inside its branches, whose own statements record their raise points: `foo; x = nil if c` rescues with `x`
-      # at its entry value.
-      def record_raise_points(frames, statements, stmt, before, after)
+      # A literal, a variable read or write, `self`, a branch or an `&&` is taken not to raise (a frozen `self` and
+      # asynchronous exceptions aside).
+      def record_raise_points(frames, stmt, before)
+        record_raise_scope(frames, stmt, before) if may_raise?(stmt)
+      end
+
+      # How each node class that can raise contributes ({#record_raise_site}): `:dispatch` the scopes before and after
+      # it (a call, `yield`, `super`, an interpolation's `to_s`, a range's `Range.new`, all after their operands),
+      # `:entry` the scope before it (a constant or class-variable read, which reads nothing that writes, a compound
+      # write, whose operator or `[]=` runs before it binds, a pattern match, a class body), `:loop` the scope after
+      # a loop whose test can raise, which runs again after each iteration of the body, and `:multi` a multiple
+      # assignment, whose attribute or index targets can raise after the targets before them are bound.
+      RAISE_SITES = {
+        Prism::CallNode => :dispatch, Prism::YieldNode => :dispatch, Prism::SuperNode => :dispatch,
+        Prism::ForwardingSuperNode => :dispatch, Prism::XStringNode => :dispatch,
+        Prism::InterpolatedStringNode => :dispatch, Prism::InterpolatedSymbolNode => :dispatch,
+        Prism::InterpolatedXStringNode => :dispatch, Prism::InterpolatedRegularExpressionNode => :dispatch,
+        Prism::RangeNode => :dispatch,
+        Prism::ConstantReadNode => :entry, Prism::ConstantPathNode => :entry, Prism::ClassVariableReadNode => :entry,
+        Prism::LocalVariableOperatorWriteNode => :entry, Prism::InstanceVariableOperatorWriteNode => :entry,
+        Prism::ClassVariableOperatorWriteNode => :entry, Prism::GlobalVariableOperatorWriteNode => :entry,
+        Prism::IndexOperatorWriteNode => :entry, Prism::IndexOrWriteNode => :entry, Prism::IndexAndWriteNode => :entry,
+        Prism::CallOperatorWriteNode => :entry, Prism::CallOrWriteNode => :entry, Prism::CallAndWriteNode => :entry,
+        Prism::MatchWriteNode => :entry, Prism::MatchPredicateNode => :entry, Prism::MatchRequiredNode => :entry,
+        Prism::ClassNode => :entry, Prism::ModuleNode => :entry, Prism::SingletonClassNode => :entry,
+        Prism::WhileNode => :loop, Prism::UntilNode => :loop, Prism::ForNode => :loop,
+        Prism::MultiWriteNode => :multi
+      }.freeze
+      # A `case` runs its `===` tests or pattern deconstruction from the scope after its subject ({#eval_case}).
+      CASE_NODES = [Prism::CaseNode, Prism::CaseMatchNode].freeze
+      # Nothing under these runs where they appear.
+      DEFERRED_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
+      MULTI_RAISING_TARGETS = [Prism::CallTargetNode, Prism::IndexTargetNode].freeze
+      private_constant :RAISE_SITES, :CASE_NODES, :DEFERRED_NODES, :MULTI_RAISING_TARGETS
+
+      # Records the raise points of `node`, a {RAISE_SITES} node the evaluator reached, which left `after`.
+      def record_raise_site(raise_site, node, after)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        return unless frames
+
+        case raise_site
+        when :dispatch
+          record_raise_scope(frames, node, scope)
+          record_raise_scope(frames, node, after)
+        when :entry then record_raise_scope(frames, node, scope)
+        when :loop
+          record_raise_scope(frames, node, after) if node.is_a?(Prism::ForNode) || may_raise?(node.predicate)
+        when :multi
+          record_raise_scope(frames, node, scope)
+          record_raise_scope(frames, node, after) if multi_target_may_raise?(node)
+        end
+      end
+
+      def multi_target_may_raise?(node)
+        [*node.lefts, node.rest, *node.rights].any? do |target|
+          MULTI_RAISING_TARGETS.any? { |klass| target.is_a?(klass) } ||
+            (target.is_a?(Prism::MultiTargetNode) && multi_target_may_raise?(target))
+        end
+      end
+
+      # Adds `raised` to the raise points of every edge whose frame holds `node`.
+      def record_raise_scope(frames, node, raised)
         frames.each do |edge|
-          next unless edge.frame.include?(statements)
-          next if inert_statement?(stmt)
+          next unless edge.frame.include?(node)
 
           scopes = edge.raise_scopes
-          scopes << before unless scopes.last.equal?(before)
-          scopes << after if effect_before_raise?(stmt)
+          scopes << raised unless scopes.last.equal?(raised)
         end
       end
 
-      INERT_WRITE_NODES = [Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode].freeze
-      INERT_VALUE_NODES = [
-        Prism::NilNode, Prism::TrueNode, Prism::FalseNode, Prism::SelfNode, Prism::IntegerNode, Prism::FloatNode,
-        Prism::RationalNode, Prism::ImaginaryNode, Prism::StringNode, Prism::SymbolNode, Prism::LocalVariableReadNode,
-        Prism::InstanceVariableReadNode
-      ].freeze
-      WRITE_LAST_NODES = Set[
-        *INERT_WRITE_NODES, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-        Prism::LocalVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode
-      ].freeze
-      private_constant :INERT_WRITE_NODES, :INERT_VALUE_NODES, :WRITE_LAST_NODES
+      # Whether anything under `node` that runs where it appears can raise.
+      def may_raise?(node)
+        klass = node.class
+        return true if RAISE_SITES.key?(klass) || CASE_NODES.include?(klass)
+        return false if DEFERRED_NODES.include?(klass)
 
-      def inert_statement?(stmt)
-        INERT_WRITE_NODES.include?(stmt.class) && INERT_VALUE_NODES.include?(stmt.value.class)
+        found = false
+        node.rigor_each_child { |child| found ||= may_raise?(child) }
+        found
       end
 
-      def effect_before_raise?(stmt)
-        case stmt
-        when Prism::IfNode, Prism::UnlessNode then conditional_test_effects?(stmt)
-        when Prism::CaseNode, Prism::CaseMatchNode then case_test_effects?(stmt)
-        else !WRITE_LAST_NODES.include?(stmt.class) || OperandEffects.any?(stmt.value)
-        end
+      # A `case`'s `===` tests and pattern deconstruction, and the error an unmatched `case … in` raises, run from the
+      # scope after its subject.
+      def record_case_tests(node, post_subject)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        record_raise_scope(frames, node, post_subject) if frames
       end
 
-      # Whether a predicate of an `if` / `unless` or of its `elsif` chain writes, mutates or jumps: a later test in the
-      # chain can raise after it. A loop is not read this way, because its predicate runs again after the body.
-      def conditional_test_effects?(node)
-        while node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
-          return true if OperandEffects.any?(node.predicate)
+      # An operand the evaluator types whole without reaching, `taken` after an earlier operand wrote: a raise site in
+      # it runs from `entry` (`[y = 1, Foo::BAR]`).
+      def record_later_operand(node, entry, taken)
+        return unless taken
 
-          node = node.is_a?(Prism::IfNode) ? node.subsequent : nil
-        end
-        false
-      end
-
-      # The same for a `case` subject and its `when` conditions or `in` patterns, a pattern's captures included.
-      def case_test_effects?(node)
-        return true if OperandEffects.any?(node.predicate)
-
-        node.conditions.any? do |branch|
-          if branch.is_a?(Prism::WhenNode)
-            branch.conditions.any? { |condition| OperandEffects.any?(condition) }
-          else
-            OperandEffects.any?(branch.pattern)
-          end
-        end
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        record_raise_scope(frames, node, entry) if frames && may_raise?(node)
       end
 
       # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings
@@ -2716,7 +2755,9 @@ module Rigor
       def call_effects(node, walk, typed_from)
         mark = walk.mark
         invoked = call_operand_scope(node, walk, typed_from)
-        invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
+        after = invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
+        record_raise_site(:dispatch, node, after)
+        after
       end
 
       # The rest of the call from `invoked`, the scope its operands left, with each later operand's own value in
@@ -2772,6 +2813,8 @@ module Rigor
         unless OperandEffects.any?(node)
           # A taken position with no value of its own leaves its children to be taken: nothing types it whole.
           thread_operand_children(node, entry, walk, typed_from) if taken && slot.nil?
+          # Issue #1231 — nothing reaches a raise site in it, which runs after the earlier operands' writes.
+          record_later_operand(node, entry, taken)
           return entry
         end
 

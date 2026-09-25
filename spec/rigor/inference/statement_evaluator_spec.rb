@@ -605,6 +605,44 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
     end
 
+    it "keeps the entry value past a loop whose test cannot raise" do
+      source = <<~RUBY
+        x = 1
+        flag = true
+        begin
+          work
+          while flag
+            x = nil
+            flag = false
+          end
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1))
+    end
+
+    it "keeps the entry value past a write in a test or a wrapper that cannot raise" do
+      ["if (m = work)\n  x = nil\nend", "check && x = nil", "(x = nil)", "check ? (x = nil) : nil",
+       "begin\n  x = nil\nend", "x, y = nil, 2"].each do |tail|
+        source = "x = 1\nbegin\n  work\n#{tail.gsub(/^/, '  ')}\nrescue\n  warn \"failed\" if x\nend\n"
+        expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1)), tail
+      end
+    end
+
+    it "sees a write in an earlier operand that a later operand's raise follows" do
+      source = <<~RUBY
+        x = 1
+        begin
+          work
+          y = [x = nil, Foo::BAR]
+        rescue NameError
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
+    end
+
     it "leaves a local the body introduces unbound in the arm" do
       source = <<~RUBY
         x = 0

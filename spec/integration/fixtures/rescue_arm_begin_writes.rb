@@ -172,12 +172,208 @@ class Tally
   end
 end
 
+# A write in a test, or in a wrapper that cannot raise, adds no raise
+# point after the branch write either: every rescued raise runs first.
+def rescue_after_test_capture(s)
+  x = 1
+  begin
+    Probe.flaky
+    if (m = s.match(/a/))
+      x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    p(m)
+    x + 1
+  end
+end
+
+def rescue_after_pattern_capture(h)
+  x = 1
+  begin
+    Probe.flaky
+    case h
+    in { a: } then x = nil
+    else
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    p(a)
+    x + 1
+  end
+end
+
+def rescue_after_subject_write
+  x = 1
+  begin
+    Probe.flaky
+    case (y = Probe.coin)
+    when true then x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    p(y)
+    x + 1
+  end
+end
+
+def rescue_after_and_test_write(v)
+  x = 1
+  begin
+    Probe.flaky
+    if v.nil? && (z = 1)
+      x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    p(z)
+    x + 1
+  end
+end
+
+def rescue_after_unless_test_write(s)
+  x = 1
+  begin
+    Probe.flaky
+    x = nil unless (m = s.index("a"))
+  rescue ArgumentError
+    assert_type("1", x)
+    p(m)
+    x + 1
+  end
+end
+
+def rescue_after_mutating_test(arr)
+  x = 1
+  begin
+    Probe.flaky
+    if arr << 1
+      x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_local_loop(flag)
+  x = 1
+  begin
+    Probe.flaky
+    while flag
+      x = nil
+      flag = false
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_and_write
+  x = 1
+  begin
+    Probe.flaky
+    Probe.coin && x = nil
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_keyword_and_write
+  x = 1
+  begin
+    Probe.flaky
+    Probe.coin and x = nil
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_parenthesized_write
+  x = 1
+  begin
+    Probe.flaky
+    (x = nil)
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_ternary_write
+  x = 1
+  begin
+    Probe.flaky
+    Probe.coin ? (x = nil) : nil
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_nested_begin_write
+  x = 1
+  begin
+    Probe.flaky
+    begin
+      x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_multiple_write
+  x = 1
+  y = 1
+  begin
+    Probe.flaky
+    x, y = nil, 2
+  rescue ArgumentError
+    assert_type("1", x)
+    x + y
+  end
+end
+
 # A raising call after the branch does see its write.
 def rescue_after_branch_then_raise
   x = 1
   begin
     x = nil if Probe.coin
     Probe.flaky
+  rescue ArgumentError
+    assert_type("1?", x)
+    x + 1 # GENUINE-NIL
+  end
+end
+
+# The same after a write in a test.
+def rescue_after_test_capture_then_raise(s)
+  x = 1
+  begin
+    if (m = s.match(/a/))
+      x = nil
+    end
+    Probe.flaky
+  rescue ArgumentError
+    assert_type("1?", x)
+    p(m)
+    x + 1 # GENUINE-NIL
+  end
+end
+
+# A loop whose test can raise runs it again after the body wrote.
+def rescue_in_loop_test
+  x = 1
+  begin
+    Probe.flaky
+    while Probe.coin
+      x = nil
+    end
   rescue ArgumentError
     assert_type("1?", x)
     x + 1 # GENUINE-NIL

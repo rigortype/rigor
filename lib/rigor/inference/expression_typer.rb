@@ -3529,7 +3529,8 @@ module Rigor
         locals = bind_params_from_call_types(params, arg_types)
         return nil if locals.nil?
 
-        # Construct the body scope in a SINGLE allocation — the previous `Scope.empty.with_*.with_*…` chain
+        # Construct the body scope in a SINGLE Scope allocation (plus the issue #1358 frame it carries, whose
+        # scans run only on demand) — the previous `Scope.empty.with_*.with_*…` chain
         # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
         # discovery index is inherited whole by reference (ADR-53 Track A); the hand-copied per-field list
         # this replaces had silently dropped `data_member_layouts` and `discovered_method_visibilities`.
@@ -3549,7 +3550,7 @@ module Rigor
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
           dynamic_origins: scope.dynamic_origins,
           # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
-          match_frame: MatchRebinding::Frame.new(def_node.body)
+          match_frame: MatchRebinding::Frame.new(def_node.body, def_node.parameters)
         )
       end
 

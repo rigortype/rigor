@@ -253,12 +253,13 @@ RSpec.describe Rigor::Scope do
       expect(scope.match_rebinding_closure?).to be(false)
     end
 
-    it "survives a rebuild and a join" do
+    it "survives a rebuild and a join, even with an arm that has no frame" do
       framed = scope.with_match_frame(root("f = proc { s =~ /(z)/ }"))
       str = Rigor::Type::Combinator.nominal_of("String")
 
       expect(framed.with_local(:x, str).match_rebinding_closure?).to be(true)
       expect(framed.join(framed.with_local(:x, str)).match_rebinding_closure?).to be(true)
+      expect(scope.join(framed).match_rebinding_closure?).to be(true)
     end
   end
 
@@ -505,10 +506,10 @@ RSpec.describe Rigor::Scope do
     # - `:merged` — combined from both arms (union, intersection, agreement, or `||`). The exact rule differs
     #   per field and is pinned by the examples above and around; what this roster pins is that the field is
     #   REACHED at all.
-    # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path`,
-    #   `lexical_nesting` and `match_frame` describe where the code IS, not what a branch did. The three
-    #   `*_origins` node tables and `plugin_typed_calls` are advisory, compare-by-identity and shared by
-    #   reference: passing only `mine` is the documented contract, not an omission.
+    # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path` and
+    #   `lexical_nesting` describe where the code IS, not what a branch did. The three `*_origins` node tables
+    #   and `plugin_typed_calls` are advisory, compare-by-identity and shared by reference: passing only
+    #   `mine` is the documented contract, not an omission.
     # - `:required` — no default exists for it to silently fall back to.
     def join_field_groups
       { merged: %i[
@@ -516,10 +517,10 @@ RSpec.describe Rigor::Scope do
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
-          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes
+          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
         ],
         receiver: %i[
-          discovery source_path lexical_nesting match_frame
+          discovery source_path lexical_nesting
           dynamic_origins void_origins optimistic_origins plugin_typed_calls
         ],
         required: %i[environment] }

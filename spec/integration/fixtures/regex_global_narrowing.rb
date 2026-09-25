@@ -151,7 +151,7 @@ def block_forward(str, items, &)
   end
 end
 
-# Control: a Symbol block argument calls the method on each element, in its own frame.
+# Control: a Symbol block argument whose method cannot match (`&:freeze`) leaves the narrowing.
 def block_pass_symbol(str, items)
   if str =~ /(\d+)/
     items.each(&:freeze)
@@ -183,6 +183,139 @@ def lambda_without_match(str)
   if str =~ /(\d)/
     shout.call
     assert_type("String", $1)
+  end
+end
+
+# Controls: inside a block, `[]`, `split` and `index` are lookups unless an argument is known to be a Regexp, so a
+# hash copy, a String split and a lookup lambda leave the narrowing (Ruby: `lookup_copy("ab=c", [:a], {}, {})`
+# returns "AB").
+def lookup_copy(line, fields, row, out)
+  if line =~ /^(\w+)=/
+    fields.each { |f| out[f] = row[f] }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def split_parts(line, parts)
+  if line =~ /^(\w+)=/
+    parts.each { |part| part.split(":") }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def lookup_lambda(line, table)
+  lookup = ->(k) { table[k] }
+  if line =~ /^(\w+)=/
+    lookup.call(:a)
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+# Control: the method's own `&block` parameter forwards the block its caller made, in the caller's frame (Ruby:
+# `own_block("ab=c", ["q"]) { |i| i =~ /(zzz)/ }` returns "ab").
+def own_block(line, env, &blk)
+  if line =~ /^(\w+)=/
+    env.each(&blk)
+    key = $1
+    assert_type("String", key)
+    key.downcase
+  end
+end
+
+# A `when` condition or an `in` pattern that may be a Regexp runs a match: a Regexp constant or a pinned variable
+# (Ruby: nil for `block_when_constant("a1", ["zz"])` and `block_in_pinned("a1", ["zz"], /(q)/)`).
+WORD_RE = /(\w)!/
+
+def block_when_constant(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| case i when WORD_RE then i end }
+    assert_type("String?", $1)
+  end
+end
+
+# Control: a `when` on a class runs `Module#===`, which does not match.
+def block_when_class(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| case i when String then i end }
+    assert_type("String", $1)
+  end
+end
+
+def block_in_pinned(str, items, pattern)
+  if str =~ /(\d+)/
+    items.each { |i| i in ^pattern }
+    assert_type("String?", $1)
+  end
+end
+
+# A matching block in the receiver chain runs while the statement does (Ruby: `chained("a1", ["q"])` reads nil).
+def chained(str, items)
+  if str =~ /(\d+)/
+    items.select { |i| i =~ /(z)/ }.map(&:upcase)
+    assert_type("String?", $1)
+  end
+end
+
+# A parameter default runs in the method's frame, so a lambda there is the method's closure (Ruby:
+# `default_closure("a1")` reads nil).
+def default_closure(str, matcher = -> { "zz" =~ /(q)/ })
+  if str =~ /(\d)/
+    matcher.call
+    assert_type("String?", $1)
+  end
+end
+
+# `&:=~` runs `=~` on each element in this frame, and `$~ = …` in a block rebinds the slot directly (Ruby: nil for
+# `symbol_match("a1", ["zz", /(q)/])` and `match_data_write("a1", [nil])`).
+def symbol_match(str, pairs)
+  if str =~ /(\d)/
+    pairs.inject(&:=~)
+    assert_type("String?", $1)
+  end
+end
+
+def match_data_write(str, items)
+  if str =~ /(\d)/
+    items.each { |m| $~ = m }
+    assert_type("String?", $1)
+  end
+end
+
+# The per-element fold over a literal array types each position under the same view (Ruby: ["1", nil] for
+# `per_element_value("a1")`).
+def per_element_value(str)
+  if str =~ /(\d+)/
+    values = %w[q q].map { |c| r = $1; c =~ /(z)/; r }
+    assert_type("[String?, String?]", values)
+  end
+end
+
+# A captured local read before the body rebinds it carries an earlier iteration's `$1` (Ruby:
+# `captured_previous("a1q")` returns ["x", "1", nil]).
+def captured_previous(raw)
+  str = String(raw)
+  chars = str.chars
+  last = "x"
+  if str =~ /(\d+)/
+    values = chars.map { |c| prev = last; last = $1; c =~ /(z)/; prev }
+    assert_type('Array["x" | String | nil]', values)
+  end
+end
+
+# A class body is a frame of its own, so a lambda made there rebinds the body's `$~` when it is called (Ruby: nil
+# with `ARGV == ["a1"]`).
+class ClassBodyFrame
+  MATCHER = -> { "zz" =~ /(q)/ }
+  LINE = ARGV.join
+  if LINE =~ /(\d)/
+    MATCHER.call
+    assert_type("String?", $1)
   end
 end
 # rubocop:enable Style/PerlBackrefs

@@ -2644,15 +2644,16 @@ module Rigor
       end
 
       # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),
-      # its block may run a match (issue #1358 — the block runs in this frame, so `items.each { |i| i =~ re }`
-      # rebinds the enclosing method's `$~`, while a match inside a called Ruby method rebinds that method's own), or
-      # the frame has made a closure that may run one whenever it is called ({Scope#match_rebinding_closure?}).
-      # The scans run only while a match global is narrowed, the one state a forget can drop.
+      # a block that runs while it does may run a match ({MatchRebinding.call_may_match?} — issue #1358: the block
+      # runs in this frame, so `items.each { |i| i =~ re }` rebinds the enclosing method's `$~`, while a match inside
+      # a called Ruby method rebinds that method's own), or the frame has made a closure that may run one whenever it
+      # is called ({Scope#match_rebinding_closure?}). The scans run only while a match global is narrowed, the one
+      # state a forget can drop.
       def rebinds_match_globals?(node, post_scope)
         return false unless post_scope.match_globals_bound?
         return true if match_capable_call?(node)
 
-        MatchRebinding.block_may_match?(node) || post_scope.match_rebinding_closure?
+        MatchRebinding.call_may_match?(node, scope) || post_scope.match_rebinding_closure?
       end
 
       # The value an untyped setter call on a local stores (`foo(s.x = v)`), for the Struct member write-back; nil for
@@ -4678,8 +4679,9 @@ module Rigor
         fresh = seed_instance_ivars(fresh, singleton: singleton)
         fresh = seed_class_cvars(fresh)
         fresh = seed_program_globals(fresh)
-        # Issue #1358 — the body runs in a frame of its own, whose match globals its blocks and closures share.
-        fresh = fresh.with_match_frame(def_node.body)
+        # Issue #1358 — the body runs in a frame of its own, whose match globals its blocks and closures share, and
+        # so do its parameters' default expressions.
+        fresh = fresh.with_match_frame(def_node.body, def_node.parameters)
         # ADR-48 Struct slice 3 — install the method body's fold-safe-local set so a member read off a mutation-free
         # local folds during the in-body walk (the call-return inference path is seeded separately).
         fresh = fresh.with_struct_fold_safe(

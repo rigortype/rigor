@@ -38,3 +38,17 @@ assertions:
   '30': String?
   '31': String?
   '32': String
+  '33': String
+  '34': String
+  '35': String
+  '36': String
+  '37': String?
+  '38': String
+  '39': String?
+  '40': String?
+  '41': String?
+  '42': String?
+  '43': String?
+  '44': "[String?, String?]"
+  '45': Array["x" | String | nil]
+  '46': String?

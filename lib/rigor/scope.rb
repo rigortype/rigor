@@ -657,15 +657,16 @@ module Rigor
     end
 
     # Issue #1358 — stamps the frame `body` runs in ({Inference::MatchRebinding::Frame}) on a method, class or
-    # file body's entry scope. Every scope derived from it, a block's included, runs in that frame.
-    def with_match_frame(body)
-      rebuild(match_frame: Inference::MatchRebinding::Frame.new(body))
+    # file body's entry scope; a method passes its `parameters` too, whose defaults run in the same frame. Every
+    # scope derived from it, a block's included, runs in that frame.
+    def with_match_frame(body, parameters = nil)
+      rebuild(match_frame: Inference::MatchRebinding::Frame.new(body, parameters))
     end
 
     # True when this scope's frame makes a closure that may rebind its match globals whenever it is invoked
     # ({Inference::MatchRebinding.matching_closure?}). False where no body stamped a frame.
     def match_rebinding_closure?
-      !@match_frame.nil? && @match_frame.matching_closure?
+      !@match_frame.nil? && @match_frame.matching_closure?(self)
     end
 
     # Slice 7 phase 2 — class-level ivar accumulator. Keyed by the qualified class name (e.g. `"Rigor::Scope"`);
@@ -1747,7 +1748,7 @@ module Rigor
 
     def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
       self.class.new(
-        environment: environment,
+        environment: @environment,
         locals: joined_locals.freeze,
         fact_store: fact_store.join(other.fact_store),
         self_type: self_type == other.self_type ? self_type : nil,
@@ -1767,7 +1768,7 @@ module Rigor
         # end; m == :x` must not warn because one arm's copy is invisible to the reader's author. ADR-67
         # WD6b's `:inferred_param` taint takes the same direction for the same reason.
         published_constant_sourced: join_published_constant_sourced(other),
-        source_path: source_path,
+        source_path: @source_path,
         # Issue #589 — the fold-safe set MUST survive a merge. It was simply absent from this constructor
         # call, so it fell back to the empty default and every `if` / `while` in a method silently revoked
         # struct member folding for the whole body after it: `s = S.new("r"); while c; i += 1; end; s.raw`
@@ -1814,8 +1815,9 @@ module Rigor
         # reading, so keeping a site either arm holds is the wider answer.
         repeated_or_writes: join_repeated_or_writes(other),
         # Issue #1358 — the frame the body runs in, stamped at its entry like the nesting above, so both arms
-        # of a merge inside one body carry the same one.
-        match_frame: @match_frame
+        # of a merge inside one body carry the same one; `||` keeps it should either arm lack it, since dropping
+        # it only loses the frame's resets.
+        match_frame: @match_frame || other.match_frame
       )
     end
 

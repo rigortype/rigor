@@ -3,7 +3,9 @@
 require "prism"
 
 require_relative "../source/node_children"
+require_relative "../type"
 require_relative "stored_block_call"
+require_relative "match_rebinding/frame"
 
 module Rigor
   module Inference
@@ -12,106 +14,267 @@ module Rigor
     # slot, and every block and closure made in the method reaches that same slot, so a match a block body runs
     # rebinds the enclosing method's `$~` (issue #1358). A `def`, class or module body runs in a frame of its own.
     #
-    # The scans are syntactic and one-directional: they may answer "may match" for code that never matches, which
-    # only drops a narrowing. They short-circuit without a `return` out of a child block, which would allocate once
-    # per frame it unwinds.
+    # The scans are syntactic, resolving only constants (through the scope they are given). They short-circuit
+    # without a `return` out of a child block, which would allocate once per frame it unwinds.
     module MatchRebinding
-      # Method names that (may) run a regex match and therefore rebind the `$~` family. Conservative
-      # over-approximation — a few set globals only with a Regexp argument, but we do not inspect args.
+      # Method names that (may) run a regex match and therefore rebind the `$~` family: the statement-level table
+      # (`StatementEvaluator#match_capable_call?`). Conservative over-approximation — a few set globals only with a
+      # Regexp argument, but we do not inspect args.
       MATCH_CAPABLE_METHODS = %i[
         =~ match match? gsub gsub! sub sub! scan split slice slice!
         [] partition rpartition index rindex === grep grep_v
       ].freeze
+
+      # The block and closure scans read calls on narrower terms than the statement-level table, because inside a
+      # block `[]`, `split` and `index` are overwhelmingly lookups on hashes, arrays and strings, and counting them
+      # dropped the narrowing on correct code (`fields.each { |f| out[f] = row[f] }; $1.upcase`).
+      #
+      # These rebind `$~` whatever their argument: `sub` / `gsub` / `scan` with a String pattern still set it.
+      ALWAYS_MATCHING = Set[:=~, :match, :sub, :sub!, :gsub, :gsub!, :scan].freeze
+      # These rebind it only with a Regexp argument, so they count only when an argument is known to be one
+      # ({.regexp_argument?}): a Regexp held in a variable is not seen. `grep` is here for its block form. `match?`
+      # never sets `$~`.
+      REGEXP_ARGUMENT = Set[
+        :[], :slice, :slice!, :index, :rindex, :partition, :rpartition, :split, :grep, :grep_v
+      ].freeze
+      # `&:name` block arguments that rebind `$~`: the method runs on the element in the caller's frame. `===` with
+      # an unknown operand may be a Regexp's.
+      MATCHING_SYMBOL_PROCS = (ALWAYS_MATCHING | Set[:===]).freeze
 
       # A body that runs in a frame of its own, or never runs (`defined?` evaluates nothing).
       OWN_FRAME_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
       REGEX_LITERALS = Set[Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode].freeze
+      # Values whose `===` cannot run a match. An interpolated String or Symbol is still a String or Symbol; the code
+      # it embeds is scanned like any other.
+      NON_REGEXP_LITERALS = Set[
+        Prism::SymbolNode, Prism::InterpolatedSymbolNode, Prism::StringNode, Prism::InterpolatedStringNode,
+        Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode,
+        Prism::NilNode, Prism::TrueNode, Prism::FalseNode
+      ].freeze
+      CONSTANT_NODES = Set[Prism::ConstantReadNode, Prism::ConstantPathNode].freeze
+      PINNED_NODES = Set[Prism::PinnedVariableNode, Prism::PinnedExpressionNode].freeze
       # A bare regex condition (`if /re/`) matches against `$_`.
       LAST_LINE_MATCHES = Set[Prism::MatchLastLineNode, Prism::InterpolatedMatchLastLineNode].freeze
-      # The nodes whose `pattern` a regex in runs `Regexp#===`: `case … in`, `expr in pat` and `expr => pat`.
-      PATTERN_NODES = Set[Prism::InNode, Prism::MatchPredicateNode, Prism::MatchRequiredNode].freeze
-      private_constant :OWN_FRAME_NODES, :REGEX_LITERALS, :LAST_LINE_MATCHES, :PATTERN_NODES
+      GLOBAL_WRITES = Set[
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
+      ].freeze
+      REGEXP_CONSTRUCTORS = Set[:new, :union, :compile].freeze
+      # The classes a Regexp is an instance of, so a value of one of these types may be a Regexp.
+      REGEXP_ANCESTORS = Set["Regexp", "Object", "BasicObject", "Kernel"].freeze
+      private_constant :ALWAYS_MATCHING, :REGEXP_ARGUMENT, :MATCHING_SYMBOL_PROCS, :OWN_FRAME_NODES,
+                       :REGEX_LITERALS, :NON_REGEXP_LITERALS, :CONSTANT_NODES, :PINNED_NODES, :LAST_LINE_MATCHES,
+                       :GLOBAL_WRITES, :REGEXP_CONSTRUCTORS, :REGEXP_ANCESTORS
 
       module_function
 
-      # True when running `node` may run a regex match in the frame it runs in: a call to a
-      # {MATCH_CAPABLE_METHODS} name, a regex `when` condition or pattern, or a bare regex condition, anywhere in
-      # `node` but a nested `def`, class or module body. A block or lambda inside `node` counts, since it runs in
-      # the same frame.
-      def may_match?(node)
+      # True when running `node` may run a regex match in the frame it runs in, anywhere in `node` but a nested
+      # `def`, class or module body: a call {.call_matches?} counts, a `when` condition or an `in` / `=>` pattern
+      # value that may be a Regexp, a bare regex condition, a write to `$~`, or a block argument
+      # {.block_argument_may_match?} counts. A block or lambda inside `node` counts, since it runs in the same
+      # frame. `scope` resolves constants and names the frame; the answer for a node is kept on that frame.
+      def may_match?(node, scope = nil)
         return false unless node.is_a?(Prism::Node)
 
-        klass = node.class
-        return true if matching_node?(node, klass)
-        return false if OWN_FRAME_NODES.include?(klass)
+        frame = scope&.match_frame
+        return scan(node, scope) if frame.nil?
 
-        found = false
-        node.rigor_each_child { |child| found ||= may_match?(child) }
-        found
+        frame.memo(node) { scan(node, scope) }
       end
 
-      def matching_node?(node, klass)
-        if klass == Prism::CallNode
-          MATCH_CAPABLE_METHODS.include?(node.name)
-        elsif klass == Prism::WhenNode
-          node.conditions.any? { |condition| REGEX_LITERALS.include?(condition.class) }
-        elsif PATTERN_NODES.include?(klass)
-          regex_in?(node.pattern)
+      def scan(node, scope)
+        return true if matching_node?(node, scope)
+        return false if OWN_FRAME_NODES.include?(node.class)
+
+        found = false
+        node.rigor_each_child { |child| found ||= scan(child, scope) }
+        found
+      end
+      private_class_method :scan
+
+      def matching_node?(node, scope)
+        case node
+        when Prism::CallNode then call_matches?(node, scope)
+        when Prism::WhenNode then node.conditions.any? { |condition| pattern_value?(condition, scope) }
+        when Prism::BlockArgumentNode then block_argument_may_match?(node, scope)
+        # `case … in`, `expr in pat` and `expr => pat` run `===` on each value in the pattern.
+        when Prism::InNode, Prism::MatchPredicateNode, Prism::MatchRequiredNode
+          pattern_matches?(node.pattern, scope)
         else
-          LAST_LINE_MATCHES.include?(klass)
+          LAST_LINE_MATCHES.include?(node.class) || (GLOBAL_WRITES.include?(node.class) && node.name == :$~)
         end
       end
       private_class_method :matching_node?
 
-      def regex_in?(node)
-        return true if REGEX_LITERALS.include?(node.class)
+      # A call that rebinds `$~` in the frame it is made in: an {ALWAYS_MATCHING} name, a {REGEXP_ARGUMENT} name
+      # with a known Regexp argument, or `===` on a receiver that may be a Regexp — `a === b` is `a`'s method, so
+      # `String === re` runs no match.
+      def call_matches?(node, scope)
+        name = node.name
+        return true if ALWAYS_MATCHING.include?(name)
+
+        if name == :===
+          receiver = node.receiver
+          return receiver.nil? || pattern_value?(receiver, scope)
+        end
+        arguments = node.arguments&.arguments
+        return false unless arguments && REGEXP_ARGUMENT.include?(name)
+
+        arguments.any? { |argument| regexp_argument?(argument, scope) }
+      end
+      private_class_method :call_matches?
+
+      # True when a `===` receiver or a `when` condition may be a Regexp: anything but a literal that is not one,
+      # or a constant that resolves to something else (`when String`).
+      def pattern_value?(node, scope)
+        klass = node.class
+        return true if REGEX_LITERALS.include?(klass)
+        return false if non_regexp_literal?(node)
+        return maybe_regexp_type?(constant_type(node, scope)) if CONSTANT_NODES.include?(klass)
+
+        true
+      end
+      private_class_method :pattern_value?
+
+      # True when an `in` / `=>` pattern holds a value that may be a Regexp: a regex literal, a pinned variable or
+      # expression, or a constant that may resolve to one. Its structure, captures and other literals run no match.
+      def pattern_matches?(node, scope)
+        klass = node.class
+        return true if REGEX_LITERALS.include?(klass) || PINNED_NODES.include?(klass)
+        return maybe_regexp_type?(constant_type(node, scope)) if CONSTANT_NODES.include?(klass)
 
         found = false
-        node.rigor_each_child { |child| found ||= regex_in?(child) }
+        node.rigor_each_child { |child| found ||= pattern_matches?(child, scope) }
         found
       end
-      private_class_method :regex_in?
+      private_class_method :pattern_matches?
+
+      # True when an argument is known to be a Regexp: a regex literal, a constant that resolves to one, or
+      # `Regexp.new` / `.union` / `.compile`.
+      def regexp_argument?(node, scope)
+        return true if REGEX_LITERALS.include?(node.class)
+        return known_regexp_type?(constant_type(node, scope)) if CONSTANT_NODES.include?(node.class)
+
+        node.is_a?(Prism::CallNode) && REGEXP_CONSTRUCTORS.include?(node.name) &&
+          node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Regexp
+      end
+      private_class_method :regexp_argument?
+
+      def non_regexp_literal?(node)
+        return true if NON_REGEXP_LITERALS.include?(node.class)
+        return false unless node.is_a?(Prism::RangeNode)
+
+        [node.left, node.right].all? { |bound| bound.nil? || non_regexp_literal?(bound) }
+      end
+      private_class_method :non_regexp_literal?
+
+      def constant_type(node, scope)
+        scope&.type_of(node)
+      rescue StandardError
+        nil
+      end
+      private_class_method :constant_type
+
+      def maybe_regexp_type?(type)
+        case type
+        when Type::Singleton then false
+        when Type::Constant then type.value.is_a?(Regexp)
+        when Type::Nominal then REGEXP_ANCESTORS.include?(type.class_name)
+        when Type::Union then type.members.any? { |member| maybe_regexp_type?(member) }
+        else true
+        end
+      end
+      private_class_method :maybe_regexp_type?
+
+      def known_regexp_type?(type)
+        case type
+        when Type::Constant then type.value.is_a?(Regexp)
+        when Type::Nominal then type.class_name == "Regexp"
+        when Type::Union then type.members.any? { |member| known_regexp_type?(member) }
+        else false
+        end
+      end
+      private_class_method :known_regexp_type?
 
       # True when the block `call_node` passes may rebind the frame's match globals while the call runs: a block
-      # literal whose body {.may_match?}, or a `&expr` block argument other than a Symbol literal, which may be a
-      # proc made in this frame. An anonymous `&` forwards the block this method was called with, which was made
-      # in the caller's frame.
-      def block_may_match?(call_node)
+      # literal whose body {.may_match?}, or a block argument that {.block_argument_may_match?}.
+      def block_may_match?(call_node, scope = nil)
         block = call_node.block
         case block
-        when Prism::BlockNode then may_match?(block.body)
-        when Prism::BlockArgumentNode
-          expression = block.expression
-          !expression.nil? && !expression.is_a?(Prism::SymbolNode)
+        when Prism::BlockNode then may_match?(block.body, scope)
+        when Prism::BlockArgumentNode then block_argument_may_match?(block, scope)
         else false
         end
       end
 
-      # True when `node`, a frame's body, makes a closure that may rebind the frame's match globals whenever it is
-      # invoked: a `->` literal, or the block of a call that keeps it to run later ({StoredBlockCall}: `lambda`,
-      # `proc`, `Proc.new`, `define_method`, …), whose body {.may_match?}. Invocations are not traced — the closure
-      # can be called through any later call, or run by a method it was handed to — so {Frame} answers for the
-      # whole frame.
-      def matching_closure?(node)
+      # True when a `&expr` block argument may pass a proc made in this frame. Not an anonymous `&`, nor the method's
+      # own `&block` parameter while the body never rebinds or shadows it ({Frame#forwarded_block?}): either
+      # forwards the block the caller made, in the caller's frame. Not a `&:name` whose method cannot match
+      # ({MATCHING_SYMBOL_PROCS}).
+      def block_argument_may_match?(block_argument, scope)
+        expression = block_argument.expression
+        case expression
+        when nil then false
+        when Prism::SymbolNode then MATCHING_SYMBOL_PROCS.include?(expression.unescaped.to_sym)
+        when Prism::LocalVariableReadNode
+          frame = scope&.match_frame
+          frame.nil? || !frame.forwarded_block?(expression.name)
+        else true
+        end
+      end
+
+      # True when a statement call may rebind the frame's match globals through a block that runs while it does:
+      # its own ({.block_may_match?}), or one on a call in its receiver chain or arguments
+      # (`items.select { |i| i =~ re }.map(&:upcase)`). A call there without a block is left to the statement-level
+      # rule.
+      def call_may_match?(call_node, scope = nil)
+        block_may_match?(call_node, scope) ||
+          operand_block_may_match?(call_node.receiver, scope) ||
+          operand_block_may_match?(call_node.arguments, scope)
+      end
+
+      # A lambda literal does not run where it is written ({.matching_closure?} answers for it), and a `def`, class
+      # or module body is a frame of its own.
+      def operand_block_may_match?(node, scope)
         return false unless node.is_a?(Prism::Node)
 
-        klass = node.class
-        return false if OWN_FRAME_NODES.include?(klass)
-        return true if node.is_a?(Prism::LambdaNode) && may_match?(node.body)
-        return true if node.is_a?(Prism::CallNode) && stored_matching_block?(node)
+        case node
+        when Prism::BlockNode then may_match?(node.body, scope)
+        when Prism::BlockArgumentNode then block_argument_may_match?(node, scope)
+        when Prism::LambdaNode then false
+        else
+          return false if OWN_FRAME_NODES.include?(node.class)
+
+          found = false
+          node.rigor_each_child { |child| found ||= operand_block_may_match?(child, scope) }
+          found
+        end
+      end
+      private_class_method :operand_block_may_match?
+
+      # True when `node`, a frame's body or parameters, makes a closure that may rebind the frame's match globals
+      # whenever it is invoked: a `->` literal, or the block of a call that keeps it to run later
+      # ({StoredBlockCall}: `lambda`, `proc`, `Proc.new`, `define_method`, …), whose body {.may_match?}.
+      # Invocations are not traced — the closure can be called through any later call, or run by a method it was
+      # handed to — so {Frame} answers for the whole frame.
+      def matching_closure?(node, scope = nil)
+        return false unless node.is_a?(Prism::Node)
+        return false if OWN_FRAME_NODES.include?(node.class)
+        return true if node.is_a?(Prism::LambdaNode) && may_match?(node.body, scope)
+        return true if node.is_a?(Prism::CallNode) && stored_matching_block?(node, scope)
 
         found = false
-        node.rigor_each_child { |child| found ||= matching_closure?(child) }
+        node.rigor_each_child { |child| found ||= matching_closure?(child, scope) }
         found
       end
 
-      def stored_matching_block?(call_node)
+      def stored_matching_block?(call_node, scope)
         block = call_node.block
         return false unless block.is_a?(Prism::BlockNode)
 
-        StoredBlockCall.stores_block?(call_node) && may_match?(block.body)
+        StoredBlockCall.stores_block?(call_node) && may_match?(block.body, scope)
       end
       private_class_method :stored_matching_block?
 
@@ -123,25 +286,9 @@ module Rigor
       # pass in {ExpressionTyper}) enter through here, so they cannot disagree.
       def block_entry(scope, block_node)
         return scope unless scope.match_globals_bound?
-        return scope unless may_match?(block_node.body) || scope.match_rebinding_closure?
+        return scope unless may_match?(block_node.body, scope) || scope.match_rebinding_closure?
 
         scope.forget_match_globals
-      end
-
-      # The frame a body runs in, stamped on its entry scope ({Scope#with_match_frame}) and shared by every scope
-      # derived from it, blocks included, since they run in the same frame. {#matching_closure?} is computed on
-      # the first ask — only a call made while a match global is narrowed asks — and kept for the rest of the
-      # body.
-      class Frame
-        def initialize(body)
-          @body = body
-          @matching_closure = nil
-        end
-
-        def matching_closure?
-          @matching_closure = MatchRebinding.matching_closure?(@body) if @matching_closure.nil?
-          @matching_closure
-        end
       end
     end
   end

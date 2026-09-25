@@ -67,13 +67,13 @@ module Rigor
           CONSTANT_NODES.include?(node.class) && node_type(node, scope).is_a?(Type::Singleton)
         end
 
-        # True when a statement's operand is known to be a Regexp: a regex literal, `Regexp.new` / `.union` /
-        # `.compile`, a splat whose elements are known to be ones, or a value whose type in the flow scope is one
-        # ({.regexp_type?}). `Dynamic[top]`, `Object` and any other type are not: a position that never forgot before
-        # issue #1365 forgets only on evidence, so an argument that is a Regexp without the analyzer knowing it is a
-        # gap there, as it was before.
+        # True when a statement's operand is known to be a Regexp: a regex literal, a splat whose elements are known
+        # to be ones, or a value whose type in the flow scope is one ({.regexp_type?}; `Regexp.new(src)` types as
+        # one). `Dynamic[top]`, `Object` and any other type are not: a position that never forgot before issue #1365
+        # forgets only on evidence, so an argument that is a Regexp without the analyzer knowing it is a gap there,
+        # as it was before.
         def known_regexp_operand?(node, scope)
-          return true if REGEX_LITERALS.include?(node.class) || regexp_constructor?(node)
+          return true if REGEX_LITERALS.include?(node.class)
           return splat_known_regexp?(node.expression, scope) if node.is_a?(Prism::SplatNode)
           return false if NON_REGEXP_LITERALS.include?(node.class)
 

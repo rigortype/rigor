@@ -1,7 +1,8 @@
 # ADR-32 — Inline-RBS comment ingestion as an opt-in plugin
 
 Status: **Accepted, 2026-05-25; implemented in v0.1.10; amended
-2026-09-08 with WD13 (inline-vs-`sig/` precedence).**
+2026-09-08 with WD13 (inline-vs-`sig/` precedence); WD13's per-member
+precedence superseded 2026-09-26 by ADR-112 WD5.**
 
 The
 bundled `rigor-rbs-inline` plugin, the `source_rbs_synthesizer:`
@@ -555,9 +556,12 @@ silent because they are outside the same-line split:
 
 ### WD13 — A `sig/` declaration wins over an inline one, per member
 
-> **Partially superseded by [ADR-112](112-extrbs-comment-channel.md) (WD5).** The same-member
-> case no longer lets `sig/` win silently. Consistent declarations merge to the more precise side,
-> and a contradiction is an error. The Steep analysis below still holds.
+> **Superseded by [ADR-112](112-extrbs-comment-channel.md) WD5, implemented 2026-09-26
+> ([#1075](https://github.com/rigortype/rigor/issues/1075)).** The two declarations of one member are
+> compared instead of ranked: consistent ones merge to the more precise side, a contradiction keeps the
+> `.rbs` and is reported as `rbs.contradicting-signature` (an error), and only a pair Rigor cannot rank
+> still drops the inline side with the `:info` row described below. The Steep analysis, the per-member
+> scope and the two excluded overlaps below still hold.
 
 *2026-09-08, closing [#824](https://github.com/rigortype/rigor/issues/824).*
 

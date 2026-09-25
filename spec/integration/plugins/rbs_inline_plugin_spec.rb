@@ -1008,17 +1008,19 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
-  # Issue #824 / ADR-32 WD13 — a method declared by BOTH `sig/` and an inline annotation. rbs merges the two
-  # sources into one `ClassEntry` and ranks neither, so before this the definition build raised
-  # `RBS::DuplicatedMethodDefinitionError` and the whole class lost its method surface. `sig/` now wins per
-  # member, and the drop is reported rather than swallowed (WD12).
-  describe "precedence against sig/ (issue #824)" do
+  # Issue #824 / ADR-32 WD13, replaced by #1075 / ADR-112 WD5 — a method declared by BOTH `sig/` and an
+  # inline annotation. rbs merges the two sources into one `ClassEntry` and ranks neither, so before #824 the
+  # definition build raised `RBS::DuplicatedMethodDefinitionError` and the whole class lost its method
+  # surface. The two are now compared: consistent declarations merge to the more precise side, and a
+  # contradiction keeps the `sig/` side and is an error.
+  describe "consistency against sig/ (issues #824, #1075)" do
+    # Spelled absolutely on both sides: only an absolute core class name proves a contradiction.
     let(:sig_and_inline) do
       run_plugin(
         source: <<~RUBY,
           # rbs_inline: enabled
           class Demo
-            # @rbs (Integer) -> String
+            # @rbs (::Integer) -> ::String
             def shared(value) = value.to_s
 
             # @rbs (Integer) -> Integer
@@ -1048,12 +1050,74 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         .not_to include("rbs.coverage.definition-build-failed")
     end
 
-    it "reports one info row naming the member, the .rbs that won, and the annotated file" do
-      rows = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+    # ADR-32 WD13's reproduction contradicts in both positions, so it is now an error at the `.rbs` member
+    # rather than WD13's `:info` at the annotated file.
+    it "reports one rbs.contradicting-signature error at the sig/ member, naming the annotated file" do
+      rows = sig_and_inline.diagnostics.select { |d| d.qualified_rule == "rbs.contradicting-signature" }
       expect(rows.size).to eq(1)
-      expect(rows.first.severity).to eq(:info)
-      expect(rows.first.path).to end_with("demo.rb")
-      expect(rows.first.message).to include("`Demo#shared`", "sig/demo.rbs", "inline signature was dropped")
+      expect(rows.first.severity).to eq(:error)
+      expect(rows.first.path).to end_with("sig/demo.rbs")
+      expect(rows.first.line).to eq(2)
+      expect(rows.first.message).to include("`Demo#shared`", "demo.rb", "parameter 1")
+      expect(sig_and_inline.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-annotation-not-honoured")
+    end
+
+    # The issue's merge: the inline side is the narrower contract, so it binds and a call outside it fires.
+    # Under WD13 `sig/`'s `Symbol` won and `:up` passed.
+    it "merges a consistent pair to the more precise inline side, silently" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs dir: :asc | :desc
+            def order(dir) = nil
+          end
+
+          Demo.new.order(:up)
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def order: (::Symbol dir) -> void\nend\n" },
+        signature_paths: ["sig"]
+      )
+      rules = result.diagnostics.map(&:qualified_rule)
+      expect(rules).to include("call.argument-type-mismatch")
+      expect(rules).not_to include("rbs.contradicting-signature", "source-rbs-annotation-not-honoured",
+                                   "rbs.coverage.definition-build-failed")
+    end
+
+    # rbs-extended.md: a refinement outside its own declared type is a contradiction too, with or without
+    # a `sig/` twin. Same-line `%a{}` spelling, the one the manual shows.
+    it "reports an inline refinement outside its own declared return at the annotated file" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            # @rbs %a{rigor:v1:return: positive-int} () -> ::String
+            def label = "x"
+          end
+        RUBY
+        files: {}
+      )
+      rows = result.diagnostics.select { |d| d.qualified_rule == "rbs.contradicting-signature" }
+      expect(rows.size).to eq(1)
+      expect([File.basename(rows.first.path), rows.first.line, rows.first.severity]).to eq(["demo.rb", 1, :error])
+      expect(rows.first.message).to include("`Demo#label`", "rigor:v1:return:", "String")
+    end
+
+    # ADR-93's herb shape: `sig/` says `-> untyped`, the annotation says `-> void`. Both are the top type.
+    it "stays quiet for sig/ `-> untyped` beside an inline `-> void`" do
+      result = run_plugin(
+        source: <<~RUBY,
+          # rbs_inline: enabled
+          class Demo
+            #: () -> void
+            def run = nil
+          end
+        RUBY
+        files: { "sig/demo.rbs" => "class Demo\n  def run: () -> untyped\nend\n" },
+        signature_paths: ["sig"]
+      )
+      expect(result.diagnostics.map(&:qualified_rule))
+        .not_to include("rbs.contradicting-signature", "source-rbs-annotation-not-honoured")
     end
 
     # The rest of the file is unaffected — the same promise WD12's `module-self` row makes.
@@ -1077,6 +1141,64 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
       expect(mismatches.size).to eq(1)
       expect(mismatches.first.message).to include("only_inline")
+    end
+
+    # Round 3 of the #1428 review: project classes whose `sig/` omits the Ruby superclass (p3/p5), and
+    # a relative name the project defines only in Ruby (p7). None is a proof, and the rows may not depend
+    # on which files the run was given.
+    describe "verdicts independent of the run's path set" do
+      def rows_for(result)
+        result.diagnostics.select { |d| d.qualified_rule =~ /contradicting-signature|not-honoured/ }
+              .map { |d| [File.basename(d.path), d.line, d.qualified_rule, d.message.gsub(%r{/\S*/}, "")] }.sort
+      end
+
+      def run_both(source:, files:)
+        whole = run_plugin(source: source, files: files, paths: ["."], signature_paths: ["sig"])
+        narrow = run_plugin(source: source, files: files, paths: ["demo.rb"], signature_paths: ["sig"])
+        [rows_for(whole), rows_for(narrow)]
+      end
+
+      it "reports no error for project classes whose sig/ omits the superclass (p5)" do
+        whole, narrow = run_both(
+          source: <<~RUBY,
+            class Factory
+              #: () -> ::Admin
+              def make = Admin.new
+
+              #: (::Admin) -> void
+              def take(u) = nil
+            end
+          RUBY
+          files: {
+            "sig/models.rbs" => "class User\nend\nclass Admin\nend\nclass Factory\n  def make: () -> ::User\n  " \
+                                "def take: (::User) -> void\nend\n",
+            "user.rb" => "class User\n  #: () -> String\n  def name = \"u\"\nend\n" \
+                         "class Admin < User\n  #: () -> Integer\n  def level = 1\nend\n"
+          }
+        )
+        expect(whole.map { |row| row[2] }).not_to include("rbs.contradicting-signature")
+        expect(narrow).to eq(whole)
+      end
+
+      it "reports no error for a relative name the project defines only in Ruby (p7)" do
+        whole, narrow = run_both(
+          source: <<~RUBY,
+            module App
+              class Box
+                #: () -> Array[Integer]
+                def items = App::Set.new
+              end
+            end
+          RUBY
+          files: {
+            "sig/box.rbs" => "module App\n  class Box\n    def items: () -> Set[Integer]\n  end\nend\n",
+            "app/set.rb" => "module App\n  class Set < Array\n  end\nend\n"
+          }
+        )
+        expect(whole.map { |row| row[2] }).not_to include("rbs.contradicting-signature")
+        expect(whole).not_to be_empty
+        expect(narrow).to eq(whole)
+      end
     end
 
     it "stays silent when the inline annotations do not overlap sig/" do

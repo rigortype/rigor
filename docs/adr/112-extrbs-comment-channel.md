@@ -1,6 +1,6 @@
 # ADR-112 — `@extrbs`: a Rigor-read comment channel for what RBS cannot say
 
-Status: **Accepted, 2026-09-19. Nothing implemented yet.** Rules on
+Status: **Accepted, 2026-09-19. WD5 implemented for `sig/` against inline `@rbs` / `#:` on 2026-09-26 ([#1075](https://github.com/rigortype/rigor/issues/1075)); the `@extrbs` half of WD5 and WD1–WD4 not yet implemented.** Rules on
 [#996](https://github.com/rigortype/rigor/issues/996) the other way from
 [ADR-111](111-inline-refinement-carrier.md)'s recommendation. ADR-111 is superseded as a whole, and
 its probe is this ADR's grounding. This ADR partially supersedes [ADR-32](32-rbs-inline-comment-ingestion.md)
@@ -122,6 +122,14 @@ Rigor never writes into a `.rb` file. Every carrier below is authored intent; th
   erasure is written, not to sig-gen output.
 
 ### WD5 — Consistency across sources replaces "`sig/` wins" (ADR-32 WD13)
+
+> **Status note (2026-09-26, [#1075](https://github.com/rigortype/rigor/issues/1075)).** "Neither side a
+> subtype of the other" below is sharpened in the binding spec to **proven disjoint**: a contradiction is
+> reported only where no value and no call satisfies both sides, and every other non-subtype pair is
+> undecided (the `.rbs` binds, with ADR-32 WD12's `:info`). Under the maintainer's conservative reading,
+> only absolutely written Ruby core or stdlib classes prove two types disjoint; a project class, a gem
+> class or a relative name never does. The definition lives in
+> [`overview.md`](../type-specification/overview.md) § inline annotation handling.
 
 One rule covers `sig/` against inline and `@rbs` / `#:` against `@extrbs`:
 

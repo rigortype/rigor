@@ -3627,6 +3627,95 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #1360 — `$!` / `$@` are bound in a rescue clause and restored once the `begin` exits however it exits; `$?`
+  # is bound after a subprocess the statement certainly ran.
+  describe "`$!` / `$@` / `$?`" do
+    let(:env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+    let(:error_t) { Rigor::Type::Combinator.nominal_of("StandardError") }
+    let(:argument_t) { Rigor::Type::Combinator.nominal_of("ArgumentError") }
+    let(:status_t) { Rigor::Type::Combinator.nominal_of("Process::Status") }
+
+    # The binding of `name` each read of it records in the per-node scope index, in source order, and the scope after.
+    def special_reads(source, name, base: env_scope)
+      program = parse_program(source)
+      reads = []
+      recorder = lambda do |node, scope|
+        reads << scope.global(name) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == name
+      end
+      _, post = described_class.new(scope: base.with_match_frame(program), on_enter: recorder).evaluate(program)
+      [reads, post]
+    end
+
+    it "binds `$!` and `$@` in a rescue clause, with or without a reference, and restores the entry past the `begin`" do
+      reads, post = special_reads(<<~RUBY, :$!)
+        begin
+          Integer("x")
+        rescue ArgumentError => e
+          $!
+        rescue
+          $!
+        end
+        $!
+      RUBY
+      expect(reads).to eq([argument_t, error_t, nil])
+      expect(post.global(:$!)).to be_nil
+      expect(post.global(:$@)).to be_nil
+
+      outer = env_scope.with_global(:$!, argument_t)
+      reads, post = special_reads("begin\n  x\nrescue\n  $!\nend\n$!\n", :$!, base: outer)
+      expect(reads).to eq([error_t, argument_t])
+      expect(post.global(:$!)).to eq(argument_t)
+    end
+
+    it "restores the entry on a `break` or `next` that leaves a rescue clause or a rescue modifier" do
+      outer = env_scope.with_global(:$!, argument_t)
+      ["while ok\n  begin\n    x\n  rescue\n    break\n  end\nend",
+       "while ok\n  begin\n    x\n  rescue\n    next\n  end\nend",
+       "while ok\n  y = (x rescue break)\nend"].each do |loop_source|
+        _, post = special_reads("#{loop_source}\n", :$!, base: outer)
+        expect(post.global(:$!)).to eq(argument_t), loop_source
+      end
+    end
+
+    it "reads `$!`, `$@` and `$?` unbound in an `ensure` clause, and keeps what it entered with past it" do
+      bound = env_scope.with_global(:$!, argument_t).with_global(:$?, status_t)
+      reads, post = special_reads("begin\n  x\nensure\n  $!\n  $?\nend\n", :$!, base: bound)
+      expect(reads).to eq([nil])
+      expect(post.global(:$!)).to eq(argument_t)
+      expect(post.global(:$?)).to eq(status_t)
+
+      reads, post = special_reads("begin\n  x\nensure\n  $?\n  system('y')\nend\n", :$?)
+      expect(reads).to eq([nil])
+      expect(post.global(:$?)).to eq(status_t)
+    end
+
+    it "binds a rescue modifier's fallback to a `StandardError` and restores the entry past it" do
+      # The arm is threaded outside the per-node index, so its write shows what it read.
+      _, post = special_reads("y = (x rescue (z = $!))\n", :$!)
+      expect(post.local(:z)).to eq(Rigor::Type::Combinator.union(error_t, Rigor::Type::Combinator.constant_of(nil)))
+      expect(post.global(:$!)).to be_nil
+      _, post = special_reads("y = (x rescue (z = $!))\n", :$!, base: env_scope.with_global(:$!, argument_t))
+      expect(post.global(:$!)).to eq(argument_t)
+      type, = evaluate("(raise 'm') rescue $!", base_scope: env_scope)
+      expect(type).to eq(error_t)
+    end
+
+    it "binds `$?` after a subprocess a statement certainly ran, and not in a file that may clear it" do
+      ["`true`", "%x(true)", "system('true')", "out = `a`.strip", "puts(`a`)", "ok = Kernel.system('x')",
+       "Process.wait(pid)", "if system('x') then 1 end"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?)
+        expect(post.global(:$?)).to eq(status_t), statement
+      end
+      ["[`a`]", "x&.y(`a`)", "system('x') if ok", "items.each { `a` }", "Process.wait(pid, 1)"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?)
+        expect(post.global(:$?)).to be_nil, statement
+      end
+      clearing = env_scope.with_discovery(env_scope.discovery.with(clears_last_status: true))
+      _, post = special_reads("system('true')\n", :$?, base: clearing)
+      expect(post.global(:$?)).to be_nil
+    end
+  end
+
   # Issue #1359 — `$_` shares the match globals' frame slot: a condition on a reader narrows it, and code that may
   # set it after the narrowing forgets it.
   describe "`$_` last-line narrowing" do

@@ -29,7 +29,7 @@ module Rigor
     # ({Calls}, {.value_may_rebind?}; issue #1365): a call the old name table forgot on keeps forgetting unless its
     # literal arguments prove it match-free, and any other forgets only when it is known to match. The scans
     # short-circuit without a `return` out of a child block, which would allocate once per frame it unwinds.
-    module MatchRebinding
+    module MatchRebinding # rubocop:disable Metrics/ModuleLength
       # The block and closure scans read calls on narrower terms than the statement-level rule ({Calls}), because
       # inside a block `[]`, `split` and `index` are overwhelmingly lookups on hashes, arrays and strings whose key
       # the scan cannot type, and counting them dropped the narrowing on correct code
@@ -361,10 +361,12 @@ module Rigor
       # no iterator's; that block enters as {FreshFrameBlocks.entry} gives (issue #1361): a thread's, fiber's or
       # ractor's root block with the globals unbound, since it reads a slot of its own, and a `define_method` body
       # with a narrowed global untyped, since it reads the definer's slot whenever the method is called. `$_`, which
-      # shares the slot, enters on the same terms ({LastLine.block_entry}, issue #1359).
+      # shares the slot, enters on the same terms ({LastLine.block_entry}, issue #1359). A closure's body, which runs
+      # whenever it is called, enters with `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}, issue #1360).
       def block_entry(scope, block_node, call_node = nil)
         return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
 
+        scope = FreshFrameBlocks.closure_entry(scope, block_node, call_node)
         scope = LastLine.block_entry(scope, block_node, call_node)
         return scope unless scope.match_globals_bound?
         return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||

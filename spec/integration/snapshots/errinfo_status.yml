@@ -1,0 +1,51 @@
+---
+locals: {}
+assertions:
+  '1': ArgumentError | TypeError
+  '2': Array[String]
+  '3': StandardError
+  '4': AppError
+  '5': Dynamic[top]
+  '6': StandardError
+  '7': Array[String] | Integer
+  '8': Dynamic[top]
+  '9': Dynamic[top]
+  '10': ArgumentError
+  '11': Dynamic[top]
+  '12': Dynamic[top]
+  '13': OtherError
+  '14': AppError
+  '15': AppError
+  '16': Dynamic[top]
+  '17': AppError
+  '18': Dynamic[top]
+  '19': AppError
+  '20': AppError
+  '21': Dynamic[top]
+  '22': Dynamic[top]
+  '23': AppError
+  '24': Dynamic[top]
+  '25': Dynamic[top]
+  '26': Dynamic[top]
+  '27': Dynamic[top]
+  '28': Dynamic[top]
+  '29': Dynamic[top]
+  '30': Process::Status
+  '31': Process::Status
+  '32': Process::Status
+  '33': Process::Status
+  '34': Process::Status
+  '35': Process::Status
+  '36': Process::Status
+  '37': Process::Status
+  '38': Process::Status
+  '39': Dynamic[top]
+  '40': Dynamic[top]
+  '41': Process::Status
+  '42': Process::Status
+  '43': Process::Status
+  '44': Dynamic[top]
+  '45': Dynamic[top]
+  '46': Dynamic[top]
+  '47': Dynamic[top]
+  '48': Process::Status

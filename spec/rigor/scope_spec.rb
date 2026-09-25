@@ -335,6 +335,53 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # Issue #1360 — `$!` / `$@` belong to the rescue clause running and `$?` to the thread; each pair of readers drops or
+  # untypes its own names and nothing else.
+  describe "#forget_error_info / #untyped_error_info / #forget_last_status / #untyped_last_status" do
+    let(:error) { Rigor::Type::Combinator.nominal_of("StandardError") }
+    let(:status) { Rigor::Type::Combinator.nominal_of("Process::Status") }
+    let(:trace) { Rigor::Type::Combinator.nominal_of("Array") }
+    let(:bound) do
+      scope.with_global(:$!, error).with_global(:$@, trace).with_global(:$?, status).with_global(:$_, error)
+    end
+
+    it "drops `$!` and `$@` together, and leaves `$?` and the frame-local specials bound" do
+      forgotten = bound.forget_error_info
+
+      expect(forgotten.global(:$!)).to be_nil
+      expect(forgotten.global(:$@)).to be_nil
+      expect(forgotten.global(:$?)).to eq(status)
+      expect(forgotten.global(:$_)).to eq(error)
+    end
+
+    it "drops `$?` alone" do
+      forgotten = bound.forget_last_status
+
+      expect(forgotten.global(:$?)).to be_nil
+      expect(forgotten.global(:$!)).to eq(error)
+      expect(forgotten.global(:$@)).to eq(trace)
+    end
+
+    it "rebinds a bound name to `Dynamic[top]` and leaves an unbound one unbound" do
+      untyped = Rigor::Type::Combinator.untyped
+      only_error = scope.with_global(:$!, error)
+
+      expect(only_error.untyped_error_info.global(:$!)).to eq(untyped)
+      expect(only_error.untyped_error_info.global(:$@)).to be_nil
+      expect(bound.untyped_last_status.global(:$?)).to eq(untyped)
+      expect(bound.untyped_last_status.global(:$!)).to eq(error)
+    end
+
+    it "answers the same scope when there is nothing to drop or untype" do
+      seeded = scope.with_global(:$stdout, error)
+
+      %i[forget_error_info untyped_error_info forget_last_status untyped_last_status].each do |reader|
+        expect(seeded.public_send(reader)).to equal(seeded), reader.to_s
+        expect(scope.public_send(reader)).to equal(scope), reader.to_s
+      end
+    end
+  end
+
   # Issue #1358 — the frame a body runs in, which its blocks and closures share.
   describe "#with_match_frame / #match_rebinding_closure?" do
     def root(source) = Prism.parse(source).value

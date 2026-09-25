@@ -43,7 +43,8 @@ module Rigor
       :struct_member_layouts,
       :param_inferred_types,
       :run_generation,
-      :patched_line_readers
+      :patched_line_readers,
+      :clears_last_status
     )
 
     class DiscoveryIndex
@@ -228,7 +229,12 @@ module Rigor
         # computed name, which may be either), which `Inference::LastLine.reads_line?` declines on, as it does on a
         # name `BlockCallTiming.project_defines_anywhere?` finds. Filled by `Inference::ScopeIndexer.index` from the
         # file's own tree only.
-        patched_line_readers: EMPTY_NAME_SET
+        patched_line_readers: EMPTY_NAME_SET,
+        # Issue #1360 — true when this file holds a call that may set `$?` to nil (`Inference::LastStatus.clears?`: a
+        # `wait`-family call with a flags argument, or `waitall`), which may run between any subprocess and a read of
+        # `$?`, so `Inference::LastStatus.after` binds it nowhere in the file. Filled by `Inference::ScopeIndexer.index`
+        # from the file's own tree only.
+        clears_last_status: false
       )
     end
   end

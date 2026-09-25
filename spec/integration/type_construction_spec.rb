@@ -1207,6 +1207,36 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/errinfo_status.rb — `$!` / `$@` in a rescue clause and `$?` after a subprocess (#1360)" do
+    let(:harness) { harness_for("errinfo_status") }
+
+    it "types `$!`, `$@` and `$?` where Ruby guarantees them, and unbound everywhere else" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # A copy of `$!` in a rescue clause, or of `$?` after a subprocess, holds the exception or the status: calling a
+    # method on it reports nothing.
+    it "reports nothing on a copy of `$!` or `$?` read where it is bound" do
+      reads = marked_lines(harness, "# QUIET-1360")
+      expect(reads.size).to eq(2)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    it "reports no error anywhere in the fixture" do
+      expect(harness.errors).to be_empty
+    end
+  end
+
+  describe "fixtures/errinfo_status_declines.rb — a program that may clear `$?` or define `backtrace` (#1360)" do
+    let(:harness) { harness_for("errinfo_status_declines") }
+
+    it "leaves `$?` unbound in a file that waits with flags, and `$@` in a program that defines `backtrace`" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

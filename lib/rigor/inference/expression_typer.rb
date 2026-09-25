@@ -19,6 +19,7 @@ require_relative "closure_escape_analyzer"
 require_relative "receiver_blind_block"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
+require_relative "error_info"
 require_relative "external_ancestor_resolution"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
@@ -1159,9 +1160,20 @@ module Rigor
       end
 
       # `expr rescue fallback` is RescueModifierNode in Prism. The result is `expr`'s type when no exception
-      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union.
+      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union. Issue #1360
+      # — `fallback` runs with `$!` and `$@` bound to the `StandardError` it rescued ({ErrorInfo.modifier_entry}).
       def type_of_rescue_modifier(node)
-        Type::Combinator.union(type_of(node.expression), type_of(node.rescue_expression))
+        fallback = node.rescue_expression
+        fallback_type =
+          if ErrorInfo.read_in?(fallback)
+            ExpressionTyper.new(
+              scope: ErrorInfo.modifier_entry(scope), tracer: tracer, operand_types: @operand_types,
+              typing_node: @typing_node
+            ).type_of(fallback)
+          else
+            type_of(fallback)
+          end
+        Type::Combinator.union(type_of(node.expression), fallback_type)
       end
 
       def type_of_ensure(node)

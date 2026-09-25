@@ -61,11 +61,11 @@ precision mechanisms are sequenced behind it.
 > **Corrected 2026-09-26 (#541).** The pre-pass recorded no accessor
 > write, so `@next` above read `nil`, not `Dynamic[top] | nil`, until
 > the WD2 amendment below; the Grounding line's `type-of` reading is
-> wrong in the same way. The algorithm corpora's `Dynamic[top] | nil`
-> reads came from untyped constructor parameters, which WD2 records as
-> those fields' only writes. With only `@next = nil` recorded,
-> `if @next` folded always-falsey and `@next.value` reported a call on
-> `nil`.
+> wrong in the same way. On the algorithm corpora the `Dynamic[top]`
+> came from somewhere else: those node fields are assigned from untyped
+> constructor parameters (`def initialize(v, l = nil, r = nil)`), as the
+> WD2 status notes. With only `@next = nil` recorded, `if @next` folded
+> always-falsey and `@next.value` reported a call on `nil`.
 
 Precedent: ADR-57 slice 3 softened destructured optional tuple slots
 for exactly this reason — manufactured per-site optionality across a
@@ -295,12 +295,31 @@ on the dependency-injection idiom (bash0C7's report in #541; ADR-5).
 
 Two narrower options were rejected. A mark that declines only the flow
 folds leaves the nil-receiver error in place. Contributing only when
-every other write is `nil` misses the `@flag = false` flag. The cost is
-precision on an accessor-backed ivar that also has a concrete write:
-kramdown's `@children` goes from `[]` to `Dynamic[top] | []`, and
-`rigor sig-gen` now skips `attr_accessor :count` beside `@count = 0`
-instead of proposing `def count=: (0) -> 0`. Both closed readings were
-wrong for a field the class declares writable.
+every other write is `nil` misses the `@flag = false` flag.
+
+The cost falls on a writer-backed ivar, and a hand-written setter
+already paid each part of it:
+
+- **Precision.** An ivar that also has a concrete write reads
+  `Dynamic[top] | T`. kramdown's `@children` goes from `[]` to
+  `Dynamic[top] | []`.
+- **`rigor sig-gen`.** Every method whose return is such an ivar erases
+  to `untyped` and is skipped as `sig.skipped.untyped-return`. That
+  covers the accessor's own reader and writer, and a sibling
+  `def w_value = @w`. `attr_accessor :logger` beside
+  `@logger = Logger.new` no longer yields `def logger: () -> Logger`,
+  and `@count = 0` no longer yields `def count=: (0) -> 0`. Only an ivar
+  assigned from a constructor parameter is still typed, and only under
+  `--params=observed` (whose writer output is itself wrong, #1410).
+- **RBS-declared readers.** A writer-only ivar read before any write
+  seeds `Dynamic[top] | nil`, so `def x_value = @x` against a declared
+  `-> Integer` now reports `def.return-type-mismatch` ("inferred
+  `Dynamic[top]?`"). Before, it read `Dynamic[top]` and stayed silent.
+  The survey corpus declares almost no RBS, so the gate below could not
+  see this. #1406 removes it by seeding from the RBS attr type.
+
+Each closed reading was wrong for a field the class declares writable,
+and the false positives removed are on working code with no RBS at all.
 
 Out of scope, unchanged: `attr_reader` alone, a `class << self`
 accessor, an includer of a module that declares the writer, another

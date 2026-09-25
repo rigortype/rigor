@@ -1301,6 +1301,9 @@ RSpec.describe Rigor::SigGen::Generator do
       )
     end
 
+    # The observation fallback replaces the writer's own untyped contribution with the observed constructor
+    # literal, so the writer accepts only `0` — wrong, and stricter than a hand-written setter, which is skipped.
+    # Flip this when #1410 is fixed.
     it "emits reader + writer candidates for attr_accessor from initialize-param observations" do
       path = write_fixture("lib/box.rb", <<~RUBY)
         class Box

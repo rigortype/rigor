@@ -338,7 +338,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
           .to eq(Rigor::Type::Combinator.union(constant_of(1), string_nominal))
       end
 
-      it "folds `#{method}` on a non-empty integer Range literal to its element range" do
+      it "folds `#{method}` on a non-empty constant integer Range to its element range" do
         expect(fold(receiver: constant_of(2..4), method: method, block: any_key))
           .to eq(Rigor::Type::Combinator.integer_range(2, 4))
       end

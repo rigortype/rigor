@@ -93,7 +93,7 @@ module Rigor
         end
 
         # Issue #1333 — `min_by` / `max_by` with a block and no count on a non-empty Tuple or a non-empty
-        # integer `Range` literal answer the receiver's element type: the RBS `Elem?` return adds `nil` for
+        # constant integer `Range` answer the receiver's element type: the RBS `Elem?` return adds `nil` for
         # the empty receiver, and `[1, 2].min_by { |s| rand(3) } + 1` then reported a nil receiver on correct
         # code. The block's value picks which element, and one `block_type` typed from the call's entry scope
         # cannot say which, so the answer is the whole element union. An empty receiver, one whose size is

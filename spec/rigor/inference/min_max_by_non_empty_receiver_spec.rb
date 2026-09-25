@@ -3,7 +3,7 @@
 require "spec_helper"
 
 # Issue #1333 — `min_by` / `max_by` with a block and no count return `nil` only for an empty receiver, so
-# on a receiver the analyzer knows is non-empty (a non-empty Tuple, a non-empty integer Range literal) the
+# on a receiver the analyzer knows is non-empty (a non-empty Tuple, a non-empty constant integer Range) the
 # element union MUST NOT carry `nil`. RBS declares `Elem?`, so `m = [1, 2].min_by { |s| rand(3) }; m + 1`
 # reported `call.possible-nil-receiver` on correct code. Each fold is paired with a control whose type
 # must NOT move: an empty receiver, a receiver of unknown size, and the count form.
@@ -38,10 +38,11 @@ RSpec.describe "min_by / max_by on a non-empty receiver", type: :runner do
     RUBY
   end
 
-  it "answers the element range without nil for a non-empty integer Range literal" do
-    expect(dumped_types(<<~RUBY)).to eq(["Integer[1..3]", "Integer[1..2]"])
+  it "answers the element range without nil for a non-empty constant integer Range" do
+    expect(dumped_types(<<~RUBY)).to eq(["Integer[1..3]", "Integer[1..2]", "Integer[1..3]"])
       dump_type((1..3).min_by { |s| rand(3) })
       dump_type((1...3).max_by { |s| rand(3) })
+      dump_type(Range.new(1, 3).min_by { |s| rand(3) })
     RUBY
   end
 
@@ -57,6 +58,23 @@ RSpec.describe "min_by / max_by on a non-empty receiver", type: :runner do
       ints = (1..rand(9)).to_a
       dump_type(ints.min_by { |s| s })
       dump_type(ints.max_by { |s| s })
+    RUBY
+  end
+
+  # The fold reads the receiver's carrier, so it relies on mutation widening having dropped the literal's
+  # arity once a mutator may have emptied it.
+  it "keeps nil once a mutator may have emptied the literal" do
+    expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | nil", "1 | 2 | nil", "1 | 2 | nil"])
+      a = [1, 2]
+      a.clear
+      dump_type(a.min_by { |s| rand(3) })
+      b = [1, 2]
+      b.pop
+      b.pop
+      dump_type(b.max_by { |s| rand(3) })
+      c = [1, 2]
+      c.select! { |s| s > 5 }
+      dump_type(c.min_by { |s| rand(3) })
     RUBY
   end
 

@@ -2042,6 +2042,20 @@ RSpec.describe Rigor::Environment::RbsLoader do
         expect(outcome_for("  def x: () -> ::String", "  def x: () -> ::Integer")).to eq([%i[x contradiction]])
       end
 
+      # Where rbs's ancestry disagrees with Ruby's the proof must not trust it: `Tempfile.new` is a
+      # `Delegator` and `Random.new` a `Random::Base`, though rbs 4.2 places neither there
+      # (`RbsProof::UNRELIABLE_ANCESTRY`; `member_consistency_ancestry_guard_spec.rb` keeps the list whole).
+      it "does not prove disjointness from an RBS ancestry Ruby contradicts" do
+        verdict = lambda do |sig_type, inline_type|
+          File.write(sig_file, "class Demo\n  def f: () -> #{sig_type}\nend\n")
+          inline = "class Demo\n  def f: () -> #{inline_type}\nend\n"
+          outcomes(described_class.new(signature_paths: [tmpdir], libraries: %w[tempfile delegate],
+                                       virtual_rbs: [[virtual_name, inline]]))
+        end
+        expect(verdict.call("::Delegator", "::Tempfile")).to eq([%i[f undecided]])
+        expect(verdict.call("::Random::Base", "::Random")).to eq([%i[f undecided]])
+      end
+
       # A referenced name no RBS declares gets a stub class so the environment still builds; a stub
       # has no known superclass, so it proves nothing.
       it "does not prove a class RBS does not declare disjoint from anything" do

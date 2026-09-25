@@ -293,8 +293,7 @@ module Rigor
           return [[:signature, nil]] if inline_untyped
 
           unless function_shape(sig_fn) == function_shape(inline_fn)
-            return [(!block && shape_contradiction(sig_fn, inline_fn, prefix)) ||
-                    [:undecided, "#{prefix}the parameter lists have different shapes"]]
+            return [(!block && shape_contradiction(sig_fn, inline_fn, prefix)) || shape_undecided(block)]
           end
 
           parameter_pairs(sig_fn, inline_fn).map do |label, sig_param, inline_param, required|
@@ -305,6 +304,11 @@ module Rigor
               provable: provable && required
             )
           end
+        end
+
+        def shape_undecided(block)
+          [:undecided,
+           block ? "the block's parameter lists have different shapes" : "the parameter lists have different shapes"]
         end
 
         def function_shape(function)

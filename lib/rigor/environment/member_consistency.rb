@@ -76,6 +76,16 @@ module Rigor
       # a contradiction and an undecided pair both keep the `.rbs` member, so a proof changes a row's
       # severity and never which declaration binds.
       class RbsProof
+        # Core and stdlib classes whose RBS ancestry disagrees with Ruby's, excluded from every proof on
+        # both sides of each disagreement. rbs 4.2 declares `class Tempfile < File` where the `tempfile`
+        # library defines `Tempfile < Delegator` (so RBS reads `Tempfile` and `Delegator` as unrelated),
+        # `class Random` with no superclass where Ruby has `Random < Random::Base`, and
+        # `class Gem::MissingSpecError` with no superclass where RubyGems has it `< Gem::LoadError`. A pair
+        # naming one of these is undecided. `spec/rigor/environment/member_consistency_ancestry_guard_spec.rb` compares
+        # every candidate class's RBS chain with Ruby's and fails on a disagreement missing from this list,
+        # so an rbs or Ruby bump that introduces one fails CI instead of reporting an error on correct code.
+        UNRELIABLE_ANCESTRY = %w[Tempfile Delegator Random Random::Base Gem::MissingSpecError].to_set.freeze
+
         # @param loader — the project's {RbsLoader}, whose built environment answers the hierarchy.
         def initialize(loader)
           @loader = loader
@@ -94,6 +104,7 @@ module Rigor
         private
 
         def core_class_ancestors(key)
+          return nil if UNRELIABLE_ANCESTRY.include?(key)
           return nil unless @loader.core_or_stdlib_class?(key) && !@loader.rbs_module?(key)
 
           ancestors = @loader.ancestor_names_for(key)

@@ -56,6 +56,9 @@ module Rigor
     # block / lambda body ranges {singleton_def_shadows_call?} / {instance_def_shadows_call?} order a
     # project-defined override against.
     def discovered_deferred_ranges = @discovery.discovered_deferred_ranges
+    # Issue #1120 — `{refined class name => {method name => [refining module names]}}`: what each
+    # `refine X do … end` block defines, visible only where a `using` of its module is in effect.
+    def discovered_refinements = @discovery.discovered_refinements
     def discovered_includes = @discovery.discovered_includes
     # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
     # instance-ancestor search order (nearest prepend first). Feeds {#prepends_of}, the one table that tells

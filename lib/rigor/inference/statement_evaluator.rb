@@ -3223,6 +3223,9 @@ module Rigor
         # call in the body as `call.unresolved-toplevel`.
         #
         # Outer locals stay visible: unlike a `class` keyword body, the block is a closure.
+        refined = refined_class_context(node)
+        return enter_meta_class_body(block, block_entry, refined) if refined
+
         anonymous = AnonymousMetaClass.name_for(node, scope.source_path)
         if anonymous.nil?
           return sub_eval(block, block_entry) unless return_barrier_block?(node)
@@ -3231,6 +3234,24 @@ module Rigor
         end
 
         enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
+      end
+
+      # Issue #1120 — `refine X do … end` in a module body. A `def` in the block defines an instance method of X (a
+      # refined one), so its body runs with an instance of X as `self` and reads X's instance variables, exactly as
+      # a `def` in a `class X` body does. Entering the block as X's class body gives it that through the ordinary
+      # {#self_type_for_method_body} route. Only a constant X is modelled ({ScopeIndexer.refine_target}). One that
+      # does not type as a class object (a gem class with no RBS) keeps the name as written: the body is still some
+      # class's body, and leaving it on the enclosing `self` made a `refine` at the file's top level report every
+      # implicit-self call in it as `call.unresolved-toplevel`.
+      def refined_class_context(node)
+        target = ScopeIndexer.refine_target(node)
+        return nil if target.nil?
+
+        refined = scope.type_of(target)
+        name = refined.is_a?(Type::Singleton) ? refined.class_name : Source::ConstantPath.qualified_name(target)
+        return nil if name.nil?
+
+        [ClassFrame.new(name: name.delete_prefix("::"), singleton: false)]
       end
 
       # The block calls whose body `return` leaves only the block ({ReturnBarrier.block_call?}). Like a `->` body

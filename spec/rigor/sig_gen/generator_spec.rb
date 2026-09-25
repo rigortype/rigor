@@ -872,6 +872,25 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(candidate.rbs).to eq(%(def m: () -> "end"))
     end
+
+    it "does not credit returns from a define_method or lambda block on an explicit receiver" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def m(klass)
+            klass.define_method(:x) { |v| return nil unless v; 1 }
+            self.class.define_method(:y) { |v| return v }
+            klass.define_singleton_method(:z) { return 3 }
+            klass.public_send(:define_method, :w) { return 4 }
+            Kernel.lambda { return 5 }
+            "end"
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq(%(def m: (untyped) -> "end"))
+    end
   end
 
   describe "lenience-preserving guard (post-dogfood tighter? hardening)" do

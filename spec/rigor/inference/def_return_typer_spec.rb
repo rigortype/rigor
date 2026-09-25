@@ -96,11 +96,20 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       "define_singleton_method(:x) { return }",
       "send(:define_method, :x) { return }",
       "public_send(:lambda) { return }",
+      "Kernel.lambda { return }",
+      "klass.define_method(:x) { return }",
+      "self.class.define_method(:x) { return }",
+      "mod.define_singleton_method(:x) { return }",
+      "klass.__send__(:define_method, :x) { return }",
       "def inner; return; end"
     ].each do |barrier|
       it "does not credit a `return` inside `#{barrier}`" do
         expect(collected_returns("def m; #{barrier}; 2; end")).to be_empty
       end
+    end
+
+    it "credits a `return` inside a `lambda` block on a receiver that is not `Kernel`" do
+      expect(collected_returns("def m(obj); obj.lambda { return }; 2; end").size).to eq(1)
     end
 
     it "still credits a `return` in a barrier call's arguments" do

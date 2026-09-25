@@ -12,12 +12,13 @@ module Rigor
       # A nested `def` and a `->` literal: the body is its own method or lambda.
       NODES = Set[Prism::DefNode, Prism::LambdaNode].freeze
 
-      # The block calls whose body `return` leaves only the block: `lambda { … }`, and the method a
-      # `define_method` / `define_singleton_method` block defines, called directly or through `send`
-      # (`klass.send(:define_method, :m) { … }`).
-      BLOCK_CALLS = %i[lambda define_method define_singleton_method].to_set.freeze
+      # The block calls whose body `return` leaves only the block: the method a `define_method` /
+      # `define_singleton_method` block defines, on whatever receiver (`klass.define_method(:m) { … }`), and
+      # `Kernel#lambda` — called bare, on `self`, or on `Kernel`. Each also counts through `send`
+      # (`klass.send(:define_method, :m) { … }`). A `lambda` on any other receiver is some other method.
+      DEFINE_CALLS = %i[define_method define_singleton_method].to_set.freeze
       SEND_CALLS = %i[send public_send __send__].to_set.freeze
-      private_constant :BLOCK_CALLS, :SEND_CALLS
+      private_constant :DEFINE_CALLS, :SEND_CALLS
 
       module_function
 
@@ -31,11 +32,23 @@ module Rigor
         name = call_node.name
         if SEND_CALLS.include?(name)
           sent = call_node.arguments&.arguments&.first
-          sent.is_a?(Prism::SymbolNode) && BLOCK_CALLS.include?(sent.unescaped.to_sym)
-        else
-          BLOCK_CALLS.include?(name) && (call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode))
+          return false unless sent.is_a?(Prism::SymbolNode)
+
+          name = sent.unescaped.to_sym
+        end
+        DEFINE_CALLS.include?(name) || (name == :lambda && kernel_receiver?(call_node.receiver))
+      end
+
+      # True when a `lambda` call on `receiver` reaches `Kernel#lambda`: no receiver, `self`, `Kernel` or `::Kernel`.
+      def kernel_receiver?(receiver)
+        case receiver
+        when nil, Prism::SelfNode then true
+        when Prism::ConstantReadNode then receiver.name == :Kernel
+        when Prism::ConstantPathNode then receiver.parent.nil? && receiver.name == :Kernel
+        else false
         end
       end
+      private_class_method :kernel_receiver?
     end
   end
 end

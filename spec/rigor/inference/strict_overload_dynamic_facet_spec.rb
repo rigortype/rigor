@@ -43,7 +43,8 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
   end
 
   it "keeps a facet's nil from choosing an overload the value never reaches" do
-    # Runtime: a Complex. Chosen by the facet's `nil`, `Kernel#Complex` took its `nil`-returning form.
+    # Runtime: a Complex. Chosen by the facet's `nil`, `Kernel#Complex` took its `nil`-returning form. Its parameters
+    # are not provable, so the call now reads through the wrapper; the `(nil)` arm below pins the nil rule itself.
     dumps, = dumped_and_rules(<<~RUBY)
       def run(v) = dump_type(Complex(Integer(v), 1))
     RUBY
@@ -66,9 +67,10 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     expect(dumps).to eq(["Float"])
   end
 
-  it "keeps the wrapper when a member, such as a supertype, reaches no overload" do
+  it "keeps the wrapper for a supertype member no overload names" do
     # Runtime: `1 + 2 ** n` is an Integer for a non-negative Integer `n`. `2 ** n` is `Dynamic[Complex | Numeric]`,
     # and no `Integer#+` overload names `Numeric`; dropped, it left `Complex` precise and `even?` undefined on it.
+    # `Numeric` is not sealed, so the facet keeps the wrapper.
     dumps, rules = dumped_and_rules(<<~RUBY)
       def pow_sum(n)
         dump_type(1 + 2 ** n)
@@ -110,7 +112,8 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     it "keeps the wrapper for a member whose runtime value may be of a subclass" do
       # Runtime: `2 ** v` is an Integer for a non-negative Integer `v`, and both `real` and `num` name `Integer`, so
       # each call answers a Float. `2 ** v` is `Dynamic[Complex | Numeric]`; read member by member, `Numeric` skipped
-      # the alias arm for the `(untyped) -> nil` catch-all, and `.floor` reported `call.undefined-method`.
+      # the alias arm for the `(untyped) -> nil` catch-all, and `.floor` reported `call.undefined-method`. Two rules
+      # keep the wrapper here: `Numeric` is not sealed, and an alias parameter is not provable.
       dumps, rules = dumped_and_rules(<<~RUBY)
         def run(v)
           dump_type(Calc.new.scale(2 ** v))
@@ -152,6 +155,11 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
                         | (Integer) -> Integer
           def self.either: (Printable | Symbol) -> String
                          | (Integer) -> Integer
+          def self.trailing: (*untyped, Printable) -> String
+                           | (Integer) -> Integer
+          %a{rigor:v1:param: x is Printable}
+          def self.annotated: (Object x) -> String
+                            | (Integer y) -> Integer
           def stub: (SomeGem::IntegerExt) -> String
                   | (Integer) -> Integer
           def self.render: (:json) -> String
@@ -168,7 +176,8 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
       # Runtime: `Integer` includes `Printable`, so each call returns a String. Acceptance reads class relations from
       # the analyzer's own process, where it does not (#1352), so the member skipped the `Printable` arm, however the
       # parameter spells it, for `(Integer)`, and `.upcase` reported `call.undefined-method`. `SomeGem::IntegerExt` is a
-      # name no RBS declares, which Rigor stubs as a class and the source may include into `Integer` just the same.
+      # name no RBS declares, which Rigor stubs as a class and the source may include into `Integer` just the same, and
+      # a `rigor:v1:param:` override can name the module where the RBS says `Object`.
       dumps, rules = dumped_and_rules(<<~RUBY)
         def run(v)
           dump_type(Fmt.fmt(Integer(v)))
@@ -176,11 +185,13 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
           dump_type(Fmt.opt(Integer(v)))
           dump_type(Fmt.maybe(Integer(v)))
           dump_type(Fmt.either(Integer(v)))
+          dump_type(Fmt.trailing(Integer(v)))
+          dump_type(Fmt.annotated(Integer(v)))
           dump_type(Fmt.new.stub(Integer(v)))
           Fmt.fmt(Integer(v)).upcase
         end
       RUBY
-      expect(dumps).to eq(%w[String] * 6)
+      expect(dumps).to eq(%w[String] * 8)
       expect(rules).not_to include("call.undefined-method")
     end
 

@@ -33,11 +33,11 @@ module Rigor
       # `fmt(Integer(v)).upcase` as `Integer` and fired `call.undefined-method` where master read `String`. So every
       # overload's positional parameters must be spelled as a class RBS declares, `untyped`, `top` or `nil`, through `?`
       # and `|`, which leaves acceptance only a sealed class's fixed ancestry to read. A literal or `bool` parameter
-      # asks for a value the member cannot prove it holds: `Symbol` skipped `(:json) -> String` for `(untyped) -> nil`,
-      # and a `TrueClass` member was refused by `bool` itself. Anything else, a module, a stubbed name, an alias, an
-      # interface, a type variable, `instance`, `self`, an intersection, a singleton or an untyped `(?)`, keeps the
-      # wrapper too. The list names what is provable rather than what is not, so a form it has not met falls back to
-      # master's reading.
+      # asks for a value, which a class member cannot prove it holds: `Symbol` skipped `(:json) -> String` for
+      # `(untyped) -> nil`, and a `TrueClass` member was refused by `bool` itself. Anything else, a module, a stubbed
+      # name, an alias, an interface, a type variable, `instance`, `self`, an intersection, a singleton or an untyped
+      # `(?)`, keeps the wrapper too. The list names what is provable rather than what is not, so a form it has not met
+      # falls back to master's reading.
       #
       # A wider facet keeps the wrapper and the receiver's arm, as before. It is usually itself a #521 join
       # (`Dynamic[BigDecimal | Complex | Float | Integer | Rational]` from `n * untyped`), and read member by member it
@@ -81,8 +81,9 @@ module Rigor
           lists.any?(&:empty?) ? [] : lists.flatten(1).uniq(&:object_id)
         end
 
-        # Whether acceptance's answer for a sealed member at every overload's positional parameters, rest included, is
-        # free of `include`s it cannot see; a `rigor:v1:param:` override proves nothing either.
+        # Whether every overload's positional parameters, rest and trailing included, are in a provable form
+        # ({.provable_param?}), where acceptance's answer for a sealed member rests only on the member class's fixed
+        # ancestry; a `rigor:v1:param:` override proves nothing either.
         def provable?(definition, environment)
           loader = environment&.rbs_loader
           return false if loader.nil?

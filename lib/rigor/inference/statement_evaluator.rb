@@ -1348,7 +1348,7 @@ module Rigor
 
         if node.ensure_clause
           carry_jumps_through_ensure(node.ensure_clause, jump_marks)
-          exit_scope = eval_ensure_clause(node.ensure_clause, exit_scope, raised, rescue_chain)
+          exit_scope = eval_ensure_clause(node, exit_scope, raised, rescue_chain)
         end
 
         [exit_type, exit_scope]
@@ -1365,18 +1365,55 @@ module Rigor
       # The widened pass exists for the index alone, so an evaluator that records nothing skips it, only handing its
       # entry to the enclosing `begin`s as a raise point ({#record_ensure_entry}). The second pass records nothing
       # either, which keeps a chain of `begin … ensure` nested in each other's clauses from doubling per level.
-      def eval_ensure_clause(ensure_clause, exit_scope, raised, rescue_chain)
+      #
+      # A raise the clause runs after continues once it finishes, so the scope the widened pass leaves is a raise
+      # point of each enclosing `begin` too ({#record_ensure_reraise}).
+      def eval_ensure_clause(node, exit_scope, raised, rescue_chain)
+        ensure_clause = node.ensure_clause
         paths = rescue_chain.map { |((_, arm_scope), _)| arm_scope }
         paths << raised if raised
         clause_entry = join_raised_bindings(exit_scope, paths, keep_base: true)
-        return sub_eval(ensure_clause, exit_scope).last if clause_entry.equal?(exit_scope)
+        if clause_entry.equal?(exit_scope)
+          after = sub_eval(ensure_clause, exit_scope).last
+          record_ensure_reraise(node, after)
+          return after
+        end
 
-        if @on_enter || @operand_recorder
-          sub_eval(ensure_clause, clause_entry)
+        recording = @on_enter || @operand_recorder
+        if recording
+          record_ensure_reraise(node, sub_eval(ensure_clause, clause_entry).last)
         else
           record_ensure_entry(ensure_clause, clause_entry)
         end
-        sub_eval(ensure_clause, exit_scope, **UNRECORDED).last
+        after = sub_eval(ensure_clause, exit_scope, **UNRECORDED).last
+        record_ensure_reraise(node, ensure_writes_over(clause_entry, exit_scope, after)) unless recording
+        after
+      end
+
+      # Issue #1231 — the scope a raise the `ensure` of `node` ran after continues with, as a raise point of each
+      # enclosing `begin` whose frame holds the clause: `state = :running; begin; begin; work; ensure; state =
+      # :cleaned; end; rescue; …; end` rescues with `state` as `:cleaned` too. Only a body or rescue arm that can
+      # raise hands the clause a raise to continue.
+      def record_ensure_reraise(node, reraised)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        return unless frames
+        return unless (node.statements && may_raise?(node.statements)) ||
+                      (node.rescue_clause && may_raise?(node.rescue_clause))
+
+        record_raise_scope(frames, node.ensure_clause, reraised)
+      end
+
+      # The widened pass's exit an unrecorded evaluator did not run, approximated: `clause_entry` with each local and
+      # instance variable the clause rebound in `after`, the exit-scope pass's exit, taken from there.
+      def ensure_writes_over(clause_entry, exit_scope, after)
+        reraised = clause_entry
+        after.locals.each do |name, type|
+          reraised = reraised.with_local(name, type) unless type.equal?(exit_scope.local(name))
+        end
+        after.ivars.each do |name, type|
+          reraised = reraised.with_ivar(name, type) unless type.equal?(exit_scope.ivar(name))
+        end
+        reraised
       end
 
       # The widened entry of an `ensure` clause an unrecorded pass does not evaluate, as a raise point of each enclosing
@@ -1649,7 +1686,9 @@ module Rigor
       # How each node class that can raise contributes ({#record_raise_site}): `:dispatch` the scopes before and after
       # it (a call, `yield`, `super`, an interpolation's `to_s`, a range's `Range.new`, all after their operands),
       # `:entry` the scope before it (a constant or class-variable read, which reads nothing that writes, a compound
-      # write, whose operator or `[]=` runs before it binds, a pattern match, a class body), `:loop` the scope after
+      # write, whose operator or `[]=` runs before it binds, a pattern match, a class body, an implicit conversion —
+      # `*z` calls `to_a`, `**z` calls `to_hash` — an `alias` or `undef`, and a hash pair whose key is not a literal,
+      # whose `hash` the literal calls: `:assoc`), `:loop` the scope after
       # a loop whose test can raise, which runs again after each iteration of the body, and `:multi` a multiple
       # assignment, whose attribute or index targets can raise after the targets before them are bound.
       RAISE_SITES = {
@@ -1665,6 +1704,8 @@ module Rigor
         Prism::CallOperatorWriteNode => :entry, Prism::CallOrWriteNode => :entry, Prism::CallAndWriteNode => :entry,
         Prism::MatchWriteNode => :entry, Prism::MatchPredicateNode => :entry, Prism::MatchRequiredNode => :entry,
         Prism::ClassNode => :entry, Prism::ModuleNode => :entry, Prism::SingletonClassNode => :entry,
+        Prism::SplatNode => :entry, Prism::AssocSplatNode => :entry, Prism::AliasMethodNode => :entry,
+        Prism::UndefNode => :entry, Prism::AssocNode => :assoc,
         Prism::WhileNode => :loop, Prism::UntilNode => :loop, Prism::ForNode => :loop,
         Prism::MultiWriteNode => :multi
       }.freeze
@@ -1673,7 +1714,12 @@ module Rigor
       # Nothing under these runs where they appear.
       DEFERRED_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
       MULTI_RAISING_TARGETS = [Prism::CallTargetNode, Prism::IndexTargetNode].freeze
-      private_constant :RAISE_SITES, :CASE_NODES, :DEFERRED_NODES, :MULTI_RAISING_TARGETS
+      # Hash keys whose `hash` cannot raise.
+      LITERAL_KEYS = [
+        Prism::SymbolNode, Prism::StringNode, Prism::IntegerNode, Prism::FloatNode, Prism::NilNode, Prism::TrueNode,
+        Prism::FalseNode
+      ].freeze
+      private_constant :RAISE_SITES, :CASE_NODES, :DEFERRED_NODES, :MULTI_RAISING_TARGETS, :LITERAL_KEYS
 
       # Records the raise points of `node`, a {RAISE_SITES} node the evaluator reached, which left `after`.
       def record_raise_site(raise_site, node, after)
@@ -1685,6 +1731,7 @@ module Rigor
           record_raise_scope(frames, node, scope)
           record_raise_scope(frames, node, after)
         when :entry then record_raise_scope(frames, node, scope)
+        when :assoc then record_raise_scope(frames, node, scope) if raising_key?(node)
         when :loop
           record_raise_scope(frames, node, after) if node.is_a?(Prism::ForNode) || may_raise?(node.predicate)
         when :multi
@@ -1710,10 +1757,15 @@ module Rigor
         end
       end
 
+      def raising_key?(assoc)
+        LITERAL_KEYS.none? { |klass| assoc.key.is_a?(klass) }
+      end
+
       # Whether anything under `node` that runs where it appears can raise.
       def may_raise?(node)
         klass = node.class
-        return true if RAISE_SITES.key?(klass) || CASE_NODES.include?(klass)
+        return true if klass == Prism::AssocNode ? raising_key?(node) : RAISE_SITES.key?(klass)
+        return true if CASE_NODES.include?(klass)
         return false if DEFERRED_NODES.include?(klass)
 
         found = false
@@ -1740,7 +1792,8 @@ module Rigor
       # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings
       # in `scopes`, and in `base` itself under `keep_base`. A binding the accumulated one already accepts
       # ({#retry_binding_accepted?}) is not joined, so a narrowing inside the body (`log if m == :fast`) leaves `m` as
-      # it was. The name keeps the marks `Scope#join` would leave on it ({#raised_marks}). `base` itself when nothing
+      # it was. The name keeps the marks `Scope#join` would leave on it ({#raised_marks}), and the side tables keyed by
+      # a name `base` binds are joined as `Scope#join` joins them ({#join_raised_tables}). `base` itself when nothing
       # moves.
       def join_raised_bindings(base, scopes, keep_base:)
         joined_scope = base
@@ -1752,7 +1805,7 @@ module Rigor
           joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.ivar(name) }
           joined_scope = rejoin_raised(joined_scope, base, scopes, keep_base, :ivar, name, binding, joined) if joined
         end
-        joined_scope
+        join_raised_tables(joined_scope, base, scopes, keep_base)
       end
 
       # `joined_scope` with `name` rebound when the join moved its binding or its marks. The rebind goes through
@@ -1764,46 +1817,142 @@ module Rigor
 
         type = moved ? joined : binding
         rebound = rebind_variable(joined_scope, kind, name, type)
-        declared, optimistic, published, origin = marks
+        declared, optimistic, published, origin, inferred = marks
         if declared && kind == :local
           rebound = rebound.with_local_declaration_mark(name)
         elsif declared
           rebound = rebound.seed_declaration_sourced_ivar(name, type)
         end
         rebound = rebound.with_published_constant_mark(kind, name) if published
-        if kind == :local
-          rebound.with_optimistic_local(name, optimistic).with_local_origin(name, origin)
-        else
-          rebound.with_optimistic_ivar(name, optimistic).with_ivar_origin(name, origin)
-        end
+        return rebound.with_optimistic_ivar(name, optimistic).with_ivar_origin(name, origin) if kind == :ivar
+
+        # ADR-67's taint is sticky across `with_local`, so the rebind kept `joined_scope`'s: set it to the join's.
+        rebound = inferred ? rebound.with_inferred_param_mark(name) : rebound.without_inferred_param_mark(name)
+        rebound.with_optimistic_local(name, optimistic).with_local_origin(name, origin)
       end
 
       # The marks `Scope#join` leaves on `name` across every scope of `scopes` that binds it, and `base` under
-      # `keep_base`, as `[declaration-sourced, optimistic cause, published-constant, origin]`: ADR-58's declaration
-      # mark only where each carries it, the others where any does. A scope recorded after an in-place mutation
-      # carries the first two (`Scope#with_mutated_local`), so `r = @name; begin; up(r); …; rescue; retry; end` keeps
-      # `r`'s mark in the arm and across the retry (issue #1287).
+      # `keep_base`, as `[declaration-sourced, optimistic cause, published-constant, origin, inferred-parameter]`:
+      # ADR-58's declaration mark only where each carries it, the others where any does (ADR-67's taint included,
+      # so `x = 5; begin; x = p; foo; rescue; x.abs; end` keeps the taint `x = p` stamped). A scope recorded after an
+      # in-place mutation carries the first two (`Scope#with_mutated_local`), so `r = @name; begin; up(r); …; rescue;
+      # retry; end` keeps `r`'s mark in the arm and across the retry (issue #1287).
       def raised_marks(base, scopes, keep_base, kind, name)
-        declared, optimistic, published, origin = keep_base ? scope_marks(base, kind, name) : [true, nil, false, nil]
-        scopes.each do |path|
-          next if (kind == :local ? path.local(name) : path.ivar(name)).nil?
+        return raised_ivar_marks(base, scopes, keep_base, name) if kind == :ivar
 
-          declared &&= path.declaration_sourced?(kind, name)
-          optimistic ||= kind == :local ? path.optimistic_local(name) : path.optimistic_ivar(name)
-          published ||= path.published_constant_sourced?(kind, name)
-          origin ||= kind == :local ? path.local_origin(name) : path.ivar_origin(name)
+        declared, optimistic, published, origin, inferred =
+          keep_base ? scope_marks(base, :local, name) : [true, nil, false, nil, false]
+        scopes.each do |path|
+          next if path.local(name).nil?
+
+          declared &&= path.declaration_sourced?(:local, name)
+          optimistic ||= path.optimistic_local(name)
+          published ||= path.published_constant_sourced?(:local, name)
+          origin ||= path.local_origin(name)
+          inferred ||= path.inferred_param?(name)
         end
-        [declared, optimistic, published, origin]
+        [declared, optimistic, published, origin, inferred]
+      end
+
+      def raised_ivar_marks(base, scopes, keep_base, name)
+        declared, optimistic, published, origin = keep_base ? scope_marks(base, :ivar, name) : [true, nil, false, nil]
+        scopes.each do |path|
+          next if path.ivar(name).nil?
+
+          declared &&= path.declaration_sourced?(:ivar, name)
+          optimistic ||= path.optimistic_ivar(name)
+          published ||= path.published_constant_sourced?(:ivar, name)
+          origin ||= path.ivar_origin(name)
+        end
+        [declared, optimistic, published, origin, false]
       end
 
       def scope_marks(scope, kind, name)
         if kind == :local
           [scope.declaration_sourced?(:local, name), scope.optimistic_local(name),
-           scope.published_constant_sourced?(:local, name), scope.local_origin(name)]
+           scope.published_constant_sourced?(:local, name), scope.local_origin(name), scope.inferred_param?(name)]
         else
           [scope.declaration_sourced?(:ivar, name), scope.optimistic_ivar(name),
-           scope.published_constant_sourced?(:ivar, name), scope.ivar_origin(name)]
+           scope.published_constant_sourced?(:ivar, name), scope.ivar_origin(name), false]
         end
+      end
+
+      # The scope-wide tables `Scope#join` merges, joined over `scopes` (and `base` under `keep_base`) as it merges
+      # them: an indexed or method-chain narrowing on a receiver survives only where every scope holds it, its type
+      # the union; the struct-fold-safe set is intersected; the repeated `||=` sites are unioned. A narrowing `base`
+      # does not hold is not added, as a name `base` does not bind is not.
+      def join_raised_tables(joined_scope, base, scopes, keep_base)
+        joined_scope = join_raised_indexed(joined_scope, scopes, keep_base)
+        joined_scope = join_raised_chains(joined_scope, scopes, keep_base)
+        join_raised_sets(joined_scope, base, scopes, keep_base)
+      end
+
+      def join_raised_indexed(joined_scope, scopes, keep_base)
+        joined_scope.indexed_narrowings.each do |key, type|
+          joined = joined_table_entry(keep_base ? type : nil, scopes) { |path| path.indexed_narrowings[key] }
+          next if joined.equal?(type)
+
+          joined_scope =
+            if joined.nil? then joined_scope.without_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key)
+            else joined_scope.with_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key, joined)
+            end
+        end
+        joined_scope
+      end
+
+      def join_raised_chains(joined_scope, scopes, keep_base)
+        joined_scope.method_chain_narrowings.each do |key, type|
+          joined = joined_table_entry(keep_base ? type : nil, scopes) { |path| path.method_chain_narrowings[key] }
+          next if joined.equal?(type)
+
+          joined_scope =
+            if joined.nil?
+              joined_scope.without_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name)
+            else
+              joined_scope.with_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name, joined)
+            end
+        end
+        joined_scope
+      end
+
+      # The union of an entry's types across `scopes`, starting from `joined`, or nil when a scope lacks it. The
+      # starting object itself when nothing widens it.
+      def joined_table_entry(joined, scopes)
+        scopes.each do |path|
+          type = yield(path)
+          return nil if type.nil?
+          next if joined.equal?(type)
+
+          joined = joined.nil? ? type : Type::Combinator.union(joined, type)
+        end
+        joined
+      end
+
+      def join_raised_sets(joined_scope, base, scopes, keep_base)
+        safe = base.struct_fold_safe_locals
+        repeated = nil
+        scopes.each_with_index do |path, index|
+          other = path.struct_fold_safe_locals
+          safe = !keep_base && index.zero? ? other : fold_safe_join(safe, other)
+          path.repeated_or_writes.each_key do |node|
+            (repeated ||= []) << node unless base.repeated_or_writes.key?(node)
+          end
+        end
+        joined_scope = joined_scope.with_struct_fold_safe(safe) unless safe.equal?(joined_scope.struct_fold_safe_locals)
+        repeated ? joined_scope.with_repeated_or_writes(repeated) : joined_scope
+      end
+
+      EMPTY_FOLD_SAFE = Set.new.freeze
+      private_constant :EMPTY_FOLD_SAFE
+
+      # `Scope#join`'s struct-fold-safe merge.
+      def fold_safe_join(mine, theirs)
+        return EMPTY_FOLD_SAFE if mine.nil? || theirs.nil?
+        return mine if mine.equal?(theirs) || mine == theirs
+        return EMPTY_FOLD_SAFE if mine.empty? || theirs.empty?
+
+        intersected = mine & theirs
+        intersected.empty? ? EMPTY_FOLD_SAFE : intersected.freeze
       end
 
       # A statement-by-statement body shares one binding object across its scopes until the name is rebound, so a

@@ -643,6 +643,63 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
     end
 
+    it "sees what an inner ensure wrote before the raise it ran after continued" do
+      source = <<~RUBY
+        state = :running
+        begin
+          begin
+            work
+          ensure
+            state = :cleaned
+          end
+        rescue
+          warn "failed" if state
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :state).last).to eq(literals.call(:running, :cleaned))
+    end
+
+    it "sees an inner ensure's flag" do
+      source = <<~RUBY
+        done = false
+        begin
+          begin
+            work
+          ensure
+            done = true
+          end
+        rescue
+          warn "failed" if done
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :done).last).to eq(literals.call(false, true))
+    end
+
+    it "sees a write that follows a splat's implicit conversion" do
+      ["h = { **opts }", "parts = [*opts]", "h = { opts => 1 }"].each do |conversion|
+        source = "opts = [1]\nx = 1\nbegin\n  #{conversion}\n  x = nil\n  work\nrescue\n  warn \"failed\" if x\nend\n"
+        expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil)), conversion
+      end
+    end
+
+    it "keeps ADR-67's inferred-parameter taint a pre-raise write stamped" do
+      base = scope.with_local(:param, Rigor::Type::Combinator.nominal_of("String")).with_inferred_param_mark(:param)
+      source = <<~RUBY
+        x = 5
+        begin
+          x = param
+          work
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      arm_scopes = []
+      on_enter = ->(node, s) { arm_scopes << s if node.is_a?(Prism::IfNode) }
+      # `scopes:` declares `param` a local of the enclosing scope, as a method parameter is.
+      described_class.new(scope: base, on_enter: on_enter).evaluate(Prism.parse(source, scopes: [[:param]]).value)
+      expect(arm_scopes.last.inferred_param?(:x)).to be(true)
+    end
+
     it "leaves a local the body introduces unbound in the arm" do
       source = <<~RUBY
         x = 0

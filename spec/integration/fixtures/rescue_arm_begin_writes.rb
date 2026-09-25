@@ -380,6 +380,63 @@ def rescue_in_loop_test
   end
 end
 
+# An inner `ensure` runs before the raise it ran after reaches the
+# outer arm.
+def rescue_after_inner_ensure
+  state = :running
+  begin
+    begin
+      Probe.flaky
+    ensure
+      state = :cleaned
+    end
+  rescue ArgumentError
+    assert_type(":cleaned | :running", state)
+    puts "leaked" if state == :running
+  end
+end
+
+def rescue_after_inner_ensure_flag
+  done = false
+  begin
+    begin
+      Probe.flaky
+    ensure
+      done = true
+    end
+  rescue ArgumentError
+    assert_type("bool", done)
+    puts "not done" unless done
+  end
+end
+
+# An implicit conversion raises before the write after it.
+def rescue_in_double_splat(opts)
+  x = 1
+  begin
+    h = { **opts }
+    x = nil
+    Probe.flaky
+  rescue TypeError, ArgumentError
+    assert_type("1?", x)
+    p(h)
+    x + 1 # GENUINE-NIL
+  end
+end
+
+def rescue_in_splat(z)
+  x = 1
+  begin
+    parts = [*z]
+    x = nil
+    Probe.flaky
+  rescue TypeError, ArgumentError
+    assert_type("1?", x)
+    p(parts)
+    x + 1 # GENUINE-NIL
+  end
+end
+
 # --- Controls: the arm still reads the entry value where no raise it
 # rescues can follow a write. ---
 

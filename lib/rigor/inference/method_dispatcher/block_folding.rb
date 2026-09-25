@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "iterator_dispatch"
 
 module Rigor
   module Inference
@@ -25,6 +26,10 @@ module Rigor
       #   cases where Ruby's actual semantics make it unconditional. Non-empty + truthy `any?` is `true`;
       #   non-empty + falsey `all?` is `false`; the empty-receiver "vacuous" answers (`[].all? { false } ==
       #   true`, `[].any? { true } == false`, `[].none? { true } == true`) are likewise honoured.
+      #
+      # One family reads no block truthiness at all: **edge-selecting** `min_by` / `max_by` without a count
+      # answer `nil` only for an empty receiver, so on a receiver whose non-emptiness is a static fact they
+      # answer the element type without the `nil` the RBS `Elem?` return adds ({#fold_edge_by}).
       #
       # The dispatcher returns `nil` for any case that cannot be decided from the (receiver-shape, method,
       # block-truthiness) tuple — element-wise block re-evaluation against `Constant<Array>` receivers (the
@@ -59,6 +64,10 @@ module Rigor
         # a finitely-sized receiver it is `Constant[size]`.
         COUNT_METHOD = :count
 
+        # `min_by` / `max_by` pick one element by the block's key, so the block's value decides WHICH element
+        # but never WHETHER one is returned: only an empty receiver answers `nil`.
+        EDGE_BY_METHODS = Set[:min_by, :max_by].freeze
+
         # `context.block_type` is the inferred return type of the call's block; `nil` means "no block at the
         # call site" and disqualifies every rule here.
         def try_dispatch(context)
@@ -67,6 +76,7 @@ module Rigor
           args = context.args
           block_type = context.block_type
           return nil if receiver.nil? || block_type.nil?
+          return fold_edge_by(receiver, args) if EDGE_BY_METHODS.include?(method_name)
 
           truthiness = constant_truthiness(block_type)
           return nil if truthiness.nil?
@@ -79,6 +89,22 @@ module Rigor
             fold_falsey_nil_short_circuit(method_name, truthiness, args)
           elsif method_name == COUNT_METHOD
             fold_count(receiver, truthiness, args)
+          end
+        end
+
+        # Issue #1333 — `min_by` / `max_by` with a block and no count on a non-empty Tuple or a non-empty
+        # constant integer `Range` answer the receiver's element type: the RBS `Elem?` return adds `nil` for
+        # the empty receiver, and `[1, 2].min_by { |s| rand(3) } + 1` then reported a nil receiver on correct
+        # code. The block's value picks which element, and one `block_type` typed from the call's entry scope
+        # cannot say which, so the answer is the whole element union. An empty receiver, one whose size is
+        # not static (`Array[T]`), and the count form (`min_by(2) { … }`, an Array) decline to RBS.
+        def fold_edge_by(receiver, args)
+          return nil unless args.empty?
+          return nil unless receiver_emptiness(receiver) == :non_empty
+
+          case receiver
+          when Type::Tuple then Type::Combinator.union(*receiver.elements)
+          when Type::Constant then IteratorDispatch.element_type_of(receiver) if receiver.value.is_a?(Range)
           end
         end
 

@@ -2708,20 +2708,21 @@ module Rigor
         apply_rspec_matcher_narrowing(node, post_scope)
       end
 
-      # True when `node` could rebind the regex match-data globals by itself ({MatchRebinding.call_rebinds?}): a method
-      # that matches on this frame's behalf, on any receiver, read with the operands where they were typed (issue
-      # #1365: a name the old table forgot on keeps forgetting unless its literal arguments prove it match-free, so
-      # `row[:name]`, `csv.split(",")` and `s.match?(re)` keep the narrowing and `row[key]` does not; any other call
-      # forgets when it is known to match, as `u.start_with?(/(q)/)` is); or an implicit-self / `self.` call that
-      # may reach this frame's slot. Issue #1364 — a method defined in Ruby runs in a frame of its own, so a match in
-      # its body rebinds its own `$~`, never its caller's, and `log("parsed"); key = $1` keeps `$1` narrowed; such a
-      # call forgets as every implicit-self call did before only in a frame that hands its slot to code the analyzer
-      # does not trace, or where no body stamped a frame. A call to a non-matching method (`$3.to_i`, `year < 50`,
-      # `buf << c`) is match-free, so the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals.
+      # True when `node` could rebind the regex match-data globals by itself
+      # ({MatchRebinding::Calls.statement_rebinds?}): a method that matches on this frame's behalf, on any receiver,
+      # read with the operands where they were typed (issue #1365: a name the old table forgot on keeps forgetting
+      # unless its literal arguments prove it match-free, so `row[:name]`, `csv.split(",")` and `s.match?(re)` keep
+      # the narrowing and `row[key]` does not; any other call forgets when it is known to match, as
+      # `u.start_with?(/(q)/)` is); or an implicit-self / `self.` call that may reach this frame's slot. Issue #1364 —
+      # a method defined in Ruby runs in a frame of its own, so a match in its body rebinds its own `$~`, never its
+      # caller's, and `log("parsed"); key = $1` keeps `$1` narrowed; such a call forgets as every implicit-self call
+      # did before only in a frame that hands its slot to code the analyzer does not trace, or where no body stamped
+      # a frame. A call to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is match-free, so the
+      # multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals.
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
 
-        MatchRebinding.call_rebinds?(node, operand_scope)
+        MatchRebinding::Calls.statement_rebinds?(node, operand_scope)
       end
 
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call

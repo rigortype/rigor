@@ -260,28 +260,6 @@ module Rigor
         end
       end
 
-      # True when `call_node`, a statement's own call, may rebind the match globals of the frame it is made in once
-      # its operands have run (issue #1365). A call the name table forgot on before — any of its names, and for an
-      # implicit-self or `self.` call a name {SelfCalls.named_match?} reads — still forgets unless its syntax proves
-      # it cannot ({Calls.forgets_by_name?}); any other forgets when it is known to match ({Calls.rebinds?}). An
-      # implicit-self or `self.` call also forgets where it may reach the frame's slot although it does not match
-      # itself: where the frame hands its slot to code the analyzer does not trace ({Frame#self_call_fallback?}),
-      # where no body stamped a frame, or where its arguments hold something {.operand_may_match?} counts. Any other
-      # call runs a method in a frame of its own (issue #1364) or a C method that does not match.
-      def call_rebinds?(call_node, scope)
-        receiver = call_node.receiver
-        implicit = receiver.nil? || receiver.is_a?(Prism::SelfNode)
-        if Calls.base_named?(call_node, implicit: implicit)
-          return true if Calls.forgets_by_name?(call_node, scope)
-        elsif Calls.rebinds?(call_node, scope)
-          return true
-        end
-        return false unless implicit
-
-        frame = scope&.match_frame
-        frame.nil? || frame.self_call_fallback?(scope) || operand_may_match?(call_node.arguments, scope)
-      end
-
       # True when `program`, a String of code an eval runs in this frame, may match, on the block scan's terms: its
       # statements run here, and a `def` or class in it runs in a frame of its own. Parsed afresh, so not memoised.
       def program_may_match?(program, scope)
@@ -301,7 +279,7 @@ module Rigor
       # write whose index is known to be a Regexp (`s[re] ||= v`), a block literal on a call there whose body
       # {.may_match?}, a block argument {.block_argument_may_match?} counts, or any other construct the block scan
       # counts (a `when` or `in` value that may be a Regexp, a bare regex condition, a write to `$~`). An
-      # implicit-self call there is read the same way: the frame-wide fallback of {.call_rebinds?} stays with
+      # implicit-self call there is read the same way: the frame-wide fallback of {Calls.statement_rebinds?} stays with
       # statement-position calls, as before, where an operand's `value.upcase` would otherwise forget at every
       # attribute read. A lambda literal does not run where it is written ({.matching_closure?} answers for it),
       # and a `def`, class or module body or a `defined?` operand does not run in this frame.

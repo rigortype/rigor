@@ -77,6 +77,28 @@ module Rigor
           true
         end
 
+        # True when `call_node`, a statement's own call, may rebind the match globals of the frame it is made in once
+        # its operands have run. A call {.base_named?} names still forgets unless its syntax proves it cannot
+        # ({.forgets_by_name?}); any other forgets when it is known to match ({.rebinds?}). An implicit-self or
+        # `self.` call also forgets where it may reach the frame's slot although it does not match itself: where the
+        # frame hands its slot to code the analyzer does not trace ({Frame#self_call_fallback?}), where no body
+        # stamped a frame, or where its arguments hold something {MatchRebinding.operand_may_match?} counts. Any
+        # other call runs a method in a frame of its own (issue #1364) or a C method that does not match.
+        def statement_rebinds?(call_node, scope)
+          receiver = call_node.receiver
+          implicit = receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          if base_named?(call_node, implicit: implicit)
+            return true if forgets_by_name?(call_node, scope)
+          elsif rebinds?(call_node, scope)
+            return true
+          end
+          return false unless implicit
+
+          frame = scope&.match_frame
+          frame.nil? || frame.self_call_fallback?(scope) ||
+            MatchRebinding.operand_may_match?(call_node.arguments, scope)
+        end
+
         # True when `node`, a call, is known to rebind the `$~` of the frame it is made in by the method it calls:
         # an {ALWAYS_MATCHING} name; a {LOOKUPS} name with an argument known to be a Regexp
         # ({Operands.known_regexp_operand?}), and `grep` / `grep_v` on the same terms in their block form; `[]=` with

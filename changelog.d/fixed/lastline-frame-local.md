@@ -1,0 +1,1 @@
+- **[engine]** `$_` is now frame-local: a top-level write no longer leaks into method bodies, and a `while gets` / `if gets` condition narrows `$_` to `String` on its truthy edge and `nil` on its falsey edge. ([#1405](https://github.com/rigortype/rigor/pull/1405))

@@ -367,6 +367,14 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(operands_may_rebind?("$stdout.puts(Integer(v = $2))")).to be(false)
     end
 
+    it "keeps the answer on the frame, which every pass over the call asks" do
+      node = last_statement("[u.index(/(q)/)].map { $1 }")
+      framed = scope.with_match_frame(node)
+      allow(described_class).to receive(:value_may_rebind?).and_call_original
+      2.times { expect(described_class.operands_may_rebind?(node, framed)).to be(true) }
+      expect(described_class).to have_received(:value_may_rebind?).with(node.receiver, framed).once
+    end
+
     # The frame-wide fallback of an implicit-self call stays with statement-position calls, where it was before:
     # `value` and `emit(...)` in an operand are read by what they call.
     it "reads an implicit-self call there by what it calls, not by the frame's fallback" do
@@ -588,6 +596,22 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(rebinds?("Kernel.eval('#{matching}')")).to be(true)
         expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}')")).to be(false)
         expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}s =~ /q/')")).to be(true)
+      end
+
+      it "does not parse code past the bounds" do
+        node = call("Kernel.eval('#{"[" * 3000}1#{"]" * 3000}')")
+        allow(Prism).to receive(:parse).and_call_original
+        described_class.rebinds?(node, typed)
+        expect(Prism).not_to have_received(:parse)
+      end
+
+      # Each pass over the call asks again; the frame keeps the parsed answer.
+      it "keeps the answer for an eval's code on the frame" do
+        node = call(%q|Kernel.eval('"zz" =~ /(q)/')|)
+        framed = typed.with_match_frame(node)
+        allow(Prism).to receive(:parse).and_call_original
+        2.times { expect(described_class.rebinds?(node, framed)).to be(true) }
+        expect(Prism).to have_received(:parse).once
       end
 
       it "survives a scan that overflows the stack, reading the code by its tokens" do

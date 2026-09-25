@@ -3673,7 +3673,8 @@ module Rigor
         ClosureEscapeAnalyzer.classify(
           receiver_type: receiver_type,
           method_name: call_node.name,
-          environment: scope.environment
+          environment: scope.environment,
+          scope: scope
         )
       rescue StandardError
         :unknown

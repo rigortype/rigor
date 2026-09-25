@@ -282,8 +282,10 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
     end
   end
 
-  # The reopened shape is open, and a closed RBS record rejects an open source, as it rejects the nominal every other
-  # in-place mutation of a literal widens to. The key set is still exactly the record's, so this is a false positive.
+  # The reopened shape is open. A closed RBS record rejected every open source, so a literal that was only given a
+  # default drew a mismatch although its key set is exactly the record's (#1281). A closed record now answers `maybe`
+  # for an open source whose known keys are the record's, and `maybe` never reports. A missing key, a known extra key
+  # and a value mismatch still answer `no`.
   describe "a closed record parameter" do
     let(:sig) do
       {
@@ -291,6 +293,13 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
           class Taker
             def self.take: ({ a: Integer }) -> void
             def self.take_hash: (Hash[Symbol, Integer]) -> void
+            def self.make: () -> { a: Integer }
+            def self.pick: ({ a: Integer }) -> Integer
+                         | (Hash[Symbol, untyped]) -> String
+            def self.mix: ({ a: Integer, b: Object, c: Base }) -> Integer
+                        | (Hash[Symbol, untyped]) -> String
+          end
+          class Base
           end
         RBS
       }
@@ -300,14 +309,91 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
       "class Taker\n  def self.take(_h) = nil\n  def self.take_hash(_h) = nil\nend\n#{body}"
     end
 
-    it "rejects the reopened shape" do
-      # flip this when #1281 is fixed: the record should accept a literal that was only given a default.
-      expect(rules(take("h = { a: 1 }\nh.default = 0\nTaker.take(h)"), sig: sig)).to eq(["call.argument-type-mismatch"])
+    def mismatches(source)
+      diagnostics(source, sig).map { |diagnostic| diagnostic.rule.to_s }.grep(/mismatch/)
+    end
+
+    it "accepts the reopened shape" do
+      expect(rules(take("h = { a: 1 }\nh.default = 0\nTaker.take(h)"), sig: sig)).to be_empty
     end
 
     it "accepts the closed literal, and a Hash parameter accepts the reopened shape" do
       expect(rules(take("h = { a: 1 }\nh.fetch(:a)\nTaker.take(h)"), sig: sig)).to be_empty
       expect(rules(take("h = { a: 1 }\nh.default = 0\nTaker.take_hash(h)"), sig: sig)).to be_empty
+    end
+
+    it "accepts the reopened shape as a record return" do
+      expect(mismatches(<<~RUBY)).to be_empty
+        class Taker
+          def self.make
+            h = { a: 1 }
+            h.default = 0
+            h
+          end
+        end
+      RUBY
+    end
+
+    it "still rejects a reopened shape missing a required key, holding a known extra key, or a mismatched value" do
+      expect(rules(take("h = {}\nh.default = 0\nTaker.take(h)"), sig: sig)).to eq(["call.argument-type-mismatch"])
+      expect(rules(take("h = { a: 1, b: 2 }\nh.default = 0\nTaker.take(h)"), sig: sig))
+        .to eq(["call.argument-type-mismatch"])
+      expect(rules(take("h = { a: \"x\" }\nh.default = 0\nTaker.take(h)"), sig: sig))
+        .to eq(["call.argument-type-mismatch"])
+      expect(mismatches(<<~RUBY)).to eq(["def.return-type-mismatch"])
+        class Taker
+          def self.make
+            h = {}
+            h.default = 0
+            h
+          end
+        end
+      RUBY
+    end
+
+    # The loss #1281 accepts: a default proc that stores the key it is asked for really adds `:b`, which the record
+    # forbids. The open shape cannot tell that proc from one that only answers, so both now answer `maybe`.
+    it "accepts a hash whose default proc stored a key the record forbids" do
+      expect(rules(take(<<~RUBY), sig: sig)).to be_empty
+        h = { a: 1 }
+        h.default_proc = proc { |hash, key| hash[key] = 0 }
+        h[:b]
+        Taker.take(h)
+      RUBY
+    end
+
+    # The record's `maybe` is no evidence for its overload, so the strict pass takes the `Hash[Symbol, untyped]`
+    # overload that answers yes rather than the record listed first. The closed literal is the control.
+    it "does not let a record overload listed first win the reopened shape by position" do
+      expect(rules(<<~RUBY, sig: sig)).to eq(["call.undefined-method"])
+        class Taker
+          def self.pick(_h) = nil
+        end
+        h = { a: 1 }
+        h.default = 0
+        Taker.pick(h).upcase
+        Taker.pick({ a: 1 }).upcase
+      RUBY
+    end
+
+    # The discount is for the record's own `maybe` against the open shape. Here the open shape sits under a
+    # parameter that is no record (`b: Object`), and the record's `maybe` comes from `c:`, where `Sub` is a
+    # subclass only the Ruby source declares. That `maybe` still counts, so the record overload keeps the strict
+    # pass, as it does without the default.
+    it "keeps a record overload whose maybe does not come from the open shape" do
+      source = <<~RUBY
+        class Sub < Base
+        end
+        class Taker
+          def self.mix(_h) = nil
+        end
+        h = { k: 1 }
+        h.default = 0
+        dump_type(Taker.mix({ a: 1, b: h, c: Sub.new }))
+        Taker.mix({ a: 1, b: h, c: Sub.new }).even?
+      RUBY
+      expect(diagnostics(source, sig).map(&:message).grep(/\Adump_type/)).to eq(["dump_type: Integer"])
+      expect(rules(source, sig: sig)).to be_empty
     end
   end
 

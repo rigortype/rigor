@@ -1727,9 +1727,19 @@ module Rigor
       joined_locals = join_bindings(locals, other.locals)
       joined_ivars = join_bindings(ivars, other.ivars)
       joined_cvars = join_bindings(cvars, other.cvars)
-      joined_globals = join_bindings(globals, other.globals)
+      joined_globals = unbind_split_last_line(join_bindings(globals, other.globals), other)
       build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
     end
+
+    # Issue #1359 — arms that bind `$_` apart join with it unbound rather than to their union. The arms of a reader
+    # condition bind `String` and `nil`, and `String?` after `if gets … end` would report correct code that proves the
+    # line some other way (`ok = gets ? true : false; return unless ok; line = $_; line.chomp`).
+    def unbind_split_last_line(joined, other)
+      return joined unless joined.key?(LAST_LINE) && @globals[LAST_LINE] != other.globals[LAST_LINE]
+
+      joined.except(LAST_LINE).freeze
+    end
+    private :unbind_split_last_line
 
     def ==(other)
       other.is_a?(Scope) &&

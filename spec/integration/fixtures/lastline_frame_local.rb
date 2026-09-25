@@ -1,4 +1,5 @@
 # rubocop:disable Style/SpecialGlobalVars, Style/GlobalStdStream, Lint/UselessAssignment
+require "delegate"
 require "stringio"
 require "rigor/testing"
 include Rigor::Testing
@@ -232,11 +233,77 @@ def unentered_block(items)
   end
 end
 
-# A class method's implicit-self reader is `Kernel`'s too (Ruby: the line).
+# Inside a class the implicit-self reader may be one the ancestry defines in Ruby, which the analyzer cannot see:
+# a class built on `DelegateClass(File)` records no superclass, and its `gets` is a Ruby forwarder (Ruby: nil, the
+# forwarder's frame took the line). So no class narrows it, a plain one included (Ruby: the line).
+class DelegatedSource < DelegateClass(File)
+  def first
+    assert_type("Dynamic[top]", $_) if gets
+  end
+end
+
 class LineSource
   def self.first
-    assert_type("String", $_) if gets
+    assert_type("Dynamic[top]", $_) if gets
   end
+end
+
+# A `case` clause's conditions, and an `in` clause's guard, run before its body and every later clause (Ruby: the
+# later line, or nil at end of input).
+def case_reader(subject)
+  if gets
+    case
+    when gets then 1
+    else assert_type("Dynamic[top]", $_)
+    end
+  end
+  if gets
+    case subject
+    when $stdin.gets then 1
+    end
+    assert_type("Dynamic[top]", $_)
+  end
+  if gets
+    case subject
+    in Integer if gets then 1
+    else 2
+    end
+    assert_type("Dynamic[top]", $_)
+  end
+end
+
+# A later operand of the statement that runs the reader reads what the reader set (Ruby: the second line, or nil).
+def later_operand(items)
+  if gets
+    [gets, assert_type("Dynamic[top]", $_)]
+    gets.to_s + assert_type("Dynamic[top]", $_)
+    [gets, items.map { assert_type("Dynamic[top]", $_) }]
+    { a: gets, b: [assert_type("Dynamic[top]", $_)] }
+    [items.first(gets.to_i) ? assert_type("Dynamic[top]", $_) : 0]
+  end
+end
+
+# `redo` runs the body again without testing the predicate, after the body's own reader (Ruby: `["a\n", nil]` with
+# one line of input).
+def redo_reader
+  read = []
+  while gets
+    read << assert_type("Dynamic[top]", $_)
+    gets
+    redo if read.size == 1
+  end
+  read
+end
+
+def redo_rebinding_reader
+  count = 0
+  while gets
+    count += 1
+    assert_type("Dynamic[top]", $_)
+    gets
+    redo if count == 1
+  end
+  count
 end
 
 # A body that runs again reads what an earlier pass set (Ruby on the second pass at end of input: nil).
@@ -305,6 +372,21 @@ def definer
   end
 end
 
+# The arms of a reader condition bind `$_` to `String` and `nil`, and join with it unbound rather than to `String?`
+# (Ruby: the line or nil).
+def joined_arms
+  ok = false
+  if gets
+    ok = true
+  end
+  assert_type("Dynamic[top]", $_)
+  seen = gets ? true : false
+  assert_type("Dynamic[top]", $_)
+  once = (1 if gets)
+  assert_type("Dynamic[top]", $_)
+  [ok, seen, once]
+end
+
 # Quiet controls: correct code that reads `$_` after a condition on the reader reports nothing.
 def quiet_loop
   while gets
@@ -352,6 +434,26 @@ def quiet_foreach(path)
       copy.chomp # QUIET-1359
     end
   end
+end
+
+# A reader condition's joined arms, then a check of the flag the arms set (Ruby: the line).
+def quiet_joined_flag
+  ok = false
+  if gets
+    ok = true
+  end
+  return unless ok
+
+  line = $_
+  line.chomp # QUIET-1359
+end
+
+def quiet_ternary_flag
+  seen = gets ? true : false
+  return unless seen
+
+  line = $_
+  line.chomp # QUIET-1359
 end
 
 # A reader's value checked another way does not narrow `$_`, which stays unbound, so this reports nothing either.

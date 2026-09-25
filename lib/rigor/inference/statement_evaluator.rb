@@ -328,6 +328,8 @@ module Rigor
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
       # and `scope'` is the scope observable after the node has run. The receiver scope is never mutated.
       def evaluate(node)
+        return evaluator_at(@scope.forget_last_line).evaluate(node) if forget_last_line_first?(node)
+
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
@@ -337,6 +339,26 @@ module Rigor
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
         [@scope.type_of(node, tracer: @tracer), forget_rebound_specials(@scope, node)]
+      end
+
+      # Issue #1359 — the nodes whose handler runs their parts in order, each from the scope the parts before it
+      # left, so a `$_` reader among them forgets it where it runs ({LastLine}) and a read before it keeps the
+      # narrowing.
+      SEQUENCED_NODES = Set[
+        Prism::ProgramNode, Prism::StatementsNode, Prism::ParenthesesNode, Prism::IfNode, Prism::UnlessNode,
+        Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::CaseNode, Prism::CaseMatchNode, Prism::BeginNode,
+        Prism::AndNode, Prism::OrNode, Prism::ElseNode, Prism::WhenNode, Prism::InNode, Prism::RescueNode,
+        Prism::EnsureNode, Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
+        Prism::BlockNode, Prism::LambdaNode
+      ].freeze
+      private_constant :SEQUENCED_NODES
+
+      # True when `node` may set `$_` while `$_` is narrowed, and its handler types parts of it from the scope it
+      # starts in rather than threading them: a call's receiver and arguments, a literal's elements, a value a write
+      # stores. A read of `$_` there may run after the reader (`bar(gets, $_)`, `[gets, $_]`, `gets.to_s + $_`), so
+      # the whole node is evaluated with `$_` forgotten, which costs only a read that runs before the reader.
+      def forget_last_line_first?(node)
+        @scope.last_line_bound? && !SEQUENCED_NODES.include?(node.class) && LastLine.may_set?(node, @scope)
       end
 
       # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
@@ -1241,6 +1263,9 @@ module Rigor
         results = []
         falsey_scope = entry_scope
         conditions.each do |branch|
+          # Issue #1359 — a clause's conditions, or its pattern's pins and guard, run before its body and before
+          # every later clause, and the walk types them without evaluating them, so a reader there forgets `$_` here.
+          falsey_scope = LastLine.forget_if_set(falsey_scope, *clause_tests(branch))
           # ADR-47 WD2 — record the scope ENTERING this clause (the subject narrowed by every earlier clause's negation)
           # on the clause's first condition node, so `flow.unreachable-clause` can tell a prior-exhausted subject (entry
           # already `bot`) from a per-clause-disjoint one (entry concrete, this clause disjoint). `on_enter`-only (no
@@ -1251,6 +1276,12 @@ module Rigor
           results << sub_eval(branch, body_scope)
         end
         [results, falsey_scope]
+      end
+
+      # What a `when` / `in` clause runs to decide whether it matches, without its body: the `when` conditions, or the
+      # `in` pattern with its pins and guard.
+      def clause_tests(branch)
+        branch.is_a?(Prism::WhenNode) ? branch.conditions : [branch.pattern]
       end
 
       # ADR-47 WD2/WD3 — record the scope ENTERING a `when`/`in` clause on the node `flow.unreachable-clause` reads to
@@ -1776,9 +1807,15 @@ module Rigor
       def loop_entry_scope(node) = LastLine.forget_if_set(scope, node.statements)
 
       # {#eval_loop}'s single body pass. It enters on the predicate's loop-entry edge, as every fixpoint pass does,
-      # except a `begin … end while` body, which runs once before the predicate is tested.
+      # except a `begin … end while` body, which runs once before the predicate is tested, and a body a `redo`
+      # targets, which runs again without the predicate being tested again.
       def single_pass(node, post_pred, jumps)
-        entry = node.begin_modifier? ? post_pred : loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
+        entry =
+          if node.begin_modifier? || JumpTargets.any?(node.statements, Prism::RedoNode)
+            post_pred
+          else
+            loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
+          end
         loop_iteration(node.statements, entry, jumps)
       end
 
@@ -2122,7 +2159,12 @@ module Rigor
         overlaid = bindings.except(*body_first)
         entry = overlaid.reduce(post_pred) { |acc, (name, type)| acc.with_local(name, type) }
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, entry)
-        node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope
+        edge = node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope
+        # Issue #1359 — a `redo` re-enters the body without testing the predicate again, so a `$_` the predicate
+        # narrowed does not hold there when the body may set it.
+        return edge unless edge.last_line_bound? && JumpTargets.any?(node.statements, Prism::RedoNode)
+
+        LastLine.forget_if_set(edge, node.statements)
       end
 
       # `for index in collection; body; end`. Unlike `each {}` blocks, `for` does NOT create a new variable scope: the

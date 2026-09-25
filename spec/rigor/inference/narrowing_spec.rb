@@ -1602,9 +1602,11 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(truthy.global(:$_)).to be_nil
       expect(falsey.global(:$_)).to be_nil
 
+      # The falsey edge joins the arm where `gets` returned nil with the arm where `x` was falsey after a line: `$_`
+      # is unbound there, never `String?`.
       truthy, falsey = edges("gets && x")
       expect(truthy.global(:$_)).to eq(string_t)
-      expect(falsey.global(:$_)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+      expect(falsey.global(:$_)).to be_nil
 
       truthy, = edges("gets && gets")
       expect(truthy.global(:$_)).to eq(string_t)

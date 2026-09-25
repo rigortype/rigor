@@ -1165,7 +1165,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # leaves it unbound: neither reports a correct program that copies `$_` into a local and calls a method on it.
     it "reports nothing on a `$_` copy read under a reader condition" do
       reads = marked_lines(harness, "# QUIET-1359")
-      expect(reads.size).to eq(8)
+      expect(reads.size).to eq(10)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
 

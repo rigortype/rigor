@@ -76,9 +76,33 @@ RSpec.describe Rigor::Inference::LastLine do
         .to be(false)
     end
 
-    it "reads implicit self in a class method, and in an instance method of a class RBS does not know" do
-      expect(reads_line?("class Source; def self.first = gets; end")).to be(true)
-      expect(reads_line?("class Source; def first = gets; end")).to be(true)
+    # A class's ancestry may hold a Ruby reader the analyzer does not see: `class W < DelegateClass(File)` records no
+    # superclass, and RBS answers `Kernel` for `CSV#gets`, an alias of its Ruby `shift`.
+    it "reads implicit self as `Kernel`'s at the top level alone, and in a class only where RBS places it in `IO`" do
+      expect(reads_line?("def top = gets")).to be(true)
+      ["class Source; def self.first = gets; end", "class Source; def first = gets; end",
+       "class W < DelegateClass(File); def first = gets; end", "class Mine < IO; def first = gets; end",
+       "module Helpers; def first = gets; end"].each do |source|
+        expect(reads_line?(source)).to be(false), source
+      end
+      expect(reads_line?("class IO; def first = gets; end")).to be(true)
+
+      project = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: []))
+      ["class MyCSV < CSV; def first = gets; end", "class String; def first = gets; end"].each do |source|
+        call, call_scope = indexed_call(source, :gets, project)
+        expect(described_class.reads_line?(call, call_scope)).to be(false), source
+      end
+    end
+
+    # `Kernel`, `STDIN` and `ARGF` are read by their types, so a project constant that shadows one reads by its own.
+    it "reads `Kernel`, `STDIN` and `ARGF` by their types" do
+      shadowed = scope.with_discovery(
+        scope.discovery.with(in_source_constants: { "ARGF" => Rigor::Type::Combinator.nominal_of("Object") })
+      )
+
+      expect(described_class.reads_line?(last_statement("ARGF.gets"), shadowed)).to be(false)
+      expect(described_class.reads_line?(last_statement("STDIN.gets"), shadowed)).to be(true)
+      expect(described_class.reads_line?(last_statement("Object.gets"), scope)).to be(false)
     end
 
     # The program's own `gets` runs in a frame of its own, and so sets its own `$_`.

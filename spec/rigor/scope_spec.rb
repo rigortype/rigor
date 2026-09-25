@@ -315,6 +315,17 @@ RSpec.describe Rigor::Scope do
       expect(seeded.forget_last_line).to equal(seeded)
     end
 
+    # A reader condition's arms bind `String` and `nil`: joined, `$_` is unbound rather than `String?`.
+    it "joins arms that bind `$_` apart with it unbound, and keeps a `$_` both arms bind alike" do
+      nil_t = Rigor::Type::Combinator.constant_of(nil)
+      truthy = scope.with_global(:$_, str)
+
+      expect(truthy.join(scope.with_global(:$_, nil_t)).last_line_bound?).to be(false)
+      expect(truthy.join(truthy.with_local(:x, str)).global(:$_)).to eq(str)
+      expect(truthy.with_global(:$1, str).join(scope.with_global(:$_, nil_t).with_global(:$1, nil_t)).global(:$1))
+        .to eq(Rigor::Type::Combinator.union(str, nil_t))
+    end
+
     it "answers whether the frame's body makes a closure that may set `$_`" do
       root = ->(source) { Prism.parse(source).value }
 

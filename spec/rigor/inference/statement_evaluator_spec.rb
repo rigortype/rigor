@@ -3694,6 +3694,53 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(reads).to eq([string_t])
     end
 
+    # The `$_` each read of it sees in the per-node scope index, which also reaches the operands the evaluator types
+    # without entering.
+    def indexed_last_line_reads(source)
+      program = parse_program(source)
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: default_env_scope)
+      reads = []
+      program.breadth_first_search do |node|
+        reads << index[node].global(:$_) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == :$_
+        false
+      end
+      reads
+    end
+
+    it "forgets `$_` where a `case` clause's tests may set it, and in every later operand of a reader" do
+      ["case\nwhen gets then 1\nelse $_\nend", "case x\nwhen $stdin.gets then 1\nend\n$_",
+       "case x\nin Integer if gets then 1\nelse $_\nend", "bar(gets, $_)", "[gets, $_]", "gets.to_s + $_",
+       "show(gets, xs.map { $_ })", "h = { a: gets, b: [1].map { $_ } }", "puts(foo(gets) ? $_ : 0)"].each do |body|
+        reads = indexed_last_line_reads("def m(x, xs)\n  if gets\n#{body}\n  end\nend\n")
+        expect(reads).to all(be_nil), body
+        expect(reads).not_to be_empty, body
+      end
+      expect(indexed_last_line_reads("def m\n  if gets\n    [$_, 1]\n  end\nend\n")).to eq([string_t])
+      # A statement list, a loop or a conditional runs its parts in order, so a read before the reader keeps it.
+      expect(indexed_last_line_reads("def m(ok)\n  if gets\n    a = $_\n    b = gets if ok\n  end\nend\n"))
+        .to eq([string_t])
+    end
+
+    # `redo` re-enters the body without testing the predicate again.
+    it "enters a body a `redo` targets without the predicate's narrowing" do
+      reads, = last_line_reads("while gets\n  $_\n  gets\n  redo if ok\nend\n")
+      expect(reads).to all(be_nil)
+      reads, = last_line_reads("while gets\n  $_\n  redo if ok\nend\n")
+      expect(reads).to eq([nil])
+      # A body that rebinds a local runs the fixpoint passes, which enter on the predicate's edge.
+      reads, = last_line_reads("while gets\n  x = $_\n  gets\n  redo if x\nend\n")
+      expect(reads).to all(be_nil)
+      reads, = last_line_reads("while gets\n  x = $_\n  redo if x\nend\n")
+      expect(reads.last).to eq(string_t)
+    end
+
+    it "joins a reader condition's arms with `$_` unbound" do
+      ["if gets\n  1\nend", "ok = gets ? true : false", "x = (1 if gets)"].each do |statement|
+        _, post = last_line_reads("#{statement}\n")
+        expect(post.global(:$_)).to be_nil, statement
+      end
+    end
+
     # The single body pass enters on the predicate's loop-entry edge as the fixpoint passes do, so a body that
     # rebinds no local reads the narrowing too; a `begin … end while` body runs once before the predicate.
     it "enters the single body pass of a loop on the predicate's edge, but not a `begin … end while` body" do
@@ -3710,6 +3757,19 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       described_class.new(scope: default_env_scope, on_enter: recorder).evaluate(program)
       expect(reads.first).to eq(string_t)
       expect(reads.last).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
+    end
+
+    it "enters the single pass of a body a `redo` targets from the post-predicate scope" do
+      program = parse_program(<<~RUBY)
+        while (line = gets)
+          line
+          redo if line.empty?
+        end
+      RUBY
+      reads = []
+      recorder = ->(node, scope) { reads << scope.local(:line) if node.is_a?(Prism::LocalVariableReadNode) }
+      described_class.new(scope: default_env_scope, on_enter: recorder).evaluate(program)
+      expect(reads.first).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
     end
   end
 

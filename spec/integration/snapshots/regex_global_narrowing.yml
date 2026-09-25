@@ -65,14 +65,14 @@ assertions:
   '57': String
   '58': String
   '59': String
-  '60': String?
-  '61': String
+  '60': String
+  '61': String?
   '62': String?
   '63': String?
   '64': String?
   '65': String?
   '66': String?
-  '67': String?
+  '67': String
   '68': String?
   '69': String?
   '70': String?
@@ -80,7 +80,15 @@ assertions:
   '72': String?
   '73': String?
   '74': String?
-  '75': String
-  '76': String
+  '75': String?
+  '76': String?
   '77': String?
   '78': String?
+  '79': String?
+  '80': String?
+  '81': String?
+  '82': String?
+  '83': String?
+  '84': String?
+  '85': String?
+  '86': String?

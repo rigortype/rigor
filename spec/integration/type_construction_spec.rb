@@ -1091,10 +1091,11 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # Issue #1364 — `log("parsed")`, `warn "debug"`, `self.log("x")` and `send(:log, …)` call methods that run in
-    # frames of their own, so the read after each keeps the match edge's `String`.
+    # frames of their own, so the read after each keeps the match edge's `String`, and so does one in a frame whose
+    # only block cannot match.
     it "reports nothing on the read after a call into a Ruby-defined method" do
       reads = marked_lines(harness, "# CALLEE-FRAME")
-      expect(reads.size).to eq(4)
+      expect(reads.size).to eq(5)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end

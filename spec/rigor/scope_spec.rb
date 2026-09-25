@@ -285,6 +285,56 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # Issue #1359 — `$_` shares the match globals' frame slot, and is forgotten on the same terms.
+  describe "#forget_last_line / #untyped_last_line / #last_line_bound?" do
+    let(:str) { Rigor::Type::Combinator.nominal_of("String") }
+
+    it "drops `$_` alone, and leaves the match globals and other globals bound" do
+      narrowed = scope.with_global(:$_, str).with_global(:$1, str).with_global(:$stdout, str)
+      forgotten = narrowed.forget_last_line
+
+      expect(forgotten.global(:$_)).to be_nil
+      expect(forgotten.global(:$1)).to eq(str)
+      expect(forgotten.global(:$stdout)).to eq(str)
+      expect(narrowed.forget_match_globals.global(:$_)).to eq(str)
+    end
+
+    it "rebinds a bound `$_` to `Dynamic[top]`, and leaves an unbound one unbound" do
+      untyped = scope.with_global(:$_, str).untyped_last_line
+
+      expect(untyped.global(:$_)).to eq(Rigor::Type::Combinator.untyped)
+      expect(untyped.last_line_bound?).to be(true)
+      expect(scope.untyped_last_line).to equal(scope)
+    end
+
+    it "is bound only while `$_` holds a binding, and answers the same scope when there is nothing to drop" do
+      seeded = scope.with_global(:$stdout, str)
+
+      expect(seeded.last_line_bound?).to be(false)
+      expect(seeded.with_global(:$_, str).last_line_bound?).to be(true)
+      expect(seeded.forget_last_line).to equal(seeded)
+    end
+
+    # A reader condition's arms bind `String` and `nil`: joined, `$_` is unbound rather than `String?`.
+    it "joins arms that bind `$_` apart with it unbound, and keeps a `$_` both arms bind alike" do
+      nil_t = Rigor::Type::Combinator.constant_of(nil)
+      truthy = scope.with_global(:$_, str)
+
+      expect(truthy.join(scope.with_global(:$_, nil_t)).last_line_bound?).to be(false)
+      expect(truthy.join(truthy.with_local(:x, str)).global(:$_)).to eq(str)
+      expect(truthy.with_global(:$1, str).join(scope.with_global(:$_, nil_t).with_global(:$1, nil_t)).global(:$1))
+        .to eq(Rigor::Type::Combinator.union(str, nil_t))
+    end
+
+    it "answers whether the frame's body makes a closure that may set `$_`" do
+      root = ->(source) { Prism.parse(source).value }
+
+      expect(scope.with_match_frame(root.call("f = -> { gets }")).last_line_closure?).to be(true)
+      expect(scope.with_match_frame(root.call("f = -> { puts }")).last_line_closure?).to be(false)
+      expect(scope.last_line_closure?).to be(false)
+    end
+  end
+
   # Issue #1358 — the frame a body runs in, which its blocks and closures share.
   describe "#with_match_frame / #match_rebinding_closure?" do
     def root(source) = Prism.parse(source).value

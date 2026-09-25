@@ -38,6 +38,25 @@ module Rigor
         false
       end
 
+      # Which of `jump_classes` target the construct whose body is `node`, found in one walk and answered as a bit
+      # mask (bit `i` for `jump_classes[i]`), so a loop asks for its `next`, `break` and `redo` together without
+      # allocating. The walk stops descending once every class is found.
+      def kinds(node, jump_classes)
+        kind_mask(node, jump_classes, 0, (1 << jump_classes.size) - 1)
+      end
+
+      def kind_mask(node, jump_classes, mask, full)
+        return mask if node.nil? || mask == full
+
+        index = jump_classes.index(node.class)
+        mask |= 1 << index if index
+        node.rigor_each_child do |child|
+          mask = kind_mask(child, jump_classes, mask, full) unless boundary?(child)
+        end
+        mask
+      end
+      private_class_method :kind_mask
+
       # Every `jump_class` node that targets the construct whose body is `node`, as an identity-keyed Hash used as a
       # membership set: the jump sinks also collect jumps belonging to nested constructs, and their consumers filter
       # against this set.

@@ -3922,9 +3922,16 @@ module Rigor
 
         case ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name, scope: scope)
         when :non_escaping then true
-        when :unknown then ClosureEscapeAnalyzer.iterator_name?(call_node.name)
+        when :unknown then unseen_iterator?(call_node.name, receiver_type)
         else false
         end
+      end
+
+      # Issue #1234 — the name reads as repetition only where Rigor cannot see the method: a method the project
+      # defines under a catalogued name is the project's, whatever it is called.
+      def unseen_iterator?(method_name, receiver_type)
+        ClosureEscapeAnalyzer.iterator_name?(method_name) &&
+          !ClosureEscapeAnalyzer.project_defined?(receiver_type: receiver_type, method_name: method_name, scope: scope)
       end
 
       def at_most_one_run?(method_name, receiver_type)

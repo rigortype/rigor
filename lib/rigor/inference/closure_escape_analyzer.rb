@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../reflection"
+require_relative "external_ancestor_resolution"
 
 module Rigor
   module Inference
@@ -92,6 +93,26 @@ module Rigor
         ITERATOR_NAMES.include?(method_name)
       end
 
+      # Issue #1234 — whether the project itself answers `method_name` on some member of `receiver_type`: a
+      # `def` (or `define_method`, `attr_*`, a module's method) anywhere in a project class's ancestry, on the
+      # instance side for a `Nominal` member and the singleton side for a `Singleton` one, or a signature whose
+      # declaring owner is a project class or module. Such a method is the project's, not the catalogued
+      # iterator of the same name, so the name says nothing about how often it yields: `class Vault; def
+      # select(key) = yield(key.to_s); end` runs its block once. `ExpressionTyper#block_may_repeat?` asks this
+      # before reading an `:unknown` receiver's name as repetition. A carrier naming no class (`Dynamic`, `Top`)
+      # answers false — Rigor cannot see its method at all.
+      def project_defined?(receiver_type:, method_name:, scope:)
+        return false if scope.nil?
+
+        case receiver_type
+        when Type::Union
+          receiver_type.members.any? { |member| project_defined?(receiver_type: member, method_name:, scope:) }
+        when Type::Nominal then project_defines?(receiver_type.class_name, method_name.to_sym, :instance, scope)
+        when Type::Singleton then project_defines?(receiver_type.class_name, method_name.to_sym, :singleton, scope)
+        else false
+        end
+      end
+
       class << self
         private
 
@@ -150,17 +171,39 @@ module Rigor
         def ancestry_non_escaping?(class_name, method_sym, scope)
           return false if scope.nil? || !ITERATOR_NAMES.include?(method_sym)
           return false unless scope.known_user_class?(class_name)
-          return false if scope.discovered_method_through_ancestors?(class_name, method_sym, :instance)
-          return false if scope.user_def_through_ancestors(class_name, method_sym).first
+          return false if project_source_defines?(class_name, method_sym, :instance, scope)
 
           if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
-            definition = Rigor::Reflection.instance_method_definition(class_name, method_sym, scope: scope)
-            return catalogued_declaration?(definition, method_sym)
+            return catalogued_declaration?(method_definition(class_name, method_sym, :instance, scope), method_sym)
           end
 
           external_ancestry_non_escaping?(class_name, method_sym, scope)
-        rescue StandardError
-          false
+        end
+
+        # The project's source, or a signature whose declaring owner is a project class or module, defines the
+        # method on `class_name` or an ancestor the project declares.
+        def project_defines?(class_name, method_sym, kind, scope)
+          return true if project_source_defines?(class_name, method_sym, kind, scope)
+
+          owner = method_definition(class_name, method_sym, kind, scope)&.defined_in
+          !owner.nil? && scope.known_user_class?(owner.to_s.delete_prefix("::"))
+        end
+
+        def project_source_defines?(class_name, method_sym, kind, scope)
+          return true if scope.discovered_method_through_ancestors?(class_name, method_sym, kind)
+
+          found, = if kind == :singleton
+                     scope.singleton_def_through_ancestors(class_name, method_sym)
+                   else
+                     scope.user_def_through_ancestors(class_name, method_sym)
+                   end
+          !found.nil?
+        end
+
+        # The RBS definition, or nil — a malformed signature is a gap, and
+        # {ExternalAncestorResolution.method_definition} is the one place that rescues it.
+        def method_definition(class_name, method_sym, kind, scope)
+          ExternalAncestorResolution.method_definition(class_name, method_sym, kind, scope: scope)
         end
 
         # The first external ancestor that declares the method decides. One the environment does not know may
@@ -171,7 +214,7 @@ module Rigor
             return false if known.nil?
             return true if catalogued_owner?(known, method_sym)
 
-            definition = Rigor::Reflection.instance_method_definition(known, method_sym, scope: scope)
+            definition = method_definition(known, method_sym, :instance, scope)
             return catalogued_declaration?(definition, method_sym) if definition
           end
           false

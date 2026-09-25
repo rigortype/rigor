@@ -79,6 +79,19 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     expect(rules).not_to include("call.undefined-method")
   end
 
+  it "keeps the wrapper when a member is a supertype of a class some overload names" do
+    # Runtime: `1 <=> 2 ** n` is an Integer. `2 ** n`'s `Numeric` member skips `Integer#<=>`'s `(Integer)` arm and
+    # lands on `(untyped) -> Integer?`, a catch-all a runtime Integer never reaches; read so, `c + 1` reported a
+    # possible-nil receiver.
+    result = analyze(<<~RUBY)
+      def cmp(n)
+        c = 1 <=> 2 ** n
+        c + 1
+      end
+    RUBY
+    expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+  end
+
   it "keeps joining every arm for an untyped argument" do
     # The #521 join: an untyped argument cannot tell the arms apart.
     dumps, = dumped_and_rules(<<~RUBY)

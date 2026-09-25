@@ -450,6 +450,22 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(rational_plus(untyped_member)).to eq(["Numeric"])
       end
 
+      it "keeps the wrapper for a single supertype member that a subclass arm names" do
+        # `Dynamic[Numeric?]` against `Integer#<=>`: read as `Numeric`, it skipped `(Integer)` for the `(untyped)`
+        # catch-all, whose `Integer?` a runtime Integer never returns.
+        definition = env.rbs_loader.instance_definition("Integer")
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        numeric = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Numeric"),
+                                        Rigor::Type::Combinator.constant_of(nil))
+        )
+        picked = described_class.select_candidates(
+          definition.methods[:<=>], arg_types: [numeric], self_type: integer, instance_type: integer, environment: env
+        )
+        expect(picked.size).to eq(1)
+        expect(picked.first.type.return_type.to_s).to eq("::Integer")
+      end
+
       it "keeps the wrapper for the singular select, whose one answer a member order would decide" do
         expect(rational_plus(dynamic_of("Integer", "Float"), singular: true)).to eq(["Numeric"])
       end

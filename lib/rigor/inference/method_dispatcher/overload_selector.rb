@@ -83,7 +83,7 @@ module Rigor
                                    environment, false)
           end
 
-          FacetDistribution.select(arg_types, member_wise: member_wise) do |args, member|
+          FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
             select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member)
           end
         end

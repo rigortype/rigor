@@ -39,13 +39,50 @@ module Rigor
         # more than {CAP}, it yields once with the arguments as given. A list that matches nothing proves only that
         # no overload names that member: a supertype member (`Numeric` in `2 ** n`'s `Complex | Numeric`) still
         # reaches an arm at runtime, and dropping it read `1 + 2 ** n` as a precise `Complex`.
-        def select(arg_types, member_wise:, &)
+        def select(arg_types, definition, member_wise:, environment:, &)
           choices = arg_types.map { |arg| facet_members(arg) || [arg] }
+          return yield(arg_types, false) if supertype_member?(choices, arg_types, definition.method_types, environment)
           return yield(choices.map(&:first), false) if choices.all? { |members| members.size == 1 }
           return yield(arg_types, false) unless member_wise
 
           picks = picks_by_member(choices, &)
           picks.empty? ? yield(arg_types, false) : picks
+        end
+
+        # Whether a facet member is a proper superclass of a class some overload's parameter names (`Numeric` against
+        # `Integer#<=>`'s `(Integer)`): the member's runtime value may be of that subclass and take that arm, yet the
+        # member itself skips it for a catch-all (`(untyped) -> Integer?`), whose return then read as precise. Both
+        # halves of "no overload takes it" and "an overload takes it" are unproven for such a member, so the wrapper
+        # stays. A literal has no subclass to hide.
+        def supertype_member?(choices, arg_types, overloads, environment)
+          members = choices.each_with_index.flat_map { |ms, i| facet_members(arg_types[i]) ? ms : [] }
+          members = members.grep(Type::Nominal)
+          return false if members.empty?
+          return true if environment.nil?
+
+          names = overloads.flat_map { |method_type| param_class_names(method_type) }.uniq
+          members.any? do |member|
+            names.any? { |name| environment.class_ordering(name, member.class_name) == :subclass }
+          end
+        end
+
+        # The class names an overload's positional parameters spell, rest included, through `?` and `|`.
+        def param_class_names(method_type)
+          fun = method_type.type
+          return [] unless fun.respond_to?(:required_positionals)
+
+          params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
+          params += [fun.rest_positionals] if fun.rest_positionals
+          params.flat_map { |param| class_names_in(param.type) }
+        end
+
+        def class_names_in(rbs_type)
+          case rbs_type
+          when RBS::Types::ClassInstance then [rbs_type.name.to_s.delete_prefix("::")]
+          when RBS::Types::Optional then class_names_in(rbs_type.type)
+          when RBS::Types::Union then rbs_type.types.flat_map { |member| class_names_in(member) }
+          else []
+          end
         end
 
         # The distinct overloads the member-wise lists pick; none past {CAP} or when any list picks nothing.

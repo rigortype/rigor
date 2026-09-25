@@ -238,11 +238,11 @@ RSpec.describe Rigor::Inference::MatchRebinding do
   end
 
   # Issue #1364 — an implicit-self call no longer forgets by itself, so it answers for the match its own arguments may
-  # run, which applies no reset of its own (#1365).
+  # run; since #1365 a call there forgets by itself too.
   describe ".operand_may_match?" do
     def operand_may_match?(source) = described_class.operand_may_match?(last_statement(source).arguments, scope)
 
-    it "counts a call the table or {SelfCalls} counts on any receiver, a literal naming one, or a `yield`" do
+    it "counts a call {Calls} counts on any receiver, a literal naming one, or a `yield`" do
       expect(operand_may_match?('log(line.sub(/=/, ": "))')).to be(true)
       expect(operand_may_match?("log(\"\#{h[k]}\")")).to be(true)
       expect(operand_may_match?("log(u !~ /(z)/)")).to be(true)
@@ -256,6 +256,7 @@ RSpec.describe Rigor::Inference::MatchRebinding do
 
     it "does not count an argument that only reads, or a block or lambda the other rules answer for" do
       expect(operand_may_match?("log(\"\#{$2.strip}: parsed\")")).to be(false)
+      expect(operand_may_match?("log(row[:name], csv.split(','))")).to be(false)
       expect(operand_may_match?("log(items.map { |i| i =~ /(z)/ })")).to be(false)
       expect(operand_may_match?("register(-> { s =~ /(z)/ })")).to be(false)
     end
@@ -341,19 +342,154 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     end
   end
 
-  describe ".call_may_match?" do
-    def call_may_match?(source) = described_class.call_may_match?(last_statement(source), scope)
-
-    it "counts a block that runs in the receiver chain or an argument" do
-      expect(call_may_match?("items.select { |i| i =~ /(z)/ }.map(&:upcase)")).to be(true)
-      expect(call_may_match?("log(items.map { |i| i =~ /(z)/ })")).to be(true)
-      expect(call_may_match?("log(items.map(&handler))")).to be(true)
+  # Issue #1365 — Ruby runs a call's receiver chain and arguments in the caller's frame before the method.
+  describe ".operands_may_rebind?" do
+    def operands_may_rebind?(source, in_scope = scope)
+      described_class.operands_may_rebind?(last_statement(source), in_scope)
     end
 
-    it "does not count a lambda there, which does not run yet, or a call without a block" do
-      expect(call_may_match?("register(-> { s =~ /(z)/ })")).to be(false)
-      expect(call_may_match?("log(s.sub(/(z)/, ''))")).to be(false)
-      expect(call_may_match?("items.select { |i| i.empty? }.map(&:upcase)")).to be(false)
+    it "counts a call there that rebinds `$~`, and a block there that may match" do
+      expect(operands_may_rebind?("out.push(u.sub(/q/, ''))")).to be(true)
+      expect(operands_may_rebind?("u.sub(/q/, '').size")).to be(true)
+      expect(operands_may_rebind?("out.push([u.index(/(q)/)])")).to be(true)
+      expect(operands_may_rebind?("items.select { |i| i =~ /(z)/ }.map(&:upcase)")).to be(true)
+      expect(operands_may_rebind?("log(items.map { |i| i =~ /(z)/ })")).to be(true)
+      expect(operands_may_rebind?("log(items.map(&handler))")).to be(true)
+    end
+
+    it "does not count the call's own method or block, a lambda, or a call that leaves `$~` alone" do
+      expect(operands_may_rebind?("u.sub(/(z)/, '')")).to be(false)
+      expect(operands_may_rebind?("items.each { |i| i =~ /(z)/ }")).to be(false)
+      expect(operands_may_rebind?("register(-> { s =~ /(z)/ })")).to be(false)
+      expect(operands_may_rebind?("items.select { |i| i.empty? }.map(&:upcase)")).to be(false)
+      expect(operands_may_rebind?("out.push(row[:name], csv.split(','), \"\#{row[:name]}\")")).to be(false)
+      expect(operands_may_rebind?("$stdout.puts(Integer(v = $2))")).to be(false)
+    end
+
+    # The frame-wide fallback of an implicit-self call stays with statement-position calls, where it was before:
+    # `value` and `emit(...)` in an operand are read by what they call.
+    it "reads an implicit-self call there by what it calls, not by the frame's fallback" do
+      body = Prism.parse("on { |l| l =~ /(z)/ }").value
+      framed = scope.with_match_frame(body)
+      expect(framed.match_frame.self_call_fallback?(framed)).to be(true)
+      expect(operands_may_rebind?("value.upcase", framed)).to be(false)
+      expect(operands_may_rebind?("$stdout.puts(emit('q'))", framed)).to be(false)
+      expect(operands_may_rebind?("$stdout.puts(eval(src))", framed)).to be(true)
+    end
+  end
+
+  describe ".value_may_rebind?" do
+    def value_may_rebind?(source) = described_class.value_may_rebind?(last_statement(source), scope)
+
+    it "counts a call in a literal's values, and a block literal there that may match" do
+      expect(value_may_rebind?("[u.index(/(q)/)]")).to be(true)
+      expect(value_may_rebind?("{ a: items.find { |i| i =~ /(z)/ } }")).to be(true)
+      expect(value_may_rebind?("\"\#{items.map { |i| i =~ /(z)/ }}\"")).to be(true)
+      expect(value_may_rebind?("u[/(q)/] rescue nil")).to be(true)
+      expect(value_may_rebind?("u[/q(z)?/] ||= 'x'")).to be(true)
+    end
+
+    it "does not count a literal whose calls leave `$~` alone, or code that does not run here" do
+      expect(value_may_rebind?("[row[:name], list.index(3)]")).to be(false)
+      expect(value_may_rebind?("h[:k] ||= 1")).to be(false)
+      expect(value_may_rebind?("[-> { s =~ /(z)/ }]")).to be(false)
+      expect(value_may_rebind?("defined?(u.sub(/q/, ''))")).to be(false)
+    end
+  end
+
+  # Issue #1365 — outside a block, a statement's calls are read by the types the flow scope gives their operands.
+  describe Rigor::Inference::MatchRebinding::Calls do
+    let(:combinator) { Rigor::Type::Combinator }
+    let(:typed) do
+      scope.with_local(:re, combinator.constant_of(/(q)/))
+           .with_local(:str, combinator.nominal_of("String"))
+           .with_local(:n, combinator.nominal_of("Integer"))
+           .with_local(:either, combinator.union(combinator.nominal_of("String"), combinator.nominal_of("Regexp")))
+           .with_local(:obj, combinator.nominal_of("Object"))
+           .with_local(:md, combinator.nominal_of("MatchData"))
+           .with_local(:key, combinator.untyped)
+           .with_local(:parts, combinator.tuple_of(combinator.constant_of("a"), combinator.constant_of("b")))
+    end
+
+    # Each source declares the locals first, so they parse as reads of the bindings `typed` gives them.
+    def rebinds?(source)
+      described_class.rebinds?(last_statement("re = str = n = either = obj = md = key = parts = nil; #{source}"), typed)
+    end
+
+    it "counts `=~`, `!~`, `match`, `sub`, `gsub` and `scan` whatever their argument" do
+      ["u =~ str", "u !~ /(z)/", "u.match('q')", "u.sub('q', '')", "u.gsub!(str, '')", "u.scan('q')"].each do |call|
+        expect(rebinds?(call)).to be(true), call
+      end
+    end
+
+    it "counts a lookup only with an argument that may be a Regexp, by its type" do
+      expect(rebinds?("u.split(/(,)/)")).to be(true)
+      expect(rebinds?("u[re]")).to be(true)
+      expect(rebinds?("u.index(either)")).to be(true)
+      expect(rebinds?("u.start_with?(obj)")).to be(true)
+      expect(rebinds?("u.byterindex(WORD_RE)")).to be(true)
+      expect(rebinds?("u.split(',')")).to be(false)
+      expect(rebinds?("row[:name]")).to be(false)
+      expect(rebinds?("list.index(3)")).to be(false)
+      expect(rebinds?("u.partition(str)")).to be(false)
+      expect(rebinds?("u.slice(n, 2)")).to be(false)
+      expect(rebinds?("u.byteindex(md)")).to be(false)
+      expect(rebinds?("u.start_with?('#')")).to be(false)
+      expect(rebinds?("items.any?(String)")).to be(false)
+      expect(rebinds?("u.index(*parts)")).to be(false)
+      expect(rebinds?("u[KEYS]")).to be(false)
+    end
+
+    # Nothing is known about an unannotated parameter or an unresolved constant, so either may be a Regexp.
+    it "counts an argument of type `Dynamic[top]`" do
+      expect(rebinds?("row[key]")).to be(true)
+      expect(rebinds?("u.index(Some::Unknown)")).to be(true)
+    end
+
+    it "never counts `match?`, and counts `grep` / `grep_v` only in their block form" do
+      expect(rebinds?("u.match?(/(z)/)")).to be(false)
+      expect(rebinds?("lines.grep(/(z)/)")).to be(false)
+      expect(rebinds?("lines.grep(/(z)/) { |l| l }")).to be(true)
+      expect(rebinds?("lines.grep_v(re, &handler)")).to be(true)
+      expect(rebinds?("lines.grep(String) { |l| l }")).to be(false)
+    end
+
+    it "reads `===` and unary `~` by their receiver" do
+      expect(rebinds?("/(q)/ === u")).to be(true)
+      expect(rebinds?("re === u")).to be(true)
+      expect(rebinds?("Some::Unknown === u")).to be(true)
+      expect(rebinds?("String === u")).to be(false)
+      expect(rebinds?("str === u")).to be(false)
+      expect(rebinds?("~/(z)/")).to be(true)
+      expect(rebinds?("~n")).to be(false)
+    end
+
+    it "reads `[]=` by its index, not the value it stores" do
+      expect(rebinds?("u[/(q)/] = 'x'")).to be(true)
+      expect(rebinds?("h[:k] = /(q)/")).to be(false)
+    end
+
+    it "counts an eval of a String on any receiver, and not the block form" do
+      expect(rebinds?("Kernel.eval(src)")).to be(true)
+      expect(rebinds?("binding.eval(src)")).to be(true)
+      expect(rebinds?("obj.instance_eval(src)")).to be(true)
+      expect(rebinds?("klass.class_eval { attr_reader :x }")).to be(false)
+      expect(rebinds?("node.eval")).to be(false)
+    end
+
+    it "reads a `send` by the method it names, with the arguments it sends" do
+      expect(rebinds?("u.send(:=~, re)")).to be(true)
+      expect(rebinds?("u.public_send(name, re)")).to be(true)
+      expect(rebinds?("u.__send__('[]', /(q)/)")).to be(true)
+      expect(rebinds?("u.__send__(:[], :k)")).to be(false)
+      expect(rebinds?("u.send(:match?, /x/)")).to be(false)
+      expect(rebinds?("u.send(:upcase)")).to be(false)
+      expect(rebinds?('u.send("\xff", 1)')).to be(false)
+    end
+
+    it "reads an index compound write by its index" do
+      expect(rebinds?("u[/(q)/] ||= 'x'")).to be(true)
+      expect(rebinds?("h[:k] += 1")).to be(false)
     end
   end
 

@@ -333,8 +333,9 @@ module Rigor
         return send(handler, node) if handler
 
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
-        # observes the current scope's locals) and leave the scope unchanged.
-        [@scope.type_of(node, tracer: @tracer), @scope]
+        # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
+        # may rebind (`super(line.sub(re, ""))`, issue #1365).
+        [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
       end
 
       # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
@@ -583,7 +584,7 @@ module Rigor
       # `attr_reader`, the very macro #319 silenced at every other position); inside a module, the module's own
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
-        result = [scope.type_of(node, tracer: tracer), scope]
+        result = [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node.value)]
         call_node = meta_new_block_call(node)
         return result if call_node.nil?
 
@@ -774,7 +775,7 @@ module Rigor
                                         arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
-        [result_type, post]
+        [result_type, forget_rebound_match_globals(post, node)]
       end
 
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
@@ -784,9 +785,9 @@ module Rigor
       def eval_index_write(node)
         _rhs_type, post_rhs = sub_eval(node.value, scope)
         stored = index_write_stored_type(node, scope)
-        [stored,
-         IndexWriteWidening.widen(node: node, current_scope: post_rhs,
-                                  arg_types: index_write_arg_types(node, stored))]
+        widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
+                                           arg_types: index_write_arg_types(node, stored))
+        [stored, forget_rebound_match_globals(widened, node)]
       end
 
       # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
@@ -979,7 +980,8 @@ module Rigor
       # responds to widens the receiver as the plain call does: `h.default ||= 0` reopens `h` as `h.default = 0`
       # does ({HashLookupMutation}). The node's value is typed as before; the widening is its only scope effect.
       def eval_attribute_compound_write(node)
-        [scope.type_of(node, tracer: tracer), widen_attribute_write(node.receiver, node.write_name, scope)]
+        widened = widen_attribute_write(node.receiver, node.write_name, scope)
+        [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(widened, node)]
       end
 
       # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
@@ -2326,11 +2328,13 @@ module Rigor
       # scope and costs one scan. Issue #1256 — an element after one that wrote is typed from the scope the elements
       # before it left ({OperandWalk}), so `[n += 1, n += 1]` is `[1, 2]`.
       def eval_value_container(node)
-        return [scope.type_of(node, tracer: tracer), scope] unless OperandEffects.any?(node)
+        unless OperandEffects.any?(node)
+          return [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node)]
+        end
 
         walk = OperandWalk.new(walk_recorder)
         after = thread_operand_children(node, scope, walk, scope)
-        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), after]
+        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), forget_rebound_match_globals(after, node)]
       end
 
       # `expr rescue alt`. The rescue arm runs only when `expr` raised, possibly after some of its writes, so the arm
@@ -2339,7 +2343,9 @@ module Rigor
       # rescue (s = 1)` left `s` on its pre-write binding. The value is the modifier's own, and one holding no write
       # or jump keeps the entry scope.
       def eval_rescue_modifier(node)
-        return [scope.type_of(node, tracer: tracer), scope] unless OperandEffects.any?(node)
+        unless OperandEffects.any?(node)
+          return [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node)]
+        end
 
         walk = OperandWalk.new(walk_recorder)
         after_expression = thread_operand(node.expression, scope, walk, scope)
@@ -2351,9 +2357,12 @@ module Rigor
         arm_entry = join_with_nil_injection(scope, after_expression)
         after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
         type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
-        return [type, after_expression] if branch_unconditionally_exits?(node.rescue_expression)
-
-        [type, join_with_nil_injection(after_expression, after_rescue)]
+        after = if branch_unconditionally_exits?(node.rescue_expression)
+                  after_expression
+                else
+                  join_with_nil_injection(after_expression, after_rescue)
+                end
+        [type, forget_rebound_match_globals(after, node)]
       end
 
       # `class Foo; body; end` and `module Foo; body; end`. The class body runs in a fresh scope (Ruby's class scope
@@ -2443,6 +2452,7 @@ module Rigor
       def eval_call(node)
         walk = OperandWalk.new(walk_recorder)
         invoked = call_operand_scope(node, walk, scope)
+        invoked = forget_operand_match_globals(node, invoked)
         operand_types = walk.types(tracer)
         call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
         # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
@@ -2644,16 +2654,41 @@ module Rigor
       end
 
       # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),
-      # a block that runs while it does may run a match ({MatchRebinding.call_may_match?} — issue #1358: the block
-      # runs in this frame, so `items.each { |i| i =~ re }` rebinds the enclosing method's `$~`, while a match inside
-      # a called Ruby method rebinds that method's own), or the frame has made a closure that may run one whenever it
-      # is called ({Scope#match_rebinding_closure?}). The scans run only while a match global is narrowed, the one
-      # state a forget can drop.
+      # its own block may run a match ({MatchRebinding.block_may_match?} — issue #1358: the block runs in this frame,
+      # so `items.each { |i| i =~ re }` rebinds the enclosing method's `$~`, while a match inside a called Ruby method
+      # rebinds that method's own), or the frame has made a closure that may run one whenever it is called
+      # ({Scope#match_rebinding_closure?}). The receiver chain and arguments ran before the call, and
+      # {#forget_operand_match_globals} answered for them. The scans run only while a match global is narrowed, the
+      # one state a forget can drop.
       def rebinds_match_globals?(node, post_scope)
         return false unless post_scope.match_globals_bound?
         return true if match_capable_call?(node)
 
-        MatchRebinding.call_may_match?(node, scope) || post_scope.match_rebinding_closure?
+        MatchRebinding.block_may_match?(node, scope) || post_scope.match_rebinding_closure?
+      end
+
+      # Issue #1365 — the scope a statement call runs its method from, with the match globals forgotten when its
+      # receiver chain or arguments may rebind them ({MatchRebinding.operands_may_rebind?}): Ruby runs those first,
+      # so the call's own block already reads the rebound globals (`s.sub(re, "").each_char { $1 }`). Every call in
+      # them answers here by what it calls, as a statement call does, and none resets by itself ({#invoke_call}), so
+      # an operand's answer does not depend on whether the evaluator threads it: `$stdout.puts(Integer(v = $2))`
+      # keeps `$1` narrowed as `$stdout.puts(Integer($2))` does.
+      def forget_operand_match_globals(node, invoked)
+        return invoked if @in_operand || !invoked.match_globals_bound?
+        return invoked unless MatchRebinding.operands_may_rebind?(node, scope)
+
+        invoked.forget_match_globals
+      end
+
+      # Issue #1365 — `after` with the match globals forgotten when `node`, a value this statement types without
+      # evaluating the calls in it as statements (an array, hash or interpolation literal, a `rescue` modifier, a
+      # constant's value, a `super` or `yield`), may rebind them ({MatchRebinding.value_may_rebind?}). Inside an
+      # operand the statement that holds it answers instead.
+      def forget_rebound_match_globals(after, node)
+        return after if @in_operand || !after.match_globals_bound?
+        return after unless MatchRebinding.value_may_rebind?(node, scope)
+
+        after.forget_match_globals
       end
 
       # The value an untyped setter call on a local stores (`foo(s.x = v)`), for the Struct member write-back; nil for
@@ -2670,28 +2705,19 @@ module Rigor
         apply_rspec_matcher_narrowing(node, post_scope)
       end
 
-      # True when `node` could rebind the regex match-data globals by itself: a known regex-matching method by name
-      # ({MatchRebinding::MATCH_CAPABLE_METHODS}) on any receiver, or an implicit-self / `self.` call that may reach
-      # this frame's slot. Issue #1364 — a method defined in Ruby runs in a frame of its own, so a match in its body
-      # rebinds its own `$~`, never its caller's, and `log("parsed"); key = $1` keeps `$1` narrowed. Such a call still
-      # forgets when it is a builtin or eval that matches on this frame's behalf ({MatchRebinding::SelfCalls}), or
-      # when its arguments may match ({MatchRebinding.operand_may_match?}; a call there applies no reset of its own
-      # yet, #1365). It forgets as every implicit-self call did before in a frame that hands its slot to code the
-      # analyzer does not trace — a block that may match, a `binding`, a forward of the method's own block
-      # ({MatchRebinding::Frame#self_call_fallback?}) — and where no body stamped a frame. An explicit-receiver call
-      # to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is treated as match-free so the
-      # multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals; a C method outside the table
-      # that matches anyway is the gap #1365 closes.
+      # True when `node` could rebind the regex match-data globals by itself ({MatchRebinding.call_rebinds?}): a method
+      # that matches on this frame's behalf, on any receiver, read by the types of the operands where they were
+      # typed (issue #1365: `s.split(/(,)/)` and `u.start_with?(re)` do, `row[:name]`, `csv.split(",")` and
+      # `s.match?(re)` do not); or an implicit-self / `self.` call that may reach this frame's slot. Issue #1364 — a
+      # method defined in Ruby runs in a frame of its own, so a match in its body rebinds its own `$~`, never its
+      # caller's, and `log("parsed"); key = $1` keeps `$1` narrowed; such a call forgets as every implicit-self call
+      # did before only in a frame that hands its slot to code the analyzer does not trace, or where no body stamped
+      # a frame. A call to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is match-free, so the
+      # multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals.
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
-        return true if MatchRebinding::MATCH_CAPABLE_METHODS.include?(node.name)
 
-        receiver = node.receiver
-        return false unless receiver.nil? || receiver.is_a?(Prism::SelfNode)
-
-        frame = scope.match_frame
-        frame.nil? || frame.self_call_fallback?(scope) || MatchRebinding::SelfCalls.named_match?(node) ||
-          MatchRebinding.operand_may_match?(node.arguments, scope)
+        MatchRebinding.call_rebinds?(node, operand_scope)
       end
 
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call

@@ -954,4 +954,377 @@ def yield_in_each(line, items)
     items.each { |i| k = $1; yield k.upcase, i }
   end
 end
+
+# Issue #1365 — a call rebinds the frame's `$~` by the method it calls, on any receiver, and in any position of the
+# statement: Ruby runs a call's receiver chain and arguments, an array or hash literal's values and an interpolation
+# in the same frame. Each read below is Ruby's nil with `str = "a1"` and the arguments its comment gives.
+
+# Builtins outside the old name table that set their caller's `$~` (`u = "q"`).
+def rebind_not_match(str, u)
+  if str =~ /(\d+)/
+    u !~ /(z)/
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_start_with(str, u)
+  if str =~ /(\d+)/
+    u.start_with?(/q(z)?/)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_byteindex(str, u)
+  if str =~ /(\d+)/
+    u.byteindex(/(z)/)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_byterindex(str, u)
+  if str =~ /(\d+)/
+    u.byterindex(/(z)/)
+    assert_type("String?", $1)
+  end
+end
+
+# `u = +"q"`: the store matches `q`, whose optional group did not participate.
+def rebind_index_assign(str, u)
+  if str =~ /(\d+)/
+    u[/q(z)?/] = "x"
+    assert_type("String?", $1)
+  end
+end
+
+# Unary `~` matches `$_`.
+def rebind_tilde(str)
+  if str =~ /(\d+)/
+    $_ = "k"
+    ~/(z)/
+    assert_type("String?", $1)
+  end
+end
+
+# `send` with a literal name that matches, or a computed one, and an eval of a String on any receiver (`u = "zz"`,
+# `name = :=~`, `obj = Object.new`, `src = %q("zz" =~ /(q)/)`).
+def rebind_send_literal(str, u)
+  if str =~ /(\d+)/
+    u.send(:=~, /(q)/)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_send_computed(str, u, name)
+  if str =~ /(\d+)/
+    u.public_send(name, /(q)/)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_binding_eval(str, src)
+  if str =~ /(\d+)/
+    binding.eval(src)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_kernel_eval(str, src)
+  if str =~ /(\d+)/
+    Kernel.eval(src)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_instance_eval(str, obj, src)
+  if str =~ /(\d+)/
+    obj.instance_eval(src)
+    assert_type("String?", $1)
+  end
+end
+
+# A lookup with a Regexp argument, in statement or assignment position, and `scan` / `sub` with a String pattern, `===`
+# on a Regexp and `grep` / `any?` with one (`u = "abc"`, `items = ["zz"]`, `pattern = /(q)/`). A Regexp held in a
+# local or an unannotated parameter counts too.
+def rebind_split(str, u)
+  if str =~ /(\d+)/
+    parts = u.split(/(,)/)
+    [parts, assert_type("String?", $1)]
+  end
+end
+
+def rebind_element(str, u)
+  if str =~ /(\d+)/
+    hit = u[/(z)/]
+    [hit, assert_type("String?", $1)]
+  end
+end
+
+def rebind_index_local(str, u)
+  pattern = Regexp.new("(q)")
+  if str =~ /(\d+)/
+    u.index(pattern)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_index_parameter(str, u, pattern)
+  if str =~ /(\d+)/
+    u.index(pattern)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_scan_string(str, u)
+  if str =~ /(\d+)/
+    u.scan("q")
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_sub_string(str, u)
+  if str =~ /(\d+)/
+    u.sub("q", "")
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_case_equality(str, u)
+  if str =~ /(\d+)/
+    /(q)/ === u
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_grep_block(str, items)
+  if str =~ /(\d+)/
+    items.grep(/(q)/) { |x| x }
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_any(str, items)
+  if str =~ /(\d+)/
+    items.any?(/(q)/)
+    assert_type("String?", $1)
+  end
+end
+
+# A call in an operand: an array element, an argument, a receiver chain, a `rescue` modifier and an index `||=` (`u =
+# "z"`, and `u = +"q"` for the `||=`, whose read matches `q` without the optional group).
+def operand_array_element(str, u)
+  if str =~ /(\d+)/
+    [u.index(/(q)/)]
+    assert_type("String?", $1)
+  end
+end
+
+def operand_argument(str, u)
+  out = []
+  if str =~ /(\d+)/
+    out.push(u.sub(/q/, ""))
+    assert_type("String?", $1)
+  end
+end
+
+def operand_receiver_chain(str, u)
+  if str =~ /(\d+)/
+    size = u.sub(/q/, "").size
+    [size, assert_type("String?", $1)]
+  end
+end
+
+def operand_rescue_modifier(str, u)
+  if str =~ /(\d+)/
+    hit = u[/(q)/] rescue nil
+    [hit, assert_type("String?", $1)]
+  end
+end
+
+def operand_index_or_write(str, u)
+  if str =~ /(\d+)/
+    u[/q(z)?/] ||= "x"
+    assert_type("String?", $1)
+  end
+end
+
+# The receiver chain runs before the call's own block, which reads the rebound `$1` (Ruby: `[nil]` for
+# `operand_before_block("a1", "z")`).
+def operand_before_block(str, u)
+  if str =~ /(\d+)/
+    u.sub(/q/, "").each_char.map { |_c| assert_type("String?", $1) }
+  end
+end
+
+# A block literal that may match, in an array, hash or interpolation value (`items = ["q"]`).
+def operand_array_block(str, items)
+  if str =~ /(\d+)/
+    found = [items.find { |i| i =~ /(z)/ }]
+    [found, assert_type("String?", $1)]
+  end
+end
+
+def operand_hash_block(str, items)
+  if str =~ /(\d+)/
+    found = { a: items.find { |i| i =~ /(z)/ } }
+    [found, assert_type("String?", $1)]
+  end
+end
+
+def operand_interpolation_block(str, items)
+  if str =~ /(\d+)/
+    text = "#{items.map { |i| i =~ /(z)/ }}"
+    [text, assert_type("String?", $1)]
+  end
+end
+
+# After a call that rebinds `$~`, the read is unproven and calling a method on it reports (Ruby: NoMethodError on nil
+# for `explicit_rebind_read("ab=c", "q")` and `operand_rebind_read("ab=c", "q")`).
+def explicit_rebind_read(line, u)
+  if line =~ /^(\w+)=/
+    u !~ /(z)/
+    key = $1
+    key.upcase # GENUINE-NIL
+  end
+end
+
+def operand_rebind_read(line, u)
+  if line =~ /^(\w+)=/
+    [u.index(/(z)/)]
+    key = $1
+    key.upcase # GENUINE-NIL
+  end
+end
+
+# Controls: none of these rebinds `$~` in Ruby, because a lookup's argument is not a Regexp, `match?` never sets it,
+# `String === s` runs `Module#===`, and `grep` without a block leaves the caller's `$~` alone. Each reads "AB" with
+# `line = "ab=c"`, `row = {name: 1}`, `csv = "a,b"`, `list = [1, 3]`, `s = "a-b"`, `lines = ["zz"]` and
+# `patterns = {}`.
+def keep_hash_lookup(line, row)
+  if line =~ /^(\w+)=/
+    val = row[:name]
+    key = $1
+    assert_type("String", key)
+    [val, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_split(line, csv)
+  if line =~ /^(\w+)=/
+    csv.split(",")
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_array_index(line, list)
+  if line =~ /^(\w+)=/
+    pos = list.index(3)
+    key = $1
+    assert_type("String", key)
+    [pos, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_string_index(line, s)
+  if line =~ /^(\w+)=/
+    s.index("z")
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_string_element(line, s)
+  if line =~ /^(\w+)=/
+    hit = s["z"]
+    key = $1
+    assert_type("String", key)
+    [hit, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_match_predicate(line, s)
+  if line =~ /^(\w+)=/
+    s.match?(/x/)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_partition(line, s)
+  if line =~ /^(\w+)=/
+    head, _sep, tail = s.partition("-")
+    key = $1
+    assert_type("String", key)
+    [head, tail, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_slice(line, s)
+  if line =~ /^(\w+)=/
+    s.slice("q")
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_class_case_equality(line, s)
+  if line =~ /^(\w+)=/
+    String === s
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_grep_without_block(line, lines)
+  if line =~ /^(\w+)=/
+    lines.grep(/(z)/)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_start_with_string(line, s)
+  if line =~ /^(\w+)=/
+    s.start_with?("x")
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+# `[]=` reads its index, not the value it stores.
+def keep_index_store(line, patterns)
+  if line =~ /^(\w+)=/
+    patterns[:word] = /(\w+)/
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_send_literal(line, s)
+  if line =~ /^(\w+)=/
+    s.send(:match?, /x/)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+# The same calls in an operand leave it alone too.
+def keep_operand_lookup(line, row, csv)
+  out = []
+  if line =~ /^(\w+)=/
+    out.push(row[:name], [csv.split(",")], "#{row[:name]}")
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
 # rubocop:enable Style/PerlBackrefs

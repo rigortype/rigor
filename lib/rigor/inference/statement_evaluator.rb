@@ -1811,10 +1811,10 @@ module Rigor
       # targets, which runs again without the predicate being tested again.
       def single_pass(node, post_pred, jumps)
         entry =
-          if node.begin_modifier? || JumpTargets.any?(node.statements, Prism::RedoNode)
+          if node.begin_modifier? || jumps.redoes
             post_pred
           else
-            loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
+            loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES, jumps)
           end
         loop_iteration(node.statements, entry, jumps)
       end
@@ -1902,14 +1902,16 @@ module Rigor
       end
 
       # The jumps that target a loop body ({JumpTargets}): its `next`s and its `break`s, each an identity-keyed Hash
-      # used as a membership set, or nil when the body has none. The sinks also collect jumps that belong to a
+      # used as a membership set, or nil when the body has none, and whether a `redo` does (issue #1359: the body then
+      # runs again without the predicate being tested, {#single_pass}). The sinks also collect jumps that belong to a
       # construct evaluated under the loop's collection without installing its own (a `->` body), and the consumers
       # filter against these sets.
-      LoopJumps = Data.define(:nexts, :breaks)
+      LoopJumps = Data.define(:nexts, :breaks, :redoes)
       private_constant :LoopJumps
 
-      NO_LOOP_JUMPS = LoopJumps.new(nexts: nil, breaks: nil)
-      private_constant :NO_LOOP_JUMPS
+      NO_LOOP_JUMPS = LoopJumps.new(nexts: nil, breaks: nil, redoes: false)
+      LOOP_JUMP_CLASSES = [Prism::NextNode, Prism::BreakNode, Prism::RedoNode].freeze
+      private_constant :NO_LOOP_JUMPS, :LOOP_JUMP_CLASSES
 
       NO_BREAK_ARMS = [].freeze
       private_constant :NO_BREAK_ARMS
@@ -1921,11 +1923,12 @@ module Rigor
 
       # A body with no targeting jump pays two allocation-free scans.
       def loop_jumps(statements)
-        nexts = JumpTargets.of(statements, Prism::NextNode) if JumpTargets.any?(statements, Prism::NextNode)
-        breaks = JumpTargets.of(statements, Prism::BreakNode) if JumpTargets.any?(statements, Prism::BreakNode)
-        return NO_LOOP_JUMPS if nexts.nil? && breaks.nil?
+        kinds = JumpTargets.kinds(statements, LOOP_JUMP_CLASSES)
+        return NO_LOOP_JUMPS if kinds.empty?
 
-        LoopJumps.new(nexts: nexts, breaks: breaks)
+        nexts = JumpTargets.of(statements, Prism::NextNode) if kinds.include?(Prism::NextNode)
+        breaks = JumpTargets.of(statements, Prism::BreakNode) if kinds.include?(Prism::BreakNode)
+        LoopJumps.new(nexts: nexts, breaks: breaks, redoes: kinds.include?(Prism::RedoNode))
       end
 
       # Installs a fresh thread-local break sink around `yield` (a loop-body evaluation), returning `[collected,
@@ -1997,7 +2000,7 @@ module Rigor
         return NO_BREAK_ARMS if break_pass.nil?
         return break_pass[:arms] if break_pass[:entry] == converged.except(*body_first)
 
-        entry = loop_pass_entry(node, post_pred, converged, body_first)
+        entry = loop_pass_entry(node, post_pred, converged, body_first, jumps)
         loop_iteration(node.statements, entry, jumps, recorded: false).last
       end
 
@@ -2144,7 +2147,7 @@ module Rigor
       # `BodyFixpoint` hands every pass the same mutable assumption, and `except` copies it before the fixpoint moves
       # it.
       def loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass = nil)
-        entry = loop_pass_entry(node, post_pred, bindings, body_first)
+        entry = loop_pass_entry(node, post_pred, bindings, body_first, jumps)
         exit_scope, breaks = loop_iteration(node.statements, entry, jumps)
         if break_pass
           break_pass[:entry] = bindings.except(*body_first)
@@ -2155,14 +2158,14 @@ module Rigor
 
       # The scope one fixpoint pass enters the body with: `post_pred` overlaid with the pre-existing names' running
       # assumption, then narrowed by the predicate's loop-entry edge ({#loop_body_exit_bindings} carries the why).
-      def loop_pass_entry(node, post_pred, bindings, body_first)
+      def loop_pass_entry(node, post_pred, bindings, body_first, jumps)
         overlaid = bindings.except(*body_first)
         entry = overlaid.reduce(post_pred) { |acc, (name, type)| acc.with_local(name, type) }
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, entry)
         edge = node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope
         # Issue #1359 — a `redo` re-enters the body without testing the predicate again, so a `$_` the predicate
         # narrowed does not hold there when the body may set it.
-        return edge unless edge.last_line_bound? && JumpTargets.any?(node.statements, Prism::RedoNode)
+        return edge unless jumps.redoes
 
         LastLine.forget_if_set(edge, node.statements)
       end

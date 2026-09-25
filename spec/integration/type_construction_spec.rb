@@ -1177,6 +1177,24 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/lastline_top_level.rb — an implicit-self reader narrows only in the script body (#1359)" do
+    let(:harness) { harness_for("lastline_top_level") }
+
+    it "narrows `$_` in the script body, and not in a top-level method or a block" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/lastline_main_mixin.rb — a module mixed into `main` stops implicit-self narrowing (#1359)" do
+    let(:harness) { harness_for("lastline_main_mixin") }
+
+    it "leaves `$_` unbound after an implicit-self reader in a file that includes a module into `main`" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

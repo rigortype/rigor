@@ -1572,7 +1572,11 @@ RSpec.describe Rigor::Inference::Narrowing do
   # Issue #1359 — a condition whose value is a reader's binds `$_` on each edge to the line it returned.
   describe ".predicate_scopes — `$_` on a reader condition" do
     def string_t = Rigor::Type::Combinator.nominal_of("String")
-    def reader_scope = Rigor::Scope.empty(environment: Rigor::Environment.default)
+
+    # The script body's own frame, where an implicit-self `gets` is `Kernel`'s.
+    def reader_scope
+      Rigor::Scope.empty(environment: Rigor::Environment.default).with_match_frame(Prism.parse("").value)
+    end
 
     def edges(source, entry = reader_scope)
       described_class.predicate_scopes(parse_predicate(source, locals: %i[x line]), entry)

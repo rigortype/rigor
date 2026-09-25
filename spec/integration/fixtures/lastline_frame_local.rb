@@ -18,9 +18,14 @@ assert_type('"top"', $_)
 def fresh = assert_type("Dynamic[top]", $_)
 
 # The loop body runs only when `gets` returned a line, so `$_` is that line (Ruby: the line), and the loop exits
-# when `gets` returns nil (Ruby: nil).
+# when `gets` returns nil (Ruby: nil). Written with an implicit-self `gets` in a method, as the issue has it, the
+# reader proves nothing: a top-level method is a private method of every object, and `self` there may be one whose
+# `gets` is Ruby's (see `lastline_top_level.rb`), so `$_` stays unbound. On `$stdin` it narrows.
 def lines
   while gets
+    assert_type("Dynamic[top]", $_)
+  end
+  while $stdin.gets
     assert_type("String", $_)
   end
   assert_type("nil", $_)
@@ -35,7 +40,7 @@ end
 
 # `if gets then $_ else $_ end` (Ruby: the line, then nil at end of input).
 def branches
-  if gets
+  if $stdin.gets
     assert_type("String", $_)
   else
     assert_type("nil", $_)
@@ -50,7 +55,7 @@ def match_entry = assert_type("Dynamic[top]", $~)
 def read_one(io) = io.gets
 
 def callee_keeps(io)
-  if gets
+  if $stdin.gets
     read_one(io)
     assert_type("String", $_)
   end
@@ -59,7 +64,7 @@ end
 # A thread's root block has a slot of its own: it reads `$_` unbound (Ruby: nil), and its reader leaves the
 # creator's `$_` alone (Ruby: the creator's line). So does a fiber's.
 def thread_entry
-  if gets
+  if $stdin.gets
     Thread.new { assert_type("Dynamic[top]", $_) }.join
     Thread.new { $stdin.gets }.join
     Fiber.new { $stdin.gets }.resume
@@ -70,20 +75,20 @@ end
 # The other conditions and receivers that narrow (Ruby: the line on each).
 def or_break
   loop do
-    gets or break
+    $stdin.gets or break
     assert_type("String", $_)
   end
 end
 
 def next_unless(items)
   items.each do
-    next unless gets
+    next unless $stdin.gets
     assert_type("String", $_)
   end
 end
 
 def assignment_condition
-  while (line = gets)
+  while (line = STDIN.gets)
     assert_type("String", line)
     assert_type("String", $_)
   end
@@ -118,49 +123,49 @@ end
 
 # Code that may set `$_` after a narrowing forgets it (Ruby: the later line, or nil at end of input, on each).
 def block_reader(ios)
-  if gets
+  if $stdin.gets
     ios.each { |io| io.gets }
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def operand_reader
-  if gets
+  if $stdin.gets
     line = gets.to_s
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def symbol_proc_reader(ios)
-  if gets
+  if $stdin.gets
     ios.each(&:gets)
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def sent_reader(io)
-  if gets
+  if $stdin.gets
     io.send(:gets)
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def enumerator_reader
-  if gets
+  if $stdin.gets
     Enumerator.new { |y| $stdin.gets; y << 1 }.to_a
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def and_right_operand(ios)
-  if gets && ios.each { |io| io.gets }
+  if $stdin.gets && ios.each { |io| io.gets }
     assert_type("Dynamic[top]", $_)
   end
 end
 
 # `IO.foreach` sets `$_` to each line it yields, and to nil once the input ends (Ruby: nil after the call).
 def foreach_reader(path)
-  if gets
+  if $stdin.gets
     IO.foreach(path) { |_| nil }
     assert_type("Dynamic[top]", $_)
   end
@@ -169,21 +174,21 @@ end
 # A lambda that reads a line can run at any later call (Ruby after `reread.call`: the later line).
 def lambda_reader
   reread = -> { gets }
-  if gets
+  if $stdin.gets
     reread.call
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def literal_reader
-  if gets
+  if $stdin.gets
     pair = [gets, 1]
     assert_type("Dynamic[top]", $_)
   end
 end
 
 def eval_reader
-  if gets
+  if $stdin.gets
     eval("gets", binding, __FILE__, __LINE__)
     assert_type("Dynamic[top]", $_)
   end
@@ -196,7 +201,7 @@ def emit_line = @kept.call
 
 def kept_block_reader
   on_line { $stdin.gets }
-  if gets
+  if $stdin.gets
     emit_line
     assert_type("Dynamic[top]", $_)
   end
@@ -205,13 +210,13 @@ end
 # The call's receiver chain runs before its block, in the statement and in the pass that types the call's value
 # (Ruby: the second line, or nil).
 def receiver_reader
-  if gets
+  if $stdin.gets
     [gets].each { assert_type("Dynamic[top]", $_) }
   end
 end
 
 def receiver_reader_value
-  if gets
+  if $stdin.gets
     copies = [gets].map { $_ }
     assert_type("[Dynamic[top]]", copies)
   end
@@ -219,7 +224,7 @@ end
 
 # A block that writes `$_` rebinds the frame's slot (Ruby: nil).
 def block_writer(items)
-  if gets
+  if $stdin.gets
     items.each { $_ = nil }
     assert_type("Dynamic[top]", $_)
   end
@@ -228,7 +233,7 @@ end
 # A block in a value position is not entered, and still reads `$_` forgotten when it may set it (Ruby on the second
 # element at end of input: nil).
 def unentered_block(items)
-  if gets
+  if $stdin.gets
     items.map { assert_type("Dynamic[top]", $_).tap { gets } }.size
   end
 end
@@ -251,19 +256,19 @@ end
 # A `case` clause's conditions, and an `in` clause's guard, run before its body and every later clause (Ruby: the
 # later line, or nil at end of input).
 def case_reader(subject)
-  if gets
+  if $stdin.gets
     case
     when gets then 1
     else assert_type("Dynamic[top]", $_)
     end
   end
-  if gets
+  if $stdin.gets
     case subject
     when $stdin.gets then 1
     end
     assert_type("Dynamic[top]", $_)
   end
-  if gets
+  if $stdin.gets
     case subject
     in Integer if gets then 1
     else 2
@@ -274,7 +279,7 @@ end
 
 # A later operand of the statement that runs the reader reads what the reader set (Ruby: the second line, or nil).
 def later_operand(items)
-  if gets
+  if $stdin.gets
     [gets, assert_type("Dynamic[top]", $_)]
     gets.to_s + assert_type("Dynamic[top]", $_)
     [gets, items.map { assert_type("Dynamic[top]", $_) }]
@@ -287,7 +292,7 @@ end
 # one line of input).
 def redo_reader
   read = []
-  while gets
+  while $stdin.gets
     read << assert_type("Dynamic[top]", $_)
     gets
     redo if read.size == 1
@@ -297,7 +302,7 @@ end
 
 def redo_rebinding_reader
   count = 0
-  while gets
+  while $stdin.gets
     count += 1
     assert_type("Dynamic[top]", $_)
     gets
@@ -308,7 +313,7 @@ end
 
 # A body that runs again reads what an earlier pass set (Ruby on the second pass at end of input: nil).
 def loop_back_edge(ok)
-  if gets
+  if $stdin.gets
     while ok
       assert_type("Dynamic[top]", $_)
       gets
@@ -317,7 +322,7 @@ def loop_back_edge(ok)
 end
 
 def for_back_edge(items)
-  if gets
+  if $stdin.gets
     for item in items
       assert_type("Dynamic[top]", $_)
       gets
@@ -326,14 +331,14 @@ def for_back_edge(items)
 end
 
 def block_iteration(items)
-  if gets
+  if $stdin.gets
     items.map { assert_type("Dynamic[top]", $_).tap { gets } }
   end
 end
 
 # A block that cannot set `$_` shares the frame's narrowing (Ruby: the line).
 def plain_block(items)
-  if gets
+  if $stdin.gets
     items.map { assert_type("String", $_) }
   end
 end
@@ -341,7 +346,7 @@ end
 # A retried body runs again after the rescue clause, and its reader rebinds `$_` for the retried pass (Ruby: the
 # line read before the raise, or nil).
 def retry_reader(tries)
-  if gets
+  if $stdin.gets
     begin
       assert_type("Dynamic[top]", $_)
       gets
@@ -355,7 +360,7 @@ end
 # A rescue clause runs after any prefix of the body: `readline` sets `$_` to nil at end of input and then raises
 # (Ruby: nil).
 def rescue_arm
-  if gets
+  if $stdin.gets
     begin
       $stdin.readline
     rescue EOFError
@@ -367,7 +372,7 @@ end
 # A `define_method` body reads the definer's slot whenever the method is called, which the narrowing where it is
 # written neither proves nor refutes.
 def definer
-  if gets
+  if $stdin.gets
     define_singleton_method(:reread) { assert_type("Dynamic[top]", $_) }
   end
 end
@@ -376,27 +381,27 @@ end
 # (Ruby: the line or nil).
 def joined_arms
   ok = false
-  if gets
+  if $stdin.gets
     ok = true
   end
   assert_type("Dynamic[top]", $_)
-  seen = gets ? true : false
+  seen = $stdin.gets ? true : false
   assert_type("Dynamic[top]", $_)
-  once = (1 if gets)
+  once = (1 if $stdin.gets)
   assert_type("Dynamic[top]", $_)
   [ok, seen, once]
 end
 
 # Quiet controls: correct code that reads `$_` after a condition on the reader reports nothing.
 def quiet_loop
-  while gets
+  while $stdin.gets
     line = $_
     line.chomp # QUIET-1359
   end
 end
 
 def quiet_if
-  if gets
+  if $stdin.gets
     line = $_
     line.chomp # QUIET-1359
   end
@@ -404,7 +409,7 @@ end
 
 def quiet_or_break
   loop do
-    gets or break
+    $stdin.gets or break
     line = $_
     line.chomp # QUIET-1359
   end
@@ -412,14 +417,14 @@ end
 
 def quiet_next_unless(items)
   items.each do
-    next unless gets
+    next unless $stdin.gets
     line = $_
     line.chomp # QUIET-1359
   end
 end
 
 def quiet_assignment_condition
-  while (line = gets)
+  while (line = STDIN.gets)
     copy = $_
     copy.chomp # QUIET-1359
     line.chomp # QUIET-1359
@@ -428,7 +433,7 @@ end
 
 # The falsey edge's nil does not reach a `foreach` block, which reads the line `foreach` yields (Ruby: each line).
 def quiet_foreach(path)
-  unless gets
+  unless $stdin.gets
     IO.foreach(path) do |_|
       copy = $_
       copy.chomp # QUIET-1359
@@ -439,7 +444,7 @@ end
 # A reader condition's joined arms, then a check of the flag the arms set (Ruby: the line).
 def quiet_joined_flag
   ok = false
-  if gets
+  if $stdin.gets
     ok = true
   end
   return unless ok
@@ -449,7 +454,7 @@ def quiet_joined_flag
 end
 
 def quiet_ternary_flag
-  seen = gets ? true : false
+  seen = $stdin.gets ? true : false
   return unless seen
 
   line = $_

@@ -9,6 +9,8 @@ RSpec.describe Rigor::Inference::LastLine do
   let(:scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
   let(:string) { Rigor::Type::Combinator.nominal_of("String") }
   let(:line) { scope.with_global(:$_, string) }
+  # The script body's own frame, where `self` is `main`.
+  let(:script) { scope.with_match_frame(root("gets")) }
 
   def last_statement(source) = Prism.parse(source).value.statements.body.last
   def root(source) = Prism.parse(source).value
@@ -31,12 +33,14 @@ RSpec.describe Rigor::Inference::LastLine do
   end
 
   describe ".reads_line?" do
-    it "names a reader on implicit self, `Kernel`, `ARGF`, `STDIN`, `$stdin` and `$<`" do
+    it "names a reader on implicit self in the script body, `Kernel`, `ARGF`, `STDIN`, `$stdin` and `$<`" do
       ["gets", "self.gets", "Kernel.gets", "::Kernel.gets", "ARGF.gets", "STDIN.gets", "$stdin.gets",
        "$<.gets"].each do |source|
-        expect(described_class.reads_line?(last_statement(source), scope)).to be(true), source
+        expect(described_class.reads_line?(last_statement(source), script)).to be(true), source
       end
       expect(described_class.reads_line?(last_statement("$stdin.readline"), scope)).to be(true)
+      # With no frame stamped, `self` is not known to be `main`.
+      expect(described_class.reads_line?(last_statement("gets"), scope)).to be(false)
     end
 
     it "does not name another method, a reader given a block, or a reader on a receiver it cannot type" do
@@ -78,9 +82,9 @@ RSpec.describe Rigor::Inference::LastLine do
 
     # A class's ancestry may hold a Ruby reader the analyzer does not see: `class W < DelegateClass(File)` records no
     # superclass, and RBS answers `Kernel` for `CSV#gets`, an alias of its Ruby `shift`.
-    it "reads implicit self as `Kernel`'s at the top level alone, and in a class only where RBS places it in `IO`" do
-      expect(reads_line?("def top = gets")).to be(true)
-      ["class Source; def self.first = gets; end", "class Source; def first = gets; end",
+    it "reads implicit self as `Kernel`'s in the script body alone, and in a class only where RBS places it in `IO`" do
+      expect(reads_line?("gets")).to be(true)
+      ["def top = gets", "class Source; def self.first = gets; end", "class Source; def first = gets; end",
        "class W < DelegateClass(File); def first = gets; end", "class Mine < IO; def first = gets; end",
        "module Helpers; def first = gets; end"].each do |source|
         expect(reads_line?(source)).to be(false), source
@@ -92,6 +96,20 @@ RSpec.describe Rigor::Inference::LastLine do
         call, call_scope = indexed_call(source, :gets, project)
         expect(described_class.reads_line?(call, call_scope)).to be(false), source
       end
+    end
+
+    # A top-level method is a private method of every object, so its `self` may be one with a Ruby `gets`; a block's
+    # `self` may be rebound (`instance_exec`); and a module mixed into `main` or `Object` may define a Ruby reader.
+    it "reads implicit self only outside every block, and only while nothing is mixed into `main` or `Object`" do
+      ["[1].each { gets }", "obj.instance_exec { gets }", "-> { gets }", "include Readline\ngets",
+       "extend Readline\ngets", "self.extend(Readline)\ngets", "using Refined\ngets", "Object.include(Readline)\ngets",
+       "Kernel.send(:prepend, Readline)\ngets", "def setup = include(Readline)\ngets",
+       "class Object; include Readline; end\ngets", "Object.prepend(Readline)\ngets"].each do |source|
+        expect(reads_line?(source)).to be(false), source
+      end
+      expect(reads_line?("module App; include Readline; end\ngets")).to be(true)
+      expect(reads_line?("class App; extend Readline; end\ngets")).to be(true)
+      expect(described_class.reads_line?(last_statement("gets"), script.entering_opaque_block)).to be(false)
     end
 
     # `Kernel`, `STDIN` and `ARGF` are read by their types, so a project constant that shadows one reads by its own.
@@ -115,18 +133,18 @@ RSpec.describe Rigor::Inference::LastLine do
 
   describe ".predicate_scopes" do
     it "binds `$_` to the line on each edge: `String` / `nil` for `gets`, `String` for `readline`" do
-      truthy, falsey = described_class.predicate_scopes(last_statement("gets"), scope, nil)
+      truthy, falsey = described_class.predicate_scopes(last_statement("gets"), script, nil)
       expect(truthy.global(:$_)).to eq(string)
       expect(falsey.global(:$_)).to eq(Rigor::Type::Combinator.constant_of(nil))
 
-      truthy, falsey = described_class.predicate_scopes(last_statement("readline"), scope, nil)
+      truthy, falsey = described_class.predicate_scopes(last_statement("readline"), script, nil)
       expect(truthy.global(:$_)).to eq(string)
       expect(falsey.global(:$_)).to eq(Rigor::Type::Combinator.bot)
     end
 
     it "layers `$_` over the edges the condition narrows otherwise, and keeps a pair for a non-reader" do
       x_scope = scope.with_local(:x, string)
-      truthy, falsey = described_class.predicate_scopes(last_statement("gets"), scope, [x_scope, scope])
+      truthy, falsey = described_class.predicate_scopes(last_statement("gets"), script, [x_scope, scope])
       expect(truthy.local(:x)).to eq(string)
       expect(truthy.global(:$_)).to eq(string)
       expect(falsey.local(:x)).to be_nil

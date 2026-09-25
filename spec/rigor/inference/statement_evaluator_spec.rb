@@ -3711,13 +3711,21 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       ["case\nwhen gets then 1\nelse $_\nend", "case x\nwhen $stdin.gets then 1\nend\n$_",
        "case x\nin Integer if gets then 1\nelse $_\nend", "bar(gets, $_)", "[gets, $_]", "gets.to_s + $_",
        "show(gets, xs.map { $_ })", "h = { a: gets, b: [1].map { $_ } }", "puts(foo(gets) ? $_ : 0)"].each do |body|
-        reads = indexed_last_line_reads("def m(x, xs)\n  if gets\n#{body}\n  end\nend\n")
+        reads = indexed_last_line_reads("def m(x, xs)\n  if $stdin.gets\n#{body}\n  end\nend\n")
         expect(reads).to all(be_nil), body
         expect(reads).not_to be_empty, body
       end
-      expect(indexed_last_line_reads("def m\n  if gets\n    [$_, 1]\n  end\nend\n")).to eq([string_t])
+      expect(indexed_last_line_reads("def m\n  if $stdin.gets\n    [$_, 1]\n  end\nend\n")).to eq([string_t])
       # A statement list, a loop or a conditional runs its parts in order, so a read before the reader keeps it.
-      expect(indexed_last_line_reads("def m(ok)\n  if gets\n    a = $_\n    b = gets if ok\n  end\nend\n"))
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    a = $_\n    b = gets if ok\n  end\nend\n"))
+        .to eq([string_t])
+      # `&&` and `||` run their operands in order too, so a read in the left operand of one whose right operand
+      # reads a line keeps the narrowing, and so does a read in one that reads no line.
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    $_.empty? && gets\n  end\nend\n"))
+        .to eq([string_t])
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    $_.empty? || gets\n  end\nend\n"))
+        .to eq([string_t])
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    x = (ok && $_)\n  end\nend\n"))
         .to eq([string_t])
     end
 

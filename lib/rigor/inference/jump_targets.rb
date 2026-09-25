@@ -41,6 +41,24 @@ module Rigor
       # Every `jump_class` node that targets the construct whose body is `node`, as an identity-keyed Hash used as a
       # membership set: the jump sinks also collect jumps belonging to nested constructs, and their consumers filter
       # against this set.
+      # The jump classes among `jump_classes` that target the construct whose body is `node`, in one walk: a loop
+      # asks for its `next`, `break` and `redo` together. Early-exiting once every class is found.
+      def kinds(node, jump_classes)
+        found = []
+        collect_kinds(node, jump_classes, found)
+        found
+      end
+
+      def collect_kinds(node, jump_classes, found)
+        return if node.nil? || found.size == jump_classes.size
+
+        found << node.class if jump_classes.include?(node.class) && !found.include?(node.class)
+        node.rigor_each_child do |child|
+          collect_kinds(child, jump_classes, found) unless boundary?(child)
+        end
+      end
+      private_class_method :collect_kinds
+
       def of(node, jump_class)
         found = {}.compare_by_identity
         collect(node, jump_class, found)

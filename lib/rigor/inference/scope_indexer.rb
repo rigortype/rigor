@@ -2377,15 +2377,16 @@ module Rigor
       # its known elements for any index and an `Array[1 | 2]` `1 | 2`. `H = { a: 1 }; H.default = 0` read `H[:b]` as
       # `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
       #
-      # Each carrier member of the facet therefore stops claiming its contents are complete: a shape reopens
-      # (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values, a tuple becomes
-      # the `Array` of its elements plus the same arm, and an `Array` / `Hash` nominal with a value-pinned type
-      # argument gains the arm on every type argument, as the unknown-store seam gives it. A class-level nominal
-      # (`Hash.new(0)`'s `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and
-      # the arm would silence `COUNTS[k].upcase`. A read still answers the known values (every key's, since the
-      # projection is not keyed) beside the arm, which is what keeps a stored or rewritten value from folding. An
-      # entry already `Dynamic` is unpinned through its facet, so a carrier an RBS overload join wrapped is not left
-      # pinned.
+      # Each carrier member of the facet therefore stops claiming its contents are complete. A literal shape floors to
+      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors a mutated
+      # ivar seed (#1297): keeping the literal's known values beside a `Dynamic[top]` arm left every read carrying
+      # them, and every key's at that, since the projection is not keyed, so `STATUS[:name]` answered `false | nil |
+      # Dynamic[top]` and a method declared `-> String` returning it drew `def.return-type-mismatch` although a
+      # sibling method could store anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains
+      # the arm on every type argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
+      # `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and the arm would
+      # silence `COUNTS[k].upcase`. An entry already `Dynamic` is unpinned through its facet, so a carrier an RBS
+      # overload join wrapped is not left pinned.
       def census_mutated_type(type)
         type = type.static_facet if type.is_a?(Type::Dynamic)
         members = type.is_a?(Type::Union) ? type.members : [type]
@@ -2396,11 +2397,9 @@ module Rigor
       # refinement as well (`clear` empties a `non-empty-array`).
       def census_unpinned_carrier(member)
         case member
-        when Type::HashShape then HashLookupMutation.open_shape(member) || member
-        when Type::Tuple
-          Type::Combinator.nominal_of(
-            "Array", type_args: [Type::Combinator.union(*member.elements, Type::Combinator.untyped)]
-          )
+        when Type::HashShape
+          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::Nominal
           UnknownStoreWidening.value_pinned_collection?(member) ? UnknownStoreWidening.gradual_content(member) : member
         when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)

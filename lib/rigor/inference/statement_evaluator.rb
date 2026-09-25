@@ -1701,18 +1701,70 @@ module Rigor
       # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings
       # in `scopes`, and in `base` itself under `keep_base`. A binding the accumulated one already accepts
       # ({#retry_binding_accepted?}) is not joined, so a narrowing inside the body (`log if m == :fast`) leaves `m` as
-      # it was. `base` itself when nothing moves, allocation-free then.
+      # it was. The name keeps the marks `Scope#join` would leave on it ({#raised_marks}). `base` itself when nothing
+      # moves.
       def join_raised_bindings(base, scopes, keep_base:)
         joined_scope = base
         base.locals.each do |name, binding|
           joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.local(name) }
-          joined_scope = joined_scope.with_local(name, joined) if rebinds?(joined, binding)
+          joined_scope = rejoin_raised(joined_scope, base, scopes, keep_base, :local, name, binding, joined) if joined
         end
         base.ivars.each do |name, binding|
           joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.ivar(name) }
-          joined_scope = joined_scope.with_ivar(name, joined) if rebinds?(joined, binding)
+          joined_scope = rejoin_raised(joined_scope, base, scopes, keep_base, :ivar, name, binding, joined) if joined
         end
         joined_scope
+      end
+
+      # `joined_scope` with `name` rebound when the join moved its binding or its marks. The rebind goes through
+      # `with_local` / `with_ivar`, which drop every mark, and then re-stamps the joined ones.
+      def rejoin_raised(joined_scope, base, scopes, keep_base, kind, name, binding, joined) # rubocop:disable Metrics/ParameterLists
+        marks = raised_marks(base, scopes, keep_base, kind, name)
+        moved = rebinds?(joined, binding)
+        return joined_scope if !moved && marks == scope_marks(base, kind, name)
+
+        type = moved ? joined : binding
+        rebound = rebind_variable(joined_scope, kind, name, type)
+        declared, optimistic, published, origin = marks
+        if declared && kind == :local
+          rebound = rebound.with_local_declaration_mark(name)
+        elsif declared
+          rebound = rebound.seed_declaration_sourced_ivar(name, type)
+        end
+        rebound = rebound.with_published_constant_mark(kind, name) if published
+        if kind == :local
+          rebound.with_optimistic_local(name, optimistic).with_local_origin(name, origin)
+        else
+          rebound.with_optimistic_ivar(name, optimistic).with_ivar_origin(name, origin)
+        end
+      end
+
+      # The marks `Scope#join` leaves on `name` across every scope of `scopes` that binds it, and `base` under
+      # `keep_base`, as `[declaration-sourced, optimistic cause, published-constant, origin]`: ADR-58's declaration
+      # mark only where each carries it, the others where any does. A scope recorded after an in-place mutation
+      # carries the first two (`Scope#with_mutated_local`), so `r = @name; begin; up(r); …; rescue; retry; end` keeps
+      # `r`'s mark in the arm and across the retry (issue #1287).
+      def raised_marks(base, scopes, keep_base, kind, name)
+        declared, optimistic, published, origin = keep_base ? scope_marks(base, kind, name) : [true, nil, false, nil]
+        scopes.each do |path|
+          next if (kind == :local ? path.local(name) : path.ivar(name)).nil?
+
+          declared &&= path.declaration_sourced?(kind, name)
+          optimistic ||= kind == :local ? path.optimistic_local(name) : path.optimistic_ivar(name)
+          published ||= path.published_constant_sourced?(kind, name)
+          origin ||= kind == :local ? path.local_origin(name) : path.ivar_origin(name)
+        end
+        [declared, optimistic, published, origin]
+      end
+
+      def scope_marks(scope, kind, name)
+        if kind == :local
+          [scope.declaration_sourced?(:local, name), scope.optimistic_local(name),
+           scope.published_constant_sourced?(:local, name), scope.local_origin(name)]
+        else
+          [scope.declaration_sourced?(:ivar, name), scope.optimistic_ivar(name),
+           scope.published_constant_sourced?(:ivar, name), scope.ivar_origin(name)]
+        end
       end
 
       # A statement-by-statement body shares one binding object across its scopes until the name is rebound, so a

@@ -570,10 +570,10 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(rebinds?(%q|obj.instance_eval("x = #{n}; 'zz' =~ /(q)/")|)).to be(true)
         expect(rebinds?('klass.class_eval("def foo; end")')).to be(false)
         expect(rebinds?("klass.class_eval(\"def \#{name}; @\#{name} =~ /(q)/; end\")")).to be(false)
-        # An interpolated String that does not parse with its interpolations standing for a name counts when its
-        # literal text names a match.
-        expect(rebinds?("klass.class_eval(\"\#{name} =~ /(q)/ if\")")).to be(true)
-        expect(rebinds?("klass.class_eval(\"\#{name}( 1\")")).to be(false)
+        # An interpolated String that does not parse with its interpolations standing for a name is code the
+        # analyzer cannot read: it counts only for a `binding` or `Kernel` eval.
+        expect(rebinds?("klass.class_eval(\"\#{name} =~ /(q)/ if\")")).to be(false)
+        expect(rebinds?("Kernel.eval(\"\#{name} =~ /(q)/ if\")")).to be(true)
         expect(rebinds?("Kernel.eval('x =~ ')")).to be(false)
         expect(rebinds?("klass.class_eval { attr_reader :x }")).to be(false)
         expect(rebinds?("node.eval")).to be(false)
@@ -589,13 +589,23 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       end
 
       # A deeply nested literal would overflow the scan's recursion, so it is read by its tokens.
-      it "reads code nested too deeply, or too long, by its tokens without raising" do
-        deep = "#{'[' * 3000}1#{']' * 3000}"
-        matching = "#{'[' * 3000}\"zz\" =~ /(q)/#{']' * 3000}"
-        expect(rebinds?("Kernel.eval('#{deep}')")).to be(false)
-        expect(rebinds?("Kernel.eval('#{matching}')")).to be(true)
-        expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}')")).to be(false)
-        expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}s =~ /q/')")).to be(true)
+      # Code past the bounds is code the analyzer cannot read: it counts for a `binding` or `Kernel` eval, and not
+      # for the method-defining `class_eval` and its kin, whatever its text holds.
+      it "reads code nested too deeply, or too long, as code it cannot read, without raising" do
+        deep = "#{'[' * 3000}\"zz\" =~ /(q)/#{']' * 3000}"
+        expect(rebinds?("Kernel.eval('#{deep}')")).to be(true)
+        expect(rebinds?("klass.class_eval('#{deep}')")).to be(false)
+        long_match = "#{"x = 1\n" * 20_000}s =~ /q/"
+        expect(rebinds?("klass.class_eval('#{long_match}')")).to be(false)
+        expect(rebinds?("binding.eval('#{long_match}')")).to be(true)
+      end
+
+      # A long heredoc that defines methods, whose text holds `sub` only inside a name.
+      it "keeps a long method-defining `class_eval` heredoc quiet" do
+        body = (1..4000).map { |i| "  def subscriber_#{i}; @subscriber_#{i}; end\n" }.join
+        heredoc = "klass.class_eval <<~RUBY\n#{body}RUBY\n"
+        expect(body.bytesize).to be > 64 * 1024
+        expect(rebinds?(heredoc)).to be(false)
       end
 
       it "does not parse code past the bounds" do
@@ -614,10 +624,10 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(Prism).to have_received(:parse).once
       end
 
-      it "survives a scan that overflows the stack, reading the code by its tokens" do
+      it "survives a scan that overflows the stack, reading the code as code it cannot read" do
         allow(Rigor::Inference::MatchRebinding).to receive(:program_may_match?).and_raise(SystemStackError)
-        expect(rebinds?(%q|Kernel.eval('"zz" =~ /(q)/')|)).to be(true)
-        expect(rebinds?("klass.class_eval('def foo; end')")).to be(false)
+        expect(rebinds?("Kernel.eval('1')")).to be(true)
+        expect(rebinds?(%q|klass.class_eval('"zz" =~ /(q)/')|)).to be(false)
       end
 
       it "reads a `send` by the method it names, or by the arguments a computed name is sent" do

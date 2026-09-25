@@ -40,12 +40,10 @@ module Rigor
         NAMES_BY_STRING = (
           ALWAYS_MATCHING | LOOKUPS | BLOCK_FORM_LOOKUPS | RECEIVER_PATTERNS | EVALS | SENDS | Set[:[]=]
         ).to_h { |name| [name.to_s, name] }.freeze
-        # An interpolated String of code is parsed with each interpolation standing for this identifier; when that
-        # does not parse, the code counts if its literal text names a match ({MATCH_TOKENS}).
+        # An interpolated String of code is parsed with each interpolation standing for this identifier.
         PLACEHOLDER = "__rigor_interpolation__"
-        MATCH_TOKENS = %w[=~ !~ match sub scan $~ ===].freeze
-        # Code past these bounds is read by its tokens alone: parsing and scanning it would cost more than it tells,
-        # and a deeply nested literal (`[[[…]]]`) overflows the scan's recursion.
+        # Code past these bounds is not read: parsing and scanning it would cost more than it tells, and a deeply
+        # nested literal (`[[[…]]]`) overflows the scan's recursion.
         MAX_CODE_BYTES = 64 * 1024
         MAX_CODE_NESTING = 256
         OPENERS = "([{".bytes.to_set.freeze
@@ -56,7 +54,7 @@ module Rigor
         FIELD_SEPARATORS = %i[$; $-F].freeze
         EMPTY = [].freeze
         private_constant :ALWAYS_MATCHING, :LOOKUPS, :BLOCK_FORM_LOOKUPS, :RECEIVER_PATTERNS, :EVALS, :SENDS,
-                         :NAMES_BY_STRING, :PLACEHOLDER, :MATCH_TOKENS, :MAX_CODE_BYTES, :MAX_CODE_NESTING, :OPENERS,
+                         :NAMES_BY_STRING, :PLACEHOLDER, :MAX_CODE_BYTES, :MAX_CODE_NESTING, :OPENERS,
                          :CLOSERS, :OPERATOR_SUFFIXES, :FIELD_SEPARATORS, :EMPTY
 
         module_function
@@ -119,8 +117,8 @@ module Rigor
         # True when `node`, a call, is known to rebind the `$~` of the frame it is made in by the method it calls:
         # an {ALWAYS_MATCHING} name; a {LOOKUPS} name with an argument known to be a Regexp
         # ({Operands.known_regexp_operand?}), and `grep` / `grep_v` on the same terms in their block form; `[]=` with
-        # such an index (`s[re] = v`); `===` or unary `~` on such a receiver; an eval of a String whose code may match
-        # ({.code_may_match?}); or a {SENDS} call that names one of these with the arguments it is sent, or whose
+        # such an index (`s[re] = v`); `===` or unary `~` on such a receiver; an eval whose code may match
+        # ({.eval_may_match?}); or a {SENDS} call that names one of these with the arguments it is sent, or whose
         # computed name is sent a known Regexp (not an interpolated attribute writer, `"#{name}="`). `match?` never
         # counts, and `Dynamic[top]` is not a known Regexp. `node` may also be an index `||=` / `&&=` / `op=` write,
         # read by its index (`s[re] ||= v`). `scope` types the operands.
@@ -188,13 +186,14 @@ module Rigor
         end
         private_class_method :field_separator_regexp?
 
-        # An eval of a literal or interpolated String counts when its code may match ({.code_may_match?}). One of
-        # code the analyzer cannot read counts only for `binding.eval` (any receiver ending in a `binding` call) and
-        # `Kernel.eval`, whose whole purpose is to run code in this frame; `instance_eval`, `class_eval` and
-        # `module_eval` of a variable are the metaprogramming idiom that defines methods, and counting them would
-        # forget on correct code.
+        # An eval of a literal or interpolated String counts when the analyzer reads its code and it may match
+        # ({.code_reading}). Code it cannot read — a variable, or a literal past the bounds — counts only for
+        # `binding.eval` (any receiver ending in a `binding` call) and `Kernel.eval`, whose whole purpose is to run
+        # code in this frame; `instance_eval`, `class_eval` and `module_eval` of such code are the metaprogramming
+        # idiom that defines methods, and counting them would forget on correct code.
         def eval_may_match?(name, receiver, source, scope)
-          return code_may_match?(source, scope) if code_literal?(source)
+          answer = code_literal?(source) ? code_reading(source, scope) : nil
+          return answer unless answer.nil?
 
           name == :eval && frame_eval_receiver?(receiver)
         end
@@ -215,16 +214,17 @@ module Rigor
         end
         private_class_method :frame_eval_receiver?
 
-        # True when a String of code an eval runs may match: a literal that parses and whose program
-        # {MatchRebinding.program_may_match?} accepts, or an interpolated one read the same way with each
-        # interpolation replaced by an identifier, falling back to whether its literal text names a match
-        # ({MATCH_TOKENS}) when that does not parse. A literal that does not parse raises before it runs. Code
-        # longer than {MAX_CODE_BYTES} or nested deeper than {MAX_CODE_NESTING} is read by its tokens alone. The
-        # answer is kept on the frame as {Frame#memo} keeps a scan, since every pass over the call asks again.
-        def code_may_match?(node, scope)
+        # Whether the String of code an eval runs may match, or nil when the analyzer cannot read it. A literal that
+        # parses is read on the block scan's terms ({MatchRebinding.program_may_match?}), and an interpolated one
+        # the same way with each interpolation replaced by an identifier. A literal that does not parse raises
+        # before it runs, so it does not match. An interpolated one that does not parse once so replaced, code
+        # longer than {MAX_CODE_BYTES} or nested deeper than {MAX_CODE_NESTING}, and code whose scan raises is not
+        # read. The answer is kept on the frame as {Frame#memo} keeps a scan, since every pass over the call asks
+        # again.
+        def code_reading(node, scope)
           MatchRebinding.remember(node, scope, :code) { read_code(node, scope) }
         end
-        private_class_method :code_may_match?
+        private_class_method :code_reading
 
         def read_code(node, scope)
           interpolated = node.is_a?(Prism::InterpolatedStringNode)
@@ -233,32 +233,16 @@ module Rigor
                  else
                    node.unescaped
                  end
-          return names_match?(text) if oversized?(text)
+          return nil if oversized?(text)
 
-          answer = parsed_answer(text, scope)
-          return answer unless answer.nil?
-
-          interpolated && names_match?(text)
-        rescue SystemStackError
-          names_match?(text)
-        end
-        private_class_method :read_code
-
-        # Whether `code` may match, or nil when it does not parse.
-        def parsed_answer(code, scope)
-          result = Prism.parse(code)
-          return nil unless result.errors.empty?
+          result = Prism.parse(text)
+          return (interpolated ? nil : false) unless result.errors.empty?
 
           MatchRebinding.program_may_match?(result.value, scope)
-        rescue StandardError
+        rescue SystemStackError, StandardError
           nil
         end
-        private_class_method :parsed_answer
-
-        def names_match?(text)
-          MATCH_TOKENS.any? { |token| text.include?(token) }
-        end
-        private_class_method :names_match?
+        private_class_method :read_code
 
         # Longer than {MAX_CODE_BYTES}, or with brackets nested deeper than {MAX_CODE_NESTING}.
         def oversized?(text)

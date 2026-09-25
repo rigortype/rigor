@@ -114,15 +114,19 @@ module Rigor
         end
 
         # Binds every name into `scope` and records the optimistic mark after the binding, since
-        # `Scope#with_local` / `Scope#with_ivar` drop any mark the name carried before.
-        def apply_to(scope)
+        # `Scope#with_local` / `Scope#with_ivar` drop any mark the name carried before. `miss` is what
+        # each marked slot answers on a miss (issue #1302): `nil` for every mark the binder makes itself —
+        # a short array pads with `nil`, and a `nil` destructures to `nil` — so only a caller whose
+        # right-hand side a miss can make something else passes another answer
+        # ({OptimisticOrigin.destructuring_miss}).
+        def apply_to(scope, miss: nil)
           bound = types.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
           bound = ivars.reduce(bound) { |acc, (name, type)| acc.with_ivar(name, type) }
           bound = optimistic.reduce(bound) do |acc, name|
-            acc.with_optimistic_local(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+            acc.with_optimistic_local(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: miss)
           end
           optimistic_ivars.reduce(bound) do |acc, name|
-            acc.with_optimistic_ivar(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
+            acc.with_optimistic_ivar(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: miss)
           end
         end
       end

@@ -7,6 +7,7 @@ require_relative "analysis/fact_store"
 require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
 require_relative "inference/flow_tracer"
+require_relative "inference/optimistic_origin"
 require_relative "inference/statement_evaluator"
 require_relative "inference/def_node_resolver"
 
@@ -335,19 +336,30 @@ module Rigor
       self
     end
 
-    def optimistic_local(name) = @optimistic_locals[name.to_sym]
-    def optimistic_ivar(name) = @optimistic_ivars[name.to_sym]
+    def optimistic_local(name) = Inference::OptimisticOrigin.bound_cause(@optimistic_locals[name.to_sym])
+    def optimistic_ivar(name) = Inference::OptimisticOrigin.bound_cause(@optimistic_ivars[name.to_sym])
 
-    def with_optimistic_local(name, cause)
+    # Issue #1302 — what the value a marked local / ivar is bound to answers on a miss, as its binding recorded
+    # it beside the mark, or {Inference::OptimisticOrigin::UNKNOWN_MISS}. The answer lives in the mark's own
+    # table entry ({Inference::OptimisticOrigin::BoundMark}), so every transition that keeps or drops the mark
+    # keeps or drops the answer with it.
+    def optimistic_local_miss(name) = Inference::OptimisticOrigin.bound_miss(@optimistic_locals[name.to_sym])
+    def optimistic_ivar_miss(name) = Inference::OptimisticOrigin.bound_miss(@optimistic_ivars[name.to_sym])
+
+    # `miss` is what the bound value answers when the bet fails ({Inference::OptimisticOrigin.miss_answer}); the
+    # default records none, so a read through the binding widens as an untold miss does.
+    def with_optimistic_local(name, cause, miss: Inference::OptimisticOrigin::UNKNOWN_MISS)
       return self if cause.nil?
 
-      rebuild(optimistic_locals: @optimistic_locals.merge(name.to_sym => cause).freeze)
+      mark = Inference::OptimisticOrigin.bound_mark(cause, miss)
+      rebuild(optimistic_locals: @optimistic_locals.merge(name.to_sym => mark).freeze)
     end
 
-    def with_optimistic_ivar(name, cause)
+    def with_optimistic_ivar(name, cause, miss: Inference::OptimisticOrigin::UNKNOWN_MISS)
       return self if cause.nil?
 
-      rebuild(optimistic_ivars: @optimistic_ivars.merge(name.to_sym => cause).freeze)
+      mark = Inference::OptimisticOrigin.bound_mark(cause, miss)
+      rebuild(optimistic_ivars: @optimistic_ivars.merge(name.to_sym => mark).freeze)
     end
 
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
@@ -562,8 +574,8 @@ module Rigor
     # Issue #1287 — rebinds `name` for an in-place mutation of the object it already holds: a mutator's widening
     # (`r << x`), a content floor after a closure or callee mutated it, an element or member write through it. The
     # binding still names the same object, so this is not a flow-live write, and the marks `with_local` drops stay:
-    # ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark. A source-level write keeps
-    # going through `with_local`, which drops both.
+    # ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark, with the miss answer issue
+    # #1302 records in it. A source-level write keeps going through `with_local`, which drops both.
     #
     # Two other per-local tables are deliberately still dropped. An ADR-82 `local_origins` cause explains the
     # `Dynamic` the ASSIGNMENT bound, and a floor's `Dynamic[top]` has a different cause. Issue #667's
@@ -1845,8 +1857,8 @@ module Rigor
         void_origins: @void_origins,
         plugin_typed_calls: @plugin_typed_calls,
         optimistic_origins: @optimistic_origins,
-        optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
-        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars),
+        optimistic_locals: join_optimistic_marks(@optimistic_locals, other.optimistic_locals),
+        optimistic_ivars: join_optimistic_marks(@optimistic_ivars, other.optimistic_ivars),
         # UNION, the published-constant mark's direction: the mark only withholds the memoizing `||=`
         # reading, so keeping a site either arm holds is the wider answer.
         repeated_or_writes: join_repeated_or_writes(other),
@@ -1882,6 +1894,17 @@ module Rigor
       return theirs if mine.empty?
 
       theirs.merge(mine).freeze
+    end
+
+    # Issue #286's mark tables join as {#join_origins} does, except for the miss answer a mark may carry (issue
+    # #1302): a name both arms mark keeps its answer only when the arms agree on it. A name one arm marks keeps
+    # that arm's answer, since a miss runs through that arm only.
+    def join_optimistic_marks(mine, theirs)
+      return mine if mine.equal?(theirs) || theirs.empty?
+      return theirs if mine.empty?
+
+      theirs.merge(mine) { |_name, their_mark, my_mark| Inference::OptimisticOrigin.join_bound_marks(my_mark, their_mark) }
+            .freeze
     end
 
     # ADR-82 WD1 — rebinding drops any propagated origin for the name (the new value's provenance is set

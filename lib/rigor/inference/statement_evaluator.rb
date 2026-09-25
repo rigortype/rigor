@@ -497,7 +497,10 @@ module Rigor
 
         bound = bound.without_inferred_param_mark(node.name)
         bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
-        bound.with_optimistic_local(node.name, optimistic_rhs_origin(node.value, post_rhs))
+        cause = optimistic_rhs_origin(node.value, post_rhs)
+        return bound if cause.nil?
+
+        bound.with_optimistic_local(node.name, cause, miss: optimistic_rhs_miss(node.value, post_rhs))
       end
 
       # Issue #667 — true when this write copies a value whose constancy rests on a foreign published
@@ -518,6 +521,13 @@ module Rigor
       # `w = v` keeps the mark — the same propagation `OriginLookup` performs for the Dynamic channel.
       def optimistic_rhs_origin(value_node, scope_after_rhs)
         optimistic_origin_for(value_node, scope_after_rhs)
+      end
+
+      # Issue #1302 — what the value a marked write binds answers on a miss, recorded beside the mark so a predicate
+      # read through the binding widens only as far as the inline form does: `x = recv&.empty?; !x` keeps its
+      # `true`, while `v = h[k]; v.nil?` still widens. Asked only once {#optimistic_rhs_origin} found a mark.
+      def optimistic_rhs_miss(value_node, scope_after_rhs)
+        Inference::OptimisticOrigin.miss_answer(value_node, scope_after_rhs)
       end
 
       # The effective optimistic-nil-free cause of an expression. {Inference::OptimisticOrigin.resolve} owns
@@ -554,7 +564,8 @@ module Rigor
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = post_rhs.with_ivar(node.name, rhs_type)
         bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
-        bound = bound.with_optimistic_ivar(node.name, optimistic_rhs_origin(node.value, post_rhs))
+        cause = optimistic_rhs_origin(node.value, post_rhs)
+        bound = bound.with_optimistic_ivar(node.name, cause, miss: optimistic_rhs_miss(node.value, post_rhs)) if cause
         # Issue #667 — the ivar twin of the local stamp. This is the SAME-method half; the cross-method one
         # (`@mode = AppConfig::MODE` in `initialize`, read in a sibling) rides the class-ivar census and is
         # stamped by {#seed_instance_ivars}.
@@ -973,7 +984,8 @@ module Rigor
         rhs_type, post_rhs = sub_eval(node.value, scope)
         marks = Inference::OptimisticOrigin.destructuring_marks(node.value, post_rhs)
         bound = MultiTargetBinder.bind_marked(node, rhs_type, optimistic: marks, scope: post_rhs)
-        post = widen_index_targets(bound, bound.apply_to(post_rhs), type_scope: scope)
+        miss = marks == false ? nil : Inference::OptimisticOrigin.destructuring_miss(node.value, post_rhs)
+        post = widen_index_targets(bound, bound.apply_to(post_rhs, miss: miss), type_scope: scope)
         [rhs_type, widen_attribute_targets(node, post)]
       end
 

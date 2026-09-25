@@ -153,6 +153,18 @@ RSpec.describe Rigor::Scope do
       expect(mutated.optimistic_local(:r)).to be(cause)
     end
 
+    # Issue #1302 — the miss answer lives in the mark's own entry, so it travels and drops with the mark.
+    it "keeps a mark's recorded miss answer across a mutation's rebind and drops it at a write" do
+      cause = Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL
+      marked = scope.with_local(:r, type).with_optimistic_local(:r, cause, miss: nil)
+      mutated = marked.with_mutated_local(:r, Rigor::Type::Combinator.nominal_of("P"))
+      rebound = mutated.with_local(:r, type)
+      expect([marked.optimistic_local(:r), marked.optimistic_local_miss(:r)]).to eq([cause, nil])
+      expect([mutated.optimistic_local(:r), mutated.optimistic_local_miss(:r)]).to eq([cause, nil])
+      expect(rebound.optimistic_local(:r)).to be_nil
+      expect(rebound.optimistic_local_miss(:r)).to be(Rigor::Inference::OptimisticOrigin::UNKNOWN_MISS)
+    end
+
     it "adds no mark at an in-place mutation's rebind of an unmarked local" do
       mutated = scope.with_local(:r, type).with_mutated_local(:r, type)
       expect(mutated.declaration_sourced?(:local, :r)).to be(false)

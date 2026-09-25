@@ -141,7 +141,13 @@ The `Regexp` "specific narrowing rule" the trust levels above defer to is the `=
 - **Truthy edge** (the match succeeded — `=~` returned an `Integer` position): `$~` narrows to `MatchData`; `$&`, `` $` `` and `$'` narrow to `String` (they are non-nil on any successful match regardless of grouping); each *unconditionally participating* numbered group `$N` narrows to `String`; `$+` (the last matched group) narrows to `String` only when at least one group participates unconditionally.
 - **Falsey edge** (no match — `=~` returned `nil`): `$~`, every unconditional `$N`, and `$+` (when gated in) narrow to `nil`.
 - **Participation** is one-directional and conservative. A numbered group participates unconditionally only when neither it nor any enclosing group carries a zero-permitting quantifier (`?`, `*`, `{0,…}`) and it does not sit inside an alternation (`|`) branch; `(?:…)` and lookaround do not capture. A group that is optional, alternation-reachable, or otherwise in doubt is treated as conditional — its `$N` stays `String | nil` on both edges — because a successful overall match can leave such a group unmatched (`nil`) at runtime. `$+` follows the same gate: a zero-group or all-optional-group pattern leaves it `String | nil`.
-- **Invalidation.** The match globals are global-storage facts. Any intervening match-capable call between the predicate and a global's use invalidates the narrowing; a later successful `Regexp.last_match` consult observes the same proven-match bindings rather than re-deriving them.
+- **Invalidation.** The match globals are frame-local facts. Ruby keeps them in the special-variable slot of the method body (or class, module or file body) that runs the match. Every block and every closure created in that body — a lambda literal, `lambda {}`, `proc {}`, `Proc.new {}` — reaches the same slot, so a match it runs rebinds the body's globals; a called method, and a nested `def`, class or module body, has a slot of its own. An intervening call that may rebind the slot, between the predicate and a global's use, invalidates the narrowing:
+  - a match-capable call: one whose method name may run a match, or an implicit-self or `self.` call;
+  - a call carrying a block literal whose body may run a match — a match-capable call, a regex `when` condition, a regex in a pattern, or a bare regex condition, anywhere in the block except inside a nested `def`, class or module body;
+  - a call with a `&expr` block argument other than a Symbol literal, which may pass a proc created in this body (an anonymous `&` forwards the caller's block, created in the caller's body);
+  - any call in a body that creates a closure whose body may run a match — a lambda literal, or the block of a call that keeps its block to run later (`lambda`, `proc`, `Proc.new`, `define_method`, …) — because the closure can run through any later call.
+
+  A block body that may run a match, or any block body in a body that creates such a closure, does not read the narrowing from outside the block, because it can run after an earlier iteration rebound the globals; a block body with neither reads it on every iteration. A later successful `Regexp.last_match` consult observes the same proven-match bindings rather than re-deriving them.
 
 ## Fact stability and mutation
 
@@ -152,7 +158,7 @@ Facts MUST carry a target and a stability reason. The first implementation disti
 - **local binding facts**, such as "local `x` currently refers to a non-nil value";
 - **captured local facts**, where a block, proc, or lambda may write the local from another lexical scope;
 - **object-content facts**, such as hash keys, instance variables, singleton methods, and object-shape members;
-- **global storage facts**, such as constants, class variables, and globals;
+- **global storage facts**, such as constants, class variables, and globals (the regex match globals are frame-local instead; see § "Regexp match-predicate narrowing");
 - **dynamic-origin and relational facts**, which may survive local calls but still need target invalidation.
 
 ### Targeted invalidation

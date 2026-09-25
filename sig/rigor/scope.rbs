@@ -18,6 +18,8 @@ module Rigor
     attr_reader optimistic_ivars: Hash[Symbol, Symbol]
     # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter reaches `untyped`.
     attr_reader repeated_or_writes: Hash[untyped, bool]
+    # sig-gen gap: #1154 — the same reader shape; `Inference::MatchRebinding::Frame` carries no signature.
+    attr_reader match_frame: untyped
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -185,6 +187,11 @@ module Rigor
     def without_inferred_param_mark: (String | Symbol name) -> Scope
     def inferred_param?: (String | Symbol name) -> bool
     def forget_match_globals: () -> Scope
+    def match_globals_bound?: () -> bool
+    def with_match_frame: (untyped body) -> Scope
+    # sig-gen gap: #1154 — the frame reader over an ivar assigned in `initialize` from a parameter reaches
+    # `untyped`, so the `bool` is hand-written.
+    def match_rebinding_closure?: () -> bool
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool

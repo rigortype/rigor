@@ -231,6 +231,37 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "#match_globals_bound?" do
+    it "is true only while a match-data global holds a binding" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+
+      expect(scope.with_global(:$stdout, str).match_globals_bound?).to be(false)
+      expect(scope.with_global(:$2, str).match_globals_bound?).to be(true)
+    end
+  end
+
+  # Issue #1358 — the frame a body runs in, which its blocks and closures share.
+  describe "#with_match_frame / #match_rebinding_closure?" do
+    def root(source) = Prism.parse(source).value
+
+    it "answers whether the frame's body makes a closure that may run a match" do
+      expect(scope.with_match_frame(root("f = proc { s =~ /(z)/ }")).match_rebinding_closure?).to be(true)
+      expect(scope.with_match_frame(root("f = proc { s.upcase }")).match_rebinding_closure?).to be(false)
+    end
+
+    it "is false where no body stamped a frame" do
+      expect(scope.match_rebinding_closure?).to be(false)
+    end
+
+    it "survives a rebuild and a join" do
+      framed = scope.with_match_frame(root("f = proc { s =~ /(z)/ }"))
+      str = Rigor::Type::Combinator.nominal_of("String")
+
+      expect(framed.with_local(:x, str).match_rebinding_closure?).to be(true)
+      expect(framed.join(framed.with_local(:x, str)).match_rebinding_closure?).to be(true)
+    end
+  end
+
   describe "#with_fact" do
     it "returns a new scope with the fact added" do
       fact = Rigor::Analysis::FactStore::Fact.new(
@@ -474,10 +505,10 @@ RSpec.describe Rigor::Scope do
     # - `:merged` — combined from both arms (union, intersection, agreement, or `||`). The exact rule differs
     #   per field and is pinned by the examples above and around; what this roster pins is that the field is
     #   REACHED at all.
-    # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path` and
-    #   `lexical_nesting` describe where the code IS, not what a branch did. The three `*_origins` node tables
-    #   and `plugin_typed_calls` are advisory, compare-by-identity and shared by reference: passing only
-    #   `mine` is the documented contract, not an omission.
+    # - `:receiver` — deliberately taken from the receiver alone. `discovery`, `source_path`,
+    #   `lexical_nesting` and `match_frame` describe where the code IS, not what a branch did. The three
+    #   `*_origins` node tables and `plugin_typed_calls` are advisory, compare-by-identity and shared by
+    #   reference: passing only `mine` is the documented contract, not an omission.
     # - `:required` — no default exists for it to silently fall back to.
     def join_field_groups
       { merged: %i[
@@ -488,7 +519,7 @@ RSpec.describe Rigor::Scope do
           local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes
         ],
         receiver: %i[
-          discovery source_path lexical_nesting
+          discovery source_path lexical_nesting match_frame
           dynamic_origins void_origins optimistic_origins plugin_typed_calls
         ],
         required: %i[environment] }
@@ -506,7 +537,7 @@ RSpec.describe Rigor::Scope do
     # One arm, populated so that EVERY constructor keyword holds a non-default value. Both arms are built from
     # the same values, so the agreement / intersection rules keep them and any field the join forgets shows up
     # as the constructor default instead.
-    def populated(fact, type, node)
+    def populated(fact, type, node) # rubocop:disable Metrics/AbcSize -- one keyword per constructor field
       described_class.new(
         environment: Rigor::Environment.default,
         locals: { x: type }.freeze,
@@ -533,7 +564,8 @@ RSpec.describe Rigor::Scope do
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
         optimistic_ivars: { :@i => :cause }.freeze,
-        repeated_or_writes: { node => true }.compare_by_identity.freeze
+        repeated_or_writes: { node => true }.compare_by_identity.freeze,
+        match_frame: Rigor::Inference::MatchRebinding::Frame.new(node)
       )
     end
 

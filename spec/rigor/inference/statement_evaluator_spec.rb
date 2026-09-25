@@ -3474,6 +3474,24 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(post.global(:$1)).to be_nil
     end
+
+    # Issue #1358 — a block runs in the enclosing frame, so a match in its body rebinds the frame's `$~`.
+    it "forgets the narrowing after a call whose block may match" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        raise unless /(\\d+)/ =~ value
+        items.each { |i| i =~ /(z)/ }
+      RUBY
+      expect(post.global(:$1)).to be_nil
+      expect(post.global(:$~)).to be_nil
+    end
+
+    it "keeps the narrowing after a call whose block cannot match" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        raise unless /(\\d+)/ =~ value
+        items.each { |i| i.upcase }
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+    end
   end
 
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.

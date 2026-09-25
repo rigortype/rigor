@@ -29,6 +29,7 @@ require_relative "indexed_narrowing"
 require_relative "jump_targets"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "match_rebinding"
 require_relative "method_dispatcher"
 require_relative "mutation_widening"
 require_relative "narrowing"
@@ -3546,7 +3547,9 @@ module Rigor
           lexical_nesting: recorded_def_nesting(def_node),
           discovery: scope.discovery,
           struct_fold_safe_locals: body_fold_safe_locals(def_node, receiver, self_fold_safe),
-          dynamic_origins: scope.dynamic_origins
+          dynamic_origins: scope.dynamic_origins,
+          # Issue #1358 — the callee runs in a frame of its own ({Scope#with_match_frame}).
+          match_frame: MatchRebinding::Frame.new(def_node.body)
         )
       end
 
@@ -4007,9 +4010,10 @@ module Rigor
       # holds on ANY run rather than the first.
       #
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
-      # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
+      # yielding method's business, so the return-typing pass must see the same unmodelled-self mark. Issue #1358
+      # — and the same match-global view ({MatchRebinding.block_entry}).
       def block_entry_scope(block_node, expected, narrowed_self_type: nil, captured: nil)
-        entry = scope.entering_opaque_block
+        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node)
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowed_self_type
@@ -4807,7 +4811,10 @@ module Rigor
       def converged_captured_bindings(block, names, param_types, stored, marks)
         floored = UnthreadedRebinds.names(block, names)
         moving = names.reject { |name| floored.include?(name) }
-        base = stored.reduce(scope) { |acc, (name, type)| CapturedLocals.bind(acc, name, type) }
+        # Issue #1358 — each pass is an iteration, so it reads the match globals the block entry does.
+        base = stored.reduce(MatchRebinding.block_entry(scope, block)) do |acc, (name, type)|
+          CapturedLocals.bind(acc, name, type)
+        end
         base = floored.reduce(base) { |acc, name| CapturedLocals.bind(acc, name, Type::Combinator.untyped) }
         seeds = moving.to_h { |name| [name, CapturedLocals.bound_type(base, name)] }
         moved = {}
@@ -5485,7 +5492,9 @@ module Rigor
       # `position:` is the element's index in the fold; the binding marks the index `||=` sites an earlier
       # position may have filled there ({RepeatedOrWrites::Marks}).
       def type_block_body_with_param(block_node, expected_param_types, captured: nil, position: nil)
-        block_scope = captured ? captured.lay(scope, position: position) : scope
+        # Issue #1358 — a position past the first runs after an earlier one may have rebound the match globals.
+        entry = MatchRebinding.block_entry(scope, block_node)
+        block_scope = captured ? captured.lay(entry, position: position) : entry
         block_scope = BlockParameterBinder.new(expected_param_types: expected_param_types)
                                           .bind_onto(block_node, block_scope)
         type_block_body(block_node, block_scope, captured: captured)

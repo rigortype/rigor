@@ -21,6 +21,7 @@ require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
 require_relative "indexed_narrowing"
@@ -2631,16 +2632,27 @@ module Rigor
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
         # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are narrowed to non-nil on a successful-match edge; a
         # later call that itself runs a regex match rebinds them, so the narrowed facts must be dropped. We forget them
-        # only when the call is match-CAPABLE (a regex-matching method, or an implicit-self / unknown-receiver call
-        # whose body we cannot prove match-free). A call provably match-free on a known receiver — `$3.to_i`, `year <
-        # 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)` stdlib idiom keeps its precision
-        # while a genuinely interposed match still invalidates.
+        # only when the call may run a match in this frame ({#rebinds_match_globals?}). A call provably match-free on a
+        # known receiver — `$3.to_i`, `year < 50` — does NOT clobber, so the multi-statement `m = /…/ =~ s; …; use($2)`
+        # stdlib idiom keeps its precision while a genuinely interposed match still invalidates.
         # The chain above is Scope-total by construction (every helper returns its input scope or a
         # combinator result); the `||=` is a runtime no-op that pins the INFERRED type back to Scope for
         # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
         post_scope ||= scope
-        post_scope = post_scope.forget_match_globals if statement_call && match_capable_call?(node)
+        post_scope = post_scope.forget_match_globals if statement_call && rebinds_match_globals?(node, post_scope)
         post_scope
+      end
+
+      # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),
+      # its block may run a match (issue #1358 — the block runs in this frame, so `items.each { |i| i =~ re }`
+      # rebinds the enclosing method's `$~`, while a match inside a called Ruby method rebinds that method's own), or
+      # the frame has made a closure that may run one whenever it is called ({Scope#match_rebinding_closure?}).
+      # The scans run only while a match global is narrowed, the one state a forget can drop.
+      def rebinds_match_globals?(node, post_scope)
+        return false unless post_scope.match_globals_bound?
+        return true if match_capable_call?(node)
+
+        MatchRebinding.block_may_match?(node) || post_scope.match_rebinding_closure?
       end
 
       # The value an untyped setter call on a local stores (`foo(s.x = v)`), for the Struct member write-back; nil for
@@ -2657,23 +2669,16 @@ module Rigor
         apply_rspec_matcher_narrowing(node, post_scope)
       end
 
-      # Method names that (may) run a regex match and therefore rebind the `$~` family. Conservative over-approximation
-      # — a few set globals only with a Regexp argument, but we do not inspect args.
-      MATCH_CAPABLE_METHODS = %i[
-        =~ match match? gsub gsub! sub sub! scan split slice slice!
-        [] partition rpartition index rindex === grep grep_v
-      ].freeze
-      private_constant :MATCH_CAPABLE_METHODS
-
-      # True when `node` could rebind the regex match-data globals: a known regex-matching method by name, or an
-      # implicit-self / self-receiver call whose body we cannot inspect for an internal match. An explicit-receiver call
-      # to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is treated as match-free so the multi-statement `m
-      # = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals. The over-approximation is one-directional: a user
-      # method that secretly matches on an explicit receiver is the only escape, and re-narrowing on the next real guard
-      # recovers — weighed against the false-positive cost, precision wins here.
+      # True when `node` could rebind the regex match-data globals: a known regex-matching method by name
+      # ({MatchRebinding::MATCH_CAPABLE_METHODS}), or an implicit-self / self-receiver call whose body we cannot
+      # inspect for an internal match. An explicit-receiver call to a non-matching method (`$3.to_i`, `year < 50`,
+      # `buf << c`) is treated as match-free so the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the
+      # narrowed globals. The over-approximation is one-directional: a user method that secretly matches on an explicit
+      # receiver is the only escape, and re-narrowing on the next real guard recovers — weighed against the
+      # false-positive cost, precision wins here.
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
-        return true if MATCH_CAPABLE_METHODS.include?(node.name)
+        return true if MatchRebinding::MATCH_CAPABLE_METHODS.include?(node.name)
 
         receiver = node.receiver
         receiver.nil? || receiver.is_a?(Prism::SelfNode)
@@ -4545,8 +4550,10 @@ module Rigor
         expected = expected_block_param_types_for(call_node)
         # Issue #316 — every block body enters with `self` unmodelled (`Scope#entering_opaque_block`); the
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
-        scope_with_params = BlockParameterBinder.new(expected_param_types: expected)
-                                                .bind_onto(block_node, scope.entering_opaque_block)
+        # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
+        # ({MatchRebinding.block_entry}).
+        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node)
+        scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on
         # `Grape::Validations::ParamsScope`, `namespace` on the `Grape::API::Instance` class object, verb
@@ -4636,6 +4643,7 @@ module Rigor
         # carrier a `class X` body gets. The mark is the only thing that tells the two apart downstream, and a
         # `def` reached from this body clears it by starting from a fresh scope.
         fresh = fresh.with_singleton_class_body(node.is_a?(Prism::SingletonClassNode))
+        fresh = fresh.with_match_frame(node.body)
         fresh = stamp_nesting(fresh, new_nesting)
         sub_eval(node.body, fresh, class_context: new_context, lexical_nesting: new_nesting)
       end
@@ -4670,6 +4678,8 @@ module Rigor
         fresh = seed_instance_ivars(fresh, singleton: singleton)
         fresh = seed_class_cvars(fresh)
         fresh = seed_program_globals(fresh)
+        # Issue #1358 — the body runs in a frame of its own, whose match globals its blocks and closures share.
+        fresh = fresh.with_match_frame(def_node.body)
         # ADR-48 Struct slice 3 — install the method body's fold-safe-local set so a member read off a mutation-free
         # local folds during the in-body walk (the call-return inference path is seeded separately).
         fresh = fresh.with_struct_fold_safe(

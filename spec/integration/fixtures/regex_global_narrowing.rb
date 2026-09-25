@@ -60,4 +60,129 @@ end
 assert_type("String?", Regexp.last_match(1)) if /(a)|(b)/ =~ s
 # Off-edge (no proven match): last_match(N) defers to RBS -> String?.
 assert_type("String?", Regexp.last_match(1))
+
+# Issue #1358 — the match globals live in the method frame's special-variable slot, which the method's blocks and
+# closures share, so a match a block or closure runs rebinds the enclosing method's `$~`. Each case is a method, so
+# a closure's frame is that method's rather than this file's top level.
+
+# A block whose body matches rebinds `$~` (Ruby: `block_match("a1", ["q"])` returns nil).
+def block_match(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| i =~ /(zzz)/ }
+    group = $1
+    no_match = $~.nil?
+    assert_type("String?", group)
+    assert_type("bool", no_match)
+  end
+end
+
+# Control: a block with no match in its body keeps the narrowing.
+def block_without_match(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| puts i }
+    group = $1
+    no_match = $~.nil?
+    assert_type("String", group)
+    assert_type("false", no_match)
+  end
+end
+
+# Control: a match inside a nested `def` runs in that method's own frame.
+def block_with_nested_def(str, items)
+  if str =~ /(\d+)/
+    items.each { |_i| def nested_matcher(x) = (x =~ /(q)/) }
+    assert_type("String", $1)
+  end
+end
+
+# A `when /re/` condition runs `Regexp#===`, which rebinds `$~` as well.
+def block_case_when(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| case i when /(z)/ then i end }
+    assert_type("String?", $1)
+  end
+end
+
+# A read before the body's own match can see an earlier iteration's failed match (Ruby: on this edge with
+# `items = %w[q q]`, the first iteration reads "1" and the second nil).
+def per_iteration(str, items)
+  if str =~ /(\d+)/
+    items.each do |i|
+      assert_type("String?", $1)
+      i =~ /(z)/
+    end
+  end
+end
+
+# Control: a body with no match reads the narrowing on every iteration.
+def per_iteration_without_match(str, items)
+  if str =~ /(\d+)/
+    items.each { |_i| assert_type("String", $1) }
+  end
+end
+
+# The block-return pass types the body under the same view (Ruby: ["1", nil] for `per_iteration_value("1q")`).
+def per_iteration_value(str)
+  chars = String(str).chars
+  if str =~ /(\d+)/
+    values = chars.map { |c| r = $1; c =~ /(z)/; r }
+    assert_type("Array[String?]", values)
+  end
+end
+
+# A `&expr` block argument may be a proc made in this frame, here by a method that keeps its block (Ruby:
+# `block_pass("a1", ["q"])` returns nil).
+def keep_block(&block) = block
+
+def block_pass(str, items)
+  matcher = keep_block { |i| i =~ /(zzz)/ }
+  if str =~ /(\d+)/
+    items.each(&matcher)
+    assert_type("String?", $1)
+  end
+end
+
+# Control: an anonymous `&` forwards the block this method was called with, which the caller made in its own
+# frame (Ruby: `block_forward("a1", ["q"]) { |i| i =~ /(zzz)/ }` returns "1").
+def block_forward(str, items, &)
+  if str =~ /(\d+)/
+    items.each(&)
+    assert_type("String", $1)
+  end
+end
+
+# Control: a Symbol block argument calls the method on each element, in its own frame.
+def block_pass_symbol(str, items)
+  if str =~ /(\d+)/
+    items.each(&:freeze)
+    assert_type("String", $1)
+  end
+end
+
+# A lambda made in the method rebinds the method's `$~` whenever it runs (Ruby: `lambda_call("a1")` returns nil).
+def lambda_call(str)
+  matcher = -> { "zz" =~ /(q)/ }
+  if str =~ /(\d)/
+    matcher.call
+    assert_type("String?", $1)
+  end
+end
+
+# `proc { }` likewise (Ruby: `proc_call("a1")` returns nil).
+def proc_call(str)
+  matcher = proc { "zz" =~ /(q)/ }
+  if str =~ /(\d)/
+    matcher.call
+    assert_type("String?", $1)
+  end
+end
+
+# Control: a lambda whose body cannot match leaves later calls match-free.
+def lambda_without_match(str)
+  shout = -> { "zz".upcase }
+  if str =~ /(\d)/
+    shout.call
+    assert_type("String", $1)
+  end
+end
 # rubocop:enable Style/PerlBackrefs

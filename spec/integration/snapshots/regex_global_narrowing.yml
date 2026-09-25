@@ -23,3 +23,18 @@ assertions:
   '15': String?
   '16': String?
   '17': String?
+  '18': String?
+  '19': bool
+  '20': String
+  '21': 'false'
+  '22': String
+  '23': String?
+  '24': String?
+  '25': String
+  '26': Array[String?]
+  '27': String?
+  '28': String
+  '29': String
+  '30': String?
+  '31': String?
+  '32': String

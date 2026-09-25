@@ -41,8 +41,8 @@ end
 
 # Regexp.last_match(N) mirrors $N narrowing on a proven-match edge.
 # Both groups unconditional: last_match(N) -> String.
-# Assign to locals before assert_type so the implicit-self call
-# does not trigger forget_match_globals between the two checks.
+# The locals date from when an implicit-self call such as `assert_type`
+# forgot the match globals; since #1364 it no longer does.
 if /([a-z]+)(\d+)/ =~ s
   lm1 = Regexp.last_match(1)
   lm2 = Regexp.last_match(2)
@@ -410,6 +410,254 @@ def constructed_regexp_index(str, items)
   if str =~ /(\d+)/
     items.each { |i| i.index(pattern) }
     assert_type("String?", $1)
+  end
+end
+
+# Issue #1364 — a method defined in Ruby runs in a frame of its own, so a match in its body rebinds its own `$~`,
+# never its caller's: an implicit-self or `self.` call between the match and the read keeps the narrowing (Ruby: "AB"
+# for each with `line = "ab=c"`).
+def log_1364(msg) = msg
+
+def callee_frame_log(line)
+  if line =~ /^(\w+)=(.*)$/
+    log_1364("parsed")
+    key = $1
+    assert_type("String", key)
+    key.upcase # CALLEE-FRAME
+  end
+end
+
+def callee_frame_warn(line)
+  if line =~ /^(\w+)=(.*)$/
+    warn "debug"
+    key = $1
+    assert_type("String", key)
+    key.upcase # CALLEE-FRAME
+  end
+end
+
+class CalleeFrameParser
+  def log(msg) = msg
+
+  def callee_frame_self_log(line)
+    if line =~ /^(\w+)=(.*)$/
+      self.log("x")
+      key = $1
+      assert_type("String", key)
+      key.upcase # CALLEE-FRAME
+    end
+  end
+end
+
+# A `send` whose name is a literal that cannot match dispatches to a Ruby method, which is a frame of its own.
+def callee_frame_send_literal(line)
+  if line =~ /^(\w+)=(.*)$/
+    send(:log_1364, line)
+    key = $1
+    assert_type("String", key)
+    key.upcase # CALLEE-FRAME
+  end
+end
+
+# The call's own arguments run in this frame: a match there rebinds `$~` although the callee cannot, while an
+# argument that only reads the globals leaves them (Ruby: nil for `operand_match("ab=c")`, "AB" for
+# `operand_read("ab=c")`).
+def operand_match(line)
+  if line =~ /^(\w+)=(.*)$/
+    log_1364(line.sub(/=/, ": "))
+    assert_type("String?", $1)
+  end
+end
+
+def operand_read(line)
+  if line =~ /^(\w+)=(.*)$/
+    log_1364("#{$2.strip}: parsed")
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+# Control: after a call that does reach this frame's slot the read is unproven, and calling a method on it reports
+# (Ruby: `frame_eval_read("ab=c", %q("zz" =~ /(q)/))` raises NoMethodError on nil).
+def frame_eval_read(line, src)
+  if line =~ /^(\w+)=(.*)$/
+    eval(src)
+    key = $1
+    key.upcase # GENUINE-NIL
+  end
+end
+
+# The calls that still reach this frame's slot forget it. A block this frame made runs in it (Ruby: nil for
+# `frame_block("a1")`).
+def run_block_1364 = yield("q")
+
+def frame_block(str)
+  if str =~ /(\d+)/
+    run_block_1364 { |x| x =~ /(z)/ }
+    assert_type("String?", $1)
+  end
+end
+
+# `eval` runs its String in this frame, and so does `instance_eval` in its String form; a `send` whose name is not a
+# literal may be either (Ruby: nil for each with `str = "a1"` and `src = %q("zz" =~ /(q)/)`, and for
+# `frame_send("a1", :eval, src)`).
+def frame_eval(str, src)
+  if str =~ /(\d+)/
+    eval(src)
+    assert_type("String?", $1)
+  end
+end
+
+def frame_instance_eval(str, src)
+  if str =~ /(\d+)/
+    instance_eval(src)
+    assert_type("String?", $1)
+  end
+end
+
+def frame_send(str, name, src)
+  if str =~ /(\d+)/
+    send(name, src)
+    assert_type("String?", $1)
+  end
+end
+
+# `yield` and a call on the method's own `&block` run the block the caller passed, which may be a C-function proc
+# whose method sets this frame's slot (Ruby: nil for `frame_yield("a1", &:=~)` and `frame_block_call("a1", &:=~)`).
+def frame_yield(str)
+  if str =~ /(\d+)/
+    yield "zz", /(q)/
+    assert_type("String?", $1)
+  end
+end
+
+def frame_block_call(str, &blk)
+  if str =~ /(\d+)/
+    blk.call("zz", /(q)/)
+    assert_type("String?", $1)
+  end
+end
+
+# Inside a block they count the same way, since the block runs in this frame (Ruby: nil for
+# `frame_yield_in_block("a1", ["zz"], &:=~)` and `frame_eval_in_block("a1", [%q("zz" =~ /(q)/)])`).
+def frame_yield_in_block(str, items)
+  if str =~ /(\d+)/
+    items.each { |i| yield i, /(q)/ }
+    assert_type("String?", $1)
+  end
+end
+
+def frame_eval_in_block(str, sources)
+  if str =~ /(\d+)/
+    sources.each { |src| eval(src) }
+    assert_type("String?", $1)
+  end
+end
+
+# A block handed to a method that may keep it runs in this frame whenever a later call runs it, through self or
+# through the receiver that kept it, so every call in the frame forgets (Ruby: nil for
+# `CalleeFrameEmitter.new.kept_block("a1", "q")` and `kept_block_receiver("a1", CalleeFrameEmitter.new, "q")`).
+class CalleeFrameEmitter
+  def on(key, &handler) = (@handlers ||= {})[key] = handler
+  def emit(key, *args) = @handlers.fetch(key).call(*args)
+
+  def kept_block(str, text)
+    on(:line) { |l| l =~ /(z)/ }
+    if str =~ /(\d+)/
+      emit(:line, text)
+      assert_type("String?", $1)
+    end
+  end
+end
+
+def kept_block_receiver(str, bus, text)
+  bus.on(:line) { |l| l =~ /(z)/ }
+  if str =~ /(\d+)/
+    bus.emit(:line, text)
+    assert_type("String?", $1)
+  end
+end
+
+# `super` hands its block to the superclass method, which may keep it (Ruby: nil for
+# `CalleeFrameChild.new.hook("a1")`).
+class CalleeFrameHooks
+  def hook(_str, &handler) = @handler = handler
+  def fire(*args) = @handler.call(*args)
+end
+
+class CalleeFrameChild < CalleeFrameHooks
+  def hook(str)
+    super { |l| l =~ /(z)/ }
+    if str =~ /(\d+)/
+      fire("q")
+      assert_type("String?", $1)
+    end
+  end
+end
+
+# A lazy enumerator keeps its block until it is forced, and a `binding` lets another method eval in this frame
+# (Ruby: nil for `kept_lazy("a1", ["q"])` and `frame_binding("a1")`).
+def kept_lazy(str, items)
+  lazy = items.lazy.map { |i| i =~ /(z)/ }
+  if str =~ /(\d+)/
+    lazy.first
+    assert_type("String?", $1)
+  end
+end
+
+def eval_in_1364(frame) = frame.eval(%q("zz" =~ /(q)/))
+
+def frame_binding(str)
+  if str =~ /(\d+)/
+    eval_in_1364(binding)
+    assert_type("String?", $1)
+  end
+end
+
+# Controls: a core iterator, or a method named by the `each_` convention, runs its block before it returns, so a
+# match there before the guard leaves later calls match-free (Ruby: "1" for `block_run_now("a1", ["q"])` and
+# `each_prefix_run_now("a1", ["q"])`).
+def block_run_now(str, items)
+  items.each { |i| i =~ /(z)/ }
+  if str =~ /(\d+)/
+    str.upcase
+    assert_type("String", $1)
+  end
+end
+
+def each_row_1364(rows) = rows.each { |r| yield r }
+
+def each_prefix_run_now(str, rows)
+  each_row_1364(rows) { |r| r =~ /(z)/ }
+  if str =~ /(\d+)/
+    str.upcase
+    assert_type("String", $1)
+  end
+end
+
+# A core-class `self` inherits builtins that match on the caller's behalf (Ruby: nil for
+# `CalleeFrameLine.new("ab=c").inherited_match` and `CalleeFrameRows.new(["q"]).pattern_predicate("a1")`).
+class CalleeFrameLine < String
+  def inherited_match
+    if self =~ /(\w+)=/
+      start_with?(/(z)/)
+      assert_type("String?", $1)
+    end
+  end
+end
+
+class CalleeFrameRows
+  include Enumerable
+
+  def initialize(rows) = @rows = rows
+  def each(&) = @rows.each(&)
+
+  def pattern_predicate(str)
+    if str =~ /(\d+)/
+      any?(/(z)/)
+      assert_type("String?", $1)
+    end
   end
 end
 # rubocop:enable Style/PerlBackrefs

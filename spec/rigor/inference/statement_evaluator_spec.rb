@@ -3487,10 +3487,38 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     it "keeps the narrowing after a call whose block cannot match" do
       _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
-        raise unless /(\\d+)/ =~ value
+        raise unless /(\d+)/ =~ value
         items.each { |i| i.upcase }
       RUBY
       expect(post.global(:$1)).to eq(string_t)
+    end
+
+    # Issue #1364 — a method defined in Ruby runs in a frame of its own, so a call into one leaves the caller's `$~`.
+    it "keeps the narrowing after an implicit-self or `self.` call" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        raise unless /(\d+)/ =~ value
+        log("parsed")
+        self.log("x")
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+    end
+
+    it "forgets the narrowing after an implicit-self call whose argument runs a match in this frame" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        raise unless /(\d+)/ =~ value
+        log(value.sub(/=/, ": "))
+      RUBY
+      expect(post.global(:$1)).to be_nil
+    end
+
+    it "forgets the narrowing after an `eval` or a `yield`, which may rebind this frame's `$~`" do
+      %w[eval(src) yield(value)].each do |call|
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          raise unless /(\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to be_nil
+      end
     end
   end
 

@@ -129,6 +129,7 @@ module Rigor
         Prism::ReturnNode => :eval_return,
         Prism::NextNode => :eval_next,
         Prism::BreakNode => :eval_break,
+        Prism::YieldNode => :eval_yield,
         Prism::MatchWriteNode => :eval_match_write,
         Prism::MatchPredicateNode => :eval_match_pattern,
         Prism::MatchRequiredNode => :eval_match_pattern,
@@ -2670,19 +2671,23 @@ module Rigor
         apply_rspec_matcher_narrowing(node, post_scope)
       end
 
-      # True when `node` could rebind the regex match-data globals: a known regex-matching method by name
-      # ({MatchRebinding::MATCH_CAPABLE_METHODS}), or an implicit-self / self-receiver call whose body we cannot
-      # inspect for an internal match. An explicit-receiver call to a non-matching method (`$3.to_i`, `year < 50`,
-      # `buf << c`) is treated as match-free so the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the
-      # narrowed globals. The over-approximation is one-directional: a user method that secretly matches on an explicit
-      # receiver is the only escape, and re-narrowing on the next real guard recovers — weighed against the
-      # false-positive cost, precision wins here.
+      # True when `node` could rebind the regex match-data globals by itself: a known regex-matching method by name
+      # ({MatchRebinding::MATCH_CAPABLE_METHODS}), or one of the few other calls that reach this frame's slot
+      # ({MatchRebinding.frame_call_matches?}: `eval`, a `send` whose name is not a literal, a call on the method's own
+      # `&block`, …). Issue #1364 — any other call, implicit-self included, is match-free: a method defined in Ruby
+      # runs in a frame of its own, so a match in its body rebinds its own `$~`, never its caller's (`log("parsed");
+      # key = $1` keeps `$1` narrowed). A call to a non-matching method on another receiver (`$3.to_i`, `year < 50`,
+      # `buf << c`) is match-free for the same reason, or because it is C code that does not match; a C method outside
+      # the table that matches anyway is the gap #1365 closes. An implicit-self or `self.` call also answers for its
+      # arguments ({MatchRebinding.operand_may_match?}), as it did when it forgot unconditionally: `log(line.sub(/=/,
+      # ": "))` rebinds `$~` in the argument, which applies no reset of its own (#1365).
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
         return true if MatchRebinding::MATCH_CAPABLE_METHODS.include?(node.name)
+        return true if MatchRebinding.frame_call_matches?(node, scope)
 
         receiver = node.receiver
-        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        (receiver.nil? || receiver.is_a?(Prism::SelfNode)) && MatchRebinding.operand_may_match?(node.arguments, scope)
       end
 
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call
@@ -4923,6 +4928,18 @@ module Rigor
       end
 
       # ----- helpers -----
+
+      # `yield` runs the block the caller passed. A block literal runs in the caller's frame, but a C-function proc runs
+      # its method on this frame's behalf: `y(s, &:=~)` yielding `"zz", /(q)/` runs `String#=~`, and Ruby then reads
+      # this method's `$1` as nil. So a statement `yield` forgets the match globals as a match-capable call does (issue
+      # #1364); in an operand it applies no reset, like a call there ({#thread_operand}). It is otherwise the pure
+      # expression it was before it had a handler.
+      def eval_yield(node)
+        type = scope.type_of(node, tracer: tracer)
+        return [type, scope] if @in_operand
+
+        [type, scope.forget_match_globals]
+      end
 
       # Explicit `return value` (including `return` inside a block, which in Ruby returns from the *enclosing method*).
       # The control-transfer value is `Bot` — a `return` produces no value at its own position — but the returned

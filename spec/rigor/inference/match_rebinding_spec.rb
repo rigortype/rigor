@@ -123,6 +123,13 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     it "does not count a call whose name cannot match, such as an implicit-self one" do
       expect(may_match?("items.each { |i| puts i.upcase }")).to be(false)
     end
+
+    # Issue #1364 — the calls that reach the frame's slot from inside a block count there too.
+    it "counts a `yield` and the calls {.frame_call_matches?} counts" do
+      expect(may_match?("items.each { |i| yield i }")).to be(true)
+      expect(may_match?("sources.each { |src| eval(src) }")).to be(true)
+      expect(may_match?("items.each { |i| log(i) }")).to be(false)
+    end
   end
 
   describe ".block_may_match?" do
@@ -172,6 +179,80 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     end
   end
 
+  # Issue #1364 — a method defined in Ruby runs in a frame of its own, so an implicit-self call rebinds the caller's
+  # `$~` only as C code that matches on its behalf or runs code in its frame.
+  describe ".frame_call_matches?" do
+    def frame_call_matches?(source, in_scope = scope)
+      described_class.frame_call_matches?(last_statement(source), in_scope)
+    end
+
+    it "does not count an implicit-self or `self.` call into a Ruby method, nor a call on another receiver" do
+      expect(frame_call_matches?('log("parsed")')).to be(false)
+      expect(frame_call_matches?('warn "debug"')).to be(false)
+      expect(frame_call_matches?('self.log("x")')).to be(false)
+      expect(frame_call_matches?("logger.eval(src)")).to be(false)
+    end
+
+    it "counts `eval`, and `instance_eval` / `class_eval` / `module_eval` in their String form" do
+      expect(frame_call_matches?("eval(src)")).to be(true)
+      expect(frame_call_matches?("instance_eval(src)")).to be(true)
+      expect(frame_call_matches?("self.class_eval(src, __FILE__)")).to be(true)
+      expect(frame_call_matches?("instance_eval { |x| x }")).to be(false)
+    end
+
+    it "counts a `send` whose name is not a literal, or names a method that counts" do
+      expect(frame_call_matches?("send(name, s)")).to be(true)
+      expect(frame_call_matches?("__send__(:sub, /(z)/, '')")).to be(true)
+      expect(frame_call_matches?("public_send('eval', src)")).to be(true)
+      expect(frame_call_matches?("send(:log, s)")).to be(false)
+    end
+
+    it "counts the builtins a core-class `self` inherits, the predicates only with a pattern" do
+      expect(frame_call_matches?("self !~ /(z)/")).to be(true)
+      expect(frame_call_matches?("start_with?(/(z)/)")).to be(true)
+      expect(frame_call_matches?("any?(/(z)/)")).to be(true)
+      expect(frame_call_matches?("any?")).to be(false)
+    end
+
+    context "with the method's own `&block` parameter" do
+      def block_call_matches?(source)
+        def_node = last_statement(source)
+        framed = scope.with_match_frame(def_node.body, def_node.parameters)
+        described_class.frame_call_matches?(def_node.body.body.first, framed)
+      end
+
+      it "counts a call that runs it, since the caller may have passed a C-function proc" do
+        expect(block_call_matches?("def m(&blk); blk.call(1); end")).to be(true)
+        expect(block_call_matches?("def m(&blk); blk.(1); end")).to be(true)
+        expect(block_call_matches?("def m(&blk); blk.yield(1); end")).to be(true)
+      end
+
+      it "does not count a call that does not run it, or a call on another local" do
+        expect(block_call_matches?("def m(&blk); blk.arity; end")).to be(false)
+        expect(block_call_matches?("def m(other, &blk); other.call(1); end")).to be(false)
+      end
+    end
+  end
+
+  # Issue #1364 — an implicit-self call no longer forgets by itself, so it answers for the match its own arguments may
+  # run, which applies no reset of its own (#1365).
+  describe ".operand_may_match?" do
+    def operand_may_match?(source) = described_class.operand_may_match?(last_statement(source).arguments, scope)
+
+    it "counts a call the statement-level table or {.frame_call_matches?} counts, anywhere in the arguments" do
+      expect(operand_may_match?('log(line.sub(/=/, ": "))')).to be(true)
+      expect(operand_may_match?("log(\"\#{h[k]}\")")).to be(true)
+      expect(operand_may_match?("log(format(eval(src)))")).to be(true)
+      expect(operand_may_match?("log(case s when /(z)/ then 1 end)")).to be(true)
+    end
+
+    it "does not count an argument that only reads, or a block or lambda the other rules answer for" do
+      expect(operand_may_match?("log(\"\#{$2.strip}: parsed\")")).to be(false)
+      expect(operand_may_match?("log(items.map { |i| i =~ /(z)/ })")).to be(false)
+      expect(operand_may_match?("register(-> { s =~ /(z)/ })")).to be(false)
+    end
+  end
+
   describe ".call_may_match?" do
     def call_may_match?(source) = described_class.call_may_match?(last_statement(source), scope)
 
@@ -204,6 +285,23 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(matching_closure?("lookup = ->(k) { h[k] }")).to be(false)
       expect(matching_closure?("items.each { |i| i =~ /(z)/ }")).to be(false)
       expect(matching_closure?("def m = -> { s =~ /(z)/ }")).to be(false)
+    end
+
+    # Issue #1364 — a method the block is handed to may keep it and run it from a later call.
+    it "counts a matching block handed to a call that may keep it, or a `binding`" do
+      expect(matching_closure?("on(:x) { |l| l =~ /(z)/ }")).to be(true)
+      expect(matching_closure?("bus.on(:x) { |l| l =~ /(z)/ }")).to be(true)
+      expect(matching_closure?("super { |l| l =~ /(z)/ }")).to be(true)
+      expect(matching_closure?("lazy = items.lazy.map { |i| i =~ /(z)/ }")).to be(true)
+      expect(matching_closure?("render(binding)")).to be(true)
+    end
+
+    it "does not count a block a core iterator, a String match method or an `each_` method runs now" do
+      expect(matching_closure?("File.open(path) { |f| f.read =~ /(z)/ }")).to be(false)
+      expect(matching_closure?('line.gsub(/(\w)/) { $1 =~ /(z)/ }')).to be(false)
+      expect(matching_closure?("loop { s =~ /(z)/ }")).to be(false)
+      expect(matching_closure?("each_row { |r| r =~ /(z)/ }")).to be(false)
+      expect(matching_closure?("on(:x) { |l| l.upcase }")).to be(false)
     end
 
     it "counts a closure in a method's parameter defaults, which run in the method's frame" do

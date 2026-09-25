@@ -50,6 +50,13 @@ module Rigor
           @forwarded_block == name
         end
 
+        # True when `name` is the method's own `&block` parameter, whatever the body does with it: calling it runs
+        # the block the caller passed, which may be a C-function proc ({MatchRebinding.frame_call_matches?}).
+        def block_parameter?(name)
+          parameters = @parameters
+          parameters.is_a?(Prism::ParametersNode) && parameters.block&.name == name
+        end
+
         # The scan of `node` under `scope`, kept while `scope`'s local and instance-variable tables are the same
         # objects: a lookup argument's answer reads them ({MatchRebinding.may_match?}), and a rebuild that leaves
         # them alone passes the same tables on.

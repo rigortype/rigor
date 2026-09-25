@@ -1080,12 +1080,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # Issue #1358 — the controls read `$1` after a block or closure that cannot rebind the frame's `$~`, then call a
-    # method on it; a block rule that over-counted would report each of those calls on correct code.
-    it "reports no nil receiver on the frame-sharing controls" do
+    # method on it; a block rule that over-counted would report each of those calls on correct code. Issue #1364
+    # adds the calls into a Ruby-defined method, and one marked read after an `eval`, which does rebind it, so the
+    # rule is seen to fire.
+    it "reports a nil receiver only after a call that reaches the frame's slot" do
       nil_receivers = harness.diagnostics.select do |d|
         %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
       end
-      expect(nil_receivers).to be_empty
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    # Issue #1364 — `log("parsed")`, `warn "debug"`, `self.log("x")` and `send(:log, …)` call methods that run in
+    # frames of their own, so the read after each keeps the match edge's `String`.
+    it "reports nothing on the read after a call into a Ruby-defined method" do
+      reads = marked_lines(harness, "# CALLEE-FRAME")
+      expect(reads.size).to eq(4)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end
 

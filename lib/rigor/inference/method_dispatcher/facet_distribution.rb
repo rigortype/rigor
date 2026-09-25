@@ -17,6 +17,15 @@ module Rigor
       # are selected one by one, and the distinct picks come back together for the dispatch layer's join, wrapped in
       # `Dynamic` when their returns differ (#521).
       #
+      # Only sealed members are read ({.sealed?}): a literal, or a plain instance of a core class no subclass can
+      # instantiate. Such a member's runtime value is of exactly its class, so reading it is reading a plain argument
+      # of that class, with no hazard a plain argument lacks. Any other member's value may be of a subclass and take an
+      # arm the member itself skips: `Numeric` in `2 ** v`'s `Complex | Numeric` skipped a project `(real) -> Float`,
+      # whose `real` alias names `Integer`, for a catch-all `(untyped) -> nil`, and `.floor` on the call reported
+      # `call.undefined-method`. Scanning the parameters for a subclass of the member caught a plain class name and
+      # missed aliases, `instance`, type variables, intersections, singletons and modules, so such a facet keeps the
+      # wrapper instead.
+      #
       # A wider facet keeps the wrapper and the receiver's arm, as before. It is usually itself a #521 join
       # (`Dynamic[BigDecimal | Complex | Float | Integer | Rational]` from `n * untyped`), and read member by member it
       # joined every arm again: 256 call sites across the survey corpus lost a precise type to `Dynamic`, and a
@@ -26,63 +35,27 @@ module Rigor
         MEMBER_LIMIT = 2
         # Member-wise argument lists beyond this keep their wrappers.
         CAP = 8
+        # Core classes that undefine their allocator, so no subclass has an instance and a value of one of them is of
+        # exactly that class. `NilClass` leaves with the facet's `nil`.
+        SEALED_CLASSES = %w[Integer Float Rational Complex Symbol TrueClass FalseClass].freeze
 
         module_function
 
         # Whether any argument is a `Dynamic` whose facet selection reads; the cheap guard of the hot path.
         def faceted?(arg_types) = arg_types.any? { |arg| arg.is_a?(Type::Dynamic) && facet_members(arg) }
 
-        # Selects through the block, called as `yield(arg_types, member)`. When every narrow-faceted argument has one
+        # Selects through the block, called as `yield(arg_types, member)`. When every facet selection reads has one
         # member, it yields once with the members standing in. Otherwise, with `member_wise`, it yields once per
         # member-wise list (`member` true, where the block answers only a genuine match); without it (the singular
         # `select`, whose one answer a member order would decide), or when any list matches nothing or there are
-        # more than {CAP}, it yields once with the arguments as given. A list that matches nothing proves only that
-        # no overload names that member: a supertype member (`Numeric` in `2 ** n`'s `Complex | Numeric`) still
-        # reaches an arm at runtime, and dropping it read `1 + 2 ** n` as a precise `Complex`.
-        def select(arg_types, definition, member_wise:, environment:, &)
+        # more than {CAP}, it yields once with the arguments as given.
+        def select(arg_types, member_wise:, &)
           choices = arg_types.map { |arg| facet_members(arg) || [arg] }
-          return yield(arg_types, false) if supertype_member?(choices, arg_types, definition.method_types, environment)
           return yield(choices.map(&:first), false) if choices.all? { |members| members.size == 1 }
           return yield(arg_types, false) unless member_wise
 
           picks = picks_by_member(choices, &)
           picks.empty? ? yield(arg_types, false) : picks
-        end
-
-        # Whether a facet member is a proper superclass of a class some overload's parameter names (`Numeric` against
-        # `Integer#<=>`'s `(Integer)`): the member's runtime value may be of that subclass and take that arm, yet the
-        # member itself skips it for a catch-all (`(untyped) -> Integer?`), whose return then read as precise. Both
-        # halves of "no overload takes it" and "an overload takes it" are unproven for such a member, so the wrapper
-        # stays. A literal has no subclass to hide.
-        def supertype_member?(choices, arg_types, overloads, environment)
-          members = choices.each_with_index.flat_map { |ms, i| facet_members(arg_types[i]) ? ms : [] }
-          members = members.grep(Type::Nominal)
-          return false if members.empty?
-          return true if environment.nil?
-
-          names = overloads.flat_map { |method_type| param_class_names(method_type) }.uniq
-          members.any? do |member|
-            names.any? { |name| environment.class_ordering(name, member.class_name) == :subclass }
-          end
-        end
-
-        # The class names an overload's positional parameters spell, rest included, through `?` and `|`.
-        def param_class_names(method_type)
-          fun = method_type.type
-          return [] unless fun.respond_to?(:required_positionals)
-
-          params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
-          params += [fun.rest_positionals] if fun.rest_positionals
-          params.flat_map { |param| class_names_in(param.type) }
-        end
-
-        def class_names_in(rbs_type)
-          case rbs_type
-          when RBS::Types::ClassInstance then [rbs_type.name.to_s.delete_prefix("::")]
-          when RBS::Types::Optional then class_names_in(rbs_type.type)
-          when RBS::Types::Union then rbs_type.types.flat_map { |member| class_names_in(member) }
-          else []
-          end
         end
 
         # The distinct overloads the member-wise lists pick; none past {CAP} or when any list picks nothing.
@@ -94,16 +67,23 @@ module Rigor
         end
 
         # A `Dynamic` argument's facet members other than `nil`, or nil when selection keeps the wrapper: not a
-        # `Dynamic`, the untyped carrier, a facet that is only `nil`, one with an untyped member, or one wider than
-        # {MEMBER_LIMIT}.
+        # `Dynamic`, the untyped carrier, a facet that is only `nil`, one wider than {MEMBER_LIMIT}, or one with a
+        # member that is not sealed, an untyped member included.
         def facet_members(arg)
           return nil unless arg.is_a?(Type::Dynamic) && !arg.static_facet.is_a?(Type::Top)
 
           facet = arg.static_facet
           members = (facet.is_a?(Type::Union) ? facet.members : [facet]).reject { |member| nil_value?(member) }
-          return nil if members.any? { |member| member.is_a?(Type::Dynamic) || member.is_a?(Type::Top) }
+          members if members.size.between?(1, MEMBER_LIMIT) && members.all? { |member| sealed?(member) }
+        end
 
-          members if members.size.between?(1, MEMBER_LIMIT)
+        # A member whose runtime value is of exactly its class: a literal, or a plain instance of {SEALED_CLASSES}.
+        def sealed?(member)
+          case member
+          when Type::Constant then true
+          when Type::Nominal then member.type_args.empty? && SEALED_CLASSES.include?(member.class_name)
+          else false
+          end
         end
 
         def nil_value?(type)

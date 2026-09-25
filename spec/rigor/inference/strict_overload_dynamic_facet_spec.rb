@@ -92,6 +92,37 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
   end
 
+  context "with an overload that names a member's subclass through an alias" do
+    let(:sig) do
+      { "calc.rbs" => <<~RBS }
+        type num = Integer | Float
+
+        class Calc
+          def initialize: () -> void
+          def scale: (real) -> Float
+                   | (untyped) -> nil
+          def scale_num: (num) -> Float
+                       | (untyped) -> nil
+        end
+      RBS
+    end
+
+    it "keeps the wrapper for a member whose runtime value may be of a subclass" do
+      # Runtime: `2 ** v` is an Integer for a non-negative Integer `v`, and both `real` and `num` name `Integer`, so
+      # each call answers a Float. `2 ** v` is `Dynamic[Complex | Numeric]`; read member by member, `Numeric` skipped
+      # the alias arm for the `(untyped) -> nil` catch-all, and `.floor` reported `call.undefined-method`.
+      dumps, rules = dumped_and_rules(<<~RUBY)
+        def run(v)
+          dump_type(Calc.new.scale(2 ** v))
+          dump_type(Calc.new.scale_num(2 ** v))
+          Calc.new.scale(2 ** v).floor + Calc.new.scale_num(2 ** v).floor
+        end
+      RUBY
+      expect(dumps).to eq(%w[Float Float])
+      expect(rules).not_to include("call.undefined-method")
+    end
+  end
+
   it "keeps joining every arm for an untyped argument" do
     # The #521 join: an untyped argument cannot tell the arms apart.
     dumps, = dumped_and_rules(<<~RUBY)

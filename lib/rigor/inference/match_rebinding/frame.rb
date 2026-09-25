@@ -68,9 +68,11 @@ module Rigor
 
         # The scan of `node` under `scope`, kept while `scope`'s local and instance-variable tables are the same
         # objects: a lookup argument's answer reads them ({MatchRebinding.may_match?}), and a rebuild that leaves
-        # them alone passes the same tables on.
-        def memo(node, scope)
-          scans = (@scans ||= {}.compare_by_identity)
+        # them alone passes the same tables on. `kind` keeps another reading of the same node apart (issue #1365:
+        # {MatchRebinding.operands_may_rebind?}, and the code an eval runs), which the statement pass and each
+        # typing pass over the call ask again.
+        def memo(node, scope, kind = nil)
+          scans = kind.nil? ? (@scans ||= {}.compare_by_identity) : kind_scans(kind)
           locals = scope.locals
           ivars = scope.ivars
           kept = scans[node]
@@ -82,6 +84,11 @@ module Rigor
         end
 
         private
+
+        def kind_scans(kind)
+          tables = (@kind_scans ||= {})
+          tables[kind] ||= {}.compare_by_identity
+        end
 
         def fallback_in_frame?(scope)
           block_name = block_parameter_name

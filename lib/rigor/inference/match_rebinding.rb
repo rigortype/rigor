@@ -78,10 +78,14 @@ module Rigor
       def may_match?(node, scope = nil)
         return false unless node.is_a?(Prism::Node)
 
-        frame = scope&.match_frame
-        return scan(node, scope) if frame.nil?
+        remember(node, scope) { scan(node, scope) }
+      end
 
-        frame.memo(node, scope) { scan(node, scope) }
+      # The answer the block gives for `node`, kept on `scope`'s frame under `kind` ({Frame#memo}) when a body
+      # stamped one.
+      def remember(node, scope, kind = nil, &)
+        frame = scope&.match_frame
+        frame.nil? ? yield : frame.memo(node, scope, kind, &)
       end
 
       # `base` reads the body without {ADDED_NAMES}.
@@ -261,15 +265,15 @@ module Rigor
       end
 
       # True when `program`, a String of code an eval runs in this frame, may match, on the block scan's terms: its
-      # statements run here, and a `def` or class in it runs in a frame of its own. Parsed afresh, so not memoised.
-      def program_may_match?(program, scope)
-        scan(program, scope)
-      end
+      # statements run here, and a `def` or class in it runs in a frame of its own. The caller keeps the answer.
+      def program_may_match?(program, scope) = scan(program, scope)
 
       # True when running a call's receiver chain and arguments, which Ruby does before the method, may rebind the
-      # frame's match globals ({.value_may_rebind?}).
+      # frame's match globals ({.value_may_rebind?}), kept on the frame as {Frame#memo} keeps a scan.
       def operands_may_rebind?(call_node, scope)
-        value_may_rebind?(call_node.receiver, scope) || value_may_rebind?(call_node.arguments, scope)
+        remember(call_node, scope, :operands) do
+          value_may_rebind?(call_node.receiver, scope) || value_may_rebind?(call_node.arguments, scope)
+        end
       end
 
       # True when evaluating `node` for its value — a call's receiver chain or arguments, an array, hash or
@@ -333,14 +337,15 @@ module Rigor
       # cannot show the block runs once (a user `then` may keep it, and a loop runs the call again, #1375). With
       # the owning `call_node`, the entry also forgets when the call's receiver chain or arguments may rebind them
       # ({.operands_may_rebind?}, issue #1365): Ruby runs those before the method yields, so
-      # `[u.index(/(q)/)].map { $1 }` reads the rebound `$1`. Every block-entry pass
-      # ({StatementEvaluator#build_block_entry_scope}, the block-return pass and the per-element fold and
-      # captured-local fixpoint in {ExpressionTyper}) enters through here with the call, so they cannot disagree.
+      # `[u.index(/(q)/)].map { $1 }` reads the rebound `$1`. Every block-entry pass enters through here:
+      # {StatementEvaluator#build_block_entry_scope} and the block-return and `break` passes in {ExpressionTyper}
+      # pass the call. The per-element fold and the captured-local fixpoint pass none; they run under
+      # `ExpressionTyper#rebound_operand_typer`, whose scope has already forgotten the globals when the operands
+      # may rebind them, so no pass disagrees.
       def block_entry(scope, block_node, call_node = nil)
         return scope unless scope.match_globals_bound?
-        return scope.forget_match_globals if scope.match_rebinding_closure?
-        return scope.forget_match_globals if entry_may_match?(block_node.body, scope, call_node)
-        return scope unless call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope)
+        return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
+                            (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
 
         scope.forget_match_globals
       end

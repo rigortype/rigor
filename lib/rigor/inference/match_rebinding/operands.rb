@@ -107,7 +107,6 @@ module Rigor
           else false
           end
         end
-        private_class_method :regexp_type?
 
         def regexp_class?(class_name, scope)
           return true if class_name == "Regexp"

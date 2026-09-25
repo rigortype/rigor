@@ -1104,8 +1104,17 @@ RSpec.describe "Rigor type construction (integration)" do
     # `[]=` storing a Regexp leave `$~` alone, in statement, assignment or operand position.
     it "reports nothing on the read after a call that cannot rebind `$~`" do
       reads = marked_lines(harness, "# KEEPS-1365")
-      expect(reads.size).to eq(29)
+      expect(reads.size).to eq(31)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+  end
+
+  describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do
+    let(:harness) { harness_for("regex_global_field_separator") }
+
+    it "forgets the narrowing after a `split` without a separator" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
     end
   end
 

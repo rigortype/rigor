@@ -1540,6 +1540,26 @@ class KeepClassEval
   end
 end
 
+# `split` without a separator splits on `$;`, which this file never writes, so the split runs no match (Ruby: "AB"
+# for each with `line = "ab=c"` and `row = "a b"`; `regex_global_field_separator.rb` writes a Regexp there).
+def keep_default_split(line, row)
+  if line =~ /(\w+)=(.*)/
+    row.split
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_default_split_limit(line, row)
+  if line =~ /(\w+)=(.*)/
+    row.split(nil, 2)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
 # An implicit-self call whose argument is such a lookup runs a Ruby method, and the lookup leaves `$~` alone.
 def keep_implicit_self_lookup(line, row)
   if line =~ /^(\w+)=/

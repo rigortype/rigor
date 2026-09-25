@@ -427,6 +427,19 @@ RSpec.describe Rigor::Inference::MatchRebinding do
           .each { |source| expect(forgets_by_name?(source)).to be(true), source }
       end
 
+      # `split` with no separator splits on `$;`, which a Regexp there makes a match.
+      it "keeps a `split` on `$;` only while the file never writes `$;`" do
+        expect(forgets_by_name?("s.split")).to be(false)
+        expect(forgets_by_name?("s.split(nil, 2)")).to be(false)
+        written = typed.with_discovery(typed.discovery.with(program_globals: { "$;": combinator.constant_of(",") }))
+        ["s.split", "s.split(nil, 2)"].each do |source|
+          expect(described_class.forgets_by_name?(call(source), written)).to be(true), source
+        end
+        expect(described_class.forgets_by_name?(call("s.split(',')"), written)).to be(false)
+        dash_f = typed.with_discovery(typed.discovery.with(program_globals: { "$-F": combinator.constant_of(",") }))
+        expect(described_class.forgets_by_name?(call("s.split"), dash_f)).to be(true)
+      end
+
       # A flow type is not proof: `str` reads `String` here, but a stale type can say so of a Regexp (#1380).
       it "does not keep on a typed argument" do
         expect(forgets_by_name?("s.partition(str)")).to be(true)
@@ -507,6 +520,16 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         end
       end
 
+      it "counts a `split` on `$;` only when the file writes a known Regexp there" do
+        expect(rebinds?("u.split")).to be(false)
+        regexp = typed.with_discovery(typed.discovery.with(program_globals: { "$;": combinator.constant_of(/(,)/) }))
+        comma = typed.with_discovery(typed.discovery.with(program_globals: { "$;": combinator.constant_of(",") }))
+        expect(described_class.rebinds?(call("u.split"), regexp)).to be(true)
+        expect(described_class.rebinds?(call("u.split(nil, 2)"), regexp)).to be(true)
+        expect(described_class.rebinds?(call("u.split(',')"), regexp)).to be(false)
+        expect(described_class.rebinds?(call("u.split"), comma)).to be(false)
+      end
+
       it "never counts `match?`, and counts `grep` / `grep_v` only in their block form" do
         expect(rebinds?("u.match?(/(z)/)")).to be(false)
         expect(rebinds?("lines.grep(/(z)/)")).to be(false)
@@ -543,10 +566,34 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         # literal text names a match.
         expect(rebinds?("klass.class_eval(\"\#{name} =~ /(q)/ if\")")).to be(true)
         expect(rebinds?("klass.class_eval(\"\#{name}( 1\")")).to be(false)
-        expect(rebinds?("Kernel.eval(src)")).to be(false)
         expect(rebinds?("Kernel.eval('x =~ ')")).to be(false)
         expect(rebinds?("klass.class_eval { attr_reader :x }")).to be(false)
         expect(rebinds?("node.eval")).to be(false)
+      end
+
+      # `binding.eval` and `Kernel.eval` exist to run code in this frame; `class_eval` and its kin of a variable are
+      # the method-defining idiom.
+      it "counts `binding.eval` and `Kernel.eval` of code it cannot read, and no other eval of such code" do
+        ["binding.eval(src)", "proc {}.binding.eval(src)", "Kernel.eval(src)", "::Kernel.eval(src, b)",
+         "binding.send(:eval, src)"].each { |source| expect(rebinds?(source)).to be(true), source }
+        ["klass.class_eval(src)", "obj.instance_eval(src)", "mod.module_eval(src)", "Kernel.instance_eval(src)",
+         "calc.eval(src)", "Foo::Kernel.eval(src)"].each { |source| expect(rebinds?(source)).to be(false), source }
+      end
+
+      # A deeply nested literal would overflow the scan's recursion, so it is read by its tokens.
+      it "reads code nested too deeply, or too long, by its tokens without raising" do
+        deep = "#{"[" * 3000}1#{"]" * 3000}"
+        matching = "#{"[" * 3000}\"zz\" =~ /(q)/#{"]" * 3000}"
+        expect(rebinds?("Kernel.eval('#{deep}')")).to be(false)
+        expect(rebinds?("Kernel.eval('#{matching}')")).to be(true)
+        expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}')")).to be(false)
+        expect(rebinds?("klass.class_eval('#{"x = 1\n" * 20_000}s =~ /q/')")).to be(true)
+      end
+
+      it "survives a scan that overflows the stack, reading the code by its tokens" do
+        allow(Rigor::Inference::MatchRebinding).to receive(:program_may_match?).and_raise(SystemStackError)
+        expect(rebinds?(%q|Kernel.eval('"zz" =~ /(q)/')|)).to be(true)
+        expect(rebinds?("klass.class_eval('def foo; end')")).to be(false)
       end
 
       it "reads a `send` by the method it names, or by the arguments a computed name is sent" do

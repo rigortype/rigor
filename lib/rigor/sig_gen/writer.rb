@@ -95,7 +95,7 @@ module Rigor
       # Deliberately NARROWER than {Classification::EMITTABLE}: the write path has never produced a
       # `:new_file` row (the generator does not classify one), and admitting it here would let a
       # classification with no writer behind it decide that a target file must be created.
-      EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN, Classification::INLINE_UPDATE].freeze
+      EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN, Classification::INLINE_OVERWRITE].freeze
       private_constant :EMITTABLE
 
       def inside_sig_root?(target)
@@ -591,20 +591,20 @@ module Rigor
         source = insert_into_class(source, decl, new_methods)
         state.applied.concat(new_methods)
 
-        # An inline update replaces its stale copy whether or not `--overwrite` is set: what changed is what
-        # the author wrote inline, and the generator already kept any inferred return at the `sig/` spelling
-        # (ADR-112 WD4), so no inference is weighed against a hand-written line here.
-        replaceable = @overwrite ? conflicting : conflicting.select { |c| inline_update?(c) }
-        source, replaced = replace_eligible_conflicts(source, decl, replaceable, state)
-        state.applied.concat(replaced)
-        state.replaced.concat(replaced)
-        state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
+        if @overwrite
+          source, replaced = replace_eligible_conflicts(source, decl, conflicting, state)
+          state.applied.concat(replaced)
+          state.replaced.concat(replaced)
+          state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
+        else
+          state.skipped.concat(conflicting.map { |c| [c, :user_authored] })
+        end
 
         source
       end
 
-      def inline_update?(candidate)
-        candidate.classification == Classification::INLINE_UPDATE
+      def inline_overwrite?(candidate)
+        candidate.classification == Classification::INLINE_OVERWRITE
       end
 
       # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
@@ -673,7 +673,7 @@ module Rigor
       end
 
       def eligible_for_replacement?(candidate, decl, source)
-        return true if inline_update?(candidate)
+        return true if inline_overwrite?(candidate)
         return false if replaces_declared_void?(candidate, decl)
 
         case candidate.classification

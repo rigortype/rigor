@@ -95,25 +95,26 @@ rigor sig-gen --check lib
 ```
 
 ```
-would update sig/greeter.rbs (1 method(s))
-  - def greet: (String name) -> String
-  + def greet: (Symbol name) -> String
+would create sig/greeter.rbs (1 method(s))
+  + def greet: (String name) -> String
 ```
 
 It also fails while a method stands refused
-(`sig.skipped.inline-shape-mismatch`), since `--write` cannot
-fix that. It exits `0` and prints `sig/ is up to date`
+(`sig.skipped.inline-differs`), since `--write` refuses it
+too. It exits `0` and prints `sig/ is up to date`
 otherwise. Under `--format=json` the payload is
 `{"up_to_date": …, "results": […], "refused": […]}`: one
 entry per target in the `--write` JSON shape, with `action`
 reading `would_create` / `would_update`, and one per refused
 method.
 
-The gate follows `--write`, not `--diff`. A `tighter-return`
-against a declaration that already exists is a proposal
-`--write` declines without `--overwrite`, so it does not fail
-`--check` either; a project that reviewed the proposal and
-kept its wider type can still pass. `--check --overwrite`
+The gate follows `--write`, not `--diff`
+([ADR-112](../adr/112-extrbs-comment-channel.md) WD4 records
+the departure). A `tighter-return` against a declaration that
+already exists is a proposal `--write` declines without
+`--overwrite`, so it does not fail `--check` either: a
+reviewed, deliberately wider type must not fail the gate
+forever. `--check --overwrite`
 counts it, because `--write --overwrite` would apply it. Pass
 `--check` the `--params` and `--effect-envelopes` flags your
 `--write` uses, or it checks a different output.
@@ -128,7 +129,7 @@ states:
 | `new-file` | No RBS file declares the receiver class at all. |
 | `new-method` | RBS file declares the class but not this method. |
 | `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. |
-| `inline-update` | `sig/` holds a copy of a method declared inline with `# @rbs` / `#:`, and the inline declaration has changed since. See [Methods declared inline](#methods-declared-inline). |
+| `inline-overwrite` | Only under `--overwrite`: a method declared inline with `# @rbs` / `#:` whose `sig/` declaration disagrees with it; the whole `sig/` member is replaced by the inline one. See [Methods declared inline](#methods-declared-inline). |
 | `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void`). Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
@@ -154,10 +155,10 @@ The `sig.skipped.*` reasons are:
   generic by an inline declaration and `sig/` does not declare
   it yet, or names its type parameters otherwise. See
   [Classes made generic inline](#classes-made-generic-inline).
-- `sig.skipped.inline-shape-mismatch` — the method is declared
-  inline and in `sig/` with overloads or parameter lists that
-  do not correspond. A refusal: `--write` and `--check` exit
-  `1`. See [Methods declared inline](#methods-declared-inline).
+- `sig.skipped.inline-differs` — the method is declared
+  inline and in `sig/`, and the two disagree. A refusal:
+  `--write` and `--check` exit `1`. See
+  [Methods declared inline](#methods-declared-inline).
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every
@@ -217,38 +218,38 @@ file.
 
 Once `sig/` holds the copy, it is the declaration `rigor
 check` reads (the `.rbs` wins over the inline one for the same
-member). When you later edit the inline annotation, the copy
-is stale. `sig-gen` then classifies the method `inline-update`
-and `--write` replaces the copy with your current inline
-declaration, without `--overwrite`: what changed is what you
-wrote. `--check` fails until you do, which is what makes it
-worth running in CI. The update only ever adds annotations to
-the copy; one you delete inline stays in `sig/` until you
-delete it there too.
+member), and sig-gen compares the two on every run. When they
+state the same types — spacing and a leading `::` aside — and
+`sig/` carries every annotation you wrote inline, there is
+nothing to do.
 
-Only what you wrote inline drives that update. rbs-inline
-fills every slot you left unannotated — `untyped` for a
-parameter, `?{ (?) -> untyped }` for a `&block` — and those
-defaults never replace what `sig/` says there; an `untyped`
-you wrote yourself is treated the same way, since it states
-nothing. A copy that differs only in spelling (`::String` for
-`String`) is current. For `pair`, what you wrote is the
-parameter: the return in `sig/` came from the body, so it is
-held to the same rules as any inferred return.
-If you widened it by hand after review (`-> Array[String]`
-over a `[String, String]` the body builds), sig-gen leaves
-it alone. A return the body proves strictly narrower is a
-`tighter-return` proposal, applied only with `--overwrite`.
-When you change the parameter annotation, the update keeps
-the return `sig/` already has.
+When they differ in any way, sig-gen does not pick a side. The
+inline annotation may be your newer edit; the `sig/` member may
+be a reviewed contract someone widened on purpose (`-> Numeric`
+over a body that proves `Integer`). The method is refused as
+`sig.skipped.inline-differs`: nothing is written, `--write`
+prints a `REFUSED` line and exits `1`, and `--check` fails, so
+the contradiction cannot pass CI unnoticed. Resolve it one of
+two ways:
 
-When the two do not line up slot for slot — `sig/` declares
-two overloads and the inline annotation one, or the parameter
-lists differ in shape — sig-gen changes neither. Writing the
-inline declaration over the copy would delete an overload
-correct callers use. The method is reported as
-`sig.skipped.inline-shape-mismatch`, and both `--write` and
-`--check` exit `1` until you make the two agree by hand.
+- Keep the inline declaration: re-run with `--overwrite`. The
+  whole `sig/` member is replaced by the inline line, as
+  rbs-inline reads it — a parameter you left unannotated is
+  `untyped`, an unannotated `&block` is `?{ (?) -> untyped }`
+  — and a parameter-only annotation's return is taken from the
+  body. The two sides are never mixed slot by slot: their
+  overloads and type variables need not correspond. Comments
+  inside the replaced member, and annotations already on it,
+  are kept.
+- Keep the `sig/` member: edit or delete the inline annotation
+  to match.
+
+One case stays refused under `--overwrite`: a parameter-only
+annotation whose parameters differ from the `sig/` member's.
+The body is typed under the parameters the `sig/` member
+declares, so a return inferred for the new line would describe
+parameters that are about to change. Delete the `sig/` member
+and re-run; sig-gen then writes the method afresh.
 
 ### Classes made generic inline
 
@@ -676,15 +677,12 @@ by side without coordination.
   `tighter-return`. Without `--overwrite`, existing
   declarations are user-authored and the new method is
   silently skipped.
-- **Will** replace an existing method declaration that is a
-  stale copy of the method's inline declaration
-  (`inline-update`), with or without `--overwrite`: what
-  changed is what you wrote inline, a return inferred from
-  the body keeps its `sig/` spelling, and annotations and
-  comments already on the old declaration are kept.
-- **Will not** replace a declaration whose overloads or
-  parameter lists do not correspond to the inline one's; it
-  reports the method and exits `1` instead.
+- **Will not** change an existing method declaration that
+  disagrees with the method's inline declaration unless
+  `--overwrite` is set; it reports the method as `REFUSED`
+  and exits `1`. With `--overwrite` the whole member is
+  replaced by the inline declaration (`inline-overwrite`),
+  keeping the comments and annotations already on it.
 - **Will not** touch `attr_reader` / `attr_writer` /
   `attr_accessor` declarations in existing RBS — those are
   always treated as user-authored.

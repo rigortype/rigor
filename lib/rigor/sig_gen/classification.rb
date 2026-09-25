@@ -16,23 +16,22 @@ module Rigor
       TIGHTER_RETURN = :tighter_return
       EQUIVALENT = :equivalent
       SKIPPED = :skipped
-      # ADR-112 WD4 — `sig/` holds a copy of a member declared inline by `# @rbs` / `#:`, and what the author
-      # wrote inline has changed since: the copy is stale. The inline declaration is the one the author edits
-      # beside the code, so `--write` replaces the copy with it without `--overwrite`. Only the AUTHORED parts
-      # drive this: for a parameter-only annotation the return is inferred, the update keeps the return `sig/`
-      # has, and a return the body proves narrower is an ordinary `tighter-return` proposal instead.
-      INLINE_UPDATE = :inline_update
+      # ADR-112 WD4 — a member declared inline by `# @rbs` / `#:` whose `sig/` declaration disagrees with it,
+      # under `--overwrite`: the whole `sig/` member is replaced by the inline line. Produced only when the run
+      # asked for `--overwrite`; without it the same member is refused (`sig.skipped.inline-differs`), because
+      # neither side is presumed right and a slot-by-slot mix of two declarations need not be a declaration.
+      INLINE_OVERWRITE = :inline_overwrite
 
       # The classifications that actually produce a line in a generated `sig/`. Consulted by the renderer,
       # the writer and the generator's own post-passes; it lived as a private constant in the first two,
       # which is one fork too many for a list this load-bearing.
-      EMITTABLE = [NEW_FILE, NEW_METHOD, TIGHTER_RETURN, INLINE_UPDATE].freeze
+      EMITTABLE = [NEW_FILE, NEW_METHOD, TIGHTER_RETURN, INLINE_OVERWRITE].freeze
 
       DIAGNOSTIC_IDS = {
         NEW_FILE => "sig.generated.new-file",
         NEW_METHOD => "sig.generated.new-method",
         TIGHTER_RETURN => "sig.generated.tighter-return",
-        INLINE_UPDATE => "sig.generated.inline-update"
+        INLINE_OVERWRITE => "sig.generated.inline-overwrite"
       }.freeze
 
       SKIP_DIAGNOSTIC_IDS = {
@@ -56,10 +55,9 @@ module Rigor
         # generic T`) and `sig/` does not declare it yet. sig-gen writes no class type parameters, and a header
         # without them fails the class's definition build.
         inline_generic_class: "sig.skipped.inline-generic-class",
-        # ADR-112 WD4 — `sig/` declares the member with overloads, or parameter lists, that the inline
-        # declaration's do not correspond to slot for slot, so no update can be written without dropping or
-        # guessing at a `sig/` overload. A refusal: `--write` and `--check` exit 1 until a person reconciles them.
-        inline_shape_mismatch: "sig.skipped.inline-shape-mismatch"
+        # ADR-112 WD4 — the member is declared inline and in `sig/`, and the two disagree. A refusal, not a
+        # skip: `--write` and `--check` exit 1 until a person reconciles them or passes `--overwrite`.
+        inline_differs: "sig.skipped.inline-differs"
       }.freeze
     end
   end

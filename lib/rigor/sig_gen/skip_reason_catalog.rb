@@ -110,16 +110,19 @@ module Rigor
           next_step: "Declare the class in `sig/` with the same type parameters as the inline declaration " \
                      "(`class Box[T]` ... `end`) and re-run; sig-gen then writes the members into it."
         ),
-        "sig.skipped.inline-shape-mismatch" => Entry.new(
-          id: "sig.skipped.inline-shape-mismatch",
-          summary: "The inline declaration and its `sig/` copy do not have the same overloads or parameters.",
-          explanation: "The method is declared inline and in `sig/`, and the two cannot be paired slot for slot: " \
-                       "a different number of overloads, or an overload whose parameter lists differ in shape. " \
-                       "Writing the inline declaration over the copy would delete a `sig/` overload that correct " \
-                       "callers rely on, and a return inferred for it would describe parameters that are about " \
-                       "to change. sig-gen refuses instead, and `--write` / `--check` exit 1.",
-          next_step: "Decide which declaration is right and make the other agree: edit the `# @rbs` / `#:` " \
-                     "annotation, or the `sig/` member (deleting it lets sig-gen write it afresh)."
+        "sig.skipped.inline-differs" => Entry.new(
+          id: "sig.skipped.inline-differs",
+          summary: "The method's inline declaration and its `sig/` declaration disagree; neither was changed.",
+          explanation: "The method is declared inline by `# @rbs` / `#:` and in `sig/`, and the two do not state " \
+                       "the same types (a leading `::` and spacing aside) or `sig/` lacks an annotation written " \
+                       "inline. sig-gen does not presume either side right: the inline one may be a newer edit, " \
+                       "the `sig/` one a reviewed, deliberately wider contract. It refuses, and `--write` and " \
+                       "`--check` exit 1, so a CI job cannot pass while the two contradict each other.",
+          next_step: "Decide which declaration is right. To keep the inline one, re-run with `--overwrite`, which " \
+                     "replaces the whole `sig/` member with it; to keep the `sig/` one, edit the annotation to " \
+                     "match, or delete it. A parameter-only annotation (`# @rbs name: T`, no `return:`) whose " \
+                     "parameters differ from `sig/` stays refused under `--overwrite`, because its return would " \
+                     "be inferred under the `sig/` parameters: delete the `sig/` member and re-run instead."
         ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",

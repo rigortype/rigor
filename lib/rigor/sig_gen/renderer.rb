@@ -74,8 +74,8 @@ module Rigor
                   when Classification::NEW_FILE then "[new-file]"
                   when Classification::TIGHTER_RETURN
                     "[tighter, was: #{candidate.declared_return_rbs}]"
-                  when Classification::INLINE_UPDATE
-                    "[inline-update, was: #{candidate.declared_rbs}]"
+                  when Classification::INLINE_OVERWRITE
+                    "[inline-overwrite, was: #{candidate.declared_rbs}]"
                   end
             @out.puts("  # #{tag}")
             # Annotations first: an RBS annotation binds the declaration BELOW it, so `%a{pure}` printed
@@ -142,7 +142,7 @@ module Rigor
       # change (or refuse) are shown, each with the lines it would add; the verdict is the exit status, which
       # the command derives from the same results ({.out_of_date}).
       #
-      # @param refused — the methods the generator refused to reconcile (`sig.skipped.inline-shape-mismatch`):
+      # @param refused — the methods the generator refused to reconcile (`sig.skipped.inline-differs`):
       #   `sig/` is not up to date while one stands, and `--write` cannot fix it.
       def render_check(results:, format:, refused: [])
         stale = self.class.out_of_date(results)
@@ -161,9 +161,11 @@ module Rigor
       def self.refusal_lines(refused)
         refused.map do |candidate|
           separator = candidate.kind == :singleton ? "." : "#"
-          "REFUSED #{candidate.path}: #{candidate.class_name}#{separator}#{candidate.method_name} — the inline " \
-            "declaration's overloads or parameters do not correspond to its sig/ copy, so neither was changed " \
-            "(#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}). Make the two agree by hand."
+          "REFUSED #{candidate.path}: #{candidate.class_name}#{separator}#{candidate.method_name} — its inline " \
+            "declaration and its sig/ declaration disagree, so neither was changed " \
+            "(#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}). Make them agree, or pass " \
+            "--overwrite to replace the sig/ member with the inline declaration; `rigor explain " \
+            "#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}` says when that is not enough."
         end
       end
 

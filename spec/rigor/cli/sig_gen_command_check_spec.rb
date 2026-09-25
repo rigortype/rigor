@@ -61,6 +61,40 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     [status, out.string, err.string]
   end
 
+  # Probes `a3` / `a4`: method type parameters named differently on the two sides.
+  def write_type_parameter_fixture
+    write("lib/a.rb", <<~RUBY)
+      class D
+        #: [E] (E, untyped) -> Array[E]
+        def pair(x, y) = [x, y]
+      end
+
+      class F
+        #: [E] (E) -> Array[E]
+        def each_one(x)
+          yield x if block_given?
+          [x]
+        end
+      end
+    RUBY
+    write("sig/a.rbs", <<~RBS)
+      class D
+        def pair: [T] (T x, T y) -> Array[T]
+      end
+
+      class F
+        def each_one: [T] (T x) ?{ (T) -> void } -> Array[T]
+      end
+    RBS
+  end
+
+  def rigor_check_output(path)
+    out = StringIO.new
+    err = StringIO.new
+    Rigor::CLI.start(["check", "--no-cache", "--config=#{File.join(root, '.rigor.yml')}", path], out: out, err: err)
+    out.string + err.string
+  end
+
   def sig_file
     File.join(root, "sig/greeter.rbs")
   end
@@ -80,15 +114,21 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(out).to include("up to date")
   end
 
-  it "fails again after the inline declaration changes, and --write brings the copy back in line" do
+  it "refuses once the inline declaration changes, until --overwrite replaces the sig/ member" do
     sig_gen("--write")
     write("lib/greeter.rb", greeter_source("Symbol"))
 
     status, out, = sig_gen("--check")
     expect(status).to eq(1)
-    expect(out).to include("- def greet: (String name) -> String").and include("+ def greet: (Symbol name) -> String")
+    expect(out).to include("REFUSED").and include("Greeter#greet").and include("sig.skipped.inline-differs")
 
-    expect(sig_gen("--write").first).to eq(0)
+    status, _out, err = sig_gen("--write")
+    expect(status).to eq(1)
+    expect(err).to include("REFUSED")
+    expect(File.read(sig_file)).to include("def greet: (String name) -> String")
+
+    expect(sig_gen("--check", "--overwrite").first).to eq(1)
+    expect(sig_gen("--write", "--overwrite").first).to eq(0)
     expect(File.read(sig_file)).to include("def greet: (Symbol name) -> String")
     expect(File.read(sig_file)).not_to include("String name")
     expect(sig_gen("--check").first).to eq(0)
@@ -112,9 +152,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(sig_gen("--check", "--overwrite").first).to eq(1)
   end
 
-  # Review of #1422 (probe `f1`): a return the author did not write is inferred, so a reviewed, hand-widened one
-  # is a proposal `--write` declines, not a stale copy it rewrites.
-  it "leaves a hand-widened return on a parameter-only annotation alone under --check and --write" do
+  # Review probe `f1` of #1422: a reviewed, hand-widened return on a parameter-only annotation disagrees with
+  # the inline line, so it is refused — not narrowed — and sig/ stays byte-identical.
+  it "refuses a hand-widened return on a parameter-only annotation, leaving sig/ untouched" do
     write("lib/chain.rb", <<~RUBY)
       class Chain
         # @rbs x: Integer
@@ -126,10 +166,27 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
     sig = "class Chain\n  def c: (Integer x) -> Numeric\n  def pair: (String name) -> Array[String]\nend\n"
     write("sig/chain.rbs", sig)
-    sig_gen("--write")
 
+    expect(sig_gen("--write", "lib/chain.rb").first).to eq(1)
     expect(File.read(File.join(root, "sig/chain.rbs"))).to eq(sig)
-    expect(sig_gen("--check", "lib/chain.rb").first).to eq(0)
+    expect(sig_gen("--check", "lib/chain.rb").first).to eq(1)
+  end
+
+  # Review probes `a3` / `a4` of #1422 (round 3): `--overwrite` replaces the whole member, so a method type
+  # parameter is never taken from one side and its uses from the other.
+  it "replaces whole members under --overwrite, leaving no unbound type variable" do
+    write_type_parameter_fixture
+    expect(sig_gen("--write", "lib/a.rb").first).to eq(1)
+    expect(sig_gen("--write", "--overwrite", "lib/a.rb").first).to eq(0)
+
+    written = File.read(File.join(root, "sig/a.rbs"))
+    expect(written).to include("def pair: [E] (E, untyped) -> Array[E]")
+      .and include("def each_one: [E] (E) -> Array[E]")
+    # RBS parses an undeclared `T` as a class name, not a free variable, so the old parameter's absence is the check.
+    expect(written).not_to match(/\bT\b/)
+    expect { RBS::Parser.parse_signature(written) }.not_to raise_error
+    expect(rigor_check_output("lib/a.rb")).not_to include("definition-build-failed")
+    expect(sig_gen("--check", "lib/a.rb").first).to eq(0)
   end
 
   # Review of #1422 (probe `g_new`): the written `sig/` must build.
@@ -151,17 +208,13 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(File.exist?(File.join(root, "sig/box.rbs"))).to be(true)
     expect(File.read(File.join(root, "sig/box.rbs"))).not_to include("class Box")
 
-    out = StringIO.new
-    err = StringIO.new
-    Rigor::CLI.start(["check", "--no-cache", "--config=#{File.join(root, '.rigor.yml')}", "lib/box.rb"],
-                     out: out, err: err)
-    expect(out.string + err.string).not_to include("definition-build-failed")
+    expect(rigor_check_output("lib/box.rb")).not_to include("definition-build-failed")
     expect(sig_gen("--check", "lib/box.rb").first).to eq(0)
   end
 
-  # Review round 2 of #1422 (probe `m2c`): `sig/` keeps an overload the inline declaration does not mention, so
-  # neither --write nor --check may reconcile the two; both refuse and exit 1, and nothing is dropped.
-  it "refuses, under --write and --check alike, a member whose overloads do not correspond" do
+  # Review probe `m2c` of #1422 (round 2): `sig/` keeps an overload the inline declaration does not mention. The
+  # return would be inferred under that overload's parameters, so the refusal stands even under --overwrite.
+  it "refuses, under --write, --check and --overwrite alike, a member whose overloads do not correspond" do
     write("lib/p.rb", <<~RUBY)
       class P
         # @rbs name: String
@@ -173,7 +226,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     status, _out, err = sig_gen("--write", "lib/p.rb")
     expect(status).to eq(1)
-    expect(err).to include("REFUSED").and include("P#over_same").and include("sig.skipped.inline-shape-mismatch")
+    expect(err).to include("REFUSED").and include("P#over_same").and include("sig.skipped.inline-differs")
+    expect(File.read(File.join(root, "sig/p.rbs"))).to eq(sig)
+    expect(sig_gen("--write", "--overwrite", "lib/p.rb").first).to eq(1)
     expect(File.read(File.join(root, "sig/p.rbs"))).to eq(sig)
 
     status, out, = sig_gen("--check", "lib/p.rb")

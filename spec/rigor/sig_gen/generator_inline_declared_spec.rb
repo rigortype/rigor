@@ -50,7 +50,7 @@ RSpec.describe Rigor::SigGen::Generator do
     full
   end
 
-  def run_generator(path, inline_declared: nil, sig: false)
+  def run_generator(path, inline_declared: nil, sig: false, overwrite: false)
     data = Rigor::Configuration::DEFAULTS.merge(
       "paths" => [path],
       "plugins" => [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
@@ -58,7 +58,7 @@ RSpec.describe Rigor::SigGen::Generator do
     )
     data["signature_paths"] = [File.join(tmpdir, "sig")] if sig
     data["sig_gen"] = { "inline_declared" => inline_declared } if inline_declared
-    described_class.new(configuration: Rigor::Configuration.new(data), paths: [path]).run
+    described_class.new(configuration: Rigor::Configuration.new(data), paths: [path], overwrite: overwrite).run
   end
 
   def find(candidates, name)
@@ -159,21 +159,16 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(greet.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
-    it "proposes an inline update when sig/ holds a copy the inline declaration has since changed" do
-      write_fixture("sig/greeter.rbs", <<~RBS)
-        class Greeter
-          def greet: (Symbol name) -> String
-        end
-      RBS
+    it "refuses a member whose sig/ declaration disagrees, and writes nothing" do
+      write_fixture("sig/greeter.rbs", "class Greeter\n  def greet: (Symbol name) -> String\nend\n")
 
       greet = find(run_generator(write_fixture("lib/greeter.rb", source), sig: true), :greet)
 
-      expect(greet.classification).to eq(Rigor::SigGen::Classification::INLINE_UPDATE)
-      expect(greet.rbs).to eq("def greet: (String name) -> String")
-      expect(greet.declared_rbs).to eq("def greet: (Symbol name) -> String")
+      expect([greet.classification, greet.skip_reason, greet.rbs])
+        .to eq([Rigor::SigGen::Classification::SKIPPED, :inline_differs, nil])
     end
 
-    it "proposes an inline update when sig/ lacks an annotation the inline declaration carries" do
+    it "refuses a sig/ declaration that lacks an annotation the inline one carries" do
       write_fixture("sig/box.rbs", "class Box\n  def label: () -> String\nend\n")
       path = write_fixture("lib/box.rb", <<~RUBY)
         class Box
@@ -187,7 +182,17 @@ RSpec.describe Rigor::SigGen::Generator do
 
       label = find(run_generator(path, sig: true), :label)
 
-      expect(label.classification).to eq(Rigor::SigGen::Classification::INLINE_UPDATE)
+      expect(label.skip_reason).to eq(:inline_differs)
+    end
+
+    it "proposes replacing the whole sig/ member under --overwrite" do
+      write_fixture("sig/greeter.rbs", "class Greeter\n  def greet: (Symbol name) -> String\nend\n")
+
+      greet = find(run_generator(write_fixture("lib/greeter.rb", source), sig: true, overwrite: true), :greet)
+
+      expect([greet.classification, greet.rbs, greet.declared_rbs])
+        .to eq([Rigor::SigGen::Classification::INLINE_OVERWRITE, "def greet: (String name) -> String",
+                "def greet: (Symbol name) -> String"])
     end
   end
 
@@ -209,51 +214,11 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
-  # Review of #1422 (probe `f1`): with a parameter-only annotation the return is inferred, not authored, so it is
-  # held to the ordinary proposal rules against `sig/`, and only the authored parameters can make the copy stale.
-  describe "a mixed-provenance member sig/ already declares" do
-    let(:chain) do
-      <<~RUBY
-        class Chain
-          # @rbs x: Integer
-          def c(x) = x.to_s.size
-
-          # @rbs name: String
-          def pair(name) = [name, name.to_s]
-        end
-      RUBY
-    end
-
-    def classify(sig)
-      write_fixture("sig/chain.rbs", sig)
-      run_generator(write_fixture("lib/chain.rb", chain), sig: true)
-    end
-
-    it "leaves a hand-widened return alone when the lenience guards say so" do
-      pair = find(classify("class Chain\n  def pair: (String name) -> Array[String]\nend\n"), :pair)
-
-      expect(pair.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
-    end
-
-    it "proposes a narrower inferred return as tighter-return, keeping the authored parameters" do
-      c = find(classify("class Chain\n  def c: (Integer x) -> Numeric\nend\n"), :c)
-
-      expect([c.classification, c.rbs, c.declared_return_rbs])
-        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def c: (Integer x) -> Integer", "Numeric"])
-    end
-
-    it "updates the authored parameters and keeps the return sig/ has" do
-      pair = find(classify("class Chain\n  def pair: (Symbol name) -> Array[String]\nend\n"), :pair)
-
-      expect([pair.classification, pair.rbs])
-        .to eq([Rigor::SigGen::Classification::INLINE_UPDATE, "def pair: (String name) -> Array[String]"])
-    end
-  end
-
-  # Review round 2 of #1422 (probes `m2c` / `m2d`): the inline side and the `sig/` side are paired slot by slot.
-  # A shape they do not share is refused, and a slot rbs-inline defaulted (`untyped b`, `?{ (?) -> untyped }`)
-  # never drives or overwrites anything.
-  describe "an inline declaration against a sig/ member of another shape, or with defaulted slots" do
+  # Review probes `f1` (round 1) and `m2c` / `m2d` (round 2) of #1422: whatever the difference — a hand-widened
+  # return on a parameter-only annotation, an overload `sig/` has and the inline declaration does not, a
+  # parameter or block rbs-inline defaulted — the two declarations disagree, and sig-gen refuses rather than
+  # choose or mix. `--overwrite` replaces the whole member with the inline line, never a slot-by-slot blend.
+  describe "a sig/ declaration that disagrees with the inline one" do
     let(:source) do
       <<~RUBY
         class P
@@ -268,58 +233,56 @@ RSpec.describe Rigor::SigGen::Generator do
 
           # @rbs name: String
           def over_same(name) = name.size
+
+          # @rbs x: Integer
+          def c(x) = x.to_s.size
         end
       RUBY
     end
-    let(:m2_sig) do
+
+    let(:sig) do
       <<~RBS
         class P
           def overl: (String name) -> Array[String] | (Integer name) -> Integer
           def two: (String a, Integer b) -> Array[String]
           def blk: (String name) { (String) -> void } -> Array[String]
           def over_same: (String name) -> Integer | (Integer name) -> Integer
+          def c: (Integer x) -> Numeric
         end
       RBS
     end
 
-    def classify(sig)
+    def classify(overwrite: false)
       write_fixture("sig/p.rbs", sig)
-      run_generator(write_fixture("lib/p.rb", source), sig: true)
+      run_generator(write_fixture("lib/p.rb", source), sig: true, overwrite: overwrite)
     end
 
-    it "refuses a member whose overload count differs, and infers no return for it" do
-      candidates = classify(m2_sig)
+    it "refuses every one of them without --overwrite, inferring no line for any" do
+      candidates = classify
 
-      %i[overl over_same].each do |name|
+      %i[overl two blk over_same c].each do |name|
         candidate = find(candidates, name)
-        expect([candidate.classification, candidate.skip_reason, candidate.rbs])
-          .to eq([Rigor::SigGen::Classification::SKIPPED, :inline_shape_mismatch, nil])
+        expect([name, candidate.skip_reason, candidate.rbs]).to eq([name, :inline_differs, nil])
       end
     end
 
-    it "keeps a sig/ parameter and block the author did not annotate, and proposes nothing" do
-      candidates = classify(m2_sig)
+    # Round-2 review: the body is typed under `sig/`'s parameters, so `overl` would infer `[Integer | String, …]`
+    # from the overload the inline line drops. A return to be inferred under parameters about to change is never
+    # written; the refusal stands under --overwrite, and deleting the `sig/` member is the way through.
+    it "still refuses under --overwrite where an inferred return would rest on parameters that change" do
+      candidates = classify(overwrite: true)
 
-      expect(find(candidates, :two).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
-      expect(find(candidates, :blk).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      %i[overl two blk over_same].each do |name|
+        expect([name, find(candidates, name).skip_reason]).to eq([name, :inline_differs])
+      end
     end
 
-    it "updates only the annotated parameter, keeping the unannotated one and the block from sig/" do
-      candidates = classify(<<~RBS)
-        class P
-          def two: (Symbol a, Integer b) -> Array[String]
-          def blk: (Symbol name) { (String) -> void } -> Array[String]
-        end
-      RBS
+    it "proposes the inline line, whole, under --overwrite where only the return differs" do
+      c = find(classify(overwrite: true), :c)
 
-      expect(find(candidates, :two).rbs).to eq("def two: (String a, Integer b) -> Array[String]")
-      expect(find(candidates, :blk).rbs).to eq("def blk: (String name) { (String) -> void } -> Array[String]")
-    end
-
-    it "refuses a member whose parameter list has a different shape" do
-      pair = find(classify("class P\n  def two: (String a) -> Array[String]\nend\n"), :two)
-
-      expect(pair.skip_reason).to eq(:inline_shape_mismatch)
+      expect([c.classification, c.rbs, c.declared_rbs])
+        .to eq([Rigor::SigGen::Classification::INLINE_OVERWRITE, "def c: (Integer x) -> Integer",
+                "def c: (Integer x) -> Numeric"])
     end
   end
 

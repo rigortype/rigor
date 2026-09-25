@@ -73,9 +73,10 @@ make the inline annotation take effect.
 `rigor sig-gen --write` produces this overlap on purpose: by default it
 copies each inline declaration into `sig/`, so the generated signature
 is the complete contract a gem ships. The copy is reported like any
-other overlap, and `rigor sig-gen --check` fails when an inline
-annotation has changed since the copy was written, after which
-`--write` brings it back in line. A project whose Steep reads the same
+other overlap. When an inline annotation later disagrees with its copy,
+`rigor sig-gen --write` and `--check` refuse the method and exit `1`
+until you make the two agree or pass `--overwrite`, which replaces the
+`sig/` member with the inline declaration. A project whose Steep reads the same
 annotations sets `sig_gen.inline_declared: skip` instead
 ([handbook chapter 11](../../handbook/11-sig-gen.md#methods-declared-inline)).
 

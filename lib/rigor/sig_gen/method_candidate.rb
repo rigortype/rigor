@@ -18,7 +18,7 @@ module Rigor
     # - `inferred_return` — `Rigor::Type` instance (or `nil` when the inference pass disqualified the def).
     # - `declared_return_rbs` — the existing RBS-declared return spelling, or `nil` when no RBS declares the
     #   method.
-    # - `declared_rbs` — for an `inline_update`, the whole `sig/` line the inline declaration replaces, so
+    # - `declared_rbs` — for an `inline_overwrite`, the whole `sig/` line the inline declaration replaces, so
     #   `--diff` can show both; `nil` otherwise.
     # - `declared_annotations` — for a member declared inline, the annotations the author wrote on it
     #   (`%a{deprecated}`), rendered above `rbs` like `annotations`. Empty otherwise.

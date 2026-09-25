@@ -41,10 +41,10 @@ module Rigor
 
       # The skip reasons {#report_skipped} counts. The four left out each have a report of their own
       # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}, and the refusal
-      # lines `--write` / `--check` print for `inline_shape_mismatch`), so a method never shows up in two tallies.
+      # lines `--write` / `--check` print for `inline_differs`), so a method never shows up in two tallies.
       SUMMARISED_SKIP_REASONS = (SigGen::Classification::SKIP_DIAGNOSTIC_IDS.keys -
                                  %i[unrenderable_rbs unresolvable_superclass inline_declared
-                                    inline_shape_mismatch]).freeze
+                                    inline_differs]).freeze
       private_constant :SUMMARISED_SKIP_REASONS
 
       # @return CLI exit status.
@@ -59,7 +59,8 @@ module Rigor
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
                                           observations: observations,
                                           include_private: options.fetch(:include_private),
-                                          effect_annotator: effect_annotator(configuration, paths, options))
+                                          effect_annotator: effect_annotator(configuration, paths, options),
+                                          overwrite: options.fetch(:overwrite))
         candidates = generator.run
         mode = options.fetch(:mode).to_sym
 
@@ -235,17 +236,17 @@ module Rigor
         refused = refused_candidates(candidates)
         SigGen::Renderer.refusal_lines(refused).each { |line| @err.puts(line) }
         # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8,
-        # or a method whose inline declaration and `sig/` copy cannot be reconciled) means the user asked for a
+        # or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the user asked for a
         # write and did not get one, so the command must not report success — a green `sig-gen --write` in CI
         # would otherwise mean nothing.
         refusals = %i[skipped_invalid_rbs skipped_invalid_encoding]
         results.any? { |result| refusals.include?(result.action) } || !refused.empty? ? 1 : 0
       end
 
-      # ADR-112 WD4 — the methods the generator would not reconcile with their `sig/` copy. Unlike every other
-      # skip, the project's `sig/` is wrong while one stands and no flag makes `--write` fix it.
+      # ADR-112 WD4 — the methods whose inline and `sig/` declarations disagree, refused because the run did not
+      # pass `--overwrite`. Unlike every other skip, `sig/` contradicts the source while one stands.
       def refused_candidates(candidates)
-        candidates.select { |candidate| candidate.skip_reason == :inline_shape_mismatch }
+        candidates.select { |candidate| candidate.skip_reason == :inline_differs }
       end
 
       # ADR-112 WD4 — the same writer as {#dispatch_write}, flags included, in dry-run mode. Defined by what
@@ -275,7 +276,7 @@ module Rigor
         return if refused.empty?
 
         @err.puts("rigor sig-gen --check: #{refused.size} method(s) whose inline declaration and sig/ copy " \
-                  "cannot be reconciled; `--write` will not change them, so make the two agree by hand.")
+                  "disagree; make them agree, or pass --overwrite to replace the sig/ member.")
       end
 
       def build_writer(configuration, options, dry_run: false)
@@ -351,7 +352,8 @@ module Rigor
           opts.on("--diff", "Write a unified diff against existing RBS") { select_mode(options, "diff") }
           opts.on("--write", "Write generated RBS to sig/<path>.rbs files") { select_mode(options, "write") }
           opts.on("--check", "Exit 1 when --write would change sig/; write nothing") { select_mode(options, "check") }
-          opts.on("--overwrite", "Allow tighter-return updates to replace user-authored RBS") do
+          opts.on("--overwrite", "Allow tighter-return updates, and inline declarations that disagree with sig/, " \
+                                 "to replace user-authored RBS") do
             options[:overwrite] = true
           end
           opts.on("--include-private", "Emit private / protected instance methods (default: public only)") do

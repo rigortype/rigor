@@ -233,12 +233,23 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
-  # ADR-112 WD4 — a `sig/` copy of an inline declaration is regenerated from it: the line is the author's own,
-  # so, unlike a tighter-return, replacing it needs no --overwrite.
-  describe "inline-update candidates" do
-    let(:inline_update) { Rigor::SigGen::Classification::INLINE_UPDATE }
+  # ADR-112 WD4 as decided on #1422 — an inline declaration that disagrees with `sig/` replaces the WHOLE member,
+  # and only under --overwrite; the generator refuses it otherwise, and the writer never applies it unasked.
+  describe "inline-overwrite candidates" do
+    let(:inline_overwrite) { Rigor::SigGen::Classification::INLINE_OVERWRITE }
 
-    it "replaces the stale copy without --overwrite and leaves the rest of the file alone" do
+    it "is left alone without --overwrite" do
+      original = "class Foo\n  def greet: (Symbol name) -> String\nend\n"
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
+                                                     classification: inline_overwrite)])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+      expect(File.read(target)).to eq(original)
+    end
+
+    it "replaces the whole member under --overwrite and leaves the rest of the file alone" do
       target = write_target(<<~RBS)
         class Foo
           # A comment the writer must keep.
@@ -247,8 +258,9 @@ RSpec.describe Rigor::SigGen::Writer do
         end
       RBS
 
-      result = writer.write("lib/foo.rb", [candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
-                                                     classification: inline_update)])
+      greet = candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
+                        classification: inline_overwrite)
+      result = writer(overwrite: true).write("lib/foo.rb", [greet])
 
       expect(result.action).to eq(:updated)
       expect(File.read(target)).to eq(<<~RBS)
@@ -263,9 +275,9 @@ RSpec.describe Rigor::SigGen::Writer do
     it "adds an annotation the inline declaration gained and keeps the ones already there" do
       target = write_target("class Foo\n  %a{pure}\n  def label: () -> String\nend\n")
 
-      writer.write("lib/foo.rb", [candidate(method_name: :label, rbs: "def label: () -> String",
-                                            classification: inline_update,
-                                            declared_annotations: ["%a{deprecated}", "%a{pure}"])])
+      writer(overwrite: true).write("lib/foo.rb", [candidate(method_name: :label, rbs: "def label: () -> String",
+                                                             classification: inline_overwrite,
+                                                             declared_annotations: ["%a{deprecated}", "%a{pure}"])])
 
       expect(File.read(target)).to eq("class Foo\n  %a{deprecated}\n  %a{pure}\n  def label: () -> String\nend\n")
     end
@@ -274,28 +286,29 @@ RSpec.describe Rigor::SigGen::Writer do
       target = write_target(<<~RBS)
         class Foo
           def greet: (Symbol name) -> String
-                   # the Integer overload is for legacy callers
+                   # kept for the reader, whatever the member says
                    | (Integer id) -> String
         end
       RBS
 
-      result = writer.write("lib/foo.rb", [candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
-                                                     classification: inline_update)])
+      greet = candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
+                        classification: inline_overwrite)
+      result = writer(overwrite: true).write("lib/foo.rb", [greet])
 
       expect(result.replaced.map(&:method_name)).to eq([:greet])
       expect(File.read(target)).to eq(<<~RBS)
         class Foo
-          # the Integer overload is for legacy callers
+          # kept for the reader, whatever the member says
           def greet: (String name) -> String
         end
       RBS
     end
 
-    it "replaces a declared `-> void` too — the #836 guard protects authored intent, and this line is it" do
+    it "replaces a declared `-> void` too — the #836 guard protects authored intent, and the inline line is it" do
       target = write_target("class Foo\n  def run: () -> void\nend\n")
 
-      writer.write("lib/foo.rb", [candidate(method_name: :run, rbs: "def run: () -> Integer",
-                                            classification: inline_update)])
+      writer(overwrite: true).write("lib/foo.rb", [candidate(method_name: :run, rbs: "def run: () -> Integer",
+                                                             classification: inline_overwrite)])
 
       expect(File.read(target)).to eq("class Foo\n  def run: () -> Integer\nend\n")
     end

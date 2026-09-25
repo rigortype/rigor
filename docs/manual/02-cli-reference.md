@@ -500,7 +500,7 @@ rigor sig-gen [paths]
 | `--diff` | Write a unified diff against existing RBS. |
 | `--write` | Write RBS to `sig/<path>.rbs` files. |
 | `--check` | Write nothing; print what `--write` with the same options would change, and exit `1` if anything would. The CI freshness gate. |
-| `--overwrite` | Allow tighter-return updates to replace user-authored RBS. |
+| `--overwrite` | Allow tighter-return updates, and inline declarations that disagree with `sig/`, to replace user-authored RBS. |
 | `--include-private` | Emit private and protected methods too. |
 | `--params=untyped\|observed\|observed-strict` | Parameter-typing policy. Default `untyped`. |
 | `--observe=PATH` | Scan `PATH` for call-site observations. Repeatable. Default: the configured `test_paths:` (unset: whichever of `spec/` and `test/` exist). |
@@ -517,17 +517,16 @@ See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
 
 A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only
-annotation keeps its parameters and takes the return from the body.
-When what you wrote inline later changes, `--write` replaces the
-stale `sig/` copy without `--overwrite`; an inferred return stays an
-ordinary proposal, and a slot rbs-inline filled by default never
-overwrites `sig/`. A method whose inline and `sig/` overloads do not
-correspond is refused (`sig.skipped.inline-shape-mismatch`), and
-`--write` / `--check` exit `1` until you reconcile it by hand. A class
+annotation keeps its parameters and takes the return from the body,
+and `initialize` is always `-> void`. When `sig/` already declares
+the method and the two disagree, sig-gen changes neither: the method
+is refused (`sig.skipped.inline-differs`), and `--write` / `--check`
+exit `1` until you make them agree or pass `--overwrite`, which
+replaces the whole `sig/` member with the inline declaration. A class
 made generic inline is not written unless `sig/` declares it with the
-same type parameters. A project whose Steep reads
-the same annotations sets `sig_gen.inline_declared: skip` in
-`.rigor.yml` to keep those methods out of `sig/`. See
+same type parameters. A project whose Steep reads the same
+annotations sets `sig_gen.inline_declared: skip` in `.rigor.yml` to
+keep those methods out of `sig/`. See
 [handbook chapter 11](../handbook/11-sig-gen.md#methods-declared-inline).
 
 When `.rigor.yml` carries an `effects:` block, sig-gen also writes

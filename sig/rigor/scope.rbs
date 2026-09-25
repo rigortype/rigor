@@ -166,10 +166,7 @@ module Rigor
     def ivar_origin: (String | Symbol name) -> Symbol?
     def optimistic_local: (String | Symbol name) -> Symbol?
     def optimistic_ivar: (String | Symbol name) -> Symbol?
-    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is
-    # hand-written: the recorded `true` / `false` / `nil`, or the `Inference::OptimisticOrigin::UNKNOWN_MISS` sentinel.
     def optimistic_local_miss: (String | Symbol name) -> Object?
-    # sig-gen gap: #1148 — the same endless-def reader, for an instance variable.
     def optimistic_ivar_miss: (String | Symbol name) -> Object?
     def with_local: (String | Symbol name, Type::t type) -> Scope
     def with_ivar: (String | Symbol name, Type::t type) -> Scope

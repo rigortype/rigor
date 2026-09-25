@@ -1,0 +1,10 @@
+module Rigor
+  module Inference
+    module OptimisticOrigin
+      # sig-gen gap: #1150 — sig-gen types the `BoundMark#miss` member read `untyped`, so it skips this reader
+      # (sig.skipped.untyped-return). The answer is the recorded `true` / `false` / `nil`, or the `UNKNOWN_MISS`
+      # sentinel; declaring it is what lets sig-gen type `Scope#optimistic_local_miss` / `#optimistic_ivar_miss`.
+      def self?.bound_miss: (untyped mark) -> Object?
+    end
+  end
+end

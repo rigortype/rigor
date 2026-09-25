@@ -143,12 +143,17 @@ RSpec.describe Rigor::Inference::CapturedLocals do
       expect([bound.optimistic_local_miss(:x), bound.optimistic_ivar_miss(:@y)]).to eq([false, nil])
     end
 
-    it "drops the answer once an iteration's own mark joins the binding" do
+    # End to end, the per-element fold floors a rebound captured name to `Dynamic[top]` on its later passes
+    # (#1233), so the dropped answer is not yet visible through a block's type; this pins the rule directly.
+    it "drops the answer of a local and an ivar once an iteration's own mark joins the binding" do
       marked = Rigor::Scope.empty.with_local(:x, type).with_optimistic_local(:x, cause, miss: false)
-      bound = described_class.bind(marked, "x", type, optimistic: cause)
+                           .with_ivar(:@y, type).with_optimistic_ivar(:@y, cause, miss: false)
+      bound = described_class.bind(described_class.bind(marked, "x", type, optimistic: cause), "@y", type,
+                                   optimistic: cause)
 
-      expect(bound.optimistic_local(:x)).to eq(cause)
+      expect([bound.optimistic_local(:x), bound.optimistic_ivar(:@y)]).to eq([cause, cause])
       expect(bound.optimistic_local_miss(:x)).to be(Rigor::Inference::OptimisticOrigin::UNKNOWN_MISS)
+      expect(bound.optimistic_ivar_miss(:@y)).to be(Rigor::Inference::OptimisticOrigin::UNKNOWN_MISS)
     end
   end
 end

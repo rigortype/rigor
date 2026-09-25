@@ -128,4 +128,27 @@ RSpec.describe Rigor::Inference::CapturedLocals do
       expect(site_classes("h = {}\n[1].each { |k| }\n", :h)).to be_empty
     end
   end
+
+  # Issue #1302 — the miss answer a mark records rides the rebind `.bind` makes across iterations. An
+  # iteration's own mark comes without its answer, so once one joins the binding's, the answer is dropped.
+  describe ".bind" do
+    let(:cause) { Rigor::Inference::OptimisticOrigin::IMPLICITLY_RETURNS_NIL }
+    let(:type) { Rigor::Type::Combinator.constant_of(false) }
+
+    it "keeps the recorded miss answer of a local and an ivar when no iteration marked them" do
+      marked = Rigor::Scope.empty.with_local(:x, type).with_optimistic_local(:x, cause, miss: false)
+                           .with_ivar(:@y, type).with_optimistic_ivar(:@y, cause, miss: nil)
+      bound = described_class.bind(described_class.bind(marked, "x", type), "@y", type)
+
+      expect([bound.optimistic_local_miss(:x), bound.optimistic_ivar_miss(:@y)]).to eq([false, nil])
+    end
+
+    it "drops the answer once an iteration's own mark joins the binding" do
+      marked = Rigor::Scope.empty.with_local(:x, type).with_optimistic_local(:x, cause, miss: false)
+      bound = described_class.bind(marked, "x", type, optimistic: cause)
+
+      expect(bound.optimistic_local(:x)).to eq(cause)
+      expect(bound.optimistic_local_miss(:x)).to be(Rigor::Inference::OptimisticOrigin::UNKNOWN_MISS)
+    end
+  end
 end

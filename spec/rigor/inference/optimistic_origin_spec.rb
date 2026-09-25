@@ -771,6 +771,150 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       # A miss makes the rest `[]`, so it is the arity-free `Array`, not the one-element Tuple of the pair.
       expect(scope_after.local(:rest).describe).to eq("Array[Integer]")
     end
+
+    # Issue #1302 — the binding records what the bound value answers on a miss next to its mark, so a
+    # predicate read through the local or ivar widens exactly as far as its inline form does. Every keep
+    # below is paired with a binding whose miss answers the other boolean, or cannot be told, and still
+    # widens.
+    describe "a predicate read through the binding it was stored in" do
+      it "keeps `!` over a local bound to a safe-navigation predicate, as the inline form does" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          x = pairs.first&.empty?
+          !x
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "keeps `!` over an instance variable bound to a safe-navigation predicate" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          @x = pairs.first&.empty?
+          !@x
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "keeps the answer through a copy of the binding" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          x = pairs.first&.empty?
+          y = x
+          !y
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "keeps the answer through a destructured slot, which a miss fills with nil" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          a, _b = pairs.first&.empty?
+          !a
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "still widens `.nil?` and `!` over a local bound to a dynamic-key Hash read (the #1172 control)" do
+        %w[v.nil? !v].each do |predicate|
+          type, = evaluate_with({ h: hash_of("x", "y") }, <<~RUBY)
+            v = h[key]
+            #{predicate}
+          RUBY
+
+          expect(type.describe).to eq("bool"), "for #{predicate}"
+        end
+      end
+
+      it "keeps `.nil?` over a binding whose miss answers `false`, and widens it over one whose miss is nil" do
+        # `!!recv&.empty?` is `false` on a hit and on a miss; `recv&.empty?` is `nil` on a miss.
+        kept, = evaluate_with({ pairs: pairs }, "x = !!pairs.first&.empty?\nx.nil?\n")
+        widened, = evaluate_with({ pairs: pairs }, "x = pairs.first&.empty?\nx.nil?\n")
+
+        expect(kept).to eq(Rigor::Type::Combinator.constant_of(false))
+        expect(widened.describe).to eq("bool")
+      end
+
+      it "drops the recorded answer when the local is rebound, marked or not" do
+        type, after = evaluate_with({ pairs: pairs }, <<~RUBY)
+          x = !!pairs.first&.empty?
+          x = pairs.first&.empty?
+          x.nil?
+        RUBY
+
+        expect(type.describe).to eq("bool")
+        expect(after.optimistic_local_miss(:x)).to be_nil
+        _, unmarked = evaluate_with({ pairs: pairs }, "x = !!pairs.first&.empty?\nx = false\n")
+        expect(unmarked.optimistic_local_miss(:x)).to be(described_class::UNKNOWN_MISS)
+      end
+
+      it "widens after a join whose branches record different answers" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          if c
+            x = !!pairs.first&.empty?
+          else
+            x = pairs.first&.empty?
+          end
+          x.nil?
+        RUBY
+
+        expect(type.describe).to eq("bool")
+      end
+
+      it "keeps the marked branch's answer after a join with an unmarked branch" do
+        # The miss path runs only through the marked branch, and the unmarked `false` answers `true` too.
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          if c
+            x = pairs.first&.empty?
+          else
+            x = false
+          end
+          !x
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "keeps the answer across a block that rebinds the local to an unmarked value" do
+        type, = evaluate_with({ pairs: pairs }, <<~RUBY)
+          x = pairs.first&.empty?
+          pairs.each { x = false }
+          !x
+        RUBY
+
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(true))
+      end
+
+      it "widens across a block whose own rebind marks the local with another answer" do
+        type, = evaluate_with({ pairs: pairs, h: hash_of("x") }, <<~RUBY)
+          x = pairs.first&.empty?
+          pairs.each { x = !h[key] }
+          !x
+        RUBY
+
+        expect(type.describe).to eq("bool")
+      end
+
+      it "reports no return-type mismatch for the bound form under a declared `true`", type: :runner do
+        sig = <<~RBS
+          class Probe
+            def pairs: () -> Array[[String, Integer]]
+            def present?: () -> true
+          end
+        RBS
+        diagnostics = analyze(<<~RUBY, sig: { "probe.rbs" => sig }).diagnostics
+          class Probe
+            def pairs = []
+
+            def present?
+              x = pairs.first&.empty?
+              !x
+            end
+          end
+        RUBY
+
+        expect(diagnostics.map(&:rule)).not_to include("def.return-type-mismatch")
+      end
+    end
   end
 
   describe ".resolve through a safe-navigation call" do
@@ -814,6 +958,32 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
         .to eq([false, [true, false]])
       expect(described_class.destructuring_marks(value_of("a, b = 1, 2"), marked)).to be(false)
       expect(described_class.destructuring_marks(value_of("a, b = *v, v"), marked)).to be(false)
+    end
+  end
+
+  describe ".destructuring_miss" do
+    # `v` records a `nil` miss, as `v = h[k]` does; `w` is marked with no recorded answer.
+    let(:marked) do
+      string = Rigor::Type::Combinator.nominal_of("String")
+      scope.with_local(:v, string).with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL, miss: nil)
+           .with_local(:w, string).with_optimistic_local(:w, described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
+    def value_of(source)
+      Prism.parse(source, scopes: [%i[v w]]).value.statements.body.first.value
+    end
+
+    it "answers nil when every marked part of the right-hand side is nil on a miss" do
+      ["a, b = v", "a, b = 1, v", "a, (b, c) = 1, [v, 2]", "a, b = 1, 2"].each do |source|
+        expect(described_class.destructuring_miss(value_of(source), marked)).to be_nil, "for #{source}"
+      end
+    end
+
+    it "answers unknown when a marked part is a boolean on a miss, or its answer cannot be told" do
+      ["a, b = !v", "a, b = 1, v.nil?", "a, b = w", "a, b = v, w"].each do |source|
+        expect(described_class.destructuring_miss(value_of(source), marked))
+          .to be(described_class::UNKNOWN_MISS), "for #{source}"
+      end
     end
   end
 end

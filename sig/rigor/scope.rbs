@@ -14,8 +14,10 @@ module Rigor
     attr_reader void_origins: Hash[untyped, Inference::VoidOrigin]
     attr_reader plugin_typed_calls: Hash[untyped, bool]
     attr_reader optimistic_origins: Hash[untyped, Symbol]
-    attr_reader optimistic_locals: Hash[Symbol, Symbol]
-    attr_reader optimistic_ivars: Hash[Symbol, Symbol]
+    # A marked binding whose miss answer is known stores an `Inference::OptimisticOrigin::BoundMark` (a `Data`)
+    # in place of its bare cause (issue #1302).
+    attr_reader optimistic_locals: Hash[Symbol, Symbol | Data]
+    attr_reader optimistic_ivars: Hash[Symbol, Symbol | Data]
     # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter reaches `untyped`.
     attr_reader repeated_or_writes: Hash[untyped, bool]
     # sig-gen gap: #1154 — the same reader shape; `Inference::MatchRebinding::Frame` carries no signature.
@@ -164,11 +166,16 @@ module Rigor
     def ivar_origin: (String | Symbol name) -> Symbol?
     def optimistic_local: (String | Symbol name) -> Symbol?
     def optimistic_ivar: (String | Symbol name) -> Symbol?
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (sig.skipped.untyped-return); the row is
+    # hand-written: the recorded `true` / `false` / `nil`, or the `Inference::OptimisticOrigin::UNKNOWN_MISS` sentinel.
+    def optimistic_local_miss: (String | Symbol name) -> Object?
+    # sig-gen gap: #1148 — the same endless-def reader, for an instance variable.
+    def optimistic_ivar_miss: (String | Symbol name) -> Object?
     def with_local: (String | Symbol name, Type::t type) -> Scope
     def with_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_local_origin: (String | Symbol name, Symbol? cause) -> Scope
-    def with_optimistic_local: (String | Symbol name, Symbol? cause) -> Scope
-    def with_optimistic_ivar: (String | Symbol name, Symbol? cause) -> Scope
+    def with_optimistic_local: (String | Symbol name, Symbol? cause, ?miss: Object?) -> Scope
+    def with_optimistic_ivar: (String | Symbol name, Symbol? cause, ?miss: Object?) -> Scope
     def with_ivar_origin: (String | Symbol name, Symbol? cause) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope

@@ -3,6 +3,7 @@
 require_relative "../type"
 require_relative "../reflection"
 require_relative "external_ancestor_resolution"
+require_relative "project_method_ownership"
 
 module Rigor
   module Inference
@@ -74,15 +75,17 @@ module Rigor
       def classify(receiver_type:, method_name:, environment: nil, scope: nil) # rubocop:disable Lint/UnusedMethodArgument
         return :unknown if receiver_type.nil?
 
-        class_name = receiver_class_name(receiver_type)
-        return :unknown if class_name.nil?
-
         method_sym = method_name.to_sym
-        return :non_escaping if non_escaping?(class_name, method_sym)
-        return :escaping if escaping?(class_name, method_sym)
-        return :unknown unless receiver_type.is_a?(Type::Nominal)
+        class_name = receiver_class_name(receiver_type)
+        if class_name
+          return :non_escaping if non_escaping?(class_name, method_sym)
+          return :escaping if escaping?(class_name, method_sym)
+        end
 
-        ancestry_non_escaping?(class_name, method_sym, scope) ? :non_escaping : :unknown
+        instance_class = instance_carrier_class_name(receiver_type)
+        return :unknown if instance_class.nil?
+
+        ancestry_non_escaping?(instance_class, method_sym, scope) ? :non_escaping : :unknown
       end
 
       # Issue #1234 — whether some catalogue entry lists `method_name` as an iteration method: a name that runs
@@ -93,28 +96,37 @@ module Rigor
         ITERATOR_NAMES.include?(method_name)
       end
 
-      # Issue #1234 — whether the project itself answers `method_name` on some member of `receiver_type`: a
-      # `def` (or `define_method`, `attr_*`, a module's method) anywhere in a project class's ancestry, on the
-      # instance side for a `Nominal` member and the singleton side for a `Singleton` one, or a signature whose
-      # declaring owner is a project class or module. Such a method is the project's, not the catalogued
-      # iterator of the same name, so the name says nothing about how often it yields: `class Vault; def
-      # select(key) = yield(key.to_s); end` runs its block once. `ExpressionTyper#block_may_repeat?` asks this
-      # before reading an `:unknown` receiver's name as repetition. A carrier naming no class (`Dynamic`, `Top`)
-      # answers false — Rigor cannot see its method at all.
-      def project_defined?(receiver_type:, method_name:, scope:)
-        return false if scope.nil?
+      # Issue #1234 — whether the NAME of a catalogued iterator is the only thing Rigor knows about the method
+      # `receiver_type` answers `method_name` with, so the captured-binding pass may read it as repetition
+      # (`ExpressionTyper#block_may_repeat?`, for an `:unknown` receiver). It holds for a receiver Rigor cannot
+      # see at all (`Dynamic`, `Top`), and for a class it can see whose method the project does not define.
+      #
+      # A method the project defines under a catalogued name is the project's, not the iterator, so the name
+      # says nothing about how often it yields: `class Vault; def select(key) = yield(key.to_s); end` runs its
+      # block once. "Defines" is a `def`, `define_method` or `attr_*` anywhere in a project class's ancestry
+      # (instance side, or singleton side for a class-object receiver), or a signature whose declaring owner
+      # is a project class or module. A carrier this does not recognise, or one whose class it cannot name
+      # (an anonymous `Struct.new` value), answers false: when Rigor cannot tell whether the project owns the
+      # method, it does not assume repetition. {ProjectMethodOwnership.targets} carries the carrier audit.
+      def repeats_by_name?(receiver_type:, method_name:, scope:)
+        method_sym = method_name.to_sym
+        return false unless ITERATOR_NAMES.include?(method_sym)
 
-        case receiver_type
-        when Type::Union
-          receiver_type.members.any? { |member| project_defined?(receiver_type: member, method_name:, scope:) }
-        when Type::Nominal then project_defines?(receiver_type.class_name, method_name.to_sym, :instance, scope)
-        when Type::Singleton then project_defines?(receiver_type.class_name, method_name.to_sym, :singleton, scope)
-        else false
-        end
+        targets = ProjectMethodOwnership.targets(receiver_type)
+        return false if targets.nil?
+
+        targets.none? { |class_name, kind| ProjectMethodOwnership.defines?(class_name, method_sym, kind, scope) }
       end
 
       class << self
         private
+
+        # The instance-side class a `Nominal` or an ADR-48 member carrier names, for the ancestry step.
+        def instance_carrier_class_name(receiver_type)
+          case receiver_type
+          when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver_type.class_name&.to_s
+          end
+        end
 
         # Resolve a single concrete class name for catalogue lookup. Returns `nil` when the receiver carrier
         # does not name a single class (e.g. `Top`, `Dynamic[Top]`, `Union[...]`, `Bot`). `Tuple` projects to
@@ -171,33 +183,21 @@ module Rigor
         def ancestry_non_escaping?(class_name, method_sym, scope)
           return false if scope.nil? || !ITERATOR_NAMES.include?(method_sym)
           return false unless scope.known_user_class?(class_name)
-          return false if project_source_defines?(class_name, method_sym, :instance, scope)
+
+          by_method = (ProjectMethodOwnership.memo(scope)[:ancestry][class_name] ||= {})
+          return by_method[method_sym] if by_method.key?(method_sym)
+
+          by_method[method_sym] = compute_ancestry_non_escaping?(class_name, method_sym, scope)
+        end
+
+        def compute_ancestry_non_escaping?(class_name, method_sym, scope)
+          return false if ProjectMethodOwnership.defines?(class_name, method_sym, :instance, scope)
 
           if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
             return catalogued_declaration?(method_definition(class_name, method_sym, :instance, scope), method_sym)
           end
 
           external_ancestry_non_escaping?(class_name, method_sym, scope)
-        end
-
-        # The project's source, or a signature whose declaring owner is a project class or module, defines the
-        # method on `class_name` or an ancestor the project declares.
-        def project_defines?(class_name, method_sym, kind, scope)
-          return true if project_source_defines?(class_name, method_sym, kind, scope)
-
-          owner = method_definition(class_name, method_sym, kind, scope)&.defined_in
-          !owner.nil? && scope.known_user_class?(owner.to_s.delete_prefix("::"))
-        end
-
-        def project_source_defines?(class_name, method_sym, kind, scope)
-          return true if scope.discovered_method_through_ancestors?(class_name, method_sym, kind)
-
-          found, = if kind == :singleton
-                     scope.singleton_def_through_ancestors(class_name, method_sym)
-                   else
-                     scope.user_def_through_ancestors(class_name, method_sym)
-                   end
-          !found.nil?
         end
 
         # The RBS definition, or nil — a malformed signature is a gap, and

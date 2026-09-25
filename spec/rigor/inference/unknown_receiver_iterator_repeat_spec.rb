@@ -280,6 +280,70 @@ RSpec.describe "an iterator on an unclassified receiver", type: :runner do
       RUBY
     end
 
+    # A Struct or Data value is its own carrier (ADR-48), not a `Nominal`, and names its class all the same.
+    describe "on a Struct or Data value" do
+      let(:once_shape) { "{ |_k| was = first; first = false; was ? 5 : nil }" }
+
+      it "keeps the entry scope for a method a Struct.new block defines" do
+        expect(dumped_type(<<~RUBY)).to eq("5")
+          Rec = Struct.new(:a) do
+            def find(key) = yield(key.to_s)
+          end
+
+          first = true
+          dump_type(Rec.new(1).find(:a) #{once_shape})
+        RUBY
+      end
+
+      it "keeps the entry scope for a method a Struct subclass defines" do
+        expect(dumped_type(<<~RUBY)).to eq("5")
+          class Rec2 < Struct.new(:a)
+            def find(key) = yield(key.to_s)
+          end
+
+          first = true
+          dump_type(Rec2.new(1).find(:a) #{once_shape})
+        RUBY
+      end
+
+      it "keeps the entry scope for a method a reopened Struct constant defines" do
+        expect(dumped_type(<<~RUBY)).to eq("5")
+          Rec3 = Struct.new(:a)
+          class Rec3
+            def find(key) = yield(key.to_s)
+          end
+
+          first = true
+          dump_type(Rec3.new(1).find(:a) #{once_shape})
+        RUBY
+      end
+
+      it "reports nothing on a Data subclass's once-yielding map" do
+        expect(reported(<<~RUBY)).to be_empty
+          class Opt < Data.define(:value)
+            def map = yield(value)
+          end
+
+          def once
+            first = true
+            r = Opt.new(value: 1).map { |_v| was = first; first = false; was ? "x" : nil }
+            r.upcase
+          end
+        RUBY
+      end
+
+      it "keeps the entry scope for a method a Data.define block defines" do
+        expect(dumped_type(<<~RUBY)).to eq("5")
+          Some = Data.define(:value) do
+            def map = yield(value)
+          end
+
+          first = true
+          dump_type(Some.new(value: 1).map #{once_shape})
+        RUBY
+      end
+    end
+
     it "still repeats for the same name on a receiver Rigor cannot see" do
       expect(dumped_type(<<~RUBY)).to eq("0 | 1 | Dynamic[top]")
         #{vault}

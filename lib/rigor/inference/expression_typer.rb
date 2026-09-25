@@ -3930,8 +3930,7 @@ module Rigor
       # Issue #1234 — the name reads as repetition only where Rigor cannot see the method: a method the project
       # defines under a catalogued name is the project's, whatever it is called.
       def unseen_iterator?(method_name, receiver_type)
-        ClosureEscapeAnalyzer.iterator_name?(method_name) &&
-          !ClosureEscapeAnalyzer.project_defined?(receiver_type: receiver_type, method_name: method_name, scope: scope)
+        ClosureEscapeAnalyzer.repeats_by_name?(receiver_type: receiver_type, method_name: method_name, scope: scope)
       end
 
       def at_most_one_run?(method_name, receiver_type)

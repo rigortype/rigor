@@ -1,4 +1,5 @@
 # rubocop:disable Style/SpecialGlobalVars, Style/GlobalStdStream, Lint/UselessAssignment
+require "csv"
 require "delegate"
 require "stringio"
 require "rigor/testing"
@@ -18,9 +19,9 @@ assert_type('"top"', $_)
 def fresh = assert_type("Dynamic[top]", $_)
 
 # The loop body runs only when `gets` returned a line, so `$_` is that line (Ruby: the line), and the loop exits
-# when `gets` returns nil (Ruby: nil). Written with an implicit-self `gets` in a method, as the issue has it, the
-# reader proves nothing: a top-level method is a private method of every object, and `self` there may be one whose
-# `gets` is Ruby's (see `lastline_top_level.rb`), so `$_` stays unbound. On `$stdin` it narrows.
+# when `gets` returns nil (Ruby: nil). Written with an implicit-self `gets`, as the issue has it, the reader proves
+# nothing: `self` may be any object whose `gets` is Ruby's (a top-level method runs with whatever `self` calls it,
+# as `Importer#import` below shows), so `$_` stays unbound. On `$stdin` it narrows.
 def lines
   while gets
     assert_type("Dynamic[top]", $_)
@@ -238,13 +239,19 @@ def unentered_block(items)
   end
 end
 
-# Inside a class the implicit-self reader may be one the ancestry defines in Ruby, which the analyzer cannot see:
-# a class built on `DelegateClass(File)` records no superclass, and its `gets` is a Ruby forwarder (Ruby: nil, the
-# forwarder's frame took the line). So no class narrows it, a plain one included (Ruby: the line).
+# An implicit-self reader never narrows. Inside a class it may be one the ancestry defines in Ruby: a class built on
+# `DelegateClass(File)` records no superclass, and its `gets` is a Ruby forwarder (Ruby: nil, the forwarder's frame
+# took the line), and so does a block whose `self` `instance_exec` rebinds to one. A top-level method called on a
+# `CSV` reads `CSV#gets`, an alias of its Ruby `shift` (Ruby: `Importer.new(file).import` runs the first loop of
+# `lines` once per row and reads nil there). A plain class narrows nothing either (Ruby: the line).
 class DelegatedSource < DelegateClass(File)
   def first
     assert_type("Dynamic[top]", $_) if gets
   end
+end
+
+class Importer < CSV
+  def import = lines
 end
 
 class LineSource
@@ -468,5 +475,16 @@ def quiet_checked_elsewhere
 
   copy = $_
   copy.chomp # QUIET-1359
+end
+# The script body reads an implicit-self reader the same way: `main` can carry a mixin or a singleton `gets`, and a
+# file can run under `load(file, Wrapper)` or `instance_eval` (Ruby, run with `read` as the first argument: the
+# line, then nil). A `$stdin` reader narrows there as anywhere (Ruby: the line).
+if ARGV.first == "read"
+  while gets
+    assert_type("Dynamic[top]", $_)
+  end
+  assert_type("Dynamic[top]", $_) if gets
+  DelegatedSource.new(File.open(__FILE__)).instance_exec { assert_type("Dynamic[top]", $_) if gets }
+  assert_type("String", $_) if $stdin.gets
 end
 # rubocop:enable Style/SpecialGlobalVars, Style/GlobalStdStream, Lint/UselessAssignment

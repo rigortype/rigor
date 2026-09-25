@@ -3648,10 +3648,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     it "narrows `$_` on a reader condition's edges and leaves it nil after a `while gets` loop" do
       reads, post = last_line_reads(<<~RUBY)
-        if gets then $_ else $_ end
-        gets or raise
+        if $stdin.gets then $_ else $_ end
+        $stdin.gets or raise
         $_
-        while gets
+        while $stdin.gets
           $_
         end
       RUBY
@@ -3661,23 +3661,24 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     it "leaves `$_` unbound after a reader that is not a condition, and on an untyped receiver's condition" do
       reads, = last_line_reads(<<~RUBY)
-        if gets
+        if $stdin.gets
           gets
           $_
         end
         $_ if io.gets
+        $_ if gets
       RUBY
-      expect(reads).to eq([nil, nil])
+      expect(reads).to eq([nil, nil, nil])
     end
 
     it "forgets `$_` after an operand, literal or block that may set it, and keeps it across a Ruby method call" do
       ["x = gets.to_s", "log(gets)", "pair = [gets, 1]", "items.each { |i| i.gets }", "items.each(&:gets)",
        "io.send(:gets)", "Enumerator.new { gets }.to_a"].each do |call|
-        reads, = last_line_reads("if gets\n  #{call}\n  $_\nend\n")
+        reads, = last_line_reads("if $stdin.gets\n  #{call}\n  $_\nend\n")
         expect(reads).to eq([nil]), call
       end
       ["log('x')", "self.log('y')", "items.map { |i| i }", "Thread.new { gets }.join"].each do |call|
-        reads, = last_line_reads("if gets\n  #{call}\n  $_\nend\n")
+        reads, = last_line_reads("if $stdin.gets\n  #{call}\n  $_\nend\n")
         expect(reads).to eq([string_t]), call
       end
     end
@@ -3686,11 +3687,11 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       ["while ok\n  $_\n  gets\nend", "for i in items\n  $_\n  gets\nend",
        "begin\n  $stdin.readline\nrescue EOFError\n  $_\nend",
        "begin\n  $_\n  gets\n  raise 'x'\nrescue RuntimeError\n  retry\nend"].each do |body|
-        reads, = last_line_reads("if gets\n#{body}\nend\n")
+        reads, = last_line_reads("if $stdin.gets\n#{body}\nend\n")
         expect(reads).to all(be_nil), body
         expect(reads).not_to be_empty
       end
-      reads, = last_line_reads("if gets\n  while ok\n    $_\n  end\nend\n")
+      reads, = last_line_reads("if $stdin.gets\n  while ok\n    $_\n  end\nend\n")
       expect(reads).to eq([string_t])
     end
 
@@ -3731,19 +3732,19 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     # `redo` re-enters the body without testing the predicate again.
     it "enters a body a `redo` targets without the predicate's narrowing" do
-      reads, = last_line_reads("while gets\n  $_\n  gets\n  redo if ok\nend\n")
+      reads, = last_line_reads("while $stdin.gets\n  $_\n  gets\n  redo if ok\nend\n")
       expect(reads).to all(be_nil)
-      reads, = last_line_reads("while gets\n  $_\n  redo if ok\nend\n")
+      reads, = last_line_reads("while $stdin.gets\n  $_\n  redo if ok\nend\n")
       expect(reads).to eq([nil])
       # A body that rebinds a local runs the fixpoint passes, which enter on the predicate's edge.
-      reads, = last_line_reads("while gets\n  x = $_\n  gets\n  redo if x\nend\n")
+      reads, = last_line_reads("while $stdin.gets\n  x = $_\n  gets\n  redo if x\nend\n")
       expect(reads).to all(be_nil)
-      reads, = last_line_reads("while gets\n  x = $_\n  redo if x\nend\n")
+      reads, = last_line_reads("while $stdin.gets\n  x = $_\n  redo if x\nend\n")
       expect(reads.last).to eq(string_t)
     end
 
     it "joins a reader condition's arms with `$_` unbound" do
-      ["if gets\n  1\nend", "ok = gets ? true : false", "x = (1 if gets)"].each do |statement|
+      ["if $stdin.gets\n  1\nend", "ok = $stdin.gets ? true : false", "x = (1 if $stdin.gets)"].each do |statement|
         _, post = last_line_reads("#{statement}\n")
         expect(post.global(:$_)).to be_nil, statement
       end
@@ -3753,12 +3754,12 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     # rebinds no local reads the narrowing too; a `begin … end while` body runs once before the predicate.
     it "enters the single body pass of a loop on the predicate's edge, but not a `begin … end while` body" do
       program = parse_program(<<~RUBY)
-        while (line = gets)
+        while (line = STDIN.gets)
           line
         end
         begin
           line
-        end while (line = gets)
+        end while (line = STDIN.gets)
       RUBY
       reads = []
       recorder = ->(node, scope) { reads << scope.local(:line) if node.is_a?(Prism::LocalVariableReadNode) }
@@ -3769,7 +3770,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     it "enters the single pass of a body a `redo` targets from the post-predicate scope" do
       program = parse_program(<<~RUBY)
-        while (line = gets)
+        while (line = STDIN.gets)
           line
           redo if line.empty?
         end

@@ -38,27 +38,28 @@ module Rigor
         false
       end
 
+      # Which of `jump_classes` target the construct whose body is `node`, found in one walk and answered as a bit
+      # mask (bit `i` for `jump_classes[i]`), so a loop asks for its `next`, `break` and `redo` together without
+      # allocating. The walk stops descending once every class is found.
+      def kinds(node, jump_classes)
+        kind_mask(node, jump_classes, 0, (1 << jump_classes.size) - 1)
+      end
+
+      def kind_mask(node, jump_classes, mask, full)
+        return mask if node.nil? || mask == full
+
+        index = jump_classes.index(node.class)
+        mask |= 1 << index if index
+        node.rigor_each_child do |child|
+          mask = kind_mask(child, jump_classes, mask, full) unless boundary?(child)
+        end
+        mask
+      end
+      private_class_method :kind_mask
+
       # Every `jump_class` node that targets the construct whose body is `node`, as an identity-keyed Hash used as a
       # membership set: the jump sinks also collect jumps belonging to nested constructs, and their consumers filter
       # against this set.
-      # The jump classes among `jump_classes` that target the construct whose body is `node`, in one walk: a loop
-      # asks for its `next`, `break` and `redo` together. Early-exiting once every class is found.
-      def kinds(node, jump_classes)
-        found = []
-        collect_kinds(node, jump_classes, found)
-        found
-      end
-
-      def collect_kinds(node, jump_classes, found)
-        return if node.nil? || found.size == jump_classes.size
-
-        found << node.class if jump_classes.include?(node.class) && !found.include?(node.class)
-        node.rigor_each_child do |child|
-          collect_kinds(child, jump_classes, found) unless boundary?(child)
-        end
-      end
-      private_class_method :collect_kinds
-
       def of(node, jump_class)
         found = {}.compare_by_identity
         collect(node, jump_class, found)

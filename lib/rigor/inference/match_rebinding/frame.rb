@@ -37,16 +37,6 @@ module Rigor
           @scans = nil
           @last_line_closure = nil
           @last_line_fallback = nil
-          @main_mixin = nil
-        end
-
-        # True for the file's own frame, the top-level script body.
-        def program? = @body.is_a?(Prism::ProgramNode)
-
-        # True when the file's code may mix a module into `main` or `Object` ({LastLine.mixes_into_main?}), kept once.
-        def main_mixin?
-          @main_mixin = LastLine.mixes_into_main?(@body) if @main_mixin.nil?
-          @main_mixin
         end
 
         def matching_closure?(scope = nil)

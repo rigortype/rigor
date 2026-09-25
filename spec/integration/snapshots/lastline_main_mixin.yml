@@ -1,5 +1,0 @@
----
-locals: {}
-assertions:
-  '1': Dynamic[top]
-  '2': Dynamic[top]

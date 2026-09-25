@@ -43,9 +43,9 @@ module Rigor
       LINE_EDITORS = Set[:sub, :gsub, :chop, :chomp].freeze
       # `$stdin`, and `$<`, which is `ARGF`, while the file binds them to nothing but a reader.
       READER_GLOBALS = Set[:$stdin, :$<].freeze
-      # The RBS owners of a C reader. `Kernel`'s is private, and RBS places there any reader it does not declare
-      # (`CSV#gets`, an alias of its Ruby `shift`, reads as `Kernel`'s), so it answers only the top level's implicit
-      # `self` ({.self_reader?}); `Kernel.gets` itself is read by the receiver's type.
+      # The RBS owners of a C reader. `Kernel`'s is not one: it is private, and RBS places there any reader it does not
+      # declare (`CSV#gets`, an alias of its Ruby `shift`, reads as `Kernel`'s). `Kernel.gets` itself is read by the
+      # receiver's type.
       READER_OWNERS = Set["::IO", "::StringIO", "::RBS::Unnamed::ARGFClass", "::Zlib::GzipReader"].freeze
       # RBS declares `Tempfile < File`, but its methods are `DelegateClass(File)`'s Ruby forwarders, so its `gets`
       # sets the forwarder's `$_` and never its caller's.
@@ -59,35 +59,34 @@ module Rigor
         Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
       ].freeze
       LAST_LINE = :$_
-      # The calls that mix a module into their receiver, or refine for the rest of the file (`using`).
-      MAIN_MIXINS = Set[:include, :extend, :prepend, :using].freeze
-      MAIN_MIXIN_NAMES = MAIN_MIXINS.to_set(&:to_s).freeze
-      ROOT_CLASSES = Set["Object", "Kernel", "BasicObject"].freeze
-      CLASS_BODIES = Set[Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SETTER_NAMES, :LINE_EDITORS, :READER_GLOBALS, :READER_OWNERS, :DELEGATING_CLASSES,
-                       :DELEGATING_ORDERINGS, :SENDS, :EVALS, :WRITES, :LAST_LINE, :MAIN_MIXINS, :MAIN_MIXIN_NAMES,
-                       :ROOT_CLASSES, :CLASS_BODIES
+                       :DELEGATING_ORDERINGS, :SENDS, :EVALS, :WRITES, :LAST_LINE
 
       module_function
 
       # True when `call_node` certainly is a C reader run in this frame, so `$_` holds what it returns: `gets` or
-      # `readline` without a block, on implicit `self` at the top level or in a top-level method ({.self_reader?}),
-      # on the `Kernel` module, on `$stdin` or `$<`, or on a receiver typed as a class whose reader RBS places in
-      # `IO`, `StringIO`, `ARGF` or `Zlib::GzipReader`, other than `Tempfile` (`STDIN` and `ARGF` read so by their
-      # types, and a project constant that shadows either reads by its own). A program that defines a method of
-      # that name anywhere, or patches one in, gets no answer but false, as {BlockCallTiming.project_defines_anywhere?}
-      # reads it. A receiver typed `IO` or `File` that is a subclass instance at runtime is read as the class it is
-      # typed as.
+      # `readline` without a block, on the `Kernel` module, on `$stdin` or `$<`, or on a receiver typed as a class
+      # whose reader RBS places in `IO`, `StringIO`, `ARGF` or `Zlib::GzipReader`, other than `Tempfile` (`STDIN` and
+      # `ARGF` read so by their types, and a project constant that shadows either reads by its own). A receiver typed
+      # `IO` or `File` that is a subclass instance at runtime is read as the class it is typed as.
+      #
+      # An implicit-self or `self.` reader never is: `self` may be any object whose `gets` is Ruby's. A top-level
+      # method runs with whatever `self` calls it, `main` can carry a mixin or a singleton method (`include
+      # Readline`, `class << self`, `def self.gets`), and a file can run under a wrapper module (`load(file, M)`) or
+      # `instance_eval`. Nor is any reader of a name the program defines or patches in anywhere
+      # ({BlockCallTiming.project_defines_anywhere?}): a reopened `IO` or `Kernel`, or a project object bound to
+      # `$stdin` in another file, runs the program's Ruby method, which sets its own frame's `$_`.
       def reads_line?(call_node, scope)
         return false unless call_node.is_a?(Prism::CallNode) && READERS.include?(call_node.name)
-        return false unless call_node.block.nil?
-        return false if BlockCallTiming.project_defines_anywhere?(call_node.name, scope)
 
         receiver = call_node.receiver
-        case receiver
-        when nil, Prism::SelfNode then self_reader?(call_node.name, scope)
-        when Prism::GlobalVariableReadNode then reader_global?(receiver.name, call_node.name, scope)
-        else reader_receiver?(scope.type_of(receiver), call_node.name, scope)
+        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode) || !call_node.block.nil?
+        return false if BlockCallTiming.project_defines_anywhere?(call_node.name, scope)
+
+        if receiver.is_a?(Prism::GlobalVariableReadNode)
+          reader_global?(receiver.name, call_node.name, scope)
+        else
+          reader_receiver?(scope.type_of(receiver), call_node.name, scope)
         end
       rescue StandardError
         false
@@ -250,65 +249,6 @@ module Rigor
       end
       private_class_method :line_type, :sent_reader?
 
-      # An implicit-self reader is `Kernel`'s only in the top-level script body, outside every block, whose `self` is
-      # `main`, and only while the program mixes nothing into `main` or `Object` ({.mixes_into_main?}, and a
-      # recorded `include` / `prepend` / `extend` of `Object`, `Kernel` or `BasicObject`): `include Readline` makes
-      # `readline` Reline's Ruby method. A top-level method is a private method of `Object`, so its `self` may be any
-      # object (a `CSV` subclass calling it reads `CSV#gets`), and a block's `self` may be rebound (`instance_exec`),
-      # which the analyzer does not follow. Inside a class or module it answers only where RBS places the reader in
-      # `IO` or its kin (a reopened `IO`): any other ancestry may hold a Ruby reader the analyzer does not see, since a
-      # class written `class W < DelegateClass(File)` records no superclass at all, and RBS leaves out a Ruby reader
-      # such as `CSV#gets` or `OpenSSL::Buffering#gets` often enough that its `Kernel` answer proves nothing.
-      def self_reader?(name, scope)
-        self_type = scope.self_type
-        return reader_type?(self_type, name, scope) unless self_type.nil?
-
-        frame = scope.match_frame
-        !frame.nil? && frame.program? && !scope.opaque_block_self? && !frame.main_mixin? && !object_mixin?(scope)
-      end
-
-      # True when `program` may mix a module into `main` or `Object`: an `include`, `extend`, `prepend` or `using`
-      # (or a `send` that may name one) on implicit `self` or `self.` outside a class or module body, or on `Object`,
-      # `Kernel` or `BasicObject` anywhere. A module mixed in by another file of the program is not seen.
-      def mixes_into_main?(node, in_class: false)
-        return false unless node.is_a?(Prism::Node)
-        return true if node.is_a?(Prism::CallNode) && main_mixin_call?(node, in_class)
-
-        nested = in_class || CLASS_BODIES.include?(node.class)
-        found = false
-        node.rigor_each_child { |child| found ||= mixes_into_main?(child, in_class: nested) }
-        found
-      end
-
-      def main_mixin_call?(call_node, in_class)
-        name = call_node.name
-        mixes = MAIN_MIXINS.include?(name) ||
-                (SENDS.include?(name) && sent_mixin?(call_node.arguments&.arguments&.first))
-        return false unless mixes
-
-        receiver = call_node.receiver
-        return !in_class if receiver.nil? || receiver.is_a?(Prism::SelfNode)
-
-        constant = receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
-        constant && ROOT_CLASSES.include?(receiver.name.to_s)
-      end
-
-      def sent_mixin?(name_node)
-        case name_node
-        when nil then false
-        when Prism::SymbolNode, Prism::StringNode then MAIN_MIXIN_NAMES.include?(name_node.unescaped)
-        else true
-        end
-      end
-
-      # A recorded `include`, `prepend` or `extend` of `Object`, `Kernel` or `BasicObject` (`class Object; include M`,
-      # `Object.prepend(M)`), in any file of the program.
-      def object_mixin?(scope)
-        [scope.discovered_includes, scope.discovered_prepends, scope.discovered_extends].any? do |table|
-          ROOT_CLASSES.any? { |name| table.key?(name) }
-        end
-      end
-
       def reader_receiver?(type, name, scope)
         return type.class_name == "Kernel" if type.is_a?(Type::Singleton)
 
@@ -340,8 +280,7 @@ module Rigor
         end
       end
 
-      private_class_method :self_reader?, :main_mixin_call?, :sent_mixin?, :object_mixin?, :reader_receiver?,
-                           :reader_global?, :reader_type?, :reader_class?, :delegating_class?
+      private_class_method :reader_receiver?, :reader_global?, :reader_type?, :reader_class?, :delegating_class?
     end
   end
 end

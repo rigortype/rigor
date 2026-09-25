@@ -1910,6 +1910,7 @@ module Rigor
       private_constant :LoopJumps
 
       NO_LOOP_JUMPS = LoopJumps.new(nexts: nil, breaks: nil, redoes: false)
+      # In {JumpTargets.kinds}' bit order: `next` 0b001, `break` 0b010, `redo` 0b100.
       LOOP_JUMP_CLASSES = [Prism::NextNode, Prism::BreakNode, Prism::RedoNode].freeze
       private_constant :NO_LOOP_JUMPS, :LOOP_JUMP_CLASSES
 
@@ -1924,11 +1925,11 @@ module Rigor
       # A body with no targeting jump pays two allocation-free scans.
       def loop_jumps(statements)
         kinds = JumpTargets.kinds(statements, LOOP_JUMP_CLASSES)
-        return NO_LOOP_JUMPS if kinds.empty?
+        return NO_LOOP_JUMPS if kinds.zero?
 
-        nexts = JumpTargets.of(statements, Prism::NextNode) if kinds.include?(Prism::NextNode)
-        breaks = JumpTargets.of(statements, Prism::BreakNode) if kinds.include?(Prism::BreakNode)
-        LoopJumps.new(nexts: nexts, breaks: breaks, redoes: kinds.include?(Prism::RedoNode))
+        nexts = JumpTargets.of(statements, Prism::NextNode) if kinds.anybits?(0b001)
+        breaks = JumpTargets.of(statements, Prism::BreakNode) if kinds.anybits?(0b010)
+        LoopJumps.new(nexts: nexts, breaks: breaks, redoes: kinds.anybits?(0b100))
       end
 
       # Installs a fresh thread-local break sink around `yield` (a loop-body evaluation), returning `[collected,

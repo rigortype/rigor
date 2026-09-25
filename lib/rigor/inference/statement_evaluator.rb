@@ -2512,9 +2512,7 @@ module Rigor
       # raised while a subprocess waited, which leaves it nil. The threaded path gets that from the join with the arm.
       def eval_rescue_modifier(node)
         unless OperandEffects.any?(node)
-          after = forget_rebound_specials(scope, node)
-          after = after.forget_last_status unless branch_unconditionally_exits?(node.rescue_expression)
-          return [scope.type_of(node, tracer: tracer), after]
+          return [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node)]
         end
 
         type, after = restoring_error_info { thread_rescue_modifier(node) }
@@ -2836,7 +2834,7 @@ module Rigor
       def rebind_statement_specials(node, post_scope)
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
-        LastStatus.after(node, post_scope, scope)
+        forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
       end
 
       # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),
@@ -2890,9 +2888,33 @@ module Rigor
         if after.match_globals_bound? && MatchRebinding.value_may_rebind?(node, scope)
           after = after.forget_match_globals
         end
-        return after unless after.last_line_bound? && LastLine.may_set?(node, scope)
+        after = after.forget_last_line if after.last_line_bound? && LastLine.may_set?(node, scope)
+        forget_rescued_status(after, node)
+      end
 
-        after.forget_last_line
+      # Issue #1360 — `after`, past a statement, with `$?` forgotten when the statement may fall through a rescue in its
+      # own frame ({#rescues_through?}): the exception rescued there may have been raised while a subprocess waited,
+      # which leaves `$?` nil, and a rescue in an operand or a block the statement passes never joins its scope back.
+      def forget_rescued_status(after, node)
+        return after unless after.global(:$?) && rescues_through?(node)
+
+        after.forget_last_status
+      end
+
+      # True when running `node` may leave a rescue clause, or the fallback of a rescue modifier that may fall
+      # through, and go on: anywhere in its operands and the blocks it passes, but not in a lambda, a block a call
+      # keeps to run later ({StoredBlockCall.stores_block?}, which includes a thread's) or a `def`, none of which runs
+      # there.
+      def rescues_through?(node)
+        case node
+        when Prism::RescueNode then return true
+        when Prism::RescueModifierNode then return true unless branch_unconditionally_exits?(node.rescue_expression)
+        when Prism::DefNode, Prism::LambdaNode then return false
+        end
+        kept = node.block if node.is_a?(Prism::CallNode) && StoredBlockCall.stores_block?(node)
+        found = false
+        node.rigor_each_child { |child| found ||= !child.equal?(kept) && rescues_through?(child) }
+        found
       end
 
       # The value an untyped setter call on a local stores (`foo(s.x = v)`), for the Struct member write-back; nil for
@@ -5336,8 +5358,9 @@ module Rigor
       # `begin` exits.
       def bind_rescue_reference(rescue_node, scope)
         exception_type = rescue_exception_type(rescue_node, scope)
-        scope = ErrorInfo.rescue_entry(scope, exception_type, rescue_node.statements)
         ref = rescue_node.reference
+        reference = ref.name if ref.is_a?(Prism::LocalVariableTargetNode)
+        scope = ErrorInfo.rescue_entry(scope, exception_type, rescue_node.statements, reference)
         case ref
         when Prism::LocalVariableTargetNode
           scope.with_local(ref.name, exception_type)

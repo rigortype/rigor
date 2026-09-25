@@ -1220,7 +1220,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # the analysis types without entering.
     it "reports nothing on a copy of `$!` or `$?`, a class-guarded `$!` or an unentered clause's `$!`" do
       reads = marked_lines(harness, "# QUIET-1360")
-      expect(reads.size).to eq(12)
+      expect(reads.size).to eq(15)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
 
@@ -1233,6 +1233,15 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("errinfo_status_declines") }
 
     it "leaves `$?` unbound in a file that waits with flags, and `$@` in a program that defines `backtrace`" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/errinfo_case_equality.rb — a file that defines `===` through `define_singleton_method` (#1360)" do
+    let(:harness) { harness_for("errinfo_case_equality") }
+
+    it "binds no rescued class to `$!` in the file" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end

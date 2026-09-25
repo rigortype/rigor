@@ -199,6 +199,28 @@ rescue Exception
   exit($!.status) if $!.is_a?(SystemExit) # QUIET-1360
 end
 
+# A guard on the `rescue => e` local guards `$!` too, the same object, so the clause reads `$!` unbound (Ruby: :a in
+# each).
+def guarded_reference_is_a(h)
+  h.fetch(:a)
+rescue => e
+  $!.key if e.is_a?(KeyError) # QUIET-1360
+end
+
+def guarded_reference_case(h)
+  h.fetch(:a)
+rescue => e
+  case e
+  when KeyError then $!.key # QUIET-1360
+  end
+end
+
+def guarded_reference_case_equality(h)
+  h.fetch(:a)
+rescue => e
+  $!.key if KeyError === e # QUIET-1360
+end
+
 # A clause or fallback the analysis types without entering it (a rescue modifier's fallback, a `begin` or `do` block
 # with a rescue clause in a value position) reads `$!` unbound, never the enclosing clause's ArgumentError (Ruby: :a,
 # :a, the ENOENT's errno, :a, [:b], the OtherError, and the ArgumentError in the `ensure` reached normally).
@@ -382,6 +404,78 @@ def status_retried
   rescue Timeout::Error
     retry
   end
+end
+
+# A rescue the statement falls through in an operand or a block it passes never joins its scope back into the
+# statement's, so `$?` is unbound past the statement: the exception may have come while a subprocess waited (Ruby: nil
+# past each).
+def status_rescued_in_block
+  system("true")
+  [1].each { Timeout.timeout(0.3) { `sleep 2` } rescue nil }
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_rescued_in_do_block
+  system("true")
+  [1].each do
+    Timeout.timeout(0.3) { `sleep 2` }
+  rescue Timeout::Error
+    nil
+  end
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_rescued_in_argument
+  system("true")
+  warn(begin
+    Timeout.timeout(0.3) { `sleep 2` }
+  rescue Timeout::Error
+    nil
+  end.inspect)
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_rescued_in_modifier_argument
+  system("true")
+  warn((Timeout.timeout(0.3) { `sleep 2` } rescue nil).inspect)
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_rescued_in_literal
+  system("true")
+  outputs = [(Timeout.timeout(0.3) { `sleep 2` } rescue nil)]
+  assert_type("Dynamic[top]", $?)
+  outputs
+end
+
+def status_rescued_in_timeout_block
+  system("true")
+  Timeout.timeout(5) do
+    begin
+      Timeout.timeout(0.3) { `sleep 2` }
+    rescue Timeout::Error
+      nil
+    end
+  end
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_rescued_per_file(files)
+  system("true")
+  files.each do |f|
+    Timeout.timeout(0.3) { `sleep 2; echo #{f}` }
+  rescue Timeout::Error
+    warn f
+  end
+  assert_type("Dynamic[top]", $?)
+end
+
+# A rescue modifier's value reads `$?` unbound in its fallback (Ruby: the output, or nil when a `Timeout` around the
+# method interrupts the command).
+def status_in_fallback
+  system("true")
+  read = (`echo x` rescue $?)
+  assert_type("Dynamic[top] | String", read)
 end
 
 # A copy of `$?` after a subprocess is its status, never nil.

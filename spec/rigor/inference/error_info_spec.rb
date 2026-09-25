@@ -46,6 +46,20 @@ RSpec.describe Rigor::Inference::ErrorInfo do
       end
     end
 
+    # `rescue => e` binds `e` to the same object as `$!`.
+    it "binds neither for a body that guards the clause's reference local" do
+      ["$!.key if e.is_a?(KeyError)", "case e\nwhen KeyError then $!.key\nend", "$!.key if KeyError === e"]
+        .each do |body|
+          entered = described_class.rescue_entry(scope, error_t, Prism.parse("e = nil\n#{body}").value, :e)
+
+          expect(entered.global(:$!)).to be_nil, body
+        end
+      unrelated = Prism.parse("e = nil\nother = e\nother.is_a?(KeyError)").value
+      expect(described_class.rescue_entry(scope, error_t, unrelated, :e).global(:$!)).to eq(error_t)
+      guarded = Prism.parse("e = nil\ne.is_a?(KeyError)").value
+      expect(described_class.rescue_entry(scope, error_t, guarded).global(:$!)).to eq(error_t)
+    end
+
     it "binds `$!` for a body whose guards are on something else" do
       ["$!.message", "e.is_a?(KeyError)", "$@.is_a?(Array)", "KeyError === e", "case e\nwhen KeyError then 1\nend",
        "$!.class == KeyError"].each do |body|
@@ -110,6 +124,26 @@ RSpec.describe Rigor::Inference::ErrorInfo do
     end
   end
 
+  describe ".defines_case_equality?" do
+    it "names a `define_method` or `define_singleton_method` whose literal name is `===`" do
+      names = ->(source) { described_class.defines_case_equality?(Prism.parse(source).value.statements.body.last) }
+
+      expect(names.call("define_singleton_method(:===) { true }")).to be(true)
+      expect(names.call("singleton_class.define_method('===') { true }")).to be(true)
+      expect(names.call("define_singleton_method(:call) { true }")).to be(false)
+      expect(names.call("define_singleton_method(name) { true }")).to be(false)
+      expect(names.call("foo(:===)")).to be(false)
+    end
+
+    it "is gathered for the file, and declines every rescued class there" do
+      source = "class M < StandardError; define_singleton_method(:===) { |o| true }; end\n" \
+               "begin; x; rescue ArgumentError; $!; end"
+      expect(last_read(source, :$!)).to eq(Rigor::Type::Combinator.untyped)
+      expect(last_read("begin; x; rescue ArgumentError; $!; end", :$!))
+        .to eq(Rigor::Type::Combinator.nominal_of("ArgumentError"))
+    end
+  end
+
   describe ".modifier_entry" do
     it "binds the fallback of a rescue modifier to a rescued `StandardError`, unless the fallback guards it" do
       expect(described_class.modifier_entry(scope).global(:$!)).to eq(error_t)
@@ -163,13 +197,14 @@ RSpec.describe Rigor::Inference::ErrorInfo do
   end
 
   describe ".read_in?" do
-    it "answers whether a `$!` or `$@` read sits anywhere in the node" do
+    it "answers whether a `$!`, `$@` or `$?` read sits anywhere in the node" do
       read = ->(source) { described_class.read_in?(Prism.parse(source).value) }
 
       expect(read.call("log($!.message)")).to be(true)
       expect(read.call("[1].map { $@ }")).to be(true)
+      expect(read.call("$?.to_i")).to be(true)
       expect(read.call("nil")).to be(false)
-      expect(read.call("$? || $_")).to be(false)
+      expect(read.call("$_ || $stdout")).to be(false)
       expect(described_class.read_in?(nil)).to be(false)
     end
   end

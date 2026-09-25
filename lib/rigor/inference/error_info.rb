@@ -27,10 +27,13 @@ module Rigor
       ERROR_INFO = :$!
       BACKTRACE = :$@
       NAMES = [ERROR_INFO, BACKTRACE].freeze
+      # The globals a rescue modifier's fallback reads differently from the modifier's entry ({.modifier_entry}).
+      MODIFIER_NAMES = [ERROR_INFO, BACKTRACE, :$?].freeze
       EXCEPTION_ORDERINGS = Set[:equal, :subclass].freeze
+      DEFINERS = Set[:define_method, :define_singleton_method].freeze
       # The class guards a clause may put on `$!` ({.guarded?}).
       GUARDS = Set[:is_a?, :kind_of?, :instance_of?, :respond_to?].freeze
-      private_constant :ERROR_INFO, :BACKTRACE, :NAMES, :EXCEPTION_ORDERINGS, :GUARDS
+      private_constant :ERROR_INFO, :BACKTRACE, :NAMES, :MODIFIER_NAMES, :EXCEPTION_ORDERINGS, :GUARDS, :DEFINERS
 
       module_function
 
@@ -43,10 +46,11 @@ module Rigor
       # that it or a project ancestor gives its own singleton `===` (`class Matchy < StandardError; def self.===(o) =
       # true`).
       #
-      # `body` is the clause's statements or the fallback. When it guards `$!` by its class ({.guarded?}), the clause
-      # reads `$!` and `$@` unbound, as it did before issue #1360: a class guard does not narrow a global receiver yet,
-      # so `$!.key if $!.is_a?(KeyError)` would report the bound `StandardError` against the guard (ADR-117, point 3).
-      # Lift when #1429 narrows global receivers.
+      # `body` is the clause's statements or the fallback, and `reference` the name of the local a `rescue … => e`
+      # clause binds. When the body guards `$!`, or that local, which is the same object, by its class ({.guarded?}),
+      # the clause reads `$!` and `$@` unbound, as it did before issue #1360: a class guard does not narrow a global
+      # receiver yet, so `$!.key if e.is_a?(KeyError)` would report the bound `StandardError` against the guard
+      # (ADR-117, point 3). Lift when #1429 narrows global receivers.
       #
       # `$@` calls the exception's `backtrace`, which is an `Array[String]` for a raised exception. It is left unbound
       # in a program that defines a method named `backtrace` anywhere, which may return anything, and in a clause
@@ -55,10 +59,10 @@ module Rigor
       # `$?` is unbound because the exception may have been raised while a subprocess waited: a backtick, `%x` or
       # `system` sets `$?` to nil before it runs the child, so a `Timeout::Error`, an `Interrupt` or a `Thread#raise`
       # there leaves it nil.
-      def rescue_entry(scope, exception_type, body = nil)
+      def rescue_entry(scope, exception_type, body = nil, reference = nil)
         entered = scope.forget_error_info.forget_last_status
         # Lift when #1429 narrows global receivers.
-        return entered if guarded?(body)
+        return entered if guarded?(body, reference)
 
         entered = entered.with_global(ERROR_INFO, rescued_type(exception_type, scope))
         return entered if calls_set_backtrace?(body) || BlockCallTiming.project_defines_anywhere?(:backtrace, scope)
@@ -72,28 +76,33 @@ module Rigor
       end
 
       # The class guards on `$!` that {.rescue_entry} declines on, anywhere in `node`: `$!.is_a?`, `kind_of?`,
-      # `instance_of?` or `respond_to?`, a `===` whose argument is `$!` (`KeyError === $!`), and `case $!`.
-      def guarded?(node)
+      # `instance_of?` or `respond_to?`, a `===` whose argument is `$!` (`KeyError === $!`), and `case $!`, and the
+      # same on a read of the local named `reference`.
+      def guarded?(node, reference = nil)
         return false unless node.is_a?(Prism::Node)
-        return true if guard?(node)
+        return true if guard?(node, reference)
 
         found = false
-        node.rigor_each_child { |child| found ||= guarded?(child) }
+        node.rigor_each_child { |child| found ||= guarded?(child, reference) }
         found
       end
 
-      def guard?(node)
+      def guard?(node, reference)
         case node
         when Prism::CallNode
-          (GUARDS.include?(node.name) && error_info_read?(node.receiver)) ||
-            (node.name == :=== && error_info_read?(node.arguments&.arguments&.first))
-        when Prism::CaseNode, Prism::CaseMatchNode then error_info_read?(node.predicate)
+          (GUARDS.include?(node.name) && error_info_read?(node.receiver, reference)) ||
+            (node.name == :=== && error_info_read?(node.arguments&.arguments&.first, reference))
+        when Prism::CaseNode, Prism::CaseMatchNode then error_info_read?(node.predicate, reference)
         else false
         end
       end
 
-      def error_info_read?(node)
-        node.is_a?(Prism::GlobalVariableReadNode) && node.name == ERROR_INFO
+      def error_info_read?(node, reference)
+        case node
+        when Prism::GlobalVariableReadNode then node.name == ERROR_INFO
+        when Prism::LocalVariableReadNode then !reference.nil? && node.name == reference
+        else false
+        end
       end
 
       # True when `node` calls `set_backtrace` anywhere, on any receiver: `$!.set_backtrace(nil)` makes `$@` nil.
@@ -107,11 +116,11 @@ module Rigor
       end
       private_class_method :guard?, :error_info_read?, :calls_set_backtrace?
 
-      # True when `node` reads `$!` or `$@` anywhere in it: the gate on typing a rescue modifier's fallback under
-      # {.modifier_entry}, which most fallbacks (`rescue nil`) never need.
+      # True when `node` reads `$!`, `$@` or `$?` anywhere in it: the gate on typing a rescue modifier's fallback
+      # under {.modifier_entry}, which most fallbacks (`rescue nil`) never need.
       def read_in?(node)
         return false unless node.is_a?(Prism::Node)
-        return NAMES.include?(node.name) if node.is_a?(Prism::GlobalVariableReadNode)
+        return MODIFIER_NAMES.include?(node.name) if node.is_a?(Prism::GlobalVariableReadNode)
 
         found = false
         node.rigor_each_child { |child| found ||= read_in?(child) }
@@ -157,9 +166,21 @@ module Rigor
       end
 
       # True when the program gives `class_name`, or a project ancestor of it, a singleton `===`, which `rescue` calls
-      # to match and which may accept an exception that is not an instance of it.
+      # to match and which may accept an exception that is not an instance of it: a `def self.===` or `class << self`
+      # `def ===`, or, anywhere in the file being read, a `define_method` or `define_singleton_method` naming `===`
+      # ({.defines_case_equality?}), which the discovery tables do not place on a class, so it counts for every class.
       def own_case_equality?(class_name, scope)
-        !scope.singleton_def_through_ancestors(class_name, :===).first.nil?
+        scope.discovery.defines_case_equality ||
+          !scope.singleton_def_through_ancestors(class_name, :===).first.nil?
+      end
+
+      # True when `node` is a `define_method` or `define_singleton_method` call whose literal name is `===`.
+      # `Inference::ScopeIndexer` records whether a file holds one ({Scope::DiscoveryIndex#defines_case_equality}).
+      def defines_case_equality?(node)
+        return false unless node.is_a?(Prism::CallNode) && DEFINERS.include?(node.name)
+
+        name = node.arguments&.arguments&.first
+        (name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)) && name.unescaped == "==="
       end
 
       def exception_class?(class_name, scope)

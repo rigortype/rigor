@@ -3720,6 +3720,23 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(reads).to eq([status_t])
     end
 
+    # A rescue in an operand or a block the statement passes never joins its scope back into the statement's.
+    it "unbinds `$?` past a statement that may fall through a rescue in its own frame" do
+      bound = env_scope.with_global(:$?, status_t)
+      ["[1].each { x rescue nil }", "[1].each do\n  x\nrescue\n  nil\nend", "warn(begin; x; rescue; nil; end)",
+       "warn((x rescue nil))", "a = [(x rescue nil)]", "t(5) do\n  begin\n    x\n  rescue\n    nil\n  end\nend"]
+        .each do |statement|
+          _, post = special_reads("#{statement}\n", :$?, base: bound)
+          expect(post.global(:$?)).to be_nil, statement
+        end
+      ["f = proc { x rescue nil }", "register(-> { x rescue nil })", "private def m = (x rescue nil)",
+       "warn((x rescue return))",
+       "Thread.new { x rescue nil }", "[1].each { x }"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?, base: bound)
+        expect(post.global(:$?)).to eq(status_t), statement
+      end
+    end
+
     it "binds `$?` after a subprocess a statement certainly ran, and not in a file that may clear it" do
       ["`true`", "%x(true)", "system('true')", "out = `a`.strip", "puts(`a`)", "ok = Kernel.system('x')",
        "Process.wait(pid)", "if system('x') then 1 end"].each do |statement|

@@ -15,6 +15,7 @@ require_relative "def_handle"
 require_relative "fresh_frame_blocks"
 require_relative "last_line"
 require_relative "last_status"
+require_relative "error_info"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -2086,12 +2087,11 @@ module Rigor
 
       # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
       # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in and
-      # whether it may set `$?` to nil.
+      # whether it may set `$?` to nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
-        program_globals, patched_line_readers, clears_last_status = build_program_global_index(root, seeded_scope)
+        program_globals, census = build_program_global_index(root, seeded_scope)
         seeded_scope = seeded_scope.with_discovery(
-          seeded_scope.discovery.with(program_globals: program_globals, patched_line_readers: patched_line_readers,
-                                      clears_last_status: clears_last_status)
+          seeded_scope.discovery.with(program_globals: program_globals, **census)
         )
         program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
         seeded_scope
@@ -2114,13 +2114,14 @@ module Rigor
       #
       # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
       # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
-      # set `$?` to nil ({LastStatus.clears?}).
-      # @return the `[program_globals, patched_line_readers, clears_last_status]` triple
+      # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
+      # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        census = { patched: Set.new, clears_last_status: false }
+        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false }
         gather_global_writes(root, default_scope, accumulator, census)
-        [accumulator.freeze, census[:patched].freeze, census[:clears_last_status]]
+        census[:patched_line_readers] = census[:patched_line_readers].freeze
+        [accumulator.freeze, census]
       end
 
       def gather_global_writes(node, scope, accumulator, census)
@@ -2130,8 +2131,9 @@ module Rigor
           record_global_write(node, scope, accumulator)
         end
         readers = LastLine.patched_readers(node)
-        census[:patched].merge(readers) if readers
+        census[:patched_line_readers].merge(readers) if readers
         census[:clears_last_status] ||= LastStatus.clears?(node)
+        census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
         node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census) }
       end
 

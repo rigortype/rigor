@@ -6,7 +6,20 @@ require "prism"
 # Issue #1358 — Ruby keeps the regex match globals in the method frame's special-variable slot, and every block and
 # closure made in the method reaches that same slot, while a `def`, class or module body has a slot of its own.
 RSpec.describe Rigor::Inference::MatchRebinding do
-  let(:scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+  # `WORD_RE` resolves to a Regexp, `KEYS` to a tuple of Strings and `LIMITS` to a Hash; any other constant does not
+  # resolve.
+  let(:scope) do
+    bare = Rigor::Scope.empty(environment: Rigor::Environment.default)
+    combinator = Rigor::Type::Combinator
+    constants = {
+      "WORD_RE" => combinator.constant_of(/(\w)!/),
+      "KEYS" => combinator.tuple_of(combinator.constant_of("a"), combinator.constant_of("b")),
+      "LIMITS" => combinator.nominal_of(
+        "Hash", type_args: [combinator.nominal_of("Symbol"), combinator.nominal_of("Integer")]
+      )
+    }
+    bare.with_discovery(bare.discovery.with(in_source_constants: constants))
+  end
 
   def last_statement(source) = Prism.parse(source).value.statements.body.last
   def root(source) = Prism.parse(source).value
@@ -27,6 +40,27 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(may_match?("parts.each { |p| p[0, 2]; p.index(sep) }")).to be(false)
       expect(may_match?("parts.each { |p| p[/(z)/] }")).to be(true)
       expect(may_match?("parts.each { |p| p.split(Regexp.new(sep)) }")).to be(true)
+      expect(may_match?("parts.each { |p| p.index(WORD_RE) }")).to be(true)
+    end
+
+    # A local or instance variable bound to a Regexp where the block is written; a block parameter is not bound
+    # there.
+    it "counts a lookup argument bound to a Regexp outside the block" do
+      regexp = Rigor::Type::Combinator.constant_of(/(q)/)
+      string = Rigor::Type::Combinator.nominal_of("String")
+      read = last_statement("re = nil; items.each { |i| i[re] }")
+
+      expect(described_class.may_match?(read, scope.with_local(:re, regexp))).to be(true)
+      expect(described_class.may_match?(read, scope.with_local(:re, string))).to be(false)
+      expect(described_class.may_match?(last_statement("items.each { |i| i.index(@re) }"),
+                                        scope.with_ivar(:@re, Rigor::Type::Combinator.nominal_of("Regexp"))))
+        .to be(true)
+    end
+
+    it "counts `grep` / `grep_v` only in their block form" do
+      expect(may_match?("groups.each { |g| g.grep(/(z)/) }")).to be(false)
+      expect(may_match?("groups.each { |g| g.grep(/(z)/) { |x| x } }")).to be(true)
+      expect(may_match?("groups.each { |g| g.grep_v(/(z)/, &handler) }")).to be(true)
     end
 
     it "does not count `match?`, which never sets `$~`" do
@@ -38,20 +72,40 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(may_match?("items.each { |i| String === i }")).to be(false)
     end
 
-    it "counts a `when` condition that may be a Regexp, and not a literal or a class" do
+    it "counts a `when` condition that may be a Regexp: a regex literal, a Regexp constant, or an expression" do
       expect(may_match?("case i when /(z)/ then 1 end")).to be(true)
       expect(may_match?("case i when WORD_RE then 1 end")).to be(true)
       expect(may_match?("case i when re then 1 end")).to be(true)
       expect(may_match?("case i when *res then 1 end")).to be(true)
-      expect(may_match?("case i when String, 'q', :s, 1..2, nil then 1 end")).to be(false)
     end
 
-    it "counts an `in` / `=>` pattern holding a value that may be a Regexp, and not its structure or classes" do
+    it "does not count a `when` condition that is a non-Regexp literal, a class, a collection or unresolved" do
+      expect(may_match?("case i when String, 'q', :s, 1..2, nil then 1 end")).to be(false)
+      expect(may_match?("case i when KEYS, LIMITS then 1 end")).to be(false)
+      expect(may_match?("case i when *KEYS then 1 end")).to be(false)
+      expect(may_match?("case i when Some::Unknown::Klass, Unknown then 1 end")).to be(false)
+    end
+
+    it "does not count the conditions of a `case` without a subject, which run no `===`" do
+      expect(may_match?("items.each { |i| case; when i.empty? then 1; end }")).to be(false)
+      expect(may_match?("items.each { |i| case; when re then 1; end }")).to be(false)
+      expect(may_match?("items.each { |i| case; when i =~ /(z)/ then 1; end }")).to be(true)
+    end
+
+    it "counts an `in` / `=>` pattern holding a value that may be a Regexp" do
       expect(may_match?("case i; in [/(z)/] then 1; else 2; end")).to be(true)
       expect(may_match?("i in WORD_RE")).to be(true)
       expect(may_match?("re = nil; i in ^re")).to be(true)
+    end
+
+    it "does not count a pattern's structure, classes, unresolved constants or guard" do
       expect(may_match?("i in [Integer, String] | { name: String } | nil")).to be(false)
       expect(may_match?("i => [x, *rest]")).to be(false)
+      expect(may_match?("i in Some::Unknown::Klass")).to be(false)
+      expect(may_match?("case i; in { k: v } if LIMITS.key?(v) then 1; else 2; end")).to be(false)
+      expect(may_match?("case i; in { k: v } unless v then 1; else 2; end")).to be(false)
+      expect(may_match?("case i; in { k: v } if v.match?(/\\A[a-z]\\z/) then 1; else 2; end")).to be(false)
+      expect(may_match?("case i; in { k: v } if v =~ /(z)/ then 1; else 2; end")).to be(true)
     end
 
     it "counts a bare regex condition and a write to `$~`" do

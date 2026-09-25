@@ -149,15 +149,18 @@ The `Regexp` "specific narrowing rule" the trust levels above defer to is the `=
 
   A block or closure body *may run a match* when it contains one of the following anywhere except inside a nested `def`, class or module body:
   - a call to `=~`, `match`, `sub`, `sub!`, `gsub`, `gsub!` or `scan`, which set the globals whatever their argument;
-  - a call to `[]`, `slice`, `slice!`, `index`, `rindex`, `partition`, `rpartition`, `split`, `grep` or `grep_v` with an argument known to be a Regexp: a regex literal, a constant bound to one, or `Regexp.new` / `.union` / `.compile`. Inside a block these names are overwhelmingly Hash, Array and String lookups, so a Regexp held in a variable is not seen there;
+  - a call to `[]`, `slice`, `slice!`, `index`, `rindex`, `partition`, `rpartition` or `split` with an argument known to be a Regexp: a regex literal, a constant bound to one, a local or instance variable bound to one where the block is written, or `Regexp.new` / `.union` / `.compile`. `grep` and `grep_v` count on the same terms, but only in their block form, since without a block they leave the caller's `$~` alone. Inside a block these names are overwhelmingly Hash, Array and String lookups, so a Regexp that reaches the lookup any other way, such as through a block parameter or a method's return value, is not seen there;
   - `===` on a receiver that may be a Regexp;
-  - a `when` condition, or a value in an `in` / `=>` pattern, that may be a Regexp: anything but a literal that is not one, or a constant bound to a class, a module or a value that is not one;
+  - a `when` condition of a `case` with a subject, or a value in an `in` / `=>` pattern, that may be a Regexp: a regex literal, a pinned or other non-constant expression, a constant bound to a Regexp, or a splat of a constant holding one. These do not count: a literal that is not a Regexp; a constant bound to anything else (a class or module, a collection, any other value); and a constant that does not resolve, which is read as a class. A `case` without a subject runs no `===`, and a pattern's `if` / `unless` guard is ordinary code, scanned like the rest of the body;
   - a bare regex condition, a write to `$~`, or a `&expr` block argument as above.
 
+  A Symbol block argument naming a lookup (`&:[]`, `&:index`) whose elements pass a Regexp argument rebinds the globals as well; it is not counted, a known gap that is rare in practice.
+
   A block body that may run a match, or any block body in a body that creates such a closure, does not read the narrowing from outside the block, because it can run after an earlier iteration rebound the globals. Any other block body reads the outer narrowing, with these known exceptions that are not modelled yet:
-  - the block of `gsub`, `gsub!`, `sub`, `sub!` or `scan`, which runs after the call has set `$~` to its own match, and a lambda or proc body, which runs when it is called, not where it is written ([#1371](https://github.com/rigortype/rigor/issues/1371));
-  - the root block of `Thread.new` or `Fiber.new`, which gets a fresh slot ([#1361](https://github.com/rigortype/rigor/issues/1361));
-  - a regex `when` arm or `in` pattern that fails, which leaves `$~` nil after the `case` ([#1372](https://github.com/rigortype/rigor/issues/1372)).
+  - the block of `gsub`, `gsub!`, `sub`, `sub!`, `scan`, `grep` or `grep_v`, which runs after the call has set `$~` to its own match, and a lambda or proc body, which runs when it is called, not where it is written ([#1371](https://github.com/rigortype/rigor/issues/1371));
+  - the root block of `Thread.new` or `Fiber.new`, which gets a fresh slot ([#1361](https://github.com/rigortype/rigor/issues/1361)).
+
+  Separately from blocks, a regex `when` arm or `in` pattern that fails leaves `$~` nil after the `case`, which the narrowing does not model yet ([#1372](https://github.com/rigortype/rigor/issues/1372)).
 
   A later successful `Regexp.last_match` consult observes the same proven-match bindings rather than re-deriving them.
 

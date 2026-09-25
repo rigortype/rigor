@@ -318,4 +318,98 @@ class ClassBodyFrame
     assert_type("String?", $1)
   end
 end
+
+# Controls: none of these runs a `===` that can match, so the narrowing stays and `key.upcase` is quiet (Ruby: "AB"
+# for each with `line = "ab=c"`). A `case` without a subject tests each condition for truth; `*KEYS`, `KEYS` and
+# `LIMITS` are collections, whose `===` is equality; an `in` guard is ordinary code; and a constant that does not
+# resolve is read as a class.
+KEYS = %w[a b].freeze
+LIMITS = { a: 1 }.freeze
+
+def subjectless_case(line, items)
+  if line =~ /^(\w+)=/
+    items.each { |i| case; when i.empty? then i; end }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def splat_constant_when(line, items)
+  if line =~ /^(\w+)=/
+    items.each { |i| case i when *KEYS then i end }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def collection_constant_when(line, items)
+  if line =~ /^(\w+)=/
+    items.each { |i| case i when KEYS, LIMITS then i end }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def pattern_guard(line, items)
+  if line =~ /^(\w+)=/
+    items.each do |i|
+      case i
+      in { k: v } if LIMITS.key?(v) && v.to_s.match?(/\A[a-z]\z/) then v
+      else nil
+      end
+    end
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+def unresolved_constant_when(line, items)
+  if line =~ /^(\w+)=/
+    items.each { |i| case i when Some::Unknown::Klass then i end }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+# Control: `grep` without a block leaves the caller's `$~` alone (Ruby: "AB" for
+# `grep_without_block("ab=c", [["zz"]])`).
+def grep_without_block(line, groups)
+  if line =~ /^(\w+)=/
+    groups.each { |g| g.grep(/(z)/) }
+    key = $1
+    assert_type("String", key)
+    key.upcase
+  end
+end
+
+# `grep` with a block rebinds it (Ruby: nil for `grep_with_block("a1", [["zz"]])`).
+def grep_with_block(str, groups)
+  if str =~ /(\d+)/
+    groups.each { |g| g.grep(/(q)/) { |x| x } }
+    assert_type("String?", $1)
+  end
+end
+
+# A lookup argument bound to a Regexp where the block is written rebinds `$~` (Ruby: nil for
+# `local_regexp_lookup("a1", ["zz"])` and `constructed_regexp_index("a1", ["zz"])`).
+def local_regexp_lookup(str, items)
+  pattern = /(q)/
+  if str =~ /(\d+)/
+    items.each { |i| i[pattern] }
+    assert_type("String?", $1)
+  end
+end
+
+def constructed_regexp_index(str, items)
+  pattern = Regexp.new("(q)")
+  if str =~ /(\d+)/
+    items.each { |i| i.index(pattern) }
+    assert_type("String?", $1)
+  end
+end
 # rubocop:enable Style/PerlBackrefs

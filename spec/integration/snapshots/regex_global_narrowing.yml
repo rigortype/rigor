@@ -52,3 +52,12 @@ assertions:
   '44': "[String?, String?]"
   '45': Array["x" | String | nil]
   '46': String?
+  '47': String
+  '48': String
+  '49': String
+  '50': String
+  '51': String
+  '52': String
+  '53': String?
+  '54': String?
+  '55': String?

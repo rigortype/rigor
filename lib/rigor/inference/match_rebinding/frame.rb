@@ -11,7 +11,7 @@ module Rigor
       # derived from it, blocks included, since they run in the same frame. Each answer is computed on the first
       # ask — only code run while a match global is narrowed asks — and kept for the rest of the body: whether the
       # body makes a matching closure, the method's forwarded `&block` name, and {MatchRebinding.may_match?} per
-      # node.
+      # node ({#memo}).
       class Frame
         # The nodes that bind a local in a body: the writes, and a block's, lambda's, `rescue`'s or pattern's own
         # parameters and targets.
@@ -50,11 +50,19 @@ module Rigor
           @forwarded_block == name
         end
 
-        def memo(node)
+        # The scan of `node` under `scope`, kept while `scope`'s local and instance-variable tables are the same
+        # objects: a lookup argument's answer reads them ({MatchRebinding.may_match?}), and a rebuild that leaves
+        # them alone passes the same tables on.
+        def memo(node, scope)
           scans = (@scans ||= {}.compare_by_identity)
-          return scans[node] if scans.key?(node)
+          locals = scope.locals
+          ivars = scope.ivars
+          kept = scans[node]
+          return kept[2] if kept && kept[0].equal?(locals) && kept[1].equal?(ivars)
 
-          scans[node] = yield
+          result = yield
+          scans[node] = [locals, ivars, result]
+          result
         end
 
         private

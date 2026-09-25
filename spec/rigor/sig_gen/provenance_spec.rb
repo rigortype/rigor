@@ -163,6 +163,10 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # 711 since #1278. A closed, non-empty `HashShape` now reads a computed key as its values `| nil` instead of
 # deferring to the nil-free projection, so `SkipReasonCatalog.resolve`'s `ENTRIES[token.to_s]` infers the
 # `Entry?` its declaration states and the row leaves residue (`skip_reason_catalog.rbs` -1).
+# 710 since #1390. sig-gen now credits a `return` inside an ordinary block to the method (#1382), so
+# `RbsExtended.read_return_type_override`'s `annotations.each { … return type if type }; nil` infers the
+# declared `Type::t?` instead of the trailing `nil`, and the row leaves `declared_divergent` for
+# generated-equivalent (`rbs_extended.rbs` -1).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -285,8 +289,9 @@ SIG_PROVENANCE_RESIDUE = {
   # separately). `Contribution`'s members and constructors are #1150-marked.
   "sig/rigor/plugin/registry.rbs" => 13,
   # -1 (#1181 slice): `read_effect_envelope` now returns `Effects::Envelope?`, which sig-gen proves
-  # through the `build_*_envelope` helpers — no longer residue.
-  "sig/rigor/rbs_extended.rbs" => 22,
+  # through the `build_*_envelope` helpers — no longer residue. -1 (#1390): `read_return_type_override`'s
+  # block `return` now reaches its inferred return, which matches the declared `Type::t?`.
+  "sig/rigor/rbs_extended.rbs" => 21,
   "sig/rigor/reflection.rbs" => 8,
   "sig/rigor/scope.rbs" => 111,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,

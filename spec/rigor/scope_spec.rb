@@ -145,6 +145,20 @@ RSpec.describe Rigor::Scope do
       expect(rebound.declaration_sourced?(:local, :r)).to be(false)
     end
 
+    it "keeps a local's marks across an in-place mutation's rebind" do
+      cause = Object.new
+      copied = scope.with_declaration_sourced_local(:r, type).with_optimistic_local(:r, cause)
+      mutated = copied.with_mutated_local(:r, Rigor::Type::Combinator.nominal_of("P"))
+      expect(mutated.declaration_sourced?(:local, :r)).to be(true)
+      expect(mutated.optimistic_local(:r)).to be(cause)
+    end
+
+    it "adds no mark at an in-place mutation's rebind of an unmarked local" do
+      mutated = scope.with_local(:r, type).with_mutated_local(:r, type)
+      expect(mutated.declaration_sourced?(:local, :r)).to be(false)
+      expect(mutated.optimistic_local(:r)).to be_nil
+    end
+
     it "keeps the mark only when both join branches agree (intersection)" do
       live = scope # no mark
       seeded = scope.seed_declaration_sourced_ivar(:@right, type)

@@ -164,6 +164,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_local_origin(req:name,req:cause)
     with_match_frame(req:body,opt:parameters)
     with_method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name,req:type)
+    with_mutated_local(req:name,req:type)
     with_optimistic_ivar(req:name,req:cause)
     with_optimistic_local(req:name,req:cause)
     with_published_constant_mark(req:kind,req:name)

@@ -74,6 +74,16 @@ define *behaviour*.
   one open buffer.
 - **protection coverage** — the user-facing "what fraction of call sites the types protect" metric
   (`rigor coverage --protection`, ADR-63/70).
+- **call-site evidence** — the argument types that reach a method parameter from the call sites
+  Rigor can see, split by where the calls live: the project's own code, or its tests. A type built
+  from it is a *lower bound* on the parameter's contract, never the contract itself.
+- **unobserved parameter** — a parameter that is `untyped` because its call-site evidence is empty.
+  It is the one `untyped` cause a new test or usage example can close; a parameter whose callers
+  exist but reach it through `send`, through a `Dynamic` receiver, or with an `untyped` argument is
+  not unobserved. _Avoid_: "RBS quality", which names no single quantity.
+- **test root** — a directory the project declares as holding its tests (`spec/`, `test/`, or
+  several). A call from a file under a test root is test-side call-site evidence, even when that file
+  is also inside the analysed `paths:`. _Avoid_: "observe path", which names one command's flag.
 - **plugin contract** — the `Plugin::Base` manifest surface (`plugins/` production gems,
   `examples/` walkthroughs); the extension seams are narrow per ADR-37.
 - **plugin gate** — compiled per-run tables that keep plugin code off the hot path (ADR-52).

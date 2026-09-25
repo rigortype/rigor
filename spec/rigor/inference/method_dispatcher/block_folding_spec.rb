@@ -328,6 +328,42 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
   end
 
+  describe "min_by / max_by on a non-empty receiver (issue #1333)" do
+    let(:any_key) { integer_nominal }
+
+    %i[min_by max_by].each do |method|
+      it "folds `#{method}` on a non-empty Tuple to the element union, whatever the block's key" do
+        tup = tuple_of(constant_of(1), string_nominal)
+        expect(fold(receiver: tup, method: method, block: any_key))
+          .to eq(Rigor::Type::Combinator.union(constant_of(1), string_nominal))
+      end
+
+      it "folds `#{method}` on a non-empty constant integer Range to its element range" do
+        expect(fold(receiver: constant_of(2..4), method: method, block: any_key))
+          .to eq(Rigor::Type::Combinator.integer_range(2, 4))
+      end
+
+      it "declines `#{method}` on an empty receiver" do
+        expect(fold(receiver: tuple_of, method: method, block: any_key)).to be_nil
+        expect(fold(receiver: constant_of(1...1), method: method, block: any_key)).to be_nil
+      end
+
+      it "declines `#{method}` when the receiver's size is not static" do
+        expect(fold(receiver: array_of(integer_nominal), method: method, block: any_key)).to be_nil
+        expect(fold(receiver: constant_of(1..), method: method, block: any_key)).to be_nil
+      end
+
+      it "declines the count form `#{method}(n) { … }`" do
+        expect(fold(receiver: tuple_of(constant_of(1), constant_of(2)), method: method, block: any_key,
+                    args: [constant_of(1)])).to be_nil
+      end
+
+      it "declines `#{method}` without a block (the Enumerator form)" do
+        expect(fold(receiver: tuple_of(constant_of(1)), method: method, block: nil)).to be_nil
+      end
+    end
+  end
+
   describe "decline cases (return nil so RBS / iterator tier answers)" do
     it "declines when block_type is nil (no block at the call site)" do
       expect(fold(receiver: array_of(integer_nominal), method: :select, block: nil)).to be_nil

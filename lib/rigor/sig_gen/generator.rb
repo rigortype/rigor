@@ -844,9 +844,10 @@ module Rigor
       # types with the implicit-return expression's type. The earlier MVP only typed the implicit-return path,
       # which routinely produced single-branch artefacts like `parse_options: () -> nil` (the actual runtime
       # return is `options | nil`) or `find: () -> V` (actually `V | nil` via `return nil unless ...`). The walk
-      # excludes nested `DefNode` / lambda / block scopes whose returns belong to different methods. Delegates
-      # to {Rigor::Inference::DefReturnTyper} — the same body-typing + explicit-return-union the `rigor
-      # annotate` def-line annotator uses.
+      # includes a `return` inside an ordinary block, which exits the method, and excludes the
+      # {Rigor::Inference::ReturnBarrier} bodies — nested `def`, lambda, `define_method` — whose returns belong to a
+      # different method (issue #1382). Delegates to {Rigor::Inference::DefReturnTyper} — the same body-typing +
+      # explicit-return-union the `rigor annotate` def-line annotator uses.
       def infer_return_type(def_node, scope_index)
         Inference::DefReturnTyper.call(def_node, scope_index)
       end

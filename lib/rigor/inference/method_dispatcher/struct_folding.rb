@@ -364,7 +364,7 @@ module Rigor
             members: widen_unowned_emptiness(current.members.merge(member => assigned_type)),
             class_name: current.class_name
           )
-          scope.with_local(receiver.name, rebound)
+          scope.with_mutated_local(receiver.name, rebound)
         end
       end
     end

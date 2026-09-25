@@ -1062,6 +1062,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/return_barrier_receivers.rb — define_method and lambda bodies keep their `return`" do
+    let(:harness) { harness_for("return_barrier_receivers") }
+
+    it "shows callers the method's own value, not a `return` from a block on another receiver" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/block_auto_splat.rb — single Tuple yield destructures across multi-param block" do
     let(:harness) { harness_for("block_auto_splat") }
 

@@ -310,6 +310,71 @@ RSpec.describe "String mutation widening", type: :runner do
       RUBY
     end
 
+    let(:mutated) do
+      <<~RUBY
+        class Named
+          def initialize = @name = nil
+          def set = @name = +"x"
+          def up(v) = v.upcase!
+
+          def straight
+            r = @name
+            r << "!"
+            r.size
+          end
+
+          def block
+            r = @name
+            [1, 2].each { r.upcase! }
+            r.size
+          end
+
+          def loop_body
+            r = @name
+            i = 0
+            while i < 2
+              r << "!"
+              i += 1
+            end
+            r.size
+          end
+
+          def with_retry
+            r = @name
+            tries = 0
+            begin
+              up(r)
+              tries += 1
+              raise if tries < 2
+            rescue
+              retry
+            end
+            r.size
+          end
+
+          def rebound
+            r = @name
+            r << "!"
+            r = [nil, +"y"].sample
+            r.size # reports
+          end
+
+          def retry_rebound
+            r = @name
+            tries = 0
+            begin
+              tries += 1
+              r.size # reports
+              raise if tries < 2
+            rescue
+              r = [nil, :y].sample
+              retry
+            end
+          end
+        end
+      RUBY
+    end
+
     it "joins a block capture's String member as String, reading no mutator arguments as elements" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[1] | String", "Hash[Symbol, 1] | String", '"ab" | [1]'])
         def each_block(flag)
@@ -386,6 +451,16 @@ RSpec.describe "String mutation widening", type: :runner do
 
       expect(dumped_types(named)).to eq(["String?", "String?"])
       expect(nil_receivers.map(&:line)).to eq([named.lines.index("    q.size\n") + 3])
+    end
+
+    # Issue #1287: an in-place mutation rebinds the same object too — straight-line, from a block, inside a loop, and
+    # at a retry's re-entry, whose rebind keeps the mark only when the scope it re-enters from carries it. A local
+    # rebound to a new value is a source-level write and still reports, after the mutation or across the retry.
+    it "keeps a declaration-sourced local's mark across an in-place mutation's rebind" do
+      nil_receivers = diagnostics(mutated, {}).select { |d| d.rule.to_s == "call.possible-nil-receiver" }
+      reporting = mutated.lines.each_index.select { |i| mutated.lines[i].end_with?("# reports\n") }.map { |i| i + 3 }
+
+      expect(nil_receivers.map(&:line)).to eq(reporting)
     end
 
     # Issue #1251's two shapes: a union of String literals matched none of the floor's single-carrier tests and was

@@ -792,20 +792,104 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.rbs.split(" -> ").last.delete("()").split(" | ").sort).to eq(['"end"', "nil"])
     end
 
-    it "does not credit returns from nested blocks / lambdas / inner defs" do
-      src = <<~RUBY
+    # Issue #1382 — a `return` inside an ordinary block still exits the method (control-flow-analysis.md
+    # § "Non-local exits"), so it joins the proposal the way `rigor check` already joins it for callers.
+    it "credits a `return` inside a block the method's value flows through" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def initialize = @m = Mutex.new
+
+          def m(flag) = @m.synchronize { return nil if flag; 1 }
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq("def m: (untyped) -> (1 | nil)")
+    end
+
+    it "credits a `return` inside an iterator block ahead of a trailing `nil`" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
         class Box
           def m
-            [1].each { |i| return false }
+            [1, 2].each { |x| return x if x > 1 }
+            nil
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq("def m: () -> (2 | nil)")
+    end
+
+    it "skips a method whose block returns an untyped value instead of proposing the trailing `nil`" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def m(xs)
+            xs.each { |x| return x if x }
+            nil
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
+
+    it "leaves a method whose blocks hold no `return` unchanged" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def m
+            [1, 2].each { |x| x }
             "end"
           end
         end
       RUBY
-      path = write_fixture("lib/box.rb", src)
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
       expect(candidate.rbs).to eq(%(def m: () -> "end"))
+    end
+
+    it "does not credit returns from lambdas, define_method bodies or inner defs" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def m
+            -> { return 1 }
+            lambda { return 2 }
+            define_method(:x) { return 3 }
+            send(:define_method, :y) { return 4 }
+            define_singleton_method(:z) { return 5 }
+            def inner = (return 6)
+            "end"
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq(%(def m: () -> "end"))
+    end
+
+    it "does not credit returns from a define_method or lambda block on an explicit receiver" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def m(klass)
+            klass.define_method(:x) { |v| return nil unless v; 1 }
+            self.class.define_method(:y) { |v| return v }
+            klass.define_singleton_method(:z) { return 3 }
+            klass.public_send(:define_method, :w) { return 4 }
+            Kernel.lambda { return 5 }
+            "end"
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq(%(def m: (untyped) -> "end"))
     end
   end
 

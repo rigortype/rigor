@@ -2378,12 +2378,14 @@ module Rigor
       # `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
       #
       # Each carrier member of the facet therefore stops claiming its contents are complete. A literal shape floors to
-      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors a mutated
-      # ivar seed (#1297): keeping the literal's known values beside a `Dynamic[top]` arm left every read carrying
-      # them, and every key's at that, since the projection is not keyed, so `STATUS[:name]` answered `false | nil |
-      # Dynamic[top]` and a method declared `-> String` returning it drew `def.return-type-mismatch` although a
-      # sibling method could store anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains
-      # the arm on every type argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
+      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors an ivar
+      # seed a method stores into (#1297). Unlike that census, a shape only a lookup mutator (`default=`) touched floors
+      # too, since the census does not record the method, so its present-key reads are lost as well (#1421). Keeping
+      # the literal's known values beside a `Dynamic[top]` arm left every read carrying them, and every key's at that,
+      # since the projection is not keyed, so `STATUS[:name]` answered `false | nil | Dynamic[top]` and a method
+      # declared `-> String` returning it drew `def.return-type-mismatch` although a sibling method could store
+      # anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains the arm on every type
+      # argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
       # `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and the arm would
       # silence `COUNTS[k].upcase`. An entry already `Dynamic` is unpinned through its facet, so a carrier an RBS
       # overload join wrapped is not left pinned.

@@ -154,6 +154,79 @@ RSpec.describe "proven overload pass", type: :runner do
     expect(rules(source, sig: sig)).not_to include("call.undefined-method")
   end
 
+  # Runtime: `"p"`. The RBS never includes `Printable` into `Integer`, so both orderings call them disjoint; only the
+  # source does (#1351). A module never counts as proven out, whether `sig/` declares it or Rigor stubs it.
+  {
+    "declared in sig/" => "module Printable\nend\n",
+    "declared nowhere" => ""
+  }.each do |label, module_rbs|
+    it "does not skip an earlier arm naming a module #{label} that only the source includes" do
+      sig = { "money.rbs" => <<~RBS }
+        #{module_rbs}class Money
+          def show: (Printable) -> String
+                  | (Integer) -> Integer
+                  | (Object) -> Symbol
+        end
+      RBS
+      source = <<~RUBY
+        module Printable; end
+        class Integer; include Printable; end
+        class Money
+          def show(x) = "p"
+        end
+        dump_type(Money.new.show(1))
+        Money.new.show(1).upcase
+      RUBY
+      expect(dumped_types(source, sig: sig)).to eq(["Symbol"])
+      expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+    end
+  end
+
+  it "still proves an earlier arm out when it names a declared class, which nothing can include" do
+    # Runtime: `1`. Declining here gave `(Object) -> Symbol` back to the affinity order and fired `even?`.
+    sig = { "svc.rbs" => <<~RBS }
+      class Money
+      end
+      class Svc
+        def show: (Money) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      class Money; end
+      class Svc
+        def show(x) = 1
+      end
+      dump_type(Svc.new.show(1))
+      Svc.new.show(1).even?
+    RUBY
+    expect(dumped_types(source, sig: sig)).to eq(["Integer"])
+    expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+  end
+
+  it "declines for a class only the source declares, which it cannot tell from a module" do
+    # Runtime: `1`, so `even?` answers. Rigor stubs the undeclared `Money` exactly as it stubs an undeclared module,
+    # and the selector has no scope to tell the source's class from a module (#1352). Pass 0 declines, and the
+    # affinity order's `(Object) -> Symbol` answers, as it did before #1348. Flip this when #1352 is fixed:
+    # `show(1)` should type `Integer` with no `call.undefined-method`.
+    sig = { "svc.rbs" => <<~RBS }
+      class Svc
+        def show: (Money) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      class Money; end
+      class Svc
+        def show(x) = 1
+      end
+      dump_type(Svc.new.show(1))
+    RUBY
+    expect(dumped_types(source, sig: sig)).to eq(["Symbol"])
+  end
+
   it "does not take a union arm, where upstream RBS can be wrong, for Rational#divmod(Float)" do
     # Runtime: `Rational(3, 2).divmod(0.5)` is `[3, 0.0]`, a Float remainder. rbs declares
     # `(Integer | Float | Rational) -> [Integer, Rational]` first, and taking it made `when Float` unreachable.

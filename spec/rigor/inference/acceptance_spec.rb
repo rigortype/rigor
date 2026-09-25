@@ -452,10 +452,22 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(a, b)).to be_no
     end
 
-    it "rejects an open source when the target shape is closed" do
+    # An open source may hold keys the analysis does not know, so a closed target cannot prove it exact; it may
+    # equally hold only the known ones (`h = { a: 1 }; h.default = 0`, #1281). What the source does know still
+    # rules the record out.
+    it "cannot decide an open source whose known keys and values the closed target accepts" do
       a = shape(a: int_nominal)
-      b = shape({ a: int_nominal }, extra_keys: :open)
-      expect(accepts(a, b)).to be_no
+      expect(accepts(a, shape({ a: int_nominal }, extra_keys: :open))).to be_maybe
+      expect(accepts(shape({ a: int_nominal, b: str_nominal }, optional_keys: [:b]),
+                     shape({ a: int_nominal }, extra_keys: :open))).to be_maybe
+    end
+
+    it "rejects an open source missing a required key, holding a known extra key, or with a refused value" do
+      a = shape(a: int_nominal)
+      expect(accepts(a, shape({}, extra_keys: :open))).to be_no
+      expect(accepts(a, shape({ a: int_nominal, b: str_nominal }, extra_keys: :open))).to be_no
+      expect(accepts(a, shape({ a: int_nominal, b: str_nominal }, extra_keys: :open, optional_keys: [:b]))).to be_no
+      expect(accepts(a, shape({ a: str_nominal }, extra_keys: :open))).to be_no
     end
 
     it "rejects non-HashShape values" do

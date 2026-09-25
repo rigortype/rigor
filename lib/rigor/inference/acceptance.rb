@@ -75,17 +75,48 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
-      # Whether `param` contains a record (at any depth: `Array[{ a: Integer }]`, a tuple, a union) and `arg` a
-      # `Hash` with a gradual arm ({#gradual_hash?}). That pair is where a record answers `maybe` because it cannot
-      # read the entries, and the `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict
-      # pass reads it as no evidence for the overload.
-      def record_against_gradual_hash?(param, arg)
-        contains_type?(param) { |type| type.is_a?(Type::HashShape) } && contains_type?(arg) { |type| gradual_hash?(type) }
+      UNREAD_HASH_REFUSED_KEY = :__rigor_acceptance_unread_hash_refused__
+      private_constant :UNREAD_HASH_REFUSED_KEY
+
+      # Whether a `maybe` for `param` against `arg` rests on a record that could not read a hash's entries: a
+      # `Hash` with a gradual arm ({#gradual_hash?}) or an open `HashShape`. The record cannot prove the key set
+      # of either, and its `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict pass
+      # reads that `maybe` as no evidence for the overload, so this re-asks with each such record answering
+      # `no` and reports whether the pair then fails. A `maybe` from anywhere else (a subclass only the Ruby
+      # source declares, a splat under a parameter that is no record) survives the re-ask and still counts.
+      def maybe_rests_on_unread_hash?(param, arg)
+        return false unless contains_type?(param) { |type| type.is_a?(Type::HashShape) }
+        return false unless contains_type?(arg) { |type| unread_hash?(type) }
+
+        refusing_unread_hashes { accepts(param, arg, mode: :gradual).no? }
       end
 
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
+
+        # The flag lives on the thread, not on a parameter, because the record may sit any number of `accepts`
+        # calls below the one asked (a tuple element, a `Hash` value, a union member), and those calls go
+        # through each carrier's `Type#accepts`. It is set only for the duration of the block.
+        def refusing_unread_hashes
+          previous = Thread.current[UNREAD_HASH_REFUSED_KEY]
+          Thread.current[UNREAD_HASH_REFUSED_KEY] = true
+          yield
+        ensure
+          Thread.current[UNREAD_HASH_REFUSED_KEY] = previous
+        end
+
+        # The `maybe` a record answers for a hash whose entries it cannot read, or `no` inside
+        # {#refusing_unread_hashes}.
+        def unread_hash_maybe(mode, reason)
+          return hash_shape_no(mode, "#{reason} (refused as evidence)") if Thread.current[UNREAD_HASH_REFUSED_KEY]
+
+          Type::AcceptsResult.maybe(mode: mode, reasons: reason)
+        end
+
+        def unread_hash?(type)
+          gradual_hash?(type) || (type.is_a?(Type::HashShape) && type.open?)
+        end
 
         def contains_type?(type, &)
           return true if yield(type)
@@ -971,9 +1002,11 @@ module Rigor
 
         # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
         # the other side and Ti accepts Ui (depth covariant). Optional keys may be absent on the other side;
-        # when present, their values are checked. A closed self rejects known or possible extra keys. Other
-        # types are rejected, except a `Hash` with a gradual arm (see {#gradual_hash?}); the converse direction
-        # (a Nominal accepting a HashShape) is handled by `accepts_nominal` via projection.
+        # when present, their values are checked. A closed self rejects known extra keys, and answers at most
+        # `maybe` for an open source: `h = { a: 1 }; h.default = 0` reopens a shape whose key set is still
+        # exactly the literal's. Other types are rejected, except a `Hash` with a gradual arm (see
+        # {#gradual_hash?}); the converse direction (a Nominal accepting a HashShape) is handled by
+        # `accepts_nominal` via projection.
         def accepts_hash_shape(self_type, other_type, mode)
           unless other_type.is_a?(Type::HashShape)
             return gradual_hash_verdict(self_type, other_type, mode) if gradual_hash?(other_type)
@@ -988,8 +1021,6 @@ module Rigor
           return hash_shape_no(mode, "HashShape missing required keys: #{missing.inspect}") unless missing.empty?
 
           if self_type.closed?
-            return hash_shape_no(mode, "HashShape closed target rejects open source") if other_type.open?
-
             extra = other_type.pairs.keys - self_type.pairs.keys
             unless extra.empty?
               return hash_shape_no(mode, "HashShape closed target rejects extra keys: #{extra.inspect}")
@@ -997,7 +1028,10 @@ module Rigor
           end
 
           per_entry = hash_shape_entry_results(self_type, other_type, mode)
-          combine_arg_results(per_entry, mode)
+          result = combine_arg_results(per_entry, mode)
+          return result unless result.yes? && self_type.closed? && other_type.open?
+
+          unread_hash_maybe(mode, "HashShape closed target cannot check open source")
         end
 
         # A `Hash` nominal — directly or as the base of a `Difference` (`non-empty-hash[K, V]`) — that is raw or
@@ -1026,7 +1060,7 @@ module Rigor
           refused = refused_value_keys(self_type, value_type, mode)
           return hash_shape_no(mode, "Hash value type refused for required keys: #{refused.inspect}") if refused.any?
 
-          Type::AcceptsResult.maybe(mode: mode, reasons: "HashShape cannot check #{other_type.describe(:short)}")
+          unread_hash_maybe(mode, "HashShape cannot check #{other_type.describe(:short)}")
         end
 
         def unholdable_keys(self_type, key_type, mode)

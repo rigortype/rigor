@@ -7,6 +7,7 @@ require_relative "block_parameter_binder"
 require_relative "element_read_widening"
 require_relative "index_write_widening"
 require_relative "mutation_widening"
+require_relative "optimistic_origin"
 require_relative "receiver_alias"
 require_relative "unknown_store_widening"
 
@@ -196,15 +197,14 @@ module Rigor
       # stands for the binding across iterations, and a value that was nil-free only optimistically still is:
       # without the mark `x.nil?` folds to `false` where the runtime answers `true`. `optimistic` is a mark the
       # binding carries besides the one `scope` already holds — one an iteration's own rebind made. Class
-      # variables and globals carry no mark.
+      # variables and globals carry no mark. {OptimisticOrigin.carry_local_mark} owns the re-marking, and with
+      # it the miss answer the mark records (issue #1302).
       def bind(scope, name, type, optimistic: nil)
         case variable_kind(name)
-        when :ivar
-          scope.with_ivar(name, type).with_optimistic_ivar(name, scope.optimistic_ivar(name) || optimistic)
+        when :ivar then OptimisticOrigin.carry_ivar_mark(scope, scope.with_ivar(name, type), name, optimistic)
         when :cvar then scope.with_cvar(name, type)
         when :global then scope.with_global(name, type)
-        else
-          scope.with_local(name, type).with_optimistic_local(name, scope.optimistic_local(name) || optimistic)
+        else OptimisticOrigin.carry_local_mark(scope, scope.with_local(name, type), name, optimistic)
         end
       end
 

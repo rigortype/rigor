@@ -52,7 +52,50 @@ module Rigor
       # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
       UNKNOWN_MISS = Object.new.freeze
 
+      # Issue #1302 — a local / ivar mark that also records what the bound value answers on a miss, so
+      # {.miss_answer} reads a predicate through the binding as it reads the inline form. `Scope` stores it in
+      # the mark table in place of the bare cause, so the answer is kept and dropped with the mark itself; a
+      # binding whose miss answer cannot be told stores the bare cause, as before.
+      BoundMark = Data.define(:cause, :miss)
+
+      # The marks a binding of today's single cause records, interned so that marking `v = h[k]` allocates
+      # nothing beyond the table it always rebuilt.
+      INTERNED_BOUND_MARKS = [nil, true, false].to_h do |miss|
+        [miss, BoundMark.new(cause: IMPLICITLY_RETURNS_NIL, miss: miss)]
+      end.freeze
+      private_constant :INTERNED_BOUND_MARKS
+
       module_function
+
+      # What `Scope` stores for a binding marked with `cause` whose value answers `miss` on a miss.
+      def bound_mark(cause, miss)
+        return cause if miss.equal?(UNKNOWN_MISS)
+
+        (cause == IMPLICITLY_RETURNS_NIL && INTERNED_BOUND_MARKS[miss]) || BoundMark.new(cause: cause, miss: miss)
+      end
+
+      # The cause and the recorded miss answer of an entry {.bound_mark} made (or nil for no entry).
+      def bound_cause(mark) = mark.is_a?(BoundMark) ? mark.cause : mark
+      def bound_miss(mark) = mark.is_a?(BoundMark) ? mark.miss : UNKNOWN_MISS
+
+      # The entry a control-flow join keeps for a name both arms mark: the answer survives only when the arms
+      # agree on it, since otherwise a miss can take either arm's.
+      def join_bound_marks(mine, theirs) = mine == theirs ? mine : bound_cause(mine)
+
+      # `rebound` — `scope` with the local `name` rebound to its type across a loop's iterations
+      # (`CapturedLocals.bind`) — re-marked with the mark `scope` holds for `name` or `optimistic`, the one an
+      # iteration's own rebind made. `scope`'s recorded miss answer is kept unless an iteration's mark joins it:
+      # that one comes without its answer, so the pair's cannot be told.
+      def carry_local_mark(scope, rebound, name, optimistic)
+        miss = optimistic ? UNKNOWN_MISS : scope.optimistic_local_miss(name)
+        rebound.with_optimistic_local(name, scope.optimistic_local(name) || optimistic, miss: miss)
+      end
+
+      # {.carry_local_mark} for an instance variable.
+      def carry_ivar_mark(scope, rebound, name, optimistic)
+        miss = optimistic ? UNKNOWN_MISS : scope.optimistic_ivar_miss(name)
+        rebound.with_optimistic_ivar(name, scope.optimistic_ivar(name) || optimistic, miss: miss)
+      end
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
       # a property of the value rather than a bet. The single owner of the judgment: `ExpressionTyper`,
@@ -120,13 +163,17 @@ module Rigor
       # What a marked expression answers when the carrier its mark rests on misses, or {UNKNOWN_MISS}. The
       # carrier itself — the read the mark is recorded on, or a `recv&.m` over a marked receiver — answers `nil`,
       # and each nil-collapsing predicate over it answers what it answers for that value: `!` its negation,
-      # `nil?` / `== nil` whether it is `nil`, `!= nil` the reverse. A binding, an `&&` / `||` and anything else
-      # is unknown. `ExpressionTyper` widens a predicate's folded boolean only when the miss answers the other
-      # boolean (or cannot be told), so `!recv&.empty?` — `!false` on a hit, `!nil` on a miss — stays `true`.
+      # `nil?` / `== nil` whether it is `nil`, `!= nil` the reverse. A local / ivar read answers what its binding
+      # recorded beside the mark ({BoundMark}, issue #1302): `nil` for `x = h[k]` and for `x = recv&.m?`. An
+      # `&&` / `||`, a binding that recorded nothing, and anything else is unknown. `ExpressionTyper` widens a
+      # predicate's folded boolean only when the miss answers the other boolean (or cannot be told), so
+      # `!recv&.empty?` — `!false` on a hit, `!nil` on a miss — stays `true`, and so does `x = recv&.empty?; !x`.
       def miss_answer(node, scope)
         return nil if scope.optimistic_origins[node]
 
         case node
+        when Prism::LocalVariableReadNode then scope.optimistic_local_miss(node.name)
+        when Prism::InstanceVariableReadNode then scope.optimistic_ivar_miss(node.name)
         when Prism::CallNode then miss_answer_of_call(node, scope)
         when Prism::ParenthesesNode
           body = node.body
@@ -172,6 +219,17 @@ module Rigor
 
         marks = node.elements.map { |element| destructuring_marks(element, scope) }
         marks.any? { |mark| mark != false } ? marks : false
+      end
+
+      # Issue #1302 — the miss answer every slot {.destructuring_marks} marks records: `nil` when each marked
+      # part of the right-hand side answers `nil` on a miss, since `nil` destructures to `nil` in every slot, and
+      # {UNKNOWN_MISS} otherwise. A marked right-hand side a miss makes a boolean (`a, b = !h[k]`) binds it to
+      # the first slot only, so its slots are not told apart and all of them record nothing.
+      def destructuring_miss(node, scope)
+        return miss_answer(node, scope).nil? ? nil : UNKNOWN_MISS if resolve(node, scope)
+        return nil unless node.is_a?(Prism::ArrayNode)
+
+        node.elements.all? { |element| destructuring_miss(element, scope).nil? } ? nil : UNKNOWN_MISS
       end
 
       # Whether the overload the selector actually picked carries the ignored annotation. The judgment is

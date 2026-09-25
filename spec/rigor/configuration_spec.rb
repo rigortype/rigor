@@ -660,6 +660,12 @@ RSpec.describe Rigor::Configuration do
       end.to raise_error(Rigor::ConfigurationError, /sig_gen\.inline_declared must be one of \["write", "skip"\]/)
     end
 
+    it "rejects a key it does not know inside sig_gen:, so a misspelling cannot load as the default" do
+      expect do
+        described_class.new(Rigor::Configuration::DEFAULTS.merge("sig_gen" => { "inline_declare" => "skip" }))
+      end.to raise_error(Rigor::ConfigurationError, /sig_gen has unknown key\(s\) \["inline_declare"\]/)
+    end
+
     # Only `rigor sig-gen` reads it, so it must not move the run cache key the way `to_h` would make it.
     it "stays out of to_h" do
       expect(described_class.new.to_h).not_to have_key("sig_gen")

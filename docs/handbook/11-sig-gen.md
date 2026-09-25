@@ -145,6 +145,9 @@ The `sig.skipped.*` reasons are:
 - `sig.skipped.inline-declared` — `.rigor.yml` sets
   `sig_gen.inline_declared: skip` and the method is declared
   inline. See [Methods declared inline](#methods-declared-inline).
+- `sig.skipped.inline-generic-class` — the method's class is
+  generic by an inline declaration and `sig/` does not declare
+  it yet. See [Classes made generic inline](#classes-made-generic-inline).
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every
@@ -195,9 +198,10 @@ the declaration is what you meant, and inference does not
 override it. `pair` declares its parameter and not its return,
 so the parameter is copied and the return comes from the body,
 the same split [ADR-107](../adr/107-checked-types-and-typeless-comments.md)
-draws between authored parameters and generated returns. A
-member annotation you wrote inline, such as `# @rbs
-%a{deprecated}`, is copied with it. A method with no
+draws between authored parameters and generated returns. An
+`initialize` is always written `-> void`, whatever its body
+ends with. A member annotation you wrote inline, such as
+`# @rbs %a{deprecated}`, is copied with it. A method with no
 annotation of its own is proposed exactly as in any other
 file.
 
@@ -206,11 +210,33 @@ check` reads (the `.rbs` wins over the inline one for the same
 member). When you later edit the inline annotation, the copy
 is stale. `sig-gen` then classifies the method `inline-update`
 and `--write` replaces the copy with your current inline
-declaration. That needs no `--overwrite`: the line is yours,
-not an inference. `--check` fails until you do, which is what
-makes it worth running in CI. The update only ever adds
-annotations to the copy; one you delete inline stays in
-`sig/` until you delete it there too.
+declaration, without `--overwrite`: what changed is what you
+wrote. `--check` fails until you do, which is what makes it
+worth running in CI. The update only ever adds annotations to
+the copy; one you delete inline stays in `sig/` until you
+delete it there too.
+
+Only what you wrote inline drives that update. For `pair`,
+that is the parameter: the return in `sig/` came from the
+body, so it is held to the same rules as any inferred return.
+If you widened it by hand after review (`-> Array[String]`
+over a `[String, String]` the body builds), sig-gen leaves
+it alone. A return the body proves strictly narrower is a
+`tighter-return` proposal, applied only with `--overwrite`.
+When you change the parameter annotation, the update keeps
+the return `sig/` already has.
+
+### Classes made generic inline
+
+sig-gen does not write a class's type parameters yet. A class
+declared generic inline (`# @rbs generic T`) is therefore not
+opened in `sig/`: a header without its parameters would make
+rbs reject the class, and every class whose signature mentions
+it, with `GenericParameterMismatchError`. Its methods, and
+those of classes nested in it, are skipped as
+`sig.skipped.inline-generic-class`. Declare the class in
+`sig/` with its parameters (`class Box[T]` ... `end`) and
+sig-gen writes the members into that declaration.
 
 ### Projects that run Steep on the same annotations
 
@@ -625,9 +651,10 @@ by side without coordination.
   silently skipped.
 - **Will** replace an existing method declaration that is a
   stale copy of the method's inline declaration
-  (`inline-update`), with or without `--overwrite`: the new
-  line is the inline declaration you wrote, and annotations
-  already on the old one are kept.
+  (`inline-update`), with or without `--overwrite`: what
+  changed is what you wrote inline, a return inferred from
+  the body keeps its `sig/` spelling, and annotations and
+  comments already on the old declaration are kept.
 - **Will not** touch `attr_reader` / `attr_writer` /
   `attr_accessor` declarations in existing RBS — those are
   always treated as user-authored.

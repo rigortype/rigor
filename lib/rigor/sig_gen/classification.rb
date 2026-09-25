@@ -16,10 +16,11 @@ module Rigor
       TIGHTER_RETURN = :tighter_return
       EQUIVALENT = :equivalent
       SKIPPED = :skipped
-      # ADR-112 WD4 — `sig/` holds a copy of a member declared inline by `# @rbs` / `#:`, and the inline
-      # declaration has changed since: the copy is stale. The inline declaration is the one the author edits
-      # beside the code, so `--write` replaces the copy with it; unlike `tighter-return`, that needs no
-      # `--overwrite`, because nothing is inferred — the line is the author's own.
+      # ADR-112 WD4 — `sig/` holds a copy of a member declared inline by `# @rbs` / `#:`, and what the author
+      # wrote inline has changed since: the copy is stale. The inline declaration is the one the author edits
+      # beside the code, so `--write` replaces the copy with it without `--overwrite`. Only the AUTHORED parts
+      # drive this: for a parameter-only annotation the return is inferred, the update keeps the return `sig/`
+      # has, and a return the body proves narrower is an ordinary `tighter-return` proposal instead.
       INLINE_UPDATE = :inline_update
 
       # The classifications that actually produce a line in a generated `sig/`. Consulted by the renderer,
@@ -50,7 +51,11 @@ module Rigor
         overridden_by_unsigned_subclass: "sig.skipped.overridden-by-unsigned-subclass",
         # ADR-112 WD4 — `sig_gen.inline_declared: skip` is set and the inline reader declares this member, so
         # a `sig/` copy would be a second declaration of it for a Steep that reads the inline annotations too.
-        inline_declared: "sig.skipped.inline-declared"
+        inline_declared: "sig.skipped.inline-declared",
+        # ADR-112 WD4 — the member's class, or one it is nested in, is generic by an inline declaration (`# @rbs
+        # generic T`) and `sig/` does not declare it yet. sig-gen writes no class type parameters, and a header
+        # without them fails the class's definition build.
+        inline_generic_class: "sig.skipped.inline-generic-class"
       }.freeze
     end
   end

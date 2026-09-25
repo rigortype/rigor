@@ -270,6 +270,27 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(File.read(target)).to eq("class Foo\n  %a{deprecated}\n  %a{pure}\n  def label: () -> String\nend\n")
     end
 
+    it "keeps a comment written inside the replaced member's own lines" do
+      target = write_target(<<~RBS)
+        class Foo
+          def greet: (Symbol name) -> String
+                   # the Integer overload is for legacy callers
+                   | (Integer id) -> String
+        end
+      RBS
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
+                                                     classification: inline_update)])
+
+      expect(result.replaced.map(&:method_name)).to eq([:greet])
+      expect(File.read(target)).to eq(<<~RBS)
+        class Foo
+          # the Integer overload is for legacy callers
+          def greet: (String name) -> String
+        end
+      RBS
+    end
+
     it "replaces a declared `-> void` too — the #836 guard protects authored intent, and this line is it" do
       target = write_target("class Foo\n  def run: () -> void\nend\n")
 

@@ -518,8 +518,9 @@ See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
 A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only
 annotation keeps its parameters and takes the return from the body.
-When the inline declaration later changes, `--write` replaces the
-stale `sig/` copy without `--overwrite`. A project whose Steep reads
+When what you wrote inline later changes, `--write` replaces the
+stale `sig/` copy without `--overwrite`; an inferred return stays an
+ordinary proposal. A class made generic inline is not written. A project whose Steep reads
 the same annotations sets `sig_gen.inline_declared: skip` in
 `.rigor.yml` to keep those methods out of `sig/`. See
 [handbook chapter 11](../handbook/11-sig-gen.md#methods-declared-inline).

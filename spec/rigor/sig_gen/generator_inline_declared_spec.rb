@@ -191,6 +191,105 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "an initialize whose parameters are annotated" do
+    it "is written `-> void`, whatever the body's last expression is" do
+      path = write_fixture("lib/conn.rb", <<~RUBY)
+        class Conn
+          # @rbs opts: Hash[Symbol, untyped]
+          def initialize(opts)
+            @timeout = opts[:timeout]
+          end
+        end
+      RUBY
+
+      init = find(run_generator(path), :initialize)
+
+      expect([init.classification, init.rbs])
+        .to eq([Rigor::SigGen::Classification::NEW_METHOD, "def initialize: (Hash[Symbol, untyped] opts) -> void"])
+    end
+  end
+
+  # Review of #1422 (probe `f1`): with a parameter-only annotation the return is inferred, not authored, so it is
+  # held to the ordinary proposal rules against `sig/`, and only the authored parameters can make the copy stale.
+  describe "a mixed-provenance member sig/ already declares" do
+    let(:chain) do
+      <<~RUBY
+        class Chain
+          # @rbs x: Integer
+          def c(x) = x.to_s.size
+
+          # @rbs name: String
+          def pair(name) = [name, name.to_s]
+        end
+      RUBY
+    end
+
+    def classify(sig)
+      write_fixture("sig/chain.rbs", sig)
+      run_generator(write_fixture("lib/chain.rb", chain), sig: true)
+    end
+
+    it "leaves a hand-widened return alone when the lenience guards say so" do
+      pair = find(classify("class Chain\n  def pair: (String name) -> Array[String]\nend\n"), :pair)
+
+      expect(pair.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "proposes a narrower inferred return as tighter-return, keeping the authored parameters" do
+      c = find(classify("class Chain\n  def c: (Integer x) -> Numeric\nend\n"), :c)
+
+      expect([c.classification, c.rbs, c.declared_return_rbs])
+        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def c: (Integer x) -> Integer", "Numeric"])
+    end
+
+    it "updates the authored parameters and keeps the return sig/ has" do
+      pair = find(classify("class Chain\n  def pair: (Symbol name) -> Array[String]\nend\n"), :pair)
+
+      expect([pair.classification, pair.rbs])
+        .to eq([Rigor::SigGen::Classification::INLINE_UPDATE, "def pair: (String name) -> Array[String]"])
+    end
+  end
+
+  # Review of #1422 (probe `g_new`): sig-gen writes no class type parameters, so a `class Box` header in `sig/`
+  # beside an inline `class Box[T]` would fail the definition build of Box and of every class mentioning it.
+  describe "a class made generic by an inline declaration" do
+    let(:box) do
+      <<~RUBY
+        # @rbs generic T
+        class Box
+          #: () -> T
+          def get = @v
+
+          class Inner
+            def n = 1
+          end
+        end
+
+        class User
+          #: () -> Box[Integer]
+          def box = Box.new
+        end
+      RUBY
+    end
+
+    it "writes nothing that would open it, nested classes included, and the rest as usual" do
+      candidates = run_generator(write_fixture("lib/box.rb", box))
+
+      skipped = candidates.select { |c| c.skip_reason == :inline_generic_class }.map(&:method_name)
+      expect(skipped).to contain_exactly(:get, :n)
+      expect(find(candidates, :box).rbs).to eq("def box: () -> Box[Integer]")
+    end
+
+    it "writes the members into a declaration sig/ already carries" do
+      write_fixture("sig/box.rbs", "class Box[T]\nend\n")
+      path = write_fixture("lib/box.rb", box)
+
+      get = Dir.chdir(tmpdir) { find(run_generator(path, sig: true), :get) }
+
+      expect([get.classification, get.rbs]).to eq([Rigor::SigGen::Classification::NEW_METHOD, "def get: () -> T"])
+    end
+  end
+
   describe "with inline_declared: skip" do
     it "skips every member the inline reader declares, annotated or not, and nothing else" do
       path = write_fixture("lib/greeter.rb", source)

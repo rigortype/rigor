@@ -39,10 +39,11 @@ module Rigor
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
-      # The skip reasons {#report_skipped} counts. The two left out each have a detailed report of their own
-      # ({#report_unrenderable}, {#report_unresolvable_superclasses}), so a method never shows up in two tallies.
+      # The skip reasons {#report_skipped} counts. The three left out each have a report of their own
+      # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}), so a method never
+      # shows up in two tallies.
       SUMMARISED_SKIP_REASONS = (SigGen::Classification::SKIP_DIAGNOSTIC_IDS.keys -
-                                 %i[unrenderable_rbs unresolvable_superclass]).freeze
+                                 %i[unrenderable_rbs unresolvable_superclass inline_declared]).freeze
       private_constant :SUMMARISED_SKIP_REASONS
 
       # @return CLI exit status.
@@ -69,6 +70,7 @@ module Rigor
                    0
                  end
         report_skipped(candidates, options)
+        report_inline_declared(candidates, options)
         report_withheld_annotations(candidates, options)
         report_unrenderable(generator.unrenderable)
         report_unresolvable_superclasses(generator.unresolvable_superclasses)
@@ -165,6 +167,18 @@ module Rigor
           "rigor sig-gen: skipped #{counts.values.sum} method(s) it could not type or would not overwrite " \
           "(#{breakdown.join(', ')}). Run with --format=json to see each one with its skip_reason."
         )
+      end
+
+      # ADR-112 WD4 — `sig_gen.inline_declared: skip` leaving methods out is the project's own choice, not a
+      # method sig-gen "could not type or would not overwrite", so it is counted on a line of its own.
+      def report_inline_declared(candidates, options)
+        return unless options.fetch(:format) == "text"
+
+        count = candidates.count { |c| c.skip_reason == :inline_declared }
+        return if count.zero?
+
+        @err.puts("rigor sig-gen: left #{count} method(s) declared inline out of sig/, as " \
+                  "`sig_gen.inline_declared: skip` asks (sig.skipped.inline-declared).")
       end
 
       # A method whose rendered RBS does not parse is a Rigor rendering defect, not a fact about the user's

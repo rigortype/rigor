@@ -1025,6 +1025,14 @@ module Rigor
       section = {} if section.nil?
       raise ConfigurationError, "sig_gen must be a mapping, got #{section.inspect}" unless section.is_a?(Hash)
 
+      # The schema closes this object (`additionalProperties: false`); a misspelled key here would otherwise
+      # load as the default and write exactly what `inline_declare: skip` was meant to prevent.
+      unknown = section.keys.map(&:to_s) - DEFAULTS.fetch("sig_gen").keys
+      unless unknown.empty?
+        raise ConfigurationError,
+              "sig_gen has unknown key(s) #{unknown.inspect}; known keys: #{DEFAULTS.fetch('sig_gen').keys.inspect}"
+      end
+
       value = section.fetch("inline_declared", DEFAULTS.dig("sig_gen", "inline_declared")).to_s
       unless VALID_SIG_GEN_INLINE_DECLARED.include?(value)
         raise ConfigurationError,

@@ -100,7 +100,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(status).to eq(1)
     expect(payload["up_to_date"]).to be(false)
-    expect(payload["results"].map { |r| r["action"] }).to eq(["created"])
+    expect(payload["results"].map { |r| r["action"] }).to eq(["would_create"])
   end
 
   it "does not count a tighter return --write would decline, unless --overwrite asks for it" do
@@ -110,6 +110,53 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(sig_gen("--check").first).to eq(0)
     expect(sig_gen("--check", "--overwrite").first).to eq(1)
+  end
+
+  # Review of #1422 (probe `f1`): a return the author did not write is inferred, so a reviewed, hand-widened one
+  # is a proposal `--write` declines, not a stale copy it rewrites.
+  it "leaves a hand-widened return on a parameter-only annotation alone under --check and --write" do
+    write("lib/chain.rb", <<~RUBY)
+      class Chain
+        # @rbs x: Integer
+        def c(x) = x.to_s.size
+
+        # @rbs name: String
+        def pair(name) = [name, name.to_s]
+      end
+    RUBY
+    sig = "class Chain\n  def c: (Integer x) -> Numeric\n  def pair: (String name) -> Array[String]\nend\n"
+    write("sig/chain.rbs", sig)
+    sig_gen("--write")
+
+    expect(File.read(File.join(root, "sig/chain.rbs"))).to eq(sig)
+    expect(sig_gen("--check", "lib/chain.rb").first).to eq(0)
+  end
+
+  # Review of #1422 (probe `g_new`): the written `sig/` must build.
+  it "writes a sig/ that builds when a class is generic by an inline declaration" do
+    write("lib/box.rb", <<~RUBY)
+      # @rbs generic T
+      class Box
+        #: () -> T
+        def get = @v
+      end
+
+      class User
+        #: () -> Box[Integer]
+        def box = Box.new
+      end
+    RUBY
+    sig_gen("--write", "lib/box.rb")
+
+    expect(File.exist?(File.join(root, "sig/box.rbs"))).to be(true)
+    expect(File.read(File.join(root, "sig/box.rbs"))).not_to include("class Box")
+
+    out = StringIO.new
+    err = StringIO.new
+    Rigor::CLI.start(["check", "--no-cache", "--config=#{File.join(root, '.rigor.yml')}", "lib/box.rb"],
+                     out: out, err: err)
+    expect(out.string + err.string).not_to include("definition-build-failed")
+    expect(sig_gen("--check", "lib/box.rb").first).to eq(0)
   end
 
   it "rejects --check alongside another mode" do
@@ -130,7 +177,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(status).to eq(0)
       expect(File.exist?(sig_file)).to be(false)
       expect(File.read(File.join(root, "sig/plain.rbs"))).to include("def n: () -> 1")
-      expect(err).to include("sig.skipped.inline-declared: 1")
+      expect(err).to include("left 1 method(s) declared inline out of sig/")
       expect(sig_gen("--check", config: skip_config).first).to eq(0)
     end
   end

@@ -144,7 +144,8 @@ module Rigor
       def render_check(results:, format:)
         stale = self.class.out_of_date(results)
         case format
-        when "json" then @out.puts(JSON.pretty_generate({ up_to_date: stale.empty?, results: stale.map(&:to_h) }))
+        when "json"
+          @out.puts(JSON.pretty_generate({ up_to_date: stale.empty?, results: stale.map { |r| check_entry(r) } }))
         when "text" then render_check_text(stale)
         else raise ArgumentError, "unsupported format: #{format}"
         end
@@ -156,7 +157,18 @@ module Rigor
         results.reject { |result| %i[noop skipped_outside_sig_root].include?(result.action) }
       end
 
+      # Nothing was written, so the entry must not read like one that was: `created` / `updated` become
+      # `would_create` / `would_update`. A refusal keeps its action — `--write` would refuse the same way.
+      CHECK_ACTIONS = { created: "would_create", updated: "would_update" }.freeze
+      private_constant :CHECK_ACTIONS
+
       private
+
+      def check_entry(result)
+        entry = result.to_h
+        entry[:action] = CHECK_ACTIONS.fetch(result.action, entry[:action])
+        entry
+      end
 
       def render_check_text(stale)
         if stale.empty?
@@ -174,8 +186,9 @@ module Rigor
       end
 
       def render_check_change(result)
+        counts = result.action == :created ? "#{result.applied.size} method(s)" : applied_counts(result)
         verb = result.action == :created ? "would create" : "would update"
-        @out.puts("#{verb} #{result.target_path} (#{result.applied.size} method(s))")
+        @out.puts("#{verb} #{result.target_path} (#{counts})")
         result.applied.each do |candidate|
           @out.puts("  - #{candidate.declared_rbs}") if candidate.declared_rbs
           candidate.rbs_lines.each { |line| @out.puts("  + #{line}") }
@@ -199,12 +212,19 @@ module Rigor
         end
       end
 
+      # `+N` counts added lines; an existing line replaced (`--overwrite`, or an inline update) is counted apart,
+      # because "added 2" when one of them rewrote a line the project already had would understate the change.
+      def applied_counts(result)
+        added = "+#{result.applied.size - result.replaced.size}"
+        result.replaced.empty? ? added : "#{added}, replaced #{result.replaced.size}"
+      end
+
       def render_write_created(result)
         @out.puts("created #{result.target_path} (#{result.applied.size} method(s))")
       end
 
       def render_write_updated(result)
-        @out.puts("updated #{result.target_path} (+#{result.applied.size}, " \
+        @out.puts("updated #{result.target_path} (#{applied_counts(result)}, " \
                   "skipped #{result.skipped.size} user-authored)")
         render_left_unreadable(result)
       end

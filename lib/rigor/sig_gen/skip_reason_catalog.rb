@@ -97,6 +97,18 @@ module Rigor
                      "`sig_gen.inline_declared: skip` from `.rigor.yml` and stop Steep from reading the " \
                      "annotations of the files you generate for."
         ),
+        "sig.skipped.inline-generic-class" => Entry.new(
+          id: "sig.skipped.inline-generic-class",
+          summary: "The class is generic by an inline declaration, and sig-gen does not write type parameters.",
+          explanation: "The class (or one it is nested in) takes type parameters from `# @rbs generic`, and no " \
+                       "file under `sig/` declares it yet. sig-gen would have to open it with a header that has " \
+                       "no type parameters, and rbs rejects a class whose declarations disagree on them " \
+                       "(`GenericParameterMismatchError`): the class, and every class whose signature mentions " \
+                       "it, would fail its definition build and read `Dynamic[top]`. The inline declaration " \
+                       "still binds when the source is analysed.",
+          next_step: "Declare the class in `sig/` with its type parameters (`class Box[T]` ... `end`) and re-run; " \
+                     "sig-gen then writes the members into that declaration."
+        ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",
           summary: "A subclass overrides this method and its override was not itself emitted.",

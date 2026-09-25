@@ -31,7 +31,7 @@ module Rigor
 
       # Per-`update_existing` accumulator. The merge_class helper mutates `source` / `decls` / `applied` /
       # `skipped` in place as each class is processed so the next class sees the latest byte positions.
-      MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, keyword_init: true)
+      MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, :replaced, keyword_init: true)
       private_constant :MergeState
 
       # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
@@ -297,7 +297,8 @@ module Rigor
         decls = parse_signature(source)
         return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
 
-        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [])
+        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
+                               replaced: [])
         merge_candidates(state, candidates)
 
         action = state.applied.empty? ? :noop : :updated
@@ -320,7 +321,7 @@ module Rigor
         target.write(state.source) unless @dry_run
         WriteResult.new(source_path: source_path, target_path: target,
                         action: action, applied: state.applied, skipped: state.skipped,
-                        left_unreadable: state.left_unreadable)
+                        left_unreadable: state.left_unreadable, replaced: state.replaced)
       end
 
       # Applies every class group, then every requested shell, then normalises the layout the three steps
@@ -590,11 +591,13 @@ module Rigor
         source = insert_into_class(source, decl, new_methods)
         state.applied.concat(new_methods)
 
-        # An inline update replaces its stale copy whether or not `--overwrite` is set: the line is the
-        # author's inline declaration, not an inference weighed against a hand-written one (ADR-112 WD4).
+        # An inline update replaces its stale copy whether or not `--overwrite` is set: what changed is what
+        # the author wrote inline, and the generator already kept any inferred return at the `sig/` spelling
+        # (ADR-112 WD4), so no inference is weighed against a hand-written line here.
         replaceable = @overwrite ? conflicting : conflicting.select { |c| inline_update?(c) }
         source, replaced = replace_eligible_conflicts(source, decl, replaceable, state)
         state.applied.concat(replaced)
+        state.replaced.concat(replaced)
         state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
 
         source
@@ -732,11 +735,25 @@ module Rigor
         return nil if member.nil?
 
         loc = member.location
-        replaced = source[0...loc.start_pos] + candidate.rbs + source[loc.end_pos..]
+        replaced = source[0...loc.start_pos] + kept_comments(source, loc) + candidate.rbs + source[loc.end_pos..]
         # Both splices insert above the member, the effect annotation at its own line and the declared ones at
         # its first annotation's, so running the lower insertion first keeps the positions the parse gave valid.
         replaced = splice_annotations(replaced, member, candidate, state)
         splice_declared_annotations(replaced, member, candidate)
+      end
+
+      # A member written across lines (`def f: () -> A` / `  # why` / `  | (B) -> C`) can hold comments inside its
+      # own location, which the splice above would delete with the text it replaces. Each such comment line is
+      # kept, moved above the new line at the member's indentation. Only whole comment lines are recognised: RBS
+      # has no string type that spans a line, so a line whose first non-blank character is `#` is a comment.
+      def kept_comments(source, loc)
+        text = source[loc.start_pos...loc.end_pos].to_s
+        return "" unless text.include?("\n")
+
+        indent = source[line_start_index(source, loc.start_pos)...loc.start_pos].to_s
+        indent = "" unless indent.match?(/\A[ \t]*\z/)
+        text.lines.drop(1).filter_map { |line| line.strip if line.match?(/\A\s*#/) }
+            .map { |comment| "#{comment}\n#{indent}" }.join
       end
 
       # ADR-112 WD4 — the annotations an inline declaration carries that its `sig/` copy lacks, added above the

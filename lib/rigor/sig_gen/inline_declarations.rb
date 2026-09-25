@@ -68,6 +68,7 @@ module Rigor
 
       def initialize(virtual_rbs)
         @by_path = {}
+        @generic_classes = Set.new
         virtual_rbs.each do |name, content|
           prefix, plugin_id, path = name.to_s.split(":", 3)
           next unless prefix == "virtual" && plugin_id == SYNTHESIZER_ID && path
@@ -79,7 +80,13 @@ module Rigor
           each_member(decls, []) { |class_name, member| record(table, class_name, member) }
         end
         @by_path.freeze
+        @generic_classes.freeze
       end
+
+      # The classes and modules an inline declaration gives type parameters (`# @rbs generic T`). sig-gen does not
+      # write a class's type parameters, and a `sig/` header without them makes rbs reject the class
+      # (`GenericParameterMismatchError`), so the generator writes nothing that would open one of these.
+      attr_reader :generic_classes
 
       # @return the inline declaration of `class_name`'s `method_name` on the `kind` side, declared in the file
       #   at `path` — or nil.
@@ -103,6 +110,7 @@ module Rigor
           next unless decl.is_a?(::RBS::AST::Declarations::Class) || decl.is_a?(::RBS::AST::Declarations::Module)
 
           inner = prefix + [decl.name.to_s.delete_prefix("::")]
+          @generic_classes << inner.join("::") unless decl.type_params.empty?
           decl.members.each { |member| block.call(inner.join("::"), member) }
           each_member(decl.members, inner, &block)
         end

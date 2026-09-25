@@ -3554,7 +3554,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     # Issue #1365 — a call rebinds the frame's `$~` by what it calls and its arguments' types, in any position.
     it "keeps the narrowing after a lookup whose argument is not a Regexp, and after `match?`" do
       ["val = row[:name]", 'csv.split(",")', "list.index(3)", "value.match?(/x/)", "String === value",
-       '$stdout.puts(row[:name], [csv.split(",")])'].each do |call|
+       '$stdout.puts(row[:name], [csv.split(",")])', "h[key] = 1", "x = [h[key], 1]", "h[key] += 1",
+       "record.public_send(\"\#{attr}=\", value)", 'klass.class_eval("def foo; end")'].each do |call|
         _, post = evaluate_framed(<<~RUBY)
           raise unless /(\\d+)/ =~ value
           #{call}
@@ -3564,11 +3565,24 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "forgets the narrowing after an explicit-receiver builtin, or an operand or literal call, that rebinds it" do
-      ["value !~ /(z)/", "value.start_with?(/(z)/)", "Kernel.eval(src)", 'out.push(value.sub(/q/, ""))',
+      ["value !~ /(z)/", "value.start_with?(/(z)/)", %q|Kernel.eval('"zz" =~ /(q)/')|, 'out.push(value.sub(/q/, ""))',
        "[value.index(/(q)/)]", "x = { a: items.find { |i| i =~ /(z)/ } }", "x = value[/(q)/] rescue nil",
        'super(value.sub(/q/, ""))', 'X = value.sub(/q/, "")', "obj.attr ||= value[/(q)/]",
        "value[/(q)/] ||= 'x'"].each do |call|
         _, post = evaluate_framed(<<~RUBY)
+          raise unless /(\\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to be_nil, call
+      end
+    end
+
+    # A name the table forgot on before keeps forgetting unless every argument is a non-Regexp literal: a flow type
+    # can be stale (#1380), so a typed `String` argument does not prove the call cannot match.
+    it "forgets the narrowing after a lookup the table named whose argument is not a literal" do
+      ["row[key]", "val = value.index(str)", "value.split(\"\#{sep}\")"].each do |call|
+        _, post = evaluate_framed(<<~RUBY)
+          str = "x"
           raise unless /(\\d+)/ =~ value
           #{call}
         RUBY

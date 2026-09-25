@@ -1104,7 +1104,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # `[]=` storing a Regexp leave `$~` alone, in statement, assignment or operand position.
     it "reports nothing on the read after a call that cannot rebind `$~`" do
       reads = marked_lines(harness, "# KEEPS-1365")
-      expect(reads.size).to eq(15)
+      expect(reads.size).to eq(29)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end

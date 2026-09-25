@@ -21,8 +21,10 @@ module Rigor
       # referent, so it does not count either way — except under the `broad` reading, where it may be a Regexp
       # defined in another file (#1373) and counts ({MatchRebinding.broad_may_match?}).
       #
-      # Outside a block, the flow scope types the operand a statement runs, so the statement-level rule reads it by
-      # its type instead ({.typed_regexp?}, issue #1365).
+      # Outside a block, a statement's operands are read on two further terms (issue #1365), because the flow scope
+      # types them but its types can be stale (#1380): a call the name table forgot on before keeps the narrowing only
+      # on a non-Regexp literal ({.keep_literal?}), and a call in a position that never forgot forgets only on an
+      # operand known to be a Regexp ({.known_regexp_operand?}).
       module Operands
         REGEX_LITERALS = Set[Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode].freeze
         # Values whose `===` cannot run a match. An interpolated String or Symbol is still a String or Symbol; the
@@ -32,77 +34,94 @@ module Rigor
           Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode,
           Prism::NilNode, Prism::TrueNode, Prism::FalseNode
         ].freeze
-        # Literals {.typed_regexp?} answers without typing them: none of them builds a Regexp.
-        NON_REGEXP_VALUES = Set[
-          Prism::ArrayNode, Prism::HashNode, Prism::KeywordHashNode, Prism::RangeNode, Prism::LambdaNode,
-          Prism::XStringNode, Prism::InterpolatedXStringNode
+        # The literals {.keep_literal?} accepts: each is never a Regexp, whatever a flow type says.
+        KEEP_LITERALS = Set[
+          Prism::SymbolNode, Prism::StringNode, Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode,
+          Prism::ImaginaryNode, Prism::NilNode, Prism::TrueNode, Prism::FalseNode
         ].freeze
         CONSTANT_NODES = Set[Prism::ConstantReadNode, Prism::ConstantPathNode].freeze
         PINNED_NODES = Set[Prism::PinnedVariableNode, Prism::PinnedExpressionNode].freeze
         REGEXP_CONSTRUCTORS = Set[:new, :union, :compile].freeze
         # The classes a Regexp is an instance of, so a value of one of these types may be a Regexp.
         REGEXP_ANCESTORS = Set["Regexp", "Object", "BasicObject", "Kernel"].freeze
-        # How a class relates to `Regexp` when its instances may be one: a subclass, `Regexp` itself, or an ancestor.
-        REGEXP_ORDERINGS = Set[:subclass, :equal, :superclass].freeze
-        private_constant :REGEX_LITERALS, :NON_REGEXP_LITERALS, :NON_REGEXP_VALUES, :CONSTANT_NODES, :PINNED_NODES,
-                         :REGEXP_CONSTRUCTORS, :REGEXP_ANCESTORS, :REGEXP_ORDERINGS
+        # How a class relates to `Regexp` when every instance of it is one.
+        REGEXP_CLASS_ORDERINGS = Set[:subclass, :equal].freeze
+        private_constant :REGEX_LITERALS, :NON_REGEXP_LITERALS, :KEEP_LITERALS, :CONSTANT_NODES, :PINNED_NODES,
+                         :REGEXP_CONSTRUCTORS, :REGEXP_ANCESTORS, :REGEXP_CLASS_ORDERINGS
 
         module_function
 
-        # True when an operand a statement runs may be a Regexp, read by its type in the flow scope: a regex
-        # literal, a forwarded `...`, a splat whose elements may be one, or a value whose type admits one — `Regexp`
-        # or a subclass, an ancestor such as `Object`, `top`, an interface, a union holding one, or `Dynamic[top]`,
-        # which nothing is known about (an unannotated parameter, an unresolved constant). A literal that is not a
-        # Regexp, and any other type, do not: a `Symbol`, `String`, `Integer`, `Array` or `Hash`, a class, a tuple
-        # or hash shape. A `Dynamic` value with a static facet is read by its facet.
-        def typed_regexp?(node, scope)
-          klass = node.class
-          return true if REGEX_LITERALS.include?(klass) || klass == Prism::ForwardingArgumentsNode
-          return false if NON_REGEXP_LITERALS.include?(klass) || NON_REGEXP_VALUES.include?(klass)
-          return splat_typed_regexp?(node.expression, scope) if node.is_a?(Prism::SplatNode)
+        # True when a statement's operand is never a Regexp by its syntax alone: a Symbol, a String without
+        # interpolation, a number, `nil`, `true`, `false`, or a range of those. A call the name table forgot on before
+        # issue #1365 (`row[:name]`, `csv.split(",")`, `list.index(3)`) keeps the narrowing only when every argument is
+        # one, because a flow type that says "String" can be stale while the value is a Regexp (#1380).
+        def keep_literal?(node)
+          return true if KEEP_LITERALS.include?(node.class)
+          return false unless node.is_a?(Prism::RangeNode)
 
-          type_may_be_regexp?(node_type(node, scope), scope)
+          [node.left, node.right].all? { |bound| bound.nil? || KEEP_LITERALS.include?(bound.class) }
         end
 
-        # `*args` passes each element; an anonymous `*` forwards the method's own, which may be anything.
-        def splat_typed_regexp?(expression, scope)
-          return true if expression.nil?
+        # True when `node` is a constant naming a class or module (`String === s`), whose `===` is `Module#===`.
+        def class_constant?(node, scope)
+          CONSTANT_NODES.include?(node.class) && node_type(node, scope).is_a?(Type::Singleton)
+        end
+
+        # True when a statement's operand is known to be a Regexp: a regex literal, `Regexp.new` / `.union` /
+        # `.compile`, a splat whose elements are known to be ones, or a value whose type in the flow scope is one
+        # ({.regexp_type?}). `Dynamic[top]`, `Object` and any other type are not: a position that never forgot before
+        # issue #1365 forgets only on evidence, so an argument that is a Regexp without the analyzer knowing it is a
+        # gap there, as it was before.
+        def known_regexp_operand?(node, scope)
+          return true if REGEX_LITERALS.include?(node.class) || regexp_constructor?(node)
+          return splat_known_regexp?(node.expression, scope) if node.is_a?(Prism::SplatNode)
+          return false if NON_REGEXP_LITERALS.include?(node.class)
+
+          regexp_type?(node_type(node, scope), scope)
+        end
+
+        # `*args` passes each element; an anonymous `*` forwards elements nothing is known about.
+        def splat_known_regexp?(expression, scope)
+          return false if expression.nil?
 
           type = node_type(expression, scope)
           case type
-          when Type::Tuple then type.elements.any? { |element| type_may_be_regexp?(element, scope) }
+          when Type::Tuple then type.elements.any? { |element| regexp_type?(element, scope) }
           when Type::Nominal
-            arguments = type.type_args
-            return type_may_be_regexp?(type, scope) unless type.class_name == "Array" && !arguments.empty?
-
-            arguments.any? { |element| type_may_be_regexp?(element, scope) }
-          else type_may_be_regexp?(type, scope)
-          end
-        end
-        private_class_method :splat_typed_regexp?
-
-        def type_may_be_regexp?(type, scope)
-          case type
-          when nil, Type::Top, Type::App then true
-          when Type::Dynamic then type_may_be_regexp?(type.static_facet, scope)
-          when Type::Constant then type.value.is_a?(Regexp)
-          when Type::Nominal then nominal_may_be_regexp?(type.class_name, scope)
-          when Type::Union then type.members.any? { |member| type_may_be_regexp?(member, scope) }
-          when Type::Intersection then type.members.all? { |member| type_may_be_regexp?(member, scope) }
-          when Type::Difference, Type::Refined then type_may_be_regexp?(type.base, scope)
+            type.class_name == "Array" ? type.type_args.any? { |element| regexp_type?(element, scope) } : false
           else false
           end
         end
-        private_class_method :type_may_be_regexp?
+        private_class_method :splat_known_regexp?
 
-        # A class the environment does not relate to `Regexp` is taken to be a project class, not a Regexp subclass.
-        def nominal_may_be_regexp?(class_name, scope)
-          return true if REGEXP_ANCESTORS.include?(class_name) || class_name.start_with?("_")
+        # True when a value of `type` may be a Regexp on the analyzer's evidence: a Regexp constant, `Regexp` or a
+        # class the environment places below it, a union or intersection with such a member, a refinement or
+        # difference over one, or a `Dynamic` whose static facet is one.
+        def regexp_type?(type, scope)
+          case type
+          when Type::Constant then type.value.is_a?(Regexp)
+          when Type::Nominal then regexp_class?(type.class_name, scope)
+          when Type::Union, Type::Intersection then type.members.any? { |member| regexp_type?(member, scope) }
+          when Type::Dynamic then regexp_type?(type.static_facet, scope)
+          when Type::Difference, Type::Refined then regexp_type?(type.base, scope)
+          else false
+          end
+        end
+        private_class_method :regexp_type?
+
+        def regexp_class?(class_name, scope)
+          return true if class_name == "Regexp"
 
           environment = scope&.environment
-          environment.nil? || REGEXP_ORDERINGS.include?(environment.class_ordering(class_name, "Regexp"))
+          !environment.nil? && REGEXP_CLASS_ORDERINGS.include?(environment.class_ordering(class_name, "Regexp"))
         end
-        private_class_method :nominal_may_be_regexp?
+        private_class_method :regexp_class?
+
+        def regexp_constructor?(node)
+          node.is_a?(Prism::CallNode) && REGEXP_CONSTRUCTORS.include?(node.name) &&
+            node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Regexp
+        end
+        private_class_method :regexp_constructor?
 
         def node_type(node, scope)
           scope&.type_of(node)
@@ -149,12 +168,10 @@ module Rigor
         def regexp_argument?(node, scope)
           case node
           when Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode then true
-          when Prism::ConstantReadNode, Prism::ConstantPathNode then known_regexp?(node_type(node, scope))
-          when Prism::LocalVariableReadNode then known_regexp?(scope&.local(node.name))
-          when Prism::InstanceVariableReadNode then known_regexp?(scope&.ivar(node.name))
-          when Prism::CallNode
-            REGEXP_CONSTRUCTORS.include?(node.name) && node.receiver.is_a?(Prism::ConstantReadNode) &&
-              node.receiver.name == :Regexp
+          when Prism::ConstantReadNode, Prism::ConstantPathNode then regexp_type?(node_type(node, scope), scope)
+          when Prism::LocalVariableReadNode then regexp_type?(scope&.local(node.name), scope)
+          when Prism::InstanceVariableReadNode then regexp_type?(scope&.ivar(node.name), scope)
+          when Prism::CallNode then regexp_constructor?(node)
           else false
           end
         end
@@ -214,16 +231,6 @@ module Rigor
           end
         end
         private_class_method :constant_regexp?
-
-        def known_regexp?(type)
-          case type
-          when Type::Constant then type.value.is_a?(Regexp)
-          when Type::Nominal then type.class_name == "Regexp"
-          when Type::Union then type.members.any? { |member| known_regexp?(member) }
-          else false
-          end
-        end
-        private_class_method :known_regexp?
       end
     end
   end

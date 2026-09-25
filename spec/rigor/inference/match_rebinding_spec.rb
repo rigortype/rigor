@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "prism"
+require "tmpdir"
 
 # Issue #1358 — Ruby keeps the regex match globals in the method frame's special-variable slot, and every block and
 # closure made in the method reaches that same slot, while a `def`, class or module body has a slot of its own.
@@ -374,7 +375,7 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(framed.match_frame.self_call_fallback?(framed)).to be(true)
       expect(operands_may_rebind?("value.upcase", framed)).to be(false)
       expect(operands_may_rebind?("$stdout.puts(emit('q'))", framed)).to be(false)
-      expect(operands_may_rebind?("$stdout.puts(eval(src))", framed)).to be(true)
+      expect(operands_may_rebind?(%q($stdout.puts(eval('"zz" =~ /(q)/'))), framed)).to be(true)
     end
   end
 
@@ -397,99 +398,177 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     end
   end
 
-  # Issue #1365 — outside a block, a statement's calls are read by the types the flow scope gives their operands.
+  # Issue #1365 — outside a block, a statement's calls are read on two terms, split by what the analyzer did before.
   describe Rigor::Inference::MatchRebinding::Calls do
     let(:combinator) { Rigor::Type::Combinator }
     let(:typed) do
       scope.with_local(:re, combinator.constant_of(/(q)/))
            .with_local(:str, combinator.nominal_of("String"))
            .with_local(:n, combinator.nominal_of("Integer"))
-           .with_local(:either, combinator.union(combinator.nominal_of("String"), combinator.nominal_of("Regexp")))
+           .with_local(:maybe, combinator.union(combinator.nominal_of("Regexp"), combinator.constant_of(nil)))
            .with_local(:obj, combinator.nominal_of("Object"))
-           .with_local(:md, combinator.nominal_of("MatchData"))
            .with_local(:key, combinator.untyped)
-           .with_local(:parts, combinator.tuple_of(combinator.constant_of("a"), combinator.constant_of("b")))
+           .with_local(:dyn_re, combinator.dynamic(combinator.nominal_of("Regexp")))
+           .with_local(:res, combinator.nominal_of("Array", type_args: [combinator.nominal_of("Regexp")]))
+           .with_local(:strs, combinator.tuple_of(combinator.constant_of("a"), combinator.constant_of("b")))
     end
 
     # Each source declares the locals first, so they parse as reads of the bindings `typed` gives them.
-    def rebinds?(source)
-      described_class.rebinds?(last_statement("re = str = n = either = obj = md = key = parts = nil; #{source}"), typed)
-    end
+    def call(source) = last_statement("re = str = n = maybe = obj = key = dyn_re = res = strs = nil; #{source}")
+    def rebinds?(source, in_scope = typed) = described_class.rebinds?(call(source), in_scope)
+    def forgets_by_name?(source) = described_class.forgets_by_name?(call(source), typed)
 
-    it "counts `=~`, `!~`, `match`, `sub`, `gsub` and `scan` whatever their argument" do
-      ["u =~ str", "u !~ /(z)/", "u.match('q')", "u.sub('q', '')", "u.gsub!(str, '')", "u.scan('q')"].each do |call|
-        expect(rebinds?(call)).to be(true), call
+    describe ".forgets_by_name?" do
+      it "keeps a lookup the table named only when every argument is a non-Regexp literal" do
+        ["row[:name]", "csv.split(',')", "list.index(3)", "s.slice(0, 2)", "s[1..2]", "s.split", "h[nil]"]
+          .each { |source| expect(forgets_by_name?(source)).to be(false), source }
+        ["row[key]", "s.split(str)", "s.index(n)", "s.index(re)", "s.split(\"\#{sep}\")", "s.index(*strs)",
+         "s.index(RebindRegexp.new('q'))", "row[[1]]"]
+          .each { |source| expect(forgets_by_name?(source)).to be(true), source }
+      end
+
+      # A flow type is not proof: `str` reads `String` here, but a stale type can say so of a Regexp (#1380).
+      it "does not keep on a typed argument" do
+        expect(forgets_by_name?("s.partition(str)")).to be(true)
+        expect(forgets_by_name?("s.slice(n)")).to be(true)
+      end
+
+      it "keeps `match?`, `grep` without a block, and `===` on a literal or a class" do
+        expect(forgets_by_name?("s.match?(re)")).to be(false)
+        expect(forgets_by_name?("lines.grep(re)")).to be(false)
+        expect(forgets_by_name?("String === s")).to be(false)
+        expect(forgets_by_name?("'x' === s")).to be(false)
+        expect(forgets_by_name?("lines.grep(re) { |l| l }")).to be(true)
+        expect(forgets_by_name?("lines.grep('a') { |l| l }")).to be(false)
+        expect(forgets_by_name?("re === s")).to be(true)
+        expect(forgets_by_name?("KEYS === s")).to be(true)
+        expect(forgets_by_name?("Some::Unknown === s")).to be(true)
+        expect(forgets_by_name?("self === s")).to be(true)
+      end
+
+      it "keeps an implicit-self `start_with?` or `[]=` only on literals, and never an eval or a `send`" do
+        expect(forgets_by_name?("start_with?('x')")).to be(false)
+        expect(forgets_by_name?("start_with?(str)")).to be(true)
+        expect(forgets_by_name?("self[:k] = value")).to be(false)
+        expect(forgets_by_name?("self[key] = 1")).to be(true)
+        expect(forgets_by_name?("eval('1')")).to be(true)
+        expect(forgets_by_name?("send(:start_with?, 'x')")).to be(true)
+        expect(forgets_by_name?("s =~ str")).to be(true)
       end
     end
 
-    it "counts a lookup only with an argument that may be a Regexp, by its type" do
-      expect(rebinds?("u.split(/(,)/)")).to be(true)
-      expect(rebinds?("u[re]")).to be(true)
-      expect(rebinds?("u.index(either)")).to be(true)
-      expect(rebinds?("u.start_with?(obj)")).to be(true)
-      expect(rebinds?("u.byterindex(WORD_RE)")).to be(true)
-      expect(rebinds?("u.split(',')")).to be(false)
-      expect(rebinds?("row[:name]")).to be(false)
-      expect(rebinds?("list.index(3)")).to be(false)
-      expect(rebinds?("u.partition(str)")).to be(false)
-      expect(rebinds?("u.slice(n, 2)")).to be(false)
-      expect(rebinds?("u.byteindex(md)")).to be(false)
-      expect(rebinds?("u.start_with?('#')")).to be(false)
-      expect(rebinds?("items.any?(String)")).to be(false)
-      expect(rebinds?("u.index(*parts)")).to be(false)
-      expect(rebinds?("u[KEYS]")).to be(false)
+    describe ".base_named?" do
+      it "names the table's methods on any receiver, and {SelfCalls}' only where the call is implicit" do
+        expect(described_class.base_named?(call("u.index(re)"), implicit: false)).to be(true)
+        expect(described_class.base_named?(call("u.start_with?(re)"), implicit: false)).to be(false)
+        expect(described_class.base_named?(call("start_with?(re)"), implicit: true)).to be(true)
+        expect(described_class.base_named?(call("log(re)"), implicit: true)).to be(false)
+      end
     end
 
-    # Nothing is known about an unannotated parameter or an unresolved constant, so either may be a Regexp.
-    it "counts an argument of type `Dynamic[top]`" do
-      expect(rebinds?("row[key]")).to be(true)
-      expect(rebinds?("u.index(Some::Unknown)")).to be(true)
-    end
+    describe ".rebinds?" do
+      it "counts `=~`, `!~`, `match`, `sub`, `gsub` and `scan` whatever their argument" do
+        ["u =~ str", "u !~ /(z)/", "u.match('q')", "u.sub('q', '')", "u.gsub!(str, '')", "u.scan('q')"].each do |source|
+          expect(rebinds?(source)).to be(true), source
+        end
+      end
 
-    it "never counts `match?`, and counts `grep` / `grep_v` only in their block form" do
-      expect(rebinds?("u.match?(/(z)/)")).to be(false)
-      expect(rebinds?("lines.grep(/(z)/)")).to be(false)
-      expect(rebinds?("lines.grep(/(z)/) { |l| l }")).to be(true)
-      expect(rebinds?("lines.grep_v(re, &handler)")).to be(true)
-      expect(rebinds?("lines.grep(String) { |l| l }")).to be(false)
-    end
+      it "counts a lookup only with an argument known to be a Regexp" do
+        ["u.split(/(,)/)", "u[re]", "u.index(maybe)", "u.byterindex(WORD_RE)", "u.index(dyn_re)",
+         "u.index(Regexp.union('a', 'b'))", "u.index(*res)", "u.start_with?(/(z)/)", "items.any?(re)"]
+          .each { |source| expect(rebinds?(source)).to be(true), source }
+        ["u.split(',')", "row[:name]", "list.index(3)", "u.partition(str)", "u.slice(n, 2)", "u.start_with?(obj)",
+         "row[key]", "u.index(Some::Unknown)", "items.any?(String)", "u.index(*strs)", "u.index(*)", "u[KEYS]"]
+          .each { |source| expect(rebinds?(source)).to be(false), source }
+      end
 
-    it "reads `===` and unary `~` by their receiver" do
-      expect(rebinds?("/(q)/ === u")).to be(true)
-      expect(rebinds?("re === u")).to be(true)
-      expect(rebinds?("Some::Unknown === u")).to be(true)
-      expect(rebinds?("String === u")).to be(false)
-      expect(rebinds?("str === u")).to be(false)
-      expect(rebinds?("~/(z)/")).to be(true)
-      expect(rebinds?("~n")).to be(false)
-    end
+      # A class the environment places below `Regexp` is one; a project class it does not know is not.
+      it "reads a Regexp subclass through the environment's class ordering" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "my_re.rbs"), "class MyRe < Regexp\nend\n")
+          environment = Rigor::Environment.for_project(signature_paths: [dir])
+          subclassed = Rigor::Scope.empty(environment: environment).with_local(:mine, combinator.nominal_of("MyRe"))
+          unknown = Rigor::Scope.empty(environment: environment).with_local(:mine, combinator.nominal_of("Unrelated"))
+          expect(described_class.rebinds?(last_statement("mine = nil; u.index(mine)"), subclassed)).to be(true)
+          expect(described_class.rebinds?(last_statement("mine = nil; u.index(mine)"), unknown)).to be(false)
+        end
+      end
 
-    it "reads `[]=` by its index, not the value it stores" do
-      expect(rebinds?("u[/(q)/] = 'x'")).to be(true)
-      expect(rebinds?("h[:k] = /(q)/")).to be(false)
-    end
+      it "reads a refinement, a difference and an intersection by their Regexp member" do
+        regexp = combinator.nominal_of("Regexp")
+        {
+          Rigor::Type::Refined.new(regexp, :non_empty) => true,
+          Rigor::Type::Difference.new(regexp, combinator.constant_of(nil)) => true,
+          Rigor::Type::Intersection.new([regexp, combinator.nominal_of("Comparable")]) => true,
+          Rigor::Type::Difference.new(combinator.nominal_of("String"), combinator.constant_of("")) => false
+        }.each do |type, expected|
+          bound = typed.with_local(:mine, type)
+          expect(described_class.rebinds?(last_statement("mine = nil; u.index(mine)"), bound)).to be(expected)
+        end
+      end
 
-    it "counts an eval of a String on any receiver, and not the block form" do
-      expect(rebinds?("Kernel.eval(src)")).to be(true)
-      expect(rebinds?("binding.eval(src)")).to be(true)
-      expect(rebinds?("obj.instance_eval(src)")).to be(true)
-      expect(rebinds?("klass.class_eval { attr_reader :x }")).to be(false)
-      expect(rebinds?("node.eval")).to be(false)
-    end
+      it "never counts `match?`, and counts `grep` / `grep_v` only in their block form" do
+        expect(rebinds?("u.match?(/(z)/)")).to be(false)
+        expect(rebinds?("lines.grep(/(z)/)")).to be(false)
+        expect(rebinds?("lines.grep(/(z)/) { |l| l }")).to be(true)
+        expect(rebinds?("lines.grep_v(re, &handler)")).to be(true)
+        expect(rebinds?("lines.grep(String) { |l| l }")).to be(false)
+      end
 
-    it "reads a `send` by the method it names, with the arguments it sends" do
-      expect(rebinds?("u.send(:=~, re)")).to be(true)
-      expect(rebinds?("u.public_send(name, re)")).to be(true)
-      expect(rebinds?("u.__send__('[]', /(q)/)")).to be(true)
-      expect(rebinds?("u.__send__(:[], :k)")).to be(false)
-      expect(rebinds?("u.send(:match?, /x/)")).to be(false)
-      expect(rebinds?("u.send(:upcase)")).to be(false)
-      expect(rebinds?('u.send("\xff", 1)')).to be(false)
-    end
+      it "reads `===` and unary `~` by whether their receiver is known to be a Regexp" do
+        expect(rebinds?("/(q)/ === u")).to be(true)
+        expect(rebinds?("re === u")).to be(true)
+        expect(rebinds?("Some::Unknown === u")).to be(false)
+        expect(rebinds?("String === u")).to be(false)
+        expect(rebinds?("~/(z)/")).to be(true)
+        expect(rebinds?("~n")).to be(false)
+      end
 
-    it "reads an index compound write by its index" do
-      expect(rebinds?("u[/(q)/] ||= 'x'")).to be(true)
-      expect(rebinds?("h[:k] += 1")).to be(false)
+      it "reads `[]=` and an index compound write by the index, not the value stored" do
+        expect(rebinds?("u[/(q)/] = 'x'")).to be(true)
+        expect(rebinds?("h[:k] = /(q)/")).to be(false)
+        expect(rebinds?("h[key] = 1")).to be(false)
+        expect(rebinds?("u[/(q)/] ||= 'x'")).to be(true)
+        expect(rebinds?("u[re] += 'x'")).to be(true)
+        expect(rebinds?("h[key] += 1")).to be(false)
+      end
+
+      it "counts an eval of a String whose code may match, and not one it cannot read" do
+        expect(rebinds?(%q|Kernel.eval('"zz" =~ /(q)/')|)).to be(true)
+        expect(rebinds?(%q|binding.eval('x.sub("a", "")')|)).to be(true)
+        expect(rebinds?(%q|obj.instance_eval("x = #{n}; 'zz' =~ /(q)/")|)).to be(true)
+        expect(rebinds?('klass.class_eval("def foo; end")')).to be(false)
+        expect(rebinds?("klass.class_eval(\"def \#{name}; @\#{name} =~ /(q)/; end\")")).to be(false)
+        # An interpolated String that does not parse with its interpolations standing for a name counts when its
+        # literal text names a match.
+        expect(rebinds?("klass.class_eval(\"\#{name} =~ /(q)/ if\")")).to be(true)
+        expect(rebinds?("klass.class_eval(\"\#{name}( 1\")")).to be(false)
+        expect(rebinds?("Kernel.eval(src)")).to be(false)
+        expect(rebinds?("Kernel.eval('x =~ ')")).to be(false)
+        expect(rebinds?("klass.class_eval { attr_reader :x }")).to be(false)
+        expect(rebinds?("node.eval")).to be(false)
+      end
+
+      it "reads a `send` by the method it names, or by the arguments a computed name is sent" do
+        expect(rebinds?("u.send(:=~, re)")).to be(true)
+        expect(rebinds?("u.public_send(name, re)")).to be(true)
+        expect(rebinds?("u.__send__('[]', /(q)/)")).to be(true)
+        expect(rebinds?("u.public_send(name)")).to be(false)
+        expect(rebinds?("sock.send(packet, 0)")).to be(false)
+        expect(rebinds?("record.public_send(\"\#{attr}=\", re)")).to be(false)
+        expect(rebinds?("record.public_send(:\"\#{attr}=\", re)")).to be(false)
+        expect(rebinds?("u.public_send(\"\#{op}==\", re)")).to be(true)
+        expect(rebinds?("u.__send__(:[], :k)")).to be(false)
+        expect(rebinds?("u.send(:match?, /x/)")).to be(false)
+        expect(rebinds?("u.send(:upcase)")).to be(false)
+        expect(rebinds?('u.send("\xff", 1)')).to be(false)
+      end
+
+      it "counts a forwarded `...` in neither reading as a known Regexp, and in the name reading as a non-literal" do
+        forwarding = Prism.parse("def m(u, ...) = u.index(...)").value.statements.body.first.body.body.first
+        expect(described_class.rebinds?(forwarding, typed)).to be(false)
+        expect(described_class.forgets_by_name?(forwarding, typed)).to be(true)
+      end
     end
   end
 
@@ -551,6 +630,16 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       framed = narrowed.with_match_frame(root("f = proc { s =~ /(z)/ }"))
 
       expect(described_class.block_entry(framed, block("items.each { |i| $1 }")).global(:$1)).to be_nil
+    end
+
+    # Issue #1365 — the call's receiver chain and arguments run before it yields.
+    it "forgets them, given the owning call, when its receiver chain or arguments are known to match" do
+      rebound = last_statement("[u.index(/(q)/)].map { $1 }")
+      plain = last_statement("[row[:k]].map { $1 }")
+
+      expect(described_class.block_entry(narrowed, rebound.block, rebound).global(:$1)).to be_nil
+      expect(described_class.block_entry(narrowed, rebound.block)).to equal(narrowed)
+      expect(described_class.block_entry(narrowed, plain.block, plain)).to equal(narrowed)
     end
   end
 end

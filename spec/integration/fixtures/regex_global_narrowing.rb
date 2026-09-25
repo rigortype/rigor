@@ -1005,8 +1005,8 @@ def rebind_tilde(str)
   end
 end
 
-# `send` with a literal name that matches, or a computed one, and an eval of a String on any receiver (`u = "zz"`,
-# `name = :=~`, `obj = Object.new`, `src = %q("zz" =~ /(q)/)`).
+# `send` with a literal name that matches, or a computed one sent a Regexp, and an eval on any receiver of a String
+# whose code matches, literal, heredoc or interpolated (`u = "zz"`, `name = :=~`, `obj = Object.new`, `n = 1`).
 def rebind_send_literal(str, u)
   if str =~ /(\d+)/
     u.send(:=~, /(q)/)
@@ -1021,26 +1021,37 @@ def rebind_send_computed(str, u, name)
   end
 end
 
-def rebind_binding_eval(str, src)
+def rebind_binding_eval(str)
   if str =~ /(\d+)/
-    binding.eval(src)
+    binding.eval('"zz" =~ /(q)/')
     assert_type("String?", $1)
   end
 end
 
-def rebind_kernel_eval(str, src)
+def rebind_kernel_eval(str)
   if str =~ /(\d+)/
-    Kernel.eval(src)
+    Kernel.eval('"zz".sub("q", "")')
     assert_type("String?", $1)
   end
 end
 
-def rebind_instance_eval(str, obj, src)
+def rebind_instance_eval(str, obj)
   if str =~ /(\d+)/
-    obj.instance_eval(src)
+    obj.instance_eval <<~RUBY
+      "zz" =~ /(q)/
+    RUBY
     assert_type("String?", $1)
   end
 end
+
+def rebind_class_eval_interpolated(str, n)
+  if str =~ /(\d+)/
+    RebindEvalTarget.class_eval "x = #{n}; 'zz' =~ /(q)/"
+    assert_type("String?", $1)
+  end
+end
+
+class RebindEvalTarget; end
 
 # A lookup with a Regexp argument, in statement or assignment position, and `scan` / `sub` with a String pattern, `===`
 # on a Regexp and `grep` / `any?` with one (`u = "abc"`, `items = ["zz"]`, `pattern = /(q)/`). A Regexp held in a
@@ -1109,6 +1120,39 @@ def rebind_any(str, items)
   end
 end
 
+# A name the table always forgot on keeps forgetting on any argument that is not a literal, whatever its flow type:
+# a Regexp subclass, a forwarded `...` and a splat (Ruby: nil for each with `u = "z"`, and for
+# `rebind_forwarded("a1", "z", /(q)/)`).
+class RebindRegexp < Regexp
+  def self_case_equality(str)
+    if str =~ /(\d+)/
+      self === str
+      assert_type("String?", $1)
+    end
+  end
+end
+
+def rebind_subclass_argument(str, u)
+  if str =~ /(\d+)/
+    u.index(RebindRegexp.new("(q)"))
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_forwarded(str, u, ...)
+  if str =~ /(\d+)/
+    u.index(...)
+    assert_type("String?", $1)
+  end
+end
+
+def rebind_splat(str, u)
+  if str =~ /(\d+)/
+    u.index(*[/(q)/])
+    assert_type("String?", $1)
+  end
+end
+
 # A call in an operand: an array element, an argument, a receiver chain, a `rescue` modifier and an index `||=` (`u =
 # "z"`, and `u = +"q"` for the `||=`, whose read matches `q` without the optional group).
 def operand_array_element(str, u)
@@ -1147,11 +1191,50 @@ def operand_index_or_write(str, u)
   end
 end
 
-# The receiver chain runs before the call's own block, which reads the rebound `$1` (Ruby: `[nil]` for
-# `operand_before_block("a1", "z")`).
+# `+=` and `&&=` on a Regexp index read it, and a written literal element or `rescue` modifier is threaded but still
+# forgets (`u = +"zq"` for the index writes, whose read matches `q` without the optional group, `u = "z"` for the
+# others).
+def operand_index_operator_write(str, u)
+  if str =~ /(\d+)/
+    u[/q(z)?/] += "x"
+    assert_type("String?", $1)
+  end
+end
+
+def operand_index_and_write(str, u)
+  if str =~ /(\d+)/
+    u[/q(z)?/] &&= "x"
+    assert_type("String?", $1)
+  end
+end
+
+def operand_threaded_array(str, u)
+  n = 0
+  if str =~ /(\d+)/
+    pair = [n += 1, u.index(/(q)/)]
+    [pair, assert_type("String?", $1)]
+  end
+end
+
+def operand_threaded_rescue(str, u)
+  if str =~ /(\d+)/
+    hit = (found = u[/(q)/]) rescue nil
+    [hit, found, assert_type("String?", $1)]
+  end
+end
+
+# The receiver chain runs before the call's own block, which reads the rebound `$1`, and so does the fold over a
+# literal receiver (Ruby: `[nil]` for `operand_before_block("a1", "z")` and `operand_before_fold("a1", "z")`).
 def operand_before_block(str, u)
   if str =~ /(\d+)/
     u.sub(/q/, "").each_char.map { |_c| assert_type("String?", $1) }
+  end
+end
+
+def operand_before_fold(str, u)
+  if str =~ /(\d+)/
+    values = [u.index(/(q)/)].map { $1 }
+    assert_type("[String?]", values)
   end
 end
 
@@ -1314,6 +1397,146 @@ def keep_send_literal(line, s)
     key = $1
     assert_type("String", key)
     key.upcase # KEEPS-1365
+  end
+end
+
+# A write or lookup whose key the analyzer cannot type, an attribute writer or computed name through `send`, and a
+# `class_eval` that defines a method, in positions that never forgot, do not forget now either (Ruby: "AB" for each
+# with `line = "ab=c"`, `k = :k`, `row = {id: 1}`, `rows = [row]`, `h = {}`, `config = {}`, `section = :s`,
+# `out = []` (a `StringIO` for `puts`), `obj = "x"`, `meth = :size`, `packet` a String and `sock` a `UDPSocket`-like object whose `send`
+# takes it, and `record` a `Struct` with an `ab` member).
+class KeepSeen
+  def initialize = @seen = {}
+
+  def mark(line, k)
+    if line =~ /(\w+)=(.*)/
+      @seen[k] = true
+      key = $1
+      assert_type("String", key)
+      key.upcase # KEEPS-1365
+    end
+  end
+end
+
+def keep_counts(line, rows)
+  counts = Hash.new(0)
+  if line =~ /(\w+)=(.*)/
+    rows.each { |row| counts[row[:id]] += 1 }
+    key = $1
+    assert_type("String", key)
+    [counts, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_index_store_key(line, row, index)
+  if line =~ /(\w+)=(.*)/
+    index[row[:id]] = true
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_untyped_store(line, h, k)
+  if line =~ /(\w+)=(.*)/
+    h[k] = 1
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_config_or_write(line, config, section)
+  if line =~ /(\w+)=(.*)/
+    config[section] ||= {}
+    key = $1
+    config[section][key.downcase] = $2
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_append_lookup(line, out, row, k)
+  if line =~ /(\w+)=(.*)/
+    out << row[k]
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_puts_lookup(line, out, row, k)
+  if line =~ /(\w+)=(.*)/
+    out.puts "v: #{row[k]}"
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_literal_lookup(line, h, k)
+  if line =~ /(\w+)=(.*)/
+    x = [h[k], 1]
+    key = $1
+    assert_type("String", key)
+    [x, key.upcase] # KEEPS-1365
+  end
+end
+
+def keep_operator_store(line, h, k)
+  if line =~ /(\w+)=(.*)/
+    h[k] += 1
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_setter_send(line, record)
+  if line =~ /(\w+)=(.*)/
+    record.public_send("#{$1}=", $2)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_computed_send(line, obj, meth)
+  if line =~ /(\w+)=(.*)/
+    obj.public_send(meth)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+def keep_socket_send(line, sock, packet)
+  if line =~ /(\w+)=(.*)/
+    sock.send(packet, 0)
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
+class KeepClassEval
+  def define_heredoc(line)
+    if line =~ /(\w+)=(.*)/
+      self.class.class_eval <<~RUBY
+        def foo; end
+      RUBY
+      key = $1
+      assert_type("String", key)
+      key.upcase # KEEPS-1365
+    end
+  end
+
+  def define_literal(line, klass)
+    if line =~ /(\w+)=(.*)/
+      klass.class_eval("def foo; end")
+      key = $1
+      assert_type("String", key)
+      key.upcase # KEEPS-1365
+    end
   end
 end
 

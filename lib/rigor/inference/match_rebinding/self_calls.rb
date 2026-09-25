@@ -14,8 +14,8 @@ module Rigor
       ].freeze
 
       # The calls past that table that may rebind the frame they are made from, read by name alone (issue #1364), as
-      # the broad reading of a frame's blocks counts them ({MatchRebinding.broad_may_match?}). A statement's own calls
-      # are read by {Calls}, which also types their arguments (issue #1365).
+      # the broad reading of a frame's blocks counts them ({MatchRebinding.broad_may_match?}), and as the calls an
+      # implicit-self call forgot on before issue #1365, which {Calls.base_named?} keeps forgetting on.
       module SelfCalls
         # Builtins that set their caller's `$~` and the table misses: `x !~ re`, `~re`, and `start_with?(re)`,
         # `byteindex(re)`, `byterindex(re)`, `s[re] = v` — the ones a `String` or `Regexp` subclass inherits too.

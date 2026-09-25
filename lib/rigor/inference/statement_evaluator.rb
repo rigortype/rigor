@@ -2518,8 +2518,8 @@ module Rigor
       # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
       # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone. Issue #1365 —
       # the statement that holds the operand forgets the regex globals for every call in it instead, threaded or not,
-      # by what each call runs ({#forget_operand_match_globals}), so an operand's answer still does not depend on
-      # whether it writes.
+      # when that call is known to match ({#forget_operand_match_globals}), so an operand's answer still does not
+      # depend on whether it writes.
       def thread_operand(node, entry, walk, typed_from)
         return entry unless node.is_a?(Prism::Node)
 
@@ -2672,10 +2672,10 @@ module Rigor
 
       # Issue #1365 — the scope a statement call runs its method from, with the match globals forgotten when its
       # receiver chain or arguments may rebind them ({MatchRebinding.operands_may_rebind?}): Ruby runs those first,
-      # so the call's own block already reads the rebound globals (`s.sub(re, "").each_char { $1 }`). Every call in
-      # them answers here by what it calls, as a statement call does, and none resets by itself ({#invoke_call}), so
-      # an operand's answer does not depend on whether the evaluator threads it: `$stdout.puts(Integer(v = $2))`
-      # keeps `$1` narrowed as `$stdout.puts(Integer($2))` does.
+      # so the call's own block already reads the rebound globals (`s.sub(re, "").each_char { $1 }`). No call in them
+      # forgot before, so each forgets here only when it is known to match ({MatchRebinding::Calls.rebinds?}), and
+      # none resets by itself ({#invoke_call}), so an operand's answer does not depend on whether the evaluator
+      # threads it: `$stdout.puts(Integer(v = $2))` keeps `$1` narrowed as `$stdout.puts(Integer($2))` does.
       def forget_operand_match_globals(node, invoked)
         return invoked if @in_operand || !invoked.match_globals_bound?
         return invoked unless MatchRebinding.operands_may_rebind?(node, scope)
@@ -2709,14 +2709,15 @@ module Rigor
       end
 
       # True when `node` could rebind the regex match-data globals by itself ({MatchRebinding.call_rebinds?}): a method
-      # that matches on this frame's behalf, on any receiver, read by the types of the operands where they were
-      # typed (issue #1365: `s.split(/(,)/)` and `u.start_with?(re)` do, `row[:name]`, `csv.split(",")` and
-      # `s.match?(re)` do not); or an implicit-self / `self.` call that may reach this frame's slot. Issue #1364 — a
-      # method defined in Ruby runs in a frame of its own, so a match in its body rebinds its own `$~`, never its
-      # caller's, and `log("parsed"); key = $1` keeps `$1` narrowed; such a call forgets as every implicit-self call
-      # did before only in a frame that hands its slot to code the analyzer does not trace, or where no body stamped
-      # a frame. A call to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is match-free, so the
-      # multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals.
+      # that matches on this frame's behalf, on any receiver, read with the operands where they were typed (issue
+      # #1365: a name the old table forgot on keeps forgetting unless its literal arguments prove it match-free, so
+      # `row[:name]`, `csv.split(",")` and `s.match?(re)` keep the narrowing and `row[key]` does not; any other call
+      # forgets when it is known to match, as `u.start_with?(/(q)/)` is); or an implicit-self / `self.` call that
+      # may reach this frame's slot. Issue #1364 — a method defined in Ruby runs in a frame of its own, so a match in
+      # its body rebinds its own `$~`, never its caller's, and `log("parsed"); key = $1` keeps `$1` narrowed; such a
+      # call forgets as every implicit-self call did before only in a frame that hands its slot to code the analyzer
+      # does not trace, or where no body stamped a frame. A call to a non-matching method (`$3.to_i`, `year < 50`,
+      # `buf << c`) is match-free, so the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals.
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
 

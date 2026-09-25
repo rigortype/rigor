@@ -56,18 +56,55 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
     end
   end
 
-  describe "stack safety" do
-    it "does not recurse into RETURN_BARRIER_NODES (def/lambda/block)" do
+  describe "return barriers" do
+    # A bare `return` types as `nil` without a scope, so the count of collected types is the count of `return`s the
+    # walk credited to the method.
+    def collected_returns(source)
+      out = []
+      described_class.collect_return_types(parse_def(source).body, scope_index, out)
+      out
+    end
+
+    it "does not recurse into a lambda literal (the inner return has no scope, so nothing is collected)" do
       source = <<~RUBY
         def outer
           inner = -> { return 1 }
           return 2
         end
       RUBY
-      def_node = parse_def(source)
-      returns = []
-      described_class.collect_return_types(def_node.body, scope_index, returns)
-      expect(returns.size).to eq(0)
+      expect(collected_returns(source).size).to eq(0)
+    end
+
+    # Issue #1382 — a block `return` exits the enclosing method (control-flow-analysis.md § "Non-local exits").
+    it "credits a `return` inside an ordinary block to the method" do
+      expect(collected_returns("def m; [1].each { return }; 2; end").size).to eq(1)
+    end
+
+    it "credits a `return` inside a `proc` block, which only widens the type" do
+      expect(collected_returns("def m; proc { return }; 2; end").size).to eq(1)
+    end
+
+    it "credits a `return` in a block nested inside another block" do
+      expect(collected_returns("def m; [1].each { |x| [x].map { return } }; 2; end").size).to eq(1)
+    end
+
+    [
+      "-> { return }",
+      "lambda { return }",
+      "define_method(:x) { return }",
+      "self.define_method(:x) { return }",
+      "define_singleton_method(:x) { return }",
+      "send(:define_method, :x) { return }",
+      "public_send(:lambda) { return }",
+      "def inner; return; end"
+    ].each do |barrier|
+      it "does not credit a `return` inside `#{barrier}`" do
+        expect(collected_returns("def m; #{barrier}; 2; end")).to be_empty
+      end
+    end
+
+    it "still credits a `return` in a barrier call's arguments" do
+      expect(collected_returns("def m(f); define_method(f ? :x : (return)) { 1 }; 2; end").size).to eq(1)
     end
   end
 

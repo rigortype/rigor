@@ -404,6 +404,97 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("BigDecimal")
       end
 
+      it "selects member by member for a Dynamic argument whose facet names several classes (#1350)" do
+        # `Rational + Dynamic[Integer | Float]`: the Integer takes `(Numeric) -> Rational`, the Float
+        # `(Float) -> Float`, and both come back for the dispatch layer to join.
+        definition = env.rbs_loader.instance_definition("Rational")
+        arg = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                        Rigor::Type::Combinator.nominal_of("Float"))
+        )
+        rational = Rigor::Type::Combinator.nominal_of("Rational")
+        candidates = described_class.select_candidates(
+          definition.methods[:+], arg_types: [arg], self_type: rational, instance_type: rational, environment: env
+        )
+        params = candidates.map { |mt| mt.type.required_positionals.first.type.name.relative!.to_s }
+        expect(params).to contain_exactly("Numeric", "Float")
+      end
+
+      it "selects member by member for a Complex member, which no subclass can instantiate either" do
+        # `Integer + Dynamic[Complex | Float]`: the affinity order's `(Integer)` arm takes neither member at runtime.
+        definition = env.rbs_loader.instance_definition("Integer")
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        arg = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Complex"),
+                                        Rigor::Type::Combinator.nominal_of("Float"))
+        )
+        candidates = described_class.select_candidates(
+          definition.methods[:+], arg_types: [arg], self_type: integer, instance_type: integer, environment: env
+        )
+        params = candidates.map { |mt| mt.type.required_positionals.first.type.name.relative!.to_s }
+        expect(params).to contain_exactly("Complex", "Float")
+      end
+
+      def rational_plus(arg, singular: false)
+        method = env.rbs_loader.instance_definition("Rational").methods[:+]
+        rational = Rigor::Type::Combinator.nominal_of("Rational")
+        options = { arg_types: [arg], self_type: rational, instance_type: rational, environment: env }
+        picked = if singular
+                   [described_class.select(method, **options)]
+                 else
+                   described_class.select_candidates(method, **options)
+                 end
+        picked.map { |mt| mt.type.required_positionals.first.type.name.relative!.to_s }
+      end
+
+      def dynamic_of(*names)
+        Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(*names.map { |name| Rigor::Type::Combinator.nominal_of(name) })
+        )
+      end
+
+      it "keeps the wrapper, and the affinity arm, for a facet wider than two members" do
+        expect(rational_plus(dynamic_of("Integer", "Float", "Complex"))).to eq(["Numeric"])
+      end
+
+      it "keeps the wrapper for a facet with an untyped member" do
+        # Read member by member, the untyped member joined every arm beside the Integer's `(Numeric)`.
+        untyped_member = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.untyped)
+        )
+        expect(rational_plus(untyped_member)).to eq(["Numeric"])
+      end
+
+      it "keeps the wrapper for a single supertype member that a subclass arm names" do
+        # `Dynamic[Numeric?]` against `Integer#<=>`: read as `Numeric`, it skipped `(Integer)` for the `(untyped)`
+        # catch-all, whose `Integer?` a runtime Integer never returns.
+        definition = env.rbs_loader.instance_definition("Integer")
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        numeric = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Numeric"),
+                                        Rigor::Type::Combinator.constant_of(nil))
+        )
+        picked = described_class.select_candidates(
+          definition.methods[:<=>], arg_types: [numeric], self_type: integer, instance_type: integer, environment: env
+        )
+        expect(picked.size).to eq(1)
+        expect(picked.first.type.return_type.to_s).to eq("::Integer")
+      end
+
+      it "keeps the wrapper for the singular select, whose one answer a member order would decide" do
+        expect(rational_plus(dynamic_of("Integer", "Float"), singular: true)).to eq(["Numeric"])
+      end
+
+      it "returns one candidate when both members pick the same overload" do
+        definition = env.rbs_loader.instance_definition("Integer")
+        integer = Rigor::Type::Combinator.nominal_of("Integer")
+        candidates = described_class.select_candidates(
+          definition.methods[:fdiv], arg_types: [dynamic_of("Integer", "Float")],
+                                     self_type: integer, instance_type: integer, environment: env
+        )
+        expect(candidates.size).to eq(1)
+      end
+
       it "still prefers the receiver-affinity arm for an untyped argument on Rational#+" do
         mt = select_with_env("Rational", :+, [Rigor::Type::Combinator.untyped])
         expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("Numeric")

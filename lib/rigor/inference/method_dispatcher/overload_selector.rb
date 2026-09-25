@@ -3,6 +3,8 @@
 require_relative "../../type"
 require_relative "../acceptance"
 require_relative "../rbs_type_translator"
+require_relative "alias_strict_nominals"
+require_relative "facet_distribution"
 require_relative "proven_overload"
 require_relative "receiver_affinity"
 
@@ -42,32 +44,7 @@ module Rigor
       module OverloadSelector
         module_function
 
-        # Canonical RBS-core aliases shipped by `core/builtin.rbs` whose body is `<Nominal> | _DuckType`.
-        # Matching an overload against an Integer literal should pick the `(int) -> Array[Elem]` body over
-        # the `(string) -> String` body because Integer satisfies `int`'s strict arm and not `string`'s.
-        # The translator collapses both aliases to `Dynamic[Top]` (interfaces are not structurally matched
-        # yet), so a dedicated pass 1.5 between strict and gradual consults this map to pick the alias
-        # whose strict arm matches.
-        #
-        # Symbol keys are the alias names as they appear under `RBS::Types::Alias#name.to_s` (the `name` is
-        # a `TypeName` whose `to_s` includes the `::` prefix). Values are an Array of class names whose
-        # Nominal[..] form is the alias's strict-arm matcher.
-        #
-        # `range[T] = Range[T] | _Range[T]` is generic, unlike the others, but its strict arm is still a single
-        # nominal and the args are irrelevant to this pass. rbs 4.1 rewrote `Array#[]`'s slicing overload from
-        # `(::Range[::Integer?])` to `(range[int])`; without the entry both it and the `(int) -> E` overload look
-        # alias-typed, so `a[1..2]` resolved to the element type.
-        ALIAS_STRICT_NOMINALS = Ractor.make_shareable({
-                                                        "::int" => ["Integer"],
-                                                        "::string" => ["String"],
-                                                        "::interned" => %w[Symbol String],
-                                                        "::io" => ["IO"],
-                                                        "::encoding" => %w[Encoding String],
-                                                        "::path" => ["String"],
-                                                        "::boolean" => %w[TrueClass FalseClass],
-                                                        "::range" => ["Range"]
-                                                      })
-        private_constant :ALIAS_STRICT_NOMINALS
+        # `ALIAS_STRICT_NOMINALS`, the alias-strict pass's table, lives in `alias_strict_nominals.rb`.
 
         # @param arg_types — caller-provided types in positional order. Empty when
         #   there are no arguments.
@@ -84,7 +61,7 @@ module Rigor
         #   declaration.
         # @return the chosen overload, or nil when the definition has no method
         #   types at all.
-        def select(method_definition, **) = select_candidates(method_definition, **).first
+        def select(method_definition, **) = select_candidates(method_definition, member_wise: false, **).first
 
         # Issue #521 — like {.select}, but when an imprecise argument (`Dynamic[Top]`, or since #1021 a
         # union with a `Dynamic[Top]` member) reaches the gradual pass it returns EVERY gradually-matching
@@ -92,13 +69,30 @@ module Rigor
         # indiscriminately, so "first gradual match" is decided by overload-list
         # position, not by types — `[true] * n` with an untyped `n` pinned `Array#*(string) -> String`
         # and answered a wrong precise type the runtime can contradict. The caller unions the candidates'
-        # returns, which contains the truth whichever overload the runtime takes. Every other path (strict,
-        # alias-resolved, typed-gradual, arity fallback) still yields exactly one candidate, so `select`
-        # keeps its historical single answer.
+        # returns, which contains the truth whichever overload the runtime takes. The member-wise reading of a
+        # two-member `Dynamic` facet (#1350, `FacetDistribution`) returns one candidate per member the same way.
+        # Every other path (strict, alias-resolved, typed-gradual, arity fallback) yields exactly one candidate,
+        # and `select` (`member_wise: false`) keeps its historical single answer.
         #
         # @return matching overloads; empty when the definition declares none.
-        def select_candidates(method_definition, arg_types:, self_type:, instance_type:, type_vars: {},
-                              block_required: false, environment: nil)
+        # rubocop:disable-next Metrics/ParameterLists -- the selection keywords plus the member-wise switch.
+        def select_candidates(definition, arg_types:, self_type:, instance_type:, type_vars: {},
+                              block_required: false, environment: nil, member_wise: true)
+          unless FacetDistribution.faceted?(arg_types)
+            return select_declared(definition, arg_types, self_type, instance_type, type_vars, block_required,
+                                   environment, false)
+          end
+
+          FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
+            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member)
+          end
+        end
+
+        # The selection proper, positional so the hot path forwards no keyword hash. A member-wise call (`member`, see
+        # `FacetDistribution.select`) answers only a genuine match, never the first-overload fallback.
+        # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
+        def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
+                            environment, member)
           declared = method_definition.method_types
           return [] if declared.empty?
 
@@ -133,6 +127,7 @@ module Rigor
             matches = run_selection_passes(declared, overloads, shared.merge(block_required: false))
             return matches unless matches.empty?
           end
+          return [] if member
 
           # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
           # `overloads.first`. Methods like `Array#filter` / `Enumerable#map` declare the block-bearing

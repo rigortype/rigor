@@ -18,7 +18,9 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
+require "rigor/analysis/incremental_session"
 require "rigor/analysis/runner"
+require "rigor/cache/incremental_snapshot"
 require "rigor/cache/store"
 require "rigor/configuration"
 
@@ -166,6 +168,88 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
 
       expect(cold).to eq([["use.rb", 3, "nope"]])
       expect(warm).to eq(cold)
+    end
+
+    # Flip this when the maintainer rules on refine-body self typing (PR #1424): a refinement that overrides a
+    # core method with a different return is checked against the refined class's RBS, as a monkey-patch is.
+    it "checks a refine body's def against the refined class's signature" do
+      write("lib/override.rb", <<~RUBY)
+        module Quiet
+          refine String do
+            def upcase = nil
+          end
+        end
+      RUBY
+
+      rules = diagnostics.map { |d| [d.qualified_rule, d.line] }
+      expect(rules).to eq([["def.return-type-mismatch", 3]])
+    end
+  end
+
+  # A refine body is not a class's method, so the symbol fingerprints and appeared-symbol diff that invalidate a
+  # plain `def`'s callers never see it. Each edit below must reach the `using` file on the warm run.
+  describe "a refine body edited between runs" do
+    let(:paths) { %w[lib/r.rb lib/u.rb] }
+    let(:whisper_fires) { [["u.rb", 3, "whisper"]] }
+
+    def write_refinement(extra = "")
+      write("lib/r.rb", "module Shout\n  refine String do\n    def shout = upcase\n#{extra}  end\nend\n")
+    end
+
+    def write_project
+      write_refinement
+      write("lib/u.rb", "using Shout\n\"a\".shout\n\"a\".whisper\n")
+    end
+
+    def rows_of(diagnostics)
+      diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }
+                 .map { |d| [File.basename(d.path.to_s), d.line, d.method_name.to_s] }.sort
+    end
+
+    def incremental_rows
+      root = File.join(Dir.pwd, ".rigor", "cache")
+      snapshot = Rigor::Cache::IncrementalSnapshot.new(root: root)
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: paths)
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, paths: paths, cache_store: Rigor::Cache::Store.new(root: root)
+      )
+      found, warm = guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint)
+      [rows_of(found), warm]
+    end
+
+    it "re-checks the `using` file under --incremental when a refined def appears and then goes" do
+      write_project
+      expect(incremental_rows).to eq([whisper_fires, false])
+
+      write_refinement("    def whisper = downcase\n")
+      expect(incremental_rows).to eq([[], true])
+      expect(undefined_rows).to eq([])
+
+      write_refinement
+      expect(incremental_rows).to eq([whisper_fires, true])
+      expect(undefined_rows).to eq(whisper_fires)
+    end
+
+    # The refining file is unchanged, so the warm run restores its table from its seed bundle while it
+    # re-analyses the edited `using` file.
+    it "serves an unchanged refining file's table from its seed bundle" do
+      write_project
+      expect(incremental_rows).to eq([whisper_fires, false])
+
+      write("lib/u.rb", "using Shout\n\"a\".shout\n\"a\".whisper\n\"b\".shout\n")
+      expect(incremental_rows).to eq([whisper_fires, true])
+    end
+
+    it "answers an edited refinement on a cached run as a cold run does" do
+      write_project
+      root = File.join(Dir.pwd, ".rigor", "cache")
+      expect(undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))).to eq(whisper_fires)
+
+      write_refinement("    def whisper = downcase\n")
+      expect(undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))).to eq([])
+
+      write_refinement
+      expect(undefined_rows(cache_store: Rigor::Cache::Store.new(root: root))).to eq(whisper_fires)
     end
   end
 

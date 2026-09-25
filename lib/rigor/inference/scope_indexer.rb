@@ -6789,12 +6789,14 @@ module Rigor
       # declaration-stability skip decision off `declaration_signatures`, so a changed file is parsed once for
       # all of them (recon §2 dedup). A per-file live index (built + folded, exactly as
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
-      # reads their parameter structure from.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures: }`.
+      # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
+      # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
+        refinements = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -6803,11 +6805,12 @@ module Rigor
           fold_file_index(acc, file_index)
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
+          refinements[path] = file_index[:refinements] if file_index[:refinements]
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures }
+          declaration_signatures: declaration_signatures, refinements: refinements }
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level

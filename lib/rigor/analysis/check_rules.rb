@@ -782,6 +782,10 @@ module Rigor
           return true if lexical_sites.singleton_local_def?(call_node)
           return false unless kind == :instance
 
+          # ADR-46 — the answer below is a function of every refinement of this name in the project, so the
+          # consumer depends on the name whichever way it answers; a refine body edited in another file must
+          # re-check it (`IncrementalSession#refinement_affected`).
+          DependencyRecorder.read_name(:refinement, call_node.name) if DependencyRecorder.active?
           modules = refining_modules(scope, class_name, call_node.name)
           !modules.nil? && lexical_sites.refinement_active?(call_node, modules)
         end

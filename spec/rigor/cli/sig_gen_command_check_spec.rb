@@ -159,6 +159,32 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(sig_gen("--check", "lib/box.rb").first).to eq(0)
   end
 
+  # Review round 2 of #1422 (probe `m2c`): `sig/` keeps an overload the inline declaration does not mention, so
+  # neither --write nor --check may reconcile the two; both refuse and exit 1, and nothing is dropped.
+  it "refuses, under --write and --check alike, a member whose overloads do not correspond" do
+    write("lib/p.rb", <<~RUBY)
+      class P
+        # @rbs name: String
+        def over_same(name) = name.size
+      end
+    RUBY
+    sig = "class P\n  def over_same: (String name) -> Integer | (Integer name) -> Integer\nend\n"
+    write("sig/p.rbs", sig)
+
+    status, _out, err = sig_gen("--write", "lib/p.rb")
+    expect(status).to eq(1)
+    expect(err).to include("REFUSED").and include("P#over_same").and include("sig.skipped.inline-shape-mismatch")
+    expect(File.read(File.join(root, "sig/p.rbs"))).to eq(sig)
+
+    status, out, = sig_gen("--check", "lib/p.rb")
+    expect(status).to eq(1)
+    expect(out).to include("REFUSED")
+
+    status, out, = sig_gen("--check", "--format=json", "lib/p.rb")
+    payload = JSON.parse(out)
+    expect([status, payload["up_to_date"], payload["refused"].map { |r| r["method"] }]).to eq([1, false, ["over_same"]])
+  end
+
   it "rejects --check alongside another mode" do
     status, _out, err = sig_gen("--check", "--write")
 

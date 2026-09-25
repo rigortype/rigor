@@ -100,9 +100,14 @@ would update sig/greeter.rbs (1 method(s))
   + def greet: (Symbol name) -> String
 ```
 
-It exits `0` and prints `sig/ is up to date` otherwise. Under
-`--format=json` the payload is `{"up_to_date": …, "results":
-[…]}`, one entry per target in the `--write` JSON shape.
+It also fails while a method stands refused
+(`sig.skipped.inline-shape-mismatch`), since `--write` cannot
+fix that. It exits `0` and prints `sig/ is up to date`
+otherwise. Under `--format=json` the payload is
+`{"up_to_date": …, "results": […], "refused": […]}`: one
+entry per target in the `--write` JSON shape, with `action`
+reading `would_create` / `would_update`, and one per refused
+method.
 
 The gate follows `--write`, not `--diff`. A `tighter-return`
 against a declaration that already exists is a proposal
@@ -147,7 +152,12 @@ The `sig.skipped.*` reasons are:
   inline. See [Methods declared inline](#methods-declared-inline).
 - `sig.skipped.inline-generic-class` — the method's class is
   generic by an inline declaration and `sig/` does not declare
-  it yet. See [Classes made generic inline](#classes-made-generic-inline).
+  it yet, or names its type parameters otherwise. See
+  [Classes made generic inline](#classes-made-generic-inline).
+- `sig.skipped.inline-shape-mismatch` — the method is declared
+  inline and in `sig/` with overloads or parameter lists that
+  do not correspond. A refusal: `--write` and `--check` exit
+  `1`. See [Methods declared inline](#methods-declared-inline).
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every
@@ -216,15 +226,29 @@ worth running in CI. The update only ever adds annotations to
 the copy; one you delete inline stays in `sig/` until you
 delete it there too.
 
-Only what you wrote inline drives that update. For `pair`,
-that is the parameter: the return in `sig/` came from the
-body, so it is held to the same rules as any inferred return.
+Only what you wrote inline drives that update. rbs-inline
+fills every slot you left unannotated — `untyped` for a
+parameter, `?{ (?) -> untyped }` for a `&block` — and those
+defaults never replace what `sig/` says there; an `untyped`
+you wrote yourself is treated the same way, since it states
+nothing. A copy that differs only in spelling (`::String` for
+`String`) is current. For `pair`, what you wrote is the
+parameter: the return in `sig/` came from the body, so it is
+held to the same rules as any inferred return.
 If you widened it by hand after review (`-> Array[String]`
 over a `[String, String]` the body builds), sig-gen leaves
 it alone. A return the body proves strictly narrower is a
 `tighter-return` proposal, applied only with `--overwrite`.
 When you change the parameter annotation, the update keeps
 the return `sig/` already has.
+
+When the two do not line up slot for slot — `sig/` declares
+two overloads and the inline annotation one, or the parameter
+lists differ in shape — sig-gen changes neither. Writing the
+inline declaration over the copy would delete an overload
+correct callers use. The method is reported as
+`sig.skipped.inline-shape-mismatch`, and both `--write` and
+`--check` exit `1` until you make the two agree by hand.
 
 ### Classes made generic inline
 
@@ -235,8 +259,11 @@ rbs reject the class, and every class whose signature mentions
 it, with `GenericParameterMismatchError`. Its methods, and
 those of classes nested in it, are skipped as
 `sig.skipped.inline-generic-class`. Declare the class in
-`sig/` with its parameters (`class Box[T]` ... `end`) and
-sig-gen writes the members into that declaration.
+`sig/` with the same parameters (`class Box[T]` ... `end`) and
+sig-gen writes the members into that declaration. A `sig/`
+declaration that names them otherwise (`class Box[U]`) is
+skipped the same way: a copied `-> T` would name a parameter
+nothing binds.
 
 ### Projects that run Steep on the same annotations
 
@@ -655,6 +682,9 @@ by side without coordination.
   changed is what you wrote inline, a return inferred from
   the body keeps its `sig/` spelling, and annotations and
   comments already on the old declaration are kept.
+- **Will not** replace a declaration whose overloads or
+  parameter lists do not correspond to the inline one's; it
+  reports the method and exits `1` instead.
 - **Will not** touch `attr_reader` / `attr_writer` /
   `attr_accessor` declarations in existing RBS — those are
   always treated as user-authored.

@@ -39,11 +39,12 @@ module Rigor
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
-      # The skip reasons {#report_skipped} counts. The three left out each have a report of their own
-      # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}), so a method never
-      # shows up in two tallies.
+      # The skip reasons {#report_skipped} counts. The four left out each have a report of their own
+      # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}, and the refusal
+      # lines `--write` / `--check` print for `inline_shape_mismatch`), so a method never shows up in two tallies.
       SUMMARISED_SKIP_REASONS = (SigGen::Classification::SKIP_DIAGNOSTIC_IDS.keys -
-                                 %i[unrenderable_rbs unresolvable_superclass inline_declared]).freeze
+                                 %i[unrenderable_rbs unresolvable_superclass inline_declared
+                                    inline_shape_mismatch]).freeze
       private_constant :SUMMARISED_SKIP_REASONS
 
       # @return CLI exit status.
@@ -231,11 +232,20 @@ module Rigor
         results = build_writer(configuration, options).write_all(candidates)
 
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
-        # A refused write (an assembled file that does not parse, or an existing target that is not valid
-        # UTF-8) means the user asked for a write and did not get one, so the command must not report
-        # success — a green `sig-gen --write` in CI would otherwise mean nothing.
+        refused = refused_candidates(candidates)
+        SigGen::Renderer.refusal_lines(refused).each { |line| @err.puts(line) }
+        # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8,
+        # or a method whose inline declaration and `sig/` copy cannot be reconciled) means the user asked for a
+        # write and did not get one, so the command must not report success — a green `sig-gen --write` in CI
+        # would otherwise mean nothing.
         refusals = %i[skipped_invalid_rbs skipped_invalid_encoding]
-        results.any? { |result| refusals.include?(result.action) } ? 1 : 0
+        results.any? { |result| refusals.include?(result.action) } || !refused.empty? ? 1 : 0
+      end
+
+      # ADR-112 WD4 — the methods the generator would not reconcile with their `sig/` copy. Unlike every other
+      # skip, the project's `sig/` is wrong while one stands and no flag makes `--write` fix it.
+      def refused_candidates(candidates)
+        candidates.select { |candidate| candidate.skip_reason == :inline_shape_mismatch }
       end
 
       # ADR-112 WD4 — the same writer as {#dispatch_write}, flags included, in dry-run mode. Defined by what
@@ -247,15 +257,25 @@ module Rigor
       # @return 1 when `sig/` is out of date (or a write would be refused), 0 when it is current.
       def dispatch_check(candidates, configuration, options)
         results = build_writer(configuration, options, dry_run: true).write_all(candidates)
-        SigGen::Renderer.new(out: @out).render_check(results: results, format: options.fetch(:format))
+        refused = refused_candidates(candidates)
+        SigGen::Renderer.new(out: @out).render_check(results: results, format: options.fetch(:format),
+                                                     refused: refused)
         stale = SigGen::Renderer.out_of_date(results)
-        return 0 if stale.empty?
+        return 0 if stale.empty? && refused.empty?
 
-        if options.fetch(:format) == "text"
+        report_check_failure(stale, refused) if options.fetch(:format) == "text"
+        1
+      end
+
+      def report_check_failure(stale, refused)
+        unless stale.empty?
           @err.puts("rigor sig-gen --check: #{stale.size} signature file(s) out of date; " \
                     "run `rigor sig-gen --write` with the same options to update them.")
         end
-        1
+        return if refused.empty?
+
+        @err.puts("rigor sig-gen --check: #{refused.size} method(s) whose inline declaration and sig/ copy " \
+                  "cannot be reconciled; `--write` will not change them, so make the two agree by hand.")
       end
 
       def build_writer(configuration, options, dry_run: false)

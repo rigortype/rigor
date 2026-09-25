@@ -520,7 +520,12 @@ declaration, not as what its body infers; a parameter-only
 annotation keeps its parameters and takes the return from the body.
 When what you wrote inline later changes, `--write` replaces the
 stale `sig/` copy without `--overwrite`; an inferred return stays an
-ordinary proposal. A class made generic inline is not written. A project whose Steep reads
+ordinary proposal, and a slot rbs-inline filled by default never
+overwrites `sig/`. A method whose inline and `sig/` overloads do not
+correspond is refused (`sig.skipped.inline-shape-mismatch`), and
+`--write` / `--check` exit `1` until you reconcile it by hand. A class
+made generic inline is not written unless `sig/` declares it with the
+same type parameters. A project whose Steep reads
 the same annotations sets `sig_gen.inline_declared: skip` in
 `.rigor.yml` to keep those methods out of `sig/`. See
 [handbook chapter 11](../handbook/11-sig-gen.md#methods-declared-inline).

@@ -55,7 +55,11 @@ module Rigor
         # ADR-112 WD4 — the member's class, or one it is nested in, is generic by an inline declaration (`# @rbs
         # generic T`) and `sig/` does not declare it yet. sig-gen writes no class type parameters, and a header
         # without them fails the class's definition build.
-        inline_generic_class: "sig.skipped.inline-generic-class"
+        inline_generic_class: "sig.skipped.inline-generic-class",
+        # ADR-112 WD4 — `sig/` declares the member with overloads, or parameter lists, that the inline
+        # declaration's do not correspond to slot for slot, so no update can be written without dropping or
+        # guessing at a `sig/` overload. A refusal: `--write` and `--check` exit 1 until a person reconciles them.
+        inline_shape_mismatch: "sig.skipped.inline-shape-mismatch"
       }.freeze
     end
   end

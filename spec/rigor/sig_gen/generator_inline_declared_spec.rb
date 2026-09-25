@@ -250,6 +250,87 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Review round 2 of #1422 (probes `m2c` / `m2d`): the inline side and the `sig/` side are paired slot by slot.
+  # A shape they do not share is refused, and a slot rbs-inline defaulted (`untyped b`, `?{ (?) -> untyped }`)
+  # never drives or overwrites anything.
+  describe "an inline declaration against a sig/ member of another shape, or with defaulted slots" do
+    let(:source) do
+      <<~RUBY
+        class P
+          # @rbs name: String
+          def overl(name) = [name, name]
+
+          # @rbs a: String
+          def two(a, b) = [a, a]
+
+          # @rbs name: String
+          def blk(name, &blk) = [name, name]
+
+          # @rbs name: String
+          def over_same(name) = name.size
+        end
+      RUBY
+    end
+    let(:m2_sig) do
+      <<~RBS
+        class P
+          def overl: (String name) -> Array[String] | (Integer name) -> Integer
+          def two: (String a, Integer b) -> Array[String]
+          def blk: (String name) { (String) -> void } -> Array[String]
+          def over_same: (String name) -> Integer | (Integer name) -> Integer
+        end
+      RBS
+    end
+
+    def classify(sig)
+      write_fixture("sig/p.rbs", sig)
+      run_generator(write_fixture("lib/p.rb", source), sig: true)
+    end
+
+    it "refuses a member whose overload count differs, and infers no return for it" do
+      candidates = classify(m2_sig)
+
+      %i[overl over_same].each do |name|
+        candidate = find(candidates, name)
+        expect([candidate.classification, candidate.skip_reason, candidate.rbs])
+          .to eq([Rigor::SigGen::Classification::SKIPPED, :inline_shape_mismatch, nil])
+      end
+    end
+
+    it "keeps a sig/ parameter and block the author did not annotate, and proposes nothing" do
+      candidates = classify(m2_sig)
+
+      expect(find(candidates, :two).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+      expect(find(candidates, :blk).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "updates only the annotated parameter, keeping the unannotated one and the block from sig/" do
+      candidates = classify(<<~RBS)
+        class P
+          def two: (Symbol a, Integer b) -> Array[String]
+          def blk: (Symbol name) { (String) -> void } -> Array[String]
+        end
+      RBS
+
+      expect(find(candidates, :two).rbs).to eq("def two: (String a, Integer b) -> Array[String]")
+      expect(find(candidates, :blk).rbs).to eq("def blk: (String name) { (String) -> void } -> Array[String]")
+    end
+
+    it "refuses a member whose parameter list has a different shape" do
+      pair = find(classify("class P\n  def two: (String a) -> Array[String]\nend\n"), :two)
+
+      expect(pair.skip_reason).to eq(:inline_shape_mismatch)
+    end
+  end
+
+  it "treats a sig/ copy that only spells names absolutely as current" do
+    write_fixture("sig/greeter.rbs", "class Greeter\n  def greet: (::String name) -> ::String\nend\n")
+
+    greet = find(run_generator(write_fixture("lib/greeter.rb", source), sig: true), :greet)
+
+    expect(greet.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+  end
+
   # Review of #1422 (probe `g_new`): sig-gen writes no class type parameters, so a `class Box` header in `sig/`
   # beside an inline `class Box[T]` would fail the definition build of Box and of every class mentioning it.
   describe "a class made generic by an inline declaration" do
@@ -278,6 +359,16 @@ RSpec.describe Rigor::SigGen::Generator do
       skipped = candidates.select { |c| c.skip_reason == :inline_generic_class }.map(&:method_name)
       expect(skipped).to contain_exactly(:get, :n)
       expect(find(candidates, :box).rbs).to eq("def box: () -> Box[Integer]")
+    end
+
+    # Review round 2 (probe `g5`): rbs accepts `class Box[U]` beside an inline `Box[T]`, so a copied `-> T`
+    # would name a parameter the `sig/` declaration does not bind.
+    it "writes nothing into a sig/ declaration that names the type parameters otherwise" do
+      write_fixture("sig/box.rbs", "class Box[U]\nend\n")
+
+      get = find(run_generator(write_fixture("lib/box.rb", box), sig: true), :get)
+
+      expect(get.skip_reason).to eq(:inline_generic_class)
     end
 
     it "writes the members into a declaration sig/ already carries" do

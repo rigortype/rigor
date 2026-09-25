@@ -100,14 +100,26 @@ module Rigor
         "sig.skipped.inline-generic-class" => Entry.new(
           id: "sig.skipped.inline-generic-class",
           summary: "The class is generic by an inline declaration, and sig-gen does not write type parameters.",
-          explanation: "The class (or one it is nested in) takes type parameters from `# @rbs generic`, and no " \
-                       "file under `sig/` declares it yet. sig-gen would have to open it with a header that has " \
-                       "no type parameters, and rbs rejects a class whose declarations disagree on them " \
-                       "(`GenericParameterMismatchError`): the class, and every class whose signature mentions " \
-                       "it, would fail its definition build and read `Dynamic[top]`. The inline declaration " \
-                       "still binds when the source is analysed.",
-          next_step: "Declare the class in `sig/` with its type parameters (`class Box[T]` ... `end`) and re-run; " \
-                     "sig-gen then writes the members into that declaration."
+          explanation: "The class (or one it is nested in) takes type parameters from `# @rbs generic`, and " \
+                       "`sig/` either does not declare it yet or declares it with differently named parameters. " \
+                       "sig-gen would have to open it with a header that has no type parameters, which rbs " \
+                       "rejects (`GenericParameterMismatchError`) — the class, and every class whose signature " \
+                       "mentions it, would fail its definition build and read `Dynamic[top]` — or write members " \
+                       "whose `T` the `sig/` declaration does not bind. The inline declaration still binds when " \
+                       "the source is analysed.",
+          next_step: "Declare the class in `sig/` with the same type parameters as the inline declaration " \
+                     "(`class Box[T]` ... `end`) and re-run; sig-gen then writes the members into it."
+        ),
+        "sig.skipped.inline-shape-mismatch" => Entry.new(
+          id: "sig.skipped.inline-shape-mismatch",
+          summary: "The inline declaration and its `sig/` copy do not have the same overloads or parameters.",
+          explanation: "The method is declared inline and in `sig/`, and the two cannot be paired slot for slot: " \
+                       "a different number of overloads, or an overload whose parameter lists differ in shape. " \
+                       "Writing the inline declaration over the copy would delete a `sig/` overload that correct " \
+                       "callers rely on, and a return inferred for it would describe parameters that are about " \
+                       "to change. sig-gen refuses instead, and `--write` / `--check` exit 1.",
+          next_step: "Decide which declaration is right and make the other agree: edit the `# @rbs` / `#:` " \
+                     "annotation, or the `sig/` member (deleting it lets sig-gen write it afresh)."
         ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",

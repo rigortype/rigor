@@ -141,13 +141,29 @@ module Rigor
       # ADR-112 WD4 — `sig-gen --check`: the results of a dry-run `--write`. Only the targets `--write` would
       # change (or refuse) are shown, each with the lines it would add; the verdict is the exit status, which
       # the command derives from the same results ({.out_of_date}).
-      def render_check(results:, format:)
+      #
+      # @param refused — the methods the generator refused to reconcile (`sig.skipped.inline-shape-mismatch`):
+      #   `sig/` is not up to date while one stands, and `--write` cannot fix it.
+      def render_check(results:, format:, refused: [])
         stale = self.class.out_of_date(results)
         case format
         when "json"
-          @out.puts(JSON.pretty_generate({ up_to_date: stale.empty?, results: stale.map { |r| check_entry(r) } }))
-        when "text" then render_check_text(stale)
+          @out.puts(JSON.pretty_generate({ up_to_date: stale.empty? && refused.empty?,
+                                           results: stale.map { |r| check_entry(r) },
+                                           refused: refused.map(&:to_h) }))
+        when "text" then render_check_text(stale, refused)
         else raise ArgumentError, "unsupported format: #{format}"
+        end
+      end
+
+      # One line per method sig-gen refused to reconcile with its `sig/` copy. Shared by `--write` (on stderr,
+      # next to the write report) and `--check`.
+      def self.refusal_lines(refused)
+        refused.map do |candidate|
+          separator = candidate.kind == :singleton ? "." : "#"
+          "REFUSED #{candidate.path}: #{candidate.class_name}#{separator}#{candidate.method_name} — the inline " \
+            "declaration's overloads or parameters do not correspond to its sig/ copy, so neither was changed " \
+            "(#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}). Make the two agree by hand."
         end
       end
 
@@ -170,11 +186,13 @@ module Rigor
         entry
       end
 
-      def render_check_text(stale)
-        if stale.empty?
+      def render_check_text(stale, refused)
+        if stale.empty? && refused.empty?
           @out.puts("sig/ is up to date")
           return
         end
+
+        self.class.refusal_lines(refused).each { |line| @out.puts(line) }
 
         stale.each do |result|
           case result.action

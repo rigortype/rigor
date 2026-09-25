@@ -1922,7 +1922,7 @@ def fresh_kept_block_gap(str, emitter)
   Thread.new { emitter.on { |l| l =~ /(q)/ } }.join
   if str =~ /(\d+)/
     emitter.emit("zz")
-    assert_type("String", $1) # flip this when #1377 is fixed
+    assert_type("String", $1) # flip this when #1400 is fixed
   end
 end
 # rubocop:enable Style/PerlBackrefs

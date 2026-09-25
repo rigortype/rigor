@@ -82,12 +82,12 @@ module Rigor
       end
 
       # The scope the block of `call_node`, which {.fresh_entry?} names, enters with. A root block reads a slot of its
-      # own, so the match globals are unbound there, and `$1.upcase` in `Thread.new { … }` is a true positive. A
-      # definer body reads the definer's slot whenever the method is called, which the analyzer does not follow, so a
-      # global narrowed where it is written reads `Dynamic[top]` there, neither narrowed nor flagged: the
-      # dynamic-finder idiom defines `find_by_email` in a `method_missing` guard whose `$1` its body reads. This is
-      # the one place the frame-local specials are reset at such an entry, so `$_` (#1359) and `$!` / `$@` (#1360)
-      # join the match globals here once they narrow.
+      # own, so the match globals are unbound there, and `k = $1; k.upcase` in an entered `Thread.new { … }` block is
+      # a true positive. A definer body reads the definer's slot whenever the method is called, which the analyzer
+      # does not follow, so a global narrowed where it is written reads `Dynamic[top]` there, neither narrowed nor
+      # flagged: the dynamic-finder idiom defines `find_by_email` in a `method_missing` guard whose `$1` its body
+      # reads. This is the one place the frame-local specials are reset at such an entry, so `$_` (#1359) and `$!` /
+      # `$@` (#1360) join the match globals here once they narrow.
       def entry(scope, call_node)
         DEFINERS.include?(call_node.name) ? scope.untyped_match_globals : scope.forget_match_globals
       end

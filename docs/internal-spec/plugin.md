@@ -592,6 +592,37 @@ the block carries logic and runs through `instance_exec`:
     (coerce direction):** the gate is on the *receiver* class, and Ruby
     dispatches `1 + money` on `Integer`, so a `["Money"]` rule does not
     fire there; that result types left-biased as `Integer` (see ADR-42).
+  - **A `dynamic_return` answer takes precedence over the RBS return,
+    silently** ([ADR-2](../adr/2-extension-api.md) § "Amendment
+    2026-09-26 — a `dynamic_return` answer outranks the RBS return",
+    issue #700). `MethodDispatcher#resolve` consults the plugin tier
+    after the precision tiers (`MethodFolding.try_backward`,
+    `dispatch_precise_tiers`) and ahead of every RBS-backed tier, ending
+    in `RbsDispatch.try_dispatch`, and returns the first plugin answer.
+    The answer is the call site's type whether it narrows the declared
+    return or contradicts it, and the engine MUST NOT report the
+    difference: the RBS return never enters `FlowContribution::Merger`,
+    so there is no tier comparison. An RBS `def self.logger: () ->
+    Integer` alongside a plugin answering `Frameworkish::Logger` types
+    the site `Frameworkish::Logger`
+    (`spec/integration/plugin_typed_call_undefined_method_spec.rb`).
+    Bundled plugins rely on this: `rigor-activesupport-core-ext`'s
+    `%i[+ - *]` rule answers over the fully declared core `Time#-` /
+    `Integer#*`, because the RBS projection is wrong once a `Duration`
+    is the operand (`Time.now - 30.minutes` projects `Float`), and
+    `rigor-dry-validation` narrows the `Result#to_h` its own `sig/`
+    declares per contract.
+    - **The rule covers the return type only.** A `def` body is still
+      checked against its declared RBS return, and
+      `call.wrong-arity` / `call.argument-type-mismatch` still validate
+      a plugin-answered call against the RBS signature today — whether
+      they should is left open below.
+    - **The safeguard is a test-time check, not a diagnostic**
+      ([#1413](https://github.com/rigortype/rigor/issues/1413), not yet
+      built). The suite compares each bundled plugin's answer in its
+      integration fixtures with the RBS return, and a rule that answers
+      outside it on purpose declares `overrides_rbs: "<reason>"` on its
+      `dynamic_return`. Until #1413 lands, nothing checks an override.
   - **A `dynamic_return` answer suppresses `call.undefined-method` at
     that call site** (issue #653). The tier sits above `RbsDispatch` in
     `MethodDispatcher#resolve`, so when a plugin answers, the receiver's
@@ -611,34 +642,7 @@ the block carries logic and runs through `instance_exec`:
       read as "a plugin answer wins outright" or as "a plugin answer
       wins where the RBS is silent". The record is consulted for every
       plugin answer only because that is the cheaper and more honest
-      shape, not because this section is settling the precedence.
-    - **Open divergence — the engine and
-      [ADR-2](../adr/2-extension-api.md) § "Plugin Contribution
-      Merging" disagree, and this section does not resolve it.** The
-      ADR puts plugins in a lower authority tier than accepted RBS:
-      "Lower tiers must not weaken or contradict higher tiers.
-      Lower-tier contributions that contradict a higher tier are
-      diagnostics, not silent overrides", and specifically "Return
-      types from dynamic return extensions are checked against the
-      selected signature. A plugin may narrow within the contract; an
-      incompatible return is a conflict diagnostic, not a contract
-      override." The shipped engine does not implement that check. The
-      `dynamic_return` tier has sat ABOVE `RbsDispatch` in
-      `MethodDispatcher#resolve` since v0.1.1, and an incompatible
-      plugin return therefore overrides the declared one **silently**,
-      with no conflict diagnostic: an RBS `def self.logger: () ->
-      Integer` alongside a plugin answering `Frameworkish::Logger`
-      types the site `Frameworkish::Logger` and reports nothing.
-      Bundled plugins depend on the shipped behaviour —
-      `rigor-activesupport-core-ext`'s `%i[+ - *]` rule deliberately
-      answers over the *fully declared* core `Time#-` / `Integer#*`
-      because the RBS-projected return is wrong once a `Duration` is
-      the operand (`Time.now - 30.minutes` projects `Float`), while
-      `rigor-dry-validation` refines a `to_h` its own bundled `sig/`
-      declares, which is the narrowing ADR-2 permits. Which document
-      gives is a decision, filed for adjudication; nothing here
-      supersedes ADR-2. It is recorded so the two documents stop
-      contradicting each other in silence.
+      shape; the precedence itself is the bullet above.
     - **The suppression is only as sound as the plugin's own receiver
       gate**, which is why that gate carries the receiver KIND (issue
       #701, above). While a `receivers:` entry matched a class NAME

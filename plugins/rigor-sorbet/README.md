@@ -270,10 +270,12 @@ The full order is:
 5. User-class fallback (`Object` / `Class` ancestors).
 
 When both a project RBS sig AND a Sorbet sig describe the
-same method, the analyzer's contribution merger keeps the
-RBS contract authoritative — the plugin contribution is
-allowed to refine but not contradict it. ADR-11 § "WD3"
-records the rationale.
+same method, the Sorbet sig types the call site: the plugin
+tier answers before RBS dispatch, and a plugin's return type
+replaces the RBS return with no diagnostic (ADR-2 §
+"Amendment 2026-09-26"). The method's body is still checked
+against the RBS return. Keep the two signatures in agreement;
+where they differ, callers see the Sorbet return.
 
 ## Slice 4 RBI tree walking
 

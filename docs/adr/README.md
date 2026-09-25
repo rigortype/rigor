@@ -16,7 +16,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | --- | --- | --- |
 | ADR-0 | [Foundation and Core Architecture of Rigor](0-concept.md) | Accepted (Smart Initialization/Gemfile.lock auto-suggest was never built; rigor init writes a static template) |
 | ADR-1 | [Type Model and RBS Superset Strategy](1-types.md) | Accepted |
-| ADR-2 | [Extension API Strategy](2-extension-api.md) | Accepted |
+| ADR-2 | [Extension API Strategy](2-extension-api.md) | Accepted (plugin `dynamic_return` precedence over the RBS return amended 2026-09-26) |
 | ADR-3 | [Type Representation](3-type-representation.md) | Accepted |
 | ADR-4 | [Type Inference Engine](4-type-inference-engine.md) | Accepted |
 | ADR-5 | [Robustness Principle](5-robustness-principle.md) | Accepted |
@@ -25,7 +25,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-8 | [Steep-Inspired Improvements](8-steep-inspired-improvements.md) | Accepted |
 | ADR-9 | [Cross-Plugin API](9-cross-plugin-api.md) | Accepted (implemented in v0.1.1) |
 | ADR-10 | [Dependency Source Inference](10-dependency-source-inference.md) | Accepted |
-| ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted |
+| ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted (WD3 partially superseded by ADR-2, 2026-09-26) |
 | ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | Accepted (packaging premise partially superseded by ADR-31 — single bundled gem, no subtree split; all five dry-rb plugins shipped) |
 | ADR-13 | [TypeNode Resolver Plugin](13-typenode-resolver-plugin.md) | Accepted |
 | ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted (slices 1-5 implemented) |

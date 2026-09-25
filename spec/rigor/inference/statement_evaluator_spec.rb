@@ -3553,7 +3553,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
     # Issue #1365 — a call rebinds the frame's `$~` by what it calls and its arguments' types, in any position.
     it "keeps the narrowing after a lookup whose argument is not a Regexp, and after `match?`" do
-      ['val = row[:name]', 'csv.split(",")', "list.index(3)", "value.match?(/x/)", "String === value",
+      ["val = row[:name]", 'csv.split(",")', "list.index(3)", "value.match?(/x/)", "String === value",
        '$stdout.puts(row[:name], [csv.split(",")])'].each do |call|
         _, post = evaluate_framed(<<~RUBY)
           raise unless /(\\d+)/ =~ value
@@ -3563,7 +3563,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       end
     end
 
-    it "forgets the narrowing after an explicit-receiver builtin, or a call in an operand or literal, that rebinds it" do
+    it "forgets the narrowing after an explicit-receiver builtin, or an operand or literal call, that rebinds it" do
       ["value !~ /(z)/", "value.start_with?(/(z)/)", "Kernel.eval(src)", 'out.push(value.sub(/q/, ""))',
        "[value.index(/(q)/)]", "x = { a: items.find { |i| i =~ /(z)/ } }", "x = value[/(q)/] rescue nil",
        'super(value.sub(/q/, ""))', 'X = value.sub(/q/, "")', "obj.attr ||= value[/(q)/]",

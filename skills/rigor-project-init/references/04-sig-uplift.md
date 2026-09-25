@@ -69,7 +69,8 @@ absent (skipped as `sig.skipped.untyped-return`). Step 5-c fixes that.
 ## Step 5-c — Precision uplift with --params=observed
 
 `--params=observed` tells sig-gen to collect observed argument types
-from every call site it processes during the analysis pass. The most
+from the call sites in the project's test roots — the `test_paths:`
+Phase 4 wrote (`--observe=PATH` overrides them for one run). The most
 important use case: **`attr_reader` / `attr_writer` / `attr_accessor`
 methods whose `@ivar` is assigned from an `initialize` parameter**.
 

@@ -32,7 +32,7 @@ module Rigor
   # a typo.
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:signature_path`,
-    # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
+    # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`, `:test_path`,
     # `:bundler_bundle_path`, `:bundler_lockfile`, `:rbs_collection_lockfile`); `fields` carries the kind-specific
     # structured data merged into {#to_h} for JSON consumers.
     Warning = Data.define(:kind, :message, :fields) do
@@ -49,6 +49,7 @@ module Rigor
         bundled_plugin_signature_path_warnings(configuration) +
         library_warnings(configuration) +
         rule_token_warnings(configuration) +
+        test_path_warnings(configuration, project_root) +
         explicit_path_warnings(configuration, project_root)
     end
 
@@ -182,6 +183,19 @@ module Rigor
       return false if Analysis::CheckRules::ALL_RULES.include?(token)
 
       true
+    end
+
+    # Declared `test_paths:` entries that do not exist. `sig-gen --params=observed` would observe nothing from
+    # them, so every parameter they were meant to type stays `untyped` with no other symptom. An unset key is
+    # auto-detection and is never audited; `[]` is a declaration, not a mistake.
+    def self.test_path_warnings(configuration, project_root)
+      Array(configuration.test_paths).filter_map do |path|
+        next if File.exist?(File.expand_path(path, project_root))
+
+        Warning.new(kind: :test_path,
+                    message: "test_paths: #{path.inspect} does not exist (no call sites are observed from it)",
+                    fields: { "path" => path })
+      end
     end
 
     # Explicitly-configured bundler / rbs-collection paths that do not exist. Only the

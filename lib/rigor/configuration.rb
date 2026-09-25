@@ -49,6 +49,9 @@ module Rigor
       **/node_modules/**
     ].freeze
 
+    # The conventional test roots `test_paths: nil` auto-detects, in this order.
+    CONVENTIONAL_TEST_PATHS = %w[spec test].freeze
+
     DEFAULTS = {
       "target_ruby" => "4.0",
       "paths" => ["lib"],
@@ -57,6 +60,11 @@ module Rigor
       "disable" => [],
       "libraries" => [],
       "signature_paths" => nil,
+      # The project's test roots: the directories (or files) holding its tests. `nil` (the default) auto-detects
+      # whichever of `spec/` and `test/` exist, the same way `signature_paths: nil` auto-detects `sig/`; `[]`
+      # declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations
+      # from them when no `--observe=PATH` is given. See {#resolved_test_paths}.
+      "test_paths" => nil,
       # ADR-17 — project-side monkey-patch pre-evaluation. Empty by default; users opt in by listing explicit
       # files that the analyzer walks before per-file inference so patched-method declarations are visible
       # across the project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1 plumbing only — listed files
@@ -207,7 +215,7 @@ module Rigor
     # Top-level keys whose values are file/directory paths that MUST be resolved relative to the config
     # file's directory. `exclude:` is intentionally NOT in this list — its entries are glob patterns
     # (`**/vendor/**`), not paths.
-    PATH_KEYS = %w[paths signature_paths pre_eval].freeze
+    PATH_KEYS = %w[paths signature_paths test_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
     # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
@@ -252,7 +260,7 @@ module Rigor
 
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
-                :libraries, :signature_paths, :fold_platform_specific_paths, :parameter_inference,
+                :libraries, :signature_paths, :test_paths, :fold_platform_specific_paths, :parameter_inference,
                 :plugins_isolation,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
@@ -281,6 +289,17 @@ module Rigor
     # snapshot — untouched. Always false without the block, so an annotation alone changes nothing.
     def effects_check?
       @effects_check
+    end
+
+    # The test roots a run uses: the declared `test_paths:` as written (already resolved against the
+    # config file's directory by {.load}), or — when the key is unset — whichever of
+    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as project-relative names. `root` is the
+    # directory the run treats as the project root (the CLI's CWD), as for `signature_paths:`
+    # auto-detection.
+    def resolved_test_paths(root: Dir.pwd)
+      return test_paths unless test_paths.nil?
+
+      CONVENTIONAL_TEST_PATHS.select { |dir| File.directory?(File.join(root, dir)) }
     end
 
     # Loads a configuration file.
@@ -510,6 +529,8 @@ module Rigor
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
+      test_paths = data.fetch("test_paths", DEFAULTS.fetch("test_paths"))
+      @test_paths = test_paths.nil? ? nil : Array(test_paths).map(&:to_s).freeze
       @pre_eval = expand_pre_eval_entries(
         Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s)
       )
@@ -594,6 +615,7 @@ module Rigor
         "disable" => disabled_rules,
         "libraries" => libraries,
         "signature_paths" => signature_paths,
+        "test_paths" => test_paths,
         "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "parameter_inference" => parameter_inference,

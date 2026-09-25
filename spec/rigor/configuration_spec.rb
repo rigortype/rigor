@@ -112,6 +112,46 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    describe "test_paths:" do
+      it "resolves every declared test root relative to the config file's directory" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "test_paths: [spec, test/unit]\n")
+
+          configuration = described_class.load(path)
+          resolved = %w[spec test/unit].map { |root| File.join(File.expand_path(dir), root) }
+
+          expect(configuration.test_paths).to eq(resolved)
+          expect(configuration.resolved_test_paths(root: "/elsewhere")).to eq(resolved)
+          expect(configuration.to_h["test_paths"]).to eq(resolved)
+        end
+      end
+
+      it "auto-detects whichever of spec/ and test/ exist under the root when the key is unset" do
+        Dir.mktmpdir do |dir|
+          configuration = described_class.load(File.join(dir, "missing.yml"))
+          expect(configuration.test_paths).to be_nil
+          expect(configuration.resolved_test_paths(root: dir)).to eq([])
+
+          Dir.mkdir(File.join(dir, "test"))
+          expect(configuration.resolved_test_paths(root: dir)).to eq(["test"])
+
+          Dir.mkdir(File.join(dir, "spec"))
+          expect(configuration.resolved_test_paths(root: dir)).to eq(%w[spec test])
+        end
+      end
+
+      it "treats test_paths: [] as a declaration that the project has no test roots" do
+        Dir.mktmpdir do |dir|
+          Dir.mkdir(File.join(dir, "spec"))
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "test_paths: []\n")
+
+          expect(described_class.load(path).resolved_test_paths(root: dir)).to eq([])
+        end
+      end
+    end
+
     it "defaults fold_platform_specific_paths to false (platform-agnostic)" do
       Dir.mktmpdir do |dir|
         configuration = described_class.load(File.join(dir, "missing.yml"))

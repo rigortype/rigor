@@ -48,6 +48,13 @@
         { "type": "array", "items": { "type": "string" } }
       ]
     },
+    "test_paths": {
+      "description": "The project's test roots: directories (or files) holding its tests, resolved relative to the config file's directory. `nil` (the default) auto-detects whichever of `spec/` and `test/` exist under the project root; `[]` declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations from them when no `--observe=PATH` is given.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
     "pre_eval": {
       "description": "ADR-17 — project-side monkey-patch pre-evaluation. Files listed here are walked BEFORE per-file inference so patched-method declarations are visible across the project (e.g. `lib/core_ext/string_extensions.rb`). Each entry resolves relative to the config file's directory; literal entries that don't exist surface as `pre-eval.file-not-found` (`:error`). Slice 4 (2026-05-16) accepts `File.fnmatch?`-shaped glob patterns (`lib/core_ext/**/*.rb`); a glob that matches nothing degrades silently to an empty entry (no diagnostic). Slices 1+2+3a have shipped registry + dispatcher tier + duplicate-declaration diagnostic; per-file cache descriptor (slice 3b) stays deferred until measured pain.",
       "type": "array",

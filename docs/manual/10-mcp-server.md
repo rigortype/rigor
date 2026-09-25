@@ -358,8 +358,9 @@ Generate RBS skeleton signatures inferred from Ruby source files.
 | `params` | `"untyped"` \| `"observed"` | no | `"untyped"` |
 | `config` | `string` | no | session default |
 
-`params: "observed"` harvests call-site argument types from `spec/`
-(or a directory named via `--observe=PATH` in the underlying CLI).
+`params: "observed"` harvests call-site argument types from the
+project's test roots: the configured `test_paths:`, or whichever of
+`spec/` and `test/` exist.
 
 **Returns:** JSON — the same as `rigor sig-gen --print --format json`.
 

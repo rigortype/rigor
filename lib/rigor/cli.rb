@@ -266,6 +266,12 @@ module Rigor
         #                Leave unset (or `null`) to auto-detect
         #                `<root>/sig`. Use `[]` to disable
         #                project-RBS loading entirely.
+        # - test_paths:  the directories holding your tests.
+        #                `rigor sig-gen --params=observed` reads
+        #                their call sites to type parameters.
+        #                `rigor init` writes the spec/ and test/
+        #                it finds; unset auto-detects them, and
+        #                `[]` declares the project has none.
         # - cache.path:  where Rigor will eventually persist
         #                analysis results across runs.
         #
@@ -275,8 +281,15 @@ module Rigor
         # tempfile, uri, logger, date, prism, rbs). Adding a
         # `sig/<gem>.rbs` file under `sig/` is the simplest way
         # to extend type coverage today.
-        #{YAML.dump(Configuration::DEFAULTS).sub(/\A---\n/, '')}
+        #{YAML.dump(init_settings).sub(/\A---\n/, '')}
       YAML
+    end
+
+    # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so
+    # the project's config says where its tests are rather than leaving it to auto-detection.
+    def init_settings
+      test_paths = Configuration.new.resolved_test_paths
+      test_paths.empty? ? Configuration::DEFAULTS : Configuration::DEFAULTS.merge("test_paths" => test_paths)
     end
 
     def run_annotate

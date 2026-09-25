@@ -148,6 +148,28 @@ RSpec.describe Rigor::ConfigAudit do
     end
   end
 
+  describe "test_paths" do
+    it "flags a declared test root that does not exist, naming the key" do
+      FileUtils.mkdir_p("spec")
+      warnings = audit("test_paths" => %w[spec tests])
+
+      flagged = warnings.select { |w| w.kind == :test_path }
+      expect(flagged.map { |w| w.to_h["path"] }).to eq(["tests"])
+      expect(flagged.first.message).to include("test_paths:").and include("does not exist")
+    end
+
+    it "accepts a declared test root that is a single file" do
+      File.write("smoke_test.rb", "")
+
+      expect(audit("test_paths" => ["smoke_test.rb"]).select { |w| w.kind == :test_path }).to be_empty
+    end
+
+    it "does not audit an unset key or an explicit empty list" do
+      expect(audit({}).select { |w| w.kind == :test_path }).to be_empty
+      expect(audit("test_paths" => []).select { |w| w.kind == :test_path }).to be_empty
+    end
+  end
+
   describe "explicit bundler / rbs_collection paths" do
     it "flags an explicit bundler.bundle_path that is not a directory" do
       warnings = audit("bundler" => { "bundle_path" => "./no_such_bundle" })

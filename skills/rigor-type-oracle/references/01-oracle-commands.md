@@ -101,7 +101,7 @@ rigor sig-gen [paths]
 | `--overwrite` | Allow a tighter return to replace user-authored RBS. |
 | `--include-private` | Emit private / protected instance methods too (default: public only). |
 | `--params=untyped\|observed\|observed-strict` | Parameter policy. Default `untyped`. `observed-strict` is reserved and currently a usage error. |
-| `--observe=PATH` | Directory / file to scan for call-site observations. Repeatable. Defaults to `spec/` when present. |
+| `--observe=PATH` | Directory / file to scan for call-site observations. Repeatable. Defaults to the configured `test_paths:` (unset: whichever of `spec/` and `test/` exist). |
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--format=text\|json` | Text RBS, or the structured candidate report. |
 | `--config=PATH` | Explicit `.rigor.yml`. |

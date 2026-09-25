@@ -9,7 +9,7 @@ tooltips, downstream consumers reading your gem's `sig/` —
 sees what Rigor sees.
 
 This chapter is a walkthrough of the command's UX, the
-classification model, the three output modes, and the
+classification model, the output modes, and the
 `--params` policy trade-off that comes straight out of
 [ADR-5](../adr/5-robustness-principle.md)'s asymmetric
 "strict on returns, lenient on parameters" rule.
@@ -67,22 +67,55 @@ By default the command writes nothing — it prints the
 proposal so you can review it. Pass `--write` to apply the
 proposal to `sig/`.
 
-## The three output modes
+## The output modes
 
 | Mode | Behaviour |
 | --- | --- |
 | `--print` (default) | Print RBS to stdout, grouped by source file + class declaration. |
 | `--diff` | Show a unified-style diff comparing the existing-declared spelling (if any) against the inferred spelling. Read-only. |
 | `--write` | Apply the proposal to `sig/<path>.rbs`. Creates files, inserts new methods into existing class declarations, appends new class blocks to files that don't declare them yet. |
+| `--check` | Run the `--write` merge without writing, print what it would change, and exit `1` if anything would change. Read-only. |
+
+The four flags are mutually exclusive; passing two different
+ones is a usage error.
 
 `--write` is the only mode that touches the filesystem. It
 operates **only** inside `configuration.signature_paths`
 (default `sig/`); anything outside that tree is reported as
 `skipped_outside_sig_root` without being written to.
 
+### Keeping `sig/` current in CI
+
+`--check` is the freshness gate. It takes the same options as
+`--write` and fails exactly when that `--write` would create or
+change a file, or would refuse one:
+
+```sh
+rigor sig-gen --check lib
+```
+
+```
+would update sig/greeter.rbs (1 method(s))
+  - def greet: (String name) -> String
+  + def greet: (Symbol name) -> String
+```
+
+It exits `0` and prints `sig/ is up to date` otherwise. Under
+`--format=json` the payload is `{"up_to_date": …, "results":
+[…]}`, one entry per target in the `--write` JSON shape.
+
+The gate follows `--write`, not `--diff`. A `tighter-return`
+against a declaration that already exists is a proposal
+`--write` declines without `--overwrite`, so it does not fail
+`--check` either; a project that reviewed the proposal and
+kept its wider type can still pass. `--check --overwrite`
+counts it, because `--write --overwrite` would apply it. Pass
+`--check` the `--params` and `--effect-envelopes` flags your
+`--write` uses, or it checks a different output.
+
 ## The classification model
 
-Every method `rigor sig-gen` considers lands in one of five
+Every method `rigor sig-gen` considers lands in one of six
 states:
 
 | Classification | Meaning |
@@ -90,6 +123,7 @@ states:
 | `new-file` | No RBS file declares the receiver class at all. |
 | `new-method` | RBS file declares the class but not this method. |
 | `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. |
+| `inline-update` | `sig/` holds a copy of a method declared inline with `# @rbs` / `#:`, and the inline declaration has changed since. See [Methods declared inline](#methods-declared-inline). |
 | `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void`). Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
@@ -108,6 +142,9 @@ The `sig.skipped.*` reasons are:
 - `sig.skipped.user-authored` — `--overwrite` was not set
   and the method's existing RBS declaration would have to
   be replaced.
+- `sig.skipped.inline-declared` — `.rigor.yml` sets
+  `sig_gen.inline_declared: skip` and the method is declared
+  inline. See [Methods declared inline](#methods-declared-inline).
 - `sig.skipped.unrenderable-rbs` — the signature Rigor
   rendered for this method does not parse as RBS. This one
   is a **bug in Rigor**, not a property of your code: every
@@ -118,6 +155,91 @@ The `sig.skipped.*` reasons are:
   down with it. The rest of the signatures are unaffected;
   the skipped method is reported on stderr, and it is worth
   reporting to us.
+
+## Methods declared inline
+
+A method you annotated with `# @rbs` or `#:` already has a
+contract, written next to the code. `sig-gen` does not infer
+one for it; it copies yours into `sig/`, so the generated
+signature is the whole contract your gem ships:
+
+```ruby
+class Greeter
+  # @rbs name: String
+  # @rbs return: String
+  def greet(name) = "Hello, #{name}"
+
+  #: () -> Integer
+  def count = 1
+
+  # @rbs num: Float
+  def pair(num) = [num, num.to_s]
+end
+```
+
+```
+$ rigor sig-gen
+# lib/greeter.rb
+class Greeter
+  # [new]
+  def greet: (String name) -> String
+  # [new]
+  def count: () -> Integer
+  # [new]
+  def pair: (Float num) -> [Float, String]
+end
+```
+
+`count` is written as `Integer`, not the `1` its body proves:
+the declaration is what you meant, and inference does not
+override it. `pair` declares its parameter and not its return,
+so the parameter is copied and the return comes from the body,
+the same split [ADR-107](../adr/107-checked-types-and-typeless-comments.md)
+draws between authored parameters and generated returns. A
+member annotation you wrote inline, such as `# @rbs
+%a{deprecated}`, is copied with it. A method with no
+annotation of its own is proposed exactly as in any other
+file.
+
+Once `sig/` holds the copy, it is the declaration `rigor
+check` reads (the `.rbs` wins over the inline one for the same
+member). When you later edit the inline annotation, the copy
+is stale. `sig-gen` then classifies the method `inline-update`
+and `--write` replaces the copy with your current inline
+declaration. That needs no `--overwrite`: the line is yours,
+not an inference. `--check` fails until you do, which is what
+makes it worth running in CI. The update only ever adds
+annotations to the copy; one you delete inline stays in
+`sig/` until you delete it there too.
+
+### Projects that run Steep on the same annotations
+
+If Steep reads your inline annotations (`check "lib", inline:
+true` beside `signature "sig"`), a copy in `sig/` is a second
+declaration of each method, and Steep rejects the class with
+`DuplicatedMethodDefinition`. Tell `sig-gen` to leave those
+methods out:
+
+```yaml
+sig_gen:
+  inline_declared: skip
+```
+
+Every method the inline reader declares is then skipped as
+`sig.skipped.inline-declared`. That includes the un-annotated
+`def`s of a file that carries any annotation, because the
+reader declares those too (as `untyped`), and so does rbs's
+own inline parser, which Steep's `inline: true` uses. A file
+with no annotation at all is not read inline by Rigor, so its
+methods are still written; if Steep reads that file inline,
+keep it out of the paths you give `sig-gen`.
+
+What the setting costs: `sig/` is no longer the whole
+contract. A consumer that reads only your shipped `sig/` —
+Rigor or Steep in a project that depends on your gem — never
+sees the skipped methods. Their inline annotations, including
+a Rigor refinement written there, take effect only where the
+source itself is analysed, which is your own project.
 
 ## Emitting effect annotations
 
@@ -501,6 +623,11 @@ by side without coordination.
   `tighter-return`. Without `--overwrite`, existing
   declarations are user-authored and the new method is
   silently skipped.
+- **Will** replace an existing method declaration that is a
+  stale copy of the method's inline declaration
+  (`inline-update`), with or without `--overwrite`: the new
+  line is the inline declaration you wrote, and annotations
+  already on the old one are kept.
 - **Will not** touch `attr_reader` / `attr_writer` /
   `attr_accessor` declarations in existing RBS — those are
   always treated as user-authored.

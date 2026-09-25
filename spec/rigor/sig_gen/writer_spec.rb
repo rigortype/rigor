@@ -17,13 +17,13 @@ RSpec.describe Rigor::SigGen::Writer do
     )
   end
 
-  def writer(overwrite: false)
+  def writer(overwrite: false, dry_run: false)
     mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir)
-    described_class.new(path_mapper: mapper, overwrite: overwrite)
+    described_class.new(path_mapper: mapper, overwrite: overwrite, dry_run: dry_run)
   end
 
   def candidate(method_name:, rbs:, classification: Rigor::SigGen::Classification::NEW_METHOD, class_name: "Foo",
-                declared_return_rbs: nil)
+                declared_return_rbs: nil, declared_annotations: [])
     Rigor::SigGen::MethodCandidate.new(
       path: "lib/foo.rb",
       class_name: class_name,
@@ -31,7 +31,8 @@ RSpec.describe Rigor::SigGen::Writer do
       kind: :instance,
       classification: classification,
       rbs: rbs,
-      declared_return_rbs: declared_return_rbs
+      declared_return_rbs: declared_return_rbs,
+      declared_annotations: declared_annotations
     )
   end
 
@@ -229,6 +230,74 @@ RSpec.describe Rigor::SigGen::Writer do
       result = writer(overwrite: false).write("lib/foo.rb", [stub])
 
       expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+  end
+
+  # ADR-112 WD4 — a `sig/` copy of an inline declaration is regenerated from it: the line is the author's own,
+  # so, unlike a tighter-return, replacing it needs no --overwrite.
+  describe "inline-update candidates" do
+    let(:inline_update) { Rigor::SigGen::Classification::INLINE_UPDATE }
+
+    it "replaces the stale copy without --overwrite and leaves the rest of the file alone" do
+      target = write_target(<<~RBS)
+        class Foo
+          # A comment the writer must keep.
+          def greet: (Symbol name) -> String
+          def other: () -> Integer
+        end
+      RBS
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :greet, rbs: "def greet: (String name) -> String",
+                                                     classification: inline_update)])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(target)).to eq(<<~RBS)
+        class Foo
+          # A comment the writer must keep.
+          def greet: (String name) -> String
+          def other: () -> Integer
+        end
+      RBS
+    end
+
+    it "adds an annotation the inline declaration gained and keeps the ones already there" do
+      target = write_target("class Foo\n  %a{pure}\n  def label: () -> String\nend\n")
+
+      writer.write("lib/foo.rb", [candidate(method_name: :label, rbs: "def label: () -> String",
+                                            classification: inline_update,
+                                            declared_annotations: ["%a{deprecated}", "%a{pure}"])])
+
+      expect(File.read(target)).to eq("class Foo\n  %a{deprecated}\n  %a{pure}\n  def label: () -> String\nend\n")
+    end
+
+    it "replaces a declared `-> void` too — the #836 guard protects authored intent, and this line is it" do
+      target = write_target("class Foo\n  def run: () -> void\nend\n")
+
+      writer.write("lib/foo.rb", [candidate(method_name: :run, rbs: "def run: () -> Integer",
+                                            classification: inline_update)])
+
+      expect(File.read(target)).to eq("class Foo\n  def run: () -> Integer\nend\n")
+    end
+  end
+
+  # `sig-gen --check` runs the whole merge and stops short of the disk, so what it reports is exactly what
+  # `--write` would do.
+  describe "dry run" do
+    it "reports a file it would create without creating it" do
+      result = writer(dry_run: true).write("lib/foo.rb", [candidate(method_name: :n, rbs: "def n: () -> Integer")])
+
+      expect(result.action).to eq(:created)
+      expect(File.exist?(File.join(tmpdir, "sig/foo.rbs"))).to be(false)
+    end
+
+    it "reports an update it would make without making it" do
+      original = "class Foo\n  def existing: () -> String\nend\n"
+      target = write_target(original)
+
+      result = writer(dry_run: true).write("lib/foo.rb", [candidate(method_name: :n, rbs: "def n: () -> Integer")])
+
+      expect([result.action, result.applied.map(&:method_name)]).to eq([:updated, [:n]])
+      expect(File.read(target)).to eq(original)
     end
   end
 

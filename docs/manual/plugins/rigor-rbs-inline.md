@@ -70,6 +70,15 @@ Each dropped member is reported once as
 member and the `.rbs` that won. Delete one of the two declarations to
 make the inline annotation take effect.
 
+`rigor sig-gen --write` produces this overlap on purpose: by default it
+copies each inline declaration into `sig/`, so the generated signature
+is the complete contract a gem ships. The copy is reported like any
+other overlap, and `rigor sig-gen --check` fails when an inline
+annotation has changed since the copy was written, after which
+`--write` brings it back in line. A project whose Steep reads the same
+annotations sets `sig_gen.inline_declared: skip` instead
+([handbook chapter 11](../../handbook/11-sig-gen.md#methods-declared-inline)).
+
 `sig/` wins because it is the reviewed artefact — the one you diff in
 review and the one `rigor sig-gen --diff` reasons about. There is no
 upstream rule to defer to: rbs merges an inline `.rb` declaration and a

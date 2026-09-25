@@ -34,9 +34,13 @@ module Rigor
       MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, keyword_init: true)
       private_constant :MergeState
 
-      def initialize(path_mapper:, overwrite: false)
+      # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
+      #   creating or changing a file. `sig-gen --check` (ADR-112 WD4) is this, so it can only ever disagree
+      #   with `--write` about the disk, never about the content.
+      def initialize(path_mapper:, overwrite: false, dry_run: false)
         @path_mapper = path_mapper
         @overwrite = overwrite
+        @dry_run = dry_run
         # Run-level (cross-file) namespace-kind view, populated per `#write_all` from every candidate's per-file
         # map. Empty until then so the single-target `#write` path falls back to per-candidate kinds only.
         @global_namespace_kinds = {}
@@ -91,7 +95,7 @@ module Rigor
       # Deliberately NARROWER than {Classification::EMITTABLE}: the write path has never produced a
       # `:new_file` row (the generator does not classify one), and admitting it here would let a
       # classification with no writer behind it decide that a target file must be created.
-      EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN].freeze
+      EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN, Classification::INLINE_UPDATE].freeze
       private_constant :EMITTABLE
 
       def inside_sig_root?(target)
@@ -116,8 +120,10 @@ module Rigor
                                  action: :skipped_invalid_rbs, error: error)
         end
 
-        FileUtils.mkdir_p(target.dirname)
-        target.write(content)
+        unless @dry_run
+          FileUtils.mkdir_p(target.dirname)
+          target.write(content)
+        end
         WriteResult.new(source_path: source_path, target_path: target,
                         action: :created, applied: candidates)
       end
@@ -311,7 +317,7 @@ module Rigor
                                  action: :skipped_invalid_rbs, error: error)
         end
 
-        target.write(state.source)
+        target.write(state.source) unless @dry_run
         WriteResult.new(source_path: source_path, target_path: target,
                         action: action, applied: state.applied, skipped: state.skipped,
                         left_unreadable: state.left_unreadable)
@@ -584,15 +590,18 @@ module Rigor
         source = insert_into_class(source, decl, new_methods)
         state.applied.concat(new_methods)
 
-        if @overwrite
-          source, replaced = replace_eligible_conflicts(source, decl, conflicting, state)
-          state.applied.concat(replaced)
-          state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
-        else
-          state.skipped.concat(conflicting.map { |c| [c, :user_authored] })
-        end
+        # An inline update replaces its stale copy whether or not `--overwrite` is set: the line is the
+        # author's inline declaration, not an inference weighed against a hand-written one (ADR-112 WD4).
+        replaceable = @overwrite ? conflicting : conflicting.select { |c| inline_update?(c) }
+        source, replaced = replace_eligible_conflicts(source, decl, replaceable, state)
+        state.applied.concat(replaced)
+        state.skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
 
         source
+      end
+
+      def inline_update?(candidate)
+        candidate.classification == Classification::INLINE_UPDATE
       end
 
       # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
@@ -661,6 +670,7 @@ module Rigor
       end
 
       def eligible_for_replacement?(candidate, decl, source)
+        return true if inline_update?(candidate)
         return false if replaces_declared_void?(candidate, decl)
 
         case candidate.classification
@@ -723,7 +733,37 @@ module Rigor
 
         loc = member.location
         replaced = source[0...loc.start_pos] + candidate.rbs + source[loc.end_pos..]
-        splice_annotations(replaced, member, candidate, state)
+        # Both splices insert above the member, the effect annotation at its own line and the declared ones at
+        # its first annotation's, so running the lower insertion first keeps the positions the parse gave valid.
+        replaced = splice_annotations(replaced, member, candidate, state)
+        splice_declared_annotations(replaced, member, candidate)
+      end
+
+      # ADR-112 WD4 — the annotations an inline declaration carries that its `sig/` copy lacks, added above the
+      # member. Additive only: an annotation already there stays, whoever wrote it, so a copy never loses
+      # anything to regeneration (an annotation later deleted inline is therefore not deleted here).
+      def splice_declared_annotations(source, member, candidate)
+        missing = missing_declared_annotations(member, candidate)
+        return source if missing.empty?
+
+        line_start = line_start_index(source, member.location.start_pos)
+        indent = source[line_start...member.location.start_pos].to_s
+        return source unless indent.match?(/\A[ \t]*\z/)
+
+        anchor = annotation_block_start(source, member, line_start)
+        source[0...anchor] + missing.map { |line| "#{indent}#{line}\n" }.join + source[anchor..]
+      end
+
+      # A declared annotation line is `%a` plus a one-character delimiter pair around its content.
+      def missing_declared_annotations(member, candidate)
+        present = member.annotations.map { |annotation| annotation.string.to_s.strip }
+        candidate.declared_annotations.reject { |line| present.include?(line[3...-1].to_s.strip) }
+      end
+
+      # The start of the line the member's first annotation sits on, or of the member's own line.
+      def annotation_block_start(source, member, line_start)
+        starts = member.annotations.filter_map { |annotation| annotation.location&.start_pos }
+        ([line_start] + starts.map { |pos| line_start_index(source, pos) }).min
       end
 
       # ADR-103 WD9 — the annotation half of a replacement, and the one place this slice is allowed to

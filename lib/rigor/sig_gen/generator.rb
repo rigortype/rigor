@@ -19,6 +19,7 @@ require_relative "meta_class_shape"
 require_relative "rbs_validity"
 require_relative "classification"
 require_relative "effect_annotation"
+require_relative "inline_declarations"
 require_relative "method_candidate"
 
 module Rigor
@@ -260,7 +261,8 @@ module Rigor
           inferred_return: candidate.inferred_return, declared_return_rbs: candidate.declared_return_rbs,
           rbs: candidate.rbs, skip_reason: candidate.skip_reason,
           namespace_kinds: candidate.namespace_kinds, class_shells: candidate.class_shells,
-          class_superclasses: superclasses
+          class_superclasses: superclasses, declared_rbs: candidate.declared_rbs,
+          declared_annotations: candidate.declared_annotations
         )
       end
 
@@ -820,6 +822,12 @@ module Rigor
       def classify_def(path, def_node, class_name, kind, scope_index)
         return nil if visibility_excludes?(def_node, class_name, kind, scope_index)
         return nil if initialize_excludes?(def_node, kind)
+
+        inline = inline_declarations.lookup(path, class_name, def_node.name, kind)
+        if inline
+          return skipped(path, def_node, class_name, kind, :inline_declared) if skip_inline_declared?
+          return inline_def_candidate(path, def_node, class_name, kind, scope_index, inline) if inline.declared?
+        end
         return initialize_stub_candidate(path, def_node, class_name) if non_trivial_initialize?(def_node, kind)
 
         inferred = infer_return_type(def_node, scope_index)
@@ -833,6 +841,113 @@ module Rigor
         else
           compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
         end
+      end
+
+      # ADR-112 WD4 — the inline declarations of every analysed file, read once per run. See
+      # {InlineDeclarations} for why the synthesized text rather than the environment.
+      def inline_declarations
+        @inline_declarations ||= InlineDeclarations.build(@environment)
+      end
+
+      def skip_inline_declared?
+        @configuration.sig_gen_inline_declared == :skip
+      end
+
+      # ADR-112 WD4 — a `def` the author declared inline is written as that declaration, not as what the body
+      # infers: under ADR-32 WD13 a `sig/` member wins over the inline one, so a line built from inference
+      # (`untyped` parameters, a return the body happens to prove) would silently replace the contract the
+      # author wrote beside the code. Nothing here is inferred except a return the author left unwritten
+      # (`# @rbs name: String` with no `return:`), which ADR-107's mixed provenance fills from the body: the
+      # parameters authored, the return generated, one line. Such a body typing as `untyped` is skipped exactly
+      # as an undeclared one is.
+      def inline_def_candidate(path, def_node, class_name, kind, scope_index, inline)
+        inferred = nil
+        overloads = inline.method_types.map(&:to_s)
+        if inline.return_inferred
+          inferred = infer_return_type(def_node, scope_index)
+          return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil? || dynamic_top?(inferred)
+
+          overloads = overloads_with_inferred_return(inline.method_types, elaborated_rbs(inferred, owner: class_name))
+        end
+
+        scope = scope_index[def_node]
+        method_def = lookup_existing_method(class_name, def_node.name, kind, scope&.environment, scope)
+        rbs = "#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: #{overloads.join(' | ')}"
+        inline_candidate(path, class_name, def_node.name, kind, rbs, inline, method_def, inferred)
+      end
+
+      # A class name no project declares, standing in for the inferred return while `RBS::MethodType#to_s` spells
+      # the rest of an overload, so the return itself keeps sig-gen's own spelling (`[Float, String]`, a folded
+      # alias) rather than being re-spelled through a parse.
+      INFERRED_RETURN_PLACEHOLDER = "Rigor__SigGenInferredReturn"
+      private_constant :INFERRED_RETURN_PLACEHOLDER
+
+      # Each overload whose return rbs-inline defaulted to `untyped` takes the body's; the rest stay as written.
+      def overloads_with_inferred_return(method_types, rendered)
+        placeholder = ::RBS::Parser.parse_type(INFERRED_RETURN_PLACEHOLDER)
+        method_types.map do |method_type|
+          next method_type.to_s unless method_type.type.return_type.is_a?(::RBS::Types::Bases::Any)
+
+          method_type.update(type: method_type.type.with_return_type(placeholder)).to_s
+                     .sub(/-> #{INFERRED_RETURN_PLACEHOLDER}\z/o, "-> #{paren_wrap_union(rendered)}")
+        end
+      end
+
+      # Classifies an inline-declared member's `rbs` line against what `sig/` already says for it:
+      #
+      # - nothing on this class itself (or only the inline declaration) — `new-method`;
+      # - a copy that reads the same and carries every annotation the author wrote inline — `equivalent`;
+      # - anything else — `inline-update`, which `--write` applies without `--overwrite`. After WD13 strips the
+      #   inline member, the `sig/` copy is what `rigor check` reads, so a stale one would outrank the
+      #   declaration the author edited, and `sig-gen --check` has to be able to see that.
+      #
+      # The comparison is textual (whitespace-normalised) because the environment's view of the `sig/` member
+      # has its type names resolved (`::String`) and the inline text does not; a copy sig-gen wrote is the same
+      # text, and a hand-written equivalent spelled differently is rewritten once to the inline spelling.
+      def inline_candidate(path, class_name, method_name, kind, rbs, inline, method_def, inferred) # rubocop:disable Metrics/ParameterLists
+        fields = { path: path, class_name: class_name, method_name: method_name, kind: kind,
+                   inferred_return: inferred }
+        existing = signature_member(method_def, class_name)
+        if existing.nil?
+          build_candidate(**fields, classification: Classification::NEW_METHOD, rbs: rbs,
+                                    declared_annotations: inline.annotation_lines)
+        elsif current_copy?(existing, rbs, inline)
+          build_candidate(**fields, classification: Classification::EQUIVALENT)
+        else
+          build_candidate(**fields, classification: Classification::INLINE_UPDATE, rbs: rbs,
+                                    declared_annotations: inline.annotation_lines,
+                                    declared_rbs: squish(existing.location.source))
+        end
+      end
+
+      # The member a project `.rbs` declares for `class_name` itself — not an ancestor's, and not the inline
+      # declaration, whose buffer is the synthesizer's `virtual:` one.
+      def signature_member(method_def, class_name)
+        return nil if method_def.nil?
+
+        method_def.defs.filter_map do |type_def|
+          next unless type_def.defined_in.to_s.delete_prefix("::") == class_name
+
+          member = type_def.member
+          member unless member.location&.buffer&.name.to_s.start_with?("virtual:")
+        end.first
+      end
+
+      # A `sig/` member the writer cannot replace (an `attr_*` spelling), or whose text is unavailable, is left
+      # as it is: proposing an update that `--write` can never apply would fail `--check` for good.
+      def current_copy?(member, rbs, inline)
+        return true unless member.is_a?(::RBS::AST::Members::MethodDefinition)
+
+        source = member.location&.source
+        return true if source.nil?
+        return false unless squish(source) == squish(rbs)
+
+        present = member.annotations.map { |annotation| annotation.string.to_s.strip }
+        (inline.annotations - present).empty?
+      end
+
+      def squish(text)
+        text.to_s.gsub(/\s+/, " ").strip
       end
 
       # Mirrors the `def.return-type-mismatch` rule's body-type extraction: type the implicit-return expression
@@ -1476,6 +1591,12 @@ module Rigor
       end
 
       def build_attr_candidate(class_name, method_name, variant, ivar_type, ctx)
+        inline = inline_declarations.lookup(ctx.path, class_name, method_name, :instance)
+        if inline
+          return attr_skipped(ctx.path, class_name, method_name, :inline_declared) if skip_inline_declared?
+          return inline_attr_candidate(class_name, method_name, inline, ctx) if inline.declared?
+        end
+
         if ivar_type.nil? || dynamic_top?(ivar_type)
           return attr_skipped(ctx.path, class_name, method_name, :untyped_return)
         end
@@ -1488,6 +1609,15 @@ module Rigor
         else
           attr_compare_against_declared(ctx.path, class_name, method_name, variant, ivar_type, method_def)
         end
+      end
+
+      # ADR-112 WD4 — an attribute typed inline (`attr_reader :name #: String`) is written from that type, in
+      # the long `def` form the rest of the attr path uses.
+      def inline_attr_candidate(class_name, method_name, inline, ctx)
+        scope = ctx.scope_index.each_value.first
+        method_def = lookup_existing_method(class_name, method_name, :instance, scope&.environment, scope)
+        rbs = "def #{method_name}: #{inline.method_types.join(' | ')}"
+        inline_candidate(ctx.path, class_name, method_name, :instance, rbs, inline, method_def, nil)
       end
 
       def attr_new_candidate(path, class_name, method_name, variant, ivar_type)

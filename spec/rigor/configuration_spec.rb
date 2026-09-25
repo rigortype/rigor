@@ -634,6 +634,38 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  describe "sig_gen.inline_declared (ADR-112 WD4)" do
+    it "defaults to write" do
+      expect(described_class.new.sig_gen_inline_declared).to eq(:write)
+    end
+
+    it "reads `sig_gen.inline_declared: skip` from .rigor.yml" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "sig_gen:\n  inline_declared: skip\n")
+        expect(described_class.load(path).sig_gen_inline_declared).to eq(:skip)
+      end
+    end
+
+    it "keeps the default for a `sig_gen:` block that omits the key or is empty" do
+      expect(described_class.new(Rigor::Configuration::DEFAULTS.merge("sig_gen" => {})).sig_gen_inline_declared)
+        .to eq(:write)
+      expect(described_class.new(Rigor::Configuration::DEFAULTS.merge("sig_gen" => nil)).sig_gen_inline_declared)
+        .to eq(:write)
+    end
+
+    it "rejects a value it does not know, naming the key and the accepted values" do
+      expect do
+        described_class.new(Rigor::Configuration::DEFAULTS.merge("sig_gen" => { "inline_declared" => "omit" }))
+      end.to raise_error(Rigor::ConfigurationError, /sig_gen\.inline_declared must be one of \["write", "skip"\]/)
+    end
+
+    # Only `rigor sig-gen` reads it, so it must not move the run cache key the way `to_h` would make it.
+    it "stays out of to_h" do
+      expect(described_class.new.to_h).not_to have_key("sig_gen")
+    end
+  end
+
   describe "pre_eval glob expansion (ADR-17 slice 4)" do
     it "expands a `**/*.rb` glob to the matching files" do
       Dir.mktmpdir do |dir|

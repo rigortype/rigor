@@ -499,6 +499,7 @@ rigor sig-gen [paths]
 | `--print` | Write RBS to stdout. Default. |
 | `--diff` | Write a unified diff against existing RBS. |
 | `--write` | Write RBS to `sig/<path>.rbs` files. |
+| `--check` | Write nothing; print what `--write` with the same options would change, and exit `1` if anything would. The CI freshness gate. |
 | `--overwrite` | Allow tighter-return updates to replace user-authored RBS. |
 | `--include-private` | Emit private and protected methods too. |
 | `--params=untyped\|observed\|observed-strict` | Parameter-typing policy. Default `untyped`. |
@@ -507,6 +508,21 @@ rigor sig-gen [paths]
 | `--effect-envelopes` | Also emit `%a{rigor:v1:effect …}` for effectful methods. Needs the `effects:` opt-in. |
 | `--no-cache` | Do not read or write the analysis cache. Only effect collection uses it. |
 | `--format=text\|json` | Output format. |
+
+`--print`, `--diff`, `--write` and `--check` are mutually exclusive.
+`--check` fails exactly when `--write` would create, change or
+refuse a file, so a tighter return `--write` declines without
+`--overwrite` does not fail it; `--check --overwrite` counts one.
+See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
+
+A method declared inline with `# @rbs` / `#:` is written as that
+declaration, not as what its body infers; a parameter-only
+annotation keeps its parameters and takes the return from the body.
+When the inline declaration later changes, `--write` replaces the
+stale `sig/` copy without `--overwrite`. A project whose Steep reads
+the same annotations sets `sig_gen.inline_declared: skip` in
+`.rigor.yml` to keep those methods out of `sig/`. See
+[handbook chapter 11](../handbook/11-sig-gen.md#methods-declared-inline).
 
 When `.rigor.yml` carries an `effects:` block, sig-gen also writes
 `%a{pure}` above a method whose effect summary is **exhaustive**

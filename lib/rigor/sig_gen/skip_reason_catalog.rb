@@ -84,6 +84,19 @@ module Rigor
                      "defines it, or add the project file that declares it to the analysed paths — then " \
                      "re-run `rigor sig-gen`."
         ),
+        "sig.skipped.inline-declared" => Entry.new(
+          id: "sig.skipped.inline-declared",
+          summary: "The member is declared inline, and `sig_gen.inline_declared: skip` keeps it out of `sig/`.",
+          explanation: "Not a gap. The project asked sig-gen to leave every method its inline `# @rbs` / `#:` " \
+                       "reader declares out of `sig/`, the setting for a project whose Steep reads the same " \
+                       "annotations (`inline: true` beside `signature \"sig\"`), where a `sig/` copy would " \
+                       "declare the method twice (`DuplicatedMethodDefinition`). Rigor still reads the inline " \
+                       "declaration when it analyses the source; a consumer reading only the shipped `sig/` " \
+                       "does not see this method.",
+          next_step: "Nothing, if the setting is intended. To ship the member in `sig/`, remove " \
+                     "`sig_gen.inline_declared: skip` from `.rigor.yml` and stop Steep from reading the " \
+                     "annotations of the files you generate for."
+        ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",
           summary: "A subclass overrides this method and its override was not itself emitted.",

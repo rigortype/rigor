@@ -29,10 +29,13 @@ module Rigor
     # clause 2.
     # `--params=observed-strict` stays reserved-but-inert until the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
+    #
+    # `--check` (ADR-112 WD4) is the CI freshness gate: it runs the `--write` merge with every other flag as given,
+    # writes nothing, prints what would change, and exits 1 when anything would.
     class SigGenCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
-      VALID_MODES = %w[print diff write].freeze
+      VALID_MODES = %w[print diff write check].freeze
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
@@ -58,8 +61,9 @@ module Rigor
         candidates = generator.run
         mode = options.fetch(:mode).to_sym
 
-        status = if mode == :write
-                   dispatch_write(candidates, configuration, options)
+        status = case mode
+                 when :write then dispatch_write(candidates, configuration, options)
+                 when :check then dispatch_check(candidates, configuration, options)
                  else
                    dispatch_print_or_diff(candidates, mode, options)
                    0
@@ -210,11 +214,7 @@ module Rigor
 
       # @return exit status — non-zero when a file the user asked to write could not be written.
       def dispatch_write(candidates, configuration, options)
-        layout_index = SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
-        path_mapper = SigGen::PathMapper.new(configuration: configuration, layout_index: layout_index)
-        writer = SigGen::Writer.new(path_mapper: path_mapper, overwrite: options.fetch(:overwrite))
-
-        results = writer.write_all(candidates)
+        results = build_writer(configuration, options).write_all(candidates)
 
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
         # A refused write (an assembled file that does not parse, or an existing target that is not valid
@@ -222,6 +222,32 @@ module Rigor
         # success — a green `sig-gen --write` in CI would otherwise mean nothing.
         refusals = %i[skipped_invalid_rbs skipped_invalid_encoding]
         results.any? { |result| refusals.include?(result.action) } ? 1 : 0
+      end
+
+      # ADR-112 WD4 — the same writer as {#dispatch_write}, flags included, in dry-run mode. Defined by what
+      # `--write` would do rather than by whether `--diff` prints anything: a tighter return against an existing
+      # declaration is a proposal `--write` declines without `--overwrite`, and a gate that counted it could
+      # never pass on a project that reviewed it and said no. With `--overwrite` it counts, because `--write
+      # --overwrite` would apply it.
+      #
+      # @return 1 when `sig/` is out of date (or a write would be refused), 0 when it is current.
+      def dispatch_check(candidates, configuration, options)
+        results = build_writer(configuration, options, dry_run: true).write_all(candidates)
+        SigGen::Renderer.new(out: @out).render_check(results: results, format: options.fetch(:format))
+        stale = SigGen::Renderer.out_of_date(results)
+        return 0 if stale.empty?
+
+        if options.fetch(:format) == "text"
+          @err.puts("rigor sig-gen --check: #{stale.size} signature file(s) out of date; " \
+                    "run `rigor sig-gen --write` with the same options to update them.")
+        end
+        1
+      end
+
+      def build_writer(configuration, options, dry_run: false)
+        layout_index = SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
+        path_mapper = SigGen::PathMapper.new(configuration: configuration, layout_index: layout_index)
+        SigGen::Writer.new(path_mapper: path_mapper, overwrite: options.fetch(:overwrite), dry_run: dry_run)
       end
 
       # Slice 3 — collect call-site argument observations when `--params=observed` is set. When `--observe=PATH` is not
@@ -287,9 +313,10 @@ module Rigor
       def build_option_parser(options) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = USAGE
-          opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }
-          opts.on("--diff", "Write a unified diff against existing RBS") { options[:mode] = "diff" }
-          opts.on("--write", "Write generated RBS to sig/<path>.rbs files") { options[:mode] = "write" }
+          opts.on("--print", "Write RBS skeletons to stdout (default)") { select_mode(options, "print") }
+          opts.on("--diff", "Write a unified diff against existing RBS") { select_mode(options, "diff") }
+          opts.on("--write", "Write generated RBS to sig/<path>.rbs files") { select_mode(options, "write") }
+          opts.on("--check", "Exit 1 when --write would change sig/; write nothing") { select_mode(options, "check") }
           opts.on("--overwrite", "Allow tighter-return updates to replace user-authored RBS") do
             options[:overwrite] = true
           end
@@ -324,12 +351,19 @@ module Rigor
         end
       end
 
+      # A second, different mode flag is a usage error rather than last-one-wins: `--check --write` must not
+      # quietly write in a CI job that meant to gate, nor `--write --check` quietly not.
+      def select_mode(options, mode)
+        options[:mode] = options[:mode_given] && options[:mode] != mode ? "conflict" : mode
+        options[:mode_given] = true
+      end
+
       def validation_error(options)
         mode = options.fetch(:mode)
         format = options.fetch(:format)
         params = options.fetch(:params)
 
-        return "--print, --diff, and --write are mutually exclusive flags; pick one" unless VALID_MODES.include?(mode)
+        return "--print, --diff, --write, and --check are mutually exclusive flags; pick one" if mode == "conflict"
         return "unsupported --format=#{format}" unless VALID_FORMATS.include?(format)
         return "unsupported --params=#{params}" unless VALID_PARAM_POLICIES.include?(params)
         if params == "observed-strict"

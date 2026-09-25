@@ -133,10 +133,30 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
           include Printable
         end
 
+        class Src
+          def self.sym: (Integer) -> Symbol
+                      | (String) -> nil
+          def self.flag: (Integer) -> TrueClass
+                       | (String) -> FalseClass
+        end
+
         class Fmt
+          def initialize: () -> void
           def self.fmt: (Printable) -> String
                       | (Integer) -> Integer
-          def self.stub: (SomeGem::IntegerExt) -> String
+          def self.rest: (*Printable) -> String
+                       | (Integer) -> Integer
+          def self.opt: (?Printable) -> String
+                      | (Integer) -> Integer
+          def self.maybe: (Printable?) -> String
+                        | (Integer) -> Integer
+          def self.either: (Printable | Symbol) -> String
+                         | (Integer) -> Integer
+          def stub: (SomeGem::IntegerExt) -> String
+                  | (Integer) -> Integer
+          def self.render: (:json) -> String
+                         | (untyped) -> nil
+          def self.gate: (bool) -> String
                        | (untyped) -> nil
           def self.arity: () -> Symbol
                         | (String) -> Integer
@@ -145,15 +165,33 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     end
 
     it "keeps the wrapper when an overload names a module the member's class may include" do
-      # Runtime: `Integer` includes `Printable`, so `fmt` returns a String. Acceptance reads class relations from the
-      # analyzer's own process, where it does not (#1352), so the member skipped `(Printable)` for `(Integer)` and
-      # `.upcase` reported `call.undefined-method`. `SomeGem::IntegerExt` is a name no RBS declares, which the source
-      # may include into `Integer` just the same.
+      # Runtime: `Integer` includes `Printable`, so each call returns a String. Acceptance reads class relations from
+      # the analyzer's own process, where it does not (#1352), so the member skipped the `Printable` arm, however the
+      # parameter spells it, for `(Integer)`, and `.upcase` reported `call.undefined-method`. `SomeGem::IntegerExt` is a
+      # name no RBS declares, which Rigor stubs as a class and the source may include into `Integer` just the same.
       dumps, rules = dumped_and_rules(<<~RUBY)
         def run(v)
           dump_type(Fmt.fmt(Integer(v)))
-          dump_type(Fmt.stub(Integer(v)))
+          dump_type(Fmt.rest(Integer(v)))
+          dump_type(Fmt.opt(Integer(v)))
+          dump_type(Fmt.maybe(Integer(v)))
+          dump_type(Fmt.either(Integer(v)))
+          dump_type(Fmt.new.stub(Integer(v)))
           Fmt.fmt(Integer(v)).upcase
+        end
+      RUBY
+      expect(dumps).to eq(%w[String] * 6)
+      expect(rules).not_to include("call.undefined-method")
+    end
+
+    it "keeps the wrapper for a literal or bool parameter, which a class member cannot prove it takes" do
+      # Runtime: `sym` may return `:json` and `flag` returns true or false, so both calls may return a String. Read as
+      # members, `Symbol` skipped `(:json)` and `TrueClass` was refused by `bool` itself, each for `(untyped) -> nil`.
+      dumps, rules = dumped_and_rules(<<~RUBY)
+        def run(v)
+          dump_type(Fmt.render(Src.sym(v)))
+          dump_type(Fmt.gate(Src.flag(v)))
+          Fmt.render(Src.sym(v)).upcase + Fmt.gate(Src.flag(v)).upcase
         end
       RUBY
       expect(dumps).to eq(%w[String String])
@@ -168,6 +206,35 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
       RUBY
       expect(dumps).to eq(["Integer"])
     end
+  end
+
+  context "with an overload for the facet's nil" do
+    let(:sig) do
+      { "pick.rbs" => <<~RBS }
+        class Pick
+          def self.pick: (nil) -> Symbol
+                       | (Integer) -> Integer
+        end
+      RBS
+    end
+
+    it "leaves the nil out of the selection" do
+      # The decided reading (#1350): `Integer(v)`'s facet `Integer | nil` selects by its Integer. Read through the
+      # wrapper, the affinity order's first arm, `(nil)`, answered `Symbol`; with the nil as a member, the two joined.
+      dumps, = dumped_and_rules(<<~RUBY)
+        def run(v) = dump_type(Pick.pick(Integer(v)))
+      RUBY
+      expect(dumps).to eq(["Integer"])
+    end
+  end
+
+  it "keeps the wrapper for a type-variable parameter (#1369)" do
+    # `Rational#*`'s `[T < Numeric] (T) -> T` is not a provable parameter, so the call reads as master does.
+    # flip this when #1369 is fixed: Ruby answers a Float.
+    dumps, = dumped_and_rules(<<~RUBY)
+      def run(v) = dump_type(Rational(1, 2) * Float(v))
+    RUBY
+    expect(dumps).to eq(["Rational"])
   end
 
   it "keeps joining every arm for an untyped argument" do

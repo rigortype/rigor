@@ -10,7 +10,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FacetDistribution do
   def dynamic_of(*members) = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.union(*members))
 
   describe ".facet_members" do
-    %w[Integer Float Rational Complex Symbol TrueClass FalseClass].each do |name|
+    %w[Integer Float Rational Complex Symbol].each do |name|
       it "reads a #{name} member, leaving the facet's nil out" do
         expect(described_class.facet_members(dynamic_of(nominal(name), constant(nil)))).to eq([nominal(name)])
       end
@@ -20,11 +20,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FacetDistribution do
       expect(described_class.facet_members(dynamic_of(constant(:a), constant(:b))))
         .to contain_exactly(constant(:a), constant(:b))
       expect(described_class.facet_members(dynamic_of(constant("s"), constant(nil)))).to eq([constant("s")])
+      expect(described_class.facet_members(dynamic_of(constant(true), constant(false))))
+        .to contain_exactly(constant(true), constant(false))
     end
 
     it "keeps the wrapper for a member whose runtime value may be of a subclass" do
-      [nominal("String"), nominal("Numeric"), nominal("Object"), nominal("Array"),
-       nominal("Array", nominal("Integer"))].each do |member|
+      [nominal("String"), nominal("Numeric"), nominal("Object"), nominal("Array"), nominal("Array", nominal("Integer")),
+       nominal("TrueClass"), nominal("FalseClass")].each do |member|
         expect(described_class.facet_members(dynamic_of(member, constant(nil)))).to be_nil, member.describe
         expect(described_class.facet_members(dynamic_of(member, nominal("Integer")))).to be_nil, member.describe
       end

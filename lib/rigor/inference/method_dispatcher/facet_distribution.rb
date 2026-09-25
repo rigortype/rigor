@@ -18,22 +18,25 @@ module Rigor
       # are selected one by one, and the distinct picks come back together for the dispatch layer's join, wrapped in
       # `Dynamic` when their returns differ (#521).
       #
-      # Only sealed members are read ({.sealed?}): a literal, or a plain instance of a core class whose `new` and
-      # `allocate` are undefined. Such a member's runtime value is of exactly its class, where any other member's may be
-      # of a subclass and take an arm the member itself skips: `Numeric` in `2 ** v`'s `Complex | Numeric` skipped a
-      # project `(real) -> Float`, whose `real` alias names `Integer`, for a catch-all `(untyped) -> nil`, and `.floor`
-      # on the call reported `call.undefined-method`. Scanning the parameters for a subclass of the member caught a
-      # plain class name and missed aliases, `instance`, type variables, intersections, singletons and modules.
+      # Only sealed members are read ({.sealed?}): a literal, or a plain `Integer`, `Float`, `Rational`, `Complex` or
+      # `Symbol`, core classes whose `new` and `allocate` are undefined. Such a member's runtime value is of exactly its
+      # class, where any other member's may be of a subclass and take an arm the member itself skips: `Numeric` in
+      # `2 ** v`'s `Complex | Numeric` skipped a project `(real) -> Float`, whose `real` alias names `Integer`, for a
+      # catch-all `(untyped) -> nil`, and `.floor` on the call reported `call.undefined-method`. Scanning the parameters
+      # for a subclass of the member caught a plain class name and missed aliases, `instance`, type variables,
+      # intersections, singletons and modules.
       #
       # Even a sealed member is read only where acceptance can rule it out ({.provable?}). Acceptance reads class
       # relations from the analyzer's own process, so it answers `no` for `Integer` against a `(Printable)` that project
       # RBS or source includes into `Integer` (#1352). A plain argument shares that, but the wrapper hid it from a
       # `Dynamic` one: with `(Printable) -> String | (Integer) -> Integer`, reading the member typed
       # `fmt(Integer(v)).upcase` as `Integer` and fired `call.undefined-method` where master read `String`. So every
-      # overload's positional parameters must be spelled in forms whose answer does not depend on an `include`: a
-      # declared class, `untyped`, `top`, `nil`, `bool` or a literal, through `?` and `|`. Anything else, a module, a
-      # stubbed name, an alias, an interface, a type variable, `instance`, `self`, an intersection or a singleton, keeps
-      # the wrapper. The list names what is provable rather than what is not, so a form it has not met falls back to
+      # overload's positional parameters must be spelled as a class RBS declares, `untyped`, `top` or `nil`, through `?`
+      # and `|`, which leaves acceptance only a sealed class's fixed ancestry to read. A literal or `bool` parameter
+      # asks for a value the member cannot prove it holds: `Symbol` skipped `(:json) -> String` for `(untyped) -> nil`,
+      # and a `TrueClass` member was refused by `bool` itself. Anything else, a module, a stubbed name, an alias, an
+      # interface, a type variable, `instance`, `self`, an intersection, a singleton or an untyped `(?)`, keeps the
+      # wrapper too. The list names what is provable rather than what is not, so a form it has not met falls back to
       # master's reading.
       #
       # A wider facet keeps the wrapper and the receiver's arm, as before. It is usually itself a #521 join
@@ -46,9 +49,10 @@ module Rigor
         # Member-wise argument lists beyond this keep their wrappers.
         CAP = 8
         # Core classes whose `new` and `allocate` are undefined, so plain Ruby cannot make an instance of a subclass
-        # (`Integer`, `Float`, `Symbol`, `true` and `false` have no allocator at all; a `Rational` or `Complex` subclass
-        # instance takes `Marshal.load` or a rebound `Class#allocate`). `NilClass` leaves with the facet's `nil`.
-        SEALED_CLASSES = %w[Integer Float Rational Complex Symbol TrueClass FalseClass].freeze
+        # (`Integer`, `Float` and `Symbol` have no allocator at all; a `Rational` or `Complex` subclass instance takes
+        # `Marshal.load` or a rebound `Class#allocate`). `NilClass` leaves with the facet's `nil`, and `true` and
+        # `false` are read only as literals.
+        SEALED_CLASSES = %w[Integer Float Rational Complex Symbol].freeze
 
         module_function
 
@@ -99,14 +103,13 @@ module Rigor
           when RBS::Types::ClassInstance then declared_class?(rbs_type.name.to_s.delete_prefix("::"), loader)
           when RBS::Types::Optional then provable_param?(rbs_type.type, loader)
           when RBS::Types::Union then rbs_type.types.all? { |member| provable_param?(member, loader) }
-          when RBS::Types::Literal, RBS::Types::Bases::Any, RBS::Types::Bases::Top, RBS::Types::Bases::Nil,
-               RBS::Types::Bases::Bool then true
+          when RBS::Types::Bases::Any, RBS::Types::Bases::Top, RBS::Types::Bases::Nil then true
           else false
           end
         end
 
         # A class RBS declares, not a module and not a name Rigor stubbed because no RBS declares it: a class cannot be
-        # included, and a sealed class's ancestry is fixed, so acceptance's `no` against it holds.
+        # included, and a sealed member's class has a fixed ancestry, so acceptance's answer against it holds.
         def declared_class?(name, loader)
           loader.class_known?(name) && !loader.rbs_module?(name) && !loader.synthesized_type_names.include?(name)
         end
@@ -122,7 +125,8 @@ module Rigor
           members if members.size.between?(1, MEMBER_LIMIT) && members.all? { |member| sealed?(member) }
         end
 
-        # A member whose runtime value is of exactly its class: a literal, or a plain instance of {SEALED_CLASSES}.
+        # A member whose runtime value is of exactly its class: a `Constant`, which is a value of that exact class, or a
+        # plain instance of {SEALED_CLASSES}.
         def sealed?(member)
           case member
           when Type::Constant then true

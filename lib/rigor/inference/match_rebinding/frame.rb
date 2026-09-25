@@ -10,8 +10,8 @@ module Rigor
       # The frame a body runs in, stamped on its entry scope ({Scope#with_match_frame}) and shared by every scope
       # derived from it, blocks included, since they run in the same frame. Each answer is computed on the first
       # ask — only code run while a match global is narrowed asks — and kept for the rest of the body: whether the
-      # body makes a matching closure, the method's forwarded `&block` name, and {MatchRebinding.may_match?} per
-      # node ({#memo}).
+      # body makes a matching closure, whether its implicit-self calls keep the reset ({#self_call_fallback?}), the
+      # method's forwarded `&block` name, and {MatchRebinding.may_match?} per node ({#memo}).
       class Frame
         # The nodes that bind a local in a body: the writes, and a block's, lambda's, `rescue`'s or pattern's own
         # parameters and targets.
@@ -30,6 +30,7 @@ module Rigor
           @body = body
           @parameters = parameters
           @matching_closure = nil
+          @self_call_fallback = nil
           @forwarded_block = nil
           @scans = nil
         end
@@ -40,6 +41,21 @@ module Rigor
                                 MatchRebinding.matching_closure?(@parameters, scope)
           end
           @matching_closure
+        end
+
+        # True when an implicit-self call in this frame forgets the match globals as it did before issue #1364,
+        # because the body or a parameter default hands the frame's slot to code the analyzer does not trace
+        # ({MatchRebinding.self_call_fallback?}). Kept as {#memo} keeps a scan: the broad reading resolves constants
+        # and the variables a lookup argument names through `scope`.
+        def self_call_fallback?(scope = nil)
+          return fallback_in_frame?(scope) if scope.nil?
+
+          kept = @self_call_fallback
+          return kept[2] if kept && kept[0].equal?(scope.locals) && kept[1].equal?(scope.ivars)
+
+          result = fallback_in_frame?(scope)
+          @self_call_fallback = [scope.locals, scope.ivars, result]
+          result
         end
 
         # True when `name` is the method's own `&block` parameter and the body never binds that name — no write, no
@@ -67,13 +83,24 @@ module Rigor
 
         private
 
+        def fallback_in_frame?(scope)
+          block_name = block_parameter_name
+          MatchRebinding.self_call_fallback?(@body, block_name, scope) ||
+            MatchRebinding.self_call_fallback?(@parameters, block_name, scope)
+        end
+
         def forwarded_block_name
-          parameters = @parameters
-          block = parameters.is_a?(Prism::ParametersNode) ? parameters.block : nil
-          name = block&.name
+          name = block_parameter_name
           return nil if name.nil? || binds_local?(@body, name)
 
           name
+        end
+
+        # The method's own `&block` parameter's name, or nil.
+        def block_parameter_name
+          parameters = @parameters
+          block = parameters.is_a?(Prism::ParametersNode) ? parameters.block : nil
+          block&.name
         end
 
         # `node` is a body or one of its descendants; a method with an empty body passes nil.

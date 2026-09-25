@@ -3492,6 +3492,64 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(post.global(:$1)).to eq(string_t)
     end
+
+    # Issue #1364 — a method defined in Ruby runs in a frame of its own, so a call into one leaves the caller's `$~`.
+    # The rule reads the frame, which a method, class or file body stamps; without one an implicit-self call forgets
+    # as it did before.
+    def evaluate_framed(source)
+      program = parse_program(source)
+      default_env_scope.with_match_frame(program).evaluate(program)
+    end
+
+    it "keeps the narrowing after an implicit-self or `self.` call in a frame" do
+      _, post = evaluate_framed(<<~RUBY)
+        raise unless /(\\d+)/ =~ value
+        log("parsed")
+        self.log("x")
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+
+      _, unframed = default_env_scope.evaluate(parse_program(<<~RUBY))
+        raise unless /(\\d+)/ =~ value
+        log("parsed")
+      RUBY
+      expect(unframed.global(:$1)).to be_nil
+    end
+
+    it "forgets the narrowing after an implicit-self `eval`, or a call whose argument runs a match" do
+      ["eval(src)", 'log(value.sub(/=/, ": "))'].each do |call|
+        _, post = evaluate_framed(<<~RUBY)
+          raise unless /(\\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to be_nil
+      end
+    end
+
+    it "forgets at an implicit-self call, and only there, in a frame holding a block that may match" do
+      _, post = evaluate_framed(<<~RUBY)
+        on { |l| l =~ /(z)/ }
+        raise unless /(\\d+)/ =~ value
+        value.upcase
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+
+      _, post = evaluate_framed(<<~RUBY)
+        on { |l| l =~ /(z)/ }
+        raise unless /(\\d+)/ =~ value
+        emit("q")
+      RUBY
+      expect(post.global(:$1)).to be_nil
+    end
+
+    # A `yield` rebinds this frame only when the caller passes a C-function proc; it keeps the narrowing, as before.
+    it "keeps the narrowing after a `yield`" do
+      _, post = evaluate_framed(<<~RUBY)
+        raise unless /(\\d+)/ =~ value
+        yield(value)
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+    end
   end
 
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.

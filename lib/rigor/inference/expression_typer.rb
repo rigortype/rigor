@@ -3860,6 +3860,7 @@ module Rigor
         )
         block_return_for(
           block_arg, expected,
+          call_node: call_node,
           narrowed_self_type: block_body_self_narrowing(call_node, receiver_type),
           repeats: !BLOCK_VALUE_DISCARDING.include?(call_node.name) && block_may_repeat?(call_node, receiver_type)
         )
@@ -3957,6 +3958,7 @@ module Rigor
         param_types = break_arm_param_types(call_node, receiver)
         block_scope = block_entry_scope(
           block_node, param_types,
+          call_node: call_node,
           narrowed_self_type: block_body_self_narrowing(call_node, receiver),
           captured: repeating_captured_bindings(block_node, param_types, block_may_repeat?(call_node, receiver))
         )
@@ -3994,11 +3996,13 @@ module Rigor
         )
       end
 
-      def block_return_for(block_arg, expected, narrowed_self_type: nil, repeats: false)
+      def block_return_for(block_arg, expected, call_node: nil, narrowed_self_type: nil, repeats: false)
         case block_arg
         when Prism::BlockNode
           captured = repeating_captured_bindings(block_arg, expected, repeats)
-          entry = block_entry_scope(block_arg, expected, narrowed_self_type: narrowed_self_type, captured: captured)
+          entry = block_entry_scope(
+            block_arg, expected, call_node: call_node, narrowed_self_type: narrowed_self_type, captured: captured
+          )
           type_block_body(block_arg, entry, captured: captured)
         when Prism::BlockArgumentNode
           symbol_block_return_type(block_arg, expected)
@@ -4012,9 +4016,9 @@ module Rigor
       #
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark. Issue #1358
-      # — and the same match-global view ({MatchRebinding.block_entry}).
-      def block_entry_scope(block_node, expected, narrowed_self_type: nil, captured: nil)
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node)
+      # — and the same match-global view ({MatchRebinding.block_entry}), which reads the owning `call_node`.
+      def block_entry_scope(block_node, expected, call_node: nil, narrowed_self_type: nil, captured: nil)
+        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowed_self_type

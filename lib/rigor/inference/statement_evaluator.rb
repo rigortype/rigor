@@ -2670,19 +2670,28 @@ module Rigor
         apply_rspec_matcher_narrowing(node, post_scope)
       end
 
-      # True when `node` could rebind the regex match-data globals: a known regex-matching method by name
-      # ({MatchRebinding::MATCH_CAPABLE_METHODS}), or an implicit-self / self-receiver call whose body we cannot
-      # inspect for an internal match. An explicit-receiver call to a non-matching method (`$3.to_i`, `year < 50`,
-      # `buf << c`) is treated as match-free so the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the
-      # narrowed globals. The over-approximation is one-directional: a user method that secretly matches on an explicit
-      # receiver is the only escape, and re-narrowing on the next real guard recovers — weighed against the
-      # false-positive cost, precision wins here.
+      # True when `node` could rebind the regex match-data globals by itself: a known regex-matching method by name
+      # ({MatchRebinding::MATCH_CAPABLE_METHODS}) on any receiver, or an implicit-self / `self.` call that may reach
+      # this frame's slot. Issue #1364 — a method defined in Ruby runs in a frame of its own, so a match in its body
+      # rebinds its own `$~`, never its caller's, and `log("parsed"); key = $1` keeps `$1` narrowed. Such a call still
+      # forgets when it is a builtin or eval that matches on this frame's behalf ({MatchRebinding::SelfCalls}), or
+      # when its arguments may match ({MatchRebinding.operand_may_match?}; a call there applies no reset of its own
+      # yet, #1365). It forgets as every implicit-self call did before in a frame that hands its slot to code the
+      # analyzer does not trace — a block that may match, a `binding`, a forward of the method's own block
+      # ({MatchRebinding::Frame#self_call_fallback?}) — and where no body stamped a frame. An explicit-receiver call
+      # to a non-matching method (`$3.to_i`, `year < 50`, `buf << c`) is treated as match-free so the
+      # multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the narrowed globals; a C method outside the table
+      # that matches anyway is the gap #1365 closes.
       def match_capable_call?(node)
         return true unless node.is_a?(Prism::CallNode)
         return true if MatchRebinding::MATCH_CAPABLE_METHODS.include?(node.name)
 
         receiver = node.receiver
-        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+        return false unless receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        frame = scope.match_frame
+        frame.nil? || frame.self_call_fallback?(scope) || MatchRebinding::SelfCalls.named_match?(node) ||
+          MatchRebinding.operand_may_match?(node.arguments, scope)
       end
 
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call
@@ -4553,7 +4562,7 @@ module Rigor
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node)
+        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

@@ -123,6 +123,23 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     it "does not count a call whose name cannot match, such as an implicit-self one" do
       expect(may_match?("items.each { |i| puts i.upcase }")).to be(false)
     end
+
+    # Issue #1364 — `!~` runs `=~`, and these builtins set `$~` when given a Regexp.
+    it "counts `!~`, and `start_with?`, `byteindex`, `byterindex` and the pattern predicates with a Regexp" do
+      expect(may_match?("items.each { |l| l !~ /(z)/ }")).to be(true)
+      expect(may_match?("items.each { |l| l.start_with?(/(z)/) }")).to be(true)
+      expect(may_match?("items.each { |l| l.byteindex(WORD_RE) }")).to be(true)
+      expect(may_match?("items.each { |l| [l].any?(/(z)/) }")).to be(true)
+      expect(may_match?("items.each { |l| l.start_with?('#') }")).to be(false)
+    end
+
+    # A `yield`, and a call into a Ruby method, rebind this frame only through a C-function proc or code the scan does
+    # not read; neither counts, so a block that yields keeps the narrowing as before #1364.
+    it "does not count a `yield`, `eval`, or a call on the method's own block" do
+      expect(may_match?("items.each { |i| yield i }")).to be(false)
+      expect(may_match?("sources.each { |src| eval(src) }")).to be(false)
+      expect(may_match?("items.each { |i| blk.call(i) }")).to be(false)
+    end
   end
 
   describe ".block_may_match?" do
@@ -141,6 +158,7 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     it "counts a Symbol block argument only for a method that rebinds `$~`" do
       expect(block_may_match?("items.each(&:freeze)")).to be(false)
       expect(block_may_match?("items.inject(&:=~)")).to be(true)
+      expect(block_may_match?("items.inject(&:!~)")).to be(true)
       expect(block_may_match?("items.inject(&:[])")).to be(false)
     end
 
@@ -169,6 +187,157 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(forwarded_may_match?("def m(env, &blk); blk = proc { |x| x =~ /(q)/ }; env.each(&blk); end")).to be(true)
         expect(forwarded_may_match?("def m(procs, env, &blk); procs.each { |blk| env.each(&blk) }; end")).to be(true)
       end
+    end
+  end
+
+  # Issue #1364 — a method defined in Ruby runs in a frame of its own, so an implicit-self call rebinds the caller's
+  # `$~` only as a builtin or eval that matches on its behalf.
+  describe Rigor::Inference::MatchRebinding::SelfCalls do
+    def named_match?(source) = described_class.named_match?(last_statement(source))
+
+    it "does not count a call into a Ruby method" do
+      expect(named_match?('log("parsed")')).to be(false)
+      expect(named_match?('warn "debug"')).to be(false)
+      expect(named_match?('self.log("x")')).to be(false)
+    end
+
+    it "counts `eval`, and `instance_eval` / `class_eval` / `module_eval` in their String form, on any receiver" do
+      expect(named_match?("eval(src)")).to be(true)
+      expect(named_match?("Kernel.eval(src)")).to be(true)
+      expect(named_match?("instance_eval(src)")).to be(true)
+      expect(named_match?("klass.class_eval(src, __FILE__)")).to be(true)
+      expect(named_match?("instance_eval { |x| x }")).to be(false)
+    end
+
+    it "counts a `send` whose name is not a literal, or names a method that counts" do
+      expect(named_match?("send(name, s)")).to be(true)
+      expect(named_match?("u.__send__(:=~, /(q)/)")).to be(true)
+      expect(named_match?("public_send('eval', src)")).to be(true)
+      expect(named_match?("send(:log, s)")).to be(false)
+    end
+
+    # An invalid byte cannot become a Symbol; the name compares as a String and does not count.
+    it "reads a literal name with an invalid byte without raising" do
+      expect(named_match?('send("\xff", 1)')).to be(false)
+      expect(described_class.method_name_literal?(last_statement('log("\xff")').arguments.arguments.first))
+        .to be(false)
+    end
+
+    it "counts the builtins that set their caller's `$~`, the predicates only with a pattern" do
+      expect(named_match?("u !~ /(z)/")).to be(true)
+      expect(named_match?("start_with?(/(z)/)")).to be(true)
+      expect(named_match?("[u].any?(/(z)/)")).to be(true)
+      expect(named_match?("any?")).to be(false)
+    end
+
+    it "counts `send(:binding)` or a computed `send` as one that may hand out the frame" do
+      expect(described_class.sends_binding?(last_statement("send(:binding)"))).to be(true)
+      expect(described_class.sends_binding?(last_statement("send(name)"))).to be(true)
+      expect(described_class.sends_binding?(last_statement("send(:log)"))).to be(false)
+    end
+  end
+
+  # Issue #1364 — an implicit-self call no longer forgets by itself, so it answers for the match its own arguments may
+  # run, which applies no reset of its own (#1365).
+  describe ".operand_may_match?" do
+    def operand_may_match?(source) = described_class.operand_may_match?(last_statement(source).arguments, scope)
+
+    it "counts a call the table or {SelfCalls} counts on any receiver, a literal naming one, or a `yield`" do
+      expect(operand_may_match?('log(line.sub(/=/, ": "))')).to be(true)
+      expect(operand_may_match?("log(\"\#{h[k]}\")")).to be(true)
+      expect(operand_may_match?("log(u !~ /(z)/)")).to be(true)
+      expect(operand_may_match?("log(u.start_with?(/(z)/))")).to be(true)
+      expect(operand_may_match?("log(Kernel.eval(src))")).to be(true)
+      expect(operand_may_match?("log(u.send(:=~, /(q)/))")).to be(true)
+      expect(operand_may_match?("inject(:=~)")).to be(true)
+      expect(operand_may_match?("log(yield)")).to be(true)
+      expect(operand_may_match?("log(case s when /(z)/ then 1 end)")).to be(true)
+    end
+
+    it "does not count an argument that only reads, or a block or lambda the other rules answer for" do
+      expect(operand_may_match?("log(\"\#{$2.strip}: parsed\")")).to be(false)
+      expect(operand_may_match?("log(items.map { |i| i =~ /(z)/ })")).to be(false)
+      expect(operand_may_match?("register(-> { s =~ /(z)/ })")).to be(false)
+    end
+  end
+
+  # Issue #1364 — where the frame hands its slot to code the analyzer does not trace, an implicit-self call forgets as
+  # every one did before.
+  describe ".self_call_fallback?" do
+    def fallback?(source, block_name = nil) = described_class.self_call_fallback?(root(source), block_name, scope)
+
+    def forward?(source, block_name = nil)
+      described_class.self_call_fallback?(last_statement(source).body, block_name, scope)
+    end
+
+    it "counts a block literal that may match, whatever it is handed to" do
+      expect(fallback?("on { |l| l =~ /(z)/ }")).to be(true)
+      expect(fallback?("lines.map! { |l| l.sub(/ +$/, '') }")).to be(true)
+      expect(fallback?("super { |l| l =~ /(z)/ }")).to be(true)
+      expect(fallback?("items.each { |i| puts i }")).to be(false)
+      expect(fallback?("def m = on { |l| l =~ /(z)/ }")).to be(false)
+    end
+
+    # The broad reading counts a lookup with any argument but a non-Regexp literal, a block parameter included,
+    # where the block scan does not.
+    it "reads the block broadly" do
+      source = "on { |l, pattern| l.index(pattern) }"
+
+      expect(fallback?(source)).to be(true)
+      expect(described_class.may_match?(last_statement(source).block.body, scope)).to be(false)
+      expect(fallback?("on { |l| l.index('x') }")).to be(false)
+    end
+
+    it "counts `binding` in any spelling" do
+      expect(fallback?("eval_in(binding)")).to be(true)
+      expect(fallback?("eval_in(proc {}.binding)")).to be(true)
+      expect(fallback?("eval_in(send(:binding))")).to be(true)
+    end
+
+    it "counts a forward of the method's own block, anonymous or named, or of `...`" do
+      expect(forward?("def m(&blk) = instance_exec(1, &blk)", :blk)).to be(true)
+      expect(forward?("def m(&) = each(&)")).to be(true)
+      expect(forward?("def m(...) = f(...)")).to be(true)
+      expect(forward?("def m(other, &blk) = instance_exec(1, &other)", :blk)).to be(false)
+      expect(fallback?("def m(&) = each(&)")).to be(false)
+    end
+
+    # Round-2 review of #1364: a Regexp constant from another file does not resolve (#1373), and a lambda, a `yield`
+    # or a call on the method's own block in a block the frame hands out may rebind it as well.
+    it "reads an unresolved constant as a possible Regexp, where the block scan reads it as a class" do
+      source = "helper { |l| l.index(Pats::HEADER) }"
+
+      expect(fallback?(source)).to be(true)
+      expect(fallback?("helper { |l| case l when Pats::HEADER then l end }")).to be(true)
+      expect(fallback?("helper { |l| case l when *Pats::ALL then l end }")).to be(true)
+      expect(described_class.may_match?(last_statement(source).block.body, scope)).to be(false)
+      expect(fallback?("helper { |l| case l when String then l end }")).to be(false)
+    end
+
+    it "reads a lambda literal broadly, and counts a `yield` or an own-block call in a block" do
+      expect(fallback?("@b = ->(l, pattern) { l.index(pattern) }")).to be(true)
+      expect(fallback?("helper { |a, b| yield a, b }")).to be(true)
+      expect(forward?("def m(&blk) = helper { |a, b| blk.call(a, b) }", :blk)).to be(true)
+      expect(forward?("def m(other, &blk) = helper { |a, b| other.call(a, b) }", :blk)).to be(false)
+    end
+
+    it "keeps its answer on the frame while the scope's local and instance-variable tables stay the same" do
+      def_node = last_statement("def m(s) = log(s)")
+      frame = Rigor::Inference::MatchRebinding::Frame.new(def_node.body, def_node.parameters)
+      allow(described_class).to receive(:self_call_fallback?).and_call_original
+
+      2.times { frame.self_call_fallback?(scope) }
+      frame.self_call_fallback?(scope.with_local(:s, Rigor::Type::Combinator.nominal_of("String")))
+
+      expect(described_class).to have_received(:self_call_fallback?).with(def_node.body, nil, anything).twice
+    end
+
+    it "answers for a method's parameter defaults on the frame" do
+      def_node = last_statement("def m(s, f = on { |l| l =~ /(z)/ }) = log(s)")
+
+      expect(Rigor::Inference::MatchRebinding::Frame.new(def_node.body, def_node.parameters).self_call_fallback?(scope))
+        .to be(true)
+      expect(Rigor::Inference::MatchRebinding::Frame.new(def_node.body).self_call_fallback?(scope)).to be(false)
     end
   end
 
@@ -229,6 +398,17 @@ RSpec.describe Rigor::Inference::MatchRebinding do
 
     it "keeps them for a body that cannot match, since the block shares the frame" do
       expect(described_class.block_entry(narrowed, block("items.each { |i| $1 }"))).to equal(narrowed)
+    end
+
+    # The name cannot show a `tap` / `then` / `yield_self` block runs once (#1375), so its entry reads the body as
+    # every block's was read before #1364, without `!~` and the Regexp-valued `start_with?` family.
+    it "reads a `tap` / `then` / `yield_self` body without the names #1364 added" do
+      call = last_statement("line.then { |l| r = $1; l !~ /x/ }")
+      matching = last_statement("line.then { |l| r = $1; l =~ /x/ }")
+
+      expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed)
+      expect(described_class.block_entry(narrowed, call.block).global(:$1)).to be_nil
+      expect(described_class.block_entry(narrowed, matching.block, matching).global(:$1)).to be_nil
     end
 
     it "forgets them for any body in a frame that makes a closure that may match" do

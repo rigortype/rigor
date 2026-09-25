@@ -114,6 +114,76 @@ def ensure_keeps_exit_binding
   x + 1
 end
 
+# --- A write inside a branch that no rescued raise can follow leaves
+# the arm reading the entry value: the branch's test cannot raise after
+# the write, and nothing after the branch raises. ---
+
+module Probe
+  def self.flaky = Integer("x")
+  def self.coin = rand > 0.5
+end
+
+def rescue_after_modifier_branch
+  x = 1
+  begin
+    Probe.flaky
+    x = nil if Probe.coin
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_if_branch
+  x = 1
+  begin
+    Probe.flaky
+    if Probe.coin
+      x = nil
+    end
+  rescue ArgumentError
+    assert_type("1", x)
+    x + 1
+  end
+end
+
+def rescue_after_branch_and_inert_write
+  x = 1
+  begin
+    Probe.flaky
+    x = nil if Probe.coin
+    y = 2
+  rescue ArgumentError
+    assert_type("1", x)
+    x + y.to_i
+  end
+end
+
+class Tally
+  def bump
+    @x = 1
+    begin
+      Probe.flaky
+      @x = nil if Probe.coin
+    rescue ArgumentError
+      assert_type("1", @x)
+      @x + 1
+    end
+  end
+end
+
+# A raising call after the branch does see its write.
+def rescue_after_branch_then_raise
+  x = 1
+  begin
+    x = nil if Probe.coin
+    Probe.flaky
+  rescue ArgumentError
+    assert_type("1?", x)
+    x + 1 # GENUINE-NIL
+  end
+end
+
 # --- Controls: the arm still reads the entry value where no raise it
 # rescues can follow a write. ---
 

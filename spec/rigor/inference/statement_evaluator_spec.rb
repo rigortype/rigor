@@ -534,6 +534,77 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call(0)])
     end
 
+    # The scope after an `if` / `unless` / `case` whose tests write nothing is where the construct finishes, not a
+    # point a rescued raise comes from: its branches record their own raise points.
+    [
+      "x = nil if check",
+      "if check\n  x = nil\nend",
+      "unless check\n  x = nil\nend",
+      "case check\nwhen 1 then x = nil\nend",
+      "x = nil if check\ny = 2"
+    ].each do |tail|
+      it "keeps the entry value past a branch write no raise follows: #{tail.lines.first.strip}" do
+        source = "x = 1\nbegin\n  work\n#{tail.gsub(/^/, '  ')}\nrescue\n  warn \"failed\" if x\nend\n"
+        expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1))
+      end
+    end
+
+    it "keeps the entry value of an ivar past a branch write no raise follows" do
+      source = <<~RUBY
+        @x = 1
+        begin
+          work
+          @x = nil if check
+        rescue
+          warn "failed" if @x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :@x).last).to eq(literals.call(1))
+    end
+
+    it "sees a branch write that a raising call follows" do
+      source = <<~RUBY
+        x = 1
+        begin
+          x = nil if check
+          work
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
+    end
+
+    it "sees a branch write whose test writes before a later test can raise" do
+      source = <<~RUBY
+        x = 1
+        begin
+          work
+          if (x = nil) || check
+          end
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
+    end
+
+    it "sees a loop body's write, which the loop's next test can raise after" do
+      # `while check` runs `check` again after `x = nil`, so a raise there leaves `x` nil.
+      source = <<~RUBY
+        x = 1
+        begin
+          work
+          while check
+            x = nil
+          end
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x).last).to eq(literals.call(1, nil))
+    end
+
     it "leaves a local the body introduces unbound in the arm" do
       source = <<~RUBY
         x = 0

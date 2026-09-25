@@ -1353,15 +1353,35 @@ module Rigor
       # (`raised`, nil when the body cannot raise) and by every arm's scope: `done = false; begin; work; done = true;
       # ensure; undo unless done; end` reads `done` as `bool` there. Only a `begin` that finished reaches the code after
       # it, so when the widening moves anything, the scope the clause leaves comes from a second pass under the exit
-      # scope alone, which records nothing: `done` stays `true` past the `begin`.
+      # scope alone: `done` stays `true` past the `begin`. That pass keeps out of the per-node scope index, but its
+      # raise points still reach an enclosing `begin`, since the clause can raise after a body that finished too.
+      #
+      # The widened pass exists for the index alone, so an evaluator that records nothing skips it, only handing its
+      # entry to the enclosing `begin`s as a raise point ({#record_ensure_entry}). The second pass records nothing
+      # either, which keeps a chain of `begin … ensure` nested in each other's clauses from doubling per level.
       def eval_ensure_clause(ensure_clause, exit_scope, raised, rescue_chain)
         paths = rescue_chain.map { |((_, arm_scope), _)| arm_scope }
         paths << raised if raised
         clause_entry = join_raised_bindings(exit_scope, paths, keep_base: true)
         return sub_eval(ensure_clause, exit_scope).last if clause_entry.equal?(exit_scope)
 
-        sub_eval(ensure_clause, clause_entry)
+        if @on_enter || @operand_recorder
+          sub_eval(ensure_clause, clause_entry)
+        else
+          record_ensure_entry(ensure_clause, clause_entry)
+        end
         sub_eval(ensure_clause, exit_scope, **UNRECORDED).last
+      end
+
+      # The widened entry of an `ensure` clause an unrecorded pass does not evaluate, as a raise point of each enclosing
+      # `begin` whose frame holds the clause: the scope before its first statement, which the skipped pass would have
+      # recorded, and which carries every binding it widened.
+      def record_ensure_entry(ensure_clause, clause_entry)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        statements = ensure_clause.statements
+        return unless frames && statements
+
+        frames.each { |edge| edge.raise_scopes << clause_entry if edge.frame.include?(statements) }
       end
 
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
@@ -1609,11 +1629,15 @@ module Rigor
       # shows in the post-scope of the statement holding it. Recording from the evaluator rather than `on_enter` keeps
       # a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
       #
-      # Two statements contribute less. A write of a literal or a variable read ({#inert_statement?}) cannot raise, so
-      # the scope before it is no raise point of its own: `state = s; Integer(s)` rescues with `state` already `s`. A
-      # variable write whose value has no effect on the scope raises, if at all, before it binds, so its post-scope is
-      # one only as the next statement's pre-scope ({#effect_before_raise?}): `Integer(s); state = s` rescues with
-      # `state` still at its entry value.
+      # Some statements contribute less. A write of a literal or a variable read ({#inert_statement?}) is taken not to
+      # raise (a frozen `self` and asynchronous exceptions aside), so the scope before it is no raise point of its own:
+      # `state = s; Integer(s)` rescues with `state` already `s`. The scope after a statement is one of its own only
+      # where something inside the statement can raise after changing the scope, and no statement list of the frame
+      # records it ({#effect_before_raise?}); otherwise it is one only as the next statement's pre-scope. A variable
+      # write whose value has no effect on the scope raises, if at all, before it binds: `Integer(s); state = s`
+      # rescues with `state` still at its entry value. An `if` or `case` whose tests write nothing changes the scope
+      # only inside its branches, whose own statements record their raise points: `foo; x = nil if c` rescues with `x`
+      # at its entry value.
       def record_raise_points(frames, statements, stmt, before, after)
         frames.each do |edge|
           next unless edge.frame.include?(statements)
@@ -1643,7 +1667,35 @@ module Rigor
       end
 
       def effect_before_raise?(stmt)
-        !WRITE_LAST_NODES.include?(stmt.class) || OperandEffects.any?(stmt.value)
+        case stmt
+        when Prism::IfNode, Prism::UnlessNode then conditional_test_effects?(stmt)
+        when Prism::CaseNode, Prism::CaseMatchNode then case_test_effects?(stmt)
+        else !WRITE_LAST_NODES.include?(stmt.class) || OperandEffects.any?(stmt.value)
+        end
+      end
+
+      # Whether a predicate of an `if` / `unless` or of its `elsif` chain writes, mutates or jumps: a later test in the
+      # chain can raise after it. A loop is not read this way, because its predicate runs again after the body.
+      def conditional_test_effects?(node)
+        while node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
+          return true if OperandEffects.any?(node.predicate)
+
+          node = node.is_a?(Prism::IfNode) ? node.subsequent : nil
+        end
+        false
+      end
+
+      # The same for a `case` subject and its `when` conditions or `in` patterns, a pattern's captures included.
+      def case_test_effects?(node)
+        return true if OperandEffects.any?(node.predicate)
+
+        node.conditions.any? do |branch|
+          if branch.is_a?(Prism::WhenNode)
+            branch.conditions.any? { |condition| OperandEffects.any?(condition) }
+          else
+            OperandEffects.any?(branch.pattern)
+          end
+        end
       end
 
       # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings

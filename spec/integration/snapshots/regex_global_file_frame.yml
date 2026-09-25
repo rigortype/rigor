@@ -1,0 +1,7 @@
+---
+locals:
+  line: String
+  matcher: Proc
+assertions:
+  '1': String?
+  '2': String

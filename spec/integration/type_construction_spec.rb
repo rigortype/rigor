@@ -1078,6 +1078,24 @@ RSpec.describe "Rigor type construction (integration)" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
+
+    # Issue #1358 — the controls read `$1` after a block or closure that cannot rebind the frame's `$~`, then call a
+    # method on it; a block rule that over-counted would report each of those calls on correct code.
+    it "reports no nil receiver on the frame-sharing controls" do
+      nil_receivers = harness.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(nil_receivers).to be_empty
+    end
+  end
+
+  describe "fixtures/regex_global_file_frame.rb — the file's top level is a frame of its own (#1358)" do
+    let(:harness) { harness_for("regex_global_file_frame") }
+
+    it "forgets the top level's narrowing once it makes a matching lambda, and not a method's" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
   end
 
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do

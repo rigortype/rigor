@@ -166,7 +166,9 @@ module Rigor
         # reads `table[node]` to type predicates; the second pass's entry is the one that reflects all flow-derived
         # rebinds, so it MUST overwrite the first. ADR-48 Struct slice 3 — install the top-level fold-safe-local set so
         # a member read off a mutation-free top-level struct binding folds.
-        seeded_scope = seed_struct_fold_safe(seeded_scope, root)
+        # Issue #1358 — the file's top level runs in a frame of its own, whose match globals its blocks and closures
+        # share.
+        seeded_scope = seed_struct_fold_safe(seeded_scope, root).with_match_frame(root)
 
         on_enter = ->(node, scope) { table[node] = scope }
         StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,

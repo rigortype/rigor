@@ -23,3 +23,41 @@ assertions:
   '15': String?
   '16': String?
   '17': String?
+  '18': String?
+  '19': bool
+  '20': String
+  '21': 'false'
+  '22': String
+  '23': String?
+  '24': String?
+  '25': String
+  '26': Array[String?]
+  '27': String?
+  '28': String
+  '29': String
+  '30': String?
+  '31': String?
+  '32': String
+  '33': String
+  '34': String
+  '35': String
+  '36': String
+  '37': String?
+  '38': String
+  '39': String?
+  '40': String?
+  '41': String?
+  '42': String?
+  '43': String?
+  '44': "[String?, String?]"
+  '45': Array["x" | String | nil]
+  '46': String?
+  '47': String
+  '48': String
+  '49': String
+  '50': String
+  '51': String
+  '52': String
+  '53': String?
+  '54': String?
+  '55': String?

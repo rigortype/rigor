@@ -231,6 +231,38 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "#match_globals_bound?" do
+    it "is true only while a match-data global holds a binding" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+
+      expect(scope.with_global(:$stdout, str).match_globals_bound?).to be(false)
+      expect(scope.with_global(:$2, str).match_globals_bound?).to be(true)
+    end
+  end
+
+  # Issue #1358 — the frame a body runs in, which its blocks and closures share.
+  describe "#with_match_frame / #match_rebinding_closure?" do
+    def root(source) = Prism.parse(source).value
+
+    it "answers whether the frame's body makes a closure that may run a match" do
+      expect(scope.with_match_frame(root("f = proc { s =~ /(z)/ }")).match_rebinding_closure?).to be(true)
+      expect(scope.with_match_frame(root("f = proc { s.upcase }")).match_rebinding_closure?).to be(false)
+    end
+
+    it "is false where no body stamped a frame" do
+      expect(scope.match_rebinding_closure?).to be(false)
+    end
+
+    it "survives a rebuild and a join, even with an arm that has no frame" do
+      framed = scope.with_match_frame(root("f = proc { s =~ /(z)/ }"))
+      str = Rigor::Type::Combinator.nominal_of("String")
+
+      expect(framed.with_local(:x, str).match_rebinding_closure?).to be(true)
+      expect(framed.join(framed.with_local(:x, str)).match_rebinding_closure?).to be(true)
+      expect(scope.join(framed).match_rebinding_closure?).to be(true)
+    end
+  end
+
   describe "#with_fact" do
     it "returns a new scope with the fact added" do
       fact = Rigor::Analysis::FactStore::Fact.new(
@@ -485,7 +517,7 @@ RSpec.describe Rigor::Scope do
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
-          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes
+          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -506,7 +538,7 @@ RSpec.describe Rigor::Scope do
     # One arm, populated so that EVERY constructor keyword holds a non-default value. Both arms are built from
     # the same values, so the agreement / intersection rules keep them and any field the join forgets shows up
     # as the constructor default instead.
-    def populated(fact, type, node)
+    def populated(fact, type, node) # rubocop:disable Metrics/AbcSize -- one keyword per constructor field
       described_class.new(
         environment: Rigor::Environment.default,
         locals: { x: type }.freeze,
@@ -533,7 +565,8 @@ RSpec.describe Rigor::Scope do
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
         optimistic_ivars: { :@i => :cause }.freeze,
-        repeated_or_writes: { node => true }.compare_by_identity.freeze
+        repeated_or_writes: { node => true }.compare_by_identity.freeze,
+        match_frame: Rigor::Inference::MatchRebinding::Frame.new(node)
       )
     end
 

@@ -27,7 +27,7 @@ module Rigor
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
-                :repeated_or_writes
+                :repeated_or_writes, :match_frame
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -293,7 +293,8 @@ module Rigor
       optimistic_origins: {}.compare_by_identity,
       optimistic_locals: EMPTY_ORIGINS,
       optimistic_ivars: EMPTY_ORIGINS,
-      repeated_or_writes: EMPTY_REPEATED_OR_WRITES
+      repeated_or_writes: EMPTY_REPEATED_OR_WRITES,
+      match_frame: nil
     )
       @environment = environment
       @locals = locals
@@ -321,6 +322,7 @@ module Rigor
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
       @repeated_or_writes = repeated_or_writes
+      @match_frame = match_frame
       freeze
     end
 
@@ -633,17 +635,38 @@ module Rigor
     end
 
     # Regex match-data globals (`$~`, `$&`, `$1..$9`, the pre/post-match and last-paren back-references). Narrowed
-    # on a successful-`=~` / `case`-`when` match edge (see `Narrowing#regex_match_predicate_scopes`); any
-    # subsequent method call could run another match and rebind every one of them, so `eval_call` forgets the
-    # narrowed facts here. Always safe — only drops facts, so a subsequent read falls back to the default
-    # `String | nil`. Program-level `$GLOBAL = ...` seeds use other names and are untouched.
+    # on a successful-`=~` / `case`-`when` match edge (see `Narrowing#regex_match_predicate_scopes`). They live in
+    # the method frame's special-variable slot, which the method's blocks and closures share (issue #1358), so a
+    # later call that may run a match in this frame — a match-capable call, a block that may match, a call once
+    # the frame has made a closure that may — rebinds every one of them, and `eval_call` forgets the narrowed
+    # facts here. Always safe — only drops facts, so a subsequent read falls back to the default `String | nil`.
+    # Program-level `$GLOBAL = ...` seeds use other names and are untouched.
     MATCH_DATA_GLOBALS = %i[$~ $& $` $' $+ $1 $2 $3 $4 $5 $6 $7 $8 $9].freeze
     private_constant :MATCH_DATA_GLOBALS
 
     def forget_match_globals
-      return self unless @globals.keys.any? { |k| MATCH_DATA_GLOBALS.include?(k) }
+      return self unless match_globals_bound?
 
       rebuild(globals: @globals.except(*MATCH_DATA_GLOBALS).freeze)
+    end
+
+    # True when any match-data global holds a binding, which only a match edge makes: the only state
+    # {#forget_match_globals} can drop, and so the gate on every scan that decides whether to.
+    def match_globals_bound?
+      !@globals.empty? && MATCH_DATA_GLOBALS.any? { |name| @globals.key?(name) }
+    end
+
+    # Issue #1358 — stamps the frame `body` runs in ({Inference::MatchRebinding::Frame}) on a method, class or
+    # file body's entry scope; a method passes its `parameters` too, whose defaults run in the same frame. Every
+    # scope derived from it, a block's included, runs in that frame.
+    def with_match_frame(body, parameters = nil)
+      rebuild(match_frame: Inference::MatchRebinding::Frame.new(body, parameters))
+    end
+
+    # True when this scope's frame makes a closure that may rebind its match globals whenever it is invoked
+    # ({Inference::MatchRebinding.matching_closure?}). False where no body stamped a frame.
+    def match_rebinding_closure?
+      !@match_frame.nil? && @match_frame.matching_closure?(self)
     end
 
     # Slice 7 phase 2 — class-level ivar accumulator. Keyed by the qualified class name (e.g. `"Rigor::Scope"`);
@@ -1679,7 +1702,8 @@ module Rigor
       optimistic_origins: @optimistic_origins,
       optimistic_locals: @optimistic_locals,
       optimistic_ivars: @optimistic_ivars,
-      repeated_or_writes: @repeated_or_writes
+      repeated_or_writes: @repeated_or_writes,
+      match_frame: @match_frame
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -1703,7 +1727,8 @@ module Rigor
         optimistic_origins: optimistic_origins,
         optimistic_locals: optimistic_locals,
         optimistic_ivars: optimistic_ivars,
-        repeated_or_writes: repeated_or_writes
+        repeated_or_writes: repeated_or_writes,
+        match_frame: match_frame
       )
     end
 
@@ -1723,7 +1748,7 @@ module Rigor
 
     def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
       self.class.new(
-        environment: environment,
+        environment: @environment,
         locals: joined_locals.freeze,
         fact_store: fact_store.join(other.fact_store),
         self_type: self_type == other.self_type ? self_type : nil,
@@ -1743,7 +1768,7 @@ module Rigor
         # end; m == :x` must not warn because one arm's copy is invisible to the reader's author. ADR-67
         # WD6b's `:inferred_param` taint takes the same direction for the same reason.
         published_constant_sourced: join_published_constant_sourced(other),
-        source_path: source_path,
+        source_path: @source_path,
         # Issue #589 — the fold-safe set MUST survive a merge. It was simply absent from this constructor
         # call, so it fell back to the empty default and every `if` / `while` in a method silently revoked
         # struct member folding for the whole body after it: `s = S.new("r"); while c; i += 1; end; s.raw`
@@ -1788,7 +1813,11 @@ module Rigor
         optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars),
         # UNION, the published-constant mark's direction: the mark only withholds the memoizing `||=`
         # reading, so keeping a site either arm holds is the wider answer.
-        repeated_or_writes: join_repeated_or_writes(other)
+        repeated_or_writes: join_repeated_or_writes(other),
+        # Issue #1358 — the frame the body runs in, stamped at its entry like the nesting above, so both arms
+        # of a merge inside one body carry the same one; `||` keeps it should either arm lack it, since dropping
+        # it only loses the frame's resets.
+        match_frame: @match_frame || other.match_frame
       )
     end
 

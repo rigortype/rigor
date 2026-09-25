@@ -141,7 +141,28 @@ The `Regexp` "specific narrowing rule" the trust levels above defer to is the `=
 - **Truthy edge** (the match succeeded — `=~` returned an `Integer` position): `$~` narrows to `MatchData`; `$&`, `` $` `` and `$'` narrow to `String` (they are non-nil on any successful match regardless of grouping); each *unconditionally participating* numbered group `$N` narrows to `String`; `$+` (the last matched group) narrows to `String` only when at least one group participates unconditionally.
 - **Falsey edge** (no match — `=~` returned `nil`): `$~`, every unconditional `$N`, and `$+` (when gated in) narrow to `nil`.
 - **Participation** is one-directional and conservative. A numbered group participates unconditionally only when neither it nor any enclosing group carries a zero-permitting quantifier (`?`, `*`, `{0,…}`) and it does not sit inside an alternation (`|`) branch; `(?:…)` and lookaround do not capture. A group that is optional, alternation-reachable, or otherwise in doubt is treated as conditional — its `$N` stays `String | nil` on both edges — because a successful overall match can leave such a group unmatched (`nil`) at runtime. `$+` follows the same gate: a zero-group or all-optional-group pattern leaves it `String | nil`.
-- **Invalidation.** The match globals are global-storage facts. Any intervening match-capable call between the predicate and a global's use invalidates the narrowing; a later successful `Regexp.last_match` consult observes the same proven-match bindings rather than re-deriving them.
+- **Invalidation.** The match globals are frame-local facts. Ruby keeps them in the special-variable slot of the method body (or class, module or file body) that runs the match. A block, and a closure created in that body — a lambda literal, `lambda {}`, `proc {}`, `Proc.new {}` — ordinarily reaches the same slot, so a match it runs rebinds the body's globals; a called method, and a nested `def`, class or module body, has a slot of its own. An intervening call that may rebind the slot, between the predicate and a global's use, invalidates the narrowing:
+  - a match-capable call: one whose method name may run a match, or an implicit-self or `self.` call. The implicit-self half is conservative, since a called Ruby method cannot rebind its caller's slot; it is tracked in [#1364](https://github.com/rigortype/rigor/issues/1364);
+  - a statement whose call, or a call in its receiver chain or arguments, carries a block literal whose body may run a match (defined below);
+  - a statement whose call, or a call in its receiver chain or arguments, passes a `&expr` block argument that may be a proc created in this body. That is anything but a Symbol literal (unless it names `=~`, `match`, `sub`, `sub!`, `gsub`, `gsub!`, `scan` or `===`), an anonymous `&`, or the method's own `&block` parameter while the body neither rebinds nor shadows it; the last two forward the block the caller created;
+  - any call in a body that creates a closure whose body may run a match — a lambda literal, or the block of a call that keeps its block to run later (`lambda`, `proc`, `Proc.new`, `define_method`, …), in the body or in a method's parameter defaults — because the closure can run through any later call. The rule covers every call in the body, not only those after the closure, because in a loop a call written before the closure can run after it.
+
+  A block or closure body *may run a match* when it contains one of the following anywhere except inside a nested `def`, class or module body:
+  - a call to `=~`, `match`, `sub`, `sub!`, `gsub`, `gsub!` or `scan`, which set the globals whatever their argument;
+  - a call to `[]`, `slice`, `slice!`, `index`, `rindex`, `partition`, `rpartition` or `split` with an argument known to be a Regexp: a regex literal, a constant bound to one, a local or instance variable bound to one in the scope where the block is written, or `Regexp.new` / `.union` / `.compile`. `grep` and `grep_v` count on the same terms, but only in their block form, since without a block they leave the caller's `$~` alone. Inside a block these names are overwhelmingly Hash, Array and String lookups, so a Regexp that reaches the lookup any other way is not counted. A Regexp that arrives as a block parameter, is assigned inside the block, or comes from a method's return value is a known gap;
+  - `===` on a receiver that may be a Regexp;
+  - a `when` condition of a `case` with a subject, or a value in an `in` / `=>` pattern, that may be a Regexp: a regex literal, a pinned or other non-constant expression, a constant bound to a Regexp, or a splat of a constant holding one. These do not count: a literal that is not a Regexp; a constant bound to anything else (a class or module, a collection, any other value); and a constant that does not resolve, which is read as a class. A Regexp constant defined in another file currently does not resolve, because the cross-file constant census does not publish a Regexp literal, so it is not counted; that gap is tracked in [#1373](https://github.com/rigortype/rigor/issues/1373). A `case` without a subject runs no `===`, and a pattern's `if` / `unless` guard is ordinary code, scanned like the rest of the body;
+  - a bare regex condition, a write to `$~`, or a `&expr` block argument as above.
+
+  A Symbol block argument naming a lookup (`&:[]`, `&:index`) whose elements pass a Regexp argument rebinds the globals as well; it is not counted, a known gap that is rare in practice.
+
+  A block body that may run a match, or any block body in a body that creates such a closure, does not read the narrowing from outside the block, because it can run after an earlier iteration rebound the globals. Any other block body reads the outer narrowing, with these known exceptions that are not modelled yet:
+  - the block of `gsub`, `gsub!`, `sub`, `sub!`, `scan`, `grep` or `grep_v`, which runs after the call has set `$~` to its own match, and a lambda or proc body, which runs when it is called, not where it is written ([#1371](https://github.com/rigortype/rigor/issues/1371));
+  - the root block of `Thread.new` or `Fiber.new`, which gets a fresh slot ([#1361](https://github.com/rigortype/rigor/issues/1361)).
+
+  Separately from blocks, a regex `when` arm or `in` pattern that fails leaves `$~` nil after the `case`, which the narrowing does not model yet ([#1372](https://github.com/rigortype/rigor/issues/1372)).
+
+  A later successful `Regexp.last_match` consult observes the same proven-match bindings rather than re-deriving them.
 
 ## Fact stability and mutation
 
@@ -152,7 +173,7 @@ Facts MUST carry a target and a stability reason. The first implementation disti
 - **local binding facts**, such as "local `x` currently refers to a non-nil value";
 - **captured local facts**, where a block, proc, or lambda may write the local from another lexical scope;
 - **object-content facts**, such as hash keys, instance variables, singleton methods, and object-shape members;
-- **global storage facts**, such as constants, class variables, and globals;
+- **global storage facts**, such as constants, class variables, and globals (the regex match globals are frame-local instead; see § "Regexp match-predicate narrowing");
 - **dynamic-origin and relational facts**, which may survive local calls but still need target invalidation.
 
 ### Targeted invalidation

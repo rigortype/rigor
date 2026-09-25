@@ -114,6 +114,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[program].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
     end
 
+    # Issue #1359 — `$_` and `$~` live in the slot of the body that writes them, so a write binds that body alone:
+    # neither the top level before it nor a method body reads it.
+    it "keeps the frame-local specials out of the program-wide globals" do
+      program, idx = index_for(<<~RUBY)
+        $_ = "top"
+        $~ = nil
+        $verbose = true
+        def m = [$_, $~, $verbose]
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+      globals = idx[program].program_globals
+
+      expect(globals.keys).to eq([:$verbose])
+      expect(idx[program].global(:$_)).to be_nil
+      expect(idx[method_body].global(:$_)).to be_nil
+      expect(idx[method_body].global(:$~)).to be_nil
+      expect(idx[method_body].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
     it "shows branch-internal bindings inside their branch only" do
       program, idx = index_for(<<~RUBY)
         if cond

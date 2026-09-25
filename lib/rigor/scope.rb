@@ -692,6 +692,30 @@ module Rigor
       !@globals.empty? && MATCH_DATA_GLOBALS.any? { |name| @globals.key?(name) }
     end
 
+    # Issue #1359 — the last line read, `$_`, lives in the same frame slot as the match globals, and so on the same
+    # terms: a `gets`-family call, a write, or a block or closure of the frame that may run either rebinds it
+    # ({Inference::LastLine}). It is bound only where a condition on a reader narrows it, or where code writes it.
+    LAST_LINE = :$_
+    private_constant :LAST_LINE
+
+    def forget_last_line
+      return self unless last_line_bound?
+
+      rebuild(globals: @globals.except(LAST_LINE).freeze)
+    end
+
+    # The `$_` half of {#untyped_match_globals}: a bound `$_` rebound to `Dynamic[top]`, an unbound one left alone.
+    def untyped_last_line
+      return self unless last_line_bound?
+
+      rebuild(globals: @globals.merge(LAST_LINE => Type::Combinator.untyped).freeze)
+    end
+
+    # The gate on every scan that decides whether to forget `$_`, as {#match_globals_bound?} is for the match globals.
+    def last_line_bound?
+      !@globals.empty? && @globals.key?(LAST_LINE)
+    end
+
     # Issue #1358 — stamps the frame `body` runs in ({Inference::MatchRebinding::Frame}) on a method, class or
     # file body's entry scope; a method passes its `parameters` too, whose defaults run in the same frame. Every
     # scope derived from it, a block's included, runs in that frame.
@@ -703,6 +727,12 @@ module Rigor
     # ({Inference::MatchRebinding.matching_closure?}). False where no body stamped a frame.
     def match_rebinding_closure?
       !@match_frame.nil? && @match_frame.matching_closure?(self)
+    end
+
+    # True when this scope's frame makes a closure that may set its `$_` whenever it is invoked
+    # ({Inference::LastLine.closure?}). False where no body stamped a frame.
+    def last_line_closure?
+      !@match_frame.nil? && @match_frame.last_line_closure?(self)
     end
 
     # Slice 7 phase 2 — class-level ivar accumulator. Keyed by the qualified class name (e.g. `"Rigor::Scope"`);

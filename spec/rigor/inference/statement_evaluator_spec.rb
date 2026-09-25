@@ -3627,6 +3627,92 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #1359 — `$_` shares the match globals' frame slot: a condition on a reader narrows it, and code that may
+  # set it after the narrowing forgets it.
+  describe "`$_` last-line narrowing" do
+    let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    # The `$_` a read of it records in the per-node scope index, in source order.
+    def last_line_reads(source)
+      program = parse_program(source)
+      reads = []
+      recorder = lambda do |node, scope|
+        reads << scope.global(:$_) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == :$_
+      end
+      framed = default_env_scope.with_match_frame(program)
+      _, post = described_class.new(scope: framed, on_enter: recorder).evaluate(program)
+      [reads, post]
+    end
+
+    it "narrows `$_` on a reader condition's edges and leaves it nil after a `while gets` loop" do
+      reads, post = last_line_reads(<<~RUBY)
+        if gets then $_ else $_ end
+        gets or raise
+        $_
+        while gets
+          $_
+        end
+      RUBY
+      expect(reads).to eq([string_t, nil_t, string_t, string_t])
+      expect(post.global(:$_)).to eq(nil_t)
+    end
+
+    it "leaves `$_` unbound after a reader that is not a condition, and on an untyped receiver's condition" do
+      reads, = last_line_reads(<<~RUBY)
+        if gets
+          gets
+          $_
+        end
+        $_ if io.gets
+      RUBY
+      expect(reads).to eq([nil, nil])
+    end
+
+    it "forgets `$_` after an operand, literal or block that may set it, and keeps it across a Ruby method call" do
+      ["x = gets.to_s", "log(gets)", "pair = [gets, 1]", "items.each { |i| i.gets }", "items.each(&:gets)",
+       "io.send(:gets)", "Enumerator.new { gets }.to_a"].each do |call|
+        reads, = last_line_reads("if gets\n  #{call}\n  $_\nend\n")
+        expect(reads).to eq([nil]), call
+      end
+      ["log('x')", "self.log('y')", "items.map { |i| i }", "Thread.new { gets }.join"].each do |call|
+        reads, = last_line_reads("if gets\n  #{call}\n  $_\nend\n")
+        expect(reads).to eq([string_t]), call
+      end
+    end
+
+    it "forgets `$_` where a body that may set it runs again, and where a rescue clause reads it" do
+      ["while ok\n  $_\n  gets\nend", "for i in items\n  $_\n  gets\nend",
+       "begin\n  $stdin.readline\nrescue EOFError\n  $_\nend",
+       "begin\n  $_\n  gets\n  raise 'x'\nrescue RuntimeError\n  retry\nend"].each do |body|
+        reads, = last_line_reads("if gets\n#{body}\nend\n")
+        expect(reads).to all(be_nil), body
+        expect(reads).not_to be_empty
+      end
+      reads, = last_line_reads("if gets\n  while ok\n    $_\n  end\nend\n")
+      expect(reads).to eq([string_t])
+    end
+
+    # The single body pass enters on the predicate's loop-entry edge as the fixpoint passes do, so a body that
+    # rebinds no local reads the narrowing too; a `begin … end while` body runs once before the predicate.
+    it "enters the single body pass of a loop on the predicate's edge, but not a `begin … end while` body" do
+      program = parse_program(<<~RUBY)
+        while (line = gets)
+          line
+        end
+        begin
+          line
+        end while (line = gets)
+      RUBY
+      reads = []
+      recorder = ->(node, scope) { reads << scope.local(:line) if node.is_a?(Prism::LocalVariableReadNode) }
+      described_class.new(scope: default_env_scope, on_enter: recorder).evaluate(program)
+      expect(reads.first).to eq(string_t)
+      expect(reads.last).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
+    end
+  end
+
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.
   describe "break-path binding propagation (loop continuation)" do
     def local_after(source, name)

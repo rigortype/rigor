@@ -336,7 +336,7 @@ module Rigor
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
-        [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
+        [@scope.type_of(node, tracer: @tracer), forget_rebound_specials(@scope, node)]
       end
 
       # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
@@ -585,7 +585,7 @@ module Rigor
       # `attr_reader`, the very macro #319 silenced at every other position); inside a module, the module's own
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
-        result = [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node.value)]
+        result = [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node.value)]
         call_node = meta_new_block_call(node)
         return result if call_node.nil?
 
@@ -776,7 +776,7 @@ module Rigor
                                         arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
-        [result_type, forget_rebound_match_globals(post, node)]
+        [result_type, forget_rebound_specials(post, node)]
       end
 
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
@@ -788,7 +788,7 @@ module Rigor
         stored = index_write_stored_type(node, scope)
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
                                            arg_types: index_write_arg_types(node, stored))
-        [stored, forget_rebound_match_globals(widened, node)]
+        [stored, forget_rebound_specials(widened, node)]
       end
 
       # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
@@ -982,7 +982,7 @@ module Rigor
       # does ({HashLookupMutation}). The node's value is typed as before; the widening is its only scope effect.
       def eval_attribute_compound_write(node)
         widened = widen_attribute_write(node.receiver, node.write_name, scope)
-        [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(widened, node)]
+        [scope.type_of(node, tracer: tracer), forget_rebound_specials(widened, node)]
       end
 
       # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
@@ -1313,10 +1313,15 @@ module Rigor
       # observable.
       def eval_begin(node)
         jump_marks = ensure_jump_marks(node)
-        entry = scope
         edge = retry_edge_for(node)
+        # Issue #1359 — `$_` is not among the bindings the retry widening below carries, so a body that runs again
+        # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
+        # prefix of the body, and so reads it forgotten whenever the body may set it.
+        entry = edge ? LastLine.forget_if_set(scope, node) : scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)
+        rescue_chain = collect_rescue_chain_results(
+          node.rescue_clause, LastLine.forget_if_set(entry, node.statements), edge: edge
+        )
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -1712,7 +1717,10 @@ module Rigor
       # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase
       # 1), reflecting the common case where no `break VALUE` is observed.
       def eval_loop(node)
-        _pred_type, post_pred = sub_eval(node.predicate, scope)
+        # Issue #1359 — a body that may set `$_` runs again after it ran, so neither the predicate nor any pass over
+        # the body reads a `$_` narrowing from before the loop. A `while gets` predicate narrows it afresh.
+        entry = LastLine.forget_if_set(scope, node.statements)
+        _pred_type, post_pred = sub_eval(node.predicate, entry)
         post_pred = widen_predicate_pins(node, post_pred)
         return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 
@@ -1721,10 +1729,16 @@ module Rigor
         # Tuple), body-introduced locals' nil-injection, an instance variable's rebind, and the loop value itself. The
         # fixpoint then OVERLAYS only the rebound-local bindings it corrects.
         #
+        # Like every fixpoint pass, it enters the body on the predicate's loop-entry edge ({#loop_pass_entry}): the
+        # body of `while (line = gets)` reads `line` as `String`, and the body of `while gets` reads `$_` as one
+        # (issue #1359), also when the body rebinds no local and this is the only pass. A `begin … end while` body runs
+        # once before the predicate is first tested, so its pass enters from the post-predicate scope unnarrowed.
+        #
         # The pass ends with its `next` exits as well as its fall-through ({#loop_iteration}). Its `break` arms are
         # superseded by the fixpoint's converged pass ({#loop_break_arms}) except in a `begin … end while` loop, below.
         jumps = loop_jumps(node.statements)
-        body_scope, first_breaks = loop_iteration(node.statements, post_pred, jumps)
+        first_entry = node.begin_modifier? ? post_pred : loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
+        body_scope, first_breaks = loop_iteration(node.statements, first_entry, jumps)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
         rebound, body_first = loop_body_local_writes(node.statements, post_pred)
@@ -1842,6 +1856,11 @@ module Rigor
 
       NO_BREAK_ARMS = [].freeze
       private_constant :NO_BREAK_ARMS
+
+      # The rebind assumptions and body-first names of the single body pass, which overlays none ({#eval_loop}).
+      NO_LOOP_BINDINGS = {}.freeze
+      NO_LOOP_NAMES = [].freeze
+      private_constant :NO_LOOP_BINDINGS, :NO_LOOP_NAMES
 
       # A body with no targeting jump pays two allocation-free scans.
       def loop_jumps(statements)
@@ -2095,7 +2114,8 @@ module Rigor
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
         element_type = for_iteration_element_type(coll_type)
-        body_entry = bind_for_index(node.index, element_type, post_coll)
+        # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
+        body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
 
         if node.statements.nil?
           return [Type::Combinator.constant_of(nil), join_with_nil_injection(post_coll, body_entry)]
@@ -2342,12 +2362,12 @@ module Rigor
       # before it left ({OperandWalk}), so `[n += 1, n += 1]` is `[1, 2]`.
       def eval_value_container(node)
         unless OperandEffects.any?(node)
-          return [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node)]
+          return [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node)]
         end
 
         walk = OperandWalk.new(walk_recorder)
         after = thread_operand_children(node, scope, walk, scope)
-        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), forget_rebound_match_globals(after, node)]
+        [OperandWalk.type_of(scope, node, tracer, walk.types(tracer)), forget_rebound_specials(after, node)]
       end
 
       # `expr rescue alt`. The rescue arm runs only when `expr` raised, possibly after some of its writes, so the arm
@@ -2357,7 +2377,7 @@ module Rigor
       # or jump keeps the entry scope.
       def eval_rescue_modifier(node)
         unless OperandEffects.any?(node)
-          return [scope.type_of(node, tracer: tracer), forget_rebound_match_globals(scope, node)]
+          return [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node)]
         end
 
         walk = OperandWalk.new(walk_recorder)
@@ -2375,7 +2395,7 @@ module Rigor
                 else
                   join_with_nil_injection(after_expression, after_rescue)
                 end
-        [type, forget_rebound_match_globals(after, node)]
+        [type, forget_rebound_specials(after, node)]
       end
 
       # `class Foo; body; end` and `module Foo; body; end`. The class body runs in a fresh scope (Ruby's class scope
@@ -2465,7 +2485,7 @@ module Rigor
       def eval_call(node)
         walk = OperandWalk.new(walk_recorder)
         invoked = call_operand_scope(node, walk, scope)
-        invoked = forget_operand_match_globals(node, invoked)
+        invoked = forget_operand_specials(node, invoked)
         operand_types = walk.types(tracer)
         call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
         # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
@@ -2531,7 +2551,7 @@ module Rigor
       # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
       # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone. Issue #1365 —
       # the statement that holds the operand forgets the regex globals for every call in it instead, threaded or not,
-      # when that call is known to match ({#forget_operand_match_globals}), so an operand's answer still does not
+      # when that call is known to match ({#forget_operand_specials}), so an operand's answer still does not
       # depend on whether it writes.
       def thread_operand(node, entry, walk, typed_from)
         return entry unless node.is_a?(Prism::Node)
@@ -2666,6 +2686,7 @@ module Rigor
         # the negative rules when a helper's return widens to `Scope?` under call-site binding (#524).
         post_scope ||= scope
         post_scope = post_scope.forget_match_globals if statement_call && rebinds_match_globals?(node, post_scope)
+        post_scope = post_scope.forget_last_line if statement_call && rebinds_last_line?(node, post_scope)
         post_scope
       end
 
@@ -2674,7 +2695,7 @@ module Rigor
       # so `items.each { |i| i =~ re }` rebinds the enclosing method's `$~`, while a match inside a called Ruby method
       # rebinds that method's own), or the frame has made a closure that may run one whenever it is called
       # ({Scope#match_rebinding_closure?}). The receiver chain and arguments ran before the call, and
-      # {#forget_operand_match_globals} answered for them. The scans run only while a match global is narrowed, the
+      # {#forget_operand_specials} answered for them. The scans run only while a match global is narrowed, the
       # one state a forget can drop.
       def rebinds_match_globals?(node, post_scope)
         return false unless post_scope.match_globals_bound?
@@ -2683,28 +2704,44 @@ module Rigor
         MatchRebinding.block_may_match?(node, scope) || post_scope.match_rebinding_closure?
       end
 
+      # Issue #1359 — whether the call rebinds `$_`, which shares the match globals' frame slot and so their call
+      # rules ({LastLine.call_rebinds?}): a reader, or a block or closure of this frame that may run one, does; a
+      # call into a method defined in Ruby does not. The receiver chain and arguments ran before the call, and
+      # {#forget_operand_specials} answered for them. The scans run only while `$_` is narrowed.
+      def rebinds_last_line?(node, post_scope)
+        post_scope.last_line_bound? && LastLine.call_rebinds?(node, scope)
+      end
+
       # Issue #1365 — the scope a statement call runs its method from, with the match globals forgotten when its
       # receiver chain or arguments may rebind them ({MatchRebinding.operands_may_rebind?}): Ruby runs those first,
       # so the call's own block already reads the rebound globals (`s.sub(re, "").each_char { $1 }`). No call in them
       # forgot before, so each forgets here only when it is known to match ({MatchRebinding::Calls.rebinds?}), and
       # none resets by itself ({#invoke_call}), so an operand's answer does not depend on whether the evaluator
-      # threads it: `$stdout.puts(Integer(v = $2))` keeps `$1` narrowed as `$stdout.puts(Integer($2))` does.
-      def forget_operand_match_globals(node, invoked)
-        return invoked if @in_operand || !invoked.match_globals_bound?
-        return invoked unless MatchRebinding.operands_may_rebind?(node, scope)
+      # threads it: `$stdout.puts(Integer(v = $2))` keeps `$1` narrowed as `$stdout.puts(Integer($2))` does. `$_`
+      # is forgotten the same way when they may set it (`line = gets.chomp`, issue #1359).
+      def forget_operand_specials(node, invoked)
+        return invoked if @in_operand
 
-        invoked.forget_match_globals
+        if invoked.match_globals_bound? && MatchRebinding.operands_may_rebind?(node, scope)
+          invoked = invoked.forget_match_globals
+        end
+        return invoked unless invoked.last_line_bound? && LastLine.operands_may_set?(node, scope)
+
+        invoked.forget_last_line
       end
 
       # Issue #1365 — `after` with the match globals forgotten when `node`, a value this statement types without
       # evaluating the calls in it as statements (an array, hash or interpolation literal, a `rescue` modifier, a
-      # constant's value, a `super` or `yield`), may rebind them ({MatchRebinding.value_may_rebind?}). Inside an
-      # operand the statement that holds it answers instead.
-      def forget_rebound_match_globals(after, node)
-        return after if @in_operand || !after.match_globals_bound?
-        return after unless MatchRebinding.value_may_rebind?(node, scope)
+      # constant's value, a `super` or `yield`), may rebind them ({MatchRebinding.value_may_rebind?}), and `$_` when
+      # it may set it ({LastLine.may_set?}, issue #1359). Inside an operand the statement that holds it answers
+      # instead.
+      def forget_rebound_specials(after, node)
+        return after if @in_operand
 
-        after.forget_match_globals
+        after = after.forget_match_globals if after.match_globals_bound? && MatchRebinding.value_may_rebind?(node, scope)
+        return after unless after.last_line_bound? && LastLine.may_set?(node, scope)
+
+        after.forget_last_line
       end
 
       # The value an untyped setter call on a local stores (`foo(s.x = v)`), for the Struct member write-back; nil for

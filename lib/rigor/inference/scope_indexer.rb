@@ -13,6 +13,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
+require_relative "last_line"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -2069,6 +2070,13 @@ module Rigor
       # Slice 7 phase 6 — program-global pre-pass. Globals are process-wide so the accumulator is a flat `Hash[Symbol,
       # Type::t]` populated from every `Prism::GlobalVariableWriteNode` in the program (top-level AND inside method
       # bodies). The same accumulator is seeded into every method body and the top-level scope.
+      #
+      # Issue #1359 — except the frame-local specials ({FRAME_LOCAL_GLOBALS}): Ruby keeps `$_` and `$~` in the slot
+      # of the method, class, module or file body that writes them, so a write binds only that body and its blocks,
+      # which the flow binding already carries, and every other body starts from its own slot.
+      FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
+      private_constant :FRAME_LOCAL_GLOBALS
+
       def build_program_global_index(root, default_scope)
         accumulator = {}
         gather_global_writes(root, default_scope, accumulator)
@@ -2078,7 +2086,9 @@ module Rigor
       def gather_global_writes(node, scope, accumulator)
         return unless node.is_a?(Prism::Node)
 
-        record_global_write(node, scope, accumulator) if node.is_a?(Prism::GlobalVariableWriteNode)
+        if node.is_a?(Prism::GlobalVariableWriteNode) && !FRAME_LOCAL_GLOBALS.include?(node.name)
+          record_global_write(node, scope, accumulator)
+        end
         node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator) }
       end
 
@@ -8529,18 +8539,24 @@ module Rigor
       # {FreshFrameBlocks.fresh_entry?} names does not read the match-global narrowing of the body it is written in.
       # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
       # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
-      # statement's narrowing.
+      # statement's narrowing. Issue #1359 — nor does such a block read a `$_` narrowing it or the call's operands may
+      # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it.
       def propagate_call(node, table, current_scope)
         block = node.block
-        fresh = block.is_a?(Prism::BlockNode) && !table.key?(block) &&
-                FreshFrameBlocks.fresh_entry?(node, current_scope)
-        unless fresh
+        entry = unentered_block_entry(node, block, table, current_scope)
+        if entry.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
         end
 
-        entry = FreshFrameBlocks.entry(current_scope, node)
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
+      end
+
+      def unentered_block_entry(node, block, table, current_scope)
+        return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
+        return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
+
+        LastLine.block_entry(current_scope, block, node)
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level

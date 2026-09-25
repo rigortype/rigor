@@ -1153,6 +1153,30 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/lastline_frame_local.rb — `$_` is frame-local and narrowed by a reader condition (#1359)" do
+    let(:harness) { harness_for("lastline_frame_local") }
+
+    it "types `$_` by the frame that reads it and the reader conditions around the read" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # A condition on a reader narrows `$_` to `String` where the read happens, and a reader that is not a condition
+    # leaves it unbound: neither reports a correct program that copies `$_` into a local and calls a method on it.
+    it "reports nothing on a `$_` copy read under a reader condition" do
+      reads = marked_lines(harness, "# QUIET-1359")
+      expect(reads.size).to eq(7)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    it "reports no nil receiver anywhere in the fixture" do
+      nil_receivers = harness.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(nil_receivers).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

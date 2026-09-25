@@ -1569,6 +1569,50 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  # Issue #1359 — a condition whose value is a reader's binds `$_` on each edge to the line it returned.
+  describe ".predicate_scopes — `$_` on a reader condition" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def reader_scope = Rigor::Scope.empty(environment: Rigor::Environment.default)
+
+    def edges(source, entry = reader_scope)
+      described_class.predicate_scopes(parse_predicate(source, locals: %i[x line]), entry)
+    end
+
+    it "binds `$_` on the edges of a bare reader, a written one, and `!` of one" do
+      ["gets", "(gets)", "line = gets", "@line = gets", "$line = gets"].each do |source|
+        truthy, falsey = edges(source)
+        expect(truthy.global(:$_)).to eq(string_t), source
+        expect(falsey.global(:$_)).to eq(constant_nil), source
+      end
+      truthy, falsey = edges("!gets")
+      expect([truthy.global(:$_), falsey.global(:$_)]).to eq([constant_nil, string_t])
+    end
+
+    it "binds nothing for a reader it cannot name, or a reader's value read another way" do
+      ["io.gets", "gets.nil?", "(line = gets).nil?", "x"].each do |source|
+        truthy, falsey = edges(source)
+        expect([truthy.global(:$_), falsey.global(:$_)]).to eq([nil, nil]), source
+      end
+    end
+
+    # The right operand runs after the left one's edge, so a `$_` the left operand narrowed is forgotten when the
+    # right one may set it, and a right reader narrows it again.
+    it "forgets the left operand's `$_` where a right operand that may set it ran" do
+      truthy, falsey = edges("gets && x.each { |i| i.gets }")
+      expect(truthy.global(:$_)).to be_nil
+      expect(falsey.global(:$_)).to be_nil
+
+      truthy, falsey = edges("gets && x")
+      expect(truthy.global(:$_)).to eq(string_t)
+      expect(falsey.global(:$_)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+
+      truthy, = edges("gets && gets")
+      expect(truthy.global(:$_)).to eq(string_t)
+      _, falsey = edges("gets || x.each { |i| i.gets }")
+      expect(falsey.global(:$_)).to be_nil
+    end
+  end
+
   describe ".predicate_scopes — #172 constant-operand regex match" do
     def string_t = Rigor::Type::Combinator.nominal_of("String")
     def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")

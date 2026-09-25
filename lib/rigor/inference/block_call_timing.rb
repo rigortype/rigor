@@ -160,6 +160,22 @@ module Rigor
         end
       end
 
+      # Deliberately coarse: ANY project definition of the name — top-level, on any class or module, either
+      # side, or a `pre_eval:` patch — declines. Resolving the call-site `self`'s ancestry precisely buys
+      # nothing for names this rare, and the block-return pass is no independent check here: it types a
+      # self-call to an overridden `raise` as Kernel's `bot` too, so a missed override is a wrong `bot`.
+      # {LastLine.reads_line?} declines on it the same way for `gets` and `readline`.
+      def project_defines_anywhere?(method_name, scope)
+        return true if scope.top_level_def_for(method_name)
+        # `discovered_methods` withholds a plain cross-file `def` (the ADR-17 monkey-patch contract); the
+        # def-node tables still carry it, on both sides.
+        return true if [scope.discovered_methods, scope.discovered_def_nodes, scope.discovered_singleton_def_nodes]
+                       .any? { |tables| tables.any? { |_class_name, table| table.key?(method_name) } }
+
+        patched = scope.environment&.project_patched_methods
+        !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }
+      end
+
       class << self
         private
 
@@ -169,21 +185,6 @@ module Rigor
           return false unless NON_RETURNING_CALLS.include?(node.name)
 
           kernel_spelled_receiver?(node.receiver) && !project_defines_anywhere?(node.name, scope)
-        end
-
-        # Deliberately coarse: ANY project definition of the name — top-level, on any class or module, either
-        # side, or a `pre_eval:` patch — declines. Resolving the call-site `self`'s ancestry precisely buys
-        # nothing for names this rare, and the block-return pass is no independent check here: it types a
-        # self-call to an overridden `raise` as Kernel's `bot` too, so a missed override is a wrong `bot`.
-        def project_defines_anywhere?(method_name, scope)
-          return true if scope.top_level_def_for(method_name)
-          # `discovered_methods` withholds a plain cross-file `def` (the ADR-17 monkey-patch contract); the
-          # def-node tables still carry it, on both sides.
-          return true if [scope.discovered_methods, scope.discovered_def_nodes, scope.discovered_singleton_def_nodes]
-                         .any? { |tables| tables.any? { |_class_name, table| table.key?(method_name) } }
-
-          patched = scope.environment&.project_patched_methods
-          !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| name == method_name }
         end
 
         # Implicit self, `self.`, or the `Kernel` module itself (`Kernel.` or the root-anchored `::Kernel.`) —

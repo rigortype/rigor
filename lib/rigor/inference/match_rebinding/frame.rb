@@ -11,7 +11,9 @@ module Rigor
       # derived from it, blocks included, since they run in the same frame. Each answer is computed on the first
       # ask — only code run while a match global is narrowed asks — and kept for the rest of the body: whether the
       # body makes a matching closure, whether its implicit-self calls keep the reset ({#self_call_fallback?}), the
-      # method's forwarded `&block` name, and {MatchRebinding.may_match?} per node ({#memo}).
+      # method's forwarded `&block` name, and {MatchRebinding.may_match?} per node ({#memo}). The same slot holds
+      # `$_` (issue #1359), whose frame-wide answers ({#last_line_closure?}, {#last_line_fallback?}) are kept here
+      # too, asked only while `$_` is narrowed.
       class Frame
         # The nodes that bind a local in a body: the writes, and a block's, lambda's, `rescue`'s or pattern's own
         # parameters and targets.
@@ -33,6 +35,8 @@ module Rigor
           @self_call_fallback = nil
           @forwarded_block = nil
           @scans = nil
+          @last_line_closure = nil
+          @last_line_fallback = nil
         end
 
         def matching_closure?(scope = nil)
@@ -56,6 +60,24 @@ module Rigor
           result = fallback_in_frame?(scope)
           @self_call_fallback = [scope.locals, scope.ivars, result]
           result
+        end
+
+        # {#matching_closure?} for `$_` ({LastLine.closure?}).
+        def last_line_closure?(scope = nil)
+          if @last_line_closure.nil?
+            @last_line_closure = LastLine.closure?(@body, scope) || LastLine.closure?(@parameters, scope)
+          end
+          @last_line_closure
+        end
+
+        # {#self_call_fallback?} for `$_` ({LastLine.fallback?}). Its reading is by name alone, so it is kept once.
+        def last_line_fallback?(scope = nil)
+          if @last_line_fallback.nil?
+            block_name = block_parameter_name
+            @last_line_fallback = LastLine.fallback?(@body, block_name, scope) ||
+                                  LastLine.fallback?(@parameters, block_name, scope)
+          end
+          @last_line_fallback
         end
 
         # True when `name` is the method's own `&block` parameter and the body never binds that name — no write, no

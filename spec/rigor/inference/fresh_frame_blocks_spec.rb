@@ -78,14 +78,16 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
     let(:narrowed) do
       string = Rigor::Type::Combinator.nominal_of("String")
       scope.with_global(:$1, string).with_global(:$~, Rigor::Type::Combinator.nominal_of("MatchData"))
+           .with_global(:$_, string)
     end
 
-    it "unbinds the match globals for a root block, which reads a slot of its own" do
+    it "unbinds the match globals and `$_` for a root block, which reads a slot of its own" do
       thread = call("Thread.new { }")
       entry = described_class.entry(narrowed, thread)
 
       expect(entry.global(:$1)).to be_nil
       expect(entry.global(:$~)).to be_nil
+      expect(entry.global(:$_)).to be_nil
       expect(described_class.entry(scope, thread)).to equal(scope)
     end
 
@@ -96,6 +98,7 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
 
       expect(entry.global(:$1)).to eq(Rigor::Type::Combinator.untyped)
       expect(entry.global(:$~)).to eq(Rigor::Type::Combinator.untyped)
+      expect(entry.global(:$_)).to eq(Rigor::Type::Combinator.untyped)
       expect(entry.global(:$2)).to be_nil
       expect(described_class.entry(scope, definer)).to equal(scope)
     end

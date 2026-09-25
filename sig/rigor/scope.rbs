@@ -54,6 +54,8 @@ module Rigor
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the per-file
     # deferred-range table's row shape is hand-written.
     def discovered_deferred_ranges: () -> Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the refinement table's
+    # shape is hand-written.
     def discovered_refinements: () -> Hash[String, Hash[Symbol, Array[String]]]
     def discovered_includes: () -> Hash[String, Array[String]]
     # Issue #1123 — the instance-ancestor-ORDER table beside the include one.
@@ -127,6 +129,7 @@ module Rigor
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_refinements: Hash[String, Hash[Symbol, Array[String]]]
       attr_reader run_generation: Object?
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.

@@ -296,6 +296,10 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
             def self.make: () -> { a: Integer }
             def self.pick: ({ a: Integer }) -> Integer
                          | (Hash[Symbol, untyped]) -> String
+            def self.mix: ({ a: Integer, b: Object, c: Base }) -> Integer
+                        | (Hash[Symbol, untyped]) -> String
+          end
+          class Base
           end
         RBS
       }
@@ -370,6 +374,26 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
         Taker.pick(h).upcase
         Taker.pick({ a: 1 }).upcase
       RUBY
+    end
+
+    # The discount is for the record's own `maybe` against the open shape. Here the open shape sits under a
+    # parameter that is no record (`b: Object`), and the record's `maybe` comes from `c:`, where `Sub` is a
+    # subclass only the Ruby source declares. That `maybe` still counts, so the record overload keeps the strict
+    # pass, as it does without the default.
+    it "keeps a record overload whose maybe does not come from the open shape" do
+      source = <<~RUBY
+        class Sub < Base
+        end
+        class Taker
+          def self.mix(_h) = nil
+        end
+        h = { k: 1 }
+        h.default = 0
+        dump_type(Taker.mix({ a: 1, b: h, c: Sub.new }))
+        Taker.mix({ a: 1, b: h, c: Sub.new }).even?
+      RUBY
+      expect(diagnostics(source, sig).map(&:message).grep(/\Adump_type/)).to eq(["dump_type: Integer"])
+      expect(rules(source, sig: sig)).to be_empty
     end
   end
 

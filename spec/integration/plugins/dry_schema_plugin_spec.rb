@@ -459,12 +459,69 @@ RSpec.describe "rigor-dry-schema integration" do
     end
   end
 
+  # The shape is open, and a closed RBS record rejected every open source, so a schema whose keys are exactly
+  # the record's drew a mismatch against it (#1281). The record now answers `maybe` for an open source whose
+  # known keys and values it accepts, and `maybe` never reports. A key the record lacks still does.
+  describe "`Schema.call(input).to_h` against an RBS record" do
+    let(:app_rbs) do
+      <<~RBS
+        class Taker
+          def self.take: ({ email: String, age: Integer }) -> void
+          def self.make: (untyped input) -> { email: String, age: Integer }
+          def self.make_nick: (untyped input) -> { email: String, age: Integer }
+        end
+      RBS
+    end
+
+    let(:demo) do
+      <<~RUBY
+        UserSchema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          required(:age).value(:integer)
+        end
+
+        NickSchema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          required(:age).value(:integer)
+          optional(:nickname).maybe(:string)
+        end
+
+        class Taker
+          def self.take(_h) = nil
+
+          def self.make(input)
+            UserSchema.call(input).to_h
+          end
+
+          def self.make_nick(input)
+            NickSchema.call(input).to_h
+          end
+        end
+
+        Taker.take(UserSchema.call({}).to_h)
+        Taker.take(NickSchema.call({}).to_h)
+      RUBY
+    end
+
+    it "accepts a schema with exactly the record's keys, and reports one with a key the record lacks" do
+      mismatches = run_demo(demo, app_rbs: app_rbs).diagnostics.filter_map do |diagnostic|
+        [diagnostic.rule.to_s, diagnostic.line] if diagnostic.rule.to_s.end_with?("-type-mismatch")
+      end
+      make_nick_line = demo.lines.index { |line| line.include?("def self.make_nick") } + 1
+      take_nick_line = demo.lines.index { |line| line.start_with?("Taker.take(NickSchema") } + 1
+      expect(mismatches).to contain_exactly(
+        ["def.return-type-mismatch", make_nick_line],
+        ["call.argument-type-mismatch", take_nick_line]
+      )
+    end
+  end
+
   # Runs the plugin against a single-file project and returns the `dump.type` messages, in source order.
   def dump_types(demo)
     run_demo(demo).diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
   end
 
-  def run_demo(demo, with_dry_types: false)
+  def run_demo(demo, with_dry_types: false, app_rbs: nil)
     Rigor::Plugin.unregister!
     plugin_entries = with_dry_types ? %w[rigor-dry-types rigor-dry-schema] : ["rigor-dry-schema"]
 
@@ -477,6 +534,7 @@ RSpec.describe "rigor-dry-schema integration" do
       File.write(File.join(dir, "schema.rb"), demo)
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "dry_schema.rbs"), dry_schema_rbs)
+      File.write(File.join(dir, "sig", "app.rbs"), app_rbs) if app_rbs
       run_analysis(dir: dir, plugin_entries: plugin_entries)
     end
   end

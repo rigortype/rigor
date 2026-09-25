@@ -121,6 +121,10 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
                   | (Hash[Symbol, untyped]) -> String
           def pick_all: (Array[{ a: Integer }]) -> Integer
                       | (Array[Hash[Symbol, untyped]]) -> String
+          def mix: ({ a: Integer, b: Object, c: Base }) -> Integer
+                 | (Hash[Symbol, untyped]) -> String
+        end
+        class Base
         end
       RBS
     end
@@ -207,6 +211,27 @@ RSpec.describe "A hash literal with a **splat entry", type: :runner do
           def picks
             self.pick_all([{ **BASE, b: 2 }]).upcase
             self.pick_all([{ a: 1 }]).upcase
+          end
+        end
+      RUBY
+    end
+
+    # The discount is for the record's own `maybe` against the splatted `Hash`. Here the splat sits under a
+    # parameter that is no record (`b: Object`), and the record's `maybe` comes from `c:`, where `Sub` is a
+    # subclass only the Ruby source declares. That `maybe` still counts, so the record overload keeps the strict
+    # pass.
+    it "keeps a record overload whose maybe does not come from the splatted literal" do
+      expect(errors(<<~RUBY)).to be_empty
+        class Sub < Base
+        end
+
+        class Rec
+          BASE = { k: 1 }.freeze
+
+          def mix(_h) = 1
+
+          def mixes
+            self.mix({ a: 1, b: { **BASE, z: 2 }, c: Sub.new }).even?
           end
         end
       RUBY

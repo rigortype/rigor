@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../source/node_children"
+require_relative "return_barrier"
 
 module Rigor
   module Inference
@@ -13,15 +14,14 @@ module Rigor
     # The inferred type is the union of:
     #
     # - the body's last-statement type, and
-    # - the type of every explicit `return value` reachable in the body. Nested `def` / lambda / block bodies
-    #   are return barriers — their `return`s do not bubble up to the enclosing method.
+    # - the type of every explicit `return value` that exits the method. A `return` inside an ordinary block does
+    #   (control-flow-analysis.md § "Non-local exits"); one inside a {ReturnBarrier} — a nested `def`, a lambda,
+    #   or a `define_method` body — does not. The barriers are the ones `StatementEvaluator`'s return sink stops
+    #   at, so the proposal and `rigor check`'s view of callers agree (issue #1382).
     #
     # Extracted from `Rigor::SigGen::Generator#infer_return_type` so `LineTypeCollector` (`rigor annotate`'s
     # def-line annotator) and the sig-generator share one source of truth.
     module DefReturnTyper
-      RETURN_BARRIER_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
-      private_constant :RETURN_BARRIER_NODES
-
       module_function
 
       def call(def_node, scope_index)
@@ -60,10 +60,14 @@ module Rigor
 
       def collect_return_types(node, scope_index, out)
         return unless node.is_a?(Prism::Node)
-        return if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+        return if ReturnBarrier.node?(node)
 
         type_return_node(node, scope_index, out) if node.is_a?(Prism::ReturnNode)
-        node.rigor_each_child { |c| collect_return_types(c, scope_index, out) }
+        # A barrier call's receiver and arguments still run in the method; only its block is cut off.
+        barrier_block = node.block if node.is_a?(Prism::CallNode) && ReturnBarrier.block_call?(node)
+        node.rigor_each_child do |c|
+          collect_return_types(c, scope_index, out) unless c.equal?(barrier_block)
+        end
       end
 
       def type_return_node(return_node, scope_index, out)

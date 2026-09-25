@@ -34,6 +34,7 @@ require_relative "narrowing"
 require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
+require_relative "return_barrier"
 require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
 require_relative "version_guard"
@@ -3127,22 +3128,10 @@ module Rigor
         enter_meta_class_body(block, block_entry, [ClassFrame.new(name: anonymous, singleton: false)])
       end
 
-      # The block calls whose body `return` leaves only the block: `lambda { … }`, and the method a
-      # `define_method` / `define_singleton_method` block defines, called directly or through `send`
-      # (`klass.send(:define_method, :m) { … }`). Like a `->` body ({#eval_lambda}), each runs with the enclosing
-      # method's return sink suspended.
-      RETURN_BARRIER_BLOCK_CALLS = %i[lambda define_method define_singleton_method].to_set.freeze
-      SEND_CALLS = %i[send public_send __send__].to_set.freeze
-      private_constant :RETURN_BARRIER_BLOCK_CALLS, :SEND_CALLS
-
+      # The block calls whose body `return` leaves only the block ({ReturnBarrier.block_call?}). Like a `->` body
+      # ({#eval_lambda}), each runs with the enclosing method's return sink suspended.
       def return_barrier_block?(node)
-        name = node.name
-        if SEND_CALLS.include?(name)
-          sent = node.arguments&.arguments&.first
-          sent.is_a?(Prism::SymbolNode) && RETURN_BARRIER_BLOCK_CALLS.include?(sent.unescaped.to_sym)
-        else
-          RETURN_BARRIER_BLOCK_CALLS.include?(name) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
-        end
+        ReturnBarrier.block_call?(node)
       end
 
       # Runs the block with the method's return sink suspended, for a body whose `return` is not the method's.

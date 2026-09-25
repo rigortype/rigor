@@ -1580,4 +1580,278 @@ def keep_operand_lookup(line, row, csv)
     key.upcase # KEEPS-1365
   end
 end
+
+# Issue #1361 — a block handed to `Thread.new`, `Thread.start`, `Thread.fork`, `Fiber.new` or `Ractor.new` runs as
+# the root of a new thread, fiber or ractor, whose execution context keeps its own special-variable slot for the
+# block and every block nested in it. So the block reads `$1` and `$~` nil whatever the creator matched (Ruby: each
+# entry below reads nil with `str = "a1"`), whether the evaluator enters the block or it sits in a receiver chain.
+def fresh_thread_entry(str)
+  if str =~ /(\d+)/
+    Thread.new { assert_type("String?", $1) }.value
+  end
+end
+
+def fresh_thread_statement_entry(str)
+  if str =~ /(\d+)/
+    ::Thread.new { assert_type("bool", $~.nil?) }
+  end
+end
+
+def fresh_thread_start_entry(str)
+  if str =~ /(\d+)/
+    Thread.start { assert_type("String?", $1) }.join
+  end
+end
+
+def fresh_thread_fork_entry(str)
+  if str =~ /(\d+)/
+    worker = Thread.fork { assert_type("String?", $1) }
+    worker.join
+  end
+end
+
+def fresh_fiber_entry(str)
+  if str =~ /(\d+)/
+    Fiber.new { assert_type("String?", $1) }.resume
+  end
+end
+
+def fresh_ractor_entry(str)
+  if str =~ /(\d+)/
+    Ractor.new { assert_type("String?", $1) }.value
+  end
+end
+
+def fresh_nested_entry(str)
+  if str =~ /(\d+)/
+    Thread.new { [1].map { assert_type("String?", $1) } }.value
+  end
+end
+
+# A `define_method` / `define_singleton_method` body reads the defining frame's slot whenever the method is called,
+# and each call's own matches write it too, so the narrowing where it is defined proves nothing about it (Ruby: with
+# `str = "a1"`, `x` reads "1" when called right after, and nil once the defining frame or a call's own body has run
+# a failed match).
+def fresh_define_singleton_entry(str)
+  target = Object.new
+  if str =~ /(\d+)/
+    target.define_singleton_method(:x) { assert_type("String?", $1) }
+  end
+  target
+end
+
+class FreshDefineMethod
+  if "c9" =~ /(\d)/
+    define_method(:digit) { assert_type("String?", $1) }
+  end
+end
+
+# A match inside such a root block rebinds the new thread's, fiber's or ractor's slot, never the creator's, so the
+# creator's read after it keeps the narrowing (Ruby: "1" for each with `str = "a1"`, and `key.upcase` returns it).
+# This holds for the statement's own block, a block in its receiver chain or arguments, a block nested inside the
+# root block, a stored fiber resumed later, and an implicit-self call in a frame whose only matching block is a
+# root block.
+def fresh_thread_join(str)
+  if str =~ /(\d+)/
+    Thread.new { "zz" =~ /(q)/ }.join
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_thread_start_join(str)
+  if str =~ /(\d+)/
+    Thread.start { "zz" =~ /(q)/ }.join
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_thread_statement(str)
+  if str =~ /(\d+)/
+    worker = Thread.new { "zz" =~ /(q)/ }
+    worker.join
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_fiber_resume(str)
+  if str =~ /(\d+)/
+    Fiber.new { "zz" =~ /(q)/ }.resume
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_stored_fiber(str)
+  fiber = Fiber.new { "zz" =~ /(q)/ }
+  if str =~ /(\d+)/
+    fiber.resume
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_ractor_value(str)
+  if str =~ /(\d+)/
+    Ractor.new { "zz" =~ /(q)/ }.value
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_nested_block(str)
+  if str =~ /(\d+)/
+    Thread.new { %w[zz].each { |i| i =~ /(q)/ } }.join
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_thread_argument(str)
+  if str =~ /(\d+)/
+    [Thread.new { "zz" =~ /(q)/ }].each(&:join)
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_thread_fallback(str)
+  worker = Thread.new { "zz" =~ /(q)/ }
+  if str =~ /(\d+)/
+    log_1364("joined")
+    worker.join
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_thread_in_block(str, items)
+  if str =~ /(\d+)/
+    items.each do |_i|
+      Thread.new { "zz" =~ /(q)/ }.join
+      key = $1
+      assert_type("String", key)
+      key.upcase # FRESH-FRAME
+    end
+  end
+end
+
+# A closure made inside the root block may be handed back to the creator's thread, where it runs with the
+# creator's slot, so it still counts (Ruby: `fresh_escaping_lambda("a1")` and `fresh_escaping_proc("a1")` return
+# nil).
+def fresh_escaping_lambda(str)
+  maker = Thread.new { -> { "zz" =~ /(q)/ } }
+  if str =~ /(\d+)/
+    maker.value.call
+    assert_type("String?", $1)
+  end
+end
+
+def fresh_escaping_proc(str)
+  store = []
+  Thread.new { store << proc { "zz" =~ /(q)/ } }.join
+  if str =~ /(\d+)/
+    store.first.call
+    assert_type("String?", $1)
+  end
+end
+
+# Controls: an iterator's block shares the frame, `Enumerator.new`'s block runs on a fiber whose root is not the
+# block, and a class that only shares the name runs its block where it is called, so each reads and rebinds the
+# creator's `$~` (Ruby with `str = "a1"`: the entries read "1", the reads after a match nil).
+def fresh_control_iterator(str, items)
+  if str =~ /(\d+)/
+    items.each { assert_type("String", $1) }
+    items.lazy.map { assert_type("String", $1) }.first
+  end
+end
+
+def fresh_control_enumerator(str)
+  if str =~ /(\d+)/
+    Enumerator.new { |y| assert_type("String", $1); y << 1 }.to_a
+    Enumerator.new { |y| "zz" =~ /(q)/; y << 1 }.to_a
+    assert_type("String?", $1)
+  end
+end
+
+class InlineThread
+  def self.new = yield
+end
+
+def fresh_control_inline_thread(str)
+  if str =~ /(\d+)/
+    InlineThread.new { assert_type("String", $1) }
+    InlineThread.new { "zz" =~ /(q)/ }
+    assert_type("String?", $1)
+  end
+end
+
+module FreshFramePool
+  class Thread
+    def self.new = yield
+  end
+
+  def self.entry(str)
+    if str =~ /(\d+)/
+      Thread.new { assert_type("String", $1) }
+    end
+  end
+
+  def self.rebind(str)
+    if str =~ /(\d+)/
+      Thread.new { "zz" =~ /(q)/ }
+      assert_type("String?", $1)
+    end
+  end
+end
+
+# The block of an implicit-self call is read for what it may run in this frame later, and a root block in it, or
+# a block argument a thread runs as its root, runs nothing here (Ruby: "1" for each with `str = "a1"` and
+# `handler = proc { "zz" =~ /(q)/ }`).
+def schedule_1361(&blk) = blk
+
+def fresh_handed_root_block(str)
+  schedule_1361 { Thread.new { "zz" =~ /(q)/ }.join }
+  if str =~ /(\d+)/
+    log_1364("scheduled")
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+def fresh_block_argument(str, handler)
+  if str =~ /(\d+)/
+    log_1364(Thread.new(&handler).join)
+    key = $1
+    assert_type("String", key)
+    key.upcase # FRESH-FRAME
+  end
+end
+
+# A block kept inside a root block runs with this frame's slot once it is run on this frame's thread, so an
+# implicit-self call still forgets there (Ruby: `FreshFrameEmitter.new.parse("a1")` returns nil).
+class FreshFrameEmitter
+  def on(&blk) = (@handler = blk)
+  def emit(line) = @handler.call(line)
+
+  def parse(str)
+    Thread.new { on { |l| l =~ /(q)/ } }.join
+    if str =~ /(\d+)/
+      emit("zz")
+      assert_type("String?", $1)
+    end
+  end
+end
 # rubocop:enable Style/PerlBackrefs

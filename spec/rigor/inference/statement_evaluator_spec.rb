@@ -3603,6 +3603,28 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(entries.values.map { |entry| entry.global(:$1) }).to all(be_nil)
       expect(entries).not_to be_empty
     end
+
+    # Issue #1361 — a thread's, fiber's or ractor's root block runs with a slot of its own, and a `define_method` body
+    # reads the definer's slot whenever the method is called: each enters unbound, and a root block's match leaves
+    # the creator's narrowing, as does an implicit-self call in a frame whose only matching block is one.
+    it "enters a root block or a `define_method` body unbound, and keeps the narrowing after a root block" do
+      program = parse_program(<<~RUBY)
+        worker = Thread.new { value =~ /(z)/ }
+        raise unless /(\\d+)/ =~ value
+        Thread.new { $1 }
+        fiber = Fiber.new { $1 }
+        define_method(:x) { $1 }
+        items.each { $1 }
+        log("started")
+        worker.join
+      RUBY
+      entries = []
+      recorder = ->(node, scope) { entries << scope.global(:$1) if node.is_a?(Prism::BlockNode) }
+      framed = default_env_scope.with_match_frame(program)
+      _, post = described_class.new(scope: framed, on_enter: recorder).evaluate(program)
+      expect(entries.last(4)).to eq([nil, nil, nil, string_t])
+      expect(post.global(:$1)).to eq(string_t)
+    end
   end
 
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.

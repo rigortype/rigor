@@ -1107,6 +1107,15 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reads.size).to eq(31)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
+
+    # Issue #1361 — a thread's, fiber's or ractor's root block keeps a slot of its own, so a match in it leaves the
+    # creator's `$~`, whether the block is the statement's own, in its receiver chain or arguments, nested in another
+    # block, handed to an implicit-self call, or a stored fiber resumed later.
+    it "reports nothing on the read after a root block of a thread, fiber or ractor that matches" do
+      reads = marked_lines(harness, "# FRESH-FRAME")
+      expect(reads.size).to eq(12)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do

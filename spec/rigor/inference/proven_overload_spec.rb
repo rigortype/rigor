@@ -177,7 +177,7 @@ RSpec.describe "proven overload pass", type: :runner do
         dump_type(Money.new.show(1))
         Money.new.show(1).upcase
       RUBY
-      expect(dumped_types(source, sig: sig)).not_to eq(["Integer"])
+      expect(dumped_types(source, sig: sig)).to eq(["Symbol"])
       expect(rules(source, sig: sig)).not_to include("call.undefined-method")
     end
   end
@@ -203,6 +203,28 @@ RSpec.describe "proven overload pass", type: :runner do
     RUBY
     expect(dumped_types(source, sig: sig)).to eq(["Integer"])
     expect(rules(source, sig: sig)).not_to include("call.undefined-method")
+  end
+
+  it "declines for a class only the source declares, which it cannot tell from a module" do
+    # Runtime: `1`, so `even?` answers. Rigor stubs the undeclared `Money` exactly as it stubs an undeclared module,
+    # and the selector has no scope to tell the source's class from a module (#1352). Pass 0 declines, and the
+    # affinity order's `(Object) -> Symbol` answers, as it did before #1348. Flip this when #1352 is fixed:
+    # `show(1)` should type `Integer` with no `call.undefined-method`.
+    sig = { "svc.rbs" => <<~RBS }
+      class Svc
+        def show: (Money) -> String
+                | (Integer) -> Integer
+                | (Object) -> Symbol
+      end
+    RBS
+    source = <<~RUBY
+      class Money; end
+      class Svc
+        def show(x) = 1
+      end
+      dump_type(Svc.new.show(1))
+    RUBY
+    expect(dumped_types(source, sig: sig)).to eq(["Symbol"])
   end
 
   it "does not take a union arm, where upstream RBS can be wrong, for Rational#divmod(Float)" do

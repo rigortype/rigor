@@ -51,6 +51,10 @@ choice.** Where the engine deliberately reads past a signature's own statement t
 absent, the value it produces carries that choice, and every consumer that would convert it into a claim
 about runtime behaviour must decline.
 
+> **Partially superseded by [ADR-117](117-standard-streams-typed-by-idiom.md)** (§ Relationship, WD4): a `$_`
+> narrowed on a core reader's truthy edge may drive the elision. The exception and its re-evaluation
+> trigger are recorded there.
+
 This is the criterion, and it generalises past today's single case: any future place where Rigor
 knowingly types optimistically inherits the same obligation, without the spec having to enumerate
 consumers again. It also states the boundary in the other direction — the value stays fully usable for

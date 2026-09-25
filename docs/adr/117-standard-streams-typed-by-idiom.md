@@ -6,10 +6,10 @@ not modelled, so #1411 closes as by design. The rest is open:
 
 | Decision | Tracked in |
 | --- | --- |
-| WD1, stream reads | #1366, after #1426 and #1427 |
+| WD1, stream reads | #1366 (with #1362's join), after #1426, #1427 and #1429 |
 | WD2, write check | #1367 |
 | WD3, test-scope view | #1426, #1427 |
-| WD4 gap: in-file `def` spellings | #1423 |
+| WD4 gap: `def` on a stream's singleton | #1423 |
 | WD5, implicit-self readers | #1415 |
 | WD6, `$_` guardrail | binds #1366 |
 
@@ -28,7 +28,7 @@ diverge. On Ruby 4.0.5:
 - **Idiom** — all three hold an `IO`. Tests assign an IO-compatible object for a while, usually a
   `StringIO` (which is not an `IO` subclass), and put the original back.
 
-Ruby code that assumes anything else about a stream, or validates it at run time, is not idiomatic.
+Code that checks a stream's class at run time is uncommon. Where code does check, the check must keep Rigor quiet (WD1).
 
 `$_` depends on the stream in a sharper way. A C-implemented reader sets its caller's `$_`, but a
 reader defined in Ruby does not: `Tempfile#gets`, `Reline`'s `readline`, a test double. `Kernel#gets`
@@ -58,12 +58,16 @@ set. The type specification already names the governing principle
 
 ### Working decisions
 
-- **WD1 — Reads.** An unbound `$stdin`, `$stdout` or `$stderr` reads as `IO` (#1366).
+- **WD1 — Reads.** An unbound `$stdin`, `$stdout` or `$stderr` reads as `IO` (#1366). `$>` is the same variable as `$stdout` and reads and joins as it does.
   - This is the expectation, not a claim about the runtime class. Application code may be running with
     a `StringIO` behind `$stdout` and has no business knowing it.
   - A write the file makes joins its value (#1362).
-  - `LastLine.reader_global?` accepts a joined `$stdin` whose members are all core readers, so the join
-    does not stop `$_` narrowing.
+  - `LastLine.reader_global?` MUST accept a joined `$stdin` whose members are all core readers, so the
+    join does not stop `$_` narrowing.
+  - A class-guarded read MUST stay quiet: `$stdout.is_a?(StringIO) ? $stdout.string : nil`,
+    `$stdout.respond_to?(:string)`, `case $stdout when StringIO`. Such a guard does not narrow a global or
+    constant receiver today (`STDOUT` reports these shapes already), so #1429 lands before #1366's
+    stream part.
 - **WD2 — Writes.**
   - A write to `$stdout`, `$stderr` or `$>` is checked against `_Writer` only (#1367). `$stdout = 1`
     reports; `$stdout = StringIO.new` or any object with a `write` does not.
@@ -71,7 +75,8 @@ set. The type specification already names the governing principle
 - **WD3 — The test-scope view.** A test helper that swaps a stream (`config.before { $stdout =
   StringIO.new }`) is a monkey patch in [ADR-17](17-monkey-patch-pre-evaluation.md)'s sense. The
   engine therefore takes it from configuration: a `pre_eval:` entry scoped to the paths it serves,
-  whose global writes re-type the global for that scope as the union of the written values (#1426).
+  whose global writes re-type the global for that scope as the union of the values the scope's
+  pre-evaluated files write, without the declared `IO` (#1426).
   - The onboarding skill `rigor-project-init` writes that entry. It reads the project's own wiring
     (`.rspec`'s `--require`, a test file's `require`), never a file name alone (#1427).
   - Until a project has the entry, `$stdout.string` in a test file reports `call.undefined-method`, as
@@ -80,18 +85,20 @@ set. The type specification already names the governing principle
   or its kin (`StringIO` included: its reader is C) are assumed to set the caller's `$_`. Code that
   reads `$_` after a reader only works if it did. Visible counter-evidence still declines (all in
   `lib/rigor/inference/last_line.rb` unless noted):
-  - a `def gets` / `def readline` in a class, module or singleton body anywhere in the program
-    (`BlockCallTiming.project_defines_anywhere?`, `block_call_timing.rb` ~L168);
+  - a `def gets` / `def readline` at the top level or in a class, module or singleton body anywhere in
+    the program (`BlockCallTiming.project_defines_anywhere?`, `block_call_timing.rb` ~L168);
   - in the file, a `define_method`-family patch or an `alias` of either name, computed names included
     (`LastLine.patched_readers` via `ScopeIndexer#build_program_global_index`);
   - `$stdin` bound in the file to a non-reader (`LastLine.reader_global?`);
   - a `Tempfile` receiver (`LastLine::DELEGATING_CLASSES`);
   - a receiver class RBS does not know (`LastLine.reader_class?`).
 
-  A replacement outside the analysed code, other than a `def`, is assumed away: another file, a test
-  double, a gem, `load(file, M)`, a DSL `instance_eval`. Three in-file `def` spellings still escape the
-  first bullet: `class << $stdin; def gets`, `STDIN.singleton_class.class_eval { def gets }` and
-  `$stdin.instance_eval { def gets }` (#1423).
+  A replacement outside the file being read, other than a `def` (checked program-wide), is assumed
+  away: a patch or `$stdin` binding in another file, a test double, a gem, `load(file, M)`, a DSL
+  `instance_eval`. Still gaps:
+  - a `def` on a stream's singleton reached as `class << $stdin; def gets`,
+    `STDIN.singleton_class.class_eval { def gets }` or `$stdin.instance_eval { def gets }` (#1423);
+  - a reader defined by a String `class_eval` in the file (`IO.class_eval("def gets(*) = 'x'")`).
 - **WD5 — Implicit-self readers** (`while gets`) narrow under WD4's assumption and decline on evidence
   the file shows about `self`. #1415 holds the canonical list and the acceptance criteria.
 - **WD6 — A declined or forgotten `$_` reads `Dynamic[top]`, never its RBS type.** `Scope#forget_last_line`
@@ -99,12 +106,13 @@ set. The type specification already names the governing principle
   correct code such as `if $stdin.gets; items.each(&h); $_.chomp; end`. #1366 MUST exclude `$_` or bind
   it as `untyped_last_line` does, and its `$_` part comes after #1415.
 
-## Rejected alternatives
+## Rejected and deferred alternatives
 
 | Alternative | Reason |
 | --- | --- |
-| Type `$stdin` by its worst case (unknown) | That is true of the runtime and useless to a reader. Every Ruby program treats `$stdin` as an `IO`. |
-| Type `$stdout` reads as `_Writer`, the enforced contract | `$stdout.sync = true`, `$stdout.tty?` and `$stdout.flush` would all report. The contract is for checking writes (WD2), not for typing reads. |
+| Type `$stdin` by its worst case (unknown), by default | That is true of the runtime and useless to a reader. Every Ruby program treats `$stdin` as an `IO`. |
+| Type `$stdout` reads as `_Writer`, the enforced contract, by default | `$stdout.sync = true`, `$stdout.tty?` and `$stdout.flush` would all report. The contract is for checking writes (WD2), not for typing reads. |
+| **Deferred:** an opt-in strict-stream mode (`$stdout: _Writer`, `$stdin: Dynamic`) | More precise and sound, but outside the common pattern. Opting in to a *stricter* reading is compatible with Decision point 3: only the idiomatic default must never be opt-in. Build it when a real project asks for it, not before. |
 | A hard-coded `IO \| StringIO` | It reads Ruby as a nominal type system. The test view comes from evidence (WD3), not from a fixed union. |
 | Pre-evaluate `spec/spec_helper.rb` / `test/test_helper.rb` by default | Framework knowledge biases the engine, and a project with a same-named file that is not a test helper would be evaluated implicitly. The skill reads the wiring instead (WD3). |
 | Keep streams `Dynamic` under `test_paths` until configured | `test_paths` auto-detects by directory name, so this is the same name-based bias. A missing patch reports like any other (WD3). |
@@ -124,8 +132,8 @@ set. The type specification already names the governing principle
   - A project analysing its tests before #1427 configures it sees `$stdout.string` reported until the
     entry is added.
 - **Verification**
-  - #1366, #1367, #1415 and #1426 each carry fixtures. The corpus reads `$_` almost nowhere, so
-    fixtures carry the evidence.
+  - Each implementing PR carries fixtures, since the corpus reads `$_` and guarded streams almost
+    nowhere. #1366's include the class-guarded shapes above as quiet controls.
   - #1415 adds controls for defensive shapes that stay quiet today: `next if $_.nil?`,
     `$_ || "default"`, `case $_ when nil`, `unless $_`.
 

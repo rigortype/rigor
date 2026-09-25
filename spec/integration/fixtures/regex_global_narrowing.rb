@@ -1317,6 +1317,16 @@ def keep_send_literal(line, s)
   end
 end
 
+# An implicit-self call whose argument is such a lookup runs a Ruby method, and the lookup leaves `$~` alone.
+def keep_implicit_self_lookup(line, row)
+  if line =~ /^(\w+)=/
+    log_1364(row[:name])
+    key = $1
+    assert_type("String", key)
+    key.upcase # KEEPS-1365
+  end
+end
+
 # The same calls in an operand leave it alone too.
 def keep_operand_lookup(line, row, csv)
   out = []

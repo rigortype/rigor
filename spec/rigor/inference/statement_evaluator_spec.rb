@@ -3550,6 +3550,59 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(post.global(:$1)).to eq(string_t)
     end
+
+    # Issue #1365 — a call rebinds the frame's `$~` by what it calls and its arguments' types, in any position.
+    it "keeps the narrowing after a lookup whose argument is not a Regexp, and after `match?`" do
+      ["val = row[:name]", 'csv.split(",")', "list.index(3)", "value.match?(/x/)", "String === value",
+       '$stdout.puts(row[:name], [csv.split(",")])', "h[key] = 1", "x = [h[key], 1]", "h[key] += 1",
+       "record.public_send(\"\#{attr}=\", value)", 'klass.class_eval("def foo; end")'].each do |call|
+        _, post = evaluate_framed(<<~RUBY)
+          raise unless /(\\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to eq(string_t), call
+      end
+    end
+
+    it "forgets the narrowing after an explicit-receiver builtin, or an operand or literal call, that rebinds it" do
+      ["value !~ /(z)/", "value.start_with?(/(z)/)", %q|Kernel.eval('"zz" =~ /(q)/')|, 'out.push(value.sub(/q/, ""))',
+       "[value.index(/(q)/)]", "x = { a: items.find { |i| i =~ /(z)/ } }", "x = value[/(q)/] rescue nil",
+       'super(value.sub(/q/, ""))', 'X = value.sub(/q/, "")', "obj.attr ||= value[/(q)/]",
+       "value[/(q)/] ||= 'x'"].each do |call|
+        _, post = evaluate_framed(<<~RUBY)
+          raise unless /(\\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to be_nil, call
+      end
+    end
+
+    # A name the table forgot on before keeps forgetting unless every argument is a non-Regexp literal: a flow type
+    # can be stale (#1380), so a typed `String` argument does not prove the call cannot match.
+    it "forgets the narrowing after a lookup the table named whose argument is not a literal" do
+      ["row[key]", "val = value.index(str)", "value.split(\"\#{sep}\")"].each do |call|
+        _, post = evaluate_framed(<<~RUBY)
+          str = "x"
+          raise unless /(\\d+)/ =~ value
+          #{call}
+        RUBY
+        expect(post.global(:$1)).to be_nil, call
+      end
+    end
+
+    # Ruby runs the receiver chain before the method, so the call's own block reads the rebound globals.
+    it "forgets the narrowing before the call's own block when its receiver chain rebinds it" do
+      program = parse_program(<<~RUBY)
+        raise unless /(\\d+)/ =~ value
+        value.sub(/q/, "").each_char { |c| c }
+      RUBY
+      entries = {}
+      recorder = ->(node, scope) { entries[node] = scope if node.is_a?(Prism::BlockNode) }
+      framed = default_env_scope.with_match_frame(program)
+      described_class.new(scope: framed, on_enter: recorder).evaluate(program)
+      expect(entries.values.map { |entry| entry.global(:$1) }).to all(be_nil)
+      expect(entries).not_to be_empty
+    end
   end
 
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.

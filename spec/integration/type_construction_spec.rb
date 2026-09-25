@@ -1082,7 +1082,8 @@ RSpec.describe "Rigor type construction (integration)" do
     # Issue #1358 — the controls read `$1` after a block or closure that cannot rebind the frame's `$~`, then call a
     # method on it; a block rule that over-counted would report each of those calls on correct code. Issue #1364
     # adds the calls into a Ruby-defined method, and one marked read after an `eval`, which does rebind it, so the
-    # rule is seen to fire.
+    # rule is seen to fire. Issue #1365 adds the lookups that leave `$~` alone, and two marked reads after an
+    # explicit-receiver `!~` and an index call in an array literal.
     it "reports a nil receiver only after a call that reaches the frame's slot" do
       nil_receivers = harness.diagnostics.select do |d|
         %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
@@ -1097,6 +1098,23 @@ RSpec.describe "Rigor type construction (integration)" do
       reads = marked_lines(harness, "# CALLEE-FRAME")
       expect(reads.size).to eq(5)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    # Issue #1365 — a lookup whose argument is not a Regexp, `match?`, `String === s`, `grep` without a block and a
+    # `[]=` storing a Regexp leave `$~` alone, in statement, assignment or operand position.
+    it "reports nothing on the read after a call that cannot rebind `$~`" do
+      reads = marked_lines(harness, "# KEEPS-1365")
+      expect(reads.size).to eq(31)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+  end
+
+  describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do
+    let(:harness) { harness_for("regex_global_field_separator") }
+
+    it "forgets the narrowing after a `split` without a separator" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
     end
   end
 

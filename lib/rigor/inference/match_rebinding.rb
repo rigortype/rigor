@@ -8,6 +8,7 @@ require_relative "block_call_timing"
 require_relative "stored_block_call"
 require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
+require_relative "match_rebinding/calls"
 require_relative "match_rebinding/self_calls"
 
 module Rigor
@@ -19,13 +20,16 @@ module Rigor
     # and so does every call into a method defined in Ruby: a match in the callee writes the callee's slot, never
     # its caller's (issue #1364).
     #
-    # The scans are syntactic, resolving only constants and the variables a lookup argument names, through the
-    # scope they are given. They short-circuit without a `return` out of a child block, which would allocate once
-    # per frame it unwinds.
+    # The block and closure scans are syntactic, resolving only constants and the variables a lookup argument
+    # names, through the scope they are given. The code a statement runs outside a block is read call by call
+    # ({Calls}, {.value_may_rebind?}; issue #1365): a call the old name table forgot on keeps forgetting unless its
+    # literal arguments prove it match-free, and any other forgets only when it is known to match. The scans
+    # short-circuit without a `return` out of a child block, which would allocate once per frame it unwinds.
     module MatchRebinding
-      # The block and closure scans read calls on narrower terms than the statement-level table, because inside a
-      # block `[]`, `split` and `index` are overwhelmingly lookups on hashes, arrays and strings, and counting them
-      # dropped the narrowing on correct code (`fields.each { |f| out[f] = row[f] }; $1.upcase`).
+      # The block and closure scans read calls on narrower terms than the statement-level rule ({Calls}), because
+      # inside a block `[]`, `split` and `index` are overwhelmingly lookups on hashes, arrays and strings whose key
+      # the scan cannot type, and counting them dropped the narrowing on correct code
+      # (`fields.each { |f| out[f] = row[f] }; $1.upcase`).
       #
       # These rebind `$~` whatever their argument: `sub` / `gsub` / `scan` with a String pattern still set it, and
       # `!~` runs `=~`.
@@ -74,10 +78,14 @@ module Rigor
       def may_match?(node, scope = nil)
         return false unless node.is_a?(Prism::Node)
 
-        frame = scope&.match_frame
-        return scan(node, scope) if frame.nil?
+        remember(node, scope) { scan(node, scope) }
+      end
 
-        frame.memo(node, scope) { scan(node, scope) }
+      # The answer the block gives for `node`, kept on `scope`'s frame under `kind` ({Frame#memo}) when a body
+      # stamped one.
+      def remember(node, scope, kind = nil, &)
+        frame = scope&.match_frame
+        frame.nil? ? yield : frame.memo(node, scope, kind, &)
       end
 
       # `base` reads the body without {ADDED_NAMES}.
@@ -137,20 +145,21 @@ module Rigor
       end
       private_class_method :call_matches?, :case_matches?
 
-      # True when a statement call's arguments may run a match in this frame (issue #1364), outside a block or
-      # lambda, which {.call_may_match?} and the frame's closure rules answer for: a call on any receiver by the
-      # table's names ({MATCH_CAPABLE_METHODS}) or {SelfCalls.named_match?}; a Symbol or String literal naming one
-      # (`inject(:=~)`); a `yield`; or any other construct the block scan counts, an unresolved constant read as a
-      # possible Regexp. An implicit-self call forgets on
-      # this: it used to forget whatever it called, which covered the argument in `log(line.sub(/=/, ": "))`, and a
-      # call in an argument applies no reset of its own yet (#1365).
+      # True when an implicit-self call's arguments may run a match in this frame (issue #1364), outside a block or
+      # lambda, which {.value_may_rebind?} and the frame's closure rules answer for: a call the table or
+      # {SelfCalls} names on any receiver, unless its syntax proves it cannot match ({Calls.forgets_by_name?}, issue
+      # #1365: `log(row[:name])` keeps the narrowing, `log(row[key])` does not); a Symbol or String literal naming
+      # one (`inject(:=~)`), which the implicit-self call may run from C; a `yield`; or any other construct the
+      # block scan counts, an unresolved constant read as a possible Regexp. An implicit-self call used to forget
+      # whatever it called, and this keeps it forgetting wherever it forgot then but on that proof; a call in an
+      # argument that is known to match forgets by itself too ({.operands_may_rebind?}).
       def operand_may_match?(node, scope = nil)
         return false unless node.is_a?(Prism::Node)
 
         case node
         when Prism::BlockNode, Prism::LambdaNode then return false
         when Prism::CallNode
-          return true if MATCH_CAPABLE_METHODS.include?(node.name) || SelfCalls.named_match?(node)
+          return true if Calls.base_named?(node, implicit: true) && Calls.forgets_by_name?(node, scope)
         when Prism::YieldNode then return true
         else
           return true if SelfCalls.method_name_literal?(node) || matching_node?(node, scope, broad: true)
@@ -255,34 +264,45 @@ module Rigor
         end
       end
 
-      # True when a statement call may rebind the frame's match globals through a block that runs while it does:
-      # its own ({.block_may_match?}), or one on a call in its receiver chain or arguments
-      # (`items.select { |i| i =~ re }.map(&:upcase)`). A call there without a block is left to the statement-level
-      # rule.
-      def call_may_match?(call_node, scope = nil)
-        block_may_match?(call_node, scope) ||
-          operand_block_may_match?(call_node.receiver, scope) ||
-          operand_block_may_match?(call_node.arguments, scope)
+      # True when `program`, a String of code an eval runs in this frame, may match, on the block scan's terms: its
+      # statements run here, and a `def` or class in it runs in a frame of its own. The caller keeps the answer.
+      def program_may_match?(program, scope) = scan(program, scope)
+
+      # True when running a call's receiver chain and arguments, which Ruby does before the method, may rebind the
+      # frame's match globals ({.value_may_rebind?}), kept on the frame as {Frame#memo} keeps a scan.
+      def operands_may_rebind?(call_node, scope)
+        remember(call_node, scope, :operands) do
+          value_may_rebind?(call_node.receiver, scope) || value_may_rebind?(call_node.arguments, scope)
+        end
       end
 
-      # A lambda literal does not run where it is written ({.matching_closure?} answers for it), and a `def`, class
-      # or module body is a frame of its own.
-      def operand_block_may_match?(node, scope)
+      # True when evaluating `node` for its value — a call's receiver chain or arguments, an array, hash or
+      # interpolation literal, a `rescue` modifier, a `super` or `yield` — may rebind the frame's match globals
+      # (issue #1365). No call there forgot before, so each forgets only when it is known to match
+      # ({Calls.rebinds?}): `[u.index(/(q)/)]` does, `out << row[key]` and `x = [h[k], 1]` do not. So does an index
+      # write whose index is known to be a Regexp (`s[re] ||= v`), a block literal on a call there whose body
+      # {.may_match?}, a block argument {.block_argument_may_match?} counts, or any other construct the block scan
+      # counts (a `when` or `in` value that may be a Regexp, a bare regex condition, a write to `$~`). An
+      # implicit-self call there is read the same way: the frame-wide fallback of {Calls.statement_rebinds?} stays with
+      # statement-position calls, as before, where an operand's `value.upcase` would otherwise forget at every
+      # attribute read. A lambda literal does not run where it is written ({.matching_closure?} answers for it),
+      # and a `def`, class or module body or a `defined?` operand does not run in this frame.
+      def value_may_rebind?(node, scope)
         return false unless node.is_a?(Prism::Node)
 
         case node
-        when Prism::BlockNode then may_match?(node.body, scope)
-        when Prism::BlockArgumentNode then block_argument_may_match?(node, scope)
-        when Prism::LambdaNode then false
-        else
-          return false if OWN_FRAME_NODES.include?(node.class)
-
-          found = false
-          node.rigor_each_child { |child| found ||= operand_block_may_match?(child, scope) }
-          found
+        when Prism::BlockNode then return may_match?(node.body, scope)
+        when Prism::LambdaNode then return false
+        when Prism::CallNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode
+          return true if Calls.rebinds?(node, scope)
+        else return true if matching_node?(node, scope)
         end
+        return false if OWN_FRAME_NODES.include?(node.class)
+
+        found = false
+        node.rigor_each_child { |child| found ||= value_may_rebind?(child, scope) }
+        found
       end
-      private_class_method :operand_block_may_match?
 
       # True when `node`, a frame's body or parameters, makes a closure that may rebind the frame's match globals
       # whenever it is invoked: a `->` literal, or the block of a call that keeps it to run later
@@ -314,12 +334,18 @@ module Rigor
       # A body with neither keeps it: blocks share the frame, so `s =~ /(\d+)/; items.map { $1 }` reads the
       # guard's `$1`. The block of a call named `tap`, `then` or `yield_self` ({BlockCallTiming}) is read as the scan
       # read every block before issue #1364, without {ADDED_NAMES}, so its entry is what it was: the name alone
-      # cannot show the block runs once (a user `then` may keep it, and a loop runs the call again, #1375). Both
-      # block-entry passes ({StatementEvaluator#build_block_entry_scope} and the block-return pass in
-      # {ExpressionTyper}) enter through here, so they cannot disagree.
+      # cannot show the block runs once (a user `then` may keep it, and a loop runs the call again, #1375). With
+      # the owning `call_node`, the entry also forgets when the call's receiver chain or arguments may rebind them
+      # ({.operands_may_rebind?}, issue #1365): Ruby runs those before the method yields, so
+      # `[u.index(/(q)/)].map { $1 }` reads the rebound `$1`. Every block-entry pass enters through here:
+      # {StatementEvaluator#build_block_entry_scope} and the block-return and `break` passes in {ExpressionTyper}
+      # pass the call. The per-element fold and the captured-local fixpoint pass none; they run under
+      # `ExpressionTyper#rebound_operand_typer`, whose scope has already forgotten the globals when the operands
+      # may rebind them, so no pass disagrees.
       def block_entry(scope, block_node, call_node = nil)
         return scope unless scope.match_globals_bound?
-        return scope unless entry_may_match?(block_node.body, scope, call_node) || scope.match_rebinding_closure?
+        return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
+                            (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
 
         scope.forget_match_globals
       end

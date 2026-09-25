@@ -245,11 +245,11 @@ module Rigor
       # threading `StatementEvaluator` root typed from the scope the earlier operands left (issue #1256), or nil.
       # It is consulted only by this typer's own descent: a node it holds is the same node typed from its own
       # entry scope, so answering it here is what typing it there would answer.
-      def initialize(scope:, tracer: nil, operand_types: nil)
+      def initialize(scope:, tracer: nil, operand_types: nil, typing_node: nil)
         @scope = scope
         @tracer = tracer
         @operand_types = operand_types
-        @typing_node = nil
+        @typing_node = typing_node
       end
 
       def type_of(node)
@@ -2167,6 +2167,9 @@ module Rigor
       # The three receiver-shaped block folds, in their historical order (extracted whole from
       # `call_dispatch_type_for` for method-length budget).
       def try_receiver_block_folds(node, receiver, arg_types)
+        rebound = rebound_operand_typer(node)
+        return rebound.send(:try_receiver_block_folds, node, receiver, arg_types) if rebound
+
         per_element = try_per_element_block_fold(node, receiver)
         return per_element if per_element
 
@@ -2174,6 +2177,19 @@ module Rigor
         return inject_fold if inject_fold
 
         try_hash_shape_block_fold(node, receiver)
+      end
+
+      # Issue #1365 — Ruby runs a call's receiver chain and arguments before the method yields, so when they may
+      # rebind the match globals ({MatchRebinding.operands_may_rebind?}: `[u.index(/(q)/)].map { $1 }`) every
+      # pass that types the call's block — the block-return pass, its captured-local fixpoint and the receiver
+      # folds — types it under a typer whose scope has forgotten them, as {MatchRebinding.block_entry} does for
+      # the call's block and `StatementEvaluator#forget_operand_match_globals` for the statement. nil otherwise.
+      def rebound_operand_typer(call_node)
+        return nil if call_node.block.nil? || !scope.match_globals_bound?
+        return nil unless MatchRebinding.operands_may_rebind?(call_node, scope)
+
+        ExpressionTyper.new(scope: scope.forget_match_globals, tracer: tracer, operand_types: @operand_types,
+                            typing_node: @typing_node)
       end
 
       # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
@@ -3850,6 +3866,9 @@ module Rigor
         block_arg = call_node.block
         return nil if block_arg.nil?
         return nil if receiver_type.nil?
+
+        rebound = rebound_operand_typer(call_node)
+        return rebound.send(:block_return_type_for, call_node, receiver_type, arg_types) if rebound
 
         expected = MethodDispatcher.expected_block_param_types(
           receiver_type: receiver_type,

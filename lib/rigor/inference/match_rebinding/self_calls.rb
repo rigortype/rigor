@@ -5,17 +5,17 @@ require "prism"
 module Rigor
   module Inference
     module MatchRebinding
-      # Method names that (may) run a regex match and therefore rebind the `$~` family: the statement-level table
-      # (`StatementEvaluator#match_capable_call?`). Conservative over-approximation — a few set globals only with a
-      # Regexp argument, but we do not inspect args.
+      # Method names that may run a regex match, read by name alone: a Symbol or String literal naming one counts
+      # ({SelfCalls.method_name_literal?}), since the method it is handed to may run it from C (`inject(:=~)`). A call
+      # itself is read with its arguments ({Calls}, issue #1365).
       MATCH_CAPABLE_METHODS = %i[
         =~ match match? gsub gsub! sub sub! scan split slice slice!
         [] partition rpartition index rindex === grep grep_v
       ].freeze
 
-      # The calls past that table that may rebind the frame they are made from, read by name (issue #1364). A method
-      # defined in Ruby runs in a frame of its own, so an implicit-self call no longer forgets by itself; these still
-      # do, and so do they in its arguments ({MatchRebinding.operand_may_match?}), on any receiver there.
+      # The calls past that table that may rebind the frame they are made from, read by name alone (issue #1364), as
+      # the broad reading of a frame's blocks counts them ({MatchRebinding.broad_may_match?}), and as the calls an
+      # implicit-self call forgot on before issue #1365, which {Calls.base_named?} keeps forgetting on.
       module SelfCalls
         # Builtins that set their caller's `$~` and the table misses: `x !~ re`, `~re`, and `start_with?(re)`,
         # `byteindex(re)`, `byterindex(re)`, `s[re] = v` — the ones a `String` or `Regexp` subclass inherits too.

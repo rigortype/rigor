@@ -91,6 +91,11 @@ Note the conventional source roots so Phase 4 can set `paths:`:
 are checked differently and inflate the diagnostic count. `vendor/`
 and `tmp/` are always excluded.
 
+Note the **test roots** too — every directory holding the project's
+tests, not only the conventional one (`spec/`, `test/`, and any
+extra suite such as `test/system` kept elsewhere or an
+`integration/` tree). Phase 4 writes them to `test_paths:`.
+
 ## Phase 3 — Plugin selection
 
 Propose a plugin set from the detected families. Present it to the

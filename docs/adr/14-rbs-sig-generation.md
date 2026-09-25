@@ -101,8 +101,8 @@ small generation core under `lib/rigor/sig_gen/` that:
     `define_method` / `attr_*` method shapes the engine
     already discovers via `Inference::ScopeIndexer`.
 2.  **Optionally collects caller observations** from a
-    second set of paths (default `spec/` if present,
-    otherwise empty) so parameter-type *suggestions* can
+    second set of paths (default: the `test_paths:` test
+    roots, #1388) so parameter-type *suggestions* can
     be derived from real call sites.
 3.  **Compares against existing RBS** loaded through the
     project environment (`Rigor::Environment.for_project`),
@@ -155,8 +155,9 @@ Robustness controls:
                     Default: untyped. See § "Robustness
                     principle compliance".
   --observe=PATH... Directories to scan for call-site
-                    observations. Defaults to spec/ when
-                    present. Multiple paths allowed.
+                    observations. Defaults to the configured
+                    test_paths: (unset: spec/ and test/ when
+                    present; #1388). Multiple paths allowed.
   --overwrite       Allow tighter-return updates to replace
                     user-authored RBS declarations. Off by
                     default; tighter-return mode emits to
@@ -242,8 +243,9 @@ controls this:
   imposed on future callers. The user retains complete
   authorship.
 - **`observed`** — the generator collects argument types
-  from every call site under `--observe=PATH...` (default
-  `spec/`), unions them per parameter position, erases to
+  from every call site under `--observe=PATH...` (default:
+  the project's `test_paths:` test roots, which replaced a
+  hard-coded `spec/` in #1388), unions them per parameter position, erases to
   RBS, and emits the union. This is still ADR-5-clause-2
   compliant: the observed union is *exactly* the
   permissive contract the existing callers prove

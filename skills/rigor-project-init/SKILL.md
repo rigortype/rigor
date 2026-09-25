@@ -225,7 +225,7 @@ only in acknowledge mode). For each, give the commit recommendation:
 
 | File | What it is | Commit? |
 | --- | --- | --- |
-| `.rigor.dist.yml` | The shared project config (Phase 4) — `target_ruby`, `paths:`, `plugins:`, `severity_profile:`, and the `baseline:` pointer. The single source of truth every contributor's `rigor check` reads. | **Yes** — it is the shared config; sharing it is the whole point. |
+| `.rigor.dist.yml` | The shared project config (Phase 4) — `target_ruby`, `paths:`, `test_paths:`, `plugins:`, `severity_profile:`, and the `baseline:` pointer. The single source of truth every contributor's `rigor check` reads. | **Yes** — it is the shared config; sharing it is the whole point. |
 | `.rigor-baseline.yml` | Acknowledge mode only (Phase 7) — the snapshot of today's known diagnostics. Doubles as a record of project state; without it each developer's baseline diverges and the regression guard means different things per machine. | **Yes** — commit it; it documents project state and pins the regression envelope. |
 | `sig/` | RBS skeletons from `rigor sig-gen` (Phase 5), if that phase ran. A first-class project artefact — it sharpens inference for everyone. | **Yes** — commit it (see [`references/04-sig-uplift.md`](references/04-sig-uplift.md) § "Commit the sig/ directory"). |
 | `.rigor/` (contains `cache/`) | The per-file analysis cache `rigor check` writes to speed up re-runs. Regenerable and machine-local. | **No** — add `.rigor/` to `.gitignore`. |

@@ -183,7 +183,7 @@ module Rigor
         return 1
       end
 
-      File.write(path, init_template)
+      File.write(path, init_template(path))
       @out.puts("Created #{path}")
       print_init_next_steps(path)
       0
@@ -230,7 +230,7 @@ module Rigor
     # Renders the starter `.rigor.yml` body. The template serialises `Configuration::DEFAULTS` (so the on-disk file
     # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
     # most likely to want to edit.
-    def init_template
+    def init_template(path = ".rigor.dist.yml")
       <<~YAML
         # yaml-language-server: $schema=#{CONFIG_SCHEMA_URL}
         # Rigor configuration. The full key reference is
@@ -266,6 +266,12 @@ module Rigor
         #                Leave unset (or `null`) to auto-detect
         #                `<root>/sig`. Use `[]` to disable
         #                project-RBS loading entirely.
+        # - test_paths:  the directories holding your tests.
+        #                `rigor sig-gen --params=observed` reads
+        #                their call sites to type parameters.
+        #                `rigor init` writes the spec/ and test/
+        #                it finds; unset auto-detects them, and
+        #                `[]` declares the project has none.
         # - cache.path:  where Rigor will eventually persist
         #                analysis results across runs.
         #
@@ -275,8 +281,20 @@ module Rigor
         # tempfile, uri, logger, date, prism, rbs). Adding a
         # `sig/<gem>.rbs` file under `sig/` is the simplest way
         # to extend type coverage today.
-        #{YAML.dump(Configuration::DEFAULTS).sub(/\A---\n/, '')}
+        #{YAML.dump(init_settings(path)).sub(/\A---\n/, '')}
       YAML
+    end
+
+    # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so
+    # the project's config says where its tests are rather than leaving it to auto-detection. The roots are written
+    # relative to the config file's directory, which is what {Configuration.load} resolves them against.
+    def init_settings(path)
+      test_paths = Configuration.new.resolved_test_paths
+      return Configuration::DEFAULTS if test_paths.empty?
+
+      config_dir = Pathname(File.expand_path(File.dirname(path)))
+      relative = test_paths.map { |root| Pathname(root).relative_path_from(config_dir).to_s }
+      Configuration::DEFAULTS.merge("test_paths" => relative)
     end
 
     def run_annotate

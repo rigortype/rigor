@@ -91,6 +91,11 @@ paths:
   - app
   - lib
 
+# Where the tests live. `rigor sig-gen --params=observed` reads their
+# call sites to type parameters (Phase 5). Not analysed by `rigor check`.
+test_paths:
+  - spec
+
 exclude:
   - vendor
   - tmp
@@ -138,8 +143,27 @@ A strict-mode plain-Ruby gem is shorter:
 ```yaml
 paths:
   - lib
+test_paths:
+  - test
 severity_profile: strict
 ```
+
+### Test roots — write `test_paths:` explicitly
+
+Always write `test_paths:` with the test roots Phase 1 found, even
+when they are the conventional `spec/` or `test/`. Left unset, Rigor
+auto-detects whichever of `spec/` and `test/` exist; that covers the
+common layouts, but the committed config is then silent about where
+the tests are, and a suite anywhere else (a second tree, an
+`integration/` directory) is never read. Declaring the key replaces
+auto-detection, so list every root. A project with no tests yet
+writes `test_paths: []`.
+
+The key affects no diagnostic. Its reader today is `rigor sig-gen
+--params=observed` (Phase 5), which types a parameter from the
+arguments the tests pass. When there is no root to read, or a declared
+root does not exist, sig-gen says so on stderr and the affected
+parameters stay `untyped`.
 
 ### Key reference
 
@@ -150,6 +174,7 @@ handbook document the full surface.
 | --- | --- |
 | `paths:` | Directories Rigor analyses. Source roots only — not `spec/` / `test/`. |
 | `exclude:` | Paths removed from the `paths:` walk. |
+| `test_paths:` | The project's test roots (`spec`, `test`, or several). Write it explicitly; see § "Test roots". Relative entries resolve against the config file. `rigor check` ignores it; `sig-gen` names a declared root that does not exist. |
 | `plugins:` | Plugin ids to activate (the Phase 3 set). |
 | `signature_paths:` | Extra RBS source **directories** (paths, not gem names; resolved relative to the config file). Use it for the project's own local `sig/` if it has one. RBS-bundle *plugins* like `rigor-activesupport-core-ext` ship their own `sig/` and need no entry here — list them under `plugins:`. |
 | `severity_profile:` | `lenient` / `balanced` / `strict`. See the table above. |
@@ -231,8 +256,8 @@ with the message text.
 
 ## Output of this module
 
-A committed `.rigor.dist.yml` with `paths:`, `exclude:`,
-`plugins:`, and `severity_profile:` set — and no active
+A committed `.rigor.dist.yml` with `paths:`, `test_paths:`,
+`exclude:`, `plugins:`, and `severity_profile:` set — and no active
 `baseline:` line. `rigor plugins` reports every entry loaded,
 zero load errors. No Gemfile changes; plugins are bundled inside
 `rigortype`.

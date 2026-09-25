@@ -24,8 +24,9 @@ module Rigor
     # AND the candidate is a `tighter-return`.
     #
     # Parameter policy defaults to `untyped`. `--params=observed` (slice 3) opts in to caller-side observation
-    # harvesting: the `ObservationCollector` walks `--observe=PATH...` (default `spec/` when no flag is given AND a
-    # `spec/` directory exists), unions per-position arg types, and the generator emits the union per ADR-5 clause 2.
+    # harvesting: the `ObservationCollector` walks `--observe=PATH...` (default: the project's test roots,
+    # {Configuration#resolved_test_paths}), unions per-position arg types, and the generator emits the union per ADR-5
+    # clause 2.
     # `--params=observed-strict` stays reserved-but-inert until the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
     class SigGenCommand < Command # rubocop:disable Metrics/ClassLength
@@ -224,13 +225,41 @@ module Rigor
       end
 
       # Slice 3 — collect call-site argument observations when `--params=observed` is set. When `--observe=PATH` is not
-      # specified, default to `spec/` (skipped silently when the directory is absent).
+      # specified, observe the project's test roots: `test_paths:`, or whichever of `spec/` and `test/` exist. With no
+      # root at all the run still succeeds, but says so — otherwise every parameter stays `untyped` with nothing
+      # naming the reason.
       def collect_observations(configuration, options)
         return {} if options.fetch(:params) != "observed"
 
         observe_paths = options.fetch(:observe)
-        observe_paths = ["spec"] if observe_paths.empty? && File.directory?("spec")
+        observe_paths = configuration.resolved_test_paths if observe_paths.empty?
+        if observe_paths.empty?
+          warn_no_test_roots(configuration)
+        else
+          warn_missing_test_roots(observe_paths)
+        end
         SigGen::ObservationCollector.new(configuration: configuration, paths: observe_paths).collect
+      end
+
+      # A declared root that does not exist is read as empty, so name it: `sig-gen` is the only command that reads
+      # the test roots, and without this the run looks exactly like one whose tests pass no typed arguments.
+      def warn_missing_test_roots(observe_paths)
+        missing = observe_paths.reject { |path| File.exist?(path) }
+        return if missing.empty?
+
+        consequence = missing.size == observe_paths.size ? "; every parameter stays untyped" : ""
+        @err.puts("rigor sig-gen: no call sites are observed from #{missing.map(&:inspect).join(', ')}, " \
+                  "which does not exist#{consequence}. Check `test_paths:` or --observe=PATH.")
+      end
+
+      def warn_no_test_roots(configuration)
+        reason = if configuration.test_paths.nil?
+                   "no spec/ or test/ directory was found and `test_paths:` is unset"
+                 else
+                   "`test_paths:` is empty"
+                 end
+        @err.puts("rigor sig-gen: --params=observed has no test roots to observe (#{reason}); every parameter " \
+                  "stays untyped. Declare `test_paths:` in the configuration or pass --observe=PATH.")
       end
 
       def parse_options
@@ -278,7 +307,8 @@ module Rigor
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|
             options[:params] = value
           end
-          opts.on("--observe=PATH", "Directory / file to scan for call-site observations (repeatable)") do |value|
+          opts.on("--observe=PATH", "Directory / file to scan for call-site observations (repeatable; " \
+                                    "default: the configured test_paths)") do |value|
             options[:observe] << value
           end
           opts.on("--new-files", "Emit only new-file classifications") do

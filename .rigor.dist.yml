@@ -2,6 +2,8 @@
 target_ruby: "4.0"
 paths:
   - lib
+test_paths:
+  - spec
 plugins: []
 # A declared `-> void` is a contract about the caller ("do not rely on the value"); the rule that checks it
 # is off in every severity profile, so the self-check enables it (ADR-107; 0 findings when enabled).

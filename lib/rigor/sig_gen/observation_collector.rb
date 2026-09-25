@@ -15,7 +15,7 @@ module Rigor
   module SigGen
     # ADR-14 slice 3 — caller-side argument-type observation collector.
     #
-    # Walks the user-supplied `--observe=PATH...` tree (default `spec/`), parses every `.rb` file with `Prism`,
+    # Walks the `--observe=PATH...` tree (default: the project's test roots), parses every `.rb` file with `Prism`,
     # scope- indexes it the same way the main generator does, and records the per-call-site argument-type tuples
     # for every `Prism::CallNode` whose receiver types as a `Type::Nominal`. The {Generator} consumes the
     # resulting map to render `--params=observed` RBS:

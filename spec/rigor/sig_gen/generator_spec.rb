@@ -1281,7 +1281,9 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.rbs).to eq(%(def name: () -> "hi"))
     end
 
-    it "emits reader + writer candidates for attr_accessor" do
+    # Issue #541 — the writer stores whatever its caller passes, so the ivar reads untyped as it does behind a
+    # hand-written `def count=(v) = @count = v`. The `0` alone once rendered `def count=: (0) -> 0`.
+    it "skips attr_accessor whose ivar the writer leaves untyped" do
       path = write_fixture("lib/box.rb", <<~RUBY)
         class Box
           def initialize
@@ -1292,6 +1294,27 @@ RSpec.describe Rigor::SigGen::Generator do
       RUBY
 
       candidates = generator(paths: [path]).run.select { |c| %i[count count=].include?(c.method_name) }
+
+      expect(candidates.map { |c| [c.method_name, c.skip_reason] }).to contain_exactly(
+        %i[count untyped_return],
+        %i[count= untyped_return]
+      )
+    end
+
+    it "emits reader + writer candidates for attr_accessor from initialize-param observations" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def initialize(count)
+            @count = count
+          end
+          attr_accessor :count
+        end
+      RUBY
+      observations = { ["Box", :initialize] => [[Rigor::Type::Combinator.constant_of(0)]] }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidates = described_class.new(configuration: config, paths: [path], observations: observations)
+                                  .run.select { |c| %i[count count=].include?(c.method_name) }
 
       expect(candidates.map { |c| [c.method_name, c.rbs] }).to contain_exactly(
         [:count, "def count: () -> 0"],

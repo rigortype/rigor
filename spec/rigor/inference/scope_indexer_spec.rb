@@ -1320,6 +1320,68 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    # Issue #541 — an `attr_writer` / `attr_accessor` declaration contributes what the hand-written untyped setter
+    # `def x=(v) = @x = v` does, and only where that setter would.
+    describe "attr_writer declarations as ivar writes" do
+      def class_ivar(source, class_name, ivar)
+        program = parse(source)
+        described_class.index(program, default_scope: default_scope)[program].class_ivars_for(class_name)[ivar]
+      end
+
+      def hand_setter(source, macro)
+        source.sub(macro, "def x=(v)\n    @x = v\n  end")
+      end
+
+      {
+        "a concrete constructor write" => "class C\n  attr_accessor :x\n  def initialize = @x = 0\nend\n",
+        "a writer-only ivar read before any write" => "class C\n  attr_writer :x\n  def use = @x.foo\nend\n",
+        "a writer-only ivar" => "class C\n  attr_writer :x\nend\n",
+        "a `Class.new` block" => "K = Class.new do\n  attr_accessor :x\n  def initialize = @x = nil\nend\n",
+        "an `op=`-only ivar" => "class C\n  attr_accessor :x\n  def bump = @x += 1\nend\n"
+      }.each do |shape, source|
+        it "seeds #{shape} as the hand-written setter does" do
+          macro = source[/attr_\w+ :x/]
+          owner = source.start_with?("K") ? "K" : "C"
+          expected = class_ivar(hand_setter(source, macro), owner, :@x)
+
+          expect(expected).not_to be_nil
+          expect(class_ivar(source, owner, :@x)).to eq(expected)
+        end
+      end
+
+      it "reads `private attr_writer`, several names, and a String name" do
+        source = <<~RUBY
+          class C
+            private attr_writer :a, "b"
+            attr_accessor :c
+            def initialize = (@a = nil; @b = nil; @c = false)
+          end
+        RUBY
+        %i[@a @b].each { |ivar| expect(class_ivar(source, "C", ivar).describe).to eq("Dynamic[top]?") }
+        expect(class_ivar(source, "C", :@c).describe).to eq("Dynamic[top] | false")
+      end
+
+      it "leaves an ivar alone behind a reader, a singleton-side accessor, a splat, or an includer's module" do
+        source = <<~RUBY
+          module M
+            attr_writer :m
+          end
+
+          class C
+            include M
+            attr_reader :r
+            attr_writer(*NAMES)
+            class << self
+              attr_accessor :s
+            end
+            def initialize = (@r = nil; @s = nil; @m = nil; @names = nil)
+          end
+        RUBY
+        %i[@r @s @m @names].each { |ivar| expect(class_ivar(source, "C", ivar).describe).to eq("nil") }
+        expect(class_ivar(source, "M", :@m).describe).to eq("Dynamic[top]")
+      end
+    end
+
     describe "defensive ivar-init with falsey-Constant rvalue" do
       it "skips the seed for `@x = nil unless @x` so the predicate does not fold to Constant[nil]" do
         program = parse(<<~RUBY)

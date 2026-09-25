@@ -710,7 +710,8 @@ module Rigor
 
       # The leaf arms of {#walk_class_ivars}: a `def` collects and stops, a recognised
       # meta-new write or anonymous factory call consumes its own block, and an ordinary
-      # call seeds the ADR-38 initializer writes before the ordinary child descent runs.
+      # call seeds the ADR-38 initializer writes and an `attr_writer` family macro its ivar
+      # writes before the ordinary child descent runs.
       # Returns true when the node — and where relevant its block — was consumed.
       def walk_ivars_leaf?(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/ParameterLists
                            read_before_write, init_writes, method_assign_effects,
@@ -731,8 +732,9 @@ module Rigor
                                                method_assign_effects, def_owner, singleton_cref,
                                                defs_singleton: defs_singleton)
 
-          collect_initializer_block_ivars(node, def_owner || qualified_prefix, default_scope,
-                                          accumulator, mutated_ivars, init_writes)
+          owner = def_owner || qualified_prefix
+          collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
+          record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(node.name)
           false
         else
           walk_ivars_meta_new?(node, qualified_prefix, default_scope, accumulator,
@@ -926,6 +928,22 @@ module Rigor
 
         collect_block_ivar_writes(node.block, owner, default_scope,
                                   accumulator, mutated_ivars, init_writes)
+      end
+
+      # The `attr_writer` family arm of {#walk_class_ivars} (#541). A writer declaration is the class's own
+      # statement that `@x` takes values from outside, so it contributes what the hand-written untyped setter
+      # `def x=(v) = @x = v` does: `Dynamic[top]`. Without it `@x = nil` in `initialize` was the only write
+      # the seed saw, and `if @x` folded always-falsey on a field the class declares assignable. A setter
+      # call site (`obj.x = v`) stays out, as ADR-58 WD2 settles; the declaration is class-level evidence
+      # in the file the walk reads. `owner` is empty where no class owns an instance-side ivar (a
+      # `class << self` body), and the macro contributes nothing there.
+      def record_attr_writer_ivars(node, owner, accumulator)
+        return if owner.empty?
+
+        class_name = owner.join("::")
+        each_attr_macro_name(node) do |base|
+          accumulate_ivar_type(accumulator, class_name, :"@#{base}", Type::Combinator.untyped)
+        end
       end
 
       # ADR-38 block-form gate: true when a loaded plugin declares `method_name` a block-form initializer for
@@ -6508,22 +6526,31 @@ module Rigor
       # suppressed `def` / `define_method` / `alias_method`-discovered methods. `attr_reader` defines readers,
       # `attr_writer` writers (`x=`), `attr_accessor` both.
       ATTR_MACROS = %i[attr_reader attr_writer attr_accessor].freeze
+      # The subset that defines a writer, which the class-ivar pass counts as a write ({#record_attr_writer_ivars}).
+      ATTR_WRITER_MACROS = %i[attr_writer attr_accessor].freeze
 
       def record_attr_methods(call_node, qualified_prefix, in_singleton_class, accumulator)
         return if qualified_prefix.empty?
-        return unless call_node.receiver.nil? # only the implicit-self macro defines on the lexical class
-        return if call_node.arguments.nil?
 
         kind = in_singleton_class ? :singleton : :instance
         reader = call_node.name != :attr_writer
         writer = call_node.name != :attr_reader
         class_name = qualified_prefix.join("::")
-        call_node.arguments.arguments.each do |arg|
-          base = literal_method_name(arg)
-          next if base.nil?
-
+        each_attr_macro_name(call_node) do |base|
           record_method(accumulator, class_name, base, kind) if reader
           record_method(accumulator, class_name, :"#{base}=", kind) if writer
+        end
+      end
+
+      # Yields each name an `attr_*` call declares: a Symbol or String literal argument. A non-literal one
+      # (`attr_writer(*names)`) names nothing Rigor can read.
+      def each_attr_macro_name(call_node)
+        return unless call_node.receiver.nil? # only the implicit-self macro defines on the lexical class
+        return if call_node.arguments.nil?
+
+        call_node.arguments.arguments.each do |arg|
+          base = literal_method_name(arg)
+          yield base unless base.nil?
         end
       end
 

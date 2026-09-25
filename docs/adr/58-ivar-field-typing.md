@@ -15,7 +15,9 @@ recorded into the class-ivar type union but not into `init_writes`, so
 the read-before-write nil gate re-injected a spurious `nil` at every
 sibling read; `detect_read_before_write` now counts massign targets as
 writes, see WD5 status. The `||=`-seeding stretch is
-**deferred-with-reason** there). Archetype:
+**deferred-with-reason** there). WD2 amended (2026-09-26, #541 — an
+`attr_writer` / `attr_accessor` declaration now counts as an untyped
+write, see the WD2 amendment). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -55,6 +57,15 @@ nil — so cross-method definite assignment cannot remove the nil, and
 `Dynamic | nil`) would make the FP class worse, not better, unless the
 firing policy changes first. The policy is therefore the decision; the
 precision mechanisms are sequenced behind it.
+
+> **Corrected 2026-09-26 (#541).** The pre-pass recorded no accessor
+> write, so `@next` above read `nil`, not `Dynamic[top] | nil`, until
+> the WD2 amendment below; the Grounding line's `type-of` reading is
+> wrong in the same way. The algorithm corpora's `Dynamic[top] | nil`
+> reads came from untyped constructor parameters, which WD2 records as
+> those fields' only writes. With only `@next = nil` recorded,
+> `if @next` folded always-falsey and `@next.value` reported a call on
+> `nil`.
 
 Precedent: ADR-57 slice 3 softened destructured optional tuple slots
 for exactly this reason — manufactured per-site optionality across a
@@ -261,6 +272,47 @@ only if a corpus shows a same-class-return shape that is *provably*
 invariant-protected in a way flow could credit (at which point the fix
 is a narrowing rule, not provenance suppression). The remaining
 algorithm-corpora firings stand as earned conservatism.
+
+**Amendment, 2026-09-26 — an attr writer declaration is a write
+(#541).** The universe above left out the declaration a class makes
+about its own field. `attr_writer :x` and `attr_accessor :x` now
+contribute to `@x` exactly what the hand-written untyped setter
+`def x=(v) = @x = v` does: `Dynamic[top]`, with the read-before-write
+`nil`, the held `&&=` / `op=` merges, and WD1's declaration-sourced mark
+following as they follow any write. A writer-only ivar gets an entry.
+
+The criterion is where the evidence sits. A setter call site
+(`obj.x = v`) is still declined for the reason above: its receiver's
+class has to be resolved, and a misresolved one widens another class's
+field. A writer declaration sits
+in the class body the pre-pass already walks, names its own ivar, and
+states that the field takes values from outside. Without it the
+constructor's `@x = nil` was the only write the seed saw, so an injected
+callback or flag (`attr_accessor :cb; def initialize = @cb = nil`) read
+`nil`: `if @cb` fired `flow.always-truthy-condition`, and `@cb.call`
+fired `call.undefined-method` at error level. Both are false positives
+on the dependency-injection idiom (bash0C7's report in #541; ADR-5).
+
+Two narrower options were rejected. A mark that declines only the flow
+folds leaves the nil-receiver error in place. Contributing only when
+every other write is `nil` misses the `@flag = false` flag. The cost is
+precision on an accessor-backed ivar that also has a concrete write:
+kramdown's `@children` goes from `[]` to `Dynamic[top] | []`, and
+`rigor sig-gen` now skips `attr_accessor :count` beside `@count = 0`
+instead of proposing `def count=: (0) -> 0`. Both closed readings were
+wrong for a field the class declares writable.
+
+Out of scope, unchanged: `attr_reader` alone, a `class << self`
+accessor, an includer of a module that declares the writer, another
+file's reopening, and a non-literal name list (`attr_writer(*names)`).
+Typing the writer from an RBS or inline attribute declaration is #1406;
+the #518 safe-navigation workaround stays until #1407. Corpus gate
+(`check --no-cache --no-baseline`, base vs change): liquid −1,
+textbringer −2, rails −8, kramdown / mastodon / redmine 0, and no
+diagnostic added. Every removal is a `flow.always-truthy-condition` on
+an accessor-backed ivar (rails `@automatic_reconnect`,
+`@ignore_disconnect`; liquid `@strict_variables`; textbringer
+`@prefix_arg`).
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

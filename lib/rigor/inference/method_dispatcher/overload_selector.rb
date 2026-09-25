@@ -61,7 +61,7 @@ module Rigor
         #   declaration.
         # @return the chosen overload, or nil when the definition has no method
         #   types at all.
-        def select(method_definition, **) = select_candidates(method_definition, **).first
+        def select(method_definition, **) = select_candidates(method_definition, member_wise: false, **).first
 
         # Issue #521 — like {.select}, but when an imprecise argument (`Dynamic[Top]`, or since #1021 a
         # union with a `Dynamic[Top]` member) reaches the gradual pass it returns EVERY gradually-matching
@@ -69,22 +69,30 @@ module Rigor
         # indiscriminately, so "first gradual match" is decided by overload-list
         # position, not by types — `[true] * n` with an untyped `n` pinned `Array#*(string) -> String`
         # and answered a wrong precise type the runtime can contradict. The caller unions the candidates'
-        # returns, which contains the truth whichever overload the runtime takes. Every other path (strict,
-        # alias-resolved, typed-gradual, arity fallback) still yields exactly one candidate, so `select`
-        # keeps its historical single answer.
+        # returns, which contains the truth whichever overload the runtime takes. The member-wise reading of a
+        # two-member `Dynamic` facet (#1350, `FacetDistribution`) returns one candidate per member the same way.
+        # Every other path (strict, alias-resolved, typed-gradual, arity fallback) yields exactly one candidate,
+        # and `select` (`member_wise: false`) keeps its historical single answer.
         #
         # @return matching overloads; empty when the definition declares none.
-        def select_candidates(method_definition, arg_types:, **)
-          FacetDistribution.select(arg_types) do |args, member|
-            select_declared(method_definition, arg_types: args, member: member, **)
+        # rubocop:disable-next Metrics/ParameterLists -- the selection keywords plus the member-wise switch.
+        def select_candidates(definition, arg_types:, self_type:, instance_type:, type_vars: {},
+                              block_required: false, environment: nil, member_wise: true)
+          unless FacetDistribution.faceted?(arg_types)
+            return select_declared(definition, arg_types, self_type, instance_type, type_vars, block_required,
+                                   environment, false)
+          end
+
+          FacetDistribution.select(arg_types, member_wise: member_wise) do |args, member|
+            select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment, member)
           end
         end
 
-        # The selection proper. A member-wise call (`member:`, see `FacetDistribution.select`) answers only a genuine
-        # match, never the first-overload fallback.
-        # rubocop:disable-next Metrics/ParameterLists -- the public keyword surface plus the member-wise flag.
-        def select_declared(method_definition, arg_types:, self_type:, instance_type:, type_vars: {},
-                            block_required: false, environment: nil, member: false)
+        # The selection proper, positional so the hot path forwards no keyword hash. A member-wise call (`member`, see
+        # `FacetDistribution.select`) answers only a genuine match, never the first-overload fallback.
+        # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
+        def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
+                            environment, member)
           declared = method_definition.method_types
           return [] if declared.empty?
 
@@ -105,7 +113,7 @@ module Rigor
           # `**shared` splat per pass allocated three objects per selection (#775).
           shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
                      type_vars: type_vars, block_required: block_required, param_overrides: param_overrides,
-                     alias_expander: environment&.rbs_loader, environment: environment, member: member }
+                     alias_expander: environment&.rbs_loader, environment: environment }
 
           matches = run_selection_passes(declared, overloads, shared)
           return matches unless matches.empty?

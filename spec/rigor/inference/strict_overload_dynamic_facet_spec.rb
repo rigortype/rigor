@@ -66,6 +66,19 @@ RSpec.describe "strict overload pass on a Dynamic[T] argument", type: :runner do
     expect(dumps).to eq(["Float"])
   end
 
+  it "keeps the wrapper when a member, such as a supertype, reaches no overload" do
+    # Runtime: `1 + 2 ** n` is an Integer for a non-negative Integer `n`. `2 ** n` is `Dynamic[Complex | Numeric]`,
+    # and no `Integer#+` overload names `Numeric`; dropped, it left `Complex` precise and `even?` undefined on it.
+    dumps, rules = dumped_and_rules(<<~RUBY)
+      def pow_sum(n)
+        dump_type(1 + 2 ** n)
+        (1 + 2 ** n).even?
+      end
+    RUBY
+    expect(dumps).to eq(["Integer"])
+    expect(rules).not_to include("call.undefined-method")
+  end
+
   it "keeps joining every arm for an untyped argument" do
     # The #521 join: an untyped argument cannot tell the arms apart.
     dumps, = dumped_and_rules(<<~RUBY)

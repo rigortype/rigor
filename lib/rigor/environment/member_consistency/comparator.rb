@@ -16,20 +16,22 @@ module Rigor
       # A contradiction is reported only where it is PROVEN: no value, and no call, satisfies both sides.
       # Everything short of a proof is undecided. Four places carry that burden:
       #
-      # - {#disjoint?} proves two types share no value, from the RBS class hierarchy the analysis itself
-      #   uses ({RbsProof}), never from Ruby constants the analyzer process happens to have loaded — rbs
-      #   declares `Tempfile < File` while the `tempfile` library defines `Tempfile < Delegator`, and a proof
-      #   that moved with `require "tempfile"` would differ between the CLI and the language server. Only two
-      #   RBS classes neither of which is an RBS ancestor of the other, or a literal whose class is not
-      #   below an RBS class, count. A module, an interface, a name RBS does not declare as a class, or a
-      #   carrier without a class of its own proves nothing; and without an {RbsProof} (the environment
-      #   build) nothing is ever proven.
+      # - {#disjoint?} proves two types share no value, from the RBS hierarchy of Ruby core and stdlib
+      #   classes ({RbsProof}) only: two such classes neither of which is an RBS ancestor of the other, or a
+      #   literal whose class is not below such a class. Never Ruby constants the analyzer process happens to
+      #   have loaded (rbs declares `Tempfile < File`, the `tempfile` library `Tempfile < Delegator`), and
+      #   never a class the project declares anywhere. A module, an interface, a carrier without a class of
+      #   its own, or a class-name refinement payload proves nothing; and without an {RbsProof} (the
+      #   environment build) nothing is ever proven.
+      # - {#provable_names?} admits only class names written absolutely (`::String`). A relative name may be
+      #   a class the project defines only in Ruby (`String` inside `module App` may be `App::String`), and
+      #   seeing that would take a scan of the run's files, which a path-set-independent answer cannot use.
       # - {#faithful?} refuses a type position whose Rigor translation could mean something else: an alias,
       #   an interface, `self`, a type variable, a proc, and a relative class name the project's RBS inputs
-      #   declare (a relative `Data` inside `module App` may be `App::Data`). A proof additionally refuses a
-      #   relative name the project's Ruby source defines ({RbsProof#shadowed?}).
-      # - A position a call may leave empty — an optional or rest parameter, an optional keyword, and every
-      #   position of an optional block — never contradicts: the call that omits it satisfies both sides.
+      #   declare (a relative `Data` inside `module App` may be `App::Data`).
+      # - A position a call may leave empty — an optional or rest parameter, an optional keyword — never
+      #   contradicts, since the call that omits it satisfies both sides; nor does any block position, since
+      #   a body that never yields, or an untyped block, satisfies both.
       # - Overloads are paired by correspondence, never by position, and a member whose overloads do not
       #   pair one to one is undecided.
       #
@@ -262,9 +264,10 @@ module Rigor
           return [[:undecided, "only one side declares a block"]] if sig_block.nil? || inline_block.nil?
           return [[:undecided, "the block is required on one side only"]] if sig_block.required != inline_block.required
 
-          # A call without a block satisfies both sides of an optional one.
+          # A block position never contradicts: a call without an optional block, a body that never yields,
+          # or an untyped block satisfies both sides.
           compare_functions(sig_block.type, inline_block.type, [nil, {}], [nil, {}], "block ",
-                            block: true, provable: sig_block.required)
+                            block: true, provable: false)
         end
 
         def compare_functions(sig_fn, inline_fn, sig_refinements, inline_refinements, prefix, block:, provable:)
@@ -546,22 +549,30 @@ module Rigor
           Inference::Acceptance.accepts(sup, sub).yes?
         end
 
-        # Whether the class names a disjointness proof would lean on mean what they say: no relative name
-        # in either declared type may head with a name the project's Ruby source defines. The RBS-side
-        # names were already refused by {#faithful?}.
+        # Whether the class names a disjointness proof would lean on mean what they say: every class name in
+        # both declared types is written absolutely, and a refinement override is a value or a built-in
+        # refinement (whose base is a core class), never a class-name payload, which resolves like a
+        # relative name.
         def provable_names?(slots)
           return false if @proof.nil?
 
-          slots.all? { |slot| relative_heads(slot.rbs_type).none? { |head| @proof.shadowed?(head) } }
+          slots.all? do |slot|
+            slot.override ? provable_override?(slot.override) : absolute_names_only?(slot.rbs_type)
+          end
         end
 
-        def relative_heads(type, heads = [])
+        def absolute_names_only?(type)
           case type
           when ::RBS::Types::ClassInstance, ::RBS::Types::ClassSingleton
-            heads << (type.name.namespace.path.first || type.name.name).to_s unless type.name.absolute?
+            return false unless type.name.absolute?
           end
-          type.each_type { |inner| relative_heads(inner, heads) }
-          heads
+          type.each_type { |inner| return false unless absolute_names_only?(inner) }
+          true
+        end
+
+        def provable_override?(type)
+          members = type.is_a?(Type::Union) ? type.members : [type]
+          members.all? { |member| REFINEMENT_OR_VALUE.any? { |klass| member.is_a?(klass) } }
         end
 
         # Whether `left` and `right` provably share no value: every pairing of their members is two distinct
@@ -681,7 +692,8 @@ module Rigor
         # every value, and a declared type Rigor cannot read faithfully proves nothing.
         def exceeds?(declared, refinement)
           return false if TOP_SPELLINGS.any? { |klass| declared.is_a?(klass) } || !faithful?(declared)
-          return false unless provable_names?([Slot.new(rbs_type: declared, override: nil)])
+          return false unless provable_names?([Slot.new(rbs_type: declared, override: nil)]) &&
+                              provable_override?(refinement)
 
           declared_type = translate(declared)
           !declared_type.nil? && disjoint?(single_values(declared_type), single_values(refinement))

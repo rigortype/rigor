@@ -1014,12 +1014,13 @@ RSpec.describe "plugins/rigor-rbs-inline" do
   # surface. The two are now compared: consistent declarations merge to the more precise side, and a
   # contradiction keeps the `sig/` side and is an error.
   describe "consistency against sig/ (issues #824, #1075)" do
+    # Spelled absolutely on both sides: only an absolute core class name proves a contradiction.
     let(:sig_and_inline) do
       run_plugin(
         source: <<~RUBY,
           # rbs_inline: enabled
           class Demo
-            # @rbs (Integer) -> String
+            # @rbs (::Integer) -> ::String
             def shared(value) = value.to_s
 
             # @rbs (Integer) -> Integer
@@ -1090,7 +1091,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         source: <<~RUBY,
           # rbs_inline: enabled
           class Demo
-            # @rbs %a{rigor:v1:return: positive-int} () -> String
+            # @rbs %a{rigor:v1:return: positive-int} () -> ::String
             def label = "x"
           end
         RUBY
@@ -1140,6 +1141,64 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
       expect(mismatches.size).to eq(1)
       expect(mismatches.first.message).to include("only_inline")
+    end
+
+    # Round 3 of the #1428 review: project classes whose `sig/` omits the Ruby superclass (p3/p5), and
+    # a relative name the project defines only in Ruby (p7). None is a proof, and the rows may not depend
+    # on which files the run was given.
+    describe "verdicts independent of the run's path set" do
+      def rows_for(result)
+        result.diagnostics.select { |d| d.qualified_rule =~ /contradicting-signature|not-honoured/ }
+              .map { |d| [File.basename(d.path), d.line, d.qualified_rule, d.message.gsub(%r{/\S*/}, "")] }.sort
+      end
+
+      def run_both(source:, files:)
+        whole = run_plugin(source: source, files: files, paths: ["."], signature_paths: ["sig"])
+        narrow = run_plugin(source: source, files: files, paths: ["demo.rb"], signature_paths: ["sig"])
+        [rows_for(whole), rows_for(narrow)]
+      end
+
+      it "reports no error for project classes whose sig/ omits the superclass (p5)" do
+        whole, narrow = run_both(
+          source: <<~RUBY,
+            class Factory
+              #: () -> ::Admin
+              def make = Admin.new
+
+              #: (::Admin) -> void
+              def take(u) = nil
+            end
+          RUBY
+          files: {
+            "sig/models.rbs" => "class User\nend\nclass Admin\nend\nclass Factory\n  def make: () -> ::User\n  " \
+                                "def take: (::User) -> void\nend\n",
+            "user.rb" => "class User\n  #: () -> String\n  def name = \"u\"\nend\n" \
+                         "class Admin < User\n  #: () -> Integer\n  def level = 1\nend\n"
+          }
+        )
+        expect(whole.map { |row| row[2] }).not_to include("rbs.contradicting-signature")
+        expect(narrow).to eq(whole)
+      end
+
+      it "reports no error for a relative name the project defines only in Ruby (p7)" do
+        whole, narrow = run_both(
+          source: <<~RUBY,
+            module App
+              class Box
+                #: () -> Array[Integer]
+                def items = App::Set.new
+              end
+            end
+          RUBY
+          files: {
+            "sig/box.rbs" => "module App\n  class Box\n    def items: () -> Set[Integer]\n  end\nend\n",
+            "app/set.rb" => "module App\n  class Set < Array\n  end\nend\n"
+          }
+        )
+        expect(whole.map { |row| row[2] }).not_to include("rbs.contradicting-signature")
+        expect(whole).not_to be_empty
+        expect(narrow).to eq(whole)
+      end
     end
 
     it "stays silent when the inline annotations do not overlap sig/" do

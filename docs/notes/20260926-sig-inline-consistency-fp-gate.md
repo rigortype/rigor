@@ -74,12 +74,12 @@ rests on the fixtures in `spec/rigor/environment/rbs_loader_spec.rb` and
 `spec/integration/plugins/rbs_inline_plugin_spec.rb`, which fail on the base engine.
 
 Two limits come from the definition rather than the corpus, and both err toward silence. A
-contradiction needs a proof that no value is both, read from the RBS class hierarchy the analysis
-uses: distinct literals, a literal outside an RBS class, or two classes RBS declares neither of which
-is an RBS ancestor of the other. A module, an interface, a class RBS does not declare, a relative name
-the project defines, and a position a call may leave empty never prove it; such a pair reads as
-undecided (`:info`). And which side binds is decided from the two declarations alone, so a subclass
-relation (`Integer` against `Numeric`) is undecided too.
+contradiction needs a proof that no value is both, and only absolutely written Ruby core or stdlib
+classes give one (distinct literals, a literal outside such a class, or two such classes neither of
+which is an RBS ancestor of the other). A class the project declares, a gem's class, a relative name, a
+module, an interface, a block position and a position a call may leave empty never prove it; such a
+pair reads as undecided (`:info`). And which side binds is decided from the two declarations alone,
+so a subclass relation (`Integer` against `Numeric`) is undecided too.
 
 ## Review round 1 (PR #1428)
 
@@ -111,5 +111,19 @@ probe project gives the same rows with and without `-rtempfile -rstringio`. The 
 relative name the project's Ruby source defines unprovable (a Ruby-only `App::Set < Array` no longer
 lets `Set` read as core `::Set`), and made an optional, rest, optional-keyword or optional-block
 position unable to contradict. herb re-run on the final engine (one target, `--workers=2`, plus the
+census): unchanged — 2,519 → 37 diagnostics, 2,482 records (1,944 equal, 538 `sig/` more precise), no
+contradiction.
+
+## Review round 3 (PR #1428)
+
+Round 2's RBS-based proof still counted project classes: `::User` against `::Admin` errored when Ruby
+has `Admin < User` and `sig/` omits the superclass, as did `Point = Struct.new` against
+`::Struct[untyped]`, `Data.define` against `::Data` and `Class.new(Base)` against `::Base`, none of
+which the rest of Rigor reads as disjoint. The shadow scan also made the verdict depend on the run's
+path set (`rigor check lib` an `:info`, `rigor check lib/box.rb` an error). Under the maintainer's
+conservative reading the proof now admits only absolutely written classes whose primary RBS
+declaration comes from Ruby core or the stdlib; the source scan is gone, and block positions never
+contradict. The seven probe projects give no `rbs.contradicting-signature`, and `lib` against a single
+file gives the same rows. herb re-run on the final engine (one target, `--workers=2`, plus the
 census): unchanged — 2,519 → 37 diagnostics, 2,482 records (1,944 equal, 538 `sig/` more precise), no
 contradiction.

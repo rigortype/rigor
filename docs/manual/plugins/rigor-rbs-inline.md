@@ -81,19 +81,23 @@ end
   member loses nothing by it: the same visibility, and every
   annotation it carries (a predicate, an assertion, an effect
   envelope) also on the inline one.
-- **They contradict: an error, and the `.rbs` binds.** `Demo#shared`
-  takes a `String` in `sig/` and an `Integer` inline, and no value is
-  both, so the run reports
+- **They contradict: an error, and the `.rbs` binds.** If `Demo#shared`
+  took a `::String` in `sig/` and an `::Integer` inline, no value would
+  be both, so the run would report
   [`rbs.contradicting-signature`](../04-diagnostics.md#rule-rbs-contradicting-signature)
-  at the `sig/` line, naming the annotated file. Positional counts that
+  at the `sig/` line, naming the annotated file. Spelled `String` and
+  `Integer`, as in the example, the pair is undecided instead (below). Positional counts that
   cannot meet, or a keyword one side requires and the other cannot take
-  in any form, contradict the same way. The error needs a proof, read
-  from the RBS class hierarchy the analysis uses: a module such as
-  `Comparable` or `Enumerable` on either side never counts, since any
-  class may include it, and neither does a class no RBS declares, an
-  optional or rest parameter (a call may leave it out), or a relative
-  name your Ruby code defines. A stale generated signature is the
-  usual cause: regenerate it, or fix the annotation.
+  in any form, contradict the same way. The error needs a proof, and
+  only Ruby core or stdlib classes written absolutely (`::String`,
+  `::Integer`) give one, read from their RBS hierarchy. A module such
+  as `Comparable` never counts, since any class may include it; nor
+  does a class of your own (your `sig/` may omit the superclass Ruby
+  gives it), a gem's class, a relative name such as plain `String`
+  (it may be your own `App::String`), an optional or rest parameter
+  (a call may leave it out), or a block's parameters (the body may
+  never yield). A stale generated signature is the usual cause:
+  regenerate it, or fix the annotation.
 - **Rigor cannot tell: the `.rbs` binds, with an `:info`.** When a
   position names a type alias, an interface, `self`, a type variable,
   or a relative class name your project also declares, when Rigor
@@ -109,8 +113,9 @@ end
 
 A `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement on an
 inline annotation must also share values with its own declared type:
-`# @rbs %a{rigor:v1:return: positive-int} () -> String` is reported as
-`rbs.contradicting-signature` at the annotated file.
+`# @rbs %a{rigor:v1:return: positive-int} () -> ::String` is reported as
+`rbs.contradicting-signature` at the annotated file (the same proof rule
+applies, so `-> String` without `::` is left alone).
 
 There is no upstream rule to defer to: rbs merges an inline `.rb`
 declaration and a `.rbs` one into a single class entry and ranks

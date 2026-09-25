@@ -1847,12 +1847,12 @@ RSpec.describe Rigor::Environment::RbsLoader do
 
     # The rows `Environment.for_project` reports are derived with an `RbsProof`; without one nothing is
     # ever a contradiction (the environment build needs none).
-    def records(loader, sources = [])
-      loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader, sources))
+    def records(loader)
+      loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader))
     end
 
-    def outcomes(loader, sources = [])
-      records(loader, sources).map { |record| [record.method_name, record.outcome] }
+    def outcomes(loader)
+      records(loader).map { |record| [record.method_name, record.outcome] }
     end
 
     def method_types(definition, name)
@@ -1939,7 +1939,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     it "strips the same members with and without a proof" do
       loader = build_loader
       files = described_class.project_sig_files([tmpdir])
-      proof = Rigor::Environment::MemberConsistency::RbsProof.new(loader, [])
+      proof = Rigor::Environment::MemberConsistency::RbsProof.new(loader)
       plain = described_class.member_consistency_for(files, virtual_rbs)
       proven = described_class.member_consistency_for(files, virtual_rbs, proof: proof)
       expect(proven.inline_standdowns).to eq(plain.inline_standdowns)
@@ -2020,12 +2020,26 @@ RSpec.describe Rigor::Environment::RbsLoader do
         outcomes(build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]))
       end
 
-      # The proof reads the RBS hierarchy: two classes the project's RBS declares, neither below the other,
-      # are disjoint as far as the analysis is concerned.
-      it "proves two unrelated RBS-declared project classes disjoint, but not a subclass" do
+      # A project `sig/` routinely omits a superclass (`class Admin` for Ruby's `Admin < User`), so two
+      # classes the project declares are never proven disjoint, whatever their RBS says.
+      it "does not prove two project classes disjoint, even when their RBS is unrelated" do
         File.write(File.join(tmpdir, "types.rbs"), "class Alpha\nend\nclass Beta\nend\nclass Gamma < Alpha\nend\n")
-        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Beta")).to eq([%i[x contradiction]])
+        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Beta")).to eq([%i[x undecided]])
         expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Gamma")).to eq([%i[x undecided]])
+      end
+
+      # `Point = Struct.new(...)`, `Data.define` and `Class.new(Base)` constants have no superclass in RBS.
+      it "does not prove a project class disjoint from the core class it is built from" do
+        File.write(File.join(tmpdir, "types.rbs"), "class Point\nend\nclass Coord\nend\n")
+        expect(outcome_for("  def p: () -> ::Struct[untyped]", "  def p: () -> ::Point")).to eq([%i[p undecided]])
+        expect(outcome_for("  def c: () -> ::Data", "  def c: () -> ::Coord")).to eq([%i[c undecided]])
+      end
+
+      # A relative name may be a class the project defines only in Ruby (`String` inside `module App` may
+      # be `App::String`); telling would take a scan of the run's files, so only `::String` proves.
+      it "does not prove through a relative class name, however core it looks" do
+        expect(outcome_for("  def x: () -> String", "  def x: () -> Integer")).to eq([%i[x undecided]])
+        expect(outcome_for("  def x: () -> ::String", "  def x: () -> ::Integer")).to eq([%i[x contradiction]])
       end
 
       # A referenced name no RBS declares gets a stub class so the environment still builds; a stub
@@ -2137,22 +2151,23 @@ RSpec.describe Rigor::Environment::RbsLoader do
           .to eq([%i[m undecided]])
       end
 
-      it "still contradicts in a required position" do
+      it "still contradicts in a required keyword" do
         expect(outcome_for("  def m: (foo: ::Integer) -> void", "  def m: (foo: ::String) -> void"))
-          .to eq([%i[m contradiction]])
-        expect(outcome_for("  def m: () { (::Integer) -> void } -> void", "  def m: () { (::String) -> void } -> void"))
           .to eq([%i[m contradiction]])
       end
 
-      # `Set` inside `module App` is `App::Set` when the project's Ruby source defines one, even though no
-      # RBS declares it; read as core `::Set`, it would "contradict" `Array`.
-      it "does not prove through a relative name the project's Ruby source defines" do
+      # A body that never yields, or an untyped block, satisfies both sides.
+      it "never contradicts in a required block's positions" do
+        expect(outcome_for("  def m: () { (::Integer) -> void } -> void", "  def m: () { (::String) -> void } -> void"))
+          .to eq([%i[m undecided]])
+      end
+
+      # p7 of the round-3 review: `App::Set < Array` exists only in Ruby. The verdict may not depend on
+      # whether the run's files include it, so a relative `Set` never proves anything.
+      it "does not prove through a relative name the project may define only in Ruby" do
         File.write(sig_file, "module App\n  class Box\n    def items: () -> Set[Integer]\n  end\nend\n")
         virtual = [[virtual_name, "module App\n  class Box\n    def items: () -> Array[Integer]\n  end\nend\n"]]
-        source = File.join(tmpdir, "app.rb")
-        File.write(source, "module App\n  class Set < Array\n  end\nend\n")
-        expect(outcomes(build_loader(virtual), [source])).to eq([%i[items undecided]])
-        expect(outcomes(build_loader(virtual), [])).to eq([%i[items contradiction]])
+        expect(outcomes(build_loader(virtual))).to eq([%i[items undecided]])
       end
 
       it "never contradicts a block by its parameter count" do

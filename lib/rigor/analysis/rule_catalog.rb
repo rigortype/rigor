@@ -901,10 +901,10 @@ module Rigor
           summary: "Two declarations of one method provably contradict: no value or call satisfies both.",
           fires_when: [
             "A method is declared both in the project's `sig/` and by an inline `# @rbs` / `#:` " \
-            "annotation, and the return or a position every call must fill holds two proven-disjoint " \
-            "types — distinct literals, a literal outside an RBS class, or two classes the RBS environment " \
-            "declares neither of which is an RBS ancestor of the other (`String` against `Integer`) — or " \
-            "the two keyword-free declarations accept " \
+            "annotation, and the return or a parameter every call must pass holds two proven-disjoint " \
+            "types — distinct literals, a literal outside such a class, or two classes written absolutely " \
+            "whose RBS comes from Ruby core or the stdlib, neither an RBS ancestor of the other " \
+            "(`::String` against `::Integer`) — or the two keyword-free declarations accept " \
             "positional counts that cannot meet, or one requires a keyword the other cannot take in any " \
             "form. Several overloads are paired by correspondence, never by order. Positioned at the " \
             "`.rbs` member; Rigor reads that declaration.",
@@ -916,11 +916,11 @@ module Rigor
             "One declaration refines the other (`String` against `non-empty-string`, `Symbol` against " \
             "`:asc | :desc`, `bool` against `TrueClass`): the two merge to the more precise one, silently.",
             "Either side is `untyped`, `void` or `top` in that position — consistent with everything.",
-            "Rigor cannot prove the two contradict: a module or interface on either side, a class RBS " \
-            "does not declare, a relative name the project itself defines, two element types of one " \
-            "generic class, a type alias, `self`, a type variable, a proc, an optional, rest or " \
-            "optional-block position, overloads that do not pair one to one, differently shaped " \
-            "parameter lists that still overlap, or a block's parameter count. The " \
+            "Rigor cannot prove the two contradict: a module or interface on either side, a class the " \
+            "project declares (in `sig/`, inline or only in Ruby), a gem's class, any relative class name, " \
+            "two element types of one generic class, a type alias, `self`, a type variable, a proc, an " \
+            "optional or rest position, any block position, overloads that do not pair one to one, or " \
+            "differently shaped parameter lists that still overlap. The " \
             "inline signature is then dropped and reported as `source-rbs-annotation-not-honoured` (info).",
             "A refinement is written on one overload rather than on the member: call sites do not honour it.",
             "Two `.rbs` files declare the same method (that fails the class's definition build, " \

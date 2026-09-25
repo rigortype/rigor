@@ -126,8 +126,10 @@ Rigor never writes into a `.rb` file. Every carrier below is authored intent; th
 > **Status note (2026-09-26, [#1075](https://github.com/rigortype/rigor/issues/1075)).** "Neither side a
 > subtype of the other" below is sharpened in the binding spec to **proven disjoint**: a contradiction is
 > reported only where no value and no call satisfies both sides, and every other non-subtype pair is
-> undecided (the `.rbs` binds, with ADR-32 WD12's `:info`). The definition, including what counts as a
-> proof, lives in [`overview.md`](../type-specification/overview.md) § inline annotation handling.
+> undecided (the `.rbs` binds, with ADR-32 WD12's `:info`). Under the maintainer's conservative reading,
+> only absolutely written Ruby core or stdlib classes prove two types disjoint; a project class, a gem
+> class or a relative name never does. The definition lives in
+> [`overview.md`](../type-specification/overview.md) § inline annotation handling.
 
 One rule covers `sig/` against inline and `@rbs` / `#:` against `@extrbs`:
 

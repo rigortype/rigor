@@ -55,7 +55,7 @@ The nine content slots match
 
 | Slot | Type | Meaning |
 | --- | --- | --- |
-| `return_type` | type carrier or `nil` | Normal-edge return type. Plugins MAY narrow within the selected RBS contract; an incompatible return becomes a conflict diagnostic per the merge policy. |
+| `return_type` | type carrier or `nil` | Normal-edge return type. A plugin's `dynamic_return` answer replaces the RBS return, whether it narrows or contradicts it, with no diagnostic ([ADR-2](../adr/2-extension-api.md) § "Amendment 2026-09-26", [plugin.md](plugin.md)); the RBS return is not a merge input. Two plugin answers for the same call merge per the merge policy. |
 | `truthy_facts` | `Array` or `nil` | Facts that hold only on the truthy control-flow edge. Edge-local: a truthy-edge fact does NOT imply its falsey-edge complement unless the contribution explicitly supplies it. |
 | `falsey_facts` | `Array` or `nil` | Dual of `truthy_facts`. |
 | `post_return_facts` | `Array` or `nil` | Facts that hold after the call returns normally on every edge. The carrier for assertion-style contributions (`%a{rigor:v1:assert ...}`). |

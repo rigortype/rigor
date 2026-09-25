@@ -9,7 +9,7 @@ require_relative "stored_block_call"
 module Rigor
   module Inference
     # Issue #1361 — the blocks whose body does not read the narrowing of the frame-local special variables (the regex
-    # match globals today) where it is written ({.fresh_entry?}, {.entry}):
+    # match globals, and `$_` since issue #1359) where it is written ({.fresh_entry?}, {.entry}):
     #
     # - a root block: the block of `Thread.new` / `Thread.start` / `Thread.fork`, `Fiber.new` or `Ractor.new` on the
     #   core class ({.root_call?}). It runs as the root of a new thread, fiber or ractor, and Ruby keeps that
@@ -86,10 +86,14 @@ module Rigor
       # a true positive. A definer body reads the definer's slot whenever the method is called, which the analyzer
       # does not follow, so a global narrowed where it is written reads `Dynamic[top]` there, neither narrowed nor
       # flagged: the dynamic-finder idiom defines `find_by_email` in a `method_missing` guard whose `$1` its body
-      # reads. This is the one place the frame-local specials are reset at such an entry, so `$_` (#1359) and `$!` /
-      # `$@` (#1360) join the match globals here once they narrow.
+      # reads. This is the one place the frame-local specials are reset at such an entry: the match globals and `$_`
+      # (#1359), which `$!` / `$@` (#1360) join once they narrow.
       def entry(scope, call_node)
-        DEFINERS.include?(call_node.name) ? scope.untyped_match_globals : scope.forget_match_globals
+        if DEFINERS.include?(call_node.name)
+          scope.untyped_match_globals.untyped_last_line
+        else
+          scope.forget_match_globals.forget_last_line
+        end
       end
 
       def core_class?(receiver, constant, scope)

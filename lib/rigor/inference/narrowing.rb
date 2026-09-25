@@ -9,6 +9,7 @@ require_relative "../environment"
 require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
+require_relative "last_line"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
 
@@ -463,8 +464,29 @@ module Rigor
 
       # Internal analyser. Returns `[truthy_scope, falsey_scope]` when the predicate shape is
       # recognised, or `nil` to signal "no narrowing" so the public surface can fall back to the
-      # entry scope.
+      # entry scope. Issue #1359 — a condition whose value is a `gets`-family reader's, the bare call
+      # or a variable written with it (`while gets`, `if (line = gets)`), also binds `$_` on each edge
+      # to the line the reader returned ({LastLine.predicate_scopes}).
       def analyse(node, scope)
+        edges = analyse_shape(node, scope)
+        reader = last_line_condition(node)
+        reader ? LastLine.predicate_scopes(reader, scope, edges) : edges
+      end
+
+      # The reader call a condition's value is, or nil.
+      def last_line_condition(node)
+        call =
+          case node
+          when Prism::CallNode then node
+          when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode,
+               Prism::GlobalVariableWriteNode
+            node.value
+          end
+        call if call.is_a?(Prism::CallNode) && LastLine::READERS.include?(call.name)
+      end
+      private_class_method :last_line_condition
+
+      def analyse_shape(node, scope)
         case node
         when Prism::ParenthesesNode
           analyse_parentheses(node, scope)
@@ -488,6 +510,7 @@ module Rigor
           analyse_match_write(node, scope)
         end
       end
+      private_class_method :analyse_shape
 
       # rubocop:disable-next Metrics/ClassLength
       class << self
@@ -3235,8 +3258,11 @@ module Rigor
         end
 
         # The edges of an operand that runs only on one edge of an earlier operand, which is the
-        # step `&&` and `||` both take for their right operand.
+        # step `&&` and `||` both take for their right operand. Issue #1359 — the operand runs after
+        # that edge, so a `$_` the earlier operand narrowed is forgotten when the operand may set it
+        # (`gets && log(items.each { gets })`), before the operand's own edges narrow it again.
         def operand_edges(node, edge_scope)
+          edge_scope = LastLine.forget_if_set(edge_scope, node)
           analyse(node, edge_scope) || [edge_scope, edge_scope]
         end
 

@@ -13,6 +13,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
+require_relative "last_line"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -123,9 +124,7 @@ module Rigor
 
         class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
-        program_globals = build_program_global_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(program_globals: program_globals))
-        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope = seed_program_globals(root, seeded_scope)
 
         # Slice 7 phase 9. In-source constant value tracking. Walks every ConstantWriteNode/ConstantPathWriteNode in the
         # program and types its rvalue under a scope that carries the surrounding qualified prefix as `self_type`, so
@@ -2084,20 +2083,47 @@ module Rigor
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
+      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
+      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in.
+      def seed_program_globals(root, seeded_scope)
+        program_globals, patched_line_readers = build_program_global_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_discovery(
+          seeded_scope.discovery.with(program_globals: program_globals, patched_line_readers: patched_line_readers)
+        )
+        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope
+      end
+
       # Slice 7 phase 6 — program-global pre-pass. Globals are process-wide so the accumulator is a flat `Hash[Symbol,
       # Type::t]` populated from every `Prism::GlobalVariableWriteNode` in the program (top-level AND inside method
       # bodies). The same accumulator is seeded into every method body and the top-level scope.
+      #
+      # Issue #1359 — except the frame-local specials ({FRAME_LOCAL_GLOBALS}): Ruby keeps `$_` and `$~` in the slot
+      # of the method, class, module or file body that writes them, so a write binds only that body and its blocks,
+      # which the flow binding already carries, and every other body starts from its own slot.
+      FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
+      private_constant :FRAME_LOCAL_GLOBALS
+
+      #
+      # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
+      # ({LastLine.patched_readers}), which it reaches in every node too.
+      # @return the `[program_globals, patched_line_readers]` pair
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        gather_global_writes(root, default_scope, accumulator)
-        accumulator.freeze
+        patched = Set.new
+        gather_global_writes(root, default_scope, accumulator, patched)
+        [accumulator.freeze, patched.freeze]
       end
 
-      def gather_global_writes(node, scope, accumulator)
+      def gather_global_writes(node, scope, accumulator, patched)
         return unless node.is_a?(Prism::Node)
 
-        record_global_write(node, scope, accumulator) if node.is_a?(Prism::GlobalVariableWriteNode)
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator) }
+        if node.is_a?(Prism::GlobalVariableWriteNode) && !FRAME_LOCAL_GLOBALS.include?(node.name)
+          record_global_write(node, scope, accumulator)
+        end
+        readers = LastLine.patched_readers(node)
+        patched.merge(readers) if readers
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, patched) }
       end
 
       def record_global_write(node, scope, accumulator)
@@ -2377,15 +2403,18 @@ module Rigor
       # its known elements for any index and an `Array[1 | 2]` `1 | 2`. `H = { a: 1 }; H.default = 0` read `H[:b]` as
       # `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
       #
-      # Each carrier member of the facet therefore stops claiming its contents are complete: a shape reopens
-      # (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values, a tuple becomes
-      # the `Array` of its elements plus the same arm, and an `Array` / `Hash` nominal with a value-pinned type
-      # argument gains the arm on every type argument, as the unknown-store seam gives it. A class-level nominal
-      # (`Hash.new(0)`'s `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and
-      # the arm would silence `COUNTS[k].upcase`. A read still answers the known values (every key's, since the
-      # projection is not keyed) beside the arm, which is what keeps a stored or rewritten value from folding. An
-      # entry already `Dynamic` is unpinned through its facet, so a carrier an RBS overload join wrapped is not left
-      # pinned.
+      # Each carrier member of the facet therefore stops claiming its contents are complete. A literal shape floors to
+      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors an ivar
+      # seed a method stores into (#1297). Unlike that census, a shape only a lookup mutator (`default=`) touched floors
+      # too, since the census does not record the method, so its present-key reads are lost as well (#1421). Keeping
+      # the literal's known values beside a `Dynamic[top]` arm left every read carrying them, and every key's at that,
+      # since the projection is not keyed, so `STATUS[:name]` answered `false | nil | Dynamic[top]` and a method
+      # declared `-> String` returning it drew `def.return-type-mismatch` although a sibling method could store
+      # anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains the arm on every type
+      # argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
+      # `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and the arm would
+      # silence `COUNTS[k].upcase`. An entry already `Dynamic` is unpinned through its facet, so a carrier an RBS
+      # overload join wrapped is not left pinned.
       def census_mutated_type(type)
         type = type.static_facet if type.is_a?(Type::Dynamic)
         members = type.is_a?(Type::Union) ? type.members : [type]
@@ -2396,11 +2425,9 @@ module Rigor
       # refinement as well (`clear` empties a `non-empty-array`).
       def census_unpinned_carrier(member)
         case member
-        when Type::HashShape then HashLookupMutation.open_shape(member) || member
-        when Type::Tuple
-          Type::Combinator.nominal_of(
-            "Array", type_args: [Type::Combinator.union(*member.elements, Type::Combinator.untyped)]
-          )
+        when Type::HashShape
+          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::Nominal
           UnknownStoreWidening.value_pinned_collection?(member) ? UnknownStoreWidening.gradual_content(member) : member
         when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
@@ -8556,18 +8583,24 @@ module Rigor
       # {FreshFrameBlocks.fresh_entry?} names does not read the match-global narrowing of the body it is written in.
       # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
       # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
-      # statement's narrowing.
+      # statement's narrowing. Issue #1359 — nor does such a block read a `$_` narrowing it or the call's operands may
+      # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it.
       def propagate_call(node, table, current_scope)
         block = node.block
-        fresh = block.is_a?(Prism::BlockNode) && !table.key?(block) &&
-                FreshFrameBlocks.fresh_entry?(node, current_scope)
-        unless fresh
+        entry = unentered_block_entry(node, block, table, current_scope)
+        if entry.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
         end
 
-        entry = FreshFrameBlocks.entry(current_scope, node)
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
+      end
+
+      def unentered_block_entry(node, block, table, current_scope)
+        return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
+        return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
+
+        LastLine.block_entry(current_scope, block, node)
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level

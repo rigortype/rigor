@@ -2183,13 +2183,19 @@ module Rigor
       # rebind the match globals ({MatchRebinding.operands_may_rebind?}: `[u.index(/(q)/)].map { $1 }`) every
       # pass that types the call's block — the block-return pass, its captured-local fixpoint and the receiver
       # folds — types it under a typer whose scope has forgotten them, as {MatchRebinding.block_entry} does for
-      # the call's block and `StatementEvaluator#forget_operand_match_globals` for the statement. nil otherwise.
+      # the call's block and `StatementEvaluator#forget_operand_specials` for the statement. `$_` is forgotten on
+      # the same terms when they may set it ({LastLine.operands_may_set?}, issue #1359). nil otherwise.
       def rebound_operand_typer(call_node)
-        return nil if call_node.block.nil? || !scope.match_globals_bound?
-        return nil unless MatchRebinding.operands_may_rebind?(call_node, scope)
+        return nil if call_node.block.nil?
 
-        ExpressionTyper.new(scope: scope.forget_match_globals, tracer: tracer, operand_types: @operand_types,
-                            typing_node: @typing_node)
+        rebound = scope
+        if rebound.match_globals_bound? && MatchRebinding.operands_may_rebind?(call_node, scope)
+          rebound = rebound.forget_match_globals
+        end
+        rebound = rebound.forget_last_line if rebound.last_line_bound? && LastLine.operands_may_set?(call_node, scope)
+        return nil if rebound.equal?(scope)
+
+        ExpressionTyper.new(scope: rebound, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node)
       end
 
       # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:

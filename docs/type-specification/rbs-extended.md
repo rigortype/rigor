@@ -234,11 +234,11 @@ The analyzer applies these contributions through the same control-flow machinery
 Contribution merging is deterministic and analyzer-owned:
 
 - Contributions carry **provenance**, including whether they came from core Ruby semantics, an accepted signature or `RBS::Extended` annotation, generated metadata, or a plugin.
-- Core Ruby semantics and accepted signature contracts are authoritative. `RBS::Extended`, generated metadata, and plugins MAY refine compatible facts, but they MUST NOT weaken or contradict the ordinary Ruby/RBS contract.
+- Core Ruby semantics and accepted signature contracts are authoritative. `RBS::Extended`, generated metadata, and plugins MAY refine compatible facts, but they MUST NOT weaken or contradict the ordinary Ruby/RBS contract. A plugin's dynamic return is the exception, below.
 - Compatible facts on the same target, flow edge, and effect kind are composed. Positive type facts intersect, negative facts and relational facts accumulate under their normal budgets, and mutation, escape, and invalidation effects are unioned conservatively.
 - Contradictory contributions are diagnostics, not first-wins or last-wins behavior. Rigor SHOULD keep the nearest non-conflicting authoritative fact and ignore or weaken the conflicting contribution for that target and edge.
 - Truthy-edge and falsey-edge facts remain edge-local. A plugin MAY contribute one-sided facts, but Rigor MUST NOT infer the opposite edge unless the contribution explicitly provides it or the core analyzer can derive it.
-- Dynamic return contributions are checked against the selected signature or default return contract. A plugin MAY narrow a compatible return, but an incompatible return contribution is a conflict diagnostic rather than an override of the contract.
+- A plugin's dynamic return contribution replaces the selected signature's return type at that call site, whether it narrows the declared return or contradicts it, and Rigor does not report the difference as a conflict. A plugin models the runtime the project loads, which the RBS may not describe; checking that an override is intended belongs in the plugin's own test suite, which is planned ([#1413](https://github.com/rigortype/rigor/issues/1413)) and not yet built ([ADR-2](../adr/2-extension-api.md) § "Amendment 2026-09-26"). The exception covers the return type only: the method's definition is still checked against the selected signature.
 - Repeated `maybe` evidence does not become `yes` merely by count. Certainty changes only when a contribution supplies a stronger proof or the core analyzer can derive one from compatible facts.
 
 ### Future targets

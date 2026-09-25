@@ -42,7 +42,8 @@ module Rigor
       :data_member_layouts,
       :struct_member_layouts,
       :param_inferred_types,
-      :run_generation
+      :run_generation,
+      :patched_line_readers
     )
 
     class DiscoveryIndex
@@ -221,7 +222,13 @@ module Rigor
         # cross a run boundary (LSP / ADR-62 warm-loop re-runs land in a fresh bucket). Nil on scopes that
         # never see the runner seed (single-file probes, `run_source` before the seed applies): the memo
         # falls back to today's per-file `discovered_def_nodes` identity for those.
-        run_generation: nil
+        run_generation: nil,
+        # Issue #1359 — the `gets` / `readline` names this file patches in through the `define_method` family
+        # (`$stdin.define_singleton_method(:gets) { … }`, `IO.define_method(:gets)`, `alias_method :gets, :x`, or a
+        # computed name, which may be either), which `Inference::LastLine.reads_line?` declines on, as it does on a
+        # name `BlockCallTiming.project_defines_anywhere?` finds. Filled by `Inference::ScopeIndexer.index` from the
+        # file's own tree only.
+        patched_line_readers: EMPTY_NAME_SET
       )
     end
   end

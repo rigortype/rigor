@@ -1,6 +1,6 @@
 # ADR-2: Extension API Strategy
 
-Status: **Accepted; implemented and shipped.**
+Status: **Accepted; implemented and shipped. Amended 2026-09-26.**
 
 The v0.1.0 implementation slices
 (4 — FlowContribution wiring through internal narrowing, 5 — plugin
@@ -16,6 +16,14 @@ in [ADR-9](9-cross-plugin-api.md) (cross-plugin facts),
 and [ADR-32](32-rbs-inline-comment-ingestion.md)
 (`source_rbs_synthesizer:`). The type model and spec corpus remain
 authoritative for *what* the analyzer does; this ADR records *why*.
+
+**Amended 2026-09-26** ([#700](https://github.com/rigortype/rigor/issues/700)): a plugin's
+`dynamic_return` answer takes precedence over the RBS return, silently. The engine has done this
+since v0.1.1; the ADR said an incompatible return was a conflict diagnostic, and that rule is
+withdrawn for the return type. The safeguard is a test-time consistency check with an
+`overrides_rbs:` declaration ([#1413](https://github.com/rigortype/rigor/issues/1413), not yet
+built), not a runtime diagnostic. The decision, its criterion and the rejected alternatives are in
+§ "Amendment 2026-09-26 — a `dynamic_return` answer outranks the RBS return".
 
 ## Context
 
@@ -206,14 +214,14 @@ Internally the analyzer flattens each bundle into a tagged element list keyed by
 
 Multiple flow contributions can target the same call: a built-in narrowing rule and a plugin-provided fact may apply at the same site, two plugins may both register for the same receiver family, and `RBS::Extended` annotations may add their own facts. Rigor merges these contributions deterministically rather than letting any one source silently override another.
 
-Extensions do not override `Scope`, method reflection, or the selected RBS contract directly. They return provenance-bearing contributions that the analyzer merges through the same control-flow machinery as built-in rules.
+Extensions do not override `Scope`, method reflection, or the selected RBS contract directly. They return provenance-bearing contributions that the analyzer merges through the same control-flow machinery as built-in rules. *(Amended 2026-09-26: a `dynamic_return` answer's return type is the exception. It replaces the RBS return; see § "Amendment 2026-09-26" below.)*
 
 Authority tiers are explicit:
 
 - Core Ruby semantics and accepted ordinary RBS, rbs-inline, and Steep-compatible contracts are authoritative.
 - `RBS::Extended` annotations and generated metadata may refine those contracts.
 - Plugins may refine compatible analyzer facts.
-- Lower tiers must not weaken or contradict higher tiers. Lower-tier contributions that contradict a higher tier are diagnostics, not silent overrides.
+- Lower tiers must not weaken or contradict higher tiers. Lower-tier contributions that contradict a higher tier are diagnostics, not silent overrides. *(Amended 2026-09-26: this does not hold between a `dynamic_return` answer and the RBS return, which the plugin answer replaces; see § "Amendment 2026-09-26" below.)*
 
 Plugin order within the same tier is deterministic: project configuration order after dependency constraints are satisfied, with plugin identifier order as the tie-breaker. The first public API does not expose ad hoc priority fields.
 
@@ -221,7 +229,7 @@ Compatible contributions compose by target, flow edge, and effect kind:
 
 - Positive type facts on the same target and edge are intersected. "Compatible" means the intersection of value domains does not collapse to `bot`; intersections that do collapse are conflicts.
 - Negative and relational facts accumulate under the normal fact budgets defined in ADR-1.
-- Return types from dynamic return extensions are checked against the selected signature. A plugin may narrow within the contract; an incompatible return is a conflict diagnostic, not a contract override.
+- Return types from dynamic return extensions are checked against the selected signature. A plugin may narrow within the contract; an incompatible return is a conflict diagnostic, not a contract override. *(Withdrawn 2026-09-26: the engine never implemented this check, and a plugin answer now replaces the RBS return by decision; see § "Amendment 2026-09-26" below.)*
 - Mutation, escape, and invalidation effects are unioned conservatively. Effect declarations that cannot both be true, such as `pure` combined with a receiver-mutation effect, are conflicts.
 
 Contradictions are diagnostics, not first-wins or last-wins behavior. When two same-tier contributions conflict, Rigor reports both sources and falls back to the nearest non-conflicting higher-tier or default fact for that target and edge.
@@ -230,7 +238,69 @@ Truthy-edge and falsey-edge facts stay edge-local. A plugin's true-edge fact doe
 
 Repeated `maybe` results remain `maybe` unless a stronger proof is supplied. Counting two uncertain plugin answers is not enough to promote a relationship to `yes`. Certainty changes only when a contribution supplies a stronger proof or the core analyzer can derive one from compatible facts.
 
-This gives plugin authors a predictable rule: contributions refine the existing Ruby/RBS contract, and conflicts are reported rather than silently ordered away.
+This gives plugin authors a predictable rule: contributions refine the existing Ruby/RBS contract, and conflicts are reported rather than silently ordered away. *(Amended 2026-09-26: for a `dynamic_return` answer against the RBS return, the rule is now that the plugin answer wins.)*
+
+### Amendment 2026-09-26 — a `dynamic_return` answer outranks the RBS return
+
+Archetype: mechanical / policy — it records what the engine already does and picks the safeguard.
+Stakes: mid. It is reversible, it reaches every plugin that answers a method its RBS declares, and it
+sits on the false-positive boundary in both directions: a runtime diagnostic would fire on correct
+user code, and a wrong override types a call site wrongly.
+
+**Context.** `MethodDispatcher#resolve` (`lib/rigor/inference/method_dispatcher.rb`) has consulted
+`try_plugin_contribution` (~L126) ahead of `RbsDispatch.try_dispatch` (~L179) since v0.1.1 Track 2
+slice 7. It collects every gated plugin's contribution, merges them through
+`FlowContribution::Merger`, and returns the merged return type as soon as it is non-`nil`. Only
+the precision tiers run first: `MethodFolding.try_backward` and `dispatch_precise_tiers` (e.g. Data
+and Struct folding, meta-introspection, constant, literal-string and shape folding, the stdlib
+singleton folders, the Kernel intrinsics and the `PRECISE_TIERS_TAIL` block folds). The RBS return
+never enters the merge, so no tier comparison happens, and an incompatible plugin return replaces
+the declared one with no diagnostic. The bullets above said the opposite, and
+[`docs/internal-spec/plugin.md`](../internal-spec/plugin.md) recorded the disagreement as open.
+Bundled plugins depend on the shipped order. `rigor-activesupport-core-ext`'s `%i[+ - *]` rule
+answers over the fully declared core `Time#-` and `Integer#*`, because the RBS projection is wrong
+once a `Duration` is the operand (`Time.now - 30.minutes` projects `Float`). `rigor-dry-validation`
+narrows the `Result#to_h` its own `sig/` declares per contract. `rigor-sorbet` answers a method from
+its translated Sorbet `sig`, ahead of an RBS signature for the same method.
+
+**Decision.** A plugin's `dynamic_return` answer replaces the RBS return, whether it narrows it or
+contradicts it, and the engine reports nothing. The criterion:
+RBS describes a library's declared surface, and a plugin rule describes the runtime the project
+actually loads — a monkey patch, a per-contract shape, a DSL-generated return. When the two
+disagree the plugin is usually the one that is right about the project, and the user can fix
+neither source. Whether an override is intended is a property of the plugin, not of the analyzed
+code, so it belongs where the plugin is built: in its test suite (#1413, planned), not in the
+user's run.
+
+**Safeguard** ([#1413](https://github.com/rigortype/rigor/issues/1413), not yet built). The suite
+checks every bundled plugin's `dynamic_return` answer in its integration fixtures against the RBS
+return for the same receiver, method and arguments. The RBS return must accept the plugin's type;
+a `no` fails unless the rule declares `dynamic_return … overrides_rbs: "<reason>"`. A method with
+no RBS definition, or an `untyped` RBS return, is skipped. The declaration does not change
+dispatch. A public helper for third-party plugins follows in
+[#123](https://github.com/rigortype/rigor/issues/123).
+
+**Scope.** The amendment covers the return type only. Plugin facts, effects and exceptional
+slots still merge by the tiers above. Two plugins answering the same call still meet in
+`FlowContribution::Merger`, whose recorded conflicts are not yet reported
+([#922](https://github.com/rigortype/rigor/issues/922)). The RBS still binds where the analyzer
+reads a resolved signature rather than a call's type: a `def` body is checked against its declared
+return, and `call.wrong-arity` and `call.argument-type-mismatch` still validate a plugin-answered
+call against the RBS today (the internal spec leaves open whether they should). A plugin answer
+suppresses that site's `call.undefined-method` ([#653](https://github.com/rigortype/rigor/issues/653)).
+
+| Alternative | Status | Reason |
+| --- | --- | --- |
+| Conflict diagnostic on an incompatible plugin return (the original bullet) | Rejected | It fires on correct user code at every site a bundled override answers — every `Time.now - 30.minutes` — and the user can fix neither the RBS nor the plugin. |
+| Subtype-only override: a plugin may narrow the RBS return but not contradict it | Rejected | It breaks the overrides that model runtime patches (`Integer#*` returning a `Duration`), which is what those plugins are for. |
+| An `:info` conflict diagnostic that skips declared `overrides_rbs:` rules | Deferred | Possible once #922 surfaces merger conflicts; #1413's declaration is shaped so this diagnostic can read it. |
+| Leave the ADR and the engine disagreeing | Rejected | A reader of either document gets the wrong rule, and a fix that follows the ADR would break the bundled plugins. |
+
+**Consequences.** Plugin authors get one rule: an answer is taken as given, so answer only what the
+rule models. A wrong plugin answer is silent at runtime, so a regression is caught only where
+#1413's check covers it — the bundled plugins' fixtures, not third-party plugins until #123. The
+Sorbet translation outranks an RBS signature for the same method, which partially supersedes
+[ADR-11](11-sorbet-input-adapter.md) WD3 (marked there).
 
 ## Plugin Diagnostic Provenance
 

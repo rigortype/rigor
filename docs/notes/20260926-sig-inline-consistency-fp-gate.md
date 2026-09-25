@@ -73,12 +73,27 @@ files #824 measured in September have since been reconciled, and the nine `lib/`
 rests on the fixtures in `spec/rigor/environment/rbs_loader_spec.rb` and
 `spec/integration/plugins/rbs_inline_plugin_spec.rb`, which fail on the base engine.
 
-Two limits come from the definition rather than the corpus, and both err toward silence. Disjointness
-is proven by `Inference::Acceptance`, whose class-hierarchy answer comes from classes loaded in the
-analyzer process, so two project classes are never contradictory, however unrelated; a pair that
-names one reads as undecided (`:info`). And a type position Rigor cannot translate faithfully (an
-alias, an interface, `self`, a type variable, a proc) is undecided unless both sides spell it
-identically.
+Two limits come from the definition rather than the corpus, and both err toward silence. A
+contradiction needs a proof that no value is both: distinct literals, a literal outside a class, or
+two classes loaded in the analyzer process neither of which is an ancestor of the other. A module or
+an interface never proves it, and two project classes are never contradictory, however unrelated; a
+pair that names one reads as undecided (`:info`). And a type position Rigor cannot translate
+faithfully (an alias, an interface, `self`, a type variable, a proc, a relative class name the
+project itself declares) is undecided unless both sides spell it identically.
+
+## Review round 1 (PR #1428)
+
+The first version read "both `accepts` answers are `no`" as disjointness, and zipped overloads by
+position. The review found shapes that turn correct pairs into errors: reordered overloads,
+`Comparable` against `Enumerable[untyped]`, `String` against `Enumerable[untyped]`, `bool` against
+`TrueClass`, a relative `Data` inside `module App` read as core `::Data`, a keyword against a
+positional `Hash` or a `*rest`, and a block's parameter count. It also found two silent losses when
+the inline side bound: a `sig/` member's `rigor:v1:predicate-if-true` (narrowing fell from `String`
+to `Dynamic[top]`) and its `private` visibility. The disjointness proof, the overload pairing, the
+name check, the keyword and block rules and the binding conditions were rewritten as the spec now
+states them, each with a spec that fails on the first version. herb was re-run on the revised engine
+(one target, `--workers=2`, plus the census): the numbers above are unchanged — 2,519 → 37
+diagnostics, 2,482 records (1,944 equal, 538 `sig/` more precise), no contradiction.
 
 Once `rigor sig-gen` writes inline-declared members into `sig/` by default (#1076), every such pair
 is equal by construction. The rule's contradiction row is then what a stale generated signature

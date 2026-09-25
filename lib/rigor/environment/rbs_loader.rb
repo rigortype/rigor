@@ -962,33 +962,45 @@ module Rigor
         def member_consistency_for(project_files, virtual_rbs)
           return MemberConsistency::EMPTY if virtual_rbs.nil? || virtual_rbs.empty?
 
-          signature_members = signature_member_index(project_files, virtual_rbs)
+          signature_members, shadowable = signature_member_index(project_files, virtual_rbs)
           inline_members = inline_member_entries(virtual_rbs, all: !signature_members.empty?)
-          MemberConsistency.resolve(signature_members, inline_members)
+          MemberConsistency.resolve(signature_members, inline_members, shadowable: shadowable)
         end
 
-        # `{[class_name, method_name, kind] => [signature_path, member]}` for every method-shaped member the
-        # project's own `signature_paths:` files declare and the inline sources also name; the first file in
-        # sorted order owns a key two `.rbs` files declare (that pair fails the definition build anyway).
+        # `[owners, shadowable]`. `owners` is `{[class_name, method_name, kind] => [signature_path, member,
+        # visibility]}` for every method-shaped member the project's own `signature_paths:` files declare and
+        # the inline sources also name; the first file in sorted order owns a key two `.rbs` files declare
+        # (that pair fails the definition build anyway). `shadowable` is every `::` segment of every class /
+        # module name the inline sources and the signature files declare — the names a relative reference
+        # might resolve to inside an enclosing namespace ({MemberConsistency::Comparator#faithful?}).
         #
         # The parse is scoped by a substring pre-filter over each file's text: a declaration has to spell its
         # own name, so a signature file mentioning none of the names the inline sources declare cannot
         # collide with them. The filter over-approximates (it matches a name in a comment or a type position
         # too), so it can only cost an unnecessary parse, never miss a collision.
         def signature_member_index(project_files, virtual_rbs)
-          return {} if project_files.nil? || project_files.empty?
-
           names = inline_declared_name_segments(virtual_rbs)
-          return {} if names.empty?
+          return [{}, names] if project_files.nil? || project_files.empty? || names.empty?
 
-          project_files.to_a.sort.each_with_object({}) do |file, owners|
-            decls = parse_signature_file_if_mentions(file, names)
-            next if decls.nil?
+          shadowable = names.dup
+          owners = project_files.to_a.sort.each_with_object({}) do |file, index|
+            content = read_signature_text(file)
+            next if content.nil?
 
-            each_declared_member(decls) do |class_name, member|
-              member_method_keys(member).each do |method_name, kind|
-                owners[[class_name, method_name, kind]] ||= [file, member].freeze
-              end
+            merge_declared_segments(content, shadowable)
+            next if names.none? { |name| content.include?(name) }
+
+            index_signature_members(index, file, parse_signature_source(file, content))
+          end
+          [owners, shadowable]
+        end
+
+        def index_signature_members(index, file, decls)
+          return if decls.nil?
+
+          each_declared_member(decls) do |class_name, member, visibility|
+            member_method_keys(member).each do |method_name, kind|
+              index[[class_name, method_name, kind]] ||= [file, member, visibility].freeze
             end
           end
         end
@@ -1013,7 +1025,9 @@ module Rigor
             decls = parse_signature_source(name, content)
             next if decls.nil?
 
-            each_declared_member(decls) { |class_name, member| entries << [name.to_s, class_name, member] }
+            each_declared_member(decls) do |class_name, member, visibility|
+              entries << [name.to_s, class_name, member, visibility]
+            end
           end
         end
 
@@ -1033,19 +1047,35 @@ module Rigor
           end
         end
 
-        # Yields `[class_name, member]` for every member of every class / module declaration in `decls`,
-        # descending through nesting. The enclosing path is accumulated and the name rendered `::`-stripped,
-        # so a `module Foo; class Bar` and a `class Foo::Bar` elsewhere key the same — which is what makes a
-        # `sig/` declaration and an inline one comparable at all.
+        # Yields `[class_name, member, visibility]` for every member of every class / module declaration in
+        # `decls`, descending through nesting. The enclosing path is accumulated and the name rendered
+        # `::`-stripped, so a `module Foo; class Bar` and a `class Foo::Bar` elsewhere key the same — which is
+        # what makes a `sig/` declaration and an inline one comparable at all. `visibility` is the member's
+        # own (`private def x`) or else the one the enclosing `private` / `public` section sets; a singleton
+        # method takes no section, as in Ruby.
         def each_declared_member(decls, prefix = [], &block)
           Array(decls).each do |decl|
             next unless declaration_with_members?(decl)
 
             inner = prefix + [decl.name.to_s.delete_prefix("::")]
             class_name = inner.join("::")
-            decl.members.each { |member| block.call(class_name, member) }
+            section = :public
+            decl.members.each do |member|
+              case member
+              when ::RBS::AST::Members::Private then section = :private
+              when ::RBS::AST::Members::Public then section = :public
+              else block.call(class_name, member, member_visibility(member, section))
+              end
+            end
             each_declared_member(decl.members, inner, &block)
           end
+        end
+
+        def member_visibility(member, section)
+          own = member.respond_to?(:visibility) ? member.visibility : nil
+          return own if own
+
+          member.respond_to?(:kind) && member.kind == :singleton ? :public : section
         end
 
         def declaration_with_members?(decl)
@@ -1075,18 +1105,20 @@ module Rigor
             content = content.to_s
             next if content.empty? || invalid_encoding?(content)
 
-            content.scan(INLINE_DECLARATION_NAME) { |(declared)| acc.merge(declared.split("::")) }
+            merge_declared_segments(content, acc)
           end
         end
 
-        # Parses one project signature file, or nil when it is unreadable, not valid UTF-8, unparseable, or
-        # mentions none of `names` (so nothing in it can collide with the inline sources).
-        def parse_signature_file_if_mentions(file, names)
-          content = File.read(file, encoding: "UTF-8")
-          return nil if invalid_encoding?(content)
-          return nil if names.none? { |name| content.include?(name) }
+        # Adds every `::` segment of every class / module header in `content` to `segments`. The pattern has
+        # one capture group, which every match fills.
+        def merge_declared_segments(content, segments)
+          content.scan(INLINE_DECLARATION_NAME) { segments.merge(Regexp.last_match(1).to_s.split("::")) }
+        end
 
-          parse_signature_source(file, content)
+        # One project signature file's text, or nil when it is unreadable or not valid UTF-8.
+        def read_signature_text(file)
+          content = File.read(file, encoding: "UTF-8")
+          invalid_encoding?(content) ? nil : content
         rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
           nil
         end

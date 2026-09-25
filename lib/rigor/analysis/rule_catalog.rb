@@ -898,24 +898,29 @@ module Rigor
 
         CheckRules::RULE_CONTRADICTING_SIGNATURE => Entry.new(
           id: CheckRules::RULE_CONTRADICTING_SIGNATURE,
-          summary: "Two declarations of one method contradict: neither signature is a subtype of the other.",
+          summary: "Two declarations of one method provably contradict: no value or call satisfies both.",
           fires_when: [
             "A method is declared both in the project's `sig/` and by an inline `# @rbs` / `#:` " \
-            "annotation, and in some parameter or return position each declaration's type is provably " \
-            "outside the other's (`String` against `Integer`), or the two accept disjoint numbers of " \
-            "positional arguments, or one requires a keyword the other cannot accept. Positioned at the " \
+            "annotation, and some parameter or return position holds two proven-disjoint types — distinct " \
+            "literals, a literal outside a class, or two loaded classes neither of which is an ancestor of " \
+            "the other (`String` against `Integer`) — or the two keyword-free declarations accept " \
+            "positional counts that cannot meet, or one requires a keyword the other cannot take in any " \
+            "form. Several overloads are paired by correspondence, never by order. Positioned at the " \
             "`.rbs` member; Rigor reads that declaration.",
-            "A `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement is provably outside the type " \
-            "its own member declares (`rigor:v1:return: positive-int` on `-> String`)."
+            "A member-level `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement is proven " \
+            "disjoint from the type its own member declares, in every overload it applies to " \
+            "(`rigor:v1:return: positive-int` on `-> String`)."
           ],
           does_not_fire_when: [
             "One declaration refines the other (`String` against `non-empty-string`, `Symbol` against " \
-            "`:asc | :desc`): the two merge to the more precise one, silently.",
+            "`:asc | :desc`, `bool` against `TrueClass`): the two merge to the more precise one, silently.",
             "Either side is `untyped`, `void` or `top` in that position — consistent with everything.",
-            "Rigor cannot prove the two disjoint: a project class (whose hierarchy the check does not " \
-            "read), a type alias, an interface, `self`, a type variable, a proc, differently shaped " \
-            "parameter lists that still overlap, or a different overload count. The inline signature " \
-            "is then dropped and reported as `source-rbs-annotation-not-honoured` (info) instead.",
+            "Rigor cannot prove the two contradict: a module or interface on either side, a project " \
+            "class, a relative name the project itself declares, two element types of one generic class, " \
+            "a type alias, `self`, a type variable, a proc, overloads that do not pair one to one, " \
+            "differently shaped parameter lists that still overlap, or a block's parameter count. The " \
+            "inline signature is then dropped and reported as `source-rbs-annotation-not-honoured` (info).",
+            "A refinement is written on one overload rather than on the member: call sites do not honour it.",
             "Two `.rbs` files declare the same method (that fails the class's definition build, " \
             "`rbs.coverage.definition-build-failed`), or a project `.rbs` collides with bundled RBS " \
             "(the file is quarantined, `rbs.coverage.quarantined-signature`)."
@@ -925,8 +930,8 @@ module Rigor
                        "fix is to regenerate the stale signature or correct the annotation.",
           severity_authored: :error,
           severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
-          # Both sides are authored declarations, and disjointness is a proven `no` in both directions —
-          # the ADR-35 both-sides-authored construction, with every doubt routed to the `:info` row instead.
+          # Both sides are authored declarations, and a firing needs a proof that no value or call satisfies
+          # both — the ADR-35 both-sides-authored construction, with every doubt routed to the `:info` row.
           evidence_tier: :high,
           since: "0.4.0"
         ),

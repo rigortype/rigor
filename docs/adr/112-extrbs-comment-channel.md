@@ -123,6 +123,12 @@ Rigor never writes into a `.rb` file. Every carrier below is authored intent; th
 
 ### WD5 — Consistency across sources replaces "`sig/` wins" (ADR-32 WD13)
 
+> **Status note (2026-09-26, [#1075](https://github.com/rigortype/rigor/issues/1075)).** "Neither side a
+> subtype of the other" below is sharpened in the binding spec to **proven disjoint**: a contradiction is
+> reported only where no value and no call satisfies both sides, and every other non-subtype pair is
+> undecided (the `.rbs` binds, with ADR-32 WD12's `:info`). The definition, including what counts as a
+> proof, lives in [`overview.md`](../type-specification/overview.md) § inline annotation handling.
+
 One rule covers `sig/` against inline and `@rbs` / `#:` against `@extrbs`:
 
 - **Consistent:** for each overload, one side is a subtype of the other, in either direction. `untyped`

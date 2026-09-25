@@ -69,32 +69,43 @@ end
 
 - **One refines the other: the more precise one binds, silently.**
   `:asc | :desc` is a subtype of `Symbol`, so `Demo#order` takes the
-  inline contract and `order(:up)` is an argument-type error. `String`
-  in `sig/` beside `non-empty-string` inline reads as
-  `non-empty-string`. `untyped`, `void` and `top` are consistent with
-  anything and say the least, so `sig/`'s `-> untyped` beside an inline
-  `-> void` is quiet. Identical declarations — what `rigor sig-gen`
-  writes for an annotated method — are quiet too.
+  inline contract and `order(:up)` is an argument-type error, where
+  the `.rbs` alone let it pass. The merge takes the narrower type in
+  every position, parameters included, on purpose: both declarations
+  are yours, and the narrower one is what you stated. `String` in
+  `sig/` beside `non-empty-string` inline reads as `non-empty-string`.
+  `untyped`, `void` and `top` are consistent with anything and say the
+  least, so `sig/`'s `-> untyped` beside an inline `-> void` is quiet.
+  Identical declarations — what `rigor sig-gen` writes for an annotated
+  method — are quiet too. The inline side binds only if the `.rbs`
+  member loses nothing by it: the same visibility, and every
+  annotation it carries (a predicate, an assertion, an effect
+  envelope) also on the inline one.
 - **They contradict: an error, and the `.rbs` binds.** `Demo#shared`
-  takes a `String` in `sig/` and an `Integer` inline, and neither is a
-  subtype of the other, so the run reports
+  takes a `String` in `sig/` and an `Integer` inline, and no value is
+  both, so the run reports
   [`rbs.contradicting-signature`](../04-diagnostics.md#rule-rbs-contradicting-signature)
-  at the `sig/` line, naming the annotated file. Disjoint numbers of
-  positional arguments, or a keyword one side requires and the other
-  cannot accept, contradict the same way. A stale generated signature
-  is the usual cause: regenerate it, or fix the annotation.
+  at the `sig/` line, naming the annotated file. Positional counts that
+  cannot meet, or a keyword one side requires and the other cannot take
+  in any form, contradict the same way. The error needs a proof: a
+  module such as `Comparable` or `Enumerable` on either side never
+  counts, since any class may include it, and neither do two classes
+  of your own. A stale generated signature is the usual cause:
+  regenerate it, or fix the annotation.
 - **Rigor cannot tell: the `.rbs` binds, with an `:info`.** When a
-  position names a type alias, an interface, `self` or a type
-  variable, when the relation between two of your own classes is
-  unknown, when the parameter lists are shaped differently but
-  overlap, when the overload counts differ, or when each side is more
-  precise somewhere, the inline signature is dropped and reported as
+  position names a type alias, an interface, `self`, a type variable,
+  or a relative class name your project also declares, when Rigor
+  cannot prove two types disjoint, when the parameter lists are shaped
+  differently but overlap, when the overloads do not pair one to one
+  (they are paired by what they declare, not by their order), or when
+  each side is more precise somewhere, the inline signature is dropped
+  and reported as
   `plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the
   member and the `.rbs` that bound. Make one a refinement of the
   other, or delete one, to settle it.
 
 A `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement on an
-inline annotation must also fit its own declared type:
+inline annotation must also share values with its own declared type:
 `# @rbs %a{rigor:v1:return: positive-int} () -> String` is reported as
 `rbs.contradicting-signature` at the annotated file.
 

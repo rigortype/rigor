@@ -44,6 +44,13 @@ module Rigor
           end
         end
 
+        # Is `def_node` one of the defs a `refine X do … end` body defines on X? Such a def redefines X's method by
+        # design, so X's declared signature for the name is not its contract (issue #1120, maintainer ruling a′).
+        def refinement_def?(def_node)
+          build
+          @refinement_defs.include?(def_node.location.start_offset)
+        end
+
         # Does a `def <local>.<name>` for this call's local receiver and method name sit in the scope the call
         # is in?
         def singleton_local_def?(call_node)
@@ -77,6 +84,7 @@ module Rigor
           @refine_blocks = []
           @singleton_defs = []
           @scopes = []
+          @refinement_defs = Set.new
           @unresolved_using = false
           return if @root.nil?
 
@@ -123,8 +131,17 @@ module Rigor
         def record_call(node, prefix, body, in_def)
           if Inference::ScopeIndexer.refine_target(node)
             @refine_blocks << span_of(node.block)
+            record_refinement_defs(node.block.body)
           elsif using_call?(node) && !in_def
             record_using(node, prefix, body)
+          end
+        end
+
+        def record_refinement_defs(body)
+          return if body.nil?
+
+          Inference::ScopeIndexer.each_refinement_def(body) do |def_node|
+            @refinement_defs << def_node.location.start_offset
           end
         end
 

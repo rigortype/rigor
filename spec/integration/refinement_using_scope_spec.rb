@@ -170,19 +170,41 @@ RSpec.describe "Ruby refinements (`refine` / `using`) and singleton defs on loca
       expect(warm).to eq(cold)
     end
 
-    # Flip this when the maintainer rules on refine-body self typing (PR #1424): a refinement that overrides a
-    # core method with a different return is checked against the refined class's RBS, as a monkey-patch is.
-    it "checks a refine body's def against the refined class's signature" do
+    # Maintainer ruling a′ on PR #1424: a refinement exists to redefine, so a refine-body def of a method X already
+    # declares is not checked against X's signature for it (return or parameters), while the rest of the body is.
+    it "does not check a refine body's redefinition against the refined class's signature" do
       write("lib/override.rb", <<~RUBY)
         module Quiet
           refine String do
             def upcase = nil
+            def center(width) = Rigor.dump_type(width)
+            def fresh = 1.nope_ctl
+            def probe = Rigor.dump_type(self)
+          end
+          refine Integer do
+            def to_s = :sym
           end
         end
       RUBY
 
-      rules = diagnostics.map { |d| [d.qualified_rule, d.line] }
-      expect(rules).to eq([["def.return-type-mismatch", 3]])
+      rows = diagnostics.map { |d| [d.qualified_rule, d.line, d.message] }
+      expect(rows).to eq(
+        [
+          ["dump.type", 4, "dump_type: Dynamic[top]"],
+          ["call.undefined-method", 5, "undefined method `nope_ctl' for 1"],
+          ["dump.type", 6, "dump_type: String"]
+        ]
+      )
+    end
+
+    it "still checks a monkey-patch against the class's signature" do
+      write("lib/patch.rb", <<~RUBY)
+        class String
+          def upcase = nil
+        end
+      RUBY
+
+      expect(diagnostics.map { |d| [d.qualified_rule, d.line] }).to eq([["def.return-type-mismatch", 2]])
     end
   end
 

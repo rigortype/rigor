@@ -208,8 +208,14 @@ module Rigor
 
       # Lexical class frame: the `name:` field is the qualified class name as it would render in Ruby (e.g.,
       # `"Foo::Bar"`); the `singleton:` field is `true` for `class << self` frames so nested defs resolve to
-      # singleton-method RBS lookups.
-      ClassFrame = Data.define(:name, :singleton)
+      # singleton-method RBS lookups. Issue #1120 — `refinement:` is `true` for the frame a `refine X do … end`
+      # block is entered under: its `def`s redefine X's methods, so none of them binds its parameters from X's
+      # RBS signature for the name ({#build_method_entry_scope}).
+      ClassFrame = Data.define(:name, :singleton, :refinement) do
+        def initialize(name:, singleton:, refinement: false)
+          super
+        end
+      end
 
       # Issue #652 — Ruby's `Module.nesting` for the body currently being evaluated, innermost first, built as
       # the walk ENTERS each declaration rather than reconstructed from the qualified name afterwards. A
@@ -3251,7 +3257,7 @@ module Rigor
         name = refined.is_a?(Type::Singleton) ? refined.class_name : Source::ConstantPath.qualified_name(target)
         return nil if name.nil?
 
-        [ClassFrame.new(name: name.delete_prefix("::"), singleton: false)]
+        [ClassFrame.new(name: name.delete_prefix("::"), singleton: false, refinement: true)]
       end
 
       # The block calls whose body `return` leaves only the block ({ReturnBarrier.block_call?}). Like a `->` body
@@ -4810,7 +4816,9 @@ module Rigor
         singleton = singleton_def?(def_node)
         binder = MethodParameterBinder.new(
           environment: scope.environment,
-          class_path: current_class_path,
+          # Issue #1120 — a refinement exists to redefine, so X's declared parameters for the name are not this
+          # def's contract; it binds its parameters as an undeclared method does.
+          class_path: @class_context.last&.refinement ? nil : current_class_path,
           singleton: singleton,
           source_path: scope.source_path
         )

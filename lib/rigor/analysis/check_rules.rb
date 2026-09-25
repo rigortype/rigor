@@ -143,7 +143,7 @@ module Rigor
           call_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites)
         when Prism::DefNode
           [
-            return_type_mismatch_diagnostic(path, node, scope_index),
+            refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites),
             override_visibility_diagnostic(path, node, scope_index),
             override_return_widened_diagnostic(path, node, scope_index),
             override_param_narrowed_diagnostic(path, node, scope_index)
@@ -153,6 +153,17 @@ module Rigor
         else
           []
         end
+      end
+
+      # Issue #1120, maintainer ruling a′ — a `def` in a `refine X do … end` body redefines X's method by design, so
+      # X's declared return for the name is not its contract and a mismatch against it is not reported. Every other
+      # check in the body stands. The refine-body test runs only once a mismatch would report, so a file pays the
+      # {LexicalMethodSites} walk only then.
+      def refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites)
+        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
+        return diagnostic if diagnostic.nil? || lexical_sites.nil?
+
+        lexical_sites.refinement_def?(node) ? nil : diagnostic
       end
 
       # Constructs the fresh, unpopulated built-in collector set keyed by

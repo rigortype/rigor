@@ -167,6 +167,9 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `RbsExtended.read_return_type_override`'s `annotations.each { … return type if type }; nil` infers the
 # declared `Type::t?` instead of the trailing `nil`, and the row leaves `declared_divergent` for
 # generated-equivalent (`rbs_extended.rbs` -1).
+# 709 since #1424. `StatementEvaluator::ClassFrame` gains an optional `refinement:` member, and the keyword
+# default is written as an explicit `def initialize`, so its declared `initialize` now has a source `def`
+# sig-gen reproduces instead of the `Data`-synthesised one it could only find at runtime (`inference.rbs` -1).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -246,7 +249,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
-  "sig/rigor/inference.rbs" => 85,
+  "sig/rigor/inference.rbs" => 84,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,

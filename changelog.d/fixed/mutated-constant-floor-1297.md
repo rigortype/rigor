@@ -1,0 +1,1 @@
+- **[inference]** A method that returns a read of a constant or class variable holding a hash or array the file mutates no longer reports `def.return-type-mismatch` against the literal's original values: such a read now types as `untyped`, as an instance-variable seed a method stores into already did. [#1419](https://github.com/rigortype/rigor/pull/1419)

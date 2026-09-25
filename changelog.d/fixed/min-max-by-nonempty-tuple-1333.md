@@ -1,0 +1,1 @@
+- **[inference]** `min_by` / `max_by` with a block on a non-empty array literal or integer range literal no longer add `nil` to the result, so `[1, 2].min_by { |s| rand(3) } + 1` no longer reports a false `call.possible-nil-receiver`. ([#1391](https://github.com/rigortype/rigor/pull/1391))

@@ -331,12 +331,18 @@ module Rigor
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
-        return send(handler, node) if handler
-
-        # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
-        # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
-        # may rebind (`super(line.sub(re, ""))`, issue #1365).
-        [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
+        result =
+          if handler
+            send(handler, node)
+          else
+            # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
+            # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in
+            # it may rebind (`super(line.sub(re, ""))`, issue #1365).
+            [@scope.type_of(node, tracer: @tracer), forget_rebound_match_globals(@scope, node)]
+          end
+        raise_site = RAISE_SITES[node.class]
+        record_raise_site(raise_site, node, result.last) if raise_site
+        result
       end
 
       # One invocation of `block_node`'s body, from the receiver scope (which the caller has already bound the block's
@@ -440,15 +446,15 @@ module Rigor
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope
       # effects are preserved.
       #
-      # Inside a retrying `begin`'s primary body, each statement's post-scope is also a point the body can raise from
-      # ({#record_raise_points}).
+      # Inside the primary body of a `begin` with a rescue chain or an `ensure`, the scope before each statement that
+      # can raise is also a point the body can raise from ({#record_raise_points}).
       def eval_statements(node)
         result_type = Type::Combinator.constant_of(nil)
         current = scope
         raising = Thread.current[RETRY_FRAMES_KEY]
         node.body.each do |stmt|
-          result_type, current = sub_eval(stmt, current)
           record_raise_points(raising, stmt, current) if raising
+          result_type, current = sub_eval(stmt, current)
         end
         [result_type, current]
       end
@@ -1190,6 +1196,7 @@ module Rigor
       # nil-injection so half-bound names degrade to `T | nil`.
       def eval_case(node)
         subject_type, post_pred = node.predicate ? sub_eval(node.predicate, scope) : [nil, scope]
+        record_case_tests(node, post_pred)
         branch_results, falsey_scope = eval_case_when_branches(subject_type, node.predicate, node.conditions, post_pred)
         if pattern_case_matches_every_path?(node, branch_results)
           return unmatched_pattern_result(branch_results, node.conditions)
@@ -1323,20 +1330,24 @@ module Rigor
       # semantics: else runs only if the body raises no exception). The ensure-clause runs but does not contribute to
       # the value; its scope effects are layered on the joined exit scope so locals bound exclusively in `ensure` stay
       # observable.
+      #
+      # Issue #1231 — the rescue chain runs after the body raised from some point inside it, so it is entered with each
+      # local and ivar the entry binds at its bindings at those points ({#raised_entry}): `conn = nil; begin; conn =
+      # open; use(conn); rescue; conn&.close; end` reads `conn` as `Conn | nil` in the arm. The `ensure` runs after
+      # such a raise too ({#eval_ensure_clause}).
       def eval_begin(node)
         jump_marks = ensure_jump_marks(node)
         entry = scope
-        edge = retry_edge_for(node)
-        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)
+        edge = retry_edge_for(node) || raise_edge_for(node, entry)
+        primary_type, primary_scope, rescue_chain, raised = eval_begin_paths(node, entry, edge)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
         # the primary body's own, since it can raise after any prefix of itself (`begin; tries += 1; raise if tries < 3;
         # rescue; retry; end`). Without the widening the re-entry keeps `tries: Constant[0]` and the predicate folds.
         # {#eval_retried_begin} re-evaluates the primary body AND the rescue chain under a widened entry.
-        retried = edge && eval_retried_begin(node, entry, edge)
-        primary_type, primary_scope, rescue_chain = retried if retried
+        retried = edge&.retries && eval_retried_begin(node, entry, edge)
+        primary_type, primary_scope, rescue_chain, raised = retried if retried
 
         live_rescues = live_rescue_results(rescue_chain)
         if live_rescues.empty?
@@ -1349,11 +1360,83 @@ module Rigor
 
         if node.ensure_clause
           carry_jumps_through_ensure(node.ensure_clause, jump_marks)
-          _ensure_type, ensure_scope = sub_eval(node.ensure_clause, exit_scope)
-          exit_scope = ensure_scope
+          exit_scope = eval_ensure_clause(node, exit_scope, raised, rescue_chain)
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The scope past a `begin`'s `ensure`. The clause runs after the body or a rescue arm finished, and after a raise
+      # nothing rescued or an arm that left, so it is typed under the exit scope widened by the rescue chain's entry
+      # (`raised`, nil when the body cannot raise) and by every arm's scope: `done = false; begin; work; done = true;
+      # ensure; undo unless done; end` reads `done` as `bool` there. Only a `begin` that finished reaches the code after
+      # it, so when the widening moves anything, the scope the clause leaves comes from a second pass under the exit
+      # scope alone: `done` stays `true` past the `begin`. That pass keeps out of the per-node scope index, but its
+      # raise points still reach an enclosing `begin`, since the clause can raise after a body that finished too.
+      #
+      # The widened pass exists for the index alone, so an evaluator that records nothing skips it, only handing its
+      # entry to the enclosing `begin`s as a raise point ({#record_ensure_entry}). The second pass records nothing
+      # either, which keeps a chain of `begin … ensure` nested in each other's clauses from doubling per level.
+      #
+      # A raise the clause runs after continues once it finishes, so the scope the widened pass leaves is a raise
+      # point of each enclosing `begin` too ({#record_ensure_reraise}).
+      def eval_ensure_clause(node, exit_scope, raised, rescue_chain)
+        ensure_clause = node.ensure_clause
+        paths = rescue_chain.map { |((_, arm_scope), _)| arm_scope }
+        paths << raised if raised
+        clause_entry = join_raised_bindings(exit_scope, paths, keep_base: true)
+        if clause_entry.equal?(exit_scope)
+          after = sub_eval(ensure_clause, exit_scope).last
+          record_ensure_reraise(node, after)
+          return after
+        end
+
+        recording = @on_enter || @operand_recorder
+        if recording
+          record_ensure_reraise(node, sub_eval(ensure_clause, clause_entry).last)
+        else
+          record_ensure_entry(ensure_clause, clause_entry)
+        end
+        after = sub_eval(ensure_clause, exit_scope, **UNRECORDED).last
+        record_ensure_reraise(node, ensure_writes_over(clause_entry, exit_scope, after)) unless recording
+        after
+      end
+
+      # Issue #1231 — the scope a raise the `ensure` of `node` ran after continues with, as a raise point of each
+      # enclosing `begin` whose frame holds the clause: `state = :running; begin; begin; work; ensure; state =
+      # :cleaned; end; rescue; …; end` rescues with `state` as `:cleaned` too. Only a body or rescue arm that can
+      # raise hands the clause a raise to continue.
+      def record_ensure_reraise(node, reraised)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        return unless frames
+        return unless (node.statements && may_raise?(node.statements)) ||
+                      (node.rescue_clause && may_raise?(node.rescue_clause))
+
+        record_raise_scope(frames, node.ensure_clause, reraised)
+      end
+
+      # The widened pass's exit an unrecorded evaluator did not run, approximated: `clause_entry` with each local and
+      # instance variable the clause rebound in `after`, the exit-scope pass's exit, taken from there.
+      def ensure_writes_over(clause_entry, exit_scope, after)
+        reraised = clause_entry
+        after.locals.each do |name, type|
+          reraised = reraised.with_local(name, type) unless type.equal?(exit_scope.local(name))
+        end
+        after.ivars.each do |name, type|
+          reraised = reraised.with_ivar(name, type) unless type.equal?(exit_scope.ivar(name))
+        end
+        reraised
+      end
+
+      # The widened entry of an `ensure` clause an unrecorded pass does not evaluate, as a raise point of each enclosing
+      # `begin` whose frame holds the clause: the scope before its first statement, which the skipped pass would have
+      # recorded, and which carries every binding it widened.
+      def record_ensure_entry(ensure_clause, clause_entry)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        statements = ensure_clause.statements
+        return unless frames && statements
+
+        frames.each { |edge| edge.raise_scopes << clause_entry if edge.frame.include?(statements) }
       end
 
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
@@ -1400,9 +1483,9 @@ module Rigor
       # Ruby semantics (the else runs only when no exception was raised), but the body's scope effects still apply
       # because the body did run before the else.
       #
-      # `edge`, when given, collects every scope the primary body could raise from: the scope after each statement of
-      # its frame ({#record_raise_points}), and the scope it ends with. The else-clause is not among them: what it
-      # raises is not rescued here.
+      # `edge`, when given, collects every scope the primary body could raise from: the scopes around each statement of
+      # its frame ({#record_raise_points}), and, when a `retry` targets the `begin`, the scope it ends with. The
+      # else-clause is not among them: what it raises is not rescued here.
       def eval_begin_primary_under(node, entry_scope, edge: nil)
         body_type, body_scope =
           if node.statements
@@ -1410,7 +1493,7 @@ module Rigor
           else
             [Type::Combinator.constant_of(nil), entry_scope]
           end
-        edge.raise_scopes << body_scope if edge
+        edge.raise_scopes << body_scope if edge&.retries
 
         if node.else_clause
           else_type, else_scope = sub_eval(node.else_clause, body_scope)
@@ -1421,9 +1504,12 @@ module Rigor
       end
 
       # B2.1 — what one pass over a `begin` whose rescue chain retries collects: the `retry` nodes that target it, the
-      # arms holding them, the nodes of its primary body's frame and the names that frame writes, and the scopes control
-      # carries back into the primary body — at each point the body can raise from (`raise_scopes`), and at each of
-      # those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
+      # arms holding them, the nodes of its primary body's frame and the names that frame writes, and the
+      # scopes control carries back into the primary body — at each point the body can raise from (`raise_scopes`), and
+      # at each of those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
+      #
+      # Issue #1231 — a `begin` no `retry` targets takes one with `retries`, `retrying_arms` and `body_writes` nil
+      # ({#raise_edge_for}), which collects only the `raise_scopes` its rescue chain and `ensure` are entered with.
       RetryEdge = Data.define(:retries, :retrying_arms, :frame, :body_writes, :raise_scopes, :retry_scopes) do
         def fresh = with(raise_scopes: [], retry_scopes: [])
 
@@ -1468,6 +1554,18 @@ module Rigor
                       raise_scopes: [], retry_scopes: [])
       end
 
+      # Issue #1231 — the raise-point edge of a `begin` no `retry` targets, or nil when nothing could widen: it rescues
+      # and ensures nothing, its body is empty, or its entry binds no local or instance variable.
+      def raise_edge_for(node, entry)
+        return nil unless (node.rescue_clause || node.ensure_clause) && node.statements
+        return nil if entry.locals.empty? && entry.ivars.empty?
+
+        frame = Set.new.compare_by_identity
+        walk_primary_frame(node.statements, true, frame, nil)
+        RetryEdge.new(retries: nil, retrying_arms: nil, frame: frame, body_writes: nil, raise_scopes: [],
+                      retry_scopes: [])
+      end
+
       # The `retry` nodes under `node` that re-enter the `begin` whose rescue arm holds it, or nil for none. A nested
       # `rescue` clause, or a rescue modifier's fallback, owns the `retry`s inside it (Ruby 4.0.5 retries the modifier's
       # own expression), and a nested block, lambda, `def` or class body cannot hold one for this `begin`.
@@ -1492,14 +1590,16 @@ module Rigor
       private_constant :RETRY_WRITE_NODES
 
       # Collects into `frame` the nodes of the primary body that run in its own frame — a nested block or lambda keeps
-      # its own locals (a block parameter can shadow the counter) — and into `writes` every variable name the body
-      # writes, a block's included (it may write an outer local). A `def` or class body runs nothing here.
+      # its own locals (a block parameter can shadow the counter) — and into `writes`, when given, every variable name
+      # the body writes, a block's included (it may write an outer local). A `def` or class body runs nothing here.
       def walk_primary_frame(node, in_frame, frame, writes)
         return if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
 
         in_frame &&= SCOPE_NESTING_NODES.none? { |klass| node.is_a?(klass) }
+        return unless in_frame || writes
+
         frame << node if in_frame
-        writes << node.name if RETRY_WRITE_NODES.include?(node.class)
+        writes << node.name if writes && RETRY_WRITE_NODES.include?(node.class)
         node.rigor_each_child { |child| walk_primary_frame(child, in_frame, frame, writes) }
       end
 
@@ -1520,9 +1620,24 @@ module Rigor
         eval_begin_paths(node, widened || literal, nil)
       end
 
+      # The primary path's `[type, scope]`, the rescue chain's results, and the entry the chain was evaluated under
+      # ({#raised_entry}), nil when the body cannot raise. Without an `edge` the chain reads the entry unchanged: it
+      # binds nothing to widen, or it is the retry edge's last pass, whose entry already holds every binding the
+      # earlier passes saw at the body's raise points.
       def eval_begin_paths(node, entry, edge)
         primary = eval_begin_primary_under(node, entry, edge: edge)
-        [*primary, collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)]
+        raised = edge ? raised_entry(entry, edge.raise_scopes) : entry
+        [*primary, collect_rescue_chain_results(node.rescue_clause, raised || entry, edge: edge), raised]
+      end
+
+      # Issue #1231 — the scope a rescue arm is entered with: `entry` with each local and instance variable it binds
+      # rebound to the join of that name's bindings at every point the primary body can raise from, or nil for a body
+      # with no such point. A name the entry does not bind stays unbound: one the body introduces may not be set yet
+      # where it raised.
+      def raised_entry(entry, raise_scopes)
+        return nil if raise_scopes.empty?
+
+        join_raised_bindings(entry, raise_scopes, keep_base: false)
       end
 
       # B2.1 — the entry scope widened by what crosses the retry edge, or nil when nothing does. A local or ivar bound
@@ -1560,15 +1675,318 @@ module Rigor
         end
       end
 
-      # The scope after each statement of a retrying primary body's frame is a point the body can raise from, the next
-      # statement's being the one after. Together they carry every rebind a retry can re-enter with, including one on a
-      # branch that then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a
-      # write threaded into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a
-      # nested block or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect
-      # on this frame shows in the post-scope of the statement holding it. Recording from the evaluator rather than
-      # `on_enter` keeps a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
-      def record_raise_points(frames, stmt, stmt_scope)
-        frames.each { |edge| edge.raise_scopes << stmt_scope if edge.frame.include?(stmt) }
+      # Issue #1231 — a point the primary body can raise from is a scope that something able to raise runs from: the
+      # scope before a node that can raise and, for a call-like node that dispatches after its operands ran, the scope
+      # after it. Nothing else is one: a write, a branch or a whole construct is never a raise point for holding a
+      # write, and the scope after a write is one only when something that can raise runs after it. So `state = s;
+      # Integer(s)` rescues with `state` already `s`, `Integer(s); state = s` with `state` at its entry value, and
+      # `foo; x = nil if c` with `x` at its entry value (`c` runs before the write), while `x = nil if c; foo` sees
+      # both. A call's post-scope carries a write threaded into its own operands (`raise Retry.new(tries += 1) if
+      # flaky?`), a write its block makes before raising (the block's effect on this frame shows there), and an
+      # instance variable a self call may have set. The raise sites are recorded where the evaluator reaches them
+      # ({#record_raise_site}); the scope before each statement that can raise ({#may_raise?}) covers one it types
+      # whole without reaching. A node of a nested block or lambda body is not in the frame (a block parameter can
+      # shadow the counter). Recording from the evaluator rather than `on_enter` keeps a node reached with the index
+      # recorder off (a threaded operand, a loop fixpoint pass).
+      #
+      # A literal, a variable read or write, `self`, a branch or an `&&` is taken not to raise (a frozen `self` and
+      # asynchronous exceptions aside).
+      def record_raise_points(frames, stmt, before)
+        record_raise_scope(frames, stmt, before) if may_raise?(stmt)
+      end
+
+      # How each node class that can raise contributes ({#record_raise_site}): `:dispatch` the scopes before and after
+      # it (a call, `yield`, `super`, an interpolation's `to_s`, a range's `Range.new`, all after their operands),
+      # `:entry` the scope before it (a constant or class-variable read, which reads nothing that writes, a compound
+      # write, whose operator or `[]=` runs before it binds, a pattern match, a class body, an implicit conversion —
+      # `*z` calls `to_a`, `**z` calls `to_hash` — an `alias` or `undef`, and a hash pair whose key is not a literal,
+      # whose `hash` the literal calls: `:assoc`), `:loop` the scope after
+      # a loop whose test can raise, which runs again after each iteration of the body, and `:multi` a multiple
+      # assignment, whose attribute or index targets can raise after the targets before them are bound.
+      RAISE_SITES = {
+        Prism::CallNode => :dispatch, Prism::YieldNode => :dispatch, Prism::SuperNode => :dispatch,
+        Prism::ForwardingSuperNode => :dispatch, Prism::XStringNode => :dispatch,
+        Prism::InterpolatedStringNode => :dispatch, Prism::InterpolatedSymbolNode => :dispatch,
+        Prism::InterpolatedXStringNode => :dispatch, Prism::InterpolatedRegularExpressionNode => :dispatch,
+        Prism::RangeNode => :dispatch,
+        Prism::ConstantReadNode => :entry, Prism::ConstantPathNode => :entry, Prism::ClassVariableReadNode => :entry,
+        Prism::LocalVariableOperatorWriteNode => :entry, Prism::InstanceVariableOperatorWriteNode => :entry,
+        Prism::ClassVariableOperatorWriteNode => :entry, Prism::GlobalVariableOperatorWriteNode => :entry,
+        Prism::IndexOperatorWriteNode => :entry, Prism::IndexOrWriteNode => :entry, Prism::IndexAndWriteNode => :entry,
+        Prism::CallOperatorWriteNode => :entry, Prism::CallOrWriteNode => :entry, Prism::CallAndWriteNode => :entry,
+        Prism::MatchWriteNode => :entry, Prism::MatchPredicateNode => :entry, Prism::MatchRequiredNode => :entry,
+        Prism::ClassNode => :entry, Prism::ModuleNode => :entry, Prism::SingletonClassNode => :entry,
+        Prism::SplatNode => :entry, Prism::AssocSplatNode => :entry, Prism::AliasMethodNode => :entry,
+        Prism::UndefNode => :entry, Prism::AssocNode => :assoc,
+        Prism::WhileNode => :loop, Prism::UntilNode => :loop, Prism::ForNode => :loop,
+        Prism::MultiWriteNode => :multi
+      }.freeze
+      # A `case` runs its `===` tests or pattern deconstruction from the scope after its subject ({#eval_case}).
+      CASE_NODES = [Prism::CaseNode, Prism::CaseMatchNode].freeze
+      # Nothing under these runs where they appear.
+      DEFERRED_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
+      MULTI_RAISING_TARGETS = [Prism::CallTargetNode, Prism::IndexTargetNode].freeze
+      # Hash keys whose `hash` cannot raise.
+      LITERAL_KEYS = [
+        Prism::SymbolNode, Prism::StringNode, Prism::IntegerNode, Prism::FloatNode, Prism::NilNode, Prism::TrueNode,
+        Prism::FalseNode
+      ].freeze
+      private_constant :RAISE_SITES, :CASE_NODES, :DEFERRED_NODES, :MULTI_RAISING_TARGETS, :LITERAL_KEYS
+
+      # Records the raise points of `node`, a {RAISE_SITES} node the evaluator reached, which left `after`.
+      def record_raise_site(raise_site, node, after)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        return unless frames
+
+        case raise_site
+        when :dispatch
+          record_raise_scope(frames, node, scope)
+          record_raise_scope(frames, node, after)
+        when :entry then record_raise_scope(frames, node, scope)
+        when :assoc then record_raise_scope(frames, node, scope) if raising_key?(node)
+        when :loop
+          record_raise_scope(frames, node, after) if node.is_a?(Prism::ForNode) || may_raise?(node.predicate)
+        when :multi
+          record_raise_scope(frames, node, scope)
+          record_raise_scope(frames, node, after) if multi_target_may_raise?(node)
+        end
+      end
+
+      def multi_target_may_raise?(node)
+        [*node.lefts, node.rest, *node.rights].any? do |target|
+          MULTI_RAISING_TARGETS.any? { |klass| target.is_a?(klass) } ||
+            (target.is_a?(Prism::MultiTargetNode) && multi_target_may_raise?(target))
+        end
+      end
+
+      # Adds `raised` to the raise points of every edge whose frame holds `node`.
+      def record_raise_scope(frames, node, raised)
+        frames.each do |edge|
+          next unless edge.frame.include?(node)
+
+          scopes = edge.raise_scopes
+          scopes << raised unless scopes.last.equal?(raised)
+        end
+      end
+
+      def raising_key?(assoc)
+        LITERAL_KEYS.none? { |klass| assoc.key.is_a?(klass) }
+      end
+
+      # Whether anything under `node` that runs where it appears can raise.
+      def may_raise?(node)
+        klass = node.class
+        return true if klass == Prism::AssocNode ? raising_key?(node) : RAISE_SITES.key?(klass)
+        return true if CASE_NODES.include?(klass)
+        return false if DEFERRED_NODES.include?(klass)
+
+        found = false
+        node.rigor_each_child { |child| found ||= may_raise?(child) }
+        found
+      end
+
+      # A `case`'s `===` tests and pattern deconstruction, and the error an unmatched `case … in` raises, run from the
+      # scope after its subject.
+      def record_case_tests(node, post_subject)
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        record_raise_scope(frames, node, post_subject) if frames
+      end
+
+      # An operand the evaluator types whole without reaching, `taken` after an earlier operand wrote: a raise site in
+      # it runs from `entry` (`[y = 1, Foo::BAR]`).
+      def record_later_operand(node, entry, taken)
+        return unless taken
+
+        frames = Thread.current[RETRY_FRAMES_KEY]
+        record_raise_scope(frames, node, entry) if frames && may_raise?(node)
+      end
+
+      # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings
+      # in `scopes`, and in `base` itself under `keep_base`. A binding the accumulated one already accepts
+      # ({#retry_binding_accepted?}) is not joined, so a narrowing inside the body (`log if m == :fast`) leaves `m` as
+      # it was. The name keeps the marks `Scope#join` would leave on it ({#raised_marks}), and the side tables keyed by
+      # a name `base` binds are joined as `Scope#join` joins them ({#join_raised_tables}). `base` itself when nothing
+      # moves.
+      def join_raised_bindings(base, scopes, keep_base:)
+        joined_scope = base
+        base.locals.each do |name, binding|
+          joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.local(name) }
+          joined_scope = rejoin_raised(joined_scope, base, scopes, keep_base, :local, name, binding, joined) if joined
+        end
+        base.ivars.each do |name, binding|
+          joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.ivar(name) }
+          joined_scope = rejoin_raised(joined_scope, base, scopes, keep_base, :ivar, name, binding, joined) if joined
+        end
+        join_raised_tables(joined_scope, base, scopes, keep_base)
+      end
+
+      # `joined_scope` with `name` rebound when the join moved its binding or its marks. The rebind goes through
+      # `with_local` / `with_ivar`, which drop every mark, and then re-stamps the joined ones.
+      def rejoin_raised(joined_scope, base, scopes, keep_base, kind, name, binding, joined) # rubocop:disable Metrics/ParameterLists
+        marks = raised_marks(base, scopes, keep_base, kind, name)
+        moved = rebinds?(joined, binding)
+        return joined_scope if !moved && marks == scope_marks(base, kind, name)
+
+        type = moved ? joined : binding
+        rebound = rebind_variable(joined_scope, kind, name, type)
+        declared, optimistic, published, origin, inferred = marks
+        if declared && kind == :local
+          rebound = rebound.with_local_declaration_mark(name)
+        elsif declared
+          rebound = rebound.seed_declaration_sourced_ivar(name, type)
+        end
+        rebound = rebound.with_published_constant_mark(kind, name) if published
+        return rebound.with_optimistic_ivar(name, optimistic).with_ivar_origin(name, origin) if kind == :ivar
+
+        # ADR-67's taint is sticky across `with_local`, so the rebind kept `joined_scope`'s: set it to the join's.
+        rebound = inferred ? rebound.with_inferred_param_mark(name) : rebound.without_inferred_param_mark(name)
+        rebound.with_optimistic_local(name, optimistic).with_local_origin(name, origin)
+      end
+
+      # The marks `Scope#join` leaves on `name` across every scope of `scopes` that binds it, and `base` under
+      # `keep_base`, as `[declaration-sourced, optimistic cause, published-constant, origin, inferred-parameter]`:
+      # ADR-58's declaration mark only where each carries it, the others where any does (ADR-67's taint included,
+      # so `x = 5; begin; x = p; foo; rescue; x.abs; end` keeps the taint `x = p` stamped). A scope recorded after an
+      # in-place mutation carries the first two (`Scope#with_mutated_local`), so `r = @name; begin; up(r); …; rescue;
+      # retry; end` keeps `r`'s mark in the arm and across the retry (issue #1287).
+      def raised_marks(base, scopes, keep_base, kind, name)
+        return raised_ivar_marks(base, scopes, keep_base, name) if kind == :ivar
+
+        declared, optimistic, published, origin, inferred =
+          keep_base ? scope_marks(base, :local, name) : [true, nil, false, nil, false]
+        scopes.each do |path|
+          next if path.local(name).nil?
+
+          declared &&= path.declaration_sourced?(:local, name)
+          optimistic ||= path.optimistic_local(name)
+          published ||= path.published_constant_sourced?(:local, name)
+          origin ||= path.local_origin(name)
+          inferred ||= path.inferred_param?(name)
+        end
+        [declared, optimistic, published, origin, inferred]
+      end
+
+      def raised_ivar_marks(base, scopes, keep_base, name)
+        declared, optimistic, published, origin = keep_base ? scope_marks(base, :ivar, name) : [true, nil, false, nil]
+        scopes.each do |path|
+          next if path.ivar(name).nil?
+
+          declared &&= path.declaration_sourced?(:ivar, name)
+          optimistic ||= path.optimistic_ivar(name)
+          published ||= path.published_constant_sourced?(:ivar, name)
+          origin ||= path.ivar_origin(name)
+        end
+        [declared, optimistic, published, origin, false]
+      end
+
+      def scope_marks(scope, kind, name)
+        if kind == :local
+          [scope.declaration_sourced?(:local, name), scope.optimistic_local(name),
+           scope.published_constant_sourced?(:local, name), scope.local_origin(name), scope.inferred_param?(name)]
+        else
+          [scope.declaration_sourced?(:ivar, name), scope.optimistic_ivar(name),
+           scope.published_constant_sourced?(:ivar, name), scope.ivar_origin(name), false]
+        end
+      end
+
+      # The scope-wide tables `Scope#join` merges, joined over `scopes` (and `base` under `keep_base`) as it merges
+      # them: an indexed or method-chain narrowing on a receiver survives only where every scope holds it, its type
+      # the union; the struct-fold-safe set is intersected; the repeated `||=` sites are unioned. A narrowing `base`
+      # does not hold is not added, as a name `base` does not bind is not.
+      def join_raised_tables(joined_scope, base, scopes, keep_base)
+        joined_scope = join_raised_indexed(joined_scope, scopes, keep_base)
+        joined_scope = join_raised_chains(joined_scope, scopes, keep_base)
+        join_raised_sets(joined_scope, base, scopes, keep_base)
+      end
+
+      def join_raised_indexed(joined_scope, scopes, keep_base)
+        joined_scope.indexed_narrowings.each do |key, type|
+          joined = joined_table_entry(keep_base ? type : nil, scopes) { |path| path.indexed_narrowings[key] }
+          next if joined.equal?(type)
+
+          joined_scope =
+            if joined.nil? then joined_scope.without_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key)
+            else joined_scope.with_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key, joined)
+            end
+        end
+        joined_scope
+      end
+
+      def join_raised_chains(joined_scope, scopes, keep_base)
+        joined_scope.method_chain_narrowings.each do |key, type|
+          joined = joined_table_entry(keep_base ? type : nil, scopes) { |path| path.method_chain_narrowings[key] }
+          next if joined.equal?(type)
+
+          joined_scope =
+            if joined.nil?
+              joined_scope.without_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name)
+            else
+              joined_scope.with_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name, joined)
+            end
+        end
+        joined_scope
+      end
+
+      # The union of an entry's types across `scopes`, starting from `joined`, or nil when a scope lacks it. The
+      # starting object itself when nothing widens it.
+      def joined_table_entry(joined, scopes)
+        scopes.each do |path|
+          type = yield(path)
+          return nil if type.nil?
+          next if joined.equal?(type)
+
+          joined = joined.nil? ? type : Type::Combinator.union(joined, type)
+        end
+        joined
+      end
+
+      def join_raised_sets(joined_scope, base, scopes, keep_base)
+        safe = base.struct_fold_safe_locals
+        repeated = nil
+        scopes.each_with_index do |path, index|
+          other = path.struct_fold_safe_locals
+          safe = !keep_base && index.zero? ? other : fold_safe_join(safe, other)
+          path.repeated_or_writes.each_key do |node|
+            (repeated ||= []) << node unless base.repeated_or_writes.key?(node)
+          end
+        end
+        joined_scope = joined_scope.with_struct_fold_safe(safe) unless safe.equal?(joined_scope.struct_fold_safe_locals)
+        repeated ? joined_scope.with_repeated_or_writes(repeated) : joined_scope
+      end
+
+      EMPTY_FOLD_SAFE = Set.new.freeze
+      private_constant :EMPTY_FOLD_SAFE
+
+      # `Scope#join`'s struct-fold-safe merge.
+      def fold_safe_join(mine, theirs)
+        return EMPTY_FOLD_SAFE if mine.nil? || theirs.nil?
+        return mine if mine.equal?(theirs) || mine == theirs
+        return EMPTY_FOLD_SAFE if mine.empty? || theirs.empty?
+
+        intersected = mine & theirs
+        intersected.empty? ? EMPTY_FOLD_SAFE : intersected.freeze
+      end
+
+      # A statement-by-statement body shares one binding object across its scopes until the name is rebound, so a
+      # binding identical to the previous one is not weighed again.
+      def joined_binding(joined, scopes)
+        seen = joined
+        scopes.each do |path|
+          type = yield(path)
+          next if type.nil? || type.equal?(seen)
+
+          seen = type
+          joined =
+            if joined.nil? then type
+            elsif retry_binding_accepted?(joined, type) then joined
+            else Type::Combinator.union(joined, type)
+            end
+        end
+        joined
+      end
+
+      def rebinds?(joined, binding)
+        !(joined.nil? || joined.equal?(binding) || joined == binding)
       end
 
       # An `on_enter` that records, besides forwarding to the installed one, the entry scope of each `retry` of `edge`
@@ -1699,7 +2117,7 @@ module Rigor
       # runs on the way out (`begin; retry; ensure; tries += 1; end`), or one made before a `retry` the evaluator only
       # types (`log(tries < 5 ? retry : :gave_up)`).
       def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil)
-        on_enter = edge ? retry_scope_recorder(edge) : @on_enter
+        on_enter = edge&.retries ? retry_scope_recorder(edge) : @on_enter
         results = []
         current = rescue_node
         while current
@@ -2498,7 +2916,9 @@ module Rigor
       def call_effects(node, walk, typed_from)
         mark = walk.mark
         invoked = call_operand_scope(node, walk, typed_from)
-        invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
+        after = invoke_from(node, invoked, nil, walk.types(tracer, since: mark))
+        record_raise_site(:dispatch, node, after)
+        after
       end
 
       # The rest of the call from `invoked`, the scope its operands left, with each later operand's own value in
@@ -2554,6 +2974,8 @@ module Rigor
         unless OperandEffects.any?(node)
           # A taken position with no value of its own leaves its children to be taken: nothing types it whole.
           thread_operand_children(node, entry, walk, typed_from) if taken && slot.nil?
+          # Issue #1231 — nothing reaches a raise site in it, which runs after the earlier operands' writes.
+          record_later_operand(node, entry, taken)
           return entry
         end
 

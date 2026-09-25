@@ -412,6 +412,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1231 — a rescue arm and an ensure clause read the `begin` body's writes made before the raise, not only
+  # the `begin`'s entry scope. The controls read a local no rescued raise can follow a write of, and still report.
+  describe "fixtures/rescue_arm_begin_writes.rb — a rescue arm reads the body's pre-raise writes" do
+    let(:harness) { harness_for("rescue_arm_begin_writes") }
+
+    it "reports nothing but the controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = [
+        *marked_lines(harness, "# GENUINE-NIL").map { |line| [line, "call.possible-nil-receiver"] },
+        *marked_lines(harness, "# GENUINE-UNDEFINED").map { |line| [line, "call.undefined-method"] },
+        *marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] }
+      ]
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/non_empty_refinement_mutation_widening.rb — a mutator invalidates `non-empty-array`" do
     let(:harness) { harness_for("non_empty_refinement_mutation_widening") }
 

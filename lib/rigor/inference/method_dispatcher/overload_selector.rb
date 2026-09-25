@@ -452,10 +452,10 @@ module Rigor
             result = param_type.accepts(arg, mode: :gradual)
             return result.yes? && ProvenOverload.names_arg_class?(param_type, arg) if strict == :proven
 
-            # A record's `maybe` for a `Hash` with a gradual arm is no evidence for the overload: with
-            # `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
+            # A record's `maybe` for a `Hash` with a gradual arm or an open shape is no evidence for the overload:
+            # with `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
             # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.
-            return false if strict && result.maybe? && Acceptance.record_against_gradual_hash?(param_type, arg)
+            return false if strict && result.maybe? && Acceptance.record_against_open_hash?(param_type, arg)
 
             result.yes? || result.maybe?
           end

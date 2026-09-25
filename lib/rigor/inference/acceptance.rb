@@ -76,11 +76,13 @@ module Rigor
       private_constant :TYPE_HANDLERS
 
       # Whether `param` contains a record (at any depth: `Array[{ a: Integer }]`, a tuple, a union) and `arg` a
-      # `Hash` with a gradual arm ({#gradual_hash?}). That pair is where a record answers `maybe` because it cannot
-      # read the entries, and the `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict
-      # pass reads it as no evidence for the overload.
-      def record_against_gradual_hash?(param, arg)
-        contains_type?(param) { |type| type.is_a?(Type::HashShape) } && contains_type?(arg) { |type| gradual_hash?(type) }
+      # hash whose entries the analysis cannot all read: a `Hash` with a gradual arm ({#gradual_hash?}) or an open
+      # `HashShape`. That pair is where a record answers `maybe` because it cannot prove the key set, and the
+      # `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict pass reads it as no evidence
+      # for the overload.
+      def record_against_open_hash?(param, arg)
+        contains_type?(param) { |type| type.is_a?(Type::HashShape) } &&
+          contains_type?(arg) { |type| gradual_hash?(type) || (type.is_a?(Type::HashShape) && type.open?) }
       end
 
       # rubocop:disable-next Metrics/ClassLength
@@ -971,9 +973,11 @@ module Rigor
 
         # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
         # the other side and Ti accepts Ui (depth covariant). Optional keys may be absent on the other side;
-        # when present, their values are checked. A closed self rejects known or possible extra keys. Other
-        # types are rejected, except a `Hash` with a gradual arm (see {#gradual_hash?}); the converse direction
-        # (a Nominal accepting a HashShape) is handled by `accepts_nominal` via projection.
+        # when present, their values are checked. A closed self rejects known extra keys, and answers at most
+        # `maybe` for an open source: `h = { a: 1 }; h.default = 0` reopens a shape whose key set is still
+        # exactly the literal's. Other types are rejected, except a `Hash` with a gradual arm (see
+        # {#gradual_hash?}); the converse direction (a Nominal accepting a HashShape) is handled by
+        # `accepts_nominal` via projection.
         def accepts_hash_shape(self_type, other_type, mode)
           unless other_type.is_a?(Type::HashShape)
             return gradual_hash_verdict(self_type, other_type, mode) if gradual_hash?(other_type)
@@ -988,8 +992,6 @@ module Rigor
           return hash_shape_no(mode, "HashShape missing required keys: #{missing.inspect}") unless missing.empty?
 
           if self_type.closed?
-            return hash_shape_no(mode, "HashShape closed target rejects open source") if other_type.open?
-
             extra = other_type.pairs.keys - self_type.pairs.keys
             unless extra.empty?
               return hash_shape_no(mode, "HashShape closed target rejects extra keys: #{extra.inspect}")
@@ -997,7 +999,10 @@ module Rigor
           end
 
           per_entry = hash_shape_entry_results(self_type, other_type, mode)
-          combine_arg_results(per_entry, mode)
+          result = combine_arg_results(per_entry, mode)
+          return result unless result.yes? && self_type.closed? && other_type.open?
+
+          Type::AcceptsResult.maybe(mode: mode, reasons: "HashShape closed target cannot check open source")
         end
 
         # A `Hash` nominal — directly or as the base of a `Difference` (`non-empty-hash[K, V]`) — that is raw or

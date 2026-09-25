@@ -25,11 +25,54 @@ RSpec.describe Rigor::Inference::ErrorInfo do
   end
 
   describe ".rescue_entry" do
-    it "binds `$!` to the rescued type and `$@` to an `Array[String]`" do
-      entered = described_class.rescue_entry(scope, error_t)
+    it "binds `$!` to the rescued type and `$@` to an `Array[String]`, and unbinds `$?`" do
+      status = Rigor::Type::Combinator.nominal_of("Process::Status")
+      entered = described_class.rescue_entry(scope.with_global(:$?, status), error_t)
 
       expect(entered.global(:$!)).to eq(error_t)
       expect(entered.global(:$@)).to eq(trace_t)
+      expect(entered.global(:$?)).to be_nil
+    end
+
+    # A class guard does not narrow a global receiver yet (#1429): a bound `$!` would report against the guard.
+    it "binds neither `$!` nor `$@` for a body that guards `$!` by its class" do
+      outer = scope.with_global(:$!, error_t).with_global(:$@, trace_t)
+      ["$!.key if $!.is_a?(KeyError)", "$!.kind_of?(KeyError)", "$!.instance_of?(KeyError)",
+       "$!.respond_to?(:key)", "KeyError === $!", "case $!\nwhen KeyError then 1\nend",
+       "case $!\nin KeyError then 1\nend", "[1].each { next unless $!.is_a?(KeyError) }"].each do |body|
+        entered = described_class.rescue_entry(outer, error_t, Prism.parse(body).value)
+
+        expect([entered.global(:$!), entered.global(:$@)]).to eq([nil, nil]), body
+      end
+    end
+
+    it "binds `$!` for a body whose guards are on something else" do
+      ["$!.message", "e.is_a?(KeyError)", "$@.is_a?(Array)", "KeyError === e", "case e\nwhen KeyError then 1\nend",
+       "$!.class == KeyError"].each do |body|
+        entered = described_class.rescue_entry(scope, error_t, Prism.parse(body).value)
+
+        expect(entered.global(:$!)).to eq(error_t), body
+      end
+    end
+
+    it "leaves `$@` unbound for a body that calls `set_backtrace`, and still binds `$!`" do
+      entered = described_class.rescue_entry(scope, error_t, Prism.parse("$!.set_backtrace(nil)").value)
+
+      expect(entered.global(:$@)).to be_nil
+      expect(entered.global(:$!)).to eq(error_t)
+      expect(described_class.rescue_entry(scope, error_t, Prism.parse("$!.backtrace").value).global(:$@))
+        .to eq(trace_t)
+    end
+
+    # `rescue` calls `===` to match, and a project class may redefine it to accept anything.
+    it "reads a class that it or a project ancestor gives a singleton `===` as `Dynamic[top]`" do
+      untyped = Rigor::Type::Combinator.untyped
+      expect(last_read("class Matchy < StandardError; def self.===(o) = true; end\n" \
+                       "begin; x; rescue Matchy; $!; end", :$!)).to eq(untyped)
+      expect(last_read("class Base < StandardError; def self.===(o) = true; end\nclass Leaf < Base; end\n" \
+                       "begin; x; rescue Leaf; $!; end", :$!)).to eq(untyped)
+      expect(last_read("class Leaf < StandardError; def self.other = 1; end\n" \
+                       "begin; x; rescue Leaf; $!; end", :$!)).to eq(Rigor::Type::Combinator.nominal_of("Leaf"))
     end
 
     it "reads a rescue list's members below `Exception` as themselves, a project class's through its superclass" do
@@ -68,9 +111,33 @@ RSpec.describe Rigor::Inference::ErrorInfo do
   end
 
   describe ".modifier_entry" do
-    it "binds the fallback of a rescue modifier to a rescued `StandardError`" do
+    it "binds the fallback of a rescue modifier to a rescued `StandardError`, unless the fallback guards it" do
       expect(described_class.modifier_entry(scope).global(:$!)).to eq(error_t)
+      guard = Prism.parse("$!.is_a?(KeyError) ? $! : nil").value
+      expect(described_class.modifier_entry(scope, guard).global(:$!)).to be_nil
       expect(last_read("y = (x rescue $!)\n$!", :$!)).to be_nil
+    end
+  end
+
+  # The evaluator binds `$!` in a clause it enters; the scope index and the expression typer read a clause or fallback
+  # they reach without it with `$!` unbound, never the enclosing clause's.
+  describe "an unentered clause" do
+    let(:outer) { "begin; raise ArgumentError; rescue ArgumentError\n%s\nend" }
+
+    it "reads `$!` unbound in a modifier's fallback and a value-position `begin`'s clause and `ensure`" do
+      ["h.fetch(:a) rescue $!", "warn(begin; x; rescue KeyError; $!; end)", "warn(begin; x; ensure; $!; end)",
+       "warn(xs.map do |x| x; rescue KeyError; $! end)"].each do |inner|
+        expect(last_read(format(outer, inner), :$!)).to be_nil, inner
+      end
+      expect(last_read(format(outer, "warn($!)"), :$!)).to eq(Rigor::Type::Combinator.nominal_of("ArgumentError"))
+    end
+
+    it "types a value-position `begin`'s clauses, and a clause typed directly, with `$!` unbound" do
+      rescuing = scope.with_global(:$!, error_t).with_global(:$?, error_t)
+      begin_node = Prism.parse("begin; :ok; rescue KeyError; $!; end").value.statements.body.first
+
+      expect(rescuing.type_of(begin_node).describe(:short)).to eq(":ok | Dynamic[top]")
+      expect(rescuing.type_of(begin_node.rescue_clause)).to eq(Rigor::Type::Combinator.untyped)
     end
   end
 

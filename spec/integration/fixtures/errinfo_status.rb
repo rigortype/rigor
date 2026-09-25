@@ -1,5 +1,6 @@
 # rubocop:disable Style/SpecialGlobalVars, Lint/UselessAssignment, Style/RescueModifier, Lint/SuppressedException
 require "rigor/testing"
+require "timeout"
 include Rigor::Testing
 
 # Issue #1360 — `$!` is the exception being rescued and `$@` its backtrace: Ruby finds them through the nearest rescue
@@ -161,6 +162,95 @@ rescue AppError
   -> { assert_type("Dynamic[top]", $!) }
 end
 
+# A clause that guards `$!` by its class reads `$!` and `$@` unbound, as before #1360: a class guard does not narrow a
+# global receiver yet (#1429), so a bound `StandardError` would report `key` against the guard (Ruby: :a in each, and
+# exit status 3 in `guarded_exit_status`).
+def guarded_is_a(h)
+  h.fetch(:a)
+rescue
+  $!.key if $!.is_a?(KeyError) # QUIET-1360
+end
+
+def guarded_case(h)
+  h.fetch(:a)
+rescue
+  case $!
+  when KeyError then $!.key # QUIET-1360
+  end
+end
+
+def guarded_case_equality(h)
+  h.fetch(:a)
+rescue
+  $!.key if KeyError === $! # QUIET-1360
+end
+
+def guarded_kind_of(h)
+  h.fetch(:a)
+rescue
+  return unless $!.kind_of?(KeyError)
+
+  $!.key # QUIET-1360
+end
+
+def guarded_exit_status
+  exit 3
+rescue Exception
+  exit($!.status) if $!.is_a?(SystemExit) # QUIET-1360
+end
+
+# A clause or fallback the analysis types without entering it (a rescue modifier's fallback, a `begin` or `do` block
+# with a rescue clause in a value position) reads `$!` unbound, never the enclosing clause's ArgumentError (Ruby: :a,
+# :a, the ENOENT's errno, :a, [:b], the OtherError, and the ArgumentError in the `ensure` reached normally).
+def unentered_clauses(h, path, xs)
+  raise ArgumentError
+rescue ArgumentError
+  h.fetch(:a) rescue $!.key # QUIET-1360
+  k = (h.fetch(:a) rescue $!.key) # QUIET-1360
+  File.read(path) rescue warn($!.errno.to_s) # QUIET-1360
+  warn(begin
+    h.fetch(:a)
+  rescue KeyError
+    $!.key # QUIET-1360
+  end.inspect)
+  warn(xs.map do |x|
+    h.fetch(x)
+  rescue KeyError
+    $!.key # QUIET-1360
+  end.inspect)
+  assert_type("[Dynamic[top]]", [begin; raise OtherError; rescue OtherError; $!; end])
+  assert_type("[1]", [begin; 1; ensure; assert_type("Dynamic[top]", $!); end])
+  k
+end
+
+# A rescue modifier's fallback that guards `$!` by its class reads it unbound in the modifier's value too (Ruby: nil,
+# the RuntimeError not being a KeyError).
+def guarded_modifier
+  found = ((raise "x") rescue ($!.is_a?(KeyError) ? $! : nil))
+  assert_type("Dynamic[top]?", found)
+end
+
+# A class that gives itself a singleton `===` matches exceptions that are not its instances (Ruby: the RuntimeError).
+class Matchy < StandardError
+  def self.===(_exception) = true
+end
+
+def matchy_class
+  raise "boom"
+rescue Matchy
+  assert_type("Dynamic[top]", $!)
+end
+
+# `set_backtrace(nil)` makes `$@` nil (Ruby: nil), so a clause that calls it reads `$@` unbound; `$!` is still the
+# exception (Ruby: the AppError).
+def reset_backtrace
+  raise AppError
+rescue AppError
+  $!.set_backtrace(nil)
+  assert_type("Dynamic[top]", $@)
+  assert_type("AppError", $!)
+end
+
 # A copy of `$!` in a rescue clause is the exception, never nil.
 def quiet_error_copy
   Integer("x")
@@ -258,6 +348,40 @@ def status_ensure
     assert_type("Dynamic[top]", $?)
   end
   assert_type("Process::Status", $?)
+end
+
+# A backtick, `%x` or `system` sets `$?` to nil before it runs the child, so an exception raised while it waits
+# (`Timeout::Error`, `Interrupt`, `Thread#raise`) leaves `$?` nil: a rescue clause reads it unbound (Ruby: nil), and so
+# does the code past the `begin` and past a rescue modifier (Ruby: nil, nil).
+def status_interrupted
+  system("true")
+  begin
+    Timeout.timeout(0.3) { `sleep 2` }
+  rescue Timeout::Error
+    assert_type("Dynamic[top]", $?)
+  end
+  assert_type("Dynamic[top]", $?)
+end
+
+def status_interrupted_modifier
+  system("true")
+  out = (Timeout.timeout(0.3) { `sleep 2` } rescue nil)
+  assert_type("Dynamic[top]", $?)
+  out
+end
+
+# A body a `retry` re-enters runs again after such an exception (Ruby: a Process::Status on the first pass, nil on the
+# second).
+def status_retried
+  system("true")
+  tries = 0
+  begin
+    tries += 1
+    assert_type("Dynamic[top]", $?)
+    Timeout.timeout(0.3) { `sleep 2` } if tries == 1
+  rescue Timeout::Error
+    retry
+  end
 end
 
 # A copy of `$?` after a subprocess is its status, never nil.

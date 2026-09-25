@@ -28,30 +28,84 @@ module Rigor
       BACKTRACE = :$@
       NAMES = [ERROR_INFO, BACKTRACE].freeze
       EXCEPTION_ORDERINGS = Set[:equal, :subclass].freeze
-      private_constant :ERROR_INFO, :BACKTRACE, :NAMES, :EXCEPTION_ORDERINGS
+      # The class guards a clause may put on `$!` ({.guarded?}).
+      GUARDS = Set[:is_a?, :kind_of?, :instance_of?, :respond_to?].freeze
+      private_constant :ERROR_INFO, :BACKTRACE, :NAMES, :EXCEPTION_ORDERINGS, :GUARDS
 
       module_function
 
       # The scope a `rescue` clause, or a rescue modifier's fallback, runs from: `$!` bound to the exception it rescued
-      # and `$@` to that exception's backtrace. `exception_type` is what `rescue … => e` binds `e` to
+      # and `$@` to that exception's backtrace, with `$?` unbound. `exception_type` is what `rescue … => e` binds `e` to
       # (`StatementEvaluator#rescue_exception_type`): the union of the named classes' instances, `StandardError` for a
       # bare `rescue`. A member that is not a class RBS or the program places below `Exception` reads `Dynamic[top]`
       # instead: a rescue list may name a module with its own `===` (`rescue NetworkErrors`), which matches exceptions
-      # that are not instances of it, and a class the analyzer cannot place may be such an object too.
+      # that are not instances of it, and a class the analyzer cannot place may be such an object too. So does a class
+      # that it or a project ancestor gives its own singleton `===` (`class Matchy < StandardError; def self.===(o) =
+      # true`).
       #
-      # `$@` calls the exception's `backtrace`, which is an `Array[String]` for a raised exception; a program that
-      # defines a method named `backtrace` anywhere may return anything from it, so `$@` is left unbound there.
-      def rescue_entry(scope, exception_type)
-        entered = scope.forget_error_info.with_global(ERROR_INFO, rescued_type(exception_type, scope))
-        return entered if BlockCallTiming.project_defines_anywhere?(:backtrace, scope)
+      # `body` is the clause's statements or the fallback. When it guards `$!` by its class ({.guarded?}), the clause
+      # reads `$!` and `$@` unbound, as it did before issue #1360: a class guard does not narrow a global receiver yet,
+      # so `$!.key if $!.is_a?(KeyError)` would report the bound `StandardError` against the guard (ADR-117, point 3).
+      # Lift when #1429 narrows global receivers.
+      #
+      # `$@` calls the exception's `backtrace`, which is an `Array[String]` for a raised exception. It is left unbound
+      # in a program that defines a method named `backtrace` anywhere, which may return anything, and in a clause
+      # whose body calls `set_backtrace`, which may set it to nil.
+      #
+      # `$?` is unbound because the exception may have been raised while a subprocess waited: a backtick, `%x` or
+      # `system` sets `$?` to nil before it runs the child, so a `Timeout::Error`, an `Interrupt` or a `Thread#raise`
+      # there leaves it nil.
+      def rescue_entry(scope, exception_type, body = nil)
+        entered = scope.forget_error_info.forget_last_status
+        # Lift when #1429 narrows global receivers.
+        return entered if guarded?(body)
+
+        entered = entered.with_global(ERROR_INFO, rescued_type(exception_type, scope))
+        return entered if calls_set_backtrace?(body) || BlockCallTiming.project_defines_anywhere?(:backtrace, scope)
 
         entered.with_global(BACKTRACE, backtrace_type)
       end
 
       # The scope a rescue modifier's fallback (`expr rescue fallback`) runs from, which rescues a `StandardError`.
-      def modifier_entry(scope)
-        rescue_entry(scope, Type::Combinator.nominal_of("StandardError"))
+      def modifier_entry(scope, fallback = nil)
+        rescue_entry(scope, Type::Combinator.nominal_of("StandardError"), fallback)
       end
+
+      # The class guards on `$!` that {.rescue_entry} declines on, anywhere in `node`: `$!.is_a?`, `kind_of?`,
+      # `instance_of?` or `respond_to?`, a `===` whose argument is `$!` (`KeyError === $!`), and `case $!`.
+      def guarded?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if guard?(node)
+
+        found = false
+        node.rigor_each_child { |child| found ||= guarded?(child) }
+        found
+      end
+
+      def guard?(node)
+        case node
+        when Prism::CallNode
+          (GUARDS.include?(node.name) && error_info_read?(node.receiver)) ||
+            (node.name == :=== && error_info_read?(node.arguments&.arguments&.first))
+        when Prism::CaseNode, Prism::CaseMatchNode then error_info_read?(node.predicate)
+        else false
+        end
+      end
+
+      def error_info_read?(node)
+        node.is_a?(Prism::GlobalVariableReadNode) && node.name == ERROR_INFO
+      end
+
+      # True when `node` calls `set_backtrace` anywhere, on any receiver: `$!.set_backtrace(nil)` makes `$@` nil.
+      def calls_set_backtrace?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if node.is_a?(Prism::CallNode) && node.name == :set_backtrace
+
+        found = false
+        node.rigor_each_child { |child| found ||= calls_set_backtrace?(child) }
+        found
+      end
+      private_class_method :guard?, :error_info_read?, :calls_set_backtrace?
 
       # True when `node` reads `$!` or `$@` anywhere in it: the gate on typing a rescue modifier's fallback under
       # {.modifier_entry}, which most fallbacks (`rescue nil`) never need.
@@ -90,6 +144,7 @@ module Rigor
         return false unless type.is_a?(Type::Nominal)
 
         class_name = type.class_name
+        return false if own_case_equality?(class_name, scope)
         return true if exception_class?(class_name, scope)
         return false unless scope.known_user_class?(class_name)
 
@@ -101,6 +156,12 @@ module Rigor
         false
       end
 
+      # True when the program gives `class_name`, or a project ancestor of it, a singleton `===`, which `rescue` calls
+      # to match and which may accept an exception that is not an instance of it.
+      def own_case_equality?(class_name, scope)
+        !scope.singleton_def_through_ancestors(class_name, :===).first.nil?
+      end
+
       def exception_class?(class_name, scope)
         EXCEPTION_ORDERINGS.include?(scope.environment.class_ordering(class_name, "Exception"))
       end
@@ -108,7 +169,7 @@ module Rigor
       def backtrace_type
         Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.nominal_of("String")])
       end
-      private_class_method :rescued_type, :exception_instance?, :exception_class?, :backtrace_type
+      private_class_method :rescued_type, :exception_instance?, :own_case_equality?, :exception_class?, :backtrace_type
     end
   end
 end

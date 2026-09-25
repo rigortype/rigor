@@ -15,12 +15,17 @@ module Rigor
     # status 127), and `Process.wait`, `waitpid`, `wait2` or `waitpid2` without a flags argument, which blocks until a
     # child exits.
     #
-    # Two things set it back to `nil` (Ruby 4.0.5): one of those four waits given the `WNOHANG` flag when no child
-    # has exited, and `Process.waitall` when there is no child. Either can run inside any method the thread calls, or
-    # in a signal handler, so a file that holds one ({.clears?}) binds `$?` nowhere. Anywhere else a `$?` once set
-    # stays a `Process::Status`, so the binding survives later calls, blocks and loops until a join with a path that
-    # did not set it drops it. The root block of a new thread or ractor ({FreshFrameBlocks.entry}) and a closure's
-    # body ({FreshFrameBlocks.closure_entry}) start without it, and so does a method body.
+    # Ruby 4.0.5 sets it back to `nil` in four ways. One of those four waits given the `WNOHANG` flag sets it so when
+    # no child has exited, and `Process.waitall` when there is no child; either can run inside any method the thread
+    # calls, or in a signal handler, so a file that holds one ({.clears?}) binds `$?` nowhere. A backtick, `%x` or
+    # `system` sets it to nil before it runs the child, so an exception raised while it waits (`Timeout::Error`,
+    # `Interrupt`, `Thread#raise`) leaves it nil: a rescue clause or modifier fallback reads it unbound
+    # ({ErrorInfo.rescue_entry}), and so do the code past a rescue modifier and a body a `retry` re-enters. And
+    # `IO#close` on an `IO.popen` stream whose child was already reaped sets it to nil, which the analysis does not
+    # model. Otherwise a `$?` once set stays a `Process::Status`, so the binding survives later calls, blocks and loops
+    # until a join with a path that did not set it drops it. The root block of a new thread or ractor
+    # ({FreshFrameBlocks.entry}) and a closure's body ({FreshFrameBlocks.closure_entry}) start without it, and so does
+    # a method body.
     module LastStatus
       LAST_STATUS = :$?
       # The `Process` functions that wait for a child and set `$?` to its status. Their optional flags argument may

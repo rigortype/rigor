@@ -3696,8 +3696,28 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$!)).to be_nil
       _, post = special_reads("y = (x rescue (z = $!))\n", :$!, base: env_scope.with_global(:$!, argument_t))
       expect(post.global(:$!)).to eq(argument_t)
+      # A fallback that guards `$!` by its class reads it unbound (#1429).
+      _, post = special_reads("y = (x rescue (z = ($!.is_a?(KeyError) ? $! : nil)))\n", :$!)
+      expect(post.local(:z).describe(:short)).to eq("Dynamic[top]?")
       type, = evaluate("(raise 'm') rescue $!", base_scope: env_scope)
       expect(type).to eq(error_t)
+    end
+
+    # A backtick, `%x` or `system` sets `$?` to nil before it runs the child, so a raise while it waits leaves it nil.
+    it "unbinds `$?` in a rescue clause, past a modifier whose fallback may fall through, and in a retried body" do
+      bound = env_scope.with_global(:$?, status_t)
+      reads, post = special_reads("begin\n  `sleep 2`\nrescue\n  $?\nend\n$?\n", :$?, base: bound)
+      expect(reads).to eq([nil, nil])
+      expect(post.global(:$?)).to be_nil
+      _, post = special_reads("x = (`sleep 2` rescue nil)\n", :$?, base: bound)
+      expect(post.global(:$?)).to be_nil
+      _, post = special_reads("def m\n  x = (y rescue return)\nend\nx = (y rescue return)\n", :$?, base: bound)
+      expect(post.global(:$?)).to eq(status_t)
+      reads, = special_reads("begin\n  $?\n  `sleep 2`\nrescue\n  retry\nend\n", :$?, base: bound)
+      expect(reads).to all(be_nil)
+      expect(reads).not_to be_empty
+      reads, = special_reads("begin\n  $?\n  `sleep 2`\nrescue\n  1\nend\n", :$?, base: bound)
+      expect(reads).to eq([status_t])
     end
 
     it "binds `$?` after a subprocess a statement certainly ran, and not in a file that may clear it" do

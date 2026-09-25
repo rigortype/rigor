@@ -1357,8 +1357,24 @@ module Rigor
       # its rescue clauses made ({#bind_rescue_reference}) never reaches the code after it. The retry edge carries
       # locals and instance variables only, so a retried body reads them as the `begin` found them already. A `begin`
       # without a rescue chain binds neither.
+      #
+      # A body a `retry` re-enters runs again after the exception it raised, which may have come while a subprocess
+      # waited and so left `$?` nil, and the retry edge does not carry `$?`: such a `begin` is evaluated with `$?`
+      # unbound.
       def eval_begin_node(node)
-        node.rescue_clause ? restoring_error_info { eval_begin(node) } : eval_begin(node)
+        return eval_begin(node) unless node.rescue_clause
+        return evaluator_at(scope.forget_last_status).send(:eval_begin_node, node) if status_retried?(node)
+
+        restoring_error_info { eval_begin(node) }
+      end
+
+      # True when `$?` is bound and a rescue clause of `node` holds a `retry` that re-enters it.
+      def status_retried?(node)
+        return false unless scope.global(:$?)
+
+        current = node.rescue_clause
+        current = current.subsequent until current.nil? || collect_retries(current.statements)
+        !current.nil?
       end
 
       # The `[type, scope]` the block answers, for a `begin` or rescue modifier that starts from this evaluator's
@@ -2490,11 +2506,15 @@ module Rigor
       # rescue (s = 1)` left `s` on its pre-write binding. The value is the modifier's own, and one holding no write
       # or jump keeps the entry scope.
       #
-      # Issue #1360 — the arm runs with `$!` bound to the `StandardError` it rescued and `$@` to its backtrace, and the
-      # modifier leaves, through its end or a jump in the arm, with them restored to what it found.
+      # Issue #1360 — the arm runs with `$!` bound to the `StandardError` it rescued, `$@` to its backtrace and `$?`
+      # unbound ({ErrorInfo.modifier_entry}), and the modifier leaves, through its end or a jump in the arm, with `$!`
+      # and `$@` restored to what it found. `$?` is unbound past a modifier whose arm may fall through: `expr` may have
+      # raised while a subprocess waited, which leaves it nil. The threaded path gets that from the join with the arm.
       def eval_rescue_modifier(node)
         unless OperandEffects.any?(node)
-          return [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node)]
+          after = forget_rebound_specials(scope, node)
+          after = after.forget_last_status unless branch_unconditionally_exits?(node.rescue_expression)
+          return [scope.type_of(node, tracer: tracer), after]
         end
 
         type, after = restoring_error_info { thread_rescue_modifier(node) }
@@ -2509,7 +2529,7 @@ module Rigor
         # u.strip`, where the raise almost always comes from `Float` after it. Neither the arm nor anything in it
         # is recorded or typed from there, which keeps it where it was before #1256: an ADR-5 trade of the rare
         # raise-before-write path for no false positive on the common one.
-        arm_entry = ErrorInfo.modifier_entry(join_with_nil_injection(scope, after_expression))
+        arm_entry = ErrorInfo.modifier_entry(join_with_nil_injection(scope, after_expression), node.rescue_expression)
         after_rescue = thread_operand(node.rescue_expression, arm_entry, OperandWalk.new(nil), arm_entry)
         type = OperandWalk.type_of(scope, node, tracer, walk.types(tracer))
         after = if branch_unconditionally_exits?(node.rescue_expression)
@@ -5310,11 +5330,12 @@ module Rigor
       # (`rescue => h[:e]`) stores the exception through `[]=` instead, so its receiver widens with the exception
       # instance type as the stored value, exactly as `rescue => e; h[:e] = e` widens it.
       #
-      # Issue #1360 — with or without a reference, the clause runs with `$!` bound to the exception it rescued and `$@`
-      # to its backtrace ({ErrorInfo.rescue_entry}); {#eval_begin_node} restores what they were once the `begin` exits.
+      # Issue #1360 — with or without a reference, the clause runs with `$!` bound to the exception it rescued, `$@` to
+      # its backtrace and `$?` unbound ({ErrorInfo.rescue_entry}); {#eval_begin_node} restores `$!` and `$@` once the
+      # `begin` exits.
       def bind_rescue_reference(rescue_node, scope)
         exception_type = rescue_exception_type(rescue_node, scope)
-        scope = ErrorInfo.rescue_entry(scope, exception_type)
+        scope = ErrorInfo.rescue_entry(scope, exception_type, rescue_node.statements)
         ref = rescue_node.reference
         case ref
         when Prism::LocalVariableTargetNode

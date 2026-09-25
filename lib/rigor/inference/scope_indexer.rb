@@ -8583,6 +8583,14 @@ module Rigor
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         when Prism::CallNode
           propagate_call(node, table, current_scope)
+        when Prism::RescueNode, Prism::EnsureNode
+          # Issue #1360 — a clause the evaluator did not enter (a `begin` in a value position) reads `$!`, `$@` and
+          # `$?` unbound, not the enclosing clause's; one it entered keeps what it recorded.
+          child_scope = current_scope.forget_error_info.forget_last_status
+          node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        when Prism::RescueModifierNode
+          propagate(node.expression, table, current_scope)
+          propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end

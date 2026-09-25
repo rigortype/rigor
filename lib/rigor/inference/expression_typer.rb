@@ -1145,19 +1145,24 @@ module Rigor
         Type::Combinator.union(primary_type, *rescue_types)
       end
 
+      # Issue #1360 — the evaluator binds `$!` in a rescue clause it enters; a clause typed here, such as one in a
+      # `begin` passed as an argument, reads `$!`, `$@` and `$?` unbound rather than an enclosing clause's.
       def rescue_chain_types(rescue_node)
+        arm_typer = typer_under(rescue_arm_scope)
         types = []
         current = rescue_node
         while current
-          types << statements_or_nil(current.statements)
+          types << arm_typer.send(:statements_or_nil, current.statements)
           current = current.subsequent
         end
         types
       end
 
       def type_of_rescue(node)
-        statements_or_nil(node.statements)
+        typer_under(rescue_arm_scope).send(:statements_or_nil, node.statements)
       end
+
+      def rescue_arm_scope = scope.forget_error_info.forget_last_status
 
       # `expr rescue fallback` is RescueModifierNode in Prism. The result is `expr`'s type when no exception
       # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union. Issue #1360
@@ -1166,14 +1171,20 @@ module Rigor
         fallback = node.rescue_expression
         fallback_type =
           if ErrorInfo.read_in?(fallback)
-            ExpressionTyper.new(
-              scope: ErrorInfo.modifier_entry(scope), tracer: tracer, operand_types: @operand_types,
-              typing_node: @typing_node
-            ).type_of(fallback)
+            typer_under(ErrorInfo.modifier_entry(scope, fallback)).type_of(fallback)
           else
             type_of(fallback)
           end
         Type::Combinator.union(type_of(node.expression), fallback_type)
+      end
+
+      # A typer that shares this one's tracer and operand types but reads `other_scope`.
+      def typer_under(other_scope)
+        return self if other_scope.equal?(scope)
+
+        ExpressionTyper.new(
+          scope: other_scope, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node
+        )
       end
 
       def type_of_ensure(node)

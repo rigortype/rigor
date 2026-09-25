@@ -1216,10 +1216,11 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # A copy of `$!` in a rescue clause, or of `$?` after a subprocess, holds the exception or the status: calling a
-    # method on it reports nothing.
-    it "reports nothing on a copy of `$!` or `$?` read where it is bound" do
+    # method on it reports nothing. Nor does a `$!` a clause guards by its class, or one read in a clause or fallback
+    # the analysis types without entering.
+    it "reports nothing on a copy of `$!` or `$?`, a class-guarded `$!` or an unentered clause's `$!`" do
       reads = marked_lines(harness, "# QUIET-1360")
-      expect(reads.size).to eq(2)
+      expect(reads.size).to eq(12)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
 

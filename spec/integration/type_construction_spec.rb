@@ -1198,6 +1198,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/lastline_patched_reader.rb — a reader the program patches in narrows nothing (#1359)" do
+    let(:harness) { harness_for("lastline_patched_reader") }
+
+    it "leaves `$_` unbound after a reader whose name the file defines through the `define_method` family" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

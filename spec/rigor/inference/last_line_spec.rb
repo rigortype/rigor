@@ -117,6 +117,42 @@ RSpec.describe Rigor::Inference::LastLine do
     end
   end
 
+  # A program that puts its own reader in place through the `define_method` family runs that Ruby method, which sets
+  # its own frame's `$_` (Ruby 4.0.5: the caller's `$_` stays nil).
+  describe ".patched_readers" do
+    it "names a reader the `define_method` family puts in place, on any receiver" do
+      {
+        "STDIN.define_singleton_method(:gets) { }" => [:gets],
+        "$stdin.define_singleton_method('readline') { }" => [:readline],
+        "STDIN.singleton_class.define_method(:gets) { }" => [:gets],
+        "IO.define_method(:gets) { }" => [:gets],
+        "alias_method :gets, :to_s" => [:gets],
+        "alias gets to_s" => [:gets],
+        "IO.send(:define_method, :readline) { }" => [:readline],
+        "IO.public_send('alias_method', :gets, :to_s)" => [:gets]
+      }.each do |source, names|
+        expect(described_class.patched_readers(last_statement(source))).to eq(names), source
+      end
+    end
+
+    it "names both readers for a computed name, and none for another name or call" do
+      ["IO.define_method(name) { }", "alias_method(*names)", "alias :\"\#{x}\" to_s"].each do |source|
+        expect(described_class.patched_readers(last_statement(source))).to contain_exactly(:gets, :readline), source
+      end
+      ["define_method(:each) { }", "alias_method :to_str, :to_s", "IO.send(:puts, :gets)", "IO.send(name, :gets)",
+       "define_method(\"\\xff\") { }", "gets"].each do |source|
+        expect(described_class.patched_readers(last_statement(source))).to be_nil, source
+      end
+    end
+
+    it "keeps an explicit reader of a name the file patches in from narrowing, and no other" do
+      expect(reads_line?("STDIN.define_singleton_method(:gets) { }\nSTDIN.gets")).to be(false)
+      expect(reads_line?("IO.define_method(name) { }\n$stdin.gets")).to be(false)
+      expect(reads_line?("STDIN.define_singleton_method(:readline) { }\nSTDIN.gets")).to be(true)
+      expect(reads_line?("STDIN.gets")).to be(true)
+    end
+  end
+
   describe ".predicate_scopes" do
     it "binds `$_` to the line on each edge: `String` / `nil` for `gets`, `String` for `readline`" do
       truthy, falsey = described_class.predicate_scopes(last_statement("$stdin.gets"), scope, nil)

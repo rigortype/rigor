@@ -124,9 +124,7 @@ module Rigor
 
         class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
-        program_globals = build_program_global_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(program_globals: program_globals))
-        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope = seed_program_globals(root, seeded_scope)
 
         # Slice 7 phase 9. In-source constant value tracking. Walks every ConstantWriteNode/ConstantPathWriteNode in the
         # program and types its rvalue under a scope that carries the surrounding qualified prefix as `self_type`, so
@@ -2085,6 +2083,17 @@ module Rigor
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
+      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
+      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in.
+      def seed_program_globals(root, seeded_scope)
+        program_globals, patched_line_readers = build_program_global_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_discovery(
+          seeded_scope.discovery.with(program_globals: program_globals, patched_line_readers: patched_line_readers)
+        )
+        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope
+      end
+
       # Slice 7 phase 6 — program-global pre-pass. Globals are process-wide so the accumulator is a flat `Hash[Symbol,
       # Type::t]` populated from every `Prism::GlobalVariableWriteNode` in the program (top-level AND inside method
       # bodies). The same accumulator is seeded into every method body and the top-level scope.
@@ -2095,19 +2104,26 @@ module Rigor
       FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
       private_constant :FRAME_LOCAL_GLOBALS
 
+      #
+      # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
+      # ({LastLine.patched_readers}), which it reaches in every node too.
+      # @return the `[program_globals, patched_line_readers]` pair
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        gather_global_writes(root, default_scope, accumulator)
-        accumulator.freeze
+        patched = Set.new
+        gather_global_writes(root, default_scope, accumulator, patched)
+        [accumulator.freeze, patched.freeze]
       end
 
-      def gather_global_writes(node, scope, accumulator)
+      def gather_global_writes(node, scope, accumulator, patched)
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::GlobalVariableWriteNode) && !FRAME_LOCAL_GLOBALS.include?(node.name)
           record_global_write(node, scope, accumulator)
         end
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator) }
+        readers = LastLine.patched_readers(node)
+        patched.merge(readers) if readers
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, patched) }
       end
 
       def record_global_write(node, scope, accumulator)

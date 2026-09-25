@@ -59,6 +59,13 @@ module Rigor
         Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
       ].freeze
       LAST_LINE = :$_
+      # The calls that put a method in place under the name they are given: the new name, for `alias_method`.
+      DEFINERS = Set[:define_method, :define_singleton_method, :alias_method].freeze
+      DEFINER_NAMES = DEFINERS.to_set(&:to_s).freeze
+      ALL_READERS = READERS.to_a.freeze
+      # Compared as Strings: a literal with an invalid byte (`define_method("\xff")`) cannot become a Symbol.
+      READER_STRINGS = READERS.to_set(&:to_s).freeze
+      private_constant :DEFINERS, :DEFINER_NAMES, :ALL_READERS, :READER_STRINGS
       private_constant :SETTER_NAMES, :LINE_EDITORS, :READER_GLOBALS, :READER_OWNERS, :DELEGATING_CLASSES,
                        :DELEGATING_ORDERINGS, :SENDS, :EVALS, :WRITES, :LAST_LINE
 
@@ -82,6 +89,7 @@ module Rigor
         receiver = call_node.receiver
         return false if receiver.nil? || receiver.is_a?(Prism::SelfNode) || !call_node.block.nil?
         return false if BlockCallTiming.project_defines_anywhere?(call_node.name, scope)
+        return false if scope.discovery.patched_line_readers.include?(call_node.name)
 
         if receiver.is_a?(Prism::GlobalVariableReadNode)
           reader_global?(receiver.name, call_node.name, scope)
@@ -108,6 +116,41 @@ module Rigor
         falsey = falsey.with_global(LAST_LINE, Narrowing.narrow_falsey(line)) unless call_node.safe_navigation?
         [truthy, falsey]
       end
+
+      # The reader names `node` patches in through the `define_method` family, on any receiver, or nil: a
+      # `define_method`, `define_singleton_method` or `alias_method` call (or a `send`, `__send__` or `public_send`
+      # naming one) and an `alias` whose new name is `gets` or `readline`, or is not a literal, which may be either.
+      # `Inference::ScopeIndexer` gathers them for the file ({Scope::DiscoveryIndex#patched_line_readers}).
+      def patched_readers(node)
+        case node
+        when Prism::AliasMethodNode then reader_named(node.new_name)
+        when Prism::CallNode
+          arguments = node.arguments&.arguments
+          if DEFINERS.include?(node.name)
+            reader_named(arguments&.first)
+          elsif SENDS.include?(node.name) && arguments && definer_name?(arguments.first)
+            reader_named(arguments[1])
+          end
+        end
+      end
+
+      # The readers a method-name argument may name: its own when it is a reader's literal, both when it is not a
+      # literal, and none for another literal or no argument at all.
+      def reader_named(name_node)
+        case name_node
+        when nil then nil
+        when Prism::SymbolNode, Prism::StringNode
+          name = name_node.unescaped
+          [name.to_sym] if READER_STRINGS.include?(name)
+        else ALL_READERS
+        end
+      end
+
+      def definer_name?(name_node)
+        (name_node.is_a?(Prism::SymbolNode) || name_node.is_a?(Prism::StringNode)) &&
+          DEFINER_NAMES.include?(name_node.unescaped)
+      end
+      private_class_method :reader_named, :definer_name?
 
       # True when running `node` may set `$_` in the frame it runs in, anywhere in `node` but a nested `def`, class
       # or module body or a root block ({FreshFrameBlocks.any_frame_child?}): a call {.call_may_set?} counts, a write

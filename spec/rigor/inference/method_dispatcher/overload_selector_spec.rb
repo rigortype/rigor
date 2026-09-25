@@ -404,6 +404,22 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("BigDecimal")
       end
 
+      it "selects member by member for a Dynamic argument whose facet names several classes (#1350)" do
+        # `Rational + Dynamic[Integer | Float]`: the Integer takes `(Numeric) -> Rational`, the Float
+        # `(Float) -> Float`, and both come back for the dispatch layer to join.
+        definition = env.rbs_loader.instance_definition("Rational")
+        arg = Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                        Rigor::Type::Combinator.nominal_of("Float"))
+        )
+        rational = Rigor::Type::Combinator.nominal_of("Rational")
+        candidates = described_class.select_candidates(
+          definition.methods[:+], arg_types: [arg], self_type: rational, instance_type: rational, environment: env
+        )
+        params = candidates.map { |mt| mt.type.required_positionals.first.type.name.relative!.to_s }
+        expect(params).to contain_exactly("Numeric", "Float")
+      end
+
       it "still prefers the receiver-affinity arm for an untyped argument on Rational#+" do
         mt = select_with_env("Rational", :+, [Rigor::Type::Combinator.untyped])
         expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("Numeric")

@@ -157,6 +157,14 @@ def and_right_operand(ios)
   end
 end
 
+# `IO.foreach` sets `$_` to each line it yields, and to nil once the input ends (Ruby: nil after the call).
+def foreach_reader(path)
+  if gets
+    IO.foreach(path) { |_| nil }
+    assert_type("Dynamic[top]", $_)
+  end
+end
+
 # A lambda that reads a line can run at any later call (Ruby after `reread.call`: the later line).
 def lambda_reader
   reread = -> { gets }
@@ -333,6 +341,16 @@ def quiet_assignment_condition
     copy = $_
     copy.chomp # QUIET-1359
     line.chomp # QUIET-1359
+  end
+end
+
+# The falsey edge's nil does not reach a `foreach` block, which reads the line `foreach` yields (Ruby: each line).
+def quiet_foreach(path)
+  unless gets
+    IO.foreach(path) do |_|
+      copy = $_
+      copy.chomp # QUIET-1359
+    end
   end
 end
 

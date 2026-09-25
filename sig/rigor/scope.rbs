@@ -200,6 +200,12 @@ module Rigor
     # sig-gen gap: #1154 — the frame reader over an ivar assigned in `initialize` from a parameter reaches
     # `untyped`, so the `bool` is hand-written.
     def match_rebinding_closure?: () -> bool
+    def forget_last_line: () -> Scope
+    def untyped_last_line: () -> Scope
+    # sig-gen gap: #1154 — the same readers as `match_globals_bound?` and `match_rebinding_closure?`, over the
+    # `@globals` and `@match_frame` ivars `initialize` assigns from parameters, so each `bool` is hand-written.
+    def last_line_bound?: () -> bool
+    def last_line_closure?: () -> bool
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool

@@ -57,7 +57,8 @@ module Rigor
       # The calls on the method's own `&block` parameter that run it, which the broad reading counts.
       BLOCK_INVOCATIONS = Set[:call, :yield, :[], :===].freeze
 
-      # A body that runs in a frame of its own, or never runs (`defined?` evaluates nothing).
+      # A body that runs in a frame of its own, or never runs (`defined?` evaluates nothing): every walk of what a
+      # frame runs stops there, `$_`'s ({LastLine}) included.
       OWN_FRAME_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
@@ -69,7 +70,7 @@ module Rigor
       ].freeze
       private_constant :ALWAYS_MATCHING, :REGEXP_ARGUMENT, :BLOCK_FORM_ONLY, :MATCHING_SYMBOL_PROCS, :BROAD_ARGUMENT,
                        :ADDED_NAMES, :BLOCK_INVOCATIONS,
-                       :OWN_FRAME_NODES, :LAST_LINE_MATCHES, :GLOBAL_WRITES
+                       :LAST_LINE_MATCHES, :GLOBAL_WRITES
 
       module_function
 
@@ -207,7 +208,6 @@ module Rigor
         else false
         end
       end
-      private_class_method :handoff_node?
 
       # {.may_match?} on broad terms, where over-counting costs no more than an implicit-self call forgetting as it
       # did before issue #1364: a {BROAD_ARGUMENT} name counts with any argument that may be a Regexp — a block
@@ -240,7 +240,7 @@ module Rigor
         !block_name.nil? && receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == block_name &&
           BLOCK_INVOCATIONS.include?(call_node.name)
       end
-      private_class_method :broad_matching_node?, :own_block_call?
+      private_class_method :handoff_node?, :broad_matching_node?, :own_block_call?
 
       # True when the block `call_node` passes may rebind the frame's match globals while the call runs: a block
       # literal whose body {.may_match?}, or a block argument that {.block_argument_may_match?}. The root block of a
@@ -322,9 +322,7 @@ module Rigor
       # handed to — so {Frame} answers for the whole frame. The root block of a thread or fiber is kept too, but it
       # only ever runs as that thread's or fiber's root, with a slot of its own ({FreshFrameBlocks}); a closure made
       # inside it still counts, since it may be handed back to this frame's thread.
-      def matching_closure?(node, scope = nil)
-        makes_closure?(node, scope) { |body| may_match?(body, scope) }
-      end
+      def matching_closure?(node, scope = nil) = makes_closure?(node, scope) { |body| may_match?(body, scope) }
 
       # The walk under {.matching_closure?}, shared with `$_` ({LastLine.closure?}): the block answers whether a
       # closure body may rebind the special it asks about.
@@ -341,15 +339,10 @@ module Rigor
 
       def stored_block_rebinds?(call_node, scope)
         block = call_node.block
-        return false unless block.is_a?(Prism::BlockNode)
-
-        StoredBlockCall.stores_block?(call_node) && !FreshFrameBlocks.root_call?(call_node, scope) && yield(block.body)
+        block.is_a?(Prism::BlockNode) && StoredBlockCall.stores_block?(call_node) &&
+          !FreshFrameBlocks.root_call?(call_node, scope) && yield(block.body)
       end
       private_class_method :stored_block_rebinds?
-
-      # True for a `def`, class or module body, which runs in a frame of its own, and a `defined?` operand, which
-      # never runs: every walk of what a frame runs stops there.
-      def own_frame?(node) = OWN_FRAME_NODES.include?(node.class)
 
       # The scope a block or lambda body enters with: `scope` with its match globals forgotten when the body may
       # match, or when the frame makes a closure that may. The body can run on a later iteration, after an earlier

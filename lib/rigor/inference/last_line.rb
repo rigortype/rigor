@@ -17,15 +17,17 @@ module Rigor
     # the body, shares it; a call into a method defined in Ruby writes that method's slot, never its caller's; and
     # the root block of a thread, fiber or ractor has one of its own ({FreshFrameBlocks}). Only a C-implemented
     # reader sets its caller's `$_`, to the line it returns: `Kernel#gets` / `#readline` and the same methods of
-    # `IO`, `StringIO`, `ARGF` and `Zlib::GzipReader`. `each_line` and `readlines` leave it alone.
+    # `IO`, `StringIO`, `ARGF` and `Zlib::GzipReader`; `IO.foreach` sets it to each line it yields. `each_line` and
+    # `readlines` leave it alone.
     #
     # A call is read two ways, as the match globals' calls are:
     #
     # - {.reads_line?}: the call certainly is such a reader, run in this frame, so a condition on its value narrows
     #   `$_` on both edges ({Narrowing}). Apart from a write, that is the only place `$_` is bound.
-    # - {.may_set?}: running the code may set `$_` in this frame, so a narrowing of it is forgotten: a reader's name
-    #   on any receiver (a `Dynamic` one, or one whose reader turns out to be a Ruby method, which only costs the
-    #   narrowing), a `send` that may name one, an eval of a String, a write, or a block argument that may run one.
+    # - {.may_set?}: running the code may set `$_` in this frame, so a narrowing of it is forgotten: a reader's or
+    #   `foreach`'s name on any receiver (a `Dynamic` one, or one whose method turns out to be defined in Ruby, which
+    #   only costs the narrowing), a `send` that may name one, an eval of a String, a write, or a block argument that
+    #   may run one.
     #
     # A reader that is not a condition leaves `$_` unbound, not bound to its `String?`: nothing proves the line
     # non-nil there, and a `String?` would report correct code that checks the reader's value another way before
@@ -33,7 +35,13 @@ module Rigor
     module LastLine
       # The C readers' names.
       READERS = Set[:gets, :readline].freeze
-      READER_NAMES = READERS.to_set(&:to_s).freeze
+      # Every name that may set its caller's `$_`, on any receiver: the readers, and `IO.foreach`, which sets it to
+      # each line before it yields the line and to nil once the input ends. Compared as Strings where a literal
+      # names one.
+      SETTERS = (READERS | Set[:foreach]).freeze
+      SETTER_NAMES = SETTERS.to_set(&:to_s).freeze
+      # The `Kernel` functions `ruby -n` / `-p` adds, which edit `$_` in place of an implicit-self receiver.
+      LINE_EDITORS = Set[:sub, :gsub, :chop, :chomp].freeze
       # Receivers whose reader is the interpreter's own, whatever the analyzer infers for them: `Kernel.gets`, and
       # the objects `ARGF` and `STDIN`.
       READER_CONSTANTS = Set[:Kernel, :ARGF, :STDIN].freeze
@@ -55,7 +63,7 @@ module Rigor
         Prism::GlobalVariableAndWriteNode, Prism::GlobalVariableTargetNode
       ].freeze
       LAST_LINE = :$_
-      private_constant :READER_NAMES, :READER_CONSTANTS, :READER_GLOBALS, :READER_OWNERS, :KERNEL_OWNER,
+      private_constant :SETTER_NAMES, :LINE_EDITORS, :READER_CONSTANTS, :READER_GLOBALS, :READER_OWNERS, :KERNEL_OWNER,
                        :DELEGATING_CLASSES,
                        :DELEGATING_ORDERINGS, :SENDS, :EVALS, :WRITES, :LAST_LINE
 
@@ -114,7 +122,7 @@ module Rigor
 
       def scan(node, scope)
         return true if setting_node?(node, scope)
-        return false if MatchRebinding.own_frame?(node)
+        return false if MatchRebinding::OWN_FRAME_NODES.include?(node.class)
 
         FreshFrameBlocks.any_frame_child?(node, scope) { |child| scan(child, scope) }
       end
@@ -128,11 +136,11 @@ module Rigor
       end
       private_class_method :scan, :setting_node?
 
-      # True when `call_node` itself, on any receiver, may set its caller's `$_`: a reader's name, a `send` whose
-      # name is not a literal or names a reader, or an eval of a String.
+      # True when `call_node` itself may set its caller's `$_`: a {SETTERS} name on any receiver, a {LINE_EDITORS}
+      # name on implicit `self`, a `send` whose name is not a literal or names a setter, or an eval of a String.
       def call_may_set?(call_node)
         name = call_node.name
-        return true if READERS.include?(name)
+        return true if SETTERS.include?(name) || (call_node.receiver.nil? && LINE_EDITORS.include?(name))
 
         arguments = call_node.arguments&.arguments
         return sent_reader?(arguments&.first) if SENDS.include?(name)
@@ -147,7 +155,7 @@ module Rigor
         expression = block_argument.expression
         case expression
         when nil then false
-        when Prism::SymbolNode then READER_NAMES.include?(expression.unescaped)
+        when Prism::SymbolNode then SETTER_NAMES.include?(expression.unescaped)
         when Prism::LocalVariableReadNode
           frame = scope&.match_frame
           frame.nil? || !frame.forwarded_block?(expression.name)
@@ -206,14 +214,19 @@ module Rigor
 
       # The scope a block or lambda body enters with, as {MatchRebinding.block_entry} gives the match globals': `$_`
       # forgotten when the body may set it, which a later iteration then reads, when the frame makes a closure that
-      # may, or when the owning call's receiver chain or arguments may, which Ruby runs before the method yields.
+      # may, or when the owning call may: its receiver chain and arguments run before the method yields, and
+      # `IO.foreach` sets `$_` to each line it yields.
       def block_entry(scope, block_node, call_node = nil)
         return scope unless scope.last_line_bound?
-        return scope unless scope.last_line_closure? || may_set?(block_node.body, scope) ||
-                            (call_node.is_a?(Prism::CallNode) && operands_may_set?(call_node, scope))
+        return scope unless scope.last_line_closure? || may_set?(block_node.body, scope) || call_sets?(call_node, scope)
 
         scope.forget_last_line
       end
+
+      def call_sets?(call_node, scope)
+        call_node.is_a?(Prism::CallNode) && (call_may_set?(call_node) || operands_may_set?(call_node, scope))
+      end
+      private_class_method :call_sets?
 
       # `scope` with `$_` forgotten when `body` may set it: a loop body that runs again after it ran, or a `begin`
       # body a `rescue` clause reads after any prefix of it ran.
@@ -231,7 +244,7 @@ module Rigor
       def sent_reader?(name_node)
         case name_node
         when nil then false
-        when Prism::SymbolNode, Prism::StringNode then READER_NAMES.include?(name_node.unescaped)
+        when Prism::SymbolNode, Prism::StringNode then SETTER_NAMES.include?(name_node.unescaped)
         else true
         end
       end

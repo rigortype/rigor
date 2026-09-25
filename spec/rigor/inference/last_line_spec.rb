@@ -126,15 +126,16 @@ RSpec.describe Rigor::Inference::LastLine do
     def may_set?(source) = described_class.may_set?(last_statement(source), scope)
 
     it "counts a reader's name on any receiver, a `send` that may name one, an eval of a String and a write" do
-      ["gets", "io.gets", "obj.readline", "io.send(:gets)", "io.public_send('readline')", "io.send(name)",
-       "eval('x')", "klass.class_eval(src)", "$_ = 'x'", "$_ ||= 'x'", "$_, x = 1, 2"].each do |source|
+      ["gets", "io.gets", "obj.readline", "IO.foreach(path) { }", "File.foreach(path).to_a", "chomp", "sub(/a/, 'b')",
+       "io.send(:gets)", "io.public_send('readline')", "io.send(name)", "eval('x')", "klass.class_eval(src)",
+       "$_ = 'x'", "$_ ||= 'x'", "$_, x = 1, 2"].each do |source|
         expect(may_set?(source)).to be(true), source
       end
     end
 
     it "does not count another method, a `send` naming one, or an eval's block form" do
       ["io.each_line { }", "io.readlines", "io.send(:puts)", "io.send", "klass.class_eval { }", "$x = 1",
-       "puts $_"].each do |source|
+       "puts $_", "line.chomp", "line.sub(/a/, 'b')"].each do |source|
         expect(may_set?(source)).to be(false), source
       end
     end
@@ -232,6 +233,13 @@ RSpec.describe Rigor::Inference::LastLine do
 
       expect(described_class.block_entry(line, call.block, call).global(:$_)).to be_nil
       expect(described_class.block_entry(line, call.block).global(:$_)).to eq(string)
+    end
+
+    # `IO.foreach` sets `$_` to each line before it yields it.
+    it "forgets `$_` when the owning call itself sets it" do
+      call = last_statement("IO.foreach(path) { $_ }")
+
+      expect(described_class.block_entry(line, call.block, call).global(:$_)).to be_nil
     end
 
     it "forgets `$_` in a frame that makes a closure that may set it" do

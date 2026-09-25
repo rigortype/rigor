@@ -1729,10 +1729,7 @@ module Rigor
       # degrade to `T | nil` in the post-loop scope. The loop expression itself types as `Constant[nil]` (Slice 3 phase
       # 1), reflecting the common case where no `break VALUE` is observed.
       def eval_loop(node)
-        # Issue #1359 — a body that may set `$_` runs again after it ran, so neither the predicate nor any pass over
-        # the body reads a `$_` narrowing from before the loop. A `while gets` predicate narrows it afresh.
-        entry = LastLine.forget_if_set(scope, node.statements)
-        _pred_type, post_pred = sub_eval(node.predicate, entry)
+        _pred_type, post_pred = sub_eval(node.predicate, loop_entry_scope(node))
         post_pred = widen_predicate_pins(node, post_pred)
         return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 
@@ -1749,8 +1746,7 @@ module Rigor
         # The pass ends with its `next` exits as well as its fall-through ({#loop_iteration}). Its `break` arms are
         # superseded by the fixpoint's converged pass ({#loop_break_arms}) except in a `begin … end while` loop, below.
         jumps = loop_jumps(node.statements)
-        first_entry = node.begin_modifier? ? post_pred : loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
-        body_scope, first_breaks = loop_iteration(node.statements, first_entry, jumps)
+        body_scope, first_breaks = single_pass(node, post_pred, jumps)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
         rebound, body_first = loop_body_local_writes(node.statements, post_pred)
@@ -1772,6 +1768,18 @@ module Rigor
         post_loop = join_break_scopes(post_loop, first_breaks, names) if node.begin_modifier?
         post_loop = narrow_loop_exit_edge(node, post_loop)
         [Type::Combinator.constant_of(nil), post_loop]
+      end
+
+      # Issue #1359 — the scope a loop's predicate first runs from: a body that may set `$_` runs again after it ran,
+      # so neither the predicate nor any pass over the body reads a `$_` narrowing from before the loop. A `while
+      # gets` predicate narrows it afresh.
+      def loop_entry_scope(node) = LastLine.forget_if_set(scope, node.statements)
+
+      # {#eval_loop}'s single body pass. It enters on the predicate's loop-entry edge, as every fixpoint pass does,
+      # except a `begin … end while` body, which runs once before the predicate is tested.
+      def single_pass(node, post_pred, jumps)
+        entry = node.begin_modifier? ? post_pred : loop_pass_entry(node, post_pred, NO_LOOP_BINDINGS, NO_LOOP_NAMES)
+        loop_iteration(node.statements, entry, jumps)
       end
 
       # A `while` / `until` predicate runs before every iteration and once more to leave, but the walk evaluates it
@@ -2750,7 +2758,9 @@ module Rigor
       def forget_rebound_specials(after, node)
         return after if @in_operand
 
-        after = after.forget_match_globals if after.match_globals_bound? && MatchRebinding.value_may_rebind?(node, scope)
+        if after.match_globals_bound? && MatchRebinding.value_may_rebind?(node, scope)
+          after = after.forget_match_globals
+        end
         return after unless after.last_line_bound? && LastLine.may_set?(node, scope)
 
         after.forget_last_line
@@ -4863,7 +4873,8 @@ module Rigor
 
       # Globals are process-wide. The body scope already inherited the program-globals accumulator through
       # `with_program_globals`; seeding here just materialises each entry into the body's `globals` map so reads observe
-      # a precise type without consulting the accumulator on every lookup.
+      # a precise type without consulting the accumulator on every lookup. The frame-local `$_` and `$~` are not in it
+      # (issue #1359): a method body starts with a slot of its own.
       def seed_program_globals(body_scope)
         seeded = scope.program_globals
         return body_scope if seeded.empty?

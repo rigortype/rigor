@@ -6,15 +6,17 @@ module Rigor
     # ADR-32 WD13's "`sig/` wins per member": a `sig/` declaration and an inline (`@rbs` / `#:`) one of the
     # same member are compared instead of ranked.
     #
-    # - **Consistent** — in every type position one side's type is a subtype of the other's. `untyped` (and
+    # - **Consistent** — in every type position one side's type is a subtype of the other's, decided from
+    #   the two declarations alone ({Comparator#subset?}). `untyped` (and
     #   `void` / `top`, which RBS defines as the same top type) is consistent with everything and is the
     #   least precise answer, so a migrating project's `sig/ -> untyped` beside an inline `-> void` stays
     #   quiet (ADR-93's herb case). The two merge to the more precise side: when every position of the
     #   inline member is at least as precise as `sig/`'s and one is strictly more, the inline member binds
     #   and the `sig/` one stands down; otherwise `sig/` binds. Nothing is reported either way. The merge
     #   takes the narrower type in parameter positions too, which is the author's stated contract.
-    # - **Contradiction** — proven: some position whose two types are disjoint (no value is both), positional
-    #   arity ranges that cannot meet, or a keyword one side requires and the other cannot take in any form.
+    # - **Contradiction** — proven: some position every call fills whose two types are disjoint by the RBS
+    #   class hierarchy ({RbsProof}), positional arity ranges that cannot meet, or a keyword one side
+    #   requires and the other cannot take in any form.
     #   `sig/` still binds, so the class builds, and the run reports `rbs.contradicting-signature` as an
     #   error.
     # - **Undecided** — everything else: a position Rigor cannot read faithfully, two types it cannot prove
@@ -57,6 +59,72 @@ module Rigor
       NO_RECORDS = [].freeze
       private_constant :NO_RECORDS
 
+      # What a disjointness proof may lean on (ADR-112 WD5, #1075): the RBS class hierarchy the analysis
+      # itself uses, and the class and constant names the project's Ruby source defines. Never Ruby
+      # constants loaded in the analyzer process — those depend on which libraries happen to be required,
+      # and rbs and Ruby disagree about some of them (`Tempfile < File` in rbs, `< Delegator` in Ruby).
+      #
+      # Only the reported rows are derived with a proof; the environment build is not, and needs none:
+      # a contradiction and an undecided pair both keep the `.rbs` member, so a proof changes a row's
+      # severity and never which declaration binds.
+      class RbsProof
+        # A class / module header in Ruby source, and a top-level-style constant assignment
+        # (`Data = Struct.new(...)`): either can make a relative name in a signature mean the project's own.
+        RUBY_DECLARATION = /^[ \t]*(?:class|module)[ \t]+(?:::)?([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)/
+        RUBY_CONSTANT_ASSIGNMENT = /^[ \t]*([A-Z][A-Za-z0-9_]*)[ \t]*=(?![=~>])/
+        private_constant :RUBY_DECLARATION, :RUBY_CONSTANT_ASSIGNMENT
+
+        # @param loader — the project's {RbsLoader}, whose built environment answers the hierarchy.
+        # @param source_files — the project's Ruby files, read only when a proof meets a relative name.
+        def initialize(loader, source_files)
+          @loader = loader
+          @source_files = source_files
+          @ancestors = {}
+        end
+
+        # The RBS ancestor names of `name` (itself first) when RBS declares it as a class — not a module, an
+        # alias, or a stub Rigor synthesized for a referenced but undeclared name — or nil.
+        def class_ancestors(name)
+          key = name.to_s.delete_prefix("::")
+          return @ancestors[key] if @ancestors.key?(key)
+
+          @ancestors[key] = rbs_class_ancestors(key)
+        end
+
+        # Whether the project's Ruby source defines a class, module or constant whose name has `segment`
+        # as one of its `::` segments.
+        def shadowed?(segment)
+          source_segments.include?(segment)
+        end
+
+        private
+
+        def rbs_class_ancestors(key)
+          return nil if @loader.synthesized_type_names.include?(key)
+          return nil unless @loader.class_known?(key) && !@loader.rbs_module?(key)
+
+          ancestors = @loader.ancestor_names_for(key)
+          ancestors.first == key ? ancestors : nil
+        end
+
+        def source_segments
+          @source_segments ||= Array(@source_files).each_with_object(Set.new) do |path, segments|
+            text = read_source(path)
+            next if text.nil?
+
+            text.scan(RUBY_DECLARATION) { segments.merge(Regexp.last_match(1).to_s.split("::")) }
+            text.scan(RUBY_CONSTANT_ASSIGNMENT) { segments << Regexp.last_match(1).to_s }
+          end
+        end
+
+        def read_source(path)
+          text = File.read(path.to_s, encoding: "UTF-8")
+          text.valid_encoding? ? text : nil
+        rescue SystemCallError
+          nil
+        end
+      end
+
       class << self
         # @param signature_members — `{[class, method, kind] => [signature_path, member, visibility]}`, the
         #   first project `.rbs` member declaring each key, with its effective visibility.
@@ -64,16 +132,17 @@ module Rigor
         #   inline sources declare.
         # @param shadowable — the first segment of every class / module name the project's inputs declare
         #   ({Comparator#initialize}).
+        # @param proof — an {RbsProof} for the reported rows, or nil for the environment build.
         # @return a {Resolution}. Records are sorted and deduplicated; silent outcomes are recorded too, so a
         #   caller can see what merged where.
-        def resolve(signature_members, inline_members, shadowable: Set.new)
+        def resolve(signature_members, inline_members, shadowable: Set.new, proof: nil)
           return EMPTY if inline_members.empty?
 
           # Loaded here rather than with the file: {RbsLoader} requires this module on every run, and only a
           # project with inline RBS ever compares anything.
           require_relative "member_consistency/comparator"
 
-          state = { comparator: Comparator.new(shadowable), records: [], inline: Set.new,
+          state = { comparator: Comparator.new(shadowable, proof: proof), records: [], inline: Set.new,
                     signature: Hash.new { |hash, file| hash[file] = Set.new }, checked: {}.compare_by_identity }
           inline_members.each do |virtual_name, class_name, member, visibility|
             state[:records].concat(refinement_records(state, class_name, member, nil, virtual_name))

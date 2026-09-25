@@ -959,12 +959,12 @@ module Rigor
         # cache HIT never runs the build, and a stripped member leaves no trace in the environment to read
         # back. The build and {RbsLoader#member_consistency} call this same function on the same two inputs,
         # so the members they strip and the rows they report agree warm and cold.
-        def member_consistency_for(project_files, virtual_rbs)
+        def member_consistency_for(project_files, virtual_rbs, proof: nil)
           return MemberConsistency::EMPTY if virtual_rbs.nil? || virtual_rbs.empty?
 
           signature_members, shadowable = signature_member_index(project_files, virtual_rbs)
           inline_members = inline_member_entries(virtual_rbs, all: !signature_members.empty?)
-          MemberConsistency.resolve(signature_members, inline_members, shadowable: shadowable)
+          MemberConsistency.resolve(signature_members, inline_members, shadowable: shadowable, proof: proof)
         end
 
         # `[owners, shadowable]`. `owners` is `{[class_name, method_name, kind] => [signature_path, member,
@@ -1476,7 +1476,7 @@ module Rigor
         # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
         # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
         # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
-        # `:definition_build_summary_warned`, `:member_consistency`, `:internal_demand`,
+        # `:definition_build_summary_warned`, `:member_consistency`, `:member_consistency_proven`, `:internal_demand`,
         # `:internal_demand_status`, `:builder`, `:reflection`,
         # `:instance_definitions_table`, `:singleton_definitions_table`.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
@@ -1696,9 +1696,14 @@ module Rigor
       # trace in the env at all.
       #
       # @return the records, sorted. Empty (and free) whenever the project contributes no inline RBS.
-      def member_consistency
-        @state[:member_consistency] ||=
-          self.class.member_consistency_for(self.class.project_sig_files(@signature_paths), @virtual_rbs).records
+      #
+      # @param proof — a {MemberConsistency::RbsProof} over this loader, without which no pair is reported
+      #   as a contradiction (only the severity of a row depends on it, never which declaration binds).
+      def member_consistency(proof: nil)
+        key = proof ? :member_consistency_proven : :member_consistency
+        @state[key] ||= self.class.member_consistency_for(
+          self.class.project_sig_files(@signature_paths), @virtual_rbs, proof: proof
+        ).records
       end
 
       # The referenced-but-undeclared types {.stub_missing_referenced_types} stubbed so the project classes

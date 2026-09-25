@@ -74,12 +74,12 @@ rests on the fixtures in `spec/rigor/environment/rbs_loader_spec.rb` and
 `spec/integration/plugins/rbs_inline_plugin_spec.rb`, which fail on the base engine.
 
 Two limits come from the definition rather than the corpus, and both err toward silence. A
-contradiction needs a proof that no value is both: distinct literals, a literal outside a class, or
-two classes loaded in the analyzer process neither of which is an ancestor of the other. A module or
-an interface never proves it, and two project classes are never contradictory, however unrelated; a
-pair that names one reads as undecided (`:info`). And a type position Rigor cannot translate
-faithfully (an alias, an interface, `self`, a type variable, a proc, a relative class name the
-project itself declares) is undecided unless both sides spell it identically.
+contradiction needs a proof that no value is both, read from the RBS class hierarchy the analysis
+uses: distinct literals, a literal outside an RBS class, or two classes RBS declares neither of which
+is an RBS ancestor of the other. A module, an interface, a class RBS does not declare, a relative name
+the project defines, and a position a call may leave empty never prove it; such a pair reads as
+undecided (`:info`). And which side binds is decided from the two declarations alone, so a subclass
+relation (`Integer` against `Numeric`) is undecided too.
 
 ## Review round 1 (PR #1428)
 
@@ -98,3 +98,18 @@ diagnostics, 2,482 records (1,944 equal, 538 `sig/` more precise), no contradict
 Once `rigor sig-gen` writes inline-declared members into `sig/` by default (#1076), every such pair
 is equal by construction. The rule's contradiction row is then what a stale generated signature
 looks like.
+
+## Review round 2 (PR #1428)
+
+The round-1 proof read class relations from Ruby constants loaded in the analyzer process. rbs
+declares `Tempfile < File`, while the `tempfile` library defines `Tempfile < Delegator`, so `sig/ ->
+File` or `-> Object` against an inline `-> Tempfile` was undecided from the plain CLI and a
+contradiction under `-rtempfile` — and the language server requires `tempfile`. The proof now reads
+the RBS hierarchy of the built environment (`MemberConsistency::RbsProof`), and the decision of which
+side binds reads no hierarchy at all, so the answer is the same whatever the process has loaded; the
+probe project gives the same rows with and without `-rtempfile -rstringio`. The same round made a
+relative name the project's Ruby source defines unprovable (a Ruby-only `App::Set < Array` no longer
+lets `Set` read as core `::Set`), and made an optional, rest, optional-keyword or optional-block
+position unable to contradict. herb re-run on the final engine (one target, `--workers=2`, plus the
+census): unchanged — 2,519 → 37 diagnostics, 2,482 records (1,944 equal, 538 `sig/` more precise), no
+contradiction.

@@ -91,14 +91,6 @@ module Rigor
         refusing_unread_hashes { accepts(param, arg, mode: :gradual).no? }
       end
 
-      # The loaded class or module `name` denotes in the analyzer process, or nil. The resolution the subtype
-      # check uses ({.resolve_class}): it never triggers `const_missing` or a pending autoload. Public for
-      # `Environment::MemberConsistency`, which proves two classes disjoint from the same loaded hierarchy
-      # the subtype check reads (#1075).
-      def loaded_module(name)
-        resolve_class(name)
-      end
-
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private

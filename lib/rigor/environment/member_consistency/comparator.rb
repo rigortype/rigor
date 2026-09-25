@@ -14,18 +14,30 @@ module Rigor
       # declared types. See {MemberConsistency} for the rule; this class holds the type work.
       #
       # A contradiction is reported only where it is PROVEN: no value, and no call, satisfies both sides.
-      # Everything short of a proof is undecided. Three places carry that burden:
+      # Everything short of a proof is undecided. Four places carry that burden:
       #
-      # - {#disjoint?} proves two types share no value. `accepts` answering `no` both ways is not such a
-      #   proof (`Comparable` and `Enumerable` are both "no" and share values), so disjointness is read off
-      #   exact values and loaded classes only: two classes neither of which is an ancestor of the other,
-      #   or a literal outside a class. A module, an interface, a class the analyzer has not loaded, or a
-      #   carrier with no class of its own proves nothing.
+      # - {#disjoint?} proves two types share no value, from the RBS class hierarchy the analysis itself
+      #   uses ({RbsProof}), never from Ruby constants the analyzer process happens to have loaded — rbs
+      #   declares `Tempfile < File` while the `tempfile` library defines `Tempfile < Delegator`, and a proof
+      #   that moved with `require "tempfile"` would differ between the CLI and the language server. Only two
+      #   RBS classes neither of which is an RBS ancestor of the other, or a literal whose class is not
+      #   below an RBS class, count. A module, an interface, a name RBS does not declare as a class, or a
+      #   carrier without a class of its own proves nothing; and without an {RbsProof} (the environment
+      #   build) nothing is ever proven.
       # - {#faithful?} refuses a type position whose Rigor translation could mean something else: an alias,
-      #   an interface, `self`, a type variable, a proc, and a relative class name the project itself could
-      #   shadow (a relative `Data` inside `module App` may be `App::Data`).
+      #   an interface, `self`, a type variable, a proc, and a relative class name the project's RBS inputs
+      #   declare (a relative `Data` inside `module App` may be `App::Data`). A proof additionally refuses a
+      #   relative name the project's Ruby source defines ({RbsProof#shadowed?}).
+      # - A position a call may leave empty — an optional or rest parameter, an optional keyword, and every
+      #   position of an optional block — never contradicts: the call that omits it satisfies both sides.
       # - Overloads are paired by correspondence, never by position, and a member whose overloads do not
       #   pair one to one is undecided.
+      #
+      # Which side binds ({#subset?}) is decided by names alone — the same class, a literal of exactly that
+      # class, a refinement of that class — with no hierarchy at all. The environment build takes that
+      # decision before the environment exists, and the reported rows re-derive it on a cache hit, so it
+      # must read nothing but the two declarations. A subclass relation (`Integer` against `Numeric`) is
+      # therefore undecided, as it was before the rule existed.
       class Comparator # rubocop:disable Metrics/ClassLength
         # A type position: the declared RBS type, and the `rigor:v1:` refinement that overrides it (or nil).
         Slot = Data.define(:rbs_type, :override)
@@ -66,11 +78,23 @@ module Rigor
         PAIRING_LIMIT = 16
         private_constant :PAIRING_LIMIT
 
-        # @param shadowable — the first `::` segment of every class / module name the project's own inputs
+        # The carriers {#refinement_subset?} hands to `Inference::Acceptance`: a literal or a refinement
+        # against a refinement, which it answers from the value and the refinement alone.
+        REFINEMENT_OR_VALUE = [Type::Constant, Type::Refined, Type::Difference, Type::IntegerRange,
+                               Type::FloatRange].freeze
+        # The class a range or record carrier's values all belong to.
+        CARRIER_CLASSES = { Type::IntegerRange => "Integer", Type::FloatRange => "Float",
+                            Type::HashShape => "Hash" }.freeze
+        private_constant :REFINEMENT_OR_VALUE, :CARRIER_CLASSES
+
+        # @param shadowable — the first `::` segment of every class / module name the project's RBS inputs
         #   declare. A relative class name starting with one of them may resolve inside an enclosing
         #   namespace, so it is not compared.
-        def initialize(shadowable)
+        # @param proof — an {RbsProof}, or nil when nothing may be proven disjoint (the environment build,
+        #   whose decisions do not depend on it).
+        def initialize(shadowable, proof: nil)
           @shadowable = shadowable
+          @proof = proof
         end
 
         # @return `[outcome, detail]` — `outcome` is `:equal`, `:signature` (`sig/` is more precise),
@@ -228,7 +252,8 @@ module Rigor
             return [[:undecided, "a generic method type"]]
           end
 
-          compare_functions(sig_type.type, inline_type.type, sig_refinements, inline_refinements, "", block: false) +
+          compare_functions(sig_type.type, inline_type.type, sig_refinements, inline_refinements, "",
+                            block: false, provable: true) +
             compare_blocks(sig_type.block, inline_type.block)
         end
 
@@ -237,22 +262,27 @@ module Rigor
           return [[:undecided, "only one side declares a block"]] if sig_block.nil? || inline_block.nil?
           return [[:undecided, "the block is required on one side only"]] if sig_block.required != inline_block.required
 
-          compare_functions(sig_block.type, inline_block.type, [nil, {}], [nil, {}], "block ", block: true)
+          # A call without a block satisfies both sides of an optional one.
+          compare_functions(sig_block.type, inline_block.type, [nil, {}], [nil, {}], "block ",
+                            block: true, provable: sig_block.required)
         end
 
-        def compare_functions(sig_fn, inline_fn, sig_refinements, inline_refinements, prefix, block:)
-          results = compare_parameters(sig_fn, inline_fn, sig_refinements[1], inline_refinements[1], prefix, block)
+        def compare_functions(sig_fn, inline_fn, sig_refinements, inline_refinements, prefix, block:, provable:)
+          results = compare_parameters(sig_fn, inline_fn, [sig_refinements[1], inline_refinements[1]], prefix,
+                                       block, provable)
           results << compare_slot(
             "#{prefix}return type",
             Slot.new(rbs_type: sig_fn.return_type, override: sig_refinements[0]),
-            Slot.new(rbs_type: inline_fn.return_type, override: inline_refinements[0])
+            Slot.new(rbs_type: inline_fn.return_type, override: inline_refinements[0]),
+            provable: provable
           )
           results
         end
 
         # `(?) -> T` declares nothing about its parameters, so the other side's parameter list is the more
         # precise one — or they are equal when both are untyped.
-        def compare_parameters(sig_fn, inline_fn, sig_params, inline_params, prefix, block)
+        def compare_parameters(sig_fn, inline_fn, param_refinements, prefix, block, provable)
+          sig_params, inline_params = param_refinements
           sig_untyped = sig_fn.is_a?(::RBS::Types::UntypedFunction)
           inline_untyped = inline_fn.is_a?(::RBS::Types::UntypedFunction)
           return [] if sig_untyped && inline_untyped
@@ -264,11 +294,12 @@ module Rigor
                     [:undecided, "#{prefix}the parameter lists have different shapes"]]
           end
 
-          parameter_pairs(sig_fn, inline_fn).map do |label, sig_param, inline_param|
+          parameter_pairs(sig_fn, inline_fn).map do |label, sig_param, inline_param, required|
             compare_slot(
               "#{prefix}#{label}",
               Slot.new(rbs_type: sig_param.type, override: sig_param.name && sig_params[sig_param.name]),
-              Slot.new(rbs_type: inline_param.type, override: inline_param.name && inline_params[inline_param.name])
+              Slot.new(rbs_type: inline_param.type, override: inline_param.name && inline_params[inline_param.name]),
+              provable: provable && required
             )
           end
         end
@@ -279,19 +310,23 @@ module Rigor
            function.optional_keywords.keys.sort, !function.rest_keywords.nil?]
         end
 
-        # Aligned `[label, sig_param, inline_param]` triples for two functions of the same shape.
+        # Aligned `[label, sig_param, inline_param, required]` for two functions of the same shape. `required`
+        # is false for a position a call may leave empty.
         def parameter_pairs(sig_fn, inline_fn)
           positional_pairs(sig_fn, inline_fn) + keyword_pairs(sig_fn, inline_fn)
         end
 
         def positional_pairs(sig_fn, inline_fn)
           inline_leading = inline_fn.required_positionals + inline_fn.optional_positionals
+          required = sig_fn.required_positionals.size
           pairs = (sig_fn.required_positionals + sig_fn.optional_positionals).each_with_index.map do |param, i|
-            ["parameter #{i + 1}", param, inline_leading[i]]
+            ["parameter #{i + 1}", param, inline_leading[i], i < required]
           end
-          pairs << ["rest parameter", sig_fn.rest_positionals, inline_fn.rest_positionals] if sig_fn.rest_positionals
+          if sig_fn.rest_positionals
+            pairs << ["rest parameter", sig_fn.rest_positionals, inline_fn.rest_positionals, false]
+          end
           sig_fn.trailing_positionals.each_with_index do |param, i|
-            pairs << ["trailing parameter #{i + 1}", param, inline_fn.trailing_positionals[i]]
+            pairs << ["trailing parameter #{i + 1}", param, inline_fn.trailing_positionals[i], true]
           end
           pairs
         end
@@ -299,9 +334,11 @@ module Rigor
         def keyword_pairs(sig_fn, inline_fn)
           inline_keywords = inline_fn.required_keywords.merge(inline_fn.optional_keywords)
           pairs = sig_fn.required_keywords.merge(sig_fn.optional_keywords).map do |name, param|
-            ["keyword `#{name}:`", param, inline_keywords[name]]
+            ["keyword `#{name}:`", param, inline_keywords[name], sig_fn.required_keywords.key?(name)]
           end
-          pairs << ["keyword rest parameter", sig_fn.rest_keywords, inline_fn.rest_keywords] if sig_fn.rest_keywords
+          if sig_fn.rest_keywords
+            pairs << ["keyword rest parameter", sig_fn.rest_keywords, inline_fn.rest_keywords, false]
+          end
           pairs
         end
 
@@ -355,8 +392,9 @@ module Rigor
         end
 
         # One type position. The top spellings are the least precise answer; a position Rigor cannot
-        # translate faithfully is undecided unless the two are spelled identically.
-        def compare_slot(label, sig_slot, inline_slot)
+        # translate faithfully is undecided unless the two are spelled identically. `provable` is false for a
+        # position a call may leave empty, which can never contradict.
+        def compare_slot(label, sig_slot, inline_slot, provable:)
           return EQUAL if sig_slot == inline_slot
 
           sig_top = top_slot?(sig_slot)
@@ -369,20 +407,21 @@ module Rigor
           inline_type = slot_type(inline_slot)
           return [:undecided, "#{label} is a type Rigor cannot compare"] if sig_type.nil? || inline_type.nil?
 
-          slot_verdict(label, sig_slot, inline_slot, sig_type, inline_type)
+          slot_verdict(label, [sig_slot, inline_slot], sig_type, inline_type, provable)
         end
 
-        def slot_verdict(label, sig_slot, inline_slot, sig_type, inline_type)
-          inline_fits = sig_type.accepts(inline_type).yes?
-          sig_fits = inline_type.accepts(sig_type).yes?
+        def slot_verdict(label, slots, sig_type, inline_type, provable)
+          inline_fits = subset?(inline_type, sig_type)
+          sig_fits = subset?(sig_type, inline_type)
           return EQUAL if inline_fits && sig_fits
           return [:inline, nil] if inline_fits
           return SIGNATURE_MORE_PRECISE if sig_fits
-          return [:undecided, "Rigor cannot tell whether the two #{label}s overlap"] unless disjoint?(sig_type,
-                                                                                                      inline_type)
+          unless provable && provable_names?(slots) && disjoint?(sig_type, inline_type)
+            return [:undecided, "Rigor cannot rank or separate the two #{label}s"]
+          end
 
           [:contradiction,
-           "#{label} is `#{describe_slot(sig_slot)}` in `sig/` and `#{describe_slot(inline_slot)}` inline, " \
+           "#{label} is `#{describe_slot(slots[0])}` in `sig/` and `#{describe_slot(slots[1])}` inline, " \
            "and no value is both"]
         end
 
@@ -445,11 +484,92 @@ module Rigor
           nil
         end
 
+        # Whether `sub` is provably a subset of `sup`, decided by names alone (see the class comment): equal
+        # types, a union member by member, the same class with element types that are each a subset (or
+        # unstated on `sup`), a literal of exactly that class, a refinement or a range of that class, a tuple
+        # of an `Array`, a record of a `Hash`; `untyped` either side. A refinement on the `sup` side is left
+        # to `Inference::Acceptance`, which answers it from the value and the refinement alone.
+        def subset?(sub, sup)
+          return true if sub == sup || gradual?(sub) || gradual?(sup) || sub.is_a?(Type::Bot)
+          return sub.members.all? { |member| subset?(member, sup) } if sub.is_a?(Type::Union)
+          return sup.members.any? { |member| subset?(sub, member) } if sup.is_a?(Type::Union)
+
+          subset_of_member?(sub, sup)
+        end
+
+        def subset_of_member?(sub, sup)
+          case sup
+          when Type::Nominal then subset_of_class?(sub, sup)
+          when Type::Refined, Type::Difference, Type::IntegerRange, Type::FloatRange then refinement_subset?(sub, sup)
+          when Type::Tuple then sub.is_a?(Type::Tuple) && pairwise_subset?(sub.elements, sup.elements)
+          else false
+          end
+        end
+
+        def pairwise_subset?(subs, sups)
+          subs.size == sups.size && subs.zip(sups).all? { |left, right| subset?(left, right) }
+        end
+
+        def gradual?(type)
+          type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
+        end
+
+        def subset_of_class?(sub, sup)
+          case sub
+          when Type::Constant then bare_class?(sup, literal_class_name(sub.value))
+          when Type::Nominal
+            sub.class_name == sup.class_name && (sup.type_args.empty? || pairwise_subset?(sub.type_args, sup.type_args))
+          when Type::Refined, Type::Difference then subset?(sub.base, sup)
+          when Type::Tuple then tuple_of_array?(sub, sup)
+          else bare_class?(sup, CARRIER_CLASSES[sub.class])
+          end
+        end
+
+        def tuple_of_array?(tuple, sup)
+          sup.class_name == "Array" &&
+            (sup.type_args.empty? || tuple.elements.all? { |element| subset?(element, sup.type_args.first) })
+        end
+
+        # A literal's class name. The literal's own class is exact, and its name is compared with the RBS
+        # name the other side spells — no constant is resolved.
+        def literal_class_name(value)
+          value.class.name
+        end
+
+        def bare_class?(type, name)
+          !name.nil? && type.class_name == name && type.type_args.empty?
+        end
+
+        def refinement_subset?(sub, sup)
+          return false unless REFINEMENT_OR_VALUE.any? { |klass| sub.is_a?(klass) }
+
+          Inference::Acceptance.accepts(sup, sub).yes?
+        end
+
+        # Whether the class names a disjointness proof would lean on mean what they say: no relative name
+        # in either declared type may head with a name the project's Ruby source defines. The RBS-side
+        # names were already refused by {#faithful?}.
+        def provable_names?(slots)
+          return false if @proof.nil?
+
+          slots.all? { |slot| relative_heads(slot.rbs_type).none? { |head| @proof.shadowed?(head) } }
+        end
+
+        def relative_heads(type, heads = [])
+          case type
+          when ::RBS::Types::ClassInstance, ::RBS::Types::ClassSingleton
+            heads << (type.name.namespace.path.first || type.name.name).to_s unless type.name.absolute?
+          end
+          type.each_type { |inner| relative_heads(inner, heads) }
+          heads
+        end
+
         # Whether `left` and `right` provably share no value: every pairing of their members is two distinct
-        # exact values, a value outside a class, or two loaded classes neither of which is an ancestor of the
-        # other. Anything else — a module, an unloaded or project class, a carrier without an exact class — is
-        # left unproven, so the answer is false.
+        # literals, a literal whose class is not below an RBS class, or two RBS classes neither of which is
+        # an RBS ancestor of the other. Anything else is left unproven, so the answer is false.
         def disjoint?(left, right)
+          return false if @proof.nil?
+
           left_atoms = atoms(left)
           right_atoms = atoms(right)
           return false if left_atoms.nil? || right_atoms.nil?
@@ -457,7 +577,7 @@ module Rigor
           left_atoms.all? { |a| right_atoms.all? { |b| disjoint_atoms?(a, b) } }
         end
 
-        # `[:value, v]` or `[:class, Class]` per union member, or nil when a member has neither.
+        # `[:value, v]` or `[:class, name]` per union member, or nil when a member has neither.
         def atoms(type)
           members = type.is_a?(Type::Union) ? type.members : [type]
           result = members.map { |member| atom(member) }
@@ -467,28 +587,37 @@ module Rigor
         def atom(type)
           case type
           when Type::Constant then [:value, type.value]
-          when Type::Nominal then class_atom(type.class_name)
+          when Type::Nominal then [:class, type.class_name]
           when Type::Refined, Type::Difference then atom(type.base)
-          when Type::IntegerRange then [:class, ::Integer]
-          when Type::FloatRange then [:class, ::Float]
-          when Type::Tuple then [:class, ::Array]
-          when Type::HashShape then [:class, ::Hash]
+          when Type::Tuple then [:class, "Array"]
+          else
+            name = CARRIER_CLASSES[type.class]
+            name && [:class, name]
           end
-        end
-
-        # A loaded CLASS only: a module can be mixed into any class, so it proves nothing.
-        def class_atom(name)
-          loaded = Inference::Acceptance.loaded_module(name)
-          loaded.instance_of?(::Class) ? [:class, loaded] : nil
         end
 
         def disjoint_atoms?(left, right)
           case [left[0], right[0]]
           when %i[value value] then !left[1].eql?(right[1])
-          when %i[value class] then !left[1].is_a?(right[1])
-          when %i[class value] then !right[1].is_a?(left[1])
-          else (left[1] <= right[1]).nil? # `Module#<=` answers nil for two unrelated classes
+          when %i[value class] then outside_class?(left[1], right[1])
+          when %i[class value] then outside_class?(right[1], left[1])
+          else unrelated_classes?(left[1], right[1])
           end
+        end
+
+        # A literal's own class is exact (`1` is an `Integer`, not a subclass), so it is outside `name` when
+        # RBS places that class nowhere below `name`.
+        def outside_class?(value, name)
+          ancestors = @proof.class_ancestors(literal_class_name(value))
+          !ancestors.nil? && !@proof.class_ancestors(name).nil? && !ancestors.include?(name)
+        end
+
+        def unrelated_classes?(left, right)
+          left_ancestors = @proof.class_ancestors(left)
+          right_ancestors = @proof.class_ancestors(right)
+          return false if left_ancestors.nil? || right_ancestors.nil?
+
+          !left_ancestors.include?(right) && !right_ancestors.include?(left)
         end
 
         # Folds per-position results into one verdict: any contradiction wins, then any undecided position,
@@ -552,6 +681,7 @@ module Rigor
         # every value, and a declared type Rigor cannot read faithfully proves nothing.
         def exceeds?(declared, refinement)
           return false if TOP_SPELLINGS.any? { |klass| declared.is_a?(klass) } || !faithful?(declared)
+          return false unless provable_names?([Slot.new(rbs_type: declared, override: nil)])
 
           declared_type = translate(declared)
           !declared_type.nil? && disjoint?(single_values(declared_type), single_values(refinement))

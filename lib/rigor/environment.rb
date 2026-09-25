@@ -369,7 +369,7 @@ module Rigor
         # WD12's "parsed but not honoured" rows, drains out of pool workers, and is regenerated (never cached)
         # on every run, so the member-level outcome needs no plumbing of its own. Costs nothing for a project
         # with no inline RBS: the loader's reader short-circuits on an empty `virtual_rbs`.
-        record_member_consistency(loader, source_rbs_synthesis_reporter, root)
+        record_member_consistency(loader, source_rbs_synthesis_reporter, root, source_files)
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost
@@ -583,10 +583,14 @@ module Rigor
       # `:not_honoured` row at the annotated `.rb` (line 1, as every entry on that stream is): the inline
       # signature was parsed and dropped, and WD12 forbids swallowing that. The silent outcomes — equal, or
       # merged to the more precise side — record nothing.
-      def record_member_consistency(loader, reporter, root)
+      #
+      # The records are derived with a {MemberConsistency::RbsProof}, so a contradiction is proven from the
+      # RBS hierarchy and the project's own Ruby names, never from the analyzer process's loaded constants.
+      def record_member_consistency(loader, reporter, root, source_files)
         return if reporter.nil?
 
-        loader.member_consistency.each do |record|
+        proof = MemberConsistency::RbsProof.new(loader, source_files)
+        loader.member_consistency(proof: proof).each do |record|
           case record.outcome
           when :contradiction then record_member_contradiction(reporter, record, root)
           when :refinement then record_refinement_contradiction(reporter, record, root)

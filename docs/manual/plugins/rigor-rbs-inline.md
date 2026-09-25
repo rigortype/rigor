@@ -87,15 +87,18 @@ end
   [`rbs.contradicting-signature`](../04-diagnostics.md#rule-rbs-contradicting-signature)
   at the `sig/` line, naming the annotated file. Positional counts that
   cannot meet, or a keyword one side requires and the other cannot take
-  in any form, contradict the same way. The error needs a proof: a
-  module such as `Comparable` or `Enumerable` on either side never
-  counts, since any class may include it, and neither do two classes
-  of your own. A stale generated signature is the usual cause:
-  regenerate it, or fix the annotation.
+  in any form, contradict the same way. The error needs a proof, read
+  from the RBS class hierarchy the analysis uses: a module such as
+  `Comparable` or `Enumerable` on either side never counts, since any
+  class may include it, and neither does a class no RBS declares, an
+  optional or rest parameter (a call may leave it out), or a relative
+  name your Ruby code defines. A stale generated signature is the
+  usual cause: regenerate it, or fix the annotation.
 - **Rigor cannot tell: the `.rbs` binds, with an `:info`.** When a
   position names a type alias, an interface, `self`, a type variable,
   or a relative class name your project also declares, when Rigor
-  cannot prove two types disjoint, when the parameter lists are shaped
+  cannot prove two types disjoint (a subclass relation such as
+  `Integer` against `Numeric` included), when the parameter lists are shaped
   differently but overlap, when the overloads do not pair one to one
   (they are paired by what they declare, not by their order), or when
   each side is more precise somewhere, the inline signature is dropped

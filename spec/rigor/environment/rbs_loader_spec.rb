@@ -1845,8 +1845,14 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader
     end
 
-    def outcomes(loader)
-      loader.member_consistency.map { |record| [record.method_name, record.outcome] }
+    # The rows `Environment.for_project` reports are derived with an `RbsProof`; without one nothing is
+    # ever a contradiction (the environment build needs none).
+    def records(loader, sources = [])
+      loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader, sources))
+    end
+
+    def outcomes(loader, sources = [])
+      records(loader, sources).map { |record| [record.method_name, record.outcome] }
     end
 
     def method_types(definition, name)
@@ -1885,8 +1891,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
 
     it "records each contradiction with the class, member, kind, the deciding position and both sources" do
-      records = build_loader.member_consistency
-      expect(records.map { |r| [r.class_name, r.method_name, r.kind, r.outcome, r.signature_path, r.virtual_name] })
+      rows = records(build_loader)
+      expect(rows.map { |r| [r.class_name, r.method_name, r.kind, r.outcome, r.signature_path, r.virtual_name] })
         .to eq(
           [
             ["Demo", :shared, :instance, :contradiction, sig_file, virtual_name],
@@ -1894,7 +1900,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
             ["Demo", :shared_singleton, :singleton, :contradiction, sig_file, virtual_name]
           ]
         )
-      shared = records.first
+      shared = rows.first
       expect(shared.signature_line).to eq(2)
       expect(shared.detail).to include("parameter 1", "::String", "::Integer")
     end
@@ -1902,12 +1908,12 @@ RSpec.describe Rigor::Environment::RbsLoader do
     it "records nothing when the inline members do not overlap sig/" do
       virtual = [[virtual_name, "class Demo\n  def only_inline: () -> ::Integer\nend\n"]]
       loader = build_loader(virtual)
-      expect(loader.member_consistency).to be_empty
+      expect(records(loader)).to be_empty
       expect(loader.instance_definition("Demo").methods[:only_inline]).not_to be_nil
     end
 
     it "records nothing for a project with no inline contribution at all" do
-      expect(build_loader([]).member_consistency).to be_empty
+      expect(records(build_loader([]))).to be_empty
     end
 
     # `def x: ... | ...` is filed under `overloads`, not `originals`, so rbs composes it with an existing
@@ -1915,17 +1921,31 @@ RSpec.describe Rigor::Environment::RbsLoader do
     it "keeps an overloading inline member, which rbs composes rather than duplicates" do
       virtual = [[virtual_name, "class Demo\n  def shared: (::Symbol) -> ::Integer | ...\nend\n"]]
       loader = build_loader(virtual)
-      expect(loader.member_consistency).to be_empty
+      expect(records(loader)).to be_empty
       expect(method_types(loader.instance_definition("Demo"), :shared))
         .to eq(["(::Symbol) -> ::Integer", "(::String) -> ::Integer"])
     end
 
     # The answer must not depend on cache state: the derivation reads the loader's own inputs, never the
     # built environment, so a loader that has never built one answers identically.
-    it "answers without building the environment" do
+    it "answers without building the environment when no proof is asked for" do
       loader = build_loader
       expect(loader.member_consistency.map(&:method_name)).to eq(%i[shared shared_attr shared_singleton])
       expect(loader.instance_variable_get(:@state)[:env_loaded]).to be_nil
+    end
+
+    # The environment build decides without a proof. A proof may turn an undecided row into a
+    # contradiction, but both keep the `.rbs` member, so which declaration binds must not move with it.
+    it "strips the same members with and without a proof" do
+      loader = build_loader
+      files = described_class.project_sig_files([tmpdir])
+      proof = Rigor::Environment::MemberConsistency::RbsProof.new(loader, [])
+      plain = described_class.member_consistency_for(files, virtual_rbs)
+      proven = described_class.member_consistency_for(files, virtual_rbs, proof: proof)
+      expect(proven.inline_standdowns).to eq(plain.inline_standdowns)
+      expect(proven.signature_standdowns).to eq(plain.signature_standdowns)
+      expect(plain.records.map(&:outcome).uniq).to eq([:undecided])
+      expect(proven.records.map(&:outcome).uniq).to eq([:contradiction])
     end
 
     # Nesting is what makes the two sides comparable at all: the writer emits `module Outer\n class Inner`
@@ -2000,9 +2020,38 @@ RSpec.describe Rigor::Environment::RbsLoader do
         outcomes(build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]))
       end
 
-      it "does not prove two project classes disjoint" do
-        File.write(File.join(tmpdir, "types.rbs"), "class Alpha\nend\nclass Beta\nend\n")
-        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Beta")).to eq([%i[x undecided]])
+      # The proof reads the RBS hierarchy: two classes the project's RBS declares, neither below the other,
+      # are disjoint as far as the analysis is concerned.
+      it "proves two unrelated RBS-declared project classes disjoint, but not a subclass" do
+        File.write(File.join(tmpdir, "types.rbs"), "class Alpha\nend\nclass Beta\nend\nclass Gamma < Alpha\nend\n")
+        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Beta")).to eq([%i[x contradiction]])
+        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Gamma")).to eq([%i[x undecided]])
+      end
+
+      # A referenced name no RBS declares gets a stub class so the environment still builds; a stub
+      # has no known superclass, so it proves nothing.
+      it "does not prove a class RBS does not declare disjoint from anything" do
+        expect(outcome_for("  def x: () -> ::String", "  def x: () -> ::NotDeclaredAnywhere"))
+          .to eq([%i[x undecided]])
+      end
+
+      # rbs declares `Tempfile < File`; the `tempfile` library defines `Tempfile < Delegator`. The answer
+      # must be the RBS one whether or not the analyzer process has required `tempfile`.
+      it "reads Tempfile against File and Object from RBS, whatever the process has loaded" do
+        loader_for = lambda do |sig_type|
+          File.write(sig_file, "class Demo\n  def f: () -> #{sig_type}\nend\n")
+          described_class.new(signature_paths: [tmpdir], libraries: ["tempfile"],
+                              virtual_rbs: [[virtual_name, "class Demo\n  def f: () -> ::Tempfile\nend\n"]])
+        end
+        verdicts = lambda do
+          %w[::File ::Object].map { |type| outcomes(loader_for.call(type)) }
+        end
+        hide_const("Tempfile") if defined?(Tempfile)
+        without = verdicts.call
+        require "tempfile"
+        with = verdicts.call
+        expect(without).to eq([[%i[f undecided]], [%i[f undecided]]])
+        expect(with).to eq(without)
       end
 
       it "does not compare through a type alias" do
@@ -2077,6 +2126,35 @@ RSpec.describe Rigor::Environment::RbsLoader do
           .to eq([%i[m undecided]])
       end
 
+      # A call that leaves the position empty satisfies both sides.
+      it "never contradicts in a position a call may leave empty" do
+        expect(outcome_for("  def m: (?::Integer) -> void", "  def m: (?::String) -> void")).to eq([%i[m undecided]])
+        expect(outcome_for("  def m: (*::Integer) -> void", "  def m: (*::String) -> void")).to eq([%i[m undecided]])
+        expect(outcome_for("  def m: (?foo: ::Integer) -> void", "  def m: (?foo: ::String) -> void"))
+          .to eq([%i[m undecided]])
+        expect(outcome_for("  def m: () ?{ (::Integer) -> void } -> void",
+                           "  def m: () ?{ (::String) -> void } -> void"))
+          .to eq([%i[m undecided]])
+      end
+
+      it "still contradicts in a required position" do
+        expect(outcome_for("  def m: (foo: ::Integer) -> void", "  def m: (foo: ::String) -> void"))
+          .to eq([%i[m contradiction]])
+        expect(outcome_for("  def m: () { (::Integer) -> void } -> void", "  def m: () { (::String) -> void } -> void"))
+          .to eq([%i[m contradiction]])
+      end
+
+      # `Set` inside `module App` is `App::Set` when the project's Ruby source defines one, even though no
+      # RBS declares it; read as core `::Set`, it would "contradict" `Array`.
+      it "does not prove through a relative name the project's Ruby source defines" do
+        File.write(sig_file, "module App\n  class Box\n    def items: () -> Set[Integer]\n  end\nend\n")
+        virtual = [[virtual_name, "module App\n  class Box\n    def items: () -> Array[Integer]\n  end\nend\n"]]
+        source = File.join(tmpdir, "app.rb")
+        File.write(source, "module App\n  class Set < Array\n  end\nend\n")
+        expect(outcomes(build_loader(virtual), [source])).to eq([%i[items undecided]])
+        expect(outcomes(build_loader(virtual), [])).to eq([%i[items contradiction]])
+      end
+
       it "never contradicts a block by its parameter count" do
         expect(outcome_for("  def m: () { (::Integer) -> void } -> void",
                            "  def m: () { (::Integer, ::Integer) -> void } -> void")).to eq([%i[m undecided]])
@@ -2113,7 +2191,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     describe "contradictions beyond a single type position" do
       def outcome_for(sig_body, inline_body)
         File.write(sig_file, "class Demo\n#{sig_body}\nend\n")
-        build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]).member_consistency
+        records(build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]))
       end
 
       it "reports disjoint positional arity" do
@@ -2134,17 +2212,17 @@ RSpec.describe Rigor::Environment::RbsLoader do
       it "records the inline member whose return refinement its declared return does not accept" do
         virtual = [[virtual_name,
                     "class Demo\n  %a{rigor:v1:return: positive-int}\n  def label: () -> ::String\nend\n"]]
-        records = build_loader(virtual, paths: []).member_consistency
-        expect(records.map { |r| [r.method_name, r.outcome, r.virtual_name, r.signature_path] })
+        rows = records(build_loader(virtual, paths: []))
+        expect(rows.map { |r| [r.method_name, r.outcome, r.virtual_name, r.signature_path] })
           .to eq([[:label, :refinement, virtual_name, nil]])
-        expect(records.first.detail).to include("rigor:v1:return:", "::String")
+        expect(rows.first.detail).to include("rigor:v1:return:", "::String")
       end
 
       it "records a sig/ member that overlaps an inline one, at its own line" do
         File.write(sig_file,
                    "class Demo\n  %a{rigor:v1:param: n is non-empty-string}\n  def x: (::Integer n) -> void\nend\n")
         virtual = [[virtual_name, "class Demo\n  def x: (::Integer n) -> void\nend\n"]]
-        refinement = build_loader(virtual).member_consistency.find { |r| r.outcome == :refinement }
+        refinement = records(build_loader(virtual)).find { |r| r.outcome == :refinement }
         expect(refinement).to have_attributes(signature_path: sig_file, signature_line: 3, virtual_name: nil)
         expect(refinement.detail).to include("rigor:v1:param: n")
       end
@@ -2154,19 +2232,19 @@ RSpec.describe Rigor::Environment::RbsLoader do
       it "ignores a refinement scoped to one overload" do
         virtual = [[virtual_name, "class Demo\n  def m: %a{rigor:v1:param: v positive-int} (::Integer v) -> void " \
                                   "| (::String v) -> void\nend\n"]]
-        expect(build_loader(virtual, paths: []).member_consistency).to be_empty
+        expect(records(build_loader(virtual, paths: []))).to be_empty
       end
 
       it "stays quiet for a member-level refinement that fits one of its overloads" do
         virtual = [[virtual_name, "class Demo\n  %a{rigor:v1:param: v positive-int}\n  " \
                                   "def m: (::Integer v) -> void | (::String v) -> void\nend\n"]]
-        expect(build_loader(virtual, paths: []).member_consistency).to be_empty
+        expect(records(build_loader(virtual, paths: []))).to be_empty
       end
 
       it "stays quiet for a refinement inside its declared type" do
         virtual = [[virtual_name,
                     "class Demo\n  %a{rigor:v1:return: non-empty-string}\n  def label: () -> ::String\nend\n"]]
-        expect(build_loader(virtual, paths: []).member_consistency).to be_empty
+        expect(records(build_loader(virtual, paths: []))).to be_empty
       end
     end
   end

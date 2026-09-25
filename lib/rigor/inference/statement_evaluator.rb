@@ -253,7 +253,7 @@ module Rigor
       #   where it is the receiver scope itself ({#operand_scope}).
       # @param in_operand — true for an evaluator {#thread_operand} opened, and every evaluator it opens: the
       #   calls it runs are inside another expression's operand, which {#invoke_call} leaves the resets of a
-      #   statement-position call out of.
+      #   statement-position call out of; the statement that holds the operand answers for its match globals.
       # @param operand_recorder — the per-node scope index's recorder, for an evaluator {#thread_operand} opened
       #   (whose own `on_enter` is nil) and every evaluator it opens but an unrecorded pass ({UNRECORDED}), so an
       #   {OperandWalk} rooted inside an operand still records its later operands ({#walk_recorder}).
@@ -2516,7 +2516,10 @@ module Rigor
       # does not. The same holds for every call under an operand evaluated through its handler, so the evaluator
       # carries `in_operand` into everything it opens: an in-place mutation counts as an effect, and threading
       # `opts[:k] = strict? ? queue.shift : nil` must not let the typed `strict?` inside the ternary reset
-      # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone.
+      # the regex globals or the narrowed ivars that the same line without the `shift` leaves alone. Issue #1365 —
+      # the statement that holds the operand forgets the regex globals for every call in it instead, threaded or not,
+      # by what each call runs ({#forget_operand_match_globals}), so an operand's answer still does not depend on
+      # whether it writes.
       def thread_operand(node, entry, walk, typed_from)
         return entry unless node.is_a?(Prism::Node)
 

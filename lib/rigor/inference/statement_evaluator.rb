@@ -440,15 +440,16 @@ module Rigor
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope
       # effects are preserved.
       #
-      # Inside a retrying `begin`'s primary body, each statement's post-scope is also a point the body can raise from
-      # ({#record_raise_points}).
+      # Inside the primary body of a `begin` with a rescue chain or an `ensure`, the scopes around each statement are
+      # also points the body can raise from ({#record_raise_points}).
       def eval_statements(node)
         result_type = Type::Combinator.constant_of(nil)
         current = scope
         raising = Thread.current[RETRY_FRAMES_KEY]
         node.body.each do |stmt|
+          before = current
           result_type, current = sub_eval(stmt, current)
-          record_raise_points(raising, stmt, current) if raising
+          record_raise_points(raising, node, stmt, before, current) if raising
         end
         [result_type, current]
       end
@@ -1311,20 +1312,24 @@ module Rigor
       # semantics: else runs only if the body raises no exception). The ensure-clause runs but does not contribute to
       # the value; its scope effects are layered on the joined exit scope so locals bound exclusively in `ensure` stay
       # observable.
+      #
+      # Issue #1231 — the rescue chain runs after the body raised from some point inside it, so it is entered with each
+      # local and ivar the entry binds at its bindings at those points ({#raised_entry}): `conn = nil; begin; conn =
+      # open; use(conn); rescue; conn&.close; end` reads `conn` as `Conn | nil` in the arm. The `ensure` runs after
+      # such a raise too ({#eval_ensure_clause}).
       def eval_begin(node)
         jump_marks = ensure_jump_marks(node)
         entry = scope
-        edge = retry_edge_for(node)
-        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)
+        edge = retry_edge_for(node) || raise_edge_for(node, entry)
+        primary_type, primary_scope, rescue_chain, raised = eval_begin_paths(node, entry, edge)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
         # the primary body's own, since it can raise after any prefix of itself (`begin; tries += 1; raise if tries < 3;
         # rescue; retry; end`). Without the widening the re-entry keeps `tries: Constant[0]` and the predicate folds.
         # {#eval_retried_begin} re-evaluates the primary body AND the rescue chain under a widened entry.
-        retried = edge && eval_retried_begin(node, entry, edge)
-        primary_type, primary_scope, rescue_chain = retried if retried
+        retried = edge&.retries && eval_retried_begin(node, entry, edge)
+        primary_type, primary_scope, rescue_chain, raised = retried if retried
 
         live_rescues = live_rescue_results(rescue_chain)
         if live_rescues.empty?
@@ -1337,11 +1342,26 @@ module Rigor
 
         if node.ensure_clause
           carry_jumps_through_ensure(node.ensure_clause, jump_marks)
-          _ensure_type, ensure_scope = sub_eval(node.ensure_clause, exit_scope)
-          exit_scope = ensure_scope
+          exit_scope = eval_ensure_clause(node.ensure_clause, exit_scope, raised, rescue_chain)
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The scope past a `begin`'s `ensure`. The clause runs after the body or a rescue arm finished, and after a raise
+      # nothing rescued or an arm that left, so it is typed under the exit scope widened by the rescue chain's entry
+      # (`raised`, nil when the body cannot raise) and by every arm's scope: `done = false; begin; work; done = true;
+      # ensure; undo unless done; end` reads `done` as `bool` there. Only a `begin` that finished reaches the code after
+      # it, so when the widening moves anything, the scope the clause leaves comes from a second pass under the exit
+      # scope alone, which records nothing: `done` stays `true` past the `begin`.
+      def eval_ensure_clause(ensure_clause, exit_scope, raised, rescue_chain)
+        paths = rescue_chain.map { |((_, arm_scope), _)| arm_scope }
+        paths << raised if raised
+        clause_entry = join_raised_bindings(exit_scope, paths, keep_base: true)
+        return sub_eval(ensure_clause, exit_scope).last if clause_entry.equal?(exit_scope)
+
+        sub_eval(ensure_clause, clause_entry)
+        sub_eval(ensure_clause, exit_scope, **UNRECORDED).last
       end
 
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
@@ -1388,9 +1408,9 @@ module Rigor
       # Ruby semantics (the else runs only when no exception was raised), but the body's scope effects still apply
       # because the body did run before the else.
       #
-      # `edge`, when given, collects every scope the primary body could raise from: the scope after each statement of
-      # its frame ({#record_raise_points}), and the scope it ends with. The else-clause is not among them: what it
-      # raises is not rescued here.
+      # `edge`, when given, collects every scope the primary body could raise from: the scopes around each statement of
+      # its frame ({#record_raise_points}), and, when a `retry` targets the `begin`, the scope it ends with. The
+      # else-clause is not among them: what it raises is not rescued here.
       def eval_begin_primary_under(node, entry_scope, edge: nil)
         body_type, body_scope =
           if node.statements
@@ -1398,7 +1418,7 @@ module Rigor
           else
             [Type::Combinator.constant_of(nil), entry_scope]
           end
-        edge.raise_scopes << body_scope if edge
+        edge.raise_scopes << body_scope if edge&.retries
 
         if node.else_clause
           else_type, else_scope = sub_eval(node.else_clause, body_scope)
@@ -1409,9 +1429,12 @@ module Rigor
       end
 
       # B2.1 — what one pass over a `begin` whose rescue chain retries collects: the `retry` nodes that target it, the
-      # arms holding them, the nodes of its primary body's frame and the names that frame writes, and the scopes control
-      # carries back into the primary body — at each point the body can raise from (`raise_scopes`), and at each of
-      # those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
+      # arms holding them, the statement lists of its primary body's frame and the names that frame writes, and the
+      # scopes control carries back into the primary body — at each point the body can raise from (`raise_scopes`), and
+      # at each of those `retry`s together with the post-scope of each arm holding one (`retry_scopes`).
+      #
+      # Issue #1231 — a `begin` no `retry` targets takes one with `retries`, `retrying_arms` and `body_writes` nil
+      # ({#raise_edge_for}), which collects only the `raise_scopes` its rescue chain and `ensure` are entered with.
       RetryEdge = Data.define(:retries, :retrying_arms, :frame, :body_writes, :raise_scopes, :retry_scopes) do
         def fresh = with(raise_scopes: [], retry_scopes: [])
 
@@ -1456,6 +1479,18 @@ module Rigor
                       raise_scopes: [], retry_scopes: [])
       end
 
+      # Issue #1231 — the raise-point edge of a `begin` no `retry` targets, or nil when nothing could widen: it rescues
+      # and ensures nothing, its body is empty, or its entry binds no local or instance variable.
+      def raise_edge_for(node, entry)
+        return nil unless (node.rescue_clause || node.ensure_clause) && node.statements
+        return nil if entry.locals.empty? && entry.ivars.empty?
+
+        frame = Set.new.compare_by_identity
+        walk_primary_frame(node.statements, true, frame, nil)
+        RetryEdge.new(retries: nil, retrying_arms: nil, frame: frame, body_writes: nil, raise_scopes: [],
+                      retry_scopes: [])
+      end
+
       # The `retry` nodes under `node` that re-enter the `begin` whose rescue arm holds it, or nil for none. A nested
       # `rescue` clause, or a rescue modifier's fallback, owns the `retry`s inside it (Ruby 4.0.5 retries the modifier's
       # own expression), and a nested block, lambda, `def` or class body cannot hold one for this `begin`.
@@ -1479,15 +1514,18 @@ module Rigor
       RETRY_WRITE_NODES = (CapturedLocals::LOCAL_WRITE_NODES | CapturedLocals::NON_LOCAL_WRITE_NODES).freeze
       private_constant :RETRY_WRITE_NODES
 
-      # Collects into `frame` the nodes of the primary body that run in its own frame — a nested block or lambda keeps
-      # its own locals (a block parameter can shadow the counter) — and into `writes` every variable name the body
-      # writes, a block's included (it may write an outer local). A `def` or class body runs nothing here.
+      # Collects into `frame` the statement lists of the primary body that run in its own frame — a nested block or
+      # lambda keeps its own locals (a block parameter can shadow the counter) — and into `writes`, when given, every
+      # variable name the body writes, a block's included (it may write an outer local). A `def` or class body runs
+      # nothing here.
       def walk_primary_frame(node, in_frame, frame, writes)
         return if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
 
         in_frame &&= SCOPE_NESTING_NODES.none? { |klass| node.is_a?(klass) }
-        frame << node if in_frame
-        writes << node.name if RETRY_WRITE_NODES.include?(node.class)
+        return unless in_frame || writes
+
+        frame << node if in_frame && node.is_a?(Prism::StatementsNode)
+        writes << node.name if writes && RETRY_WRITE_NODES.include?(node.class)
         node.rigor_each_child { |child| walk_primary_frame(child, in_frame, frame, writes) }
       end
 
@@ -1508,9 +1546,24 @@ module Rigor
         eval_begin_paths(node, widened || literal, nil)
       end
 
+      # The primary path's `[type, scope]`, the rescue chain's results, and the entry the chain was evaluated under
+      # ({#raised_entry}), nil when the body cannot raise. Without an `edge` the chain reads the entry unchanged: it
+      # binds nothing to widen, or it is the retry edge's last pass, whose entry already holds every binding the
+      # earlier passes saw at the body's raise points.
       def eval_begin_paths(node, entry, edge)
         primary = eval_begin_primary_under(node, entry, edge: edge)
-        [*primary, collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)]
+        raised = edge ? raised_entry(entry, edge.raise_scopes) : entry
+        [*primary, collect_rescue_chain_results(node.rescue_clause, raised || entry, edge: edge), raised]
+      end
+
+      # Issue #1231 — the scope a rescue arm is entered with: `entry` with each local and instance variable it binds
+      # rebound to the join of that name's bindings at every point the primary body can raise from, or nil for a body
+      # with no such point. A name the entry does not bind stays unbound: one the body introduces may not be set yet
+      # where it raised.
+      def raised_entry(entry, raise_scopes)
+        return nil if raise_scopes.empty?
+
+        join_raised_bindings(entry, raise_scopes, keep_base: false)
       end
 
       # B2.1 — the entry scope widened by what crosses the retry edge, or nil when nothing does. A local or ivar bound
@@ -1548,15 +1601,88 @@ module Rigor
         end
       end
 
-      # The scope after each statement of a retrying primary body's frame is a point the body can raise from, the next
-      # statement's being the one after. Together they carry every rebind a retry can re-enter with, including one on a
-      # branch that then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a
-      # write threaded into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a
-      # nested block or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect
-      # on this frame shows in the post-scope of the statement holding it. Recording from the evaluator rather than
-      # `on_enter` keeps a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
-      def record_raise_points(frames, stmt, stmt_scope)
-        frames.each { |edge| edge.raise_scopes << stmt_scope if edge.frame.include?(stmt) }
+      # The scopes before and after each statement of a primary body's frame are points the body can raise from.
+      # Together they carry every rebind a rescue arm, an `ensure` or a retry can see, including one on a branch that
+      # then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a write threaded
+      # into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a nested block
+      # or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect on this frame
+      # shows in the post-scope of the statement holding it. Recording from the evaluator rather than `on_enter` keeps
+      # a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
+      #
+      # Two statements contribute less. A write of a literal or a variable read ({#inert_statement?}) cannot raise, so
+      # the scope before it is no raise point of its own: `state = s; Integer(s)` rescues with `state` already `s`. A
+      # variable write whose value has no effect on the scope raises, if at all, before it binds, so its post-scope is
+      # one only as the next statement's pre-scope ({#effect_before_raise?}): `Integer(s); state = s` rescues with
+      # `state` still at its entry value.
+      def record_raise_points(frames, statements, stmt, before, after)
+        frames.each do |edge|
+          next unless edge.frame.include?(statements)
+          next if inert_statement?(stmt)
+
+          scopes = edge.raise_scopes
+          scopes << before unless scopes.last.equal?(before)
+          scopes << after if effect_before_raise?(stmt)
+        end
+      end
+
+      INERT_WRITE_NODES = [Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode].freeze
+      INERT_VALUE_NODES = [
+        Prism::NilNode, Prism::TrueNode, Prism::FalseNode, Prism::SelfNode, Prism::IntegerNode, Prism::FloatNode,
+        Prism::RationalNode, Prism::ImaginaryNode, Prism::StringNode, Prism::SymbolNode, Prism::LocalVariableReadNode,
+        Prism::InstanceVariableReadNode
+      ].freeze
+      WRITE_LAST_NODES = Set[
+        *INERT_WRITE_NODES, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+        Prism::LocalVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode
+      ].freeze
+      private_constant :INERT_WRITE_NODES, :INERT_VALUE_NODES, :WRITE_LAST_NODES
+
+      def inert_statement?(stmt)
+        INERT_WRITE_NODES.include?(stmt.class) && INERT_VALUE_NODES.include?(stmt.value.class)
+      end
+
+      def effect_before_raise?(stmt)
+        !WRITE_LAST_NODES.include?(stmt.class) || OperandEffects.any?(stmt.value)
+      end
+
+      # Issue #1231 — `base` with each local and instance variable it binds rebound to the join of that name's bindings
+      # in `scopes`, and in `base` itself under `keep_base`. A binding the accumulated one already accepts
+      # ({#retry_binding_accepted?}) is not joined, so a narrowing inside the body (`log if m == :fast`) leaves `m` as
+      # it was. `base` itself when nothing moves, allocation-free then.
+      def join_raised_bindings(base, scopes, keep_base:)
+        joined_scope = base
+        base.locals.each do |name, binding|
+          joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.local(name) }
+          joined_scope = joined_scope.with_local(name, joined) if rebinds?(joined, binding)
+        end
+        base.ivars.each do |name, binding|
+          joined = joined_binding(keep_base ? binding : nil, scopes) { |path| path.ivar(name) }
+          joined_scope = joined_scope.with_ivar(name, joined) if rebinds?(joined, binding)
+        end
+        joined_scope
+      end
+
+      # A statement-by-statement body shares one binding object across its scopes until the name is rebound, so a
+      # binding identical to the previous one is not weighed again.
+      def joined_binding(joined, scopes)
+        seen = joined
+        scopes.each do |path|
+          type = yield(path)
+          next if type.nil? || type.equal?(seen)
+
+          seen = type
+          joined =
+            if joined.nil? then type
+            elsif retry_binding_accepted?(joined, type) then joined
+            else Type::Combinator.union(joined, type)
+            end
+        end
+        joined
+      end
+
+      def rebinds?(joined, binding)
+        !(joined.nil? || joined.equal?(binding) || joined == binding)
       end
 
       # An `on_enter` that records, besides forwarding to the installed one, the entry scope of each `retry` of `edge`
@@ -1687,7 +1813,7 @@ module Rigor
       # runs on the way out (`begin; retry; ensure; tries += 1; end`), or one made before a `retry` the evaluator only
       # types (`log(tries < 5 ? retry : :gave_up)`).
       def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil)
-        on_enter = edge ? retry_scope_recorder(edge) : @on_enter
+        on_enter = edge&.retries ? retry_scope_recorder(edge) : @on_enter
         results = []
         current = rescue_node
         while current

@@ -381,6 +381,15 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # The binding of `name` on entry to every `node_class` node, last visit winning as in `ScopeIndexer`, so the
+  # retry pass's re-evaluation overwrites the first pass's entry.
+  def entry_bindings(source, node_class, name, base_scope: scope)
+    entries = {}.compare_by_identity
+    on_enter = ->(node, s) { entries[node] = s.local(name) || s.ivar(name) if node.is_a?(node_class) }
+    described_class.new(scope: base_scope, on_enter: on_enter).evaluate(parse_program(source))
+    entries.values
+  end
+
   describe "begin/rescue/ensure" do
     it "joins the body and rescue-chain scopes" do
       _, post = evaluate(<<~RUBY)
@@ -480,21 +489,101 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #1231 — a rescue arm and an `ensure` run after the primary body raised from some point inside it, so they
+  # read each local the `begin`'s entry binds at its bindings at those points rather than at the entry's.
+  describe "begin/rescue/ensure raise points" do
+    let(:literals) { ->(*values) { Rigor::Type::Combinator.union(*values.map { Rigor::Type::Combinator.constant_of(it) }) } }
+
+    it "enters a rescue arm with a write made between two raising calls" do
+      source = <<~RUBY
+        x = 0
+        begin
+          work
+          x = 1
+          work
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call(0, 1)])
+    end
+
+    it "does not enter a rescue arm with the entry value a write that cannot raise replaced" do
+      source = <<~RUBY
+        x = 0
+        begin
+          x = 1
+          work
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call(1)])
+    end
+
+    it "keeps the entry value when the only write follows the last raising call" do
+      source = <<~RUBY
+        x = 0
+        begin
+          work
+          x = work
+        rescue
+          warn "failed" if x
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call(0)])
+    end
+
+    it "leaves a local the body introduces unbound in the arm" do
+      source = <<~RUBY
+        x = 0
+        begin
+          c = 1
+          work
+        rescue
+          warn "failed" if c
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :c)).to eq([nil])
+    end
+
+    it "enters an ensure with the pre-raise bindings and leaves it with the body's exit binding" do
+      source = <<~RUBY
+        done = false
+        begin
+          work
+          done = true
+        ensure
+          warn "rolled back" unless done
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::UnlessNode, :done)).to eq([literals.call(false, true)])
+      _, post = evaluate(source)
+      expect(post.local(:done)).to eq(literals.call(true))
+    end
+
+    it "enters an ensure with the scope of a rescue arm that re-raises" do
+      source = <<~RUBY
+        st = :run
+        begin
+          st = :done
+        rescue
+          st = :failed
+          raise
+        ensure
+          warn "state" if st
+        end
+      RUBY
+      expect(entry_bindings(source, Prism::IfNode, :st)).to eq([literals.call(:done, :failed)])
+    end
+  end
+
   describe "begin/rescue/retry (retry-edge widening)" do
     # B2.1: when a rescue arm contains `retry` AND rebinds a local across the retry edge, the primary body observes the
     # rebound local widened to its Nominal envelope (not the pre-retry Constant) because control can re-enter the
     # primary body via that rescue arm. Without the widening, `tries += 1` inside the primary body would keep folding
     # from `Constant[0]` on every notional retry pass instead of reflecting that `tries` can already be a live Integer
     # by the time the primary body re-runs.
-
-    # The binding of `name` on entry to every `node_class` node, last visit winning as in `ScopeIndexer`, so the
-    # retry pass's re-evaluation overwrites the first pass's entry.
-    def entry_bindings(source, node_class, name, base_scope: scope)
-      entries = {}.compare_by_identity
-      on_enter = ->(node, s) { entries[node] = s.local(name) || s.ivar(name) if node.is_a?(node_class) }
-      described_class.new(scope: base_scope, on_enter: on_enter).evaluate(parse_program(source))
-      entries.values
-    end
 
     let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:literals) { ->(*values) { Rigor::Type::Combinator.union(*values.map { Rigor::Type::Combinator.constant_of(it) }) } }
@@ -851,6 +940,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
       it "keeps every value the primary body rebinds a local to before raising" do
         # The raise can follow either rebind, so the arm sees `x` as `"a"` as well as the `:b` the body exits with.
+        # It never sees the entry's `0`: `x = "a"` cannot raise, so every raise the arm rescues follows it (#1231).
         source = <<~RUBY
           x = 0
           begin
@@ -863,7 +953,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
             retry
           end
         RUBY
-        expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call(0, "a", :b)])
+        expect(entry_bindings(source, Prism::IfNode, :x)).to eq([literals.call("a", :b)])
       end
 
       it "does not widen a binding the primary body only narrows" do

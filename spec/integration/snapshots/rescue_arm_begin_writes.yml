@@ -1,0 +1,9 @@
+---
+locals: {}
+assertions:
+  '1': String
+  '2': Conn?
+  '3': bool
+  '4': ":parsed | :start"
+  '5': '"1" | "x" | nil'
+  '6': 'true'

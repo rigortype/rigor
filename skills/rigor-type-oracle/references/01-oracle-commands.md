@@ -257,7 +257,9 @@ Two shape differences from the CLI worth knowing:
 - `rigor_sig_gen` returns the **JSON candidate report**, always — there
   is no `--print` text mode and no `--diff`. Read `rbs` per candidate.
 - `rigor_sig_gen` exposes `params` but **not** `observe`; observation
-  falls back to `spec/` when present. Point it elsewhere from the CLI.
+  reads the configured `test_paths:` (unset: whichever of `spec/` and
+  `test/` exist). To observe anything else, declare it in `test_paths:`
+  or use the CLI's `--observe`.
 
 `rigor_triage` and `rigor_coverage` are also served, and belong to
 `rigor-baseline-reduce` / `rigor-protection-uplift` rather than here.

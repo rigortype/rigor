@@ -293,13 +293,12 @@ module Rigor
 
     # The test roots a run uses: the declared `test_paths:` as written (already resolved against the
     # config file's directory by {.load}), or — when the key is unset — whichever of
-    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as project-relative names. `root` is the
-    # directory the run treats as the project root (the CLI's CWD), as for `signature_paths:`
-    # auto-detection.
+    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as absolute paths. `root` is the directory
+    # the run treats as the project root (the CLI's CWD), as for `signature_paths:` auto-detection.
     def resolved_test_paths(root: Dir.pwd)
       return test_paths unless test_paths.nil?
 
-      CONVENTIONAL_TEST_PATHS.select { |dir| File.directory?(File.join(root, dir)) }
+      CONVENTIONAL_TEST_PATHS.map { |dir| File.expand_path(dir, root) }.select { |dir| File.directory?(dir) }
     end
 
     # Loads a configuration file.
@@ -615,7 +614,9 @@ module Rigor
         "disable" => disabled_rules,
         "libraries" => libraries,
         "signature_paths" => signature_paths,
-        "test_paths" => test_paths,
+        # `test_paths:` is deliberately absent, as `effects:` is: `to_h` feeds the run cache key and the
+        # incremental-snapshot fingerprint, and the test roots change no diagnostic, so editing them must not
+        # invalidate either.
         "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "parameter_inference" => parameter_inference,

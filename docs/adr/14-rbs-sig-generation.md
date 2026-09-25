@@ -101,8 +101,8 @@ small generation core under `lib/rigor/sig_gen/` that:
     `define_method` / `attr_*` method shapes the engine
     already discovers via `Inference::ScopeIndexer`.
 2.  **Optionally collects caller observations** from a
-    second set of paths (default `spec/` if present,
-    otherwise empty) so parameter-type *suggestions* can
+    second set of paths (default: the `test_paths:` test
+    roots, #1388) so parameter-type *suggestions* can
     be derived from real call sites.
 3.  **Compares against existing RBS** loaded through the
     project environment (`Rigor::Environment.for_project`),

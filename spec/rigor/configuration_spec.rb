@@ -123,7 +123,8 @@ RSpec.describe Rigor::Configuration do
 
           expect(configuration.test_paths).to eq(resolved)
           expect(configuration.resolved_test_paths(root: "/elsewhere")).to eq(resolved)
-          expect(configuration.to_h["test_paths"]).to eq(resolved)
+          # Kept out of the cache-key input: the test roots change no diagnostic.
+          expect(configuration.to_h).not_to have_key("test_paths")
         end
       end
 
@@ -134,10 +135,10 @@ RSpec.describe Rigor::Configuration do
           expect(configuration.resolved_test_paths(root: dir)).to eq([])
 
           Dir.mkdir(File.join(dir, "test"))
-          expect(configuration.resolved_test_paths(root: dir)).to eq(["test"])
+          expect(configuration.resolved_test_paths(root: dir)).to eq([File.join(dir, "test")])
 
           Dir.mkdir(File.join(dir, "spec"))
-          expect(configuration.resolved_test_paths(root: dir)).to eq(%w[spec test])
+          expect(configuration.resolved_test_paths(root: dir)).to eq(%w[spec test].map { |root| File.join(dir, root) })
         end
       end
 

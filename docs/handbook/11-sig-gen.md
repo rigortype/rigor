@@ -352,7 +352,7 @@ two are wired today, one is reserved.
 | Policy | Behaviour |
 | --- | --- |
 | `untyped` (default) | Every parameter is spelled `untyped`. No inference-derived parameter contract is imposed on future callers. The user retains complete authorship over parameter typing. |
-| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, sig-gen says so on stderr and every parameter stays `untyped`. |
+| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist, sig-gen says so on stderr. |
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 The default deliberately favours `untyped` because of

@@ -70,6 +70,25 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(err).to include("no test roots to observe").and include("test_paths:")
   end
 
+  it "names a declared test root that does not exist instead of observing it silently" do
+    write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+    _status, out, err = run(config: "paths:\n  - lib\ntest_paths:\n  - tests\n")
+
+    expect(out).to include("def m: (untyped) -> 1")
+    expect(err).to include("tests").and include("does not exist").and include("every parameter stays untyped")
+  end
+
+  it "names only the missing root when another declared root exists" do
+    write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+    _status, out, err = run(config: "paths:\n  - lib\ntest_paths:\n  - spec\n  - tests\n")
+
+    expect(out).to include("def m: (42) -> 1")
+    expect(err).to include("tests").and include("does not exist")
+    expect(err).not_to include("every parameter stays untyped")
+  end
+
   it "names an explicit empty test_paths: as the reason" do
     write("spec/calc_spec.rb", "Calc.new.m(42)\n")
 

@@ -40,9 +40,7 @@ confusing downstream error: a `signature_paths:` that is missing / not a
 directory / holds no `.rbs` (which would turn every covered call into a
 false `call.undefined-method` at `evidence_tier: high`), a `libraries:`
 name RBS does not recognise, a `disable:` / `severity_overrides:` id
-naming no real rule, a declared `test_paths:` root that does not exist
-(`sig-gen --params=observed` would read nothing from it), or a missing
-`bundler` / `rbs_collection` path.
+naming no real rule, or a missing `bundler` / `rbs_collection` path.
 **Each warning is a real misconfiguration — fix it.**
 
 ### `rbs_environment` — the type universe loaded

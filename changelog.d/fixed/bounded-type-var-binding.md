@@ -1,1 +1,1 @@
-- **[inference]** `Rational * Float` (for a `Rational` Rigor knows only by class) no longer types as the Float argument's literal: `r * 0.5` is `Float`, not `0.5`, so a later `(r * 0.5) == 0.5` is no longer folded as always true.
+- **[inference]** `Rational * Float` (for a `Rational` Rigor knows only by class) no longer types as the Float argument's literal: `r * 0.5` is `Float`, not `0.5`, so `(r * 0.5) == 0.5` no longer reports `flow.always-truthy-condition`. ([#1355](https://github.com/rigortype/rigor/pull/1355))

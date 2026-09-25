@@ -1415,8 +1415,18 @@ module Rigor
               name, bound = param_binding(param, arg, declared, type_vars)
               next if name.nil?
 
+              bound = Type::Combinator.widen_value_pinned(bound) if upper_bounded?(method_type, name)
               bindings[name] = bindings.key?(name) ? Type::Combinator.union(bindings[name], bound) : bound
             end
+          end
+
+          # Issue #1347 — a variable that declares an upper bound (`[T < X]`) binds the argument widened off its
+          # value-pinned members. The bound constrains a class, and `Rational#*: [T < Numeric](T) -> T` returns a
+          # value of the argument's class, not the argument, so `r * 0.5` read the literal `0.5`. An unbounded
+          # variable keeps the literal (`Ractor.make_shareable("x")` is `"x"`); a bounded identity return
+          # (`String#setbyte`) gives its literal up.
+          def upper_bounded?(method_type, name)
+            method_type.type_params.any? { |type_param| type_param.name == name && type_param.upper_bound }
           end
 
           # The `(variable name, bound type)` a positional parameter contributes, or {NO_BINDING} when it

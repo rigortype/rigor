@@ -1592,9 +1592,21 @@ module Rigor
           current = scope_acc.public_send(getter, name)
           next if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
 
-          scope_acc = rebind_variable(scope_acc, kind, name, retry_widened_type(current, post, kind, widening.envelope))
+          scope_acc = rebind_retried(scope_acc, post_scope, kind, name,
+                                     retry_widened_type(current, post, kind, widening.envelope))
         end
         scope_acc
+      end
+
+      # The rebind joins the binding a retry re-enters with into the accumulated one, so ADR-58's local mark stays only
+      # when both scopes carry it, as `Scope#join` keeps it (issue #1287): `up(r)` in the body floors `r` in place and
+      # keeps the mark, while `r = other` in the rescue arm is a write and drops it.
+      def rebind_retried(scope_acc, post_scope, kind, name, type)
+        rebound = rebind_variable(scope_acc, kind, name, type)
+        return rebound unless kind == :local && scope_acc.declaration_sourced?(:local, name) &&
+                              post_scope.declaration_sourced?(:local, name)
+
+        rebound.with_local_declaration_mark(name)
       end
 
       # Whether `post` needs no weighing: this widening has weighed it for `name` already, or it is the entry's binding.
@@ -1971,7 +1983,7 @@ module Rigor
           joined = join_content_for_param(calls, seed, post_loop)
           next acc if joined.nil?
 
-          acc.with_local(name, rewritten_capture(joined, seed, rewrites.fetch(name, NO_REWRITES)))
+          acc.with_mutated_local(name, rewritten_capture(joined, seed, rewrites.fetch(name, NO_REWRITES)))
         end
       end
 
@@ -3247,18 +3259,8 @@ module Rigor
           next acc unless acc.locals.key?(argument.name)
 
           floored = content_floor_for(acc.local(argument.name))
-          floored.nil? ? acc : with_floored_local(acc, argument.name, floored)
+          floored.nil? ? acc : acc.with_mutated_local(argument.name, floored)
         end
-      end
-
-      # A floor rebinds a local to the same object with its contents forgotten, which is not a flow-live write, so the
-      # marks a write drops stay: ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark.
-      # With a plain `with_local`, a `String?` copied from a declaration-seeded ivar and floored after a closure or
-      # callee mutated it (`r = @name; -> { r.upcase! }.call`) lost the first, and `r.size` reported a nil receiver.
-      def with_floored_local(scope, name, floored)
-        rebound = scope.with_local(name, floored)
-        rebound = rebound.with_local_declaration_mark(name) if scope.declaration_sourced?(:local, name)
-        rebound.with_optimistic_local(name, scope.optimistic_local(name))
       end
 
       # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
@@ -3445,7 +3447,7 @@ module Rigor
 
         mutations.keys.reduce(post_scope) do |acc, name|
           floored = content_floor_for(acc.local(name))
-          floored.nil? ? acc : with_floored_local(acc, name, floored)
+          floored.nil? ? acc : acc.with_mutated_local(name, floored)
         end
       end
 
@@ -3710,7 +3712,7 @@ module Rigor
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         rewrites = local_rewrites(block.body) { |receiver, ancestors| receiver.depth > scope_nesting(ancestors) }
         joined.reduce(post_scope) do |acc, (name, type)|
-          acc.with_local(name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
+          acc.with_mutated_local(name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
         end
       end
 

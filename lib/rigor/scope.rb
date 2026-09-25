@@ -375,6 +375,13 @@ module Rigor
     end
 
     def with_local(name, type)
+      bind_local(name, type, keep_marks: false)
+    end
+
+    # The one body behind {#with_local} and {#with_mutated_local}, which differ only in whether the two marks a
+    # write drops survive. Passing the kept sets through unchanged, rather than dropping and re-adding them, keeps
+    # a mutation's rebind to the one `rebuild` a write costs.
+    def bind_local(name, type, keep_marks:)
       # `rigor trace` — the moment a local enters the scope.
       Inference::FlowTracer.bind(name, type) if Inference::FlowTracer.active?
       new_locals = @locals.merge(name.to_sym => type).freeze
@@ -393,14 +400,15 @@ module Rigor
       rebuild(locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
-              declaration_sourced: drop_declaration_sourced_for(:local, name),
+              declaration_sourced: keep_marks ? @declaration_sourced : drop_declaration_sourced_for(:local, name),
               # Issue #667 — rebinding is flow-live for the published-constant mark too: the new value need
               # not be a copy of anything. `with_published_constant_mark` re-stamps afterward when the write's
               # rvalue is one.
               published_constant_sourced: drop_published_constant_sourced_for(:local, name),
               local_origins: drop_origin(@local_origins, name),
-              optimistic_locals: drop_origin(@optimistic_locals, name))
+              optimistic_locals: keep_marks ? @optimistic_locals : drop_origin(@optimistic_locals, name))
     end
+    private :bind_local
 
     def with_fact(fact)
       rebuild(fact_store: fact_store.with_fact(fact))
@@ -551,6 +559,20 @@ module Rigor
       rebuild(declaration_sourced: add_declaration_sourced(:local, name))
     end
 
+    # Issue #1287 — rebinds `name` for an in-place mutation of the object it already holds: a mutator's widening
+    # (`r << x`), a content floor after a closure or callee mutated it, an element or member write through it. The
+    # binding still names the same object, so this is not a flow-live write, and the marks `with_local` drops stay:
+    # ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark. A source-level write keeps
+    # going through `with_local`, which drops both.
+    #
+    # Two other per-local tables are deliberately still dropped. An ADR-82 `local_origins` cause explains the
+    # `Dynamic` the ASSIGNMENT bound, and a floor's `Dynamic[top]` has a different cause. Issue #667's
+    # published-constant mark can never be live here: only a frozen scalar publishes, and a frozen value is not
+    # mutated in place.
+    def with_mutated_local(name, type)
+      bind_local(name, type, keep_marks: true)
+    end
+
     # Issue #667 — record that `name` is currently bound to a value copied out of a foreign published
     # constant. Always applied AFTER the `with_local` / `with_ivar` that binds the value (both drop the mark
     # unconditionally), exactly as {#with_local_declaration_mark} is.
@@ -570,6 +592,8 @@ module Rigor
     # ADR-58 WD1 — true when `(kind, name)`'s binding optionality is purely declaration-sourced (no flow-live
     # write/narrowing has touched it).
     def declaration_sourced?(kind, name)
+      return false if @declaration_sourced.empty?
+
       @declaration_sourced.include?([kind.to_sym, name.to_sym])
     end
 

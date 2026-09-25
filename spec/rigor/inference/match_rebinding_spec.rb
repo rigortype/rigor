@@ -148,6 +148,7 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(may_match?("items.each { Thread.new { s =~ /(z)/ }.join }")).to be(false)
       expect(may_match?("items.each { Fiber.new { items.each { |i| i =~ /(z)/ } }.resume }")).to be(false)
       expect(may_match?("items.each { ::Ractor.new(&handler) }")).to be(false)
+      expect(may_match?("items.each { Thread.new(&handlers.fetch(s.sub(/_(q)/, ''))).join }")).to be(true)
       expect(may_match?("items.each { Thread.new(s.sub(/q/, '')) { } }")).to be(true)
       expect(may_match?("items.each { Enumerator.new { |y| s =~ /(z)/ }.to_a }")).to be(true)
       expect(may_match?("items.each { MyThread.new { s =~ /(z)/ } }")).to be(true)
@@ -181,10 +182,14 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(block_may_match?("items.first")).to be(false)
     end
 
-    # Issue #1361 — the block runs as a new thread's, fiber's or ractor's root, with a slot of its own.
-    it "does not count a thread's, fiber's or ractor's root block, literal or argument" do
+    # Issue #1361 — the block runs as a new thread's, fiber's or ractor's root, with a slot of its own, but a `&expr`
+    # argument's expression runs in this frame before the thread starts.
+    it "does not count a thread's, fiber's or ractor's root block, literal or argument, but reads a `&expr` there" do
       expect(block_may_match?("Thread.new { |i| i =~ /(z)/ }")).to be(false)
       expect(block_may_match?("Thread.start(&handler)")).to be(false)
+      expect(block_may_match?("Thread.new(&HANDLERS.fetch(name))")).to be(false)
+      expect(block_may_match?("Thread.new(&HANDLERS.fetch(name.sub(/_(q)/, '')))")).to be(true)
+      expect(block_may_match?("Fiber.new(&((('zz' =~ /(q)/) ? h : h)))")).to be(true)
       expect(block_may_match?("Fiber.new { s.sub(/q/, '') }")).to be(false)
       expect(block_may_match?("Ractor.new { s =~ /(z)/ }")).to be(false)
       expect(block_may_match?("Enumerator.new { |y| s =~ /(z)/ }")).to be(true)
@@ -283,9 +288,10 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(operand_may_match?("register(-> { s =~ /(z)/ })")).to be(false)
     end
 
-    it "does not count a block argument a thread, fiber or ractor runs as its root" do
+    it "does not count a block argument a thread, fiber or ractor runs as its root, but reads its expression" do
       expect(operand_may_match?("log(Fiber.new(&handler))")).to be(false)
       expect(operand_may_match?("log(items.map(&handler))")).to be(true)
+      expect(operand_may_match?("log(Fiber.new(&handlers.fetch(s.sub(/_(q)/, ''))))")).to be(true)
     end
   end
 
@@ -406,10 +412,11 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(operands_may_rebind?("$stdout.puts(Integer(v = $2))")).to be(false)
     end
 
-    it "does not count a thread's, fiber's or ractor's root block there" do
+    it "does not count a thread's, fiber's or ractor's root block there, but reads a `&expr` expression" do
       expect(operands_may_rebind?("Thread.new { s =~ /(z)/ }.join")).to be(false)
       expect(operands_may_rebind?("[Fiber.new { s =~ /(z)/ }].each(&:resume)")).to be(false)
       expect(operands_may_rebind?("workers << Thread.new(&handler)")).to be(false)
+      expect(operands_may_rebind?("Thread.new(&handlers.fetch(s.sub(/_(q)/, ''))).join")).to be(true)
       expect(operands_may_rebind?("Enumerator.new { |y| s =~ /(z)/ }.to_a")).to be(true)
     end
 
@@ -783,15 +790,20 @@ RSpec.describe Rigor::Inference::MatchRebinding do
       expect(described_class.block_entry(narrowed, plain.block, plain)).to equal(narrowed)
     end
 
-    # Issue #1361 — given the owning call, a thread's, fiber's or ractor's root block and a `define_method` body enter
-    # with the globals unbound, even when the body cannot match.
-    it "unbinds them for a root block or a `define_method` body, given the owning call" do
-      ["Thread.new { $1 }", "Fiber.new { $1 }", "Ractor.new { $1 }", "define_method(:x) { $1 }",
-       "obj.define_singleton_method(:x) { $1 }"].each do |source|
+    # Issue #1361 — given the owning call, a thread's, fiber's or ractor's root block enters with the globals
+    # unbound, and a `define_method` body with them untyped, even when the body cannot match.
+    it "unbinds them for a root block and untypes them for a `define_method` body, given the owning call" do
+      ["Thread.new { $1 }", "Fiber.new { $1 }", "Ractor.new { $1 }"].each do |source|
         call = last_statement(source)
 
         expect(described_class.block_entry(narrowed, call.block, call).global(:$1)).to be_nil, source
         expect(described_class.block_entry(narrowed, call.block)).to equal(narrowed), source
+      end
+      ["define_method(:x) { $1 }", "obj.define_singleton_method(:x) { $1 }"].each do |source|
+        call = last_statement(source)
+
+        expect(described_class.block_entry(narrowed, call.block, call).global(:$1))
+          .to eq(Rigor::Type::Combinator.untyped), source
       end
       %w[items.each Enumerator.new MyThread.new].each do |receiver|
         call = last_statement("#{receiver} { $1 }")

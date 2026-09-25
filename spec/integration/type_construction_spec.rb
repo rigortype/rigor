@@ -1116,6 +1116,14 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reads.size).to eq(12)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
+
+    # Issue #1361 — a `define_method` body reads the definer's slot whenever the method is called, so a global
+    # narrowed where it is written reads `Dynamic[top]` there: the dynamic-finder idiom is not flagged.
+    it "reports nothing on a `$1` read in a `define_method` body written under a match" do
+      reads = marked_lines(harness, "# DEFINER-ENTRY")
+      expect(reads.size).to eq(2)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do

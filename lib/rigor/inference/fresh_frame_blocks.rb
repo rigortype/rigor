@@ -8,18 +8,19 @@ require_relative "stored_block_call"
 
 module Rigor
   module Inference
-    # Issue #1361 — the blocks whose body does not read the frame-local special variables (the regex match globals
-    # today) of the body they are written in, so each enters with them unbound ({.entry}):
+    # Issue #1361 — the blocks whose body does not read the narrowing of the frame-local special variables (the regex
+    # match globals today) where it is written ({.fresh_entry?}, {.entry}):
     #
     # - a root block: the block of `Thread.new` / `Thread.start` / `Thread.fork`, `Fiber.new` or `Ractor.new` on the
     #   core class ({.root_call?}). It runs as the root of a new thread, fiber or ractor, and Ruby keeps that
     #   execution context's own special-variable slot (`ec->root_svar`) for every piece of code whose local frame is
     #   the block's, the block and each block nested in it included. So the block reads `$1` nil whatever the
-    #   creator matched, and a match it runs never rebinds the creator's `$~`;
+    #   creator matched, and a match it runs never rebinds the creator's `$~`. A `&expr` block argument's
+    #   expression still runs in the creator's frame, before the thread starts;
     # - a definer block: the block of `define_method` / `define_singleton_method`, on any receiver. It runs as a
     #   method body whenever the method is called, and reads the defining frame's slot as it is at that time, which
-    #   each call's own matches write too, so the narrowing where the method is defined proves nothing about it.
-    #   Unlike a root block it shares that slot, so a match in it still rebinds the definer's `$~`.
+    #   each call's own matches write too, so the narrowing where the method is defined neither proves nor refutes
+    #   what it reads. Unlike a root block it shares that slot, so a match in it still rebinds the definer's `$~`.
     #
     # `Enumerator.new` is neither: its block runs on an internal fiber whose root is not the block, so it reads and
     # rebinds the creator's slot like any other block.
@@ -53,34 +54,42 @@ module Rigor
 
       # True when the block answers true for a child of `node` that runs in the frame `node` runs in: any child but
       # a root block ({.root_block}), which runs with a slot of its own. Every {MatchRebinding} reading of what
-      # running code may match walks through here. `into_root` asks the root block's own children in its place, for
-      # a reading of what the code makes rather than what it runs: a closure made in a root block may be handed back
-      # to this frame's thread. Stops at the first true answer, without a `return` out of the walk's block.
+      # running code may match walks through here. A root `&expr` block argument's own children are asked in its
+      # place, since Ruby evaluates `expr` in this frame before the thread starts
+      # (`Thread.new(&HANDLERS.fetch(name.sub(re, "")))` rebinds the creator's `$~`). `into_root` asks a root block's
+      # children too, for a reading of what the code makes rather than what it runs: a closure made in a root block
+      # may be handed back to this frame's thread. Stops at the first true answer, without a `return` out of the
+      # walk's block.
       def any_frame_child?(node, scope, into_root: false)
         root = root_block(node, scope)
         found = false
         node.rigor_each_child do |child|
           if !child.equal?(root)
             found ||= yield(child)
-          elsif into_root
+          elsif into_root || child.is_a?(Prism::BlockArgumentNode)
             child.rigor_each_child { |inner| found ||= yield(inner) }
           end
         end
         found
       end
 
-      # True when the block of `call_node` enters with the frame-local specials unbound: a root block, or a definer
-      # block.
-      def unbound_entry?(call_node, scope = nil)
+      # True when the block of `call_node` does not read the narrowing where it is written: a root block, or a
+      # definer block. {.entry} gives the scope it enters with.
+      def fresh_entry?(call_node, scope = nil)
         return false unless call_node.is_a?(Prism::CallNode)
 
         DEFINERS.include?(call_node.name) || root_call?(call_node, scope)
       end
 
-      # The scope such a block enters with. This is the one place the frame-local specials are reset together, so
-      # `$_` (#1359) and `$!` / `$@` (#1360) join the match globals here once they narrow.
-      def entry(scope)
-        scope.forget_match_globals
+      # The scope the block of `call_node`, which {.fresh_entry?} names, enters with. A root block reads a slot of its
+      # own, so the match globals are unbound there, and `$1.upcase` in `Thread.new { … }` is a true positive. A
+      # definer body reads the definer's slot whenever the method is called, which the analyzer does not follow, so a
+      # global narrowed where it is written reads `Dynamic[top]` there, neither narrowed nor flagged: the
+      # dynamic-finder idiom defines `find_by_email` in a `method_missing` guard whose `$1` its body reads. This is
+      # the one place the frame-local specials are reset at such an entry, so `$_` (#1359) and `$!` / `$@` (#1360)
+      # join the match globals here once they narrow.
+      def entry(scope, call_node)
+        DEFINERS.include?(call_node.name) ? scope.untyped_match_globals : scope.forget_match_globals
       end
 
       def core_class?(receiver, constant, scope)

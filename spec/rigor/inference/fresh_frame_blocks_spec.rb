@@ -58,31 +58,46 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
     end
   end
 
-  describe ".unbound_entry?" do
+  describe ".fresh_entry?" do
     it "names a root block and a `define_method` / `define_singleton_method` block on any receiver" do
       ["Thread.new { }", "Fiber.new { }", "define_method(:x) { }", "klass.define_method(:x) { }",
        "obj.define_singleton_method(:x) { }"].each do |source|
-        expect(described_class.unbound_entry?(call(source), scope)).to be(true), source
+        expect(described_class.fresh_entry?(call(source), scope)).to be(true), source
       end
     end
 
     it "does not name an iterator, `Enumerator.new`, `lambda` or a missing call" do
       ["items.each { }", "Enumerator.new { |y| y << 1 }", "lambda { }", "MyThread.new { }"].each do |source|
-        expect(described_class.unbound_entry?(call(source), scope)).to be(false), source
+        expect(described_class.fresh_entry?(call(source), scope)).to be(false), source
       end
-      expect(described_class.unbound_entry?(nil, scope)).to be(false)
+      expect(described_class.fresh_entry?(nil, scope)).to be(false)
     end
   end
 
   describe ".entry" do
-    it "unbinds the match globals" do
+    let(:narrowed) do
       string = Rigor::Type::Combinator.nominal_of("String")
-      narrowed = scope.with_global(:$1, string).with_global(:$~, Rigor::Type::Combinator.nominal_of("MatchData"))
-      entry = described_class.entry(narrowed)
+      scope.with_global(:$1, string).with_global(:$~, Rigor::Type::Combinator.nominal_of("MatchData"))
+    end
+
+    it "unbinds the match globals for a root block, which reads a slot of its own" do
+      thread = call("Thread.new { }")
+      entry = described_class.entry(narrowed, thread)
 
       expect(entry.global(:$1)).to be_nil
       expect(entry.global(:$~)).to be_nil
-      expect(described_class.entry(scope)).to equal(scope)
+      expect(described_class.entry(scope, thread)).to equal(scope)
+    end
+
+    # A definer body reads the definer's slot whenever the method is called: neither narrowed nor flagged.
+    it "reads a narrowed global as `Dynamic[top]` in a definer body, and leaves an unbound one unbound" do
+      definer = call("define_singleton_method(:x) { }")
+      entry = described_class.entry(narrowed, definer)
+
+      expect(entry.global(:$1)).to eq(Rigor::Type::Combinator.untyped)
+      expect(entry.global(:$~)).to eq(Rigor::Type::Combinator.untyped)
+      expect(entry.global(:$2)).to be_nil
+      expect(described_class.entry(scope, definer)).to equal(scope)
     end
   end
 end

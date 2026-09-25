@@ -1629,20 +1629,48 @@ def fresh_nested_entry(str)
 end
 
 # A `define_method` / `define_singleton_method` body reads the defining frame's slot whenever the method is called,
-# and each call's own matches write it too, so the narrowing where it is defined proves nothing about it (Ruby: with
+# and each call's own matches write it too, so the narrowing where it is defined neither proves nor refutes what it
+# reads: a global narrowed there reads `Dynamic[top]` in the body, and an unbound one stays `String?` (Ruby: with
 # `str = "a1"`, `x` reads "1" when called right after, and nil once the defining frame or a call's own body has run
-# a failed match).
+# a failed match; `FreshDefineMethod.new.digit` reads "9"; `FreshDefineUnguarded.new.plain` reads nil).
 def fresh_define_singleton_entry(str)
   target = Object.new
   if str =~ /(\d+)/
-    target.define_singleton_method(:x) { assert_type("String?", $1) }
+    target.define_singleton_method(:x) { assert_type("Dynamic[top]", $1) }
   end
   target
 end
 
 class FreshDefineMethod
   if "c9" =~ /(\d)/
-    define_method(:digit) { assert_type("String?", $1) }
+    define_method(:digit) { assert_type("Dynamic[top]", $1) }
+  end
+end
+
+class FreshDefineUnguarded
+  define_method(:plain) { assert_type("String?", $1) }
+end
+
+# So the dynamic-finder idiom, which defines a method from its guard's `$1`, reads it quietly (Ruby:
+# `FreshFinder.find_by_email("x")` returns `{email: "x"}`, and `FreshDefineDigit.new.dm` returns "9").
+class FreshFinder
+  def self.where(conditions) = conditions
+
+  def self.method_missing(name, *args)
+    if name.to_s =~ /\Afind_by_(\w+)\z/
+      define_singleton_method(name) { |v| attr = $1; where(attr.to_sym => v) } # DEFINER-ENTRY
+      send(name, *args)
+    else
+      super
+    end
+  end
+
+  def self.respond_to_missing?(*) = true
+end
+
+class FreshDefineDigit
+  if "c9" =~ /(\d)/
+    define_method(:dm) { key = $1; key.upcase } # DEFINER-ENTRY
   end
 end
 
@@ -1816,9 +1844,9 @@ module FreshFramePool
   end
 end
 
-# The block of an implicit-self call is read for what it may run in this frame later, and a root block in it, or
-# a block argument a thread runs as its root, runs nothing here (Ruby: "1" for each with `str = "a1"` and
-# `handler = proc { "zz" =~ /(q)/ }`).
+# The block of an implicit-self call is read for what it may run in this frame later, and a root block in it runs
+# nothing here; nor does the proc a `&handler` argument hands a thread as its root, while the `handler` expression
+# itself runs no match (Ruby: "1" for each with `str = "a1"` and `handler = proc { "zz" =~ /(q)/ }`).
 def schedule_1361(&blk) = blk
 
 def fresh_handed_root_block(str)
@@ -1852,6 +1880,49 @@ class FreshFrameEmitter
       emit("zz")
       assert_type("String?", $1)
     end
+  end
+end
+
+# A `&expr` block argument's expression runs in the creator's frame before the thread or fiber starts, so a match
+# in it rebinds the creator's `$~`, whether the call is a statement's receiver, an assignment's value or a fiber's
+# (Ruby: nil for each with `str = "a1"`, `handlers = { "x" => proc {} }`, `name = "x"` and `handler = proc {}`).
+def fresh_block_argument_rebinds(str, handlers, name)
+  if str =~ /(\d+)/
+    Thread.new(&handlers.fetch(name.sub(/_(q)/, ""))).join
+    assert_type("String?", $1)
+  end
+end
+
+def fresh_block_argument_condition(str, handler)
+  if str =~ /(\d+)/
+    Thread.new(&((("zz" =~ /(q)/) ? handler : handler))).join
+    assert_type("String?", $1)
+  end
+end
+
+def fresh_block_argument_assignment(str, handlers, name)
+  if str =~ /(\d+)/
+    worker = Thread.new(&handlers.fetch(name.sub(/_(q)/, "")))
+    worker.join
+    assert_type("String?", $1)
+  end
+end
+
+def fresh_block_argument_fiber(str, handlers, name)
+  if str =~ /(\d+)/
+    Fiber.new(&handlers.fetch(name.sub(/_(q)/, ""))).resume
+    assert_type("String?", $1)
+  end
+end
+
+# A block kept by an explicit-receiver call and run through it is a stated gap, and one kept inside a root block is
+# no exception (Ruby: nil with `str = "a1"` and `emitter = FreshFrameEmitter.new`). The read below keeps the
+# narrowing although Ruby rebinds it.
+def fresh_kept_block_gap(str, emitter)
+  Thread.new { emitter.on { |l| l =~ /(q)/ } }.join
+  if str =~ /(\d+)/
+    emitter.emit("zz")
+    assert_type("String", $1) # flip this when #1377 is fixed
   end
 end
 # rubocop:enable Style/PerlBackrefs

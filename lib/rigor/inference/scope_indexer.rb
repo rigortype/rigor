@@ -8491,8 +8491,8 @@ module Rigor
       # `eval_if`'s narrowing path.
       #
       # A block or lambda the evaluator never entered is special-cased too ({#closure_scope}): its own locals shadow
-      # the enclosing bindings of the same names. Such a block of a call {FreshFrameBlocks} names enters with the
-      # frame-local specials unbound, as the evaluator enters it ({#propagate_call}).
+      # the enclosing bindings of the same names. Such a block of a call {FreshFrameBlocks} names enters as the
+      # evaluator enters it ({#propagate_call}).
       def propagate(node, table, parent_scope)
         return unless node.is_a?(Prism::Node)
 
@@ -8526,19 +8526,20 @@ module Rigor
       end
 
       # Issue #1361 — the block of `Thread.new`, `Fiber.new`, `define_method` and the other calls
-      # {FreshFrameBlocks.unbound_entry?} names does not read the match globals of the body it is written in. The
-      # evaluator enters it with them unbound ({MatchRebinding.block_entry}), but a block in a value position — the
-      # receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the statement's narrowing.
+      # {FreshFrameBlocks.fresh_entry?} names does not read the match-global narrowing of the body it is written in.
+      # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
+      # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
+      # statement's narrowing.
       def propagate_call(node, table, current_scope)
         block = node.block
         fresh = block.is_a?(Prism::BlockNode) && !table.key?(block) &&
-                FreshFrameBlocks.unbound_entry?(node, current_scope)
+                FreshFrameBlocks.fresh_entry?(node, current_scope)
         unless fresh
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
         end
 
-        entry = FreshFrameBlocks.entry(current_scope)
+        entry = FreshFrameBlocks.entry(current_scope, node)
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
       end
 

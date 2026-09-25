@@ -650,8 +650,20 @@ module Rigor
       rebuild(globals: @globals.except(*MATCH_DATA_GLOBALS).freeze)
     end
 
-    # True when any match-data global holds a binding, which only a match edge makes: the only state
-    # {#forget_match_globals} can drop, and so the gate on every scan that decides whether to.
+    # Issue #1361 — this scope with every bound match-data global rebound to `Dynamic[top]`, and an unbound one left
+    # unbound: the view a `define_method` / `define_singleton_method` body enters with
+    # ({Inference::FreshFrameBlocks.entry}). The body reads the defining frame's slot whenever the method is called,
+    # which the narrowing where it is written neither proves nor refutes, so it is neither narrowed nor flagged.
+    def untyped_match_globals
+      return self unless match_globals_bound?
+
+      untyped = Type::Combinator.untyped
+      rebound = MATCH_DATA_GLOBALS.each_with_object({}) { |name, acc| acc[name] = untyped if @globals.key?(name) }
+      rebuild(globals: @globals.merge(rebound).freeze)
+    end
+
+    # True when any match-data global holds a binding, which a match edge or {#untyped_match_globals} makes: the only
+    # state {#forget_match_globals} can drop, and so the gate on every scan that decides whether to.
     def match_globals_bound?
       !@globals.empty? && MATCH_DATA_GLOBALS.any? { |name| @globals.key?(name) }
     end

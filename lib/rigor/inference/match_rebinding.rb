@@ -237,11 +237,14 @@ module Rigor
 
       # True when the block `call_node` passes may rebind the frame's match globals while the call runs: a block
       # literal whose body {.may_match?}, or a block argument that {.block_argument_may_match?}. The root block of a
-      # thread, fiber or ractor never does ({FreshFrameBlocks.root_call?}).
+      # thread, fiber or ractor never does ({FreshFrameBlocks.root_call?}); a root `&expr` argument's expression runs
+      # here first, as an operand does ({.value_may_rebind?}).
       def block_may_match?(call_node, scope = nil)
-        return false if FreshFrameBlocks.root_call?(call_node, scope)
-
         block = call_node.block
+        if FreshFrameBlocks.root_call?(call_node, scope)
+          return block.is_a?(Prism::BlockArgumentNode) && value_may_rebind?(block.expression, scope)
+        end
+
         case block
         when Prism::BlockNode then may_match?(block.body, scope)
         when Prism::BlockArgumentNode then block_argument_may_match?(block, scope)
@@ -346,11 +349,11 @@ module Rigor
       # pass the call. The per-element fold and the captured-local fixpoint pass none; they run under
       # `ExpressionTyper#rebound_operand_typer`, whose scope has already forgotten the globals when the operands
       # may rebind them, so no pass disagrees. Neither runs for the block of a call {FreshFrameBlocks} names, which is
-      # no iterator's; that block enters with the globals unbound (issue #1361), since a thread's, fiber's or
-      # ractor's root block reads a slot of its own, and a `define_method` body reads the definer's slot whenever the
-      # method is called.
+      # no iterator's; that block enters as {FreshFrameBlocks.entry} gives (issue #1361): a thread's, fiber's or
+      # ractor's root block with the globals unbound, since it reads a slot of its own, and a `define_method` body
+      # with a narrowed global untyped, since it reads the definer's slot whenever the method is called.
       def block_entry(scope, block_node, call_node = nil)
-        return FreshFrameBlocks.entry(scope) if FreshFrameBlocks.unbound_entry?(call_node, scope)
+        return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
         return scope unless scope.match_globals_bound?
         return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
                             (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))

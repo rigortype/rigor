@@ -137,10 +137,11 @@ module Rigor
           if SEND_CALLS.include?(name)
             return if arguments.empty?
 
-            # A method name no literal spells (computed, or with bytes invalid in its encoding) may be any of them.
+            # A method name no literal spells (computed, or with bytes invalid in its encoding) may be any of them. A
+            # literal one is read as that call written directly: `send(:include, M)` at the top level is a mixin, and
+            # `send(:size)` defines nothing.
             first = literal_name(arguments.first)
             return @census << any_entry(node) if first.nil?
-            return unless DEFINING_CALLS.include?(first)
 
             name = first
             arguments = arguments.drop(1)

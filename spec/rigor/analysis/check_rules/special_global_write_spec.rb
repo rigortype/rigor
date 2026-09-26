@@ -251,6 +251,9 @@ RSpec.describe "special global writes", type: :runner do
     it "declines on a top-level mixin of a module RBS does not rule out" do
       expect_quiet("include Nowhere\n", "$stdout = 1")
       expect_quiet("extend Nowhere\n", "$stdout = 1")
+      expect_quiet("send(:include, Nowhere)\n", "$stdout = 1")
+      expect_quiet("self.public_send(:prepend, Nowhere)\n", "$stdout = 1")
+      expect_quiet("__send__(:extend, Nowhere)\n", "$stdout = 1")
       expect_quiet("include Writable\n", "$stdout = 1",
                    sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
       expect(fired("include Comparable\n$stdout = 1\n")).to eq([[2, "global.write-type-mismatch"]])
@@ -349,9 +352,11 @@ RSpec.describe "special global writes", type: :runner do
     end
 
     it "declines on a refinement that imports a module RBS may give the method" do
-      source = "module ArrayWriter\n  refine(Array) { import_methods Writable }\nend\nusing ArrayWriter\n$stdout = []\n"
-      expect(fired(source, sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" }))
-        .to be_empty
+      sig = { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" }
+      ["import_methods Writable", "send(:import_methods, Writable)"].each do |import|
+        source = "module ArrayWriter\n  refine(Array) { #{import} }\nend\nusing ArrayWriter\n$stdout = []\n"
+        expect(fired(source, sig: sig)).to be_empty, import
+      end
     end
 
     # The target may be computed or a constant alias (`fixtures/special_global_writes/refined_*_target.rb`), so which

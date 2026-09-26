@@ -1858,10 +1858,10 @@ module Rigor
       # (a closure of the frame, `binding`, a forwarded block) leaves it unbound, and the clause's scope then stands.
       def eval_ensure(node)
         entry = scope.forget_error_info.forget_last_status
-        bound = scope.last_line_bound?
-        entry = entry.untyped_last_line if bound
+        line = scope.global(:$_)
+        entry = entry.untyped_last_line if line
         type, after = eval_branch_or_nil(node.statements, entry)
-        after = after.with_global(:$_, scope.global(:$_)) if bound && last_line_kept?(after, node)
+        after = after.with_global(:$_, line) if line && last_line_kept?(after, node)
         [type, LastStatus.restore_unless_set(ErrorInfo.restore(after, scope), scope)]
       end
 

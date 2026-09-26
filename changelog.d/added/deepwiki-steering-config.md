@@ -1,0 +1,1 @@
+- **[docs]** The [DeepWiki](https://deepwiki.com/rigortype/rigor) pages are now generated from a maintained outline, so they follow the binding specifications and the project's own terminology instead of guessing at them ([#1460](https://github.com/rigortype/rigor/pull/1460)).

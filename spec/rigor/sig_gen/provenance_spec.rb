@@ -176,6 +176,9 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `declared_divergent` (`scope.rbs` +1; the reason is at its pin).
 # 711 since #1449. `DiscoveryIndex` gains the `implicit_self_evidence` member, whose `Data` row is residue as
 # every member row of that class is (`scope.rbs` +1; the reason is at its pin).
+# 707 since #1429. A value-position `case` types each arm under the subject's `when` narrowing, so four rows
+# whose body is a `case … when <Class>` render their return (`inference.rbs` -1, `type.rbs` -3; the reasons are
+# at the pins). The new `Scope` guard rows are sig-gen output or carry the #1154 marker, so they add none.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays

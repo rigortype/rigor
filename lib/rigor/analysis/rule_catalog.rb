@@ -670,8 +670,8 @@ module Rigor
             "parenthesised or not — whose class the setter does not take: `$/ = 1`, `$/ = /x/`, `$~ = \"x\"`, " \
             "`$0 = nil`, `$. = \"3\"`, `$stdout = 1`.",
             "Where the setter also converts (`to_str`, `to_int`) or asks for `write`, the literal's object " \
-            "cannot answer that method: neither RBS nor the program gives its class, or an ancestor, the method " \
-            "or a `method_missing` / `respond_to_missing?` / `respond_to?` of its own.",
+            "cannot answer that method: RBS gives its class neither the method nor a `method_missing` / " \
+            "`respond_to_missing?` / `respond_to?` of its own, and the program defines none of them anywhere.",
             "The envelope is the interpreter's setter, not the global's RBS declaration: `$/ = /x/` fires " \
             "although `$;` takes a Regexp."
           ],
@@ -680,14 +680,21 @@ module Rigor
             "`$DEBUG`, `$=`; nor `$@`, whose setter depends on whether `$!` is set.",
             "The value is not a literal — a variable, a method call, a constant, a conditional — whatever its " \
             "inferred type: a class RBS declares without `write` or `to_str` does not prove the object lacks it.",
-            "The program gives the literal's class or an ancestor the method or a hatch: RBS (a `sig/` reopening " \
-            "or `include` counts), a `def` / `define_method` / `alias` / `alias_method` / `attr_*` / `class_eval` " \
-            "block in a reopening, a top-level `def`, any project module that defines it, `Integer.include(M)` / " \
-            "`Object.include(M)` / `Integer.define_method(...)`, a module an ancestor mixes in that RBS does not " \
-            "rule out, or a `pre_eval:` patch.",
-            "For `$stdout` / `$>` / `$stderr`, a refinement of the class or an ancestor that defines `write` is in " \
-            "effect at the write. The `to_str` / `to_int` conversions ignore refinements, so those still fire.",
-            "Any project file aliases the special (`alias $stdout $out`, on either side).",
+            "RBS gives the literal's class the method or a hatch of its own (a `sig/` reopening or `include` " \
+            "counts).",
+            "The program — any project or `pre_eval:` file — defines the method or a `method_missing` / " \
+            "`respond_to_missing?` / `respond_to?` anywhere, in any spelling (`def`, `define_method`, " \
+            "`define_singleton_method`, `alias`, `alias_method`, `attr_*`, a delegation macro, a string `eval`, " \
+            "the same through `send`) and on any receiver, or defines a method whose name no literal spells. " \
+            "This is blanket: no census of where a definition lands can be complete, so the literal of every " \
+            "class declines, whatever the definition's owner.",
+            "An ancestor's surface is rewritten from outside (`Integer.include(M)`, `Object.include(M)`, a string " \
+            "`class_eval`), or a top-level `include` / `prepend` / `extend`, or an ancestor's `include`, names a " \
+            "module RBS does not rule out.",
+            "For `$stdout` / `$>` / `$stderr`, a refinement that may add `write` refines the class or an ancestor " \
+            "and a `using` is in effect at the write. The `to_str` / `to_int` conversions, and a refined " \
+            "`respond_to_missing?` / `respond_to?`, ignore refinements, so those still fire.",
+            "Any project or `pre_eval:` file aliases the special (`alias $stdout $out`, on either side).",
             "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a multiple-assignment target, a `for` index, or a " \
             "`rescue => $g` reference: their value is not type-checked.",
             "The write sits in the dead arm of a decidable version guard. Other code that never runs (`if " \
@@ -717,8 +724,8 @@ module Rigor
             "The write is `$g ||= v` or `$g &&= v`, which writes only when the current value is falsy " \
             "(truthy): `$LOAD_PATH ||= []` never writes.",
             "The write is a `for` index or a `rescue => $g` reference.",
-            "Any project file aliases the special (`alias $! $err`, on either side), which can make the name " \
-            "another variable.",
+            "Any project or `pre_eval:` file aliases the special (`alias $! $err`, on either side), which can " \
+            "make the name another variable.",
             "Mutating the value is not a write: `$LOAD_PATH << dir` and `$LOADED_FEATURES.delete(f)` stay silent.",
             "The write sits in the dead arm of a decidable version guard. Other code that never runs is not " \
             "recognised, and a write there still fires."

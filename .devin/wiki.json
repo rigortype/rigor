@@ -9,14 +9,14 @@
       "author": "Rigor Maintainers"
     },
     {
-      "content": "Repository layout and documentation authority: (1) Normative specifications: docs/type-specification/ (type system) and docs/internal-spec/ (inference engine contracts) are binding. (2) Architecture Decision Records: docs/adr/ explains the rationale behind architectural decisions (ADR-0 through ADR-117). (3) Core implementation lives in lib/rigor/ (engine, CLI, language server, MCP server, cache, effects). (4) Production framework plugins live in plugins/ (38 plugins covering Rails, ActiveRecord, RSpec, Sorbet bridge, Sidekiq, Devise, dry-rb, etc.). (5) Agent skills live in skills/ (rigor-next-steps, rigor-ask, rigor-project-init). Upstream submodules in references/ are read-only upstream material.",
+      "content": "Repository layout and documentation authority: (1) Normative specifications: docs/type-specification/ (type system) and docs/internal-spec/ (inference engine contracts) are binding. (2) Architecture Decision Records: docs/adr/ explains the rationale behind architectural decisions; docs/adr/README.md is the complete index. (3) Core implementation lives in lib/rigor/ (engine, CLI, language server, MCP server, cache, effects). (4) Production framework plugins live in plugins/ (Rails, ActiveRecord, RSpec, Sorbet bridge, Sidekiq, Devise, dry-rb, and more; plugins/README.md is the inventory); examples/ holds plugin-contract walkthroughs, not production support. (5) User-facing agent skills that Rigor ships to adopting projects live in skills/ (e.g. rigor-next-steps, rigor-ask, rigor-project-init; skills/README.md is the inventory); .claude/skills/ holds contributor-only workflows for this repository and is not part of the product. Upstream submodules in references/ are read-only upstream material.",
       "author": "Rigor Maintainers"
     }
   ],
   "pages": [
     {
       "title": "Overview",
-      "purpose": "High-level introduction to Rigor: what it is, its core philosophy (inference-first, no inline annotations, zero runtime dependency), key capabilities, and how the major subsystems relate. Links to child pages for installation, configuration, contribution, and editor/agent integrations. Reflects v0.3.x themes plus effect labels (ADR-103), unused-code reachability (ADR-102), checked types and typeless comments (ADR-107), type provenance for agents (ADR-108), Ruby-native range notation (ADR-109), inherited declaration precedence (ADR-110), and inline refinement carrier (ADR-111).",
+      "purpose": "High-level introduction to Rigor: what it is, its core philosophy (inference-first, no inline annotations, zero runtime dependency), key capabilities, and how the major subsystems relate. Links to child pages for installation, configuration, contribution, and editor/agent integrations. Covers recent additions such as effect labels (ADR-103), unused-code reachability (ADR-102), checked types and typeless comments (ADR-107), type provenance for agents (ADR-108), Ruby-native range notation (ADR-109), inherited declaration precedence (ADR-110), and inline refinement carrier (ADR-111).",
       "page_notes": [
         {
           "content": "Start with README.md, AGENTS.md, and CONTEXT.md. Emphasize that Rigor is a developer tool and static bug detector, not a type system compiler or runtime type checker."
@@ -59,7 +59,7 @@
       "parent": "Overview",
       "page_notes": [
         {
-          "content": "Implementation lives in lib/rigor/language_server/, lib/rigor/mcp/, and skills/. Reference docs/manual/09-editor-integration.md and docs/manual/10-mcp-server.md."
+          "content": "Implementation lives in lib/rigor/language_server/, lib/rigor/mcp/, and skills/. Reference docs/manual/08-skills.md, docs/manual/09-editor-integration.md, and docs/manual/10-mcp-server.md."
         }
       ]
     },
@@ -74,7 +74,7 @@
     },
     {
       "title": "Type Carriers and the Value Lattice",
-      "purpose": "Reference for every type carrier: Constant, Nominal, Singleton, Union, Tuple, HashShape, IntegerRange, Dynamic[Top], Bot, Refined, Difference, BoundMethod, Type::App (HKT), and Intersection. Normalization rules, trinary certainty system, Type::Combinator, dynamic-origin algebra (ADR-83), Dynamic[T] provenance (ADR-75, ADR-82, ADR-108), and Ruby-native range notation (ADR-109).",
+      "purpose": "Reference for the type carriers, including Constant, Nominal, Singleton, Union, Tuple, HashShape, IntegerRange, Dynamic[Top], Bot, Refined, Difference, BoundMethod, Type::App (HKT), and Intersection. Normalization rules, trinary certainty system, Type::Combinator, dynamic-origin algebra (ADR-83), Dynamic[T] provenance (ADR-75, ADR-82, ADR-108), and Ruby-native range notation (ADR-109).",
       "parent": "Type System",
       "page_notes": [
         {
@@ -186,17 +186,17 @@
       "purpose": "The plugin subsystem design: lib/rigor/plugin/ runtime, Plugin::Base manifest contracts, Plugin::Registry, narrow extension seams (ADR-37), compiled plugin gates keeping execution off hot paths (ADR-52), macro helpers, and authoring guidelines for custom framework plugins.",
       "page_notes": [
         {
-          "content": "Implementation in lib/rigor/plugin/. Governed by ADR-2, ADR-37, and ADR-52. Walkthrough in skills/rigor-plugin-author and examples/."
+          "content": "Implementation in lib/rigor/plugin/. Governed by ADR-2, ADR-37, and ADR-52. User guide in docs/manual/07-plugins.md; contract walkthroughs in examples/ and the authoring skill in skills/rigor-plugin-author/."
         }
       ]
     },
     {
       "title": "Built-in Framework and Gem Plugins",
-      "purpose": "Survey of the 38 production plugins bundled in plugins/: Rails suite (ActiveRecord, ActionPack, ActionMailer, ActiveJob, routes, i18n, Railties), Testing (RSpec, FactoryBot, Minitest, Shoulda Matchers), Ecosystem (Sidekiq, Devise, Pundit, Sinatra, dry-rb, GraphQL, Hanami), and type-system bridges (rigor-sorbet ingesting Sorbet RBI signatures).",
+      "purpose": "Survey of the production plugins bundled in plugins/, grouped by area: Rails suite (ActiveRecord, ActionPack, ActionMailer, ActiveJob, routes, i18n, Railties), Testing (RSpec, FactoryBot, Minitest, Shoulda Matchers), Ecosystem (Sidekiq, Devise, Pundit, Sinatra, dry-rb, GraphQL, Hanami), and type-system bridges (rigor-sorbet ingesting Sorbet RBI signatures).",
       "parent": "Plugin Architecture and Ecosystem",
       "page_notes": [
         {
-          "content": "Explore plugins/ and plugins/README.md. Highlight how plugins teach Rigor about dynamic metaprogramming without modifying analyzed application code."
+          "content": "Explore plugins/ and treat plugins/README.md as the authoritative inventory; do not state a plugin count. Highlight how plugins teach Rigor about dynamic metaprogramming without modifying analyzed application code."
         }
       ]
     },

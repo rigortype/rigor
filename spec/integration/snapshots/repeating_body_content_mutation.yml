@@ -1,0 +1,5 @@
+---
+locals: {}
+assertions:
+  '1': Array[Dynamic[top]]
+  '2': Dynamic[top] | []

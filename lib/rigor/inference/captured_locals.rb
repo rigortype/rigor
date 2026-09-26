@@ -35,7 +35,7 @@ module Rigor
     #
     # {.content_mutations} is the sibling set on the same terms: the captured outer locals the body mutates
     # IN PLACE rather than rebinds, which the rebind set cannot see and the per-element fold needs as well.
-    module CapturedLocals
+    module CapturedLocals # rubocop:disable Metrics/ModuleLength
       LOCAL_WRITE_NODES = Set[
         Prism::LocalVariableWriteNode,
         Prism::LocalVariableOperatorWriteNode,
@@ -266,6 +266,51 @@ module Rigor
         return NO_SITES if body.nil?
 
         introduced = nil
+        body_mutation_sites(body, base_scope, non_locals) { introduced ||= introduced_locals(block_node) }
+      end
+
+      # Issue #1412 — false when `node` certainly holds nothing {.writes} (with `ivars: true`) or
+      # {.content_mutations} could collect against `base_scope`: no write to a local it binds, no instance, class or
+      # global variable write, no mutator or index store, and no self-call passing a local. It over-approximates
+      # (a write a block parameter shadows still answers true) and allocates nothing, so a caller can skip both
+      # scans, and whatever it would compute only to use their answers, for the common body that touches no capture.
+      def may_touch_capture?(node, base_scope)
+        return true if capture_touch?(node, base_scope)
+
+        node.rigor_each_child { |child| return true if may_touch_capture?(child, base_scope) }
+        false
+      end
+
+      def capture_touch?(node, base_scope)
+        klass = node.class
+        return base_scope.locals.key?(node.name) if LOCAL_WRITE_NODES.include?(klass)
+        return true if NON_LOCAL_WRITE_NODES.include?(klass) || INDEX_STORE_NODES.include?(klass)
+        return false unless klass == Prism::CallNode
+
+        receiver = node.receiver
+        return true if receiver && MutationWidening::SHAPE_MUTATORS.include?(node.name)
+
+        callee_call?(node)
+      end
+
+      # Issue #1412 — {.content_mutations} for a `while` / `until` / `for` body: the locals bound in `base_scope`
+      # (the scope the loop body first enters from) that the body mutates in place. A loop body opens no scope and
+      # introduces no name, so every such local counts on the same depth terms a block's capture does — a read
+      # that resolves inside a nested block or lambda, or inside a nested `def` or class body, is not the loop's.
+      #
+      # @return `{ name => [site, ...] }`, empty for the common body that mutates nothing.
+      def loop_content_mutations(statements, base_scope)
+        return NO_SITES if statements.nil?
+
+        body_mutation_sites(statements, base_scope, false) { NO_INTRODUCED }
+      end
+
+      NO_INTRODUCED = Set.new.freeze
+      private_constant :NO_INTRODUCED
+
+      # The mutation sites under `body` whose reads name a variable {.captured_target?} accepts, keyed by name.
+      # The block yields the names the enclosing construct introduces, asked only when a local site is found.
+      def body_mutation_sites(body, base_scope, non_locals, &)
         sites = nil
         evaluator = nil
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
@@ -274,9 +319,7 @@ module Rigor
           next if site.nil?
 
           site_reads(site).each do |read|
-            next unless captured_target?(read, ancestors, base_scope, non_locals) do
-              introduced ||= introduced_locals(block_node)
-            end
+            next unless captured_target?(read, ancestors, base_scope, non_locals, &)
 
             ((sites ||= {})[read.name] ||= []) << site
           end

@@ -129,6 +129,54 @@ RSpec.describe Rigor::Inference::CapturedLocals do
     end
   end
 
+  # Issue #1412 — the loop-body sibling of `.content_mutations`: a loop body introduces no name, so every local the
+  # entry scope binds counts, on the same depth terms.
+  describe ".loop_content_mutations" do
+    def loop_sites(source, *names)
+      statements = Prism.parse(source).value.statements.body.last.statements
+      described_class.loop_content_mutations(statements, scope_binding(*names))
+                     .transform_values { |sites| sites.map(&:class) }
+    end
+
+    it "collects a mutator and an index store on a local the loop entry binds" do
+      source = "a = []\nh = {}\nwhile a.size < 3\n  a << 1\n  h[:k] = 2\nend\n"
+      expect(loop_sites(source, :a, :h)).to eq(a: [Prism::CallNode], h: [Prism::CallNode])
+    end
+
+    it "excludes a nested block's parameter that shares the name, and a nested def's own local" do
+      source = "a = []\nwhile a.empty?\n  [[]].each { |a| a << 1 }\n  def helper; a = []; a << 2; end\nend\n"
+      expect(loop_sites(source, :a)).to be_empty
+    end
+
+    it "excludes a local the entry scope does not bind" do
+      expect(loop_sites("a = []\nwhile a.empty?\n  a << 1\nend\n")).to be_empty
+    end
+  end
+
+  # Issue #1412 — the statement pass's pre-scan. It may answer true where `.writes` and `.content_mutations` both
+  # come back empty, but never false where either finds something: each shape below is one they collect (the
+  # callee store once `add_to` resolves to a method that mutates its parameter).
+  describe ".may_touch_capture?" do
+    {
+      "rebind" => "a = 1\n[1].each { |k| a = k }\n",
+      "nested rebind" => "a = 1\n[1].each { |k| [2].each { a += k } }\n",
+      "ivar rebind" => "a = 1\n[1].each { |k| @n = k }\n",
+      "mutator" => "a = []\n[1].each { |k| a << k }\n",
+      "index store" => "a = {}\n[1].each { |k| a[k] ||= 1 }\n",
+      "element mutator" => "a = [[]]\n[1].each { |k| a[0].push(k) }\n",
+      "callee store" => "a = []\n[1].each { |k| add_to(a, k) }\n"
+    }.each do |label, source|
+      it "answers true for a #{label}" do
+        expect(described_class.may_touch_capture?(block_of(source).body, scope_binding(:a))).to be(true)
+      end
+    end
+
+    it "answers false for a body that only reads captures and writes its own locals" do
+      block = block_of("a = []\n[1].each { |k| t = a.size + k; puts t.to_s }\n")
+      expect(described_class.may_touch_capture?(block.body, scope_binding(:a))).to be(false)
+    end
+  end
+
   # Issue #1302 — the miss answer a mark records rides the rebind `.bind` makes across iterations. An
   # iteration's own mark comes without its answer, so once one joins the binding's, the answer is dropped.
   describe ".bind" do

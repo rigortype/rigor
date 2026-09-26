@@ -101,7 +101,8 @@ zero new diagnostics** — the removal is a genuine win
 constant); perf neutral (lib self-check ~17.8s vs ~17.5s baseline).
 *(Amended by WD2.13's second-residue closure: a captured local the body
 mutates in place is read at its unknown-store widening in every pass,
-never at its pre-call contents.)*
+never at its pre-call contents. Issue #1412 extends that to the
+statement pass over every repeating block, and to the loop seam.)*
 
 ### WD2 — Slice B: loop-body fixpoint
 
@@ -113,6 +114,9 @@ non-convergence). `d = 1; while …; d *= 2; end` → `1 | Integer`
 (today's unsound `1 | 2`). Loop-carried narrowing on the predicate is
 recomputed per iteration from the joined scope, so existing break /
 exit-edge behaviour is preserved.
+*(Amended by WD2.13's issue #1412 note: every pass, the single pass
+included, enters with each local the body mutates in place at its
+unknown-store widening.)*
 
 **Implemented 2026-06-11.** `StatementEvaluator#eval_loop` keeps the
 historical single-pass join as the base (it still carries
@@ -1098,6 +1102,71 @@ still fire: a collection the body does not mutate, and an inner block
 parameter sharing the outer name. The spec asserts the exact `flow.*`
 line set, that no error fires on a value the body stored, and the
 accumulator's pass count.
+
+*(The statement pass and the loop seam, issue #1412, 2026-09-26.)* The
+closure above reached only the write-back's passes, and the write-back
+runs only for an explicit receiver classified `:non_escaping` whose
+body also REBINDS a capture. Every other repeating body kept the
+single statement pass from the call's entry scope, and a body that only
+mutates a capture read its pre-call contents on every pass:
+
+    depth = []
+    lines.each { |tl| puts depth.last.length if depth.last; depth << tl }
+    # error: undefined method `length' for nil
+
+That pass now enters from a write-back pass's entry
+(`StatementEvaluator#repeating_block_entry` → `#block_pass_entry`)
+whenever the call may run its block more than once. The gate is the
+#587 (b) pass's own (`Inference::BlockRepetition.may_repeat?`, moved
+out of `ExpressionTyper` so both passes share it), so #1234's iterator
+name on a `Dynamic` receiver counts, and `then`, a one-element receiver
+and an uncatalogued name do not. Where the write-back will not run its
+passes (an `:unknown` class, or no explicit receiver), a name the body
+rebinds enters at its call-site binding joined with `Dynamic[top]`,
+the rebind counterpart of the unknown-store widening: an earlier pass
+wrote something no pass typed, and the continuation already drops the
+name to `Dynamic[top]`. The loop seam takes the same widening
+(`#loop_pass_entry`, so the single pass and every fixpoint pass, and a
+`for` body's only pass) over `CapturedLocals.loop_content_mutations`.
+A widened name the body does not rebind keeps its #1287 marks
+(`Scope#with_mutated_local`), on the write-back's passes too.
+
+The rule is the one this section already chose: a body's entry must
+describe every pass it records, and where no pass types what a later
+pass reads, the gradual arm is the answer. Two alternatives were
+rejected. Running the write-back for a body that only mutates (dropping
+its `names.empty?` fast path) costs a second body pass for every such
+block, where the widening needs none. Running its fixpoint for an
+`:unknown` call costs passes on the most common untyped receiver, and
+it keeps the `nil` seed beside what the body stores, so the line
+readers below would still read a possible `nil`. The price is the
+false negative the write-back already pays: a read only the first pass
+makes goes gradual (`last = nil; items.each { |x| last.length; last =
+x }` on an untyped `items` no longer reports).
+
+A body that can neither rebind nor mutate a captured binding skips the
+gate (`CapturedLocals.may_touch_capture?`, an allocation-free scan),
+and the block's receiver is typed once per call
+(`StatementEvaluator#explicit_receiver_type`) instead of at each of
+the four sites that asked. On textbringer (`--workers=0`) that is
+6,371,968 → 6,058,445 allocated objects; the gate alone, before the
+memo, cost +35k (+0.55%).
+
+Gate: the `repeating_body_content_mutation` fixture's must-not-fire
+shapes (the repro, `each_with_index`, `push`, an index write, a Hash
+slot, a typed receiver, `while`, `until`, `for`, an untyped-receiver
+rebind and a line reader's state machine) and its three controls (a
+body that never appends, `5.then`, `Mutex#synchronize`), which still
+report. Corpus (redmine, textbringer, mail, mastodon): the three redmine
+errors the issue names are gone, with the same fix removing four
+more state-machine reads under `io.each_line` (`cvs_adapter.rb:196`
+and `:214`, `git_adapter.rb:262` and `:308`), and nothing is added.
+One error keeps its line and changes its type: `diff.rb:78` calls a
+method Redmine patches onto `Array` and now reads the receiver as
+`Array[Dynamic[top]]`, not `[]`.
+What stays open: `Kernel#loop` is not a catalogued iterator, so a
+`loop do … end` body keeps its entry; an instance variable mutated in
+place is still not collected (#1208).
 
 ### WD3 — One mechanism, shared
 

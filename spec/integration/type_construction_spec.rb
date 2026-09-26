@@ -2395,6 +2395,27 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #1412 — a repeating block or loop body that only mutates a capture in place was typed from its
+    # pre-body contents on every pass, because only the ADR-56 write-back (which needs a rebind) laid the
+    # WD2.13 unknown-store widening.
+    describe "fixtures/repeating_body_content_mutation.rb — a content mutation reaches the next pass" do
+      let(:harness) { harness_for("repeating_body_content_mutation") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fire in one assertion: every guarded read of an appended collection is
+      # live at runtime, and the three controls — a body that never mutates, a run-once block and an
+      # uncatalogued call — still report theirs.
+      it "silences the first-pass nil reads without silencing the controls" do
+        calls = harness.diagnostics.select { |d| d.rule.to_s.start_with?("call.") }
+        calls = calls.reject { |d| d.rule.to_s == "call.unresolved-toplevel" }
+        expect(calls.map(&:line)).to eq(marked_lines(harness, "# STILL-REPORTED"))
+      end
+    end
+
     describe "fixtures/loop_body_fixpoint.rb — ADR-56 slice B loop-body fixpoint" do
       let(:harness) { harness_for("loop_body_fixpoint") }
 

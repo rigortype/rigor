@@ -45,50 +45,97 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
-| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Six causes: a member your `sig/` also declares (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)), a same-line `# @rbs %a{…}` whose method type does not parse (see [Same-line annotations](#same-line-annotations)), a `# @rbs name: T` parameter type that does not parse (see [Unparseable `# @rbs name:` types](#unparseable--rbs-name-types)), and an `@rbs`-prefixed tag the gem does not recognise (see [An unrecognised tag after `@rbs`](#an-unrecognised-tag-after-rbs)) |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Six causes: a member your `sig/` also declares where Rigor cannot tell which of the two is more precise (see [Precedence](#precedence)), the `# @rbs module-self: Foo` spelling (see below), a `#:` line whose type does not parse (see [Unparseable `#:` types](#unparseable--types)), a same-line `# @rbs %a{…}` whose method type does not parse (see [Same-line annotations](#same-line-annotations)), a `# @rbs name: T` parameter type that does not parse (see [Unparseable `# @rbs name:` types](#unparseable--rbs-name-types)), and an `@rbs`-prefixed tag the gem does not recognise (see [An unrecognised tag after `@rbs`](#an-unrecognised-tag-after-rbs)) |
+| `rbs.contradicting-signature` | error | an inline declaration contradicts the `sig/` declaration of the same method, or an inline `%a{rigor:v1:…}` refinement is outside its own declared type (see [Precedence](#precedence)). A core rule rather than the plugin's own, so it carries no `plugin.rbs-inline.` prefix |
 
 ## Precedence
 
 When a method is declared **both** in `sig/` and by an inline
-annotation, **the `.rbs` wins, per member.** The inline signature for
-that one method is dropped; every other annotation in the file still
-binds, and the class keeps its method surface.
+annotation, Rigor **compares the two**, position by position — each
+parameter, the return type, a block's parameters and return — and
+exactly one of them binds. Every other annotation in the file still
+binds either way, and the class keeps its method surface.
 
 ```ruby
-# lib/demo.rb                  # sig/demo.rbs
-class Demo                     # class Demo
-  # @rbs (Integer) -> String   #   def shared: (String) -> Integer  ← this one wins
-  def shared(v) = v.to_s       #   def only_sig: () -> String
-                               # end
-  # @rbs (Integer) -> Integer
-  def only_inline(v) = v + 1   # ← inline-only: still binds
+# lib/demo.rb                          # sig/demo.rbs
+class Demo                             # class Demo
+  # @rbs dir: :asc | :desc             #   def order: (Symbol dir) -> void
+  def order(dir) = nil                 #   def shared: (String) -> Integer
+                                       # end
+  # @rbs (Integer) -> String
+  def shared(v) = v.to_s
 end
 ```
 
-Each dropped member is reported once as
-`plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the
-member and the `.rbs` that won. Delete one of the two declarations to
-make the inline annotation take effect.
+- **One refines the other: the more precise one binds, silently.**
+  `:asc | :desc` is a subtype of `Symbol`, so `Demo#order` takes the
+  inline contract and `order(:up)` is an argument-type error, where
+  the `.rbs` alone let it pass. The merge takes the narrower type in
+  every position, parameters included, on purpose: both declarations
+  are yours, and the narrower one is what you stated. `String` in
+  `sig/` beside `non-empty-string` inline reads as `non-empty-string`.
+  `untyped`, `void` and `top` are consistent with anything and say the
+  least, so `sig/`'s `-> untyped` beside an inline `-> void` is quiet.
+  Identical declarations — what `rigor sig-gen` writes for an annotated
+  method — are quiet too. The inline side binds only if the `.rbs`
+  member loses nothing by it: the same visibility, and every
+  annotation it carries (a predicate, an assertion, an effect
+  envelope) also on the inline one.
+- **They contradict: an error, and the `.rbs` binds.** If `Demo#shared`
+  took a `::String` in `sig/` and an `::Integer` inline, no value would
+  be both, so the run would report
+  [`rbs.contradicting-signature`](../04-diagnostics.md#rule-rbs-contradicting-signature)
+  at the `sig/` line, naming the annotated file. Spelled `String` and
+  `Integer`, as in the example, the pair is undecided instead (below). Positional counts that
+  cannot meet, or a keyword one side requires and the other cannot take
+  in any form, contradict the same way. The error needs a proof, and
+  only Ruby core or stdlib classes written absolutely (`::String`,
+  `::Integer`) give one, read from their RBS hierarchy. A module such
+  as `Comparable` never counts, since any class may include it; nor
+  does a class of your own (your `sig/` may omit the superclass Ruby
+  gives it), a gem's class, a relative name such as plain `String`
+  (it may be your own `App::String`), an optional or rest parameter
+  (a call may leave it out), or a block's parameters (the body may
+  never yield). A stale generated signature is the usual cause:
+  regenerate it, or fix the annotation.
+- **Rigor cannot tell: the `.rbs` binds, with an `:info`.** When a
+  position names a type alias, an interface, `self`, a type variable,
+  or a relative class name your project also declares, when Rigor
+  cannot prove two types disjoint (a subclass relation such as
+  `Integer` against `Numeric` included), when the parameter lists are shaped
+  differently but overlap, when the overloads do not pair one to one
+  (they are paired by what they declare, not by their order), or when
+  each side is more precise somewhere, the inline signature is dropped
+  and reported as
+  `plugin.rbs-inline.source-rbs-annotation-not-honoured`, naming the
+  member and the `.rbs` that bound. Make one a refinement of the
+  other, or delete one, to settle it.
 
 `rigor sig-gen --write` produces this overlap on purpose: by default it
 copies each inline declaration into `sig/`, so the generated signature
-is the complete contract a gem ships. The copy is reported like any
-other overlap. When an inline annotation later disagrees with its copy,
+is the complete contract a gem ships. An identical copy is quiet, as
+above. When an inline annotation later disagrees with its copy,
 `rigor sig-gen --write` and `--check` refuse the method and exit `1`
 until you make the two agree or pass `--overwrite`, which replaces the
 `sig/` member with the inline declaration. A project whose Steep reads the same
 annotations sets `sig_gen.inline_declared: skip` instead
 ([handbook chapter 11](../../handbook/11-sig-gen.md#methods-declared-inline)).
 
-`sig/` wins because it is the reviewed artefact — the one you diff in
-review and the one `rigor sig-gen --diff` reasons about. There is no
-upstream rule to defer to: rbs merges an inline `.rb` declaration and a
-`.rbs` one into a single class entry and ranks neither, so Steep reports
-the same overlap as a signature error and the class still fails to
-build. Rigor keeps the reporting and drops the degradation
-([ADR-32](../../adr/32-rbs-inline-comment-ingestion.md) WD13) — left to
-collide, one duplicated method costs the class every other method, and
-each call on it, real methods and typos alike, reads `Dynamic[top]`.
+A `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement on an
+inline annotation must also share values with its own declared type:
+`# @rbs %a{rigor:v1:return: positive-int} () -> ::String` is reported as
+`rbs.contradicting-signature` at the annotated file (the same proof rule
+applies, so `-> String` without `::` is left alone).
+
+There is no upstream rule to defer to: rbs merges an inline `.rb`
+declaration and a `.rbs` one into a single class entry and ranks
+neither, so Steep reports the same overlap as a signature error and
+the class fails to build. Rigor keeps the reporting and drops the
+degradation ([ADR-112](../../adr/112-extrbs-comment-channel.md) WD5,
+which replaced [ADR-32](../../adr/32-rbs-inline-comment-ingestion.md)
+WD13's "the `.rbs` always wins") — left to collide, one duplicated
+method costs the class every other method, and each call on it, real
+methods and typos alike, reads `Dynamic[top]`.
 
 Two overlaps this does **not** cover: a `.rbs` that collides with
 *bundled* RBS (Ruby core, stdlib, a gem's signatures) is quarantined

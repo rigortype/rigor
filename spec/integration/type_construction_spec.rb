@@ -1174,6 +1174,79 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/lastline_frame_local.rb — `$_` is frame-local and narrowed by a reader condition (#1359)" do
+    let(:harness) { harness_for("lastline_frame_local") }
+
+    it "types `$_` by the frame that reads it and the reader conditions around the read" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # A condition on a reader narrows `$_` to `String` where the read happens, and a reader that is not a condition
+    # leaves it unbound: neither reports a correct program that copies `$_` into a local and calls a method on it.
+    it "reports nothing on a `$_` copy read under a reader condition" do
+      reads = marked_lines(harness, "# QUIET-1359")
+      expect(reads.size).to eq(10)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    it "reports no nil receiver anywhere in the fixture" do
+      nil_receivers = harness.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(nil_receivers).to be_empty
+    end
+  end
+
+  describe "fixtures/lastline_patched_reader.rb — a reader the program patches in narrows nothing (#1359)" do
+    let(:harness) { harness_for("lastline_patched_reader") }
+
+    it "leaves `$_` unbound after a reader whose name the file defines through the `define_method` family" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/errinfo_status.rb — `$!` / `$@` in a rescue clause and `$?` after a subprocess (#1360)" do
+    let(:harness) { harness_for("errinfo_status") }
+
+    it "types `$!`, `$@` and `$?` where Ruby guarantees them, and unbound everywhere else" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # A copy of `$!` in a rescue clause, or of `$?` after a subprocess, holds the exception or the status: calling a
+    # method on it reports nothing. Nor does a `$!` a clause guards by its class, or one read in a clause or fallback
+    # the analysis types without entering.
+    it "reports nothing on a copy of `$!` or `$?`, a class-guarded `$!` or an unentered clause's `$!`" do
+      reads = marked_lines(harness, "# QUIET-1360")
+      expect(reads.size).to eq(15)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
+
+    it "reports no error anywhere in the fixture" do
+      expect(harness.errors).to be_empty
+    end
+  end
+
+  describe "fixtures/errinfo_status_declines.rb — a program that may clear `$?` or define `backtrace` (#1360)" do
+    let(:harness) { harness_for("errinfo_status_declines") }
+
+    it "leaves `$?` unbound in a file that waits with flags, and `$@` in a program that defines `backtrace`" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/errinfo_case_equality.rb — a file that defines `===` through `define_singleton_method` (#1360)" do
+    let(:harness) { harness_for("errinfo_case_equality") }
+
+    it "binds no rescued class to `$!` in the file" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 
@@ -2300,6 +2373,25 @@ RSpec.describe "Rigor type construction (integration)" do
         Rigor::Scope.empty.evaluate(Prism.parse("sum = 0\n[1, 2].each { |x| sum += x }\n").value)
         expect(passes).to eq(3)
         expect(Rigor::Inference::UnknownStoreWidening).not_to have_received(:widen)
+      end
+    end
+
+    # Issue #1234 — the captured-binding pass lays its cross-iteration binding only under a call that may
+    # run its block more than once, and that answer keyed on the receiver's class. A `Dynamic` receiver
+    # and a project `Enumerable` answered "unknown", so the block kept the first iteration's pins.
+    describe "fixtures/unknown_receiver_iterator_repeat.rb — an iterator on an unclassified receiver" do
+      let(:harness) { harness_for("unknown_receiver_iterator_repeat") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # Must-not-fire / must-still-fold in one assertion: the three repros are decided at runtime, and the
+      # control whose block rebinds nothing still folds.
+      it "silences the first-iteration folds without silencing the genuine one" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+        expect(flow.map(&:line)).to eq(marked_lines(harness, "# GENUINE-FALSEY"))
       end
     end
 

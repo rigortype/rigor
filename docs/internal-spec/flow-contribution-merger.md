@@ -163,6 +163,15 @@ The four parallel carriers translate to / from `Fact`:
 | 2    | `:plugin`, `plugin.<id>` | Plugin contributions. |
 | 3    | anything else            | Unknown — reported but treated as the lowest tier. |
 
+Tier 0 names the authority of accepted RBS, but the RBS return type
+is not a merge input: `MethodDispatcher#resolve` consults the plugin
+tier ahead of `RbsDispatch`, so when a plugin's `dynamic_return`
+answers, the merged plugin answer is the call's type and the RBS
+return is never consulted
+([ADR-2](../adr/2-extension-api.md) § "Amendment 2026-09-26",
+[plugin.md](plugin.md)). The tiers order the contributions the merger
+does see.
+
 Within a tier, contributions merge in deterministic order:
 provenance-supplied `plugin_id` alphabetical (nil plugin ids sort
 first to keep `:rbs_extended` / `:generated` pre-plugin

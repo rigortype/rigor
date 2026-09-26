@@ -13,6 +13,9 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
+require_relative "last_line"
+require_relative "last_status"
+require_relative "error_info"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
 require_relative "multi_target_binder"
@@ -123,9 +126,7 @@ module Rigor
 
         class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
-        program_globals = build_program_global_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(program_globals: program_globals))
-        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope = seed_program_globals(root, seeded_scope)
 
         # Slice 7 phase 9. In-source constant value tracking. Walks every ConstantWriteNode/ConstantPathWriteNode in the
         # program and types its rvalue under a scope that carries the surrounding qualified prefix as `self_type`, so
@@ -184,10 +185,18 @@ module Rigor
       # file_def_nodes, file_envelopes]` so the caller can thread the def-node and issue #992 envelope tables into
       # {#merge_project_method_indexes} without walking the file a second time.
       def seed_discovered_methods(seeded_scope, default_scope, root)
-        file_methods, file_def_nodes, file_envelopes = build_methods_and_def_nodes(root, default_scope.source_path)
+        file_methods, file_def_nodes, file_envelopes, file_refinements =
+          build_methods_and_def_nodes(root, default_scope.source_path)
         discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
-        scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
-        [scope, file_def_nodes, file_envelopes]
+        discovery = seeded_scope.discovery.with(discovered_methods: discovered_methods)
+        # Issue #1120 — only a file that refines something pays the overlay; the cross-file seed already carries
+        # every other file's refinements.
+        unless file_refinements.empty?
+          discovery = discovery.with(
+            discovered_refinements: merge_refinement_tables(default_scope.discovered_refinements, file_refinements)
+          )
+        end
+        [seeded_scope.with_discovery(discovery), file_def_nodes, file_envelopes]
       end
 
       # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set ({Inference::StructFoldSafety}). Struct
@@ -2084,20 +2093,56 @@ module Rigor
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
+      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
+      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in and
+      # whether it may set `$?` to nil or define a singleton `===`.
+      def seed_program_globals(root, seeded_scope)
+        program_globals, census = build_program_global_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_discovery(
+          seeded_scope.discovery.with(program_globals: program_globals, **census)
+        )
+        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        seeded_scope
+      end
+
       # Slice 7 phase 6 — program-global pre-pass. Globals are process-wide so the accumulator is a flat `Hash[Symbol,
       # Type::t]` populated from every `Prism::GlobalVariableWriteNode` in the program (top-level AND inside method
       # bodies). The same accumulator is seeded into every method body and the top-level scope.
+      #
+      # Issue #1359 — except the frame-local specials ({FRAME_LOCAL_GLOBALS}): Ruby keeps `$_` and `$~` in the slot
+      # of the method, class, module or file body that writes them, so a write binds only that body and its blocks,
+      # which the flow binding already carries, and every other body starts from its own slot.
+      FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
+      # Issue #1360 — nor `$!`, `$@` and `$?`, which hold no program-wide value either: the first two are the rescue
+      # clause's that is running, and `$?` the thread's. Ruby refuses a write to `$!` or `$?` (`NameError`), and a
+      # write to `$@` sets the backtrace of the exception being rescued.
+      UNSEEDED_GLOBALS = (FRAME_LOCAL_GLOBALS + %i[$! $@ $?]).freeze
+      private_constant :FRAME_LOCAL_GLOBALS, :UNSEEDED_GLOBALS
+
+      #
+      # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
+      # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
+      # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
+      # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        gather_global_writes(root, default_scope, accumulator)
-        accumulator.freeze
+        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false }
+        gather_global_writes(root, default_scope, accumulator, census)
+        census[:patched_line_readers] = census[:patched_line_readers].freeze
+        [accumulator.freeze, census]
       end
 
-      def gather_global_writes(node, scope, accumulator)
+      def gather_global_writes(node, scope, accumulator, census)
         return unless node.is_a?(Prism::Node)
 
-        record_global_write(node, scope, accumulator) if node.is_a?(Prism::GlobalVariableWriteNode)
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator) }
+        if node.is_a?(Prism::GlobalVariableWriteNode) && !UNSEEDED_GLOBALS.include?(node.name)
+          record_global_write(node, scope, accumulator)
+        end
+        readers = LastLine.patched_readers(node)
+        census[:patched_line_readers].merge(readers) if readers
+        census[:clears_last_status] ||= LastStatus.clears?(node)
+        census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census) }
       end
 
       def record_global_write(node, scope, accumulator)
@@ -2377,15 +2422,18 @@ module Rigor
       # its known elements for any index and an `Array[1 | 2]` `1 | 2`. `H = { a: 1 }; H.default = 0` read `H[:b]` as
       # `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
       #
-      # Each carrier member of the facet therefore stops claiming its contents are complete: a shape reopens
-      # (`extra_keys: :open`), whose projection carries a `Dynamic[top]` arm beside the known values, a tuple becomes
-      # the `Array` of its elements plus the same arm, and an `Array` / `Hash` nominal with a value-pinned type
-      # argument gains the arm on every type argument, as the unknown-store seam gives it. A class-level nominal
-      # (`Hash.new(0)`'s `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and
-      # the arm would silence `COUNTS[k].upcase`. A read still answers the known values (every key's, since the
-      # projection is not keyed) beside the arm, which is what keeps a stored or rewritten value from folding. An
-      # entry already `Dynamic` is unpinned through its facet, so a carrier an RBS overload join wrapped is not left
-      # pinned.
+      # Each carrier member of the facet therefore stops claiming its contents are complete. A literal shape floors to
+      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors an ivar
+      # seed a method stores into (#1297). Unlike that census, a shape only a lookup mutator (`default=`) touched floors
+      # too, since the census does not record the method, so its present-key reads are lost as well (#1421). Keeping
+      # the literal's known values beside a `Dynamic[top]` arm left every read carrying them, and every key's at that,
+      # since the projection is not keyed, so `STATUS[:name]` answered `false | nil | Dynamic[top]` and a method
+      # declared `-> String` returning it drew `def.return-type-mismatch` although a sibling method could store
+      # anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains the arm on every type
+      # argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
+      # `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and the arm would
+      # silence `COUNTS[k].upcase`. An entry already `Dynamic` is unpinned through its facet, so a carrier an RBS
+      # overload join wrapped is not left pinned.
       def census_mutated_type(type)
         type = type.static_facet if type.is_a?(Type::Dynamic)
         members = type.is_a?(Type::Union) ? type.members : [type]
@@ -2396,11 +2444,9 @@ module Rigor
       # refinement as well (`clear` empties a `non-empty-array`).
       def census_unpinned_carrier(member)
         case member
-        when Type::HashShape then HashLookupMutation.open_shape(member) || member
-        when Type::Tuple
-          Type::Combinator.nominal_of(
-            "Array", type_args: [Type::Combinator.union(*member.elements, Type::Combinator.untyped)]
-          )
+        when Type::HashShape
+          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::Nominal
           UnknownStoreWidening.value_pinned_collection?(member) ? UnknownStoreWidening.gradual_content(member) : member
         when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
@@ -3015,18 +3061,94 @@ module Rigor
       # It is written by the SAME recorder that writes the existence table ({#record_method}), so a name the
       # walk learns from an `alias`, an `attr_*` or a `define_method` can never be missing from it: those
       # record {Source::ParameterEnvelope::OPAQUE}, and only a `def` records a real envelope.
+      #
+      # Issue #1120 — and a fourth, `refinements`: `{refined class => {method => [refining modules]}}`, the
+      # `def`s of every `refine X do … end` body ({#record_refinement_defs}). Those are kept OUT of the first
+      # three tables, which answer everywhere: a refined method exists only where a `using` is in effect.
       def build_methods_and_def_nodes(root, source_path = nil)
         tables = MethodTables.new({}, {})
         def_nodes = {}
         walk_methods_and_def_nodes(root, [], false, tables, def_nodes, source_path)
         apply_alias_def_nodes(root, def_nodes)
         [tables.existence.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze,
-         tables.envelopes.transform_values(&:freeze).freeze]
+         tables.envelopes.transform_values(&:freeze).freeze, freeze_refinements(tables.refinements)]
       end
 
       # The accumulator {#walk_methods_and_def_nodes} threads: the existence table and its issue #992
-      # envelope twin, which only {#record_method} and {#record_surface_mark} write.
-      MethodTables = Struct.new(:existence, :envelopes)
+      # envelope twin, which only {#record_method} and {#record_surface_mark} write, and the issue #1120
+      # refinement table, which only {#record_refinement_defs} writes. That last one stays nil until a
+      # `refine` block is seen, so a file without one allocates nothing for it.
+      MethodTables = Struct.new(:existence, :envelopes, :refinements)
+
+      EMPTY_REFINEMENTS = {}.freeze
+      private_constant :EMPTY_REFINEMENTS
+
+      # Issue #1120 — a refinement table, deep-frozen; the shared empty table when nothing was recorded.
+      def freeze_refinements(table)
+        return EMPTY_REFINEMENTS if table.nil? || table.empty?
+
+        table.each_value { |methods| methods.each_value(&:freeze).freeze }.freeze
+      end
+
+      # Issue #1120 — unions `overlay` into a copy of `base`, per refined class and method. Used for the per-file
+      # overlay on the cross-file seed and for the project fold, so both answer the same union.
+      def merge_refinement_tables(base, overlay)
+        return base if overlay.nil? || overlay.empty?
+        return overlay if base.nil? || base.empty?
+
+        base.merge(overlay) do |_class_name, base_methods, overlay_methods|
+          base_methods.merge(overlay_methods) { |_method, left, right| (left + right).uniq.freeze }.freeze
+        end.freeze
+      end
+
+      # Issue #1120 — the constant a `refine X do … end` call refines, or nil when the call is not that shape: an
+      # implicit- or `self`-receiver `refine` with one constant argument and a literal block. A computed target
+      # (`refine(klass) { … }`) names no class this walk can key, so its body walks as it did before.
+      def refine_target(node)
+        return nil unless node.name == :refine && node.block.is_a?(Prism::BlockNode)
+        return nil unless node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+
+        arguments = node.arguments&.arguments
+        return nil unless arguments&.size == 1
+
+        target = arguments.first
+        target if target.is_a?(Prism::ConstantReadNode) || target.is_a?(Prism::ConstantPathNode)
+      end
+
+      # Issue #1120 — records the instance `def`s of a `refine X do … end` body as refinement methods of X, keyed by
+      # the refining module (`owner_prefix`, the `self` the `refine` call runs on). X is resolved LEXICALLY
+      # (`qualified_prefix`), which is where Ruby resolves the argument even inside a `Module.new { … }` block
+      # whose `self` is anonymous; every name it can denote is recorded, as {#constant_receiver_candidates}
+      # explains. Nothing in the body reaches the class tables: `refine String do def shout` does not give
+      # `String` or the refining module a `shout` outside a `using`.
+      def record_refinement_defs(node, target, qualified_prefix, owner_prefix, tables)
+        body = node.block.body
+        return if body.nil?
+
+        refining = owner_prefix.join("::")
+        targets = constant_receiver_candidates(target, qualified_prefix)
+        each_refinement_def(body) do |def_node|
+          targets.each do |class_name|
+            methods = ((tables.refinements ||= {})[class_name] ||= {})
+            modules = (methods[def_node.name] ||= [])
+            modules << refining unless modules.include?(refining)
+          end
+        end
+      end
+
+      # The instance `def`s a refine body defines on the refined class: nested declarations open their own
+      # scope, and a `def self.x` or a `def` inside another `def` defines nothing on it.
+      def each_refinement_def(node, &)
+        case node
+        when Prism::DefNode
+          yield node if node.receiver.nil?
+          return
+        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+          return
+        end
+
+        node.rigor_each_child { |child| each_refinement_def(child, &) }
+      end
 
       # The walk's single existence writer. Everything except a `def` passes no envelope and so records
       # {Source::ParameterEnvelope::OPAQUE}.
@@ -3208,6 +3330,11 @@ module Rigor
                                               defs_singleton: defs_singleton)
           end
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc, source_path)
+          # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
+          if (target = refine_target(node))
+            return record_refinement_defs(node, target, qualified_prefix, owner_prefix, methods_acc)
+          end
+
           if anonymous
             walk_anonymous_meta_block(node, anonymous, qualified_prefix, in_singleton_class, methods_acc,
                                       def_nodes_acc, source_path, def_owner_prefix,
@@ -6673,12 +6800,14 @@ module Rigor
       # declaration-stability skip decision off `declaration_signatures`, so a changed file is parsed once for
       # all of them (recon §2 dedup). A per-file live index (built + folded, exactly as
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
-      # reads their parameter structure from.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures: }`.
+      # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
+      # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
+        refinements = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -6687,11 +6816,12 @@ module Rigor
           fold_file_index(acc, file_index)
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
+          refinements[path] = file_index[:refinements] if file_index[:refinements]
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures }
+          declaration_signatures: declaration_signatures, refinements: refinements }
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level
@@ -6990,8 +7120,17 @@ module Rigor
         # Issue #1097 — keyed by file path, so the merge is a plain union (a bundle-restored file
         # contributes exactly the ranges its cold walk recorded).
         acc[:deferred_ranges].merge!(file_index[:deferred_ranges] || {})
+        fold_refinements(acc, file_index[:refinements])
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
+      end
+
+      # Issue #1120 — a union, so the fold is order-independent and a bundle-served file folds exactly as its live
+      # walk would. The slot stays nil until some file refines something (see {#finalize_def_index}).
+      def fold_refinements(acc, file_refinements)
+        return if file_refinements.nil? || file_refinements.empty?
+
+        acc[:refinements] = merge_refinement_tables(acc[:refinements], file_refinements)
       end
 
       # Issue #644 — the census folds per (name, path), so a re-folded file replaces exactly its own
@@ -7136,7 +7275,10 @@ module Rigor
           struct_member_layouts: file_index[:struct_member_layouts],
           # Issue #1097 — plain `[Integer, Integer, Symbol, Symbol, String]` rows, so the bundle
           # stays Marshal-clean.
-          deferred_ranges: file_index[:deferred_ranges]
+          deferred_ranges: file_index[:deferred_ranges],
+          # Issue #1120 — plain `{String => {Symbol => Array[String]}}` data (nil when the file refines
+          # nothing), so the bundle stays Marshal-clean.
+          refinements: file_index[:refinements]
         }
       end
 
@@ -7171,7 +7313,9 @@ module Rigor
           struct_member_layouts: bundle[:struct_member_layouts],
           # Issue #1097 — a pre-24 bundle lacks the key; the SCHEMA bump makes such a blob a cold
           # rebuild, but default so any in-flight fold stays total.
-          deferred_ranges: bundle[:deferred_ranges] || {}
+          deferred_ranges: bundle[:deferred_ranges] || {},
+          # Issue #1120 — absent from a pre-28 bundle, which the SCHEMA bump rebuilds cold.
+          refinements: bundle[:refinements]
         }
       end
 
@@ -7229,12 +7373,19 @@ module Rigor
         # keeps that contract intact while still letting `attr_reader :x` in one file suppress a false undefined-method
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
-        acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
+        finalize_call_surface_tables(acc)
         %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes prepends method_visibilities
            methods parameter_envelopes class_sources constant_sources deferred_ranges].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
+      end
+
+      # The two whole-project tables only call rules read: the issue #992 envelope table gains its project-wide
+      # key, and the issue #1120 refinement table, nil until some file refines something, settles to a frozen one.
+      def finalize_call_surface_tables(acc)
+        acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
+        acc[:refinements] = freeze_refinements(acc[:refinements])
       end
 
       # Removes, per class, the method names that have a project `def` node, leaving only
@@ -7262,9 +7413,10 @@ module Rigor
         # One combined descent yields both the methods existence table and the def-node table; the latter is also
         # consumed by `record_class_sources`, so a def-dense file is walked once here instead of three times (methods +
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
-        file_methods, file_def_nodes, file_envelopes = build_methods_and_def_nodes(root, path)
+        file_methods, file_def_nodes, file_envelopes, file_refinements = build_methods_and_def_nodes(root, path)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
+        fold_refinements(acc, file_refinements)
         # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
         acc[:def_nestings].merge!(build_def_nestings(root))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
@@ -8547,6 +8699,14 @@ module Rigor
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         when Prism::CallNode
           propagate_call(node, table, current_scope)
+        when Prism::RescueNode, Prism::EnsureNode
+          # Issue #1360 — a clause the evaluator did not enter (a `begin` in a value position) reads `$!`, `$@` and
+          # `$?` unbound, not the enclosing clause's; one it entered keeps what it recorded.
+          child_scope = current_scope.forget_error_info.forget_last_status
+          node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        when Prism::RescueModifierNode
+          propagate(node.expression, table, current_scope)
+          propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
@@ -8556,18 +8716,26 @@ module Rigor
       # {FreshFrameBlocks.fresh_entry?} names does not read the match-global narrowing of the body it is written in.
       # The evaluator enters it as {FreshFrameBlocks.entry} gives ({MatchRebinding.block_entry}), but a block in a
       # value position — the receiver of `Thread.new { $1 }.value` — is not entered, and its body would read the
-      # statement's narrowing.
+      # statement's narrowing. Issue #1359 — nor does such a block read a `$_` narrowing it or the call's operands may
+      # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it. Issue #1360 —
+      # and the block of a call that keeps it, a closure, reads `$!`, `$@` and `$?` unbound
+      # ({FreshFrameBlocks.closure_entry}).
       def propagate_call(node, table, current_scope)
         block = node.block
-        fresh = block.is_a?(Prism::BlockNode) && !table.key?(block) &&
-                FreshFrameBlocks.fresh_entry?(node, current_scope)
-        unless fresh
+        entry = unentered_block_entry(node, block, table, current_scope)
+        if entry.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
         end
 
-        entry = FreshFrameBlocks.entry(current_scope, node)
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
+      end
+
+      def unentered_block_entry(node, block, table, current_scope)
+        return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
+        return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
+
+        LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
       end
 
       # The scope the children of an unentered block or lambda inherit. The evaluator enters a statement-level
@@ -8585,8 +8753,10 @@ module Rigor
       # signature's parameter type: this walk evaluates nothing, and a body write to the name is never threaded,
       # so any narrower claim could be stale. A name the enclosing scope does not bind is left unbound, which
       # reads the same `Dynamic[top]`. Captured names — outer locals the body reads or rebinds without
-      # redeclaring them — keep the enclosing binding.
+      # redeclaring them — keep the enclosing binding. Issue #1360 — a `->` body and its parameter defaults run
+      # whenever the lambda is called, so they read `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
       def closure_scope(closure, scope)
+        scope = FreshFrameBlocks.closure_entry(scope, closure, nil)
         scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
         closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }
       end

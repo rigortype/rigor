@@ -10,10 +10,12 @@ A type that Rigor did not produce or check is not written down. Learn it from Ri
 `rigor type-of`, `rigor annotate`, or `rigor sig-gen --print` — never from surrounding code or an
 existing comment.
 
-Types live in `sig/`, in a checked inline `#:` / `# @rbs` annotation, or as inference. `sig/` wins
-when it declares the same member. Add an inline annotation only when it says something the name and
-code do not: `void` / `bot` intent, a non-nominal refinement such as `:asc | :desc`, or a parameter
-contract. Repeating the nominal type Rigor already shows on a method is noise.
+Types live in `sig/`, in a checked inline `#:` / `# @rbs` annotation, or as inference. When `sig/`
+declares the same member, the two must agree: the more precise of two consistent declarations binds, and
+a contradiction is a `rbs.contradicting-signature` error. Add an inline annotation only when it says
+something the name and code do not: `void` / `bot` intent, a non-nominal refinement such as
+`:asc | :desc`, or a parameter contract. Repeating the nominal type Rigor already shows on a method is
+noise.
 
 ## Comments
 

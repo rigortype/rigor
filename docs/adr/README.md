@@ -16,7 +16,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | --- | --- | --- |
 | ADR-0 | [Foundation and Core Architecture of Rigor](0-concept.md) | Accepted (Smart Initialization/Gemfile.lock auto-suggest was never built; rigor init writes a static template) |
 | ADR-1 | [Type Model and RBS Superset Strategy](1-types.md) | Accepted |
-| ADR-2 | [Extension API Strategy](2-extension-api.md) | Accepted |
+| ADR-2 | [Extension API Strategy](2-extension-api.md) | Accepted (plugin `dynamic_return` precedence over the RBS return amended 2026-09-26) |
 | ADR-3 | [Type Representation](3-type-representation.md) | Accepted |
 | ADR-4 | [Type Inference Engine](4-type-inference-engine.md) | Accepted |
 | ADR-5 | [Robustness Principle](5-robustness-principle.md) | Accepted |
@@ -25,7 +25,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-8 | [Steep-Inspired Improvements](8-steep-inspired-improvements.md) | Accepted |
 | ADR-9 | [Cross-Plugin API](9-cross-plugin-api.md) | Accepted (implemented in v0.1.1) |
 | ADR-10 | [Dependency Source Inference](10-dependency-source-inference.md) | Accepted |
-| ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted |
+| ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | Accepted (WD3 partially superseded by ADR-2, 2026-09-26) |
 | ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | Accepted (packaging premise partially superseded by ADR-31 — single bundled gem, no subtree split; all five dry-rb plugins shipped) |
 | ADR-13 | [TypeNode Resolver Plugin](13-typenode-resolver-plugin.md) | Accepted |
 | ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted (slices 1-5 implemented) |
@@ -46,7 +46,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground v0.1.10–0.1.11; in-browser ruby.wasm build shipped 2026-06-14/15) |
 | ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Accepted |
 | ADR-31 | [Contribution and Supply-chain Policy](31-contribution-and-supply-chain-policy.md) | Accepted (in force) |
-| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13 gives a `sig/` declaration precedence over an inline one, per member, 2026-09-08; WD2/WD10 default partially superseded by ADR-93) |
+| ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (WD13's per-member `sig/` precedence superseded by ADR-112 WD5, 2026-09-26; WD2/WD10 default partially superseded by ADR-93) |
 | ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10). WD5's seven-tool partition is stale against the current CLI verb surface. |
 | ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Accepted (implemented in v0.1.13; ADR-29 Playground `severity_profile: strict` wiring shipped too). Its unresolved questions name `flow_contribution_for`, deleted by ADR-52. |
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
@@ -115,7 +115,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
 | ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive case shipped 2026-07-19 as VoidTailSummary; budget ids deferred) |
-| ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
+| ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions; partially superseded by ADR-117) |
 | ADR-102 | [The unused-code reachability report is a report, not a diagnostic](102-unused-code-reachability-report.md) | Accepted (`rigor unused` shipped in v0.3.4; all eight working decisions settled; partially supersedes ADR-21 Track 3) |
 | ADR-103 | [Effect labels: an opt-in, snapshot-first effect system](103-effect-labels.md) | Accepted (effect system shipped as the v0.3.4 headline; 13 of 18 implementation issues closed under #376) |
 | ADR-104 | [Boot-slim probe for the effects surfaces](104-effects-boot-slim-probe.md) | Accepted (implemented for the report and the snapshot verbs, with #482's entry split) |
@@ -126,11 +126,12 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-109 | [Ruby range literals as the notation and the semantics of numeric range refinements](109-ruby-native-range-notation.md) | Accepted (implemented: `Integer[1..10]` in #830, `Float[R]` in #844, Float narrowing in #846, the `int<a, b>` deprecation row in #854, the Float folds) |
 | ADR-110 | [An inherited declaration does not outrank the receiver's own `def`](110-inherited-declaration-precedence.md) | Accepted (WD1 + WD3 implemented in #856; measured zero new diagnostics across 25 corpus targets) |
 | ADR-111 | [Where a refinement is written in a `.rb` file: one carrier, no Rigor-only comment dialect](111-inline-refinement-carrier.md) | Superseded (by ADR-112; the probe measurements stand) |
-| ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (nothing implemented yet) |
+| ADR-112 | [`@extrbs`: a Rigor-read comment channel for what RBS cannot say](112-extrbs-comment-channel.md) | Accepted (WD5 implemented for `sig/` against inline, 2026-09-26; the rest not yet implemented) |
 | ADR-113 | [`rigor lens`: a declaration map with type provenance, for agents and tools](113-rigor-lens.md) | Accepted (nothing implemented yet) |
 | ADR-114 | [Inherited dispatch into core and stdlib RBS](114-core-stdlib-ancestor-dispatch.md) | Accepted (#527 slice 1 landed: instance-side superclass walk; slices 2/3/5/6 out of scope, partially supersedes ADR-43's rejected alternative A) |
 | ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (thin `agents/pi-harness/` stubs; WD6 parallel path unproven) |
 | ADR-116 | [Restructuring the engine's hot files: declare each growing kind once, walk each traversal once](116-hot-file-restructuring.md) | Accepted (scheduled for after the v0.4.0 cut; WD0–WD7 not started) |
+| ADR-117 | [Standard streams: typed by idiom, checked by runtime contract](117-standard-streams-typed-by-idiom.md) | Accepted (`$_` explicit readers since #1405; open: #1362, #1366, #1367, #1415, #1423, #1426, #1427, #1429) |
 
 ## Adding a New ADR
 

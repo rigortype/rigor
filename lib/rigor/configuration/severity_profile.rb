@@ -80,7 +80,12 @@ module Rigor
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
-          "rbs_extended.unsatisfied-conformance" => :warning
+          "rbs_extended.unsatisfied-conformance" => :warning,
+          # ADR-112 WD5 / #1075 — an error in every profile, lenient included. The rule guards its
+          # false-positive rate through its narrow definition of a contradiction, and ADR-112 WD5 rules
+          # out lowering the severity instead; only a proven disagreement between two declarations the
+          # project wrote itself can fire.
+          "rbs.contradicting-signature" => :error
         }.freeze,
         balanced: {
           "call.undefined-method" => :error,
@@ -118,7 +123,8 @@ module Rigor
           "effect.liskov-widened" => :warning,
           "effect.unknown-label" => :info,
           "effect.annotations-unchecked" => :info,
-          "rbs_extended.unsatisfied-conformance" => :warning
+          "rbs_extended.unsatisfied-conformance" => :warning,
+          "rbs.contradicting-signature" => :error
         }.freeze,
         strict: {
           "call.undefined-method" => :error,
@@ -158,7 +164,8 @@ module Rigor
           # `:info` even under strict: a residual that failed a build would punish the project for
           # carrying an annotation it has not opted into checking, which is the opposite of the point.
           "effect.annotations-unchecked" => :info,
-          "rbs_extended.unsatisfied-conformance" => :error
+          "rbs_extended.unsatisfied-conformance" => :error,
+          "rbs.contradicting-signature" => :error
         }.freeze
       }.freeze
 

@@ -9,7 +9,7 @@ require_relative "stored_block_call"
 module Rigor
   module Inference
     # Issue #1361 — the blocks whose body does not read the narrowing of the frame-local special variables (the regex
-    # match globals today) where it is written ({.fresh_entry?}, {.entry}):
+    # match globals, and `$_` since issue #1359) where it is written ({.fresh_entry?}, {.entry}):
     #
     # - a root block: the block of `Thread.new` / `Thread.start` / `Thread.fork`, `Fiber.new` or `Ractor.new` on the
     #   core class ({.root_call?}). It runs as the root of a new thread, fiber or ractor, and Ruby keeps that
@@ -86,10 +86,33 @@ module Rigor
       # a true positive. A definer body reads the definer's slot whenever the method is called, which the analyzer
       # does not follow, so a global narrowed where it is written reads `Dynamic[top]` there, neither narrowed nor
       # flagged: the dynamic-finder idiom defines `find_by_email` in a `method_missing` guard whose `$1` its body
-      # reads. This is the one place the frame-local specials are reset at such an entry, so `$_` (#1359) and `$!` /
-      # `$@` (#1360) join the match globals here once they narrow.
+      # reads. This is the one place the specials are reset at such an entry: the match globals, `$_` (#1359), and
+      # `$!`, `$@` and `$?` (#1360).
+      #
+      # A root block runs in an execution context of its own, so it reads `$!` and `$@` as `nil` even where it is
+      # written in a rescue clause ({ErrorInfo}). `$?` is the thread's, so a thread's or a ractor's root block starts
+      # without one, while a fiber shares the thread's. A definer body reads all three as they are when the method is
+      # called.
       def entry(scope, call_node)
-        DEFINERS.include?(call_node.name) ? scope.untyped_match_globals : scope.forget_match_globals
+        if DEFINERS.include?(call_node.name)
+          scope.untyped_match_globals.untyped_last_line.untyped_error_info.untyped_last_status
+        else
+          fresh = scope.forget_match_globals.forget_last_line.forget_error_info
+          StoredBlockCall.root_constant_name(call_node.receiver) == :Fiber ? fresh : fresh.forget_last_status
+        end
+      end
+
+      # Issue #1360 — the scope a closure's body enters with: a lambda literal's (`block_node` a `Prism::LambdaNode`),
+      # or the block of a call that keeps it to run later ({StoredBlockCall.stores_block?}: `lambda`, `proc`,
+      # `Proc.new`, `Enumerator.new`, `Hash.new`). The body runs whenever the closure is called, which is usually after
+      # the rescue clause it is written in has exited (`f = -> { $! }` in a clause reads `nil` once called past the
+      # `begin`), and may be on another thread (`Thread.new(&f)`), so `$!`, `$@` and `$?` are unbound there. A root or
+      # definer block enters as {.entry} gives; every other block reads them where it is written.
+      def closure_entry(scope, block_node, call_node)
+        return scope unless block_node.is_a?(Prism::LambdaNode) ||
+                            (call_node.is_a?(Prism::CallNode) && StoredBlockCall.stores_block?(call_node))
+
+        scope.forget_error_info.forget_last_status
       end
 
       def core_class?(receiver, constant, scope)

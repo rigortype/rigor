@@ -285,6 +285,103 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  # Issue #1359 — `$_` shares the match globals' frame slot, and is forgotten on the same terms.
+  describe "#forget_last_line / #untyped_last_line / #last_line_bound?" do
+    let(:str) { Rigor::Type::Combinator.nominal_of("String") }
+
+    it "drops `$_` alone, and leaves the match globals and other globals bound" do
+      narrowed = scope.with_global(:$_, str).with_global(:$1, str).with_global(:$stdout, str)
+      forgotten = narrowed.forget_last_line
+
+      expect(forgotten.global(:$_)).to be_nil
+      expect(forgotten.global(:$1)).to eq(str)
+      expect(forgotten.global(:$stdout)).to eq(str)
+      expect(narrowed.forget_match_globals.global(:$_)).to eq(str)
+    end
+
+    it "rebinds a bound `$_` to `Dynamic[top]`, and leaves an unbound one unbound" do
+      untyped = scope.with_global(:$_, str).untyped_last_line
+
+      expect(untyped.global(:$_)).to eq(Rigor::Type::Combinator.untyped)
+      expect(untyped.last_line_bound?).to be(true)
+      expect(scope.untyped_last_line).to equal(scope)
+    end
+
+    it "is bound only while `$_` holds a binding, and answers the same scope when there is nothing to drop" do
+      seeded = scope.with_global(:$stdout, str)
+
+      expect(seeded.last_line_bound?).to be(false)
+      expect(seeded.with_global(:$_, str).last_line_bound?).to be(true)
+      expect(seeded.forget_last_line).to equal(seeded)
+    end
+
+    # A reader condition's arms bind `String` and `nil`: joined, `$_` is unbound rather than `String?`.
+    it "joins arms that bind `$_` apart with it unbound, and keeps a `$_` both arms bind alike" do
+      nil_t = Rigor::Type::Combinator.constant_of(nil)
+      truthy = scope.with_global(:$_, str)
+
+      expect(truthy.join(scope.with_global(:$_, nil_t)).last_line_bound?).to be(false)
+      expect(truthy.join(truthy.with_local(:x, str)).global(:$_)).to eq(str)
+      expect(truthy.with_global(:$1, str).join(scope.with_global(:$_, nil_t).with_global(:$1, nil_t)).global(:$1))
+        .to eq(Rigor::Type::Combinator.union(str, nil_t))
+    end
+
+    it "answers whether the frame's body makes a closure that may set `$_`" do
+      root = ->(source) { Prism.parse(source).value }
+
+      expect(scope.with_match_frame(root.call("f = -> { gets }")).last_line_closure?).to be(true)
+      expect(scope.with_match_frame(root.call("f = -> { puts }")).last_line_closure?).to be(false)
+      expect(scope.last_line_closure?).to be(false)
+    end
+  end
+
+  # Issue #1360 — `$!` / `$@` belong to the rescue clause running and `$?` to the thread; each pair of readers drops or
+  # untypes its own names and nothing else.
+  describe "#forget_error_info / #untyped_error_info / #forget_last_status / #untyped_last_status" do
+    let(:error) { Rigor::Type::Combinator.nominal_of("StandardError") }
+    let(:status) { Rigor::Type::Combinator.nominal_of("Process::Status") }
+    let(:trace) { Rigor::Type::Combinator.nominal_of("Array") }
+    let(:bound) do
+      scope.with_global(:$!, error).with_global(:$@, trace).with_global(:$?, status).with_global(:$_, error)
+    end
+
+    it "drops `$!` and `$@` together, and leaves `$?` and the frame-local specials bound" do
+      forgotten = bound.forget_error_info
+
+      expect(forgotten.global(:$!)).to be_nil
+      expect(forgotten.global(:$@)).to be_nil
+      expect(forgotten.global(:$?)).to eq(status)
+      expect(forgotten.global(:$_)).to eq(error)
+    end
+
+    it "drops `$?` alone" do
+      forgotten = bound.forget_last_status
+
+      expect(forgotten.global(:$?)).to be_nil
+      expect(forgotten.global(:$!)).to eq(error)
+      expect(forgotten.global(:$@)).to eq(trace)
+    end
+
+    it "rebinds a bound name to `Dynamic[top]` and leaves an unbound one unbound" do
+      untyped = Rigor::Type::Combinator.untyped
+      only_error = scope.with_global(:$!, error)
+
+      expect(only_error.untyped_error_info.global(:$!)).to eq(untyped)
+      expect(only_error.untyped_error_info.global(:$@)).to be_nil
+      expect(bound.untyped_last_status.global(:$?)).to eq(untyped)
+      expect(bound.untyped_last_status.global(:$!)).to eq(error)
+    end
+
+    it "answers the same scope when there is nothing to drop or untype" do
+      seeded = scope.with_global(:$stdout, error)
+
+      %i[forget_error_info untyped_error_info forget_last_status untyped_last_status].each do |reader|
+        expect(seeded.public_send(reader)).to equal(seeded), reader.to_s
+        expect(scope.public_send(reader)).to equal(scope), reader.to_s
+      end
+    end
+  end
+
   # Issue #1358 — the frame a body runs in, which its blocks and closures share.
   describe "#with_match_frame / #match_rebinding_closure?" do
     def root(source) = Prism.parse(source).value

@@ -147,7 +147,7 @@ an agent it means "ask Rigor, do not read the neighbours."
 | **Implementation** | the truth | — |
 | **Inference** | the first type source. Nothing is written down; the type is computed on demand | the precision gate `rigor coverage --threshold 0.58 lib`, which only ever moves up |
 | **`sig/`** | contracts: the public API boundary of [ADR-2](2-extension-api.md), plus authored intent | `make check`, `spec/rigor/public_api_drift_spec.rb`, `make steep-check` |
-| **Inline annotations** (`#:`, `# @rbs`) | documentation that is checked: `void` / `bot` intent, a return the name does not suggest, a type that says more than the nominal class, a parameter's contract | the product default ingests them ([ADR-93](93-default-rbs-inline-ingestion.md)) and `make check` checks them; where `sig/` declares the same member, `sig/` wins and an `:info` says so ([ADR-32](32-rbs-inline-comment-ingestion.md) WD13) |
+| **Inline annotations** (`#:`, `# @rbs`) | documentation that is checked: `void` / `bot` intent, a return the name does not suggest, a type that says more than the nominal class, a parameter's contract | the product default ingests them ([ADR-93](93-default-rbs-inline-ingestion.md)) and `make check` checks them; where `sig/` declares the same member, `sig/` wins and an `:info` says so ([ADR-32](32-rbs-inline-comment-ingestion.md) WD13; superseded by [ADR-112](112-extrbs-comment-channel.md) WD5, see the status note below) |
 | **Comments** | prose only — never a type | `spec/docs/type_shaped_comments_spec.rb` |
 
 `sig/` has an internal provenance rule that follows from
@@ -235,7 +235,13 @@ keeps its bracket: `[r]` is an access mode, not a type.
 An inline `#:` / `# @rbs` annotation is a type source: the product default ingests it
 ([ADR-93](93-default-rbs-inline-ingestion.md)), `make check` checks it, and where `sig/` declares the
 same member `sig/` wins with an `:info` that names both files ([ADR-32](32-rbs-inline-comment-ingestion.md)
-WD13). So it never enters the fourth state this ADR forbids. What decides whether to write one is the
+WD13). So it never enters the fourth state this ADR forbids.
+
+> **Status note (2026-09-26).** ADR-32 WD13's precedence is superseded by
+> [ADR-112](112-extrbs-comment-channel.md) WD5 ([#1075](https://github.com/rigortype/rigor/issues/1075)):
+> the two declarations are compared, the more precise of two consistent ones binds, and a proven
+> contradiction is the `rbs.contradicting-signature` error. The annotation is still checked, so the
+> conclusion above stands. What decides whether to write one is the
 same test the comment rule applies: does it say something the name and the surrounding code do not?
 
 - Worth writing: `void` / `bot` intent (the spec's own style guidance calls `#: void` strongly

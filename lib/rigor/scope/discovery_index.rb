@@ -27,6 +27,7 @@ module Rigor
       :discovered_parameter_envelopes,
       :discovered_superclasses,
       :discovered_deferred_ranges,
+      :discovered_refinements,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_prepends,
@@ -42,7 +43,10 @@ module Rigor
       :data_member_layouts,
       :struct_member_layouts,
       :param_inferred_types,
-      :run_generation
+      :run_generation,
+      :patched_line_readers,
+      :clears_last_status,
+      :defines_case_equality
     )
 
     class DiscoveryIndex
@@ -144,6 +148,14 @@ module Rigor
         # inside another deferred range carry nils and answer only the containment half. Plain data,
         # so the ADR-85 seed bundle round-trips it unchanged.
         discovered_deferred_ranges: EMPTY_TABLE,
+        # Issue #1120 — `{refined class name => {method name => [refining module names]}}`, the instance
+        # methods a `refine X do … end` block defines. They are not X's methods everywhere: Ruby activates them
+        # only lexically after a `using` of the refining module, so `call.undefined-method` reads this table
+        # together with the call site's file ({Analysis::CheckRules::LexicalMethodSites}) and never through
+        # `discovered_methods`. A refinement a `Module.new { … }` block defines has no nameable module; it is
+        # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
+        # round-trips it unchanged.
+        discovered_refinements: EMPTY_TABLE,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified
@@ -221,7 +233,23 @@ module Rigor
         # cross a run boundary (LSP / ADR-62 warm-loop re-runs land in a fresh bucket). Nil on scopes that
         # never see the runner seed (single-file probes, `run_source` before the seed applies): the memo
         # falls back to today's per-file `discovered_def_nodes` identity for those.
-        run_generation: nil
+        run_generation: nil,
+        # Issue #1359 — the `gets` / `readline` names this file patches in through the `define_method` family
+        # (`$stdin.define_singleton_method(:gets) { … }`, `IO.define_method(:gets)`, `alias_method :gets, :x`, or a
+        # computed name, which may be either), which `Inference::LastLine.reads_line?` declines on, as it does on a
+        # name `BlockCallTiming.project_defines_anywhere?` finds. Filled by `Inference::ScopeIndexer.index` from the
+        # file's own tree only.
+        patched_line_readers: EMPTY_NAME_SET,
+        # Issue #1360 — true when this file holds a call that may set `$?` to nil (`Inference::LastStatus.clears?`: a
+        # `wait`-family call with a flags argument, or `waitall`), which may run between any subprocess and a read of
+        # `$?`, so `Inference::LastStatus.after` binds it nowhere in the file. Filled by `Inference::ScopeIndexer.index`
+        # from the file's own tree only.
+        clears_last_status: false,
+        # Issue #1360 — true when this file holds a `define_method` or `define_singleton_method` call whose literal
+        # name is `===` (`Inference::ErrorInfo.defines_case_equality?`), which may give a class the singleton `===`
+        # `rescue` matches with; the class it lands on is not recorded, so no rescued class binds `$!` in the file.
+        # Filled by `Inference::ScopeIndexer.index` from the file's own tree only.
+        defines_case_equality: false
       )
     end
   end

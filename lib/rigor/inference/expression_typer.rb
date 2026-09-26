@@ -19,6 +19,7 @@ require_relative "closure_escape_analyzer"
 require_relative "receiver_blind_block"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
+require_relative "error_info"
 require_relative "external_ancestor_resolution"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
@@ -1144,24 +1145,46 @@ module Rigor
         Type::Combinator.union(primary_type, *rescue_types)
       end
 
+      # Issue #1360 — the evaluator binds `$!` in a rescue clause it enters; a clause typed here, such as one in a
+      # `begin` passed as an argument, reads `$!`, `$@` and `$?` unbound rather than an enclosing clause's.
       def rescue_chain_types(rescue_node)
+        arm_typer = typer_under(rescue_arm_scope)
         types = []
         current = rescue_node
         while current
-          types << statements_or_nil(current.statements)
+          types << arm_typer.send(:statements_or_nil, current.statements)
           current = current.subsequent
         end
         types
       end
 
       def type_of_rescue(node)
-        statements_or_nil(node.statements)
+        typer_under(rescue_arm_scope).send(:statements_or_nil, node.statements)
       end
 
+      def rescue_arm_scope = scope.forget_error_info.forget_last_status
+
       # `expr rescue fallback` is RescueModifierNode in Prism. The result is `expr`'s type when no exception
-      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union.
+      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union. Issue #1360
+      # — `fallback` runs with `$!` and `$@` bound to the `StandardError` it rescued ({ErrorInfo.modifier_entry}).
       def type_of_rescue_modifier(node)
-        Type::Combinator.union(type_of(node.expression), type_of(node.rescue_expression))
+        fallback = node.rescue_expression
+        fallback_type =
+          if ErrorInfo.read_in?(fallback)
+            typer_under(ErrorInfo.modifier_entry(scope, fallback)).type_of(fallback)
+          else
+            type_of(fallback)
+          end
+        Type::Combinator.union(type_of(node.expression), fallback_type)
+      end
+
+      # A typer that shares this one's tracer and operand types but reads `other_scope`.
+      def typer_under(other_scope)
+        return self if other_scope.equal?(scope)
+
+        ExpressionTyper.new(
+          scope: other_scope, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node
+        )
       end
 
       def type_of_ensure(node)
@@ -2183,13 +2206,19 @@ module Rigor
       # rebind the match globals ({MatchRebinding.operands_may_rebind?}: `[u.index(/(q)/)].map { $1 }`) every
       # pass that types the call's block — the block-return pass, its captured-local fixpoint and the receiver
       # folds — types it under a typer whose scope has forgotten them, as {MatchRebinding.block_entry} does for
-      # the call's block and `StatementEvaluator#forget_operand_match_globals` for the statement. nil otherwise.
+      # the call's block and `StatementEvaluator#forget_operand_specials` for the statement. `$_` is forgotten on
+      # the same terms when they may set it ({LastLine.operands_may_set?}, issue #1359). nil otherwise.
       def rebound_operand_typer(call_node)
-        return nil if call_node.block.nil? || !scope.match_globals_bound?
-        return nil unless MatchRebinding.operands_may_rebind?(call_node, scope)
+        return nil if call_node.block.nil?
 
-        ExpressionTyper.new(scope: scope.forget_match_globals, tracer: tracer, operand_types: @operand_types,
-                            typing_node: @typing_node)
+        rebound = scope
+        if rebound.match_globals_bound? && MatchRebinding.operands_may_rebind?(call_node, scope)
+          rebound = rebound.forget_match_globals
+        end
+        rebound = rebound.forget_last_line if rebound.last_line_bound? && LastLine.operands_may_set?(call_node, scope)
+        return nil if rebound.equal?(scope)
+
+        ExpressionTyper.new(scope: rebound, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node)
       end
 
       # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
@@ -3900,11 +3929,18 @@ module Rigor
 
       # Whether the call may run its block more than once, so a later run reads a captured binding an earlier
       # run rebound — the premise of laying the #587 (b) binding ({#captured_block_bindings}) under the block.
-      # Only the core iteration methods {ClosureEscapeAnalyzer} catalogues as non-escaping prove it; `tap` /
-      # `then` / `yield_self` are catalogued there too but run their block exactly once ({BlockCallTiming}).
-      # Every other call keeps the entry scope, which is exact for a block run once (`m.synchronize { out =
-      # buf; buf = nil; out }` is `buf`'s value, and a cross-iteration binding would add the `nil` a second run
-      # never reads) and remains the first-iteration pin for an iterator the catalogue does not know.
+      # The core iteration methods {ClosureEscapeAnalyzer} catalogues as non-escaping prove it — for a project
+      # class too, through its ancestry (`include Enumerable`); `tap` / `then` / `yield_self` are catalogued
+      # there too but run their block exactly once ({BlockCallTiming}).
+      #
+      # Issue #1234 — a receiver the analyzer cannot classify at all (`Dynamic`, a union, a project class
+      # whose ancestry it cannot follow) repeats when the method NAME is a catalogued iterator
+      # ({ClosureEscapeAnalyzer.iterator_name?}): `items.all? { seen += 1; seen == 1 }` on an untyped
+      # `items` kept the first run's `seen == 1`, the predicate folded to `true`, and the condition on the
+      # result was reported as constant. This is the captured-binding pass's reading of `:unknown` alone;
+      # escape analysis still treats it as unproven. Any other name, and a receiver classified `:escaping`,
+      # keeps the entry scope, which is exact for a block run once (`m.synchronize { out = buf; buf = nil;
+      # out }` is `buf`'s value, and a cross-iteration binding would add the `nil` a second run never reads).
       #
       # A receiver that provably holds at most one element runs the block at most once however it iterates, so
       # it keeps the entry scope too: `done = false; [:only].each { break if done; done = true }` is `[:only]`,
@@ -3913,7 +3949,17 @@ module Rigor
         return false if BlockCallTiming.candidate_name?(call_node.name)
         return false if at_most_one_run?(call_node.name, receiver_type)
 
-        ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name) == :non_escaping
+        case ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name, scope: scope)
+        when :non_escaping then true
+        when :unknown then unseen_iterator?(call_node.name, receiver_type)
+        else false
+        end
+      end
+
+      # Issue #1234 — the name reads as repetition only where Rigor cannot see the method: a method the project
+      # defines under a catalogued name is the project's, whatever it is called.
+      def unseen_iterator?(method_name, receiver_type)
+        ClosureEscapeAnalyzer.repeats_by_name?(receiver_type: receiver_type, method_name: method_name, scope: scope)
       end
 
       def at_most_one_run?(method_name, receiver_type)

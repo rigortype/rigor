@@ -55,11 +55,10 @@ module Rigor
         Discovery = Data.define(
           :discovered_classes, :discovered_def_nodes, :discovered_def_nestings,
           :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
-          :discovered_superclasses, :discovered_header_nestings, :discovered_includes,
-          :discovered_prepends,
+          :discovered_superclasses, :discovered_header_nestings, :discovered_includes, :discovered_prepends,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes,
-          :data_member_layouts, :struct_member_layouts, :discovered_deferred_ranges
+          :data_member_layouts, :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -186,7 +185,8 @@ module Rigor
             struct_member_layouts: def_index.fetch(:struct_member_layouts),
             # Issue #1097 — per-file def / block / lambda body ranges, the execution-timing table the
             # `*_def_shadows_call?` predicates order `sig`-shadowing defs against.
-            discovered_deferred_ranges: def_index.fetch(:deferred_ranges)
+            discovered_deferred_ranges: def_index.fetch(:deferred_ranges),
+            discovered_refinements: def_index.fetch(:refinements) # Issue #1120
           )
         end
 

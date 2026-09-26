@@ -261,19 +261,22 @@ The full order is:
    fold, kernel dispatch, block fold.
 2. **Plugin return-type contributions** — including
    `rigor-sorbet`'s sig and assertion translations. Plugins
-   that disagree about the same call site land in the
-   contribution merger, which reports the conflict rather
-   than letting one source silently override another.
+   that answer the same call site land in the contribution
+   merger, which intersects compatible answers. For disjoint
+   ones it keeps the first in plugin-id order and records a
+   conflict that is not reported yet (#922).
 3. RBS-backed dispatch (project `sig/`, `RBS::Inline`,
    bundled stdlib).
 4. Dependency-source inference (ADR-10's opt-in walker).
 5. User-class fallback (`Object` / `Class` ancestors).
 
 When both a project RBS sig AND a Sorbet sig describe the
-same method, the analyzer's contribution merger keeps the
-RBS contract authoritative — the plugin contribution is
-allowed to refine but not contradict it. ADR-11 § "WD3"
-records the rationale.
+same method, the Sorbet sig types the call site: the plugin
+tier answers before RBS dispatch, and a plugin's return type
+replaces the RBS return with no diagnostic (ADR-2 §
+"Amendment 2026-09-26"). The method's body is still checked
+against the RBS return. Keep the two signatures in agreement;
+where they differ, callers see the Sorbet return.
 
 ## Slice 4 RBI tree walking
 

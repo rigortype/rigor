@@ -47,8 +47,9 @@ plugins:
 The plugin is **input-side only**: it translates Sorbet's syntax
 into Rigor's type model. It does **not** run Sorbet's checker,
 ship `sorbet-runtime`, or enforce Sorbet's runtime guarantees.
-When an RBS sig and a Sorbet sig disagree, RBS wins (the Sorbet
-sig may refine but not contradict it). Forms outside the
+When an RBS sig and a Sorbet sig disagree, call sites get the
+Sorbet sig's return type, and the method's body is checked
+against the RBS return. Forms outside the
 translation table (`T.proc`, `T.self_type`, …) degrade to
 `Dynamic[top]`. Chapter 10 documents the full vocabulary and
 these edges.

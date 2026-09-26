@@ -896,6 +896,48 @@ module Rigor
           since: "0.3.4"
         ),
 
+        CheckRules::RULE_CONTRADICTING_SIGNATURE => Entry.new(
+          id: CheckRules::RULE_CONTRADICTING_SIGNATURE,
+          summary: "Two declarations of one method provably contradict: no value or call satisfies both.",
+          fires_when: [
+            "A method is declared both in the project's `sig/` and by an inline `# @rbs` / `#:` " \
+            "annotation, and the return or a parameter every call must pass holds two proven-disjoint " \
+            "types — distinct literals, a literal outside such a class, or two classes written absolutely " \
+            "whose RBS comes from Ruby core or the stdlib, neither an RBS ancestor of the other " \
+            "(`::String` against `::Integer`) — or the two keyword-free declarations accept " \
+            "positional counts that cannot meet, or one requires a keyword the other cannot take in any " \
+            "form. Several overloads are paired by correspondence, never by order. Positioned at the " \
+            "`.rbs` member; Rigor reads that declaration.",
+            "A member-level `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement is proven " \
+            "disjoint from the type its own member declares, in every overload it applies to " \
+            "(`rigor:v1:return: positive-int` on `-> String`)."
+          ],
+          does_not_fire_when: [
+            "One declaration refines the other (`String` against `non-empty-string`, `Symbol` against " \
+            "`:asc | :desc`, `bool` against `TrueClass`): the two merge to the more precise one, silently.",
+            "Either side is `untyped`, `void` or `top` in that position — consistent with everything.",
+            "Rigor cannot prove the two contradict: a module or interface on either side, a class the " \
+            "project declares (in `sig/`, inline or only in Ruby), a gem's class, any relative class name, " \
+            "two element types of one generic class, a type alias, `self`, a type variable, a proc, an " \
+            "optional or rest position, any block position, overloads that do not pair one to one, or " \
+            "differently shaped parameter lists that still overlap. The " \
+            "inline signature is then dropped and reported as `source-rbs-annotation-not-honoured` (info).",
+            "A refinement is written on one overload rather than on the member: call sites do not honour it.",
+            "Two `.rbs` files declare the same method (that fails the class's definition build, " \
+            "`rbs.coverage.definition-build-failed`), or a project `.rbs` collides with bundled RBS " \
+            "(the file is quarantined, `rbs.coverage.quarantined-signature`)."
+          ],
+          suppression: "`disable: [\"rbs.contradicting-signature\"]` in `.rigor.yml`, or a baseline entry. A " \
+                       "`# rigor:disable` comment does not reach a row positioned in a `.rbs` file. The real " \
+                       "fix is to regenerate the stale signature or correct the annotation.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          # Both sides are authored declarations, and a firing needs a proof that no value or call satisfies
+          # both — the ADR-35 both-sides-authored construction, with every doubt routed to the `:info` row.
+          evidence_tier: :high,
+          since: "0.4.0"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

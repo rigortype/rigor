@@ -950,10 +950,12 @@ module Rigor
           # `:failed`, so under `--workers N` a WD12 "parsed but not honoured" row came back as
           # `source-rbs-synthesis-failed` — a different id, and a message telling the user the file
           # contributed nothing when all but one of its annotations bound. Every worker reads the same
-          # sources and so hands over the same entries; the reporter's own dedup collapses them.
+          # sources and so hands over the same entries; the reporter's own dedup collapses them. `line:` rides
+          # along for the same reason (#1075): a consistency error is positioned at its `.rbs` member.
           Array(drained[:source_rbs_synthesis]).each do |entry|
             @source_rbs_synthesis_reporter.record(
-              plugin_id: entry.plugin_id, path: entry.path, message: entry.message, kind: entry.kind
+              plugin_id: entry.plugin_id, path: entry.path, message: entry.message, kind: entry.kind,
+              line: entry.line
             )
           end
           # Issue #696. Fetched with a default so an older drain stays compatible, exactly as the line above.

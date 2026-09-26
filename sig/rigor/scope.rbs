@@ -54,6 +54,9 @@ module Rigor
     # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the per-file
     # deferred-range table's row shape is hand-written.
     def discovered_deferred_ranges: () -> Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
+    # sig-gen gap: #1148 — sig-gen skips the endless-def reader (untyped return), so the refinement table's
+    # shape is hand-written.
+    def discovered_refinements: () -> Hash[String, Hash[Symbol, Array[String]]]
     def discovered_includes: () -> Hash[String, Array[String]]
     # Issue #1123 — the instance-ancestor-ORDER table beside the include one.
     def discovered_prepends: () -> Hash[String, Array[String]]
@@ -126,11 +129,19 @@ module Rigor
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]]
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader discovered_refinements: Hash[String, Hash[Symbol, Array[String]]]
       attr_reader run_generation: Object?
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader patched_line_readers: Set[Symbol]
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader clears_last_status: bool
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader defines_case_equality: bool
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?run_generation: Object?) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?discovered_refinements: Hash[String, Hash[Symbol, Array[String]]], ?run_generation: Object?, ?patched_line_readers: Set[Symbol], ?clears_last_status: bool, ?defines_case_equality: bool) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -200,6 +211,18 @@ module Rigor
     # sig-gen gap: #1154 — the frame reader over an ivar assigned in `initialize` from a parameter reaches
     # `untyped`, so the `bool` is hand-written.
     def match_rebinding_closure?: () -> bool
+    def forget_last_line: () -> Scope
+    def untyped_last_line: () -> Scope
+    # sig-gen gap: #1154 — the reader over the `@globals` ivar `initialize` assigns from a parameter reaches
+    # `untyped`, so the `bool` is hand-written.
+    def last_line_bound?: () -> bool
+    # sig-gen gap: #1154 — the frame reader over the `@match_frame` ivar `initialize` assigns from a parameter
+    # reaches `untyped`, so the `bool` is hand-written.
+    def last_line_closure?: () -> bool
+    def forget_error_info: () -> Scope
+    def untyped_error_info: () -> Scope
+    def forget_last_status: () -> Scope
+    def untyped_last_status: () -> Scope
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool

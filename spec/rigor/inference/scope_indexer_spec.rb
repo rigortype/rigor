@@ -114,6 +114,42 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[program].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
     end
 
+    # Issue #1359 — `$_` and `$~` live in the slot of the body that writes them, so a write binds that body alone:
+    # neither the top level before it nor a method body reads it.
+    it "keeps the frame-local specials out of the program-wide globals" do
+      program, idx = index_for(<<~RUBY)
+        $_ = "top"
+        $~ = nil
+        $verbose = true
+        def m = [$_, $~, $verbose]
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+      globals = idx[program].program_globals
+
+      expect(globals.keys).to eq([:$verbose])
+      expect(idx[program].global(:$_)).to be_nil
+      expect(idx[method_body].global(:$_)).to be_nil
+      expect(idx[method_body].global(:$~)).to be_nil
+      expect(idx[method_body].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    # Issue #1360 — `$!` / `$@` belong to the rescue clause running and `$?` to the thread; a write to `$!` or `$?`
+    # raises, and one to `$@` sets the rescued exception's backtrace. None is a program-wide value.
+    it "keeps `$!`, `$@` and `$?` out of the program-wide globals" do
+      program, idx = index_for(<<~RUBY)
+        $! = RuntimeError.new
+        $@ = ["x"]
+        $? = nil
+        $verbose = true
+        def m = [$!, $@, $?]
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+
+      expect(idx[program].program_globals.keys).to eq([:$verbose])
+      expect([idx[method_body].global(:$!), idx[method_body].global(:$@), idx[method_body].global(:$?)])
+        .to eq([nil, nil, nil])
+    end
+
     it "shows branch-internal bindings inside their branch only" do
       program, idx = index_for(<<~RUBY)
         if cond
@@ -811,6 +847,66 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
       expect(di[:class_sources]["Shared"]).to eq(Set[a, b])
       expect(di[:includes]["Shared"]).to contain_exactly("Comparable", "Enumerable")
+    end
+  end
+
+  # Issue #1120 — a refine body's defs are refinement methods of the refined class, active only under `using`,
+  # so they go to their own table and to no class's method tables.
+  describe "refinement discovery (#1120)" do
+    let(:source) do
+      <<~RUBY
+        module App
+          module CoreExt
+            refine String do
+              def shout = upcase
+              def self.nope = 1
+            end
+            refine(Integer) { def double = self * 2 }
+            def own = 1
+          end
+        end
+      RUBY
+    end
+
+    it "records a refine body's instance defs under every name the refined constant can denote" do
+      methods, def_nodes, _envelopes, refinements = described_class.build_methods_and_def_nodes(parse(source))
+
+      expect(refinements.fetch("App::CoreExt::String")).to eq(shout: ["App::CoreExt"])
+      expect(refinements.fetch("String")).to eq(shout: ["App::CoreExt"])
+      expect(refinements.fetch("Integer")).to eq(double: ["App::CoreExt"])
+      expect(methods.fetch("App::CoreExt")).to eq(own: :instance)
+      expect(def_nodes.fetch("App::CoreExt").keys).to eq([:own])
+      expect(methods).not_to have_key("String")
+    end
+
+    it "shares one frozen empty table for a file that refines nothing" do
+      refinements = described_class.build_methods_and_def_nodes(parse("class A\n  def f = 1\nend\n")).last
+
+      expect(refinements).to be_empty
+      expect(refinements).to be_frozen
+    end
+
+    it "folds the same table from a cached seed bundle as from a cold walk" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "core_ext.rb")
+        File.write(path, source)
+        cold = described_class.discovered_project_index_incremental([path], seed_bundles: {})
+        bundles = Marshal.load(Marshal.dump(cold.fetch(:bundles)))
+        warm = described_class.discovered_project_index_incremental([path], seed_bundles: bundles)
+
+        expect(cold.fetch(:def_index).fetch(:refinements).fetch("String")).to eq(shout: ["App::CoreExt"])
+        expect(warm.fetch(:def_index).fetch(:refinements)).to eq(cold.fetch(:def_index).fetch(:refinements))
+      end
+    end
+
+    it "overlays a file's refinements on the cross-file seed in the per-file index" do
+      seeded = default_scope.with_discovery(
+        default_scope.discovery.with(discovered_refinements: { "String" => { whisper: ["Other"] } })
+      )
+      program = parse(source)
+      scope = described_class.index(program, default_scope: seeded)[program]
+
+      expect(scope.discovered_refinements.fetch("String")).to eq(whisper: ["Other"], shout: ["App::CoreExt"])
     end
   end
 
@@ -4205,11 +4301,12 @@ end
   end
 
   # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are
-  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper. Asserted
+  # complete: each carrier member of it, `Union` members included, is unpinned inside the `Dynamic` wrapper — a literal
+  # shape or tuple floors to its gradual nominal (#1297), a value-pinned nominal gains an untyped arm. Asserted
   # on the tables because a read declines to project a `Union` facet at all, so no read tells the two apart there.
   # The read-side face is `spec/rigor/inference/mutated_constant_census_spec.rb`.
   describe "census widening of a mutated entry" do
-    it "unpins each carrier member of a mutated constant, and leaves an unmutated twin exact" do
+    it "floors each literal carrier member of a mutated constant, and leaves an unmutated twin exact" do
       program = parse(<<~RUBY)
         V = ENV["X"] ? { a: 1 } : [1]
         V << 2
@@ -4218,11 +4315,11 @@ end
       table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .in_source_constants
 
-      expect(table["V"].describe).to eq("Dynamic[Array[1 | Dynamic[top]] | { a: 1, ... }]")
+      expect(table["V"].describe).to eq("Dynamic[Array[Dynamic[top]] | Hash[Dynamic[top], Dynamic[top]]]")
       expect(table["W"].describe).to eq("[1] | { a: 1 }")
     end
 
-    it "opens a mutated class variable's shape, and leaves an unmutated twin closed" do
+    it "floors a mutated class variable's shape, and leaves an unmutated twin closed" do
       program = parse(<<~RUBY)
         class C
           def init = (@@h = { a: 1 }) && (@@k = { a: 1 })
@@ -4232,13 +4329,13 @@ end
       cvars = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .class_cvars_for("C")
 
-      expect(cvars[:@@h].describe).to eq("Dynamic[{ a: 1, ... }]")
+      expect(cvars[:@@h].describe).to eq("Dynamic[Hash[Dynamic[top], Dynamic[top]]]")
       expect(cvars[:@@k].describe).to eq("{ a: 1 }")
     end
 
     # An RBS overload join over an untyped argument wraps its candidates before the census sees them, so the facet of
-    # an entry that is already `Dynamic` is unpinned too. The overload set is RBS's, so the members are asserted by
-    # kind rather than spelled out.
+    # an entry that is already `Dynamic` is unpinned too: its tuples floor to the one `Array[untyped]`. The overload
+    # set is RBS's, so the unmutated twin's members are asserted by kind rather than spelled out.
     it "unpins the facet of an entry that is already Dynamic" do
       program = parse(<<~RUBY)
         X = 7.divmod(UNRESOLVED)
@@ -4248,7 +4345,7 @@ end
       table = described_class.index(program, default_scope: default_scope)[program.statements.body.first]
                              .in_source_constants
 
-      expect(table["X"].static_facet.members).to all(be_a(Rigor::Type::Nominal))
+      expect(table["X"].static_facet.describe).to eq("Array[Dynamic[top]]")
       expect(table["Y"].static_facet.members).to all(be_a(Rigor::Type::Tuple))
     end
 

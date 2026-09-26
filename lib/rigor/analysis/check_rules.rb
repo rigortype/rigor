@@ -26,6 +26,7 @@ require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
+require_relative "check_rules/lexical_method_sites"
 
 module Rigor
   module Analysis
@@ -136,13 +137,13 @@ module Rigor
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by
       # {MainPassCollector} on the shared {RuleWalk}. Returns the
       # diagnostics for one node, in the same emission order as before.
-      def main_pass_node_diagnostics(path, node, scope_index, eval_ranges = nil)
+      def main_pass_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
         case node
         when Prism::CallNode
-          call_node_diagnostics(path, node, scope_index, eval_ranges)
+          call_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites)
         when Prism::DefNode
           [
-            return_type_mismatch_diagnostic(path, node, scope_index),
+            refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites),
             override_visibility_diagnostic(path, node, scope_index),
             override_return_widened_diagnostic(path, node, scope_index),
             override_param_narrowed_diagnostic(path, node, scope_index)
@@ -154,6 +155,17 @@ module Rigor
         end
       end
 
+      # Issue #1120, maintainer ruling a′ — a `def` in a `refine X do … end` body redefines X's method by design, so
+      # X's declared return for the name is not its contract and a mismatch against it is not reported. Every other
+      # check in the body stands. The refine-body test runs only once a mismatch would report, so a file pays the
+      # {LexicalMethodSites} walk only then.
+      def refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites)
+        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
+        return diagnostic if diagnostic.nil? || lexical_sites.nil?
+
+        lexical_sites.refinement_def?(node) ? nil : diagnostic
+      end
+
       # Constructs the fresh, unpopulated built-in collector set keyed by
       # role, including the main pass. Split out so the converged walk
       # (ADR-53 B4) can build the collectors, drive them via a
@@ -163,7 +175,8 @@ module Rigor
       # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
       def build_node_collectors(path, scope_index, root = nil)
         eval_ranges = receiver_eval_block_ranges(root)
-        main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges) }
+        lexical_sites = LexicalMethodSites.new(root)
+        main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites) }
         {
           main_pass: MainPassCollector.new(main_pass),
           void_value_use: VoidValueUseCollector.new(scope_index),
@@ -243,8 +256,9 @@ module Rigor
       def main_pass_oracle(path, root, scope_index)
         diagnostics = []
         eval_ranges = receiver_eval_block_ranges(root)
+        lexical_sites = LexicalMethodSites.new(root)
         Source::NodeWalker.each(root) do |node|
-          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges))
+          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites))
         end
         diagnostics
       end
@@ -264,9 +278,9 @@ module Rigor
         shadow_verify_node_collectors(path, root, scope_index, collectors)
       end
 
-      def call_node_diagnostics(path, node, scope_index, eval_ranges = nil)
+      def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
         [
-          undefined_method_diagnostic(path, node, scope_index),
+          undefined_method_diagnostic(path, node, scope_index, lexical_sites),
           unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges),
           wrong_arity_diagnostic(path, node, scope_index),
           argument_type_diagnostic(path, node, scope_index),
@@ -661,7 +675,7 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def undefined_method_diagnostic(path, call_node, scope_index, lexical_sites = nil) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -753,7 +767,7 @@ module Rigor
           method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def
 
-          return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
+          return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
           # Issue #735 — the site is evidence, and whose RBS this is decides what it is evidence OF. On a
@@ -768,9 +782,54 @@ module Rigor
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
         end
 
-        # The two probes that run only once every cheaper answer has come back "absent", kept together
+        # Issue #1120 — the method exists at THIS call site but not everywhere: a refinement whose `using` is in
+        # effect here, or a `def o.m` on the receiver local in this scope. Asked from {#last_resort_surface_answers?},
+        # once every project-wide table has come back "absent", so the file walk behind {LexicalMethodSites} runs
+        # only for a call about to fire.
+        # A refinement answers instance-side receivers only: a refined singleton (`refine X.singleton_class`) names
+        # no constant target, so nothing records it.
+        def lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
+          return false if lexical_sites.nil?
+          return true if lexical_sites.singleton_local_def?(call_node)
+          return false unless kind == :instance
+
+          # ADR-46 — the answer below is a function of every refinement of this name in the project, so the
+          # consumer depends on the name whichever way it answers; a refine body edited in another file must
+          # re-check it (`IncrementalSession#refinement_affected`).
+          DependencyRecorder.read_name(:refinement, call_node.name) if DependencyRecorder.active?
+          modules = refining_modules(scope, class_name, call_node.name)
+          !modules.nil? && lexical_sites.refinement_active?(call_node, modules)
+        end
+
+        # Issue #1120 — every module that refines `method_name` into `class_name` or one of its ancestors (a
+        # refinement of `Object` reaches a `String` receiver), or nil when none does. The table is empty on a
+        # project that refines nothing, which answers without a lookup.
+        def refining_modules(scope, class_name, method_name)
+          refinements = scope.discovered_refinements
+          return nil if refinements.empty?
+
+          modules = nil
+          refinements.each do |refined, methods|
+            names = methods[method_name]
+            next if names.nil? || !refined_receiver_class?(scope, class_name, refined)
+
+            (modules ||= []).concat(names)
+          end
+          modules
+        end
+
+        def refined_receiver_class?(scope, class_name, refined)
+          return true if class_name == refined
+
+          environment = scope.environment
+          !environment.nil? && environment.class_ordering(class_name, refined) == :subclass
+        end
+
+        # The probes that run only once every cheaper answer has come back "absent", kept together
         # because they share that position and nothing else.
         #
+        # - Issue #1120 — a method that exists at this call site only: a refinement in effect here, or a
+        #   singleton `def` on the receiver local ({#lexically_defined_method?}).
         # - Issue #739 — an instance-side MODULE receiver. A value typed as a mixin module is an instance of
         #   some class that includes it, and that class contributes an arbitrary surface: inside
         #   `module Attachable::InstanceMethods`, `self.project` is defined by the ActiveRecord model that
@@ -791,7 +850,8 @@ module Rigor
         #   it"; a project ancestor still might, and the typer has already resolved the site through
         #   exactly this walk. It is last because it is the only probe here that walks the class graph
         #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
-        def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind)
+        def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites = nil)
+          return true if lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
           return true if unknown_mixin_includer?(class_name, scope)

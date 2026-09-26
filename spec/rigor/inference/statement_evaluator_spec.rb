@@ -3627,6 +3627,287 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #1360 — `$!` / `$@` are bound in a rescue clause and restored once the `begin` exits however it exits; `$?`
+  # is bound after a subprocess the statement certainly ran.
+  describe "`$!` / `$@` / `$?`" do
+    let(:env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+    let(:error_t) { Rigor::Type::Combinator.nominal_of("StandardError") }
+    let(:argument_t) { Rigor::Type::Combinator.nominal_of("ArgumentError") }
+    let(:status_t) { Rigor::Type::Combinator.nominal_of("Process::Status") }
+
+    # The binding of `name` each read of it records in the per-node scope index, in source order, and the scope after.
+    def special_reads(source, name, base: env_scope)
+      program = parse_program(source)
+      reads = []
+      recorder = lambda do |node, scope|
+        reads << scope.global(name) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == name
+      end
+      _, post = described_class.new(scope: base.with_match_frame(program), on_enter: recorder).evaluate(program)
+      [reads, post]
+    end
+
+    it "binds `$!` and `$@` in a rescue clause, with or without a reference, and restores the entry past the `begin`" do
+      reads, post = special_reads(<<~RUBY, :$!)
+        begin
+          Integer("x")
+        rescue ArgumentError => e
+          $!
+        rescue
+          $!
+        end
+        $!
+      RUBY
+      expect(reads).to eq([argument_t, error_t, nil])
+      expect(post.global(:$!)).to be_nil
+      expect(post.global(:$@)).to be_nil
+
+      outer = env_scope.with_global(:$!, argument_t)
+      reads, post = special_reads("begin\n  x\nrescue\n  $!\nend\n$!\n", :$!, base: outer)
+      expect(reads).to eq([error_t, argument_t])
+      expect(post.global(:$!)).to eq(argument_t)
+    end
+
+    it "restores the entry on a `break` or `next` that leaves a rescue clause or a rescue modifier" do
+      outer = env_scope.with_global(:$!, argument_t)
+      ["while ok\n  begin\n    x\n  rescue\n    break\n  end\nend",
+       "while ok\n  begin\n    x\n  rescue\n    next\n  end\nend",
+       "while ok\n  y = (x rescue break)\nend"].each do |loop_source|
+        _, post = special_reads("#{loop_source}\n", :$!, base: outer)
+        expect(post.global(:$!)).to eq(argument_t), loop_source
+      end
+    end
+
+    it "reads `$!`, `$@` and `$?` unbound in an `ensure` clause, and keeps what it entered with past it" do
+      bound = env_scope.with_global(:$!, argument_t).with_global(:$?, status_t)
+      reads, post = special_reads("begin\n  x\nensure\n  $!\n  $?\nend\n", :$!, base: bound)
+      expect(reads).to eq([nil])
+      expect(post.global(:$!)).to eq(argument_t)
+      expect(post.global(:$?)).to eq(status_t)
+
+      reads, post = special_reads("begin\n  x\nensure\n  $?\n  system('y')\nend\n", :$?)
+      expect(reads).to eq([nil])
+      expect(post.global(:$?)).to eq(status_t)
+    end
+
+    it "binds a rescue modifier's fallback to a `StandardError` and restores the entry past it" do
+      # The arm is threaded outside the per-node index, so its write shows what it read.
+      _, post = special_reads("y = (x rescue (z = $!))\n", :$!)
+      expect(post.local(:z)).to eq(Rigor::Type::Combinator.union(error_t, Rigor::Type::Combinator.constant_of(nil)))
+      expect(post.global(:$!)).to be_nil
+      _, post = special_reads("y = (x rescue (z = $!))\n", :$!, base: env_scope.with_global(:$!, argument_t))
+      expect(post.global(:$!)).to eq(argument_t)
+      # A fallback that guards `$!` by its class reads it unbound (#1429).
+      _, post = special_reads("y = (x rescue (z = ($!.is_a?(KeyError) ? $! : nil)))\n", :$!)
+      expect(post.local(:z).describe(:short)).to eq("Dynamic[top]?")
+      type, = evaluate("(raise 'm') rescue $!", base_scope: env_scope)
+      expect(type).to eq(error_t)
+    end
+
+    # A backtick, `%x` or `system` sets `$?` to nil before it runs the child, so a raise while it waits leaves it nil.
+    it "unbinds `$?` in a rescue clause, past a modifier whose fallback may fall through, and in a retried body" do
+      bound = env_scope.with_global(:$?, status_t)
+      reads, post = special_reads("begin\n  `sleep 2`\nrescue\n  $?\nend\n$?\n", :$?, base: bound)
+      expect(reads).to eq([nil, nil])
+      expect(post.global(:$?)).to be_nil
+      _, post = special_reads("x = (`sleep 2` rescue nil)\n", :$?, base: bound)
+      expect(post.global(:$?)).to be_nil
+      _, post = special_reads("def m\n  x = (y rescue return)\nend\nx = (y rescue return)\n", :$?, base: bound)
+      expect(post.global(:$?)).to eq(status_t)
+      reads, = special_reads("begin\n  $?\n  `sleep 2`\nrescue\n  retry\nend\n", :$?, base: bound)
+      expect(reads).to all(be_nil)
+      expect(reads).not_to be_empty
+      reads, = special_reads("begin\n  $?\n  `sleep 2`\nrescue\n  1\nend\n", :$?, base: bound)
+      expect(reads).to eq([status_t])
+    end
+
+    # A rescue in an operand or a block the statement passes never joins its scope back into the statement's.
+    it "unbinds `$?` past a statement that may fall through a rescue in its own frame" do
+      bound = env_scope.with_global(:$?, status_t)
+      ["[1].each { x rescue nil }", "[1].each do\n  x\nrescue\n  nil\nend", "warn(begin; x; rescue; nil; end)",
+       "warn((x rescue nil))", "a = [(x rescue nil)]", "t(5) do\n  begin\n    x\n  rescue\n    nil\n  end\nend"]
+        .each do |statement|
+          _, post = special_reads("#{statement}\n", :$?, base: bound)
+          expect(post.global(:$?)).to be_nil, statement
+        end
+      ["f = proc { x rescue nil }", "register(-> { x rescue nil })", "private def m = (x rescue nil)",
+       "warn((x rescue return))",
+       "Thread.new { x rescue nil }", "[1].each { x }"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?, base: bound)
+        expect(post.global(:$?)).to eq(status_t), statement
+      end
+    end
+
+    it "binds `$?` after a subprocess a statement certainly ran, and not in a file that may clear it" do
+      ["`true`", "%x(true)", "system('true')", "out = `a`.strip", "puts(`a`)", "ok = Kernel.system('x')",
+       "Process.wait(pid)", "if system('x') then 1 end"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?)
+        expect(post.global(:$?)).to eq(status_t), statement
+      end
+      ["[`a`]", "x&.y(`a`)", "system('x') if ok", "items.each { `a` }", "Process.wait(pid, 1)"].each do |statement|
+        _, post = special_reads("#{statement}\n", :$?)
+        expect(post.global(:$?)).to be_nil, statement
+      end
+      clearing = env_scope.with_discovery(env_scope.discovery.with(clears_last_status: true))
+      _, post = special_reads("system('true')\n", :$?, base: clearing)
+      expect(post.global(:$?)).to be_nil
+    end
+  end
+
+  # Issue #1359 — `$_` shares the match globals' frame slot: a condition on a reader narrows it, and code that may
+  # set it after the narrowing forgets it.
+  describe "`$_` last-line narrowing" do
+    let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    # The `$_` a read of it records in the per-node scope index, in source order.
+    def last_line_reads(source)
+      program = parse_program(source)
+      reads = []
+      recorder = lambda do |node, scope|
+        reads << scope.global(:$_) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == :$_
+      end
+      framed = default_env_scope.with_match_frame(program)
+      _, post = described_class.new(scope: framed, on_enter: recorder).evaluate(program)
+      [reads, post]
+    end
+
+    it "narrows `$_` on a reader condition's edges and leaves it nil after a `while gets` loop" do
+      reads, post = last_line_reads(<<~RUBY)
+        if $stdin.gets then $_ else $_ end
+        $stdin.gets or raise
+        $_
+        while $stdin.gets
+          $_
+        end
+      RUBY
+      expect(reads).to eq([string_t, nil_t, string_t, string_t])
+      expect(post.global(:$_)).to eq(nil_t)
+    end
+
+    it "leaves `$_` unbound after a reader that is not a condition, and on an untyped receiver's condition" do
+      reads, = last_line_reads(<<~RUBY)
+        if $stdin.gets
+          gets
+          $_
+        end
+        $_ if io.gets
+        $_ if gets
+      RUBY
+      expect(reads).to eq([nil, nil, nil])
+    end
+
+    it "forgets `$_` after an operand, literal or block that may set it, and keeps it across a Ruby method call" do
+      ["x = gets.to_s", "log(gets)", "pair = [gets, 1]", "items.each { |i| i.gets }", "items.each(&:gets)",
+       "io.send(:gets)", "Enumerator.new { gets }.to_a"].each do |call|
+        reads, = last_line_reads("if $stdin.gets\n  #{call}\n  $_\nend\n")
+        expect(reads).to eq([nil]), call
+      end
+      ["log('x')", "self.log('y')", "items.map { |i| i }", "Thread.new { gets }.join"].each do |call|
+        reads, = last_line_reads("if $stdin.gets\n  #{call}\n  $_\nend\n")
+        expect(reads).to eq([string_t]), call
+      end
+    end
+
+    it "forgets `$_` where a body that may set it runs again, and where a rescue clause reads it" do
+      ["while ok\n  $_\n  gets\nend", "for i in items\n  $_\n  gets\nend",
+       "begin\n  $stdin.readline\nrescue EOFError\n  $_\nend",
+       "begin\n  $_\n  gets\n  raise 'x'\nrescue RuntimeError\n  retry\nend"].each do |body|
+        reads, = last_line_reads("if $stdin.gets\n#{body}\nend\n")
+        expect(reads).to all(be_nil), body
+        expect(reads).not_to be_empty
+      end
+      reads, = last_line_reads("if $stdin.gets\n  while ok\n    $_\n  end\nend\n")
+      expect(reads).to eq([string_t])
+    end
+
+    # The `$_` each read of it sees in the per-node scope index, which also reaches the operands the evaluator types
+    # without entering.
+    def indexed_last_line_reads(source)
+      program = parse_program(source)
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: default_env_scope)
+      reads = []
+      program.breadth_first_search do |node|
+        reads << index[node].global(:$_) if node.is_a?(Prism::GlobalVariableReadNode) && node.name == :$_
+        false
+      end
+      reads
+    end
+
+    it "forgets `$_` where a `case` clause's tests may set it, and in every later operand of a reader" do
+      ["case\nwhen gets then 1\nelse $_\nend", "case x\nwhen $stdin.gets then 1\nend\n$_",
+       "case x\nin Integer if gets then 1\nelse $_\nend", "bar(gets, $_)", "[gets, $_]", "gets.to_s + $_",
+       "show(gets, xs.map { $_ })", "h = { a: gets, b: [1].map { $_ } }", "puts(foo(gets) ? $_ : 0)"].each do |body|
+        reads = indexed_last_line_reads("def m(x, xs)\n  if $stdin.gets\n#{body}\n  end\nend\n")
+        expect(reads).to all(be_nil), body
+        expect(reads).not_to be_empty, body
+      end
+      expect(indexed_last_line_reads("def m\n  if $stdin.gets\n    [$_, 1]\n  end\nend\n")).to eq([string_t])
+      # A statement list, a loop or a conditional runs its parts in order, so a read before the reader keeps it.
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    a = $_\n    b = gets if ok\n  end\nend\n"))
+        .to eq([string_t])
+      # `&&` and `||` run their operands in order too, so a read in the left operand of one whose right operand
+      # reads a line keeps the narrowing, and so does a read in one that reads no line.
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    $_.empty? && gets\n  end\nend\n"))
+        .to eq([string_t])
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    $_.empty? || gets\n  end\nend\n"))
+        .to eq([string_t])
+      expect(indexed_last_line_reads("def m(ok)\n  if $stdin.gets\n    x = (ok && $_)\n  end\nend\n"))
+        .to eq([string_t])
+    end
+
+    # `redo` re-enters the body without testing the predicate again.
+    it "enters a body a `redo` targets without the predicate's narrowing" do
+      reads, = last_line_reads("while $stdin.gets\n  $_\n  gets\n  redo if ok\nend\n")
+      expect(reads).to all(be_nil)
+      reads, = last_line_reads("while $stdin.gets\n  $_\n  redo if ok\nend\n")
+      expect(reads).to eq([nil])
+      # A body that rebinds a local runs the fixpoint passes, which enter on the predicate's edge.
+      reads, = last_line_reads("while $stdin.gets\n  x = $_\n  gets\n  redo if x\nend\n")
+      expect(reads).to all(be_nil)
+      reads, = last_line_reads("while $stdin.gets\n  x = $_\n  redo if x\nend\n")
+      expect(reads.last).to eq(string_t)
+    end
+
+    it "joins a reader condition's arms with `$_` unbound" do
+      ["if $stdin.gets\n  1\nend", "ok = $stdin.gets ? true : false", "x = (1 if $stdin.gets)"].each do |statement|
+        _, post = last_line_reads("#{statement}\n")
+        expect(post.global(:$_)).to be_nil, statement
+      end
+    end
+
+    # The single body pass enters on the predicate's loop-entry edge as the fixpoint passes do, so a body that
+    # rebinds no local reads the narrowing too; a `begin … end while` body runs once before the predicate.
+    it "enters the single body pass of a loop on the predicate's edge, but not a `begin … end while` body" do
+      program = parse_program(<<~RUBY)
+        while (line = STDIN.gets)
+          line
+        end
+        begin
+          line
+        end while (line = STDIN.gets)
+      RUBY
+      reads = []
+      recorder = ->(node, scope) { reads << scope.local(:line) if node.is_a?(Prism::LocalVariableReadNode) }
+      described_class.new(scope: default_env_scope, on_enter: recorder).evaluate(program)
+      expect(reads.first).to eq(string_t)
+      expect(reads.last).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
+    end
+
+    it "enters the single pass of a body a `redo` targets from the post-predicate scope" do
+      program = parse_program(<<~RUBY)
+        while (line = STDIN.gets)
+          line
+          redo if line.empty?
+        end
+      RUBY
+      reads = []
+      recorder = ->(node, scope) { reads << scope.local(:line) if node.is_a?(Prism::LocalVariableReadNode) }
+      described_class.new(scope: default_env_scope, on_enter: recorder).evaluate(program)
+      expect(reads.first).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
+    end
+  end
+
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.
   describe "break-path binding propagation (loop continuation)" do
     def local_after(source, name)

@@ -28,6 +28,7 @@ require_relative "method_dispatcher/math_folding"
 require_relative "method_dispatcher/random_folding"
 require_relative "method_dispatcher/time_folding"
 require_relative "method_dispatcher/regexp_folding"
+require_relative "method_dispatcher/process_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
 require_relative "method_dispatcher/set_folding"
@@ -836,6 +837,7 @@ module Rigor
         "Random" => RandomFolding,
         "Time" => TimeFolding,
         "Regexp" => RegexpFolding,
+        "Process" => ProcessFolding,
         "CGI" => CGIFolding,
         "URI" => URIFolding,
         "Set" => SetFolding,

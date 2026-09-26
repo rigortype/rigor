@@ -91,23 +91,32 @@ RSpec.describe "(?) signatures on method bodies and effects (RBS::Types::Untyped
     expect(result.diagnostics).to be_empty
   end
 
-  it "maps an effect's target through a named overload beside a `(?)` one" do
+  it "narrows no effect target when a `(?)` overload sits beside a named one" do
+    # A call may reach the `(?)` overload, which has no `value`, whatever its argument count: `am(x, "s")` can
+    # only match it. Resolving `value` through the named sibling narrowed `x` to String there, and an Integer
+    # argument under the predicate to `bot`.
     result = analyze(<<~RUBY, sig: sig)
       def asserted(x)
         C.new.assert_mixed(x)
         x.bogus_asserted
       end
 
+      def asserted_two(x)
+        C.new.assert_mixed(x, "s")
+        x.even?
+      end
+
       def predicated(x)
         x.bogus_predicated if C.new.mixed_string?(x)
       end
+
+      def predicated_integer
+        y = 1
+        y.even? if C.new.mixed_string?(y, "s")
+      end
     RUBY
 
-    messages = result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
-    expect(messages).to contain_exactly(
-      a_string_including("bogus_asserted").and(including("String")),
-      a_string_including("bogus_predicated").and(including("String"))
-    )
+    expect(result.diagnostics).to be_empty
   end
 
   it "accepts `(?)` as a block type and as a proc parameter type" do

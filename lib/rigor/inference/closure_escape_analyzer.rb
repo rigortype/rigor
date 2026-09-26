@@ -91,14 +91,14 @@ module Rigor
       # Issue #1234 — whether some catalogue entry lists `method_name` as an iteration method: a name that runs
       # its block once per element wherever the catalogue knows the receiver. `tap` / `then` / `yield_self` are
       # left out, as they run the block exactly once. This is a fact about the NAME, for the one consumer that
-      # asks it of an `:unknown` receiver (`ExpressionTyper#block_may_repeat?`); it proves nothing about escape.
+      # asks it of an `:unknown` receiver ({BlockRepetition.may_repeat?}); it proves nothing about escape.
       def iterator_name?(method_name)
         ITERATOR_NAMES.include?(method_name)
       end
 
       # Issue #1234 — whether the NAME of a catalogued iterator is the only thing Rigor knows about the method
-      # `receiver_type` answers `method_name` with, so the captured-binding pass may read it as repetition
-      # (`ExpressionTyper#block_may_repeat?`, for an `:unknown` receiver). It holds for a receiver Rigor cannot
+      # `receiver_type` answers `method_name` with, so a pass may read it as repetition
+      # ({BlockRepetition.may_repeat?}, for an `:unknown` receiver). It holds for a receiver Rigor cannot
       # see at all (`Dynamic`, `Top`), and for a class it can see whose method the project does not define.
       #
       # A method the project defines under a catalogued name is the project's, not the iterator, so the name

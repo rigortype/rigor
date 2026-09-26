@@ -9,6 +9,7 @@ require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../source/constant_path"
 require_relative "anonymous_meta_class"
+require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "captured_locals"
@@ -2260,6 +2261,7 @@ module Rigor
       def loop_pass_entry(node, post_pred, bindings, body_first, jumps)
         overlaid = bindings.except(*body_first)
         entry = overlaid.reduce(post_pred) { |acc, (name, type)| acc.with_local(name, type) }
+        entry = loop_content_entry(node.statements, post_pred, entry)
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, entry)
         edge = node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope
         # Issue #1359 — a `redo` re-enters the body without testing the predicate again, so a `$_` the predicate
@@ -2267,6 +2269,35 @@ module Rigor
         return edge unless jumps.redoes
 
         LastLine.forget_if_set(edge, node.statements)
+      end
+
+      # Issue #1412 — the loop-body counterpart of {#repeating_block_entry}: `entry` with every local the body
+      # mutates in place ({CapturedLocals.loop_content_mutations}, bound in `base`) at its unknown-store widening
+      # ({#unknown_store_binding}). A body runs again after it ran, so a later iteration reads what an earlier one
+      # stored, and every pass over it — the single pass and each fixpoint pass ({#loop_pass_entry}), and a `for`
+      # body's only pass — enters this way. A name the pass also rebinds is widened over its running assumption, as
+      # the block write-back widens it ({#capture_pass_bindings}); a name `entry` does not bind is left alone. The
+      # widening keeps the binding's issue #1287 marks, as {#block_pass_entry} keeps them.
+      def loop_content_entry(statements, base, entry)
+        stores = loop_content_mutations(statements, base)
+        return entry if stores.empty?
+
+        stores.reduce(entry) do |acc, (name, sites)|
+          type = acc.local(name)
+          type.nil? ? acc : acc.with_mutated_local(name, unknown_store_binding(type, sites))
+        end
+      end
+
+      # {CapturedLocals.loop_content_mutations} of a loop body against `base`, once per pair: every pass of one
+      # loop asks with the same body and the same post-predicate scope. The slot is keyed on both, so a body asked
+      # against another scope is scanned again.
+      def loop_content_mutations(statements, base)
+        memo = (@loop_content_mutations ||= {}.compare_by_identity)[statements]
+        return memo[1] if memo && memo[0].equal?(base)
+
+        stores = CapturedLocals.loop_content_mutations(statements, base)
+        @loop_content_mutations[statements] = [base, stores]
+        stores
       end
 
       # `for index in collection; body; end`. Unlike `each {}` blocks, `for` does NOT create a new variable scope: the
@@ -2280,6 +2311,7 @@ module Rigor
         element_type = for_iteration_element_type(coll_type)
         # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
         body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
+        body_entry = loop_content_entry(node.statements, post_coll, body_entry)
 
         if node.statements.nil?
           return [Type::Combinator.constant_of(nil), join_with_nil_injection(post_coll, body_entry)]
@@ -3368,7 +3400,7 @@ module Rigor
         block = node.block
         return unless block.is_a?(Prism::BlockNode)
 
-        block_entry = narrow_define_method_block_self(node, build_block_entry_scope(node, block))
+        block_entry = narrow_define_method_block_self(node, repeating_block_entry(node, block))
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it
         # and `attr_reader` runs as a class-level macro. Enter the block under the same `self_type` /
@@ -3761,8 +3793,21 @@ module Rigor
         end
       end
 
+      # The type of `call_node`'s explicit receiver where its operands were typed ({#type_operand}), computed once per
+      # call: the block's entry (its parameter types, a DSL `self`, the #1412 repeat gate), its escape class and
+      # every write-back pass all ask, and {#type_operand} types the receiver afresh each time. The one slot is
+      # keyed on the node, and an evaluator types every operand from the same scope.
+      def explicit_receiver_type(call_node)
+        memo = @explicit_receiver_type
+        return memo[1] if memo && memo[0].equal?(call_node)
+
+        type = type_operand(call_node.receiver)
+        @explicit_receiver_type = [call_node, type]
+        type
+      end
+
       def classify_closure_escape(call_node)
-        receiver_type = call_node.receiver ? type_operand(call_node.receiver) : nil
+        receiver_type = call_node.receiver ? explicit_receiver_type(call_node) : nil
         ClosureEscapeAnalyzer.classify(
           receiver_type: receiver_type,
           method_name: call_node.name,
@@ -4745,10 +4790,101 @@ module Rigor
       end
 
       # The entry scope of one write-back pass: the block's entry with each written outer local or ivar bound to
-      # `bindings`.
+      # `bindings`, and each captured local the body only mutates in place at its widening ({#capture_pass_bindings}).
+      # That widening describes the same object, so it keeps the marks a source-level write drops (issue #1287,
+      # `Scope#with_mutated_local`): a local copied from a declaration-seeded ivar stays exempt from nil-receiver
+      # reports, as it does after straight-line `r << x`.
       def block_pass_entry(call_node, block, bindings)
         entry = build_block_entry_scope(call_node, block)
-        capture_pass_bindings(block, bindings).reduce(entry) { |acc, (name, type)| bind_capture(acc, name, type) }
+        capture_pass_bindings(block, bindings).reduce(entry) do |acc, (name, type)|
+          bindings.key?(name) ? bind_capture(acc, name, type) : acc.with_mutated_local(name, type)
+        end
+      end
+
+      NO_CAPTURE_BINDINGS = {}.freeze
+      private_constant :NO_CAPTURE_BINDINGS
+
+      # Issue #1412 — the entry of the statement pass over a block ({#evaluate_block_if_present}). A block its call
+      # may run more than once ({BlockRepetition.may_repeat?}, the gate the block-return pass lays the #587 (b)
+      # binding under) enters with every captured local it mutates in place at its unknown-store widening
+      # ({#capture_pass_bindings}), as each ADR-56 write-back pass enters. The write-back runs only for a
+      # non-escaping body that also REBINDS a capture, so a body that only mutates one (`depth = []; lines.each {
+      # |tl| puts depth.last.length if depth.last; depth << tl }`) was typed from `[]` on every pass: `depth.last`
+      # read `nil`, and the guarded read reported `undefined method` for nil on correct code. A later pass reads
+      # what an earlier one stored, so the widening's gradual arm is the honest entry. The price is that a read
+      # only the first pass makes is gradual too — a false negative, the same one the write-back's passes take.
+      #
+      # A repeating call the escape analysis leaves `:unknown` (an iterator name on an untyped receiver) gets no
+      # write-back at all, so a capture it rebinds from a `nil` placeholder read `nil` on every pass (`names = nil;
+      # io.each_line { … names = {} … names[l] = true }`). Such a capture enters at {#unproven_rebind_bindings}.
+      #
+      # This costs no body pass. A body that can neither rebind nor mutate a captured binding
+      # ({CapturedLocals.may_touch_capture?}, an allocation-free scan) — most of them — skips the gate, and the
+      # gate reads the one receiver type and escape class the rest of {#eval_call} reads.
+      def repeating_block_entry(call_node, block)
+        body = block.body
+        return build_block_entry_scope(call_node, block) if body.nil? || !CapturedLocals.may_touch_capture?(body, scope)
+
+        classification = repeating_block_class(call_node)
+        return build_block_entry_scope(call_node, block) if classification.nil?
+
+        bindings = unproven_rebind_bindings(call_node, block, classification)
+        return build_block_entry_scope(call_node, block) if bindings.empty? && block_content_mutations(block).empty?
+
+        block_pass_entry(call_node, block, bindings)
+      end
+
+      # The call's {ClosureEscapeAnalyzer} class when {BlockRepetition.may_repeat?} holds for it, else nil. The
+      # receiver is the one the block-return pass asks about: the explicit receiver, or the implicit `self`
+      # (`Object` at the top level).
+      def repeating_block_class(call_node)
+        receiver_type =
+          if call_node.receiver
+            explicit_receiver_type(call_node)
+          else
+            operand_scope.self_type || operand_scope.environment.nominal_for_name("Object")
+          end
+        return nil if receiver_type.nil?
+
+        method_name = call_node.name
+        classification = ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: method_name,
+                                                        scope: scope)
+        repeats = BlockRepetition.may_repeat?(
+          method_name: method_name, receiver_type: receiver_type, scope: scope, classification: classification
+        )
+        repeats ? classification : nil
+      rescue StandardError
+        nil
+      end
+
+      # The binding each outer local or ivar the body rebinds ({CapturedLocals.writes}) from a sentinel seed — `nil` or
+      # `false`, alone or as a union of the two — enters a repeating call's body with when the write-back will not run
+      # its passes for it ({#write_back_block_captures} reaches only an explicit receiver classified
+      # `:non_escaping`): the seed joined with `Dynamic[top]`. A sentinel is a placeholder the body replaces before
+      # the reads it guards (`names = nil; io.each_line { |l| if state == :start; names = {}; else names[l] = true;
+      # end }`), so a later pass reads whatever replaced it, and no pass types that here. Any other seed keeps its
+      # call-site binding: the first pass reads it, and a later pass's binding is left unmodelled, as it was before.
+      # A call the write-back reaches answers none: its fixpoint enters every pass it records at the converged
+      # binding.
+      def unproven_rebind_bindings(call_node, block, classification)
+        return NO_CAPTURE_BINDINGS if call_node.receiver && classification == :non_escaping
+
+        names = CapturedLocals.writes(block, scope, ivars: true)
+        return NO_CAPTURE_BINDINGS if names.empty?
+
+        untyped = Type::Combinator.untyped
+        names.each_with_object({}) do |name, acc|
+          seed = CapturedLocals.bound_type(scope, name)
+          acc[name] = Type::Combinator.union(seed, untyped) if seed && sentinel_seed?(seed)
+        end
+      end
+
+      def sentinel_seed?(type)
+        case type
+        when Type::Constant then type.value.nil? || type.value == false
+        when Type::Union then type.members.all? { |member| sentinel_seed?(member) }
+        else false
+        end
       end
 
       # `bindings` plus the pass binding of every captured local the body mutates in place
@@ -4889,7 +5025,7 @@ module Rigor
       def narrow_macro_block_self(call_node)
         receiver_type =
           if call_node.receiver
-            type_operand(call_node.receiver)
+            explicit_receiver_type(call_node)
           else
             scope.self_type
           end
@@ -4916,7 +5052,7 @@ module Rigor
 
         receiver_type =
           if call_node.receiver
-            type_operand(call_node.receiver)
+            explicit_receiver_type(call_node)
           else
             scope.self_type || scope.environment.nominal_for_name("Object")
           end

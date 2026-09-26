@@ -10,6 +10,7 @@ require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_call_timing"
+require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
@@ -3929,57 +3930,9 @@ module Rigor
 
       # Whether the call may run its block more than once, so a later run reads a captured binding an earlier
       # run rebound — the premise of laying the #587 (b) binding ({#captured_block_bindings}) under the block.
-      # The core iteration methods {ClosureEscapeAnalyzer} catalogues as non-escaping prove it — for a project
-      # class too, through its ancestry (`include Enumerable`); `tap` / `then` / `yield_self` are catalogued
-      # there too but run their block exactly once ({BlockCallTiming}).
-      #
-      # Issue #1234 — a receiver the analyzer cannot classify at all (`Dynamic`, a union, a project class
-      # whose ancestry it cannot follow) repeats when the method NAME is a catalogued iterator
-      # ({ClosureEscapeAnalyzer.iterator_name?}): `items.all? { seen += 1; seen == 1 }` on an untyped
-      # `items` kept the first run's `seen == 1`, the predicate folded to `true`, and the condition on the
-      # result was reported as constant. This is the captured-binding pass's reading of `:unknown` alone;
-      # escape analysis still treats it as unproven. Any other name, and a receiver classified `:escaping`,
-      # keeps the entry scope, which is exact for a block run once (`m.synchronize { out = buf; buf = nil;
-      # out }` is `buf`'s value, and a cross-iteration binding would add the `nil` a second run never reads).
-      #
-      # A receiver that provably holds at most one element runs the block at most once however it iterates, so
-      # it keeps the entry scope too: `done = false; [:only].each { break if done; done = true }` is `[:only]`,
-      # and the cross-iteration `done` would have typed it `Array[Symbol]?`.
+      # {BlockRepetition.may_repeat?} holds the rule, which the statement pass shares (issue #1412).
       def block_may_repeat?(call_node, receiver_type)
-        return false if BlockCallTiming.candidate_name?(call_node.name)
-        return false if at_most_one_run?(call_node.name, receiver_type)
-
-        case ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: call_node.name, scope: scope)
-        when :non_escaping then true
-        when :unknown then unseen_iterator?(call_node.name, receiver_type)
-        else false
-        end
-      end
-
-      # Issue #1234 — the name reads as repetition only where Rigor cannot see the method: a method the project
-      # defines under a catalogued name is the project's, whatever it is called.
-      def unseen_iterator?(method_name, receiver_type)
-        ClosureEscapeAnalyzer.repeats_by_name?(receiver_type: receiver_type, method_name: method_name, scope: scope)
-      end
-
-      def at_most_one_run?(method_name, receiver_type)
-        case receiver_type
-        when Type::Tuple then receiver_type.elements.size <= 1
-        when Type::HashShape then receiver_type.closed? && receiver_type.pairs.size <= 1
-        when Type::Constant then constant_at_most_one_run?(method_name, receiver_type.value)
-        else false
-        end
-      end
-
-      # `1.times` and a one-element integer range iterate once.
-      def constant_at_most_one_run?(method_name, value)
-        case value
-        when Integer then method_name == :times && value <= 1
-        when Range
-          value.begin.is_a?(Integer) && value.end.is_a?(Integer) &&
-            value.end - value.begin + (value.exclude_end? ? 0 : 1) <= 1
-        else false
-        end
+        BlockRepetition.may_repeat?(method_name: call_node.name, receiver_type: receiver_type, scope: scope)
       end
 
       EMPTY_BREAK_ARMS = [].freeze

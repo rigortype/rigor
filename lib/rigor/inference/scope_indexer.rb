@@ -2094,14 +2094,20 @@ module Rigor
       end
 
       # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
-      # the scope's own `globals` map (see the call site), with the `gets` / `readline` names the file patches in and
-      # whether it may set `$?` to nil or define a singleton `===`.
+      # the scope's own `globals` map (see the call site) — a declared one's seed ({#join_declared_globals}) under the
+      # ADR-58 `:global` mark — with the `gets` / `readline` names the file patches in and whether it may set `$?` to
+      # nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
         program_globals, census = build_program_global_index(root, seeded_scope)
+        seeds = join_declared_globals(program_globals, seeded_scope.environment)
         seeded_scope = seeded_scope.with_discovery(
-          seeded_scope.discovery.with(program_globals: program_globals, **census)
+          seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
         )
-        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        program_globals.each do |name, written|
+          seed = seeds[name]
+          seeded_scope =
+            seed ? seeded_scope.seed_declaration_sourced_global(name, seed) : seeded_scope.with_global(name, written)
+        end
         seeded_scope
       end
 
@@ -2131,6 +2137,43 @@ module Rigor
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         [accumulator.freeze, census]
       end
+
+      # Issue #1362 (ADR-117 WD1) — the seed of each global in `program_globals` Ruby's own signatures declare
+      # (`$VERBOSE: bool?`, `$stdout: IO`). Such a global holds what the interpreter set, from the command line or at
+      # boot, until a write, and any loaded file may write it, so its seed is the declared type joined with the file's
+      # writes, which can only widen it: `$VERBOSE = true` seeds `bool`, and `$stdout = StringIO.new` seeds
+      # `IO | StringIO`. A global only a project or a gem declares, or none does, has no entry here and is seeded with
+      # the union of the file's writes, as before, and so is a separator ({UNJOINED_SEPARATORS}).
+      #
+      # Issue #1437 — the declared `nil` is not joined (`$VERBOSE` joins `bool`, not `bool?`): a value that mixes the
+      # global with something else (`c ? $VERBOSE : true`) would carry it past the ADR-58 mark into a report the file's
+      # writes did not earn. A `nil` the file writes is joined as any write is.
+      def join_declared_globals(program_globals, environment)
+        program_globals.each_with_object({}) do |(name, written), seeds|
+          next if UNJOINED_SEPARATORS.include?(name)
+
+          declared = non_nil_declared(environment.global_for_name(name, builtin: true))
+          seeds[name] = Type::Combinator.union(declared, written) if declared
+        end.freeze
+      end
+
+      # `declared` without its `nil` member, or nil when it has no other.
+      def non_nil_declared(declared)
+        return declared unless declared.is_a?(Type::Union) || nil_type?(declared)
+
+        members = declared.is_a?(Type::Union) ? declared.members.reject { |member| nil_type?(member) } : []
+        members.empty? ? nil : Type::Combinator.union(*members)
+      end
+
+      def nil_type?(type)
+        (type.is_a?(Type::Constant) && type.value.nil?) || (type.is_a?(Type::Nominal) && type.class_name == "NilClass")
+      end
+
+      # Issue #1437 — the separators whose declared type is nil-bearing (`String?`, `Regexp | String | nil`) stay out of
+      # the join for now. The declared `nil` would reach `call.possible-nil-receiver` through a value that mixes the
+      # global with something else (`sep = c ? $/ : ";"`, `sep = given || $/`), which the ADR-58 mark does not follow.
+      UNJOINED_SEPARATORS = %i[$/ $, $; $\\ $-0 $-F $-i].freeze
+      private_constant :UNJOINED_SEPARATORS
 
       def gather_global_writes(node, scope, accumulator, census)
         return unless node.is_a?(Prism::Node)

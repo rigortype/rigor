@@ -17,6 +17,7 @@ require_relative "dynamic_origin"
 require_relative "error_info"
 require_relative "jump_targets"
 require_relative "last_status"
+require_relative "../analysis/check_rules/declaration_sourced_guard"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
@@ -515,8 +516,8 @@ module Rigor
         # computed on the RHS *value*'s provenance — a pure ivar read of a currently declaration-sourced ivar — so it
         # survives the local copy. Any other RHS (a call result, a method-local-nil-bearing value) leaves the local
         # flow-live and the diagnostic fires as before.
-        return post_rhs.with_declaration_sourced_local(node.name, rhs_type) if
-          declaration_sourced_ivar_read?(node.value, post_rhs)
+        copied = declaration_sourced_copy(node, rhs_type, post_rhs)
+        return copied if copied
 
         bound = post_rhs.with_local(node.name, rhs_type)
         # ADR-67 WD6b — a local whose RHS is (transitively) rooted at an inferred parameter inherits the
@@ -577,6 +578,22 @@ module Rigor
         return nil unless rhs_type.is_a?(Type::Dynamic)
 
         scope_after_rhs.dynamic_origins[value_node]
+      end
+
+      # The scope binding the written local with ADR-58's `:local` mark when the write copies a declaration-sourced
+      # value, or nil. Issue #1362 — a read of a global still on its declared seed counts as an ivar read does, bare
+      # or parenthesised (`sep = $/`, `sep = ($/)`), and so does a bare read of a local that copies one (`s = sep`);
+      # the local also records the global it copies, which the consumers compare against the file's own writes to it
+      # ({Analysis::CheckRules::DeclarationSourcedGuard.copied_globals}).
+      def declaration_sourced_copy(node, rhs_type, post_rhs)
+        value = node.value
+        return post_rhs.with_declaration_sourced_local(node.name, rhs_type) if
+          declaration_sourced_ivar_read?(value, post_rhs)
+
+        globals = Analysis::CheckRules::DeclarationSourcedGuard.copied_globals(value, post_rhs)
+        return nil if globals.empty?
+
+        post_rhs.with_declaration_sourced_local(node.name, rhs_type).with_global_copy_marks(node.name, globals)
       end
 
       # True when `value_node` is a bare instance-variable read whose binding in `scope_at_read` is currently marked
@@ -1692,7 +1709,10 @@ module Rigor
           next if post.nil? || retry_rebind_settled?(widening, name, widening.entry.public_send(getter, name), post)
 
           current = scope_acc.public_send(getter, name)
-          next if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
+          if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
+            scope_acc = forget_diverged_copy(scope_acc, post_scope, kind, name)
+            next
+          end
 
           scope_acc = rebind_retried(scope_acc, post_scope, kind, name,
                                      retry_widened_type(current, post, kind, widening.envelope))
@@ -1702,13 +1722,33 @@ module Rigor
 
       # The rebind joins the binding a retry re-enters with into the accumulated one, so ADR-58's local mark stays only
       # when both scopes carry it, as `Scope#join` keeps it (issue #1287): `up(r)` in the body floors `r` in place and
-      # keeps the mark, while `r = other` in the rescue arm is a write and drops it.
+      # keeps the mark, while `r = other` in the rescue arm is a write and drops it. Issue #1362 — as in `Scope#join`, a
+      # copy of global seeds keeps its mark with the union of both scopes' globals, and only when both copy some.
       def rebind_retried(scope_acc, post_scope, kind, name, type)
         rebound = rebind_variable(scope_acc, kind, name, type)
         return rebound unless kind == :local && scope_acc.declaration_sourced?(:local, name) &&
                               post_scope.declaration_sourced?(:local, name)
 
-        rebound.with_local_declaration_mark(name)
+        copies = scope_acc.declaration_sourced_global_copies(name)
+        post_copies = post_scope.declaration_sourced_global_copies(name)
+        return rebound unless copies.empty? == post_copies.empty?
+
+        rebound.with_local_declaration_mark(name).with_global_copy_marks(name, copies | post_copies)
+      end
+
+      # Issue #1362 — a re-entered binding the accumulated one already accepts is not rebound, so ADR-58's mark would
+      # stand on a local that copies a global's seed while the retried pass holds something else. As at a join, a copy
+      # of other global seeds adds their globals to the record, and any other value makes the local flow-live.
+      def forget_diverged_copy(scope_acc, post_scope, kind, name)
+        return scope_acc unless kind == :local
+
+        copies = scope_acc.declaration_sourced_global_copies(name)
+        return scope_acc if copies.empty?
+
+        post_copies = post_scope.declaration_sourced_global_copies(name)
+        return scope_acc.without_local_declaration_marks(name) if post_copies.empty?
+
+        scope_acc.with_global_copy_marks(name, post_copies)
       end
 
       # Whether `post` needs no weighing: this widening has weighed it for `name` already, or it is the entry's binding.
@@ -5192,15 +5232,21 @@ module Rigor
         seeded.reduce(body_scope) { |acc, (name, type)| acc.with_cvar(name, type) }
       end
 
-      # Globals are process-wide. The body scope already inherited the program-globals accumulator through
-      # `with_program_globals`; seeding here just materialises each entry into the body's `globals` map so reads observe
-      # a precise type without consulting the accumulator on every lookup. The frame-local `$_` and `$~` are not in it
-      # (issue #1359): a method body starts with a slot of its own.
+      # Globals are process-wide. The body scope already inherited the program-global tables through its discovery
+      # index; seeding here just materialises each entry into the body's `globals` map so reads observe a precise type
+      # without consulting the index on every lookup. The frame-local `$_` and `$~` are not in it (issue #1359): a
+      # method body starts with a slot of its own. A global Ruby's own signatures declare is seeded with its declared
+      # type joined with the file's writes, under the ADR-58 `:global` mark (issue #1362,
+      # `ScopeIndexer#join_declared_globals`, `Scope#seed_declaration_sourced_global`).
       def seed_program_globals(body_scope)
-        seeded = scope.program_globals
-        return body_scope if seeded.empty?
+        written = scope.program_globals
+        return body_scope if written.empty?
 
-        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_global(name, type) }
+        seeds = scope.discovery.program_global_seeds
+        written.reduce(body_scope) do |acc, (name, type)|
+          seed = seeds[name]
+          seed ? acc.seed_declaration_sourced_global(name, seed) : acc.with_global(name, type)
+        end
       end
 
       # Slice A-declarations. Class- and method-bodies start from a fresh local-empty scope, but they MUST keep the

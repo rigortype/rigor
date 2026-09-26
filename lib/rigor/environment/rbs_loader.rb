@@ -1147,9 +1147,10 @@ module Rigor
         private_constant :VENDORED_GEM_SIGS_ROOT
 
         # Rigor-owned core-overlay RBS (`data/core_overlay/`). Reopens Ruby core classes to add methods
-        # upstream `ruby/rbs` omits but which every concrete value answers at runtime — loaded last so
-        # upstream always wins on conflict. Public so the cache descriptor can digest these files into the
-        # env-blob key.
+        # upstream `ruby/rbs` omits but which every concrete value answers at runtime. A direct `def` that
+        # another source also declares is a `DuplicatedMethodDefinitionError`, not a precedence question, so a
+        # method a project `sig/` or a later rbs is likely to declare goes on a module the class extends
+        # (`process.rbs`). Public so the cache descriptor can digest these files into the env-blob key.
         CORE_OVERLAY_SIGS_ROOT = File.expand_path(
           "../../../data/core_overlay",
           __dir__
@@ -1250,12 +1251,12 @@ module Rigor
         private_constant :RBS_LINE_CORE_OVERLAYS
 
         # Adds the Rigor-shipped signature sources to `rbs_loader`: every `data/vendored_gem_sigs/<gem>/`
-        # directory, then the `data/core_overlay/` files — the overlay LAST so an upstream declaration
-        # always wins on conflict (these reopenings only fill genuine holes, e.g. `Numeric#to_f`/`to_i`/
-        # `to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
-        # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
-        # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and `RBS_LINE_CORE_OVERLAYS` files must
-        # be gated individually.
+        # directory, then the `data/core_overlay/` files, which fill genuine holes only (e.g. `Numeric#to_f`/
+        # `to_i`/`to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
+        # that Rigor's arithmetic-chain widening produces). Load order does not settle a conflict: a method
+        # both sides declare directly raises `DuplicatedMethodDefinitionError` for the whole class. The
+        # overlay is added per-file, not per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and
+        # `RBS_LINE_CORE_OVERLAYS` files must be gated individually.
         #
         # @param loaded_library_names — libraries that actually resolved on this loader.
         def add_bundled_signatures(rbs_loader, loaded_library_names)
@@ -1619,6 +1620,45 @@ module Rigor
       def project_declared_class?(class_name)
         project_declared_classes.include?(class_name.to_s.delete_prefix("::"))
       end
+
+      # Issue #1362 — the translated type of the RBS declaration of the global variable `name` (`:$stdout`, declared
+      # `IO` by the core signatures), or nil when no loaded signature declares it. Translated without an alias
+      # expander, as {#constant_type} translates a constant, so `$DEBUG: boolish` reads `Dynamic[top]` rather than
+      # `top`.
+      def global_type(name)
+        global_declarations[name.to_sym]&.first
+      end
+
+      # True when `name`'s RBS declaration lives in the `rbs` gem's own `core/` or `stdlib/` tree: a global the
+      # interpreter or a default library sets. Attributed by buffer name, as {#core_or_stdlib_class?} is, with the
+      # same limit: an environment blob without buffer names answers false for every global.
+      def core_or_stdlib_global?(name)
+        global_declarations[name.to_sym]&.last || false
+      end
+
+      # `name => [type, core_or_stdlib]` for every global the environment declares; a declaration whose type
+      # translates to `bot` is left out. Memoised per loader: the core signatures declare about fifty.
+      def global_declarations
+        @state[:global_declarations] ||= build_global_declarations
+      end
+      private :global_declarations
+
+      def build_global_declarations
+        environment = env
+        return {}.freeze if environment.nil?
+
+        table = environment.global_decls.each_with_object({}) do |(name, entry), acc|
+          type = Inference::RbsTypeTranslator.translate(entry.decl.type)
+          next if type.is_a?(Type::Bot)
+
+          path = self.class.declaration_buffer_name(entry.decl)
+          acc[name.to_sym] = [type, !path.nil? && CORE_STDLIB_ROOTS.any? { |root| path.start_with?(root) }].freeze
+        end
+        table.freeze
+      rescue ::RBS::BaseError
+        {}.freeze
+      end
+      private :build_global_declarations
 
       # The total RBS-environment build failure captured this run, or nil when the env built. Unlike
       # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived so a

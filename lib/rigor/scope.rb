@@ -415,7 +415,7 @@ module Rigor
       rebuild(locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
-              declaration_sourced: keep_marks ? @declaration_sourced : drop_declaration_sourced_for(:local, name),
+              declaration_sourced: keep_marks ? @declaration_sourced : drop_local_declaration_marks(name),
               # Issue #667 — rebinding is flow-live for the published-constant mark too: the new value need
               # not be a copy of anything. `with_published_constant_mark` re-stamps afterward when the write's
               # rvalue is one.
@@ -652,9 +652,52 @@ module Rigor
       rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
     end
 
+    # Issue #1362 — a write or narrowing of a global is flow-live, so it drops the ADR-58 `:global` mark
+    # {#seed_declaration_sourced_global} stamped on the program-global seed.
     def with_global(name, type)
-      rebuild(globals: @globals.merge(name.to_sym => type).freeze)
+      rebuild(globals: @globals.merge(name.to_sym => type).freeze,
+              declaration_sourced: drop_declaration_sourced_for(:global, name))
     end
+
+    # Issue #1362 (ADR-58 parity, ADR-117 Decision point 2) — used by the method-entry and top-level seeds to bind a
+    # global Ruby's own signatures declare to its declared type joined with the file's writes, and to record that the
+    # binding is still that seed. The declared members are real type information but not diagnostic fuel
+    # ({Analysis::CheckRules::DeclarationSourcedGuard}); a write or narrowing drops the mark ({#with_global}).
+    def seed_declaration_sourced_global(name, type)
+      rebuild(globals: @globals.merge(name.to_sym => type).freeze,
+              declaration_sourced: add_declaration_sourced(:global, name))
+    end
+
+    # Issue #1362 — a local written from a read of a marked global (`sep = $/`) carries ADR-58's `:local` mark, and
+    # this records the globals it may copy, so a consumer can compare against the file's writes to them
+    # ({#declaration_sourced_global_copies}). Applied after {#with_declaration_sourced_local}; the local's next
+    # rebinding drops both ({#bind_local}), and a join of two copies keeps both branches' globals.
+    def with_global_copy_marks(name, globals)
+      name = name.to_sym
+      added = globals.map { |global| [:global_copy, name, global.to_sym].freeze }
+                     .reject { |ref| @declaration_sourced.include?(ref) }
+      return self if added.empty?
+
+      rebuild(declaration_sourced: @declaration_sourced.dup.merge(added).freeze)
+    end
+
+    # Issue #1362 — this scope with the local `name`'s ADR-58 mark and copy record dropped and its binding kept: a
+    # retried pass that re-enters with a binding the accumulated one accepts, but from another source.
+    def without_local_declaration_marks(name)
+      dropped = drop_local_declaration_marks(name)
+      dropped.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: dropped)
+    end
+
+    # The globals the local `name` is a marked copy of ({#with_global_copy_marks}), empty for a local that copies
+    # no marked global.
+    def declaration_sourced_global_copies(name)
+      return EMPTY_GLOBAL_COPIES unless declaration_sourced?(:local, name)
+
+      name = name.to_sym
+      @declaration_sourced.filter_map { |ref| ref[2] if ref[0] == :global_copy && ref[1] == name }
+    end
+    EMPTY_GLOBAL_COPIES = [].freeze
+    private_constant :EMPTY_GLOBAL_COPIES
 
     # Mark `nodes`, index `||=` sites, as ones whose slot an earlier run of a repeating block body may have
     # filled ({EMPTY_REPEATED_OR_WRITES}).
@@ -2003,6 +2046,11 @@ module Rigor
     #   value on the branch where it derives from an inferred parameter, so if EITHER branch taints it, a
     #   downstream use could observe the lower-bound value and firing on it is an FP (`x = param else x = 5;
     #   x.foo`). Intersecting would lose the taint at the merge and re-surface the false positive.
+    #
+    # Issue #1362 — a local both branches mark as copies of global seeds keeps its mark with the union of the globals
+    # the two record, so a consumer compares against the writes to every one of them. A `(:local, name)` mark only
+    # one branch backs with a record is dropped with it: that branch copies a global and the other an ivar, so no
+    # comparison answers for the merge and it is flow-live.
     def join_declaration_sourced(other)
       mine = @declaration_sourced
       theirs = other.declaration_sourced
@@ -2015,10 +2063,31 @@ module Rigor
         if mine.empty? || theirs.empty?
           EMPTY_DECLARATION_SOURCED
         else
-          mine.select { |ref| ref[0] != :inferred_param && theirs.include?(ref) }
+          join_copy_records(mine.select { |ref| ref[0] != :inferred_param && theirs.include?(ref) }, mine, theirs)
         end
       merged = inferred.merge(intersected)
       merged.empty? ? EMPTY_DECLARATION_SOURCED : merged.freeze
+    end
+
+    # `kept`, the refs both branches carry, with the `[:global_copy, …]` records rejoined ({#join_declaration_sourced}).
+    def join_copy_records(kept, mine, theirs)
+      mine_copies = global_copy_records(mine)
+      theirs_copies = global_copy_records(theirs)
+      return kept if mine_copies.empty? && theirs_copies.empty?
+
+      joined = kept.reject { |ref| ref[0] == :global_copy }
+      (mine_copies.keys | theirs_copies.keys).each do |name|
+        if mine_copies.key?(name) && theirs_copies.key?(name) && joined.include?([:local, name])
+          joined.concat(mine_copies[name] | theirs_copies[name])
+        else
+          joined.delete([:local, name])
+        end
+      end
+      joined
+    end
+
+    def global_copy_records(refs)
+      refs.each_with_object({}) { |ref, acc| (acc[ref[1]] ||= []) << ref if ref[0] == :global_copy }
     end
 
     def indexed_key(receiver_kind, receiver_name, key)
@@ -2102,6 +2171,18 @@ module Rigor
       dropped = @declaration_sourced.dup
       dropped.delete(ref)
       dropped.freeze
+    end
+
+    # The `(:local, name)` mark and, when it was there, the `[:global_copy, name, global]` records that only ever sit
+    # beside it ({#with_global_copy_marks}).
+    def drop_local_declaration_marks(name)
+      dropped = drop_declaration_sourced_for(:local, name)
+      return dropped if dropped.equal?(@declaration_sourced)
+
+      name = name.to_sym
+      return dropped unless dropped.any? { |ref| ref[0] == :global_copy && ref[1] == name }
+
+      dropped.dup.delete_if { |ref| ref[0] == :global_copy && ref[1] == name }.freeze
     end
 
     def drop_chain_narrowings_for(receiver_kind, receiver_name)

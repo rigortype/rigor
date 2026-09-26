@@ -1840,7 +1840,10 @@ module Rigor
           # {DeclarationSourcedGuard} exactly what it asked before — but it
           # now asks it through the predicate the argument-type gates share
           # (issue #324), which is what keeps the two rules from drifting.
-          return nil if DeclarationSourcedGuard.marked?(call_node.receiver, scope)
+          #
+          # Issue #1362 — a local copied from a global still on its declared seed (`sep = $/`) is asked against the
+          # file's writes to that global instead: its declared `nil` is withheld, and one the file writes still fires.
+          return nil if DeclarationSourcedGuard.withholds_nil?(call_node.receiver, scope)
 
           # ADR-67 WD6b — an inferred-parameter receiver's type (incl. any nil constituent unioned in from a
           # nil call site) is an open-call-site lower bound; a possible-nil firing against it is an FP by
@@ -2796,20 +2799,26 @@ module Rigor
           coerce_method = COERCE_DISPATCH_METHODS.include?(call_node.name)
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
-            arg_scope = argument_scope(arg, scope, scope_index)
-            arg_type = arg_scope.type_of(arg)
             params = checkable_overload_params(method_types, index, param_overrides, scope)
             next if params.nil?
 
-            mismatch =
-              if nil_member?(arg_type) # pure nil only — not a `T | nil` union
-                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
-              elsif !coerce_method
-                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
-              end
+            mismatch = overload_argument_mismatch(arg, params, param_overrides,
+                                                  argument_scope(arg, scope, scope_index), coerce_method)
             return mismatch if mismatch
           end
           nil
+        end
+
+        # The mismatch (or nil) for one argument against the parameter every overload has at its position. Issue
+        # #1362 — a builtin global's seed, or its copy, is judged by the file's writes to the global.
+        def overload_argument_mismatch(arg, params, param_overrides, arg_scope, coerce_method)
+          written = DeclarationSourcedGuard.written_type(arg, arg_scope)
+          arg_type = written || arg_scope.type_of(arg)
+          if nil_member?(arg_type) # pure nil only — not a `T | nil` union
+            nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope, written: !written.nil?)
+          elsif !coerce_method
+            non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, arg_scope)
+          end
         end
 
         # The parameter set at `index` that a verdict may rest on, or nil when there is none — the two
@@ -2827,8 +2836,8 @@ module Rigor
 
         # The nil channel: a pure `nil` argument no overload admits (ADR-58
         # parity excuses a declaration-sourced ivar nil).
-        def nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
-          return nil if declaration_sourced_nil_argument?(arg, scope)
+        def nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope, written: false)
+          return nil if !written && declaration_sourced_nil_argument?(arg, scope)
           return nil if params.any? { |param| param_admits_nil?(param, param_overrides, scope) }
 
           { node: arg, name: nil, expected: overload_param_expected_label(params), actual: arg_type }
@@ -3126,6 +3135,17 @@ module Rigor
         def single_argument_mismatch(param, arg, scope, param_overrides)
           return nil if stub_typed_param?(param, param_overrides, scope)
 
+          # Issue #1362 (ADR-58 parity, ADR-117 Decision point 2) — a read of a builtin global still on its declared
+          # seed, or a local copied from one, is judged by the file's writes to the global, as the argument was
+          # before the join: the declared members are not diagnostic fuel.
+          written = DeclarationSourcedGuard.written_type(arg, scope)
+          return written_argument_mismatch(param, arg, written, scope, param_overrides) if written
+
+          read_argument_mismatch(param, arg, scope, param_overrides)
+        end
+
+        # {#single_argument_mismatch} for an argument that reads no builtin global's seed directly.
+        def read_argument_mismatch(param, arg, scope, param_overrides)
           arg_type = scope.type_of(arg)
 
           if nil_member?(arg_type)
@@ -3139,8 +3159,40 @@ module Rigor
           return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
           return nil if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
           return nil unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
+          # Issue #1362 — a value that mixes such a global with something else (`c ? $stdout : StringIO.new`) is judged
+          # without the declared members the file never writes, as it was before the join.
+          return nil if DeclarationSourcedGuard.declared_only_rejection?(arg_type, param_type, scope) do |stripped|
+            !plain_argument_rejects?(param, stripped, scope, param_overrides)
+          end
 
           { node: arg, name: param.name, expected: param_type, actual: arg_type }
+        end
+
+        # The mismatch for an argument judged by `written`, the file's writes to the builtin globals it reads the
+        # seeds of, through the channels {#single_argument_mismatch} runs, without the ADR-58 withholding: before
+        # the join the global carried no mark.
+        def written_argument_mismatch(param, arg, written, scope, param_overrides)
+          return nil unless plain_argument_rejects?(param, written, scope, param_overrides)
+
+          expected =
+            if nil_member?(written)
+              overload_param_expected_label([param])
+            else
+              param_overrides[param.name] || translate_param_type(param.type, scope.environment)
+            end
+          { node: arg, name: param.name, expected: expected, actual: written }
+        end
+
+        # True when `param` rejects an argument of type `type` on the terms of {#single_argument_mismatch}'s nil and
+        # non-nil channels, without the ADR-58 withholding.
+        def plain_argument_rejects?(param, type, scope, param_overrides)
+          return !param_admits_nil?(param, param_overrides, scope) if nil_member?(type)
+
+          param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
+          return false if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+          return false if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
+
+          Inference::Acceptance.accepts(param_type, type, mode: :gradual).no?
         end
 
         # The parameter rejects the argument AND the rejection is not a
@@ -3309,13 +3361,26 @@ module Rigor
           declared = declared_return_type(def_node, scope_index)
           return nil if declared.nil?
 
-          inferred = inner_scope.type_of(last_expr)
+          # Issue #1362 — a body that ends on a builtin global still on its declared seed, or on a local copied from
+          # one, is judged by the file's writes to the global, as for an argument ({#single_argument_mismatch}).
+          inferred = DeclarationSourcedGuard.written_type(last_expr, inner_scope) || inner_scope.type_of(last_expr)
           return nil if dynamic_top?(inferred)
 
           severity = compare_return(declared, inferred)
           return nil if severity.nil?
+          return nil if declared_only_return?(last_expr, inferred, declared, inner_scope)
 
           build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
+        end
+
+        # Issue #1362 — a body that ends on a value mixing a builtin global's seed with something else is judged
+        # without the declared members the file never writes, as for an argument.
+        def declared_only_return?(last_expr, inferred, declared, scope)
+          return false unless DeclarationSourcedGuard.global_sources(last_expr, scope).empty?
+
+          DeclarationSourcedGuard.declared_only_rejection?(inferred, declared, scope) do |stripped|
+            compare_return(declared, stripped).nil?
+          end
         end
 
         # The body of a `def` is the last `Prism::StatementsNode` child (or a single expression for

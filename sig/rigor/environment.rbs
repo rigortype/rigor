@@ -29,6 +29,9 @@ module Rigor
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
     def constant_for_name: (String | Symbol name) -> Type::t?
+    # sig-gen gap: #1154 — the answer comes through `rbs_loader`, an `attr_reader` over an ivar assigned in
+    # `initialize` from a parameter, which reaches `untyped`.
+    def global_for_name: (String | Symbol name, ?builtin: bool) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
     def rbs_module?: (String | Symbol name) -> bool
     def singleton_extended_modules: (String | Symbol name) -> Array[String]

@@ -96,6 +96,8 @@ module Rigor
       attr_reader class_ivars: Hash[String, Hash[Symbol, Type::t]]
       attr_reader class_cvars: Hash[String, Hash[Symbol, Type::t]]
       attr_reader program_globals: Hash[Symbol, Type::t]
+      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
+      attr_reader program_global_seeds: Hash[Symbol, Type::t]
       attr_reader discovered_classes: Hash[String, Type::Singleton]
       attr_reader in_source_constants: Hash[String, Type::t]
       attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
@@ -141,7 +143,7 @@ module Rigor
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?discovered_refinements: Hash[String, Hash[Symbol, Array[String]]], ?run_generation: Object?, ?patched_line_readers: Set[Symbol], ?clears_last_status: bool, ?defines_case_equality: bool) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?program_global_seeds: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_nestings: Hash[untyped, Array[String]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_singleton_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_parameter_envelopes: Hash[String, Hash[untyped, untyped]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_prepends: Hash[String, Array[String]], ?discovered_extends: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?constant_sources: Hash[String, Set[String]], ?constant_writers: Hash[String, Array[String]], ?constant_shadowers: Hash[String, Array[String]], ?published_constant_names: Set[String], ?local_constant_names: Set[String], ?published_constant_alias_names: Set[String], ?published_constant_ivars: Hash[String, Set[Symbol]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?discovered_deferred_ranges: Hash[String, Array[[Integer, Integer, Symbol?, Symbol?, String?]]], ?discovered_refinements: Hash[String, Hash[Symbol, Array[String]]], ?run_generation: Object?, ?patched_line_readers: Set[Symbol], ?clears_last_status: bool, ?defines_case_equality: bool) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -193,8 +195,15 @@ module Rigor
     # sig-gen gap: #1152 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
-    def declaration_sourced: () -> Set[[Symbol, Symbol]]
+    # Issue #1362 — a `[:global_copy, local, global]` record rides beside the `(kind, name)` refs.
+    def declaration_sourced: () -> Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]]
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
+    def seed_declaration_sourced_global: (String | Symbol name, Type::t type) -> Scope
+    def with_global_copy_marks: (String | Symbol name, Array[String | Symbol] globals) -> Scope
+    def without_local_declaration_marks: (String | Symbol name) -> Scope
+    # sig-gen gap: #1154 — the records come out of `@declaration_sourced`, an ivar assigned in `initialize` from a
+    # parameter, which reaches `untyped`.
+    def declaration_sourced_global_copies: (String | Symbol name) -> Array[Symbol]
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope
     # `rigor sig-gen --params=observed` output; the siblings' hand-written `String | Symbol` / `Type::t`

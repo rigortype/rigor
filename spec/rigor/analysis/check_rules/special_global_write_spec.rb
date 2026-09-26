@@ -229,6 +229,15 @@ RSpec.describe "special global writes", type: :runner do
       expect(fired("include Comparable\n$stdout = 1\n")).to eq([[2, "global.write-type-mismatch"]])
     end
 
+    # A class body's `include` reaches that class alone, in the analysed file or in another.
+    it "still reports a mixin in the body of a class that is no ancestor of the literal's" do
+      mixin = "class Widget\n  include Nowhere\nend\n"
+      expect(fired("#{mixin}$stdout = 1\n")).to eq([[4, "global.write-type-mismatch"]])
+      diagnostics = global_diagnostics(files: { "lib/a.rb" => mixin, "lib/w.rb" => "$stdout = 1\n" },
+                                       config: { "paths" => ["lib"] })
+      expect(diagnostics.map { |d| [File.basename(d.path.to_s), d.line] }).to eq([["w.rb", 1]])
+    end
+
     it "declines on a module an ancestor mixes in that RBS declares with the method, or does not know" do
       expect_quiet("class Integer\n  include Writable\nend\n", "$stdout = 1",
                    sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
@@ -296,6 +305,26 @@ RSpec.describe "special global writes", type: :runner do
         $0 = 1
       RUBY
       expect(fired(source)).to eq([[6, "global.write-type-mismatch"]])
+    end
+
+    # Ruby 4.0.5 accepts each: an anonymous module's refinement, and a write inside the `refine` block itself.
+    it "declines where the refinement's module has no name, or the write sits inside the `refine` block" do
+      expect(fired("using(Module.new { refine(Hash) { def write(*) = 0 } })\n$stdout = {}\n")).to be_empty
+      source = <<~RUBY
+        module ArrayWriter
+          refine(Array) do
+            def write(*) = 0
+            def install = ($stdout = [])
+          end
+        end
+      RUBY
+      expect(fired(source)).to be_empty
+    end
+
+    it "declines on a refinement that imports a module RBS may give the method" do
+      source = "module ArrayWriter\n  refine(Array) { import_methods Writable }\nend\nusing ArrayWriter\n$stdout = []\n"
+      expect(fired(source, sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" }))
+        .to be_empty
     end
 
     it "still reports when the refined class is not the literal's class or an ancestor of it" do

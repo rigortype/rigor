@@ -1297,7 +1297,7 @@ RSpec.describe "Rigor type construction (integration)" do
 
   describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
     # The number of `# QUIET-1367` lines each entry carries.
-    quiet_counts = { "writes.rb" => 18, "aliased.rb" => 2 }.freeze
+    quiet_counts = { "setter_rejections.rb" => 18, "special_aliases.rb" => 2 }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
 

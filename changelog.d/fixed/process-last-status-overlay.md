@@ -1,0 +1,1 @@
+- **[inference]** `Process.last_status` no longer reports `call.undefined-method`: it is declared as `Process::Status | nil`, and past a `system`, backtick or blocking `Process.wait` call it reads `Process::Status`, as `$?` does. ([#1438](https://github.com/rigortype/rigor/pull/1438))

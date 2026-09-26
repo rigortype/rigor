@@ -31,6 +31,10 @@ module Rigor
     # over an ivar assigned in `initialize` from a parameter, so inference reaches `untyped`.
     attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
+    # Issue #1429 — a guard's narrowing of a constant reference, keyed by its spelling, and the pre-guard type of each
+    # global or constant a guard narrowed. sig-gen gap: #1154 — readers over ivars `initialize` assigns from a parameter.
+    attr_reader constant_narrowings: Hash[String, Type::t]
+    attr_reader guard_records: Hash[[Symbol, Symbol | String], Type::t]
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -189,6 +193,14 @@ module Rigor
     def with_ivar_origin: (String | Symbol name, Symbol? cause) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope
+    # Issue #1429 — `rigor sig-gen` output; the parameters are not inferred here, as for `with_mutated_local`.
+    def with_guarded_global: (untyped name, untyped type, untyped pre_guard, ?record: untyped) -> Scope
+    def with_constant_narrowing: (untyped key, untyped type, untyped pre_guard) -> Scope
+    def without_constant_narrowing: (untyped key) -> Scope
+    def guard_narrowed?: () -> bool
+    def forget_guard_narrowings: () -> Scope
+    # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
+    def constant_narrowing: (String key) -> Type::t?
     # sig-gen gap: #1151 — an `attr_reader` over a frozen Set literal types `untyped`, as the sibling
     # `declaration_sourced` row does.
     def published_constant_sourced: () -> Set[[Symbol, Symbol]]

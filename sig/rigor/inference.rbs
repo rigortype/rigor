@@ -106,7 +106,7 @@ module Rigor
       def self?.narrow_non_nil: (Type::t type) -> Type::t
       def self?.narrow_equal: (Type::t type, untyped literal) -> Type::t
       def self?.narrow_not_equal: (Type::t type, untyped literal) -> Type::t
-      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
+      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?, ?guard: bool) -> Type::t
       def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
       def self?.narrow_not_refinement: (Type::t current_type, Type::t refinement_type) -> Type::t
       def self?.narrow_for_fact: (Type::t current, untyped fact, untyped environment) -> Type::t
@@ -115,6 +115,8 @@ module Rigor
       def self?.value_pattern_certainty: (Type::t subject_type, untyped pattern_value) -> (:yes | :no | :maybe)
       def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
       def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]
+      # Issue #1429 — the key a constant reference's guard narrowing is recorded under.
+      def self?.constant_key: (untyped node) -> String?
       def self?.analyse: (untyped node, Scope scope) -> [Scope, Scope]?
       def self?.subclass_of?: (String rigor_class_name, String target_class_name, untyped context) -> bool
       def self?.class_ordering: (String lhs, String rhs, untyped context) -> Symbol

@@ -2404,6 +2404,9 @@ module Rigor
         def lookup_positional_arg(call_node, method_def, target_name)
           arguments = call_node.arguments&.arguments || []
           method_def.method_types.each do |mt|
+            # A `(?)` overload (`RBS::Types::UntypedFunction`, #1430) names no parameter to map the target onto.
+            next unless mt.type.respond_to?(:required_positionals)
+
             params = mt.type.required_positionals + mt.type.optional_positionals
             index = params.find_index { |param| param.name == target_name }
             return arguments[index] if index && arguments[index]

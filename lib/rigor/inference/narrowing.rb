@@ -57,11 +57,10 @@ module Rigor
       # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
       # extended-mode bail read one shape.
       RegexMatchPattern = Data.define(:source, :extended)
-      # Issue #1429 — a predicate receiver whose binding an edge can narrow ({.receiver_slot}): a local or an
-      # instance variable (`name` its Symbol), a global (`name` its Symbol; `bound` false when the scope holds no
-      # binding and `current` is its read), or a constant reference (`name` its {.constant_key}). `current` is
-      # the type the receiver reads before the predicate.
-      ReceiverSlot = Data.define(:kind, :name, :current, :bound)
+      # Issue #1429 — a predicate receiver whose binding an edge can narrow ({.receiver_slot}): a local, an instance
+      # variable or a global (`name` its Symbol), or a constant reference (`name` its {.constant_key}). `current` is
+      # the type the receiver reads before the predicate, a global's read type when the scope does not bind it.
+      ReceiverSlot = Data.define(:kind, :name, :current)
       # The globals a guard narrows without a record ({Scope#with_guarded_global}): `$_` and `$~` live in the frame's
       # special-variable slot, which a called method does not reach and their own machinery forgets
       # (`Scope#forget_last_line`, `Scope#forget_match_globals`), and `$!` / `$@` read the rescue clause that is
@@ -940,10 +939,9 @@ module Rigor
           ]
         end
 
-        LOCAL_AND_IVAR = %i[local ivar].freeze
         GLOBAL_AND_CONSTANT = %i[global constant].freeze
         ALL_SLOT_KINDS = %i[local ivar global constant].freeze
-        private_constant :LOCAL_AND_IVAR, :GLOBAL_AND_CONSTANT, :ALL_SLOT_KINDS
+        private_constant :GLOBAL_AND_CONSTANT, :ALL_SLOT_KINDS
 
         # The {ReceiverSlot} `node` reads, among `kinds`, or nil. A local or instance variable needs a binding. A
         # global the scope does not bind is read as it reads unbound, and a constant reference as it resolves
@@ -960,14 +958,13 @@ module Rigor
         def variable_slot(kind, name, current, kinds)
           return nil if current.nil? || !kinds.include?(kind)
 
-          ReceiverSlot.new(kind: kind, name: name, current: current, bound: true)
+          ReceiverSlot.new(kind: kind, name: name, current: current)
         end
 
         def global_slot(node, scope, kinds)
           return nil unless kinds.include?(:global)
 
-          bound = scope.global(node.name)
-          ReceiverSlot.new(kind: :global, name: node.name, current: bound || scope.type_of(node), bound: !bound.nil?)
+          ReceiverSlot.new(kind: :global, name: node.name, current: scope.global(node.name) || scope.type_of(node))
         end
 
         def constant_slot(node, scope, kinds)
@@ -976,7 +973,7 @@ module Rigor
           key = constant_key(node)
           return nil if key.nil?
 
-          ReceiverSlot.new(kind: :constant, name: key, current: scope.type_of(node), bound: true)
+          ReceiverSlot.new(kind: :constant, name: key, current: scope.type_of(node))
         end
 
         # `scope` with `slot`'s receiver read as `type` on one edge. A local or instance variable rebinds as its

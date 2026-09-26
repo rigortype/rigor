@@ -195,8 +195,14 @@ module Rigor
     # sig-gen gap: #1152 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
-    def declaration_sourced: () -> Set[[Symbol, Symbol]]
+    # Issue #1362 — a `[:global_copy, local, global]` record rides beside the `(kind, name)` refs.
+    def declaration_sourced: () -> Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]]
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
+    def seed_declaration_sourced_global: (String | Symbol name, Type::t type) -> Scope
+    def with_global_copy_mark: (String | Symbol name, String | Symbol global) -> Scope
+    # sig-gen gap: #1154 — the record comes out of `@declaration_sourced`, an ivar assigned in `initialize` from a
+    # parameter, which reaches `untyped`.
+    def declaration_sourced_global_copy: (String | Symbol name) -> Symbol?
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope
     # `rigor sig-gen --params=observed` output; the siblings' hand-written `String | Symbol` / `Type::t`

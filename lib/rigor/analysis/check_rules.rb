@@ -1840,7 +1840,10 @@ module Rigor
           # {DeclarationSourcedGuard} exactly what it asked before — but it
           # now asks it through the predicate the argument-type gates share
           # (issue #324), which is what keeps the two rules from drifting.
-          return nil if DeclarationSourcedGuard.marked?(call_node.receiver, scope)
+          #
+          # Issue #1362 — a local copied from a global still on its declared seed (`sep = $/`) is asked against the
+          # file's writes to that global instead: its declared `nil` is withheld, and one the file writes still fires.
+          return nil if DeclarationSourcedGuard.withholds_nil?(call_node.receiver, scope)
 
           # ADR-67 WD6b — an inferred-parameter receiver's type (incl. any nil constituent unioned in from a
           # nil call site) is an open-call-site lower bound; a possible-nil firing against it is an FP by
@@ -3147,6 +3150,14 @@ module Rigor
         # withheld declaration-sourced-nil case.
         def argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
           return false unless Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
+          # Issue #1362 (ADR-58 parity, ADR-117 Decision point 2) — a global still on its declared seed, or a local
+          # copied from one, joins the declared type with the file's writes. The declared members are not diagnostic
+          # fuel: the argument fires only when the file's writes alone are rejected, as they were before the join.
+          # This subsumes the nil-only gate below for such an argument, which would also withhold a `nil` the file
+          # writes itself.
+          unless DeclarationSourcedGuard.global_source(arg, scope).nil?
+            return !DeclarationSourcedGuard.written_accepted?(arg, scope, param_type)
+          end
 
           # ADR-58 (N2 extension) — the same declaration-sourced-nil-is-not-
           # diagnostic-fuel criterion that governs `possible-nil-receiver`
@@ -3314,6 +3325,10 @@ module Rigor
 
           severity = compare_return(declared, inferred)
           return nil if severity.nil?
+          # Issue #1362 — a body that ends on a global still on its declared seed, or on a local copied from one,
+          # returns the declared type joined with the file's writes; only the writes are diagnostic fuel, as for an
+          # argument ({#argument_genuinely_mismatches?}).
+          return nil if DeclarationSourcedGuard.written_accepted?(last_expr, inner_scope, declared)
 
           build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
         end

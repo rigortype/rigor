@@ -514,8 +514,8 @@ module Rigor
         # computed on the RHS *value*'s provenance — a pure ivar read of a currently declaration-sourced ivar — so it
         # survives the local copy. Any other RHS (a call result, a method-local-nil-bearing value) leaves the local
         # flow-live and the diagnostic fires as before.
-        return post_rhs.with_declaration_sourced_local(node.name, rhs_type) if
-          declaration_sourced_ivar_read?(node.value, post_rhs)
+        copied = declaration_sourced_copy(node, rhs_type, post_rhs)
+        return copied if copied
 
         bound = post_rhs.with_local(node.name, rhs_type)
         # ADR-67 WD6b — a local whose RHS is (transitively) rooted at an inferred parameter inherits the
@@ -578,12 +578,33 @@ module Rigor
         scope_after_rhs.dynamic_origins[value_node]
       end
 
+      # The scope binding the written local with ADR-58's `:local` mark when the write copies a declaration-sourced
+      # value, or nil. Issue #1362 — a bare read of a global still on its declared seed (`sep = $/`) counts as an ivar
+      # read does, and the local also records the global it copies, which the consumers compare against the file's
+      # own writes to it.
+      def declaration_sourced_copy(node, rhs_type, post_rhs)
+        value = node.value
+        if declaration_sourced_ivar_read?(value, post_rhs)
+          post_rhs.with_declaration_sourced_local(node.name, rhs_type)
+        elsif declaration_sourced_global_read?(value, post_rhs)
+          post_rhs.with_declaration_sourced_local(node.name, rhs_type).with_global_copy_mark(node.name, value.name)
+        end
+      end
+
       # True when `value_node` is a bare instance-variable read whose binding in `scope_at_read` is currently marked
       # declaration-sourced.
       def declaration_sourced_ivar_read?(value_node, scope_at_read)
         return false unless value_node.is_a?(Prism::InstanceVariableReadNode)
 
         scope_at_read.declaration_sourced?(:ivar, value_node.name)
+      end
+
+      # True when `value_node` is a bare global-variable read whose binding in `scope_at_read` is still the declared
+      # seed (issue #1362).
+      def declaration_sourced_global_read?(value_node, scope_at_read)
+        return false unless value_node.is_a?(Prism::GlobalVariableReadNode)
+
+        scope_at_read.declaration_sourced?(:global, value_node.name)
       end
 
       # Slice 7 phase 1 — instance/class/global variable writes. Each handler evaluates the rvalue under the entry scope
@@ -5056,16 +5077,21 @@ module Rigor
         seeded.reduce(body_scope) { |acc, (name, type)| acc.with_cvar(name, type) }
       end
 
-      # Globals are process-wide. The body scope already inherited the program-global seeds through its discovery
+      # Globals are process-wide. The body scope already inherited the program-global tables through its discovery
       # index; seeding here just materialises each entry into the body's `globals` map so reads observe a precise type
       # without consulting the index on every lookup. The frame-local `$_` and `$~` are not in it (issue #1359): a
       # method body starts with a slot of its own. A global Ruby's own signatures declare is seeded with its declared
-      # type joined with the file's writes (issue #1362, `ScopeIndexer#join_declared_globals`).
+      # type joined with the file's writes, under the ADR-58 `:global` mark (issue #1362,
+      # `ScopeIndexer#join_declared_globals`, `Scope#seed_declaration_sourced_global`).
       def seed_program_globals(body_scope)
-        seeded = scope.discovery.program_global_seeds
-        return body_scope if seeded.empty?
+        written = scope.program_globals
+        return body_scope if written.empty?
 
-        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_global(name, type) }
+        seeds = scope.discovery.program_global_seeds
+        written.reduce(body_scope) do |acc, (name, type)|
+          seed = seeds[name]
+          seed ? acc.seed_declaration_sourced_global(name, seed) : acc.with_global(name, type)
+        end
       end
 
       # Slice A-declarations. Class- and method-bodies start from a fresh local-empty scope, but they MUST keep the

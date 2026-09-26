@@ -189,6 +189,33 @@ RSpec.describe Rigor::Scope do
       b = scope.with_ivar(:@right, type)
       expect(a).not_to eq(b)
     end
+
+    # Issue #1362 — a global still on its declared program-global seed, and a local copied from one.
+    it "marks a seeded global, and drops the mark at a write or narrowing" do
+      seeded = scope.seed_declaration_sourced_global(:$/, type)
+      expect(seeded.global(:$/)).to eq(type)
+      expect(seeded.declaration_sourced?(:global, :$/)).to be(true)
+      expect(seeded.with_global(:$/, type).declaration_sourced?(:global, :$/)).to be(false)
+    end
+
+    it "records which global a marked local copies, and drops the record with the local's mark" do
+      copied = scope.seed_declaration_sourced_global(:$/, type).with_declaration_sourced_local(:sep, type)
+                    .with_global_copy_mark(:sep, :$/)
+      expect(copied.declaration_sourced?(:local, :sep)).to be(true)
+      expect(copied.declaration_sourced_global_copy(:sep)).to eq(:$/)
+      expect(copied.with_mutated_local(:sep, type).declaration_sourced_global_copy(:sep)).to eq(:$/)
+
+      rebound = copied.with_local(:sep, type)
+      expect(rebound.declaration_sourced_global_copy(:sep)).to be_nil
+      expect(rebound.with_declaration_sourced_local(:sep, type).declaration_sourced_global_copy(:sep)).to be_nil
+    end
+
+    it "keeps a copy's record through a join only when both branches copy the same global" do
+      copy = ->(global) { scope.with_declaration_sourced_local(:sep, type).with_global_copy_mark(:sep, global) }
+      expect(copy.call(:$/).join(copy.call(:$/)).declaration_sourced_global_copy(:sep)).to eq(:$/)
+      expect(copy.call(:$/).join(copy.call(:$,)).declaration_sourced_global_copy(:sep)).to be_nil
+      expect(copy.call(:$/).join(copy.call(:$,)).declaration_sourced?(:local, :sep)).to be(true)
+    end
   end
 
   # A block-return pass marks the index `||=` sites whose slot an earlier run of a repeating body may have filled,

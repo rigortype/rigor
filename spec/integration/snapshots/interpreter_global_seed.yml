@@ -5,7 +5,7 @@ assertions:
   '2': '"," | String | nil'
   '3': IO | StringIO
   '4': nil
-  '5': IO | StringIO
+  '5': Dynamic[top]
   '6': File | IO
   '7': IO | StringIO
   '8': String

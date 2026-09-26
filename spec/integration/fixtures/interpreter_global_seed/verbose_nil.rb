@@ -2,8 +2,8 @@ require "stringio"
 require "rigor/testing"
 include Rigor::Testing
 
-# Issue #1362 — the issue's example after `$VERBOSE = nil`, and a write to `$>`, which is `$stdout`. Each method
-# runs with whatever the command line or another file set last.
+# Issue #1362 — the issue's example after `$VERBOSE = nil`, and a write to `$>`. Each method runs with whatever the
+# command line or another file set last.
 
 $VERBOSE = nil
 
@@ -15,11 +15,14 @@ end
 
 $> = StringIO.new
 
-# A write to `$>` joins `$stdout`'s seed (Ruby: `$stdout.equal?($>)` is always true).
-def out = assert_type("IO | StringIO", $stdout)
-def captured_text = $stdout.string # QUIET-1362
+# `$>` keeps an entry of its own, joined with its own declaration (`$>: IO`), so a `StringIO`-only method on it
+# stays quiet. Ruby answers `$stdout.equal?($>)` true, but the analysis does not unify the two names yet (#1366):
+# `$stdout`, which this file never writes, stays unbound, as before.
+def out_alias = assert_type("IO | StringIO", $>)
+def captured_text = $>.string # QUIET-1362
+def out = assert_type("Dynamic[top]", $stdout)
 
 def capture
   $> = StringIO.new
-  assert_type("StringIO", $stdout)
+  assert_type("StringIO", $>)
 end

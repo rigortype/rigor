@@ -2093,16 +2093,21 @@ module Rigor
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
-      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global's seed
-      # ({#join_declared_globals}) materialised into the scope's own `globals` map (see the call site), with the `gets`
-      # / `readline` names the file patches in and whether it may set `$?` to nil or define a singleton `===`.
+      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
+      # the scope's own `globals` map (see the call site) — a declared one's seed ({#join_declared_globals}) under the
+      # ADR-58 `:global` mark — with the `gets` / `readline` names the file patches in and whether it may set `$?` to
+      # nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
         program_globals, census = build_program_global_index(root, seeded_scope)
         seeds = join_declared_globals(program_globals, seeded_scope.environment)
         seeded_scope = seeded_scope.with_discovery(
           seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
         )
-        seeds.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+        program_globals.each do |name, written|
+          seed = seeds[name]
+          seeded_scope =
+            seed ? seeded_scope.seed_declaration_sourced_global(name, seed) : seeded_scope.with_global(name, written)
+        end
         seeded_scope
       end
 
@@ -2120,7 +2125,6 @@ module Rigor
       UNSEEDED_GLOBALS = (FRAME_LOCAL_GLOBALS + %i[$! $@ $?]).freeze
       private_constant :FRAME_LOCAL_GLOBALS, :UNSEEDED_GLOBALS
 
-      # A write to `$>` joins `$stdout`'s entry ({Scope::GLOBAL_ALIASES}).
       #
       # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
       # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
@@ -2134,16 +2138,16 @@ module Rigor
         [accumulator.freeze, census]
       end
 
-      # Issue #1362 (ADR-117 WD1) — the seed of each global in `program_globals`. A global Ruby's own signatures
-      # declare (`$VERBOSE: bool?`, `$/: String?`, `$stdout: IO`) holds what the interpreter set, from the command
-      # line or at boot, until a write, and any loaded file may write it, so its seed is the declared type joined
-      # with the file's writes, which can only widen it: `$VERBOSE = true` seeds `bool?`, and `$stdout =
-      # StringIO.new` seeds `IO | StringIO`. A global only a project or a gem declares, or none does, is seeded with
-      # the union of the file's writes, as before.
+      # Issue #1362 (ADR-117 WD1) — the seed of each global in `program_globals` Ruby's own signatures declare
+      # (`$VERBOSE: bool?`, `$/: String?`, `$stdout: IO`). Such a global holds what the interpreter set, from the
+      # command line or at boot, until a write, and any loaded file may write it, so its seed is the declared type
+      # joined with the file's writes, which can only widen it: `$VERBOSE = true` seeds `bool?`, and `$stdout =
+      # StringIO.new` seeds `IO | StringIO`. A global only a project or a gem declares, or none does, has no entry
+      # here and is seeded with the union of the file's writes, as before.
       def join_declared_globals(program_globals, environment)
-        program_globals.to_h do |name, written|
+        program_globals.each_with_object({}) do |(name, written), seeds|
           declared = environment.global_for_name(name, builtin: true)
-          [name, declared ? Type::Combinator.union(declared, written) : written]
+          seeds[name] = Type::Combinator.union(declared, written) if declared
         end.freeze
       end
 
@@ -2162,9 +2166,8 @@ module Rigor
 
       def record_global_write(node, scope, accumulator)
         rvalue_type = scope.type_of(node.value)
-        name = Scope::GLOBAL_ALIASES.fetch(node.name, node.name)
-        existing = accumulator[name]
-        accumulator[name] =
+        existing = accumulator[node.name]
+        accumulator[node.name] =
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 

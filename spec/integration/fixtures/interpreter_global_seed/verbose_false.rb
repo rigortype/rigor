@@ -15,7 +15,8 @@ end
 
 $stdout = File.open(File::NULL, "w")
 
-# No narrower than the declared `IO`, and `$>` reads the same.
+# No narrower than the declared `IO`. `$>` names the same variable, but the analysis does not unify the two names
+# yet (#1366), and this file never writes `$>`, so it stays unbound, as before.
 def out = assert_type("File | IO", $stdout)
-def out_alias = assert_type("File | IO", $>)
+def out_alias = assert_type("Dynamic[top]", $>)
 # rubocop:enable Style/SpecialGlobalVars

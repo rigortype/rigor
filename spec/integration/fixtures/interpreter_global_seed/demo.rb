@@ -30,8 +30,9 @@ def captured = assert_type("IO | StringIO", $stdout)
 def captured_text = $stdout.string # QUIET-1362
 def emit = assert_type("nil", $stdout.puts("x"))
 
-# `$>` is `$stdout`: it reads the same seed, and a `StringIO`-only method on it stays quiet as well.
-def captured_alias = assert_type("IO | StringIO", $>)
+# `$>` is `$stdout` at runtime, but the analysis does not unify the two names yet (#1366): this file never writes
+# `$>`, so it stays unbound, as before (Ruby: the same captured text).
+def captured_alias = assert_type("Dynamic[top]", $>)
 def captured_alias_text = $>.string # QUIET-1362
 
 # The class-guarded shapes of #1429 stay quiet, and no `when` clause is unreachable (Ruby: each arm runs under the
@@ -82,13 +83,13 @@ $flag = true
 
 def flag_check
   assert_type("true", $flag)
-  1 if $flag # FIRES-1362
+  1 if $flag # FIRES-1362 flow.always-truthy-condition
 end
 
 $declared_flag = true
 
 def declared_flag_check
   assert_type("true", $declared_flag)
-  1 if $declared_flag # FIRES-1362
+  1 if $declared_flag # FIRES-1362 flow.always-truthy-condition
 end
 # rubocop:enable Style/SpecialGlobalVars, Style/GlobalVars

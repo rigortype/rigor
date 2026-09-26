@@ -245,7 +245,7 @@ module Rigor
       # `Class#inner`.
       #
       # @return the finished scan, or nil when the unit failed soft
-      def add_unit(class_name, method_name, context, body, parameters, non_public: false)
+      def add_unit(class_name, method_name, context, body, parameters, non_public: false, shared_slot: false)
         key = "#{class_name}#{context.singleton? ? '.' : '#'}#{method_name}"
         names = parameter_names(parameters)
         scan = UnitScan.new(
@@ -253,13 +253,14 @@ module Rigor
           block_parameter: block_parameter_name(parameters),
           owned_locals: LocalOwnership.owned(body, names, singleton: context.singleton?), calls: @calls,
           attribution: @attribution, envelopes: @envelopes, plugin_facts: @plugin_facts,
-          owner_class: class_name, method_name: method_name, non_public: non_public
+          owner_class: class_name, method_name: method_name, non_public: non_public, shared_slot: shared_slot
         )
         summary, edges = scan.run(body)
         merge_unit(key, summary, edges)
-        scan.nested.each do |name, nested_context, nested_body, nested_parameters|
+        scan.nested.each do |name, nested_context, nested_body, nested_parameters, nested_shared_slot|
           # A `def` inside a method is never an action, whatever the enclosing body's visibility.
-          add_unit(class_name, name, nested_context, nested_body, nested_parameters, non_public: true)
+          add_unit(class_name, name, nested_context, nested_body, nested_parameters,
+                   non_public: true, shared_slot: nested_shared_slot)
         end
         scan
       rescue StandardError
@@ -286,7 +287,10 @@ module Rigor
       def declare_define_method(class_name, node, context)
         name, body, parameters = UnitScan.define_method_unit(node)
         body_context = context.module_call_body
-        add_unit(class_name, name, body_context, body, parameters) unless name.nil? || body_context.nil?
+        return if name.nil? || body_context.nil?
+
+        # The block runs on the special-variable slot of the body that calls `define_method`, shared by every sibling.
+        add_unit(class_name, name, body_context, body, parameters, shared_slot: true)
       end
 
       # `attr_*` is a call on `self`, as `define_method` is, so it defines on the side `define_method` would:

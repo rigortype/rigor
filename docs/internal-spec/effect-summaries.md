@@ -98,8 +98,8 @@ Language constructs, by origin name:
 | Construct | Origin | Labels |
 | --- | --- | --- |
 | `` `cmd` ``, `%x(cmd)` | `xstring` | `io.process` |
-| `$g` read (excluding the frame-local specials `$~ $_ $& $` $' $+ $!`) | `gvar-read` | `global.read` |
-| `$g = …` and its operator forms | `gvar-write` | `global.write` |
+| `$g` read, except the frame-local `$~` and `$_`, and `$!` and `$@` (§ The special variables) | `gvar-read` | `global.read` |
+| `$g = …`, its operator forms, and `$g` as a multiple-assignment, `for` or `rescue =>` target, except the frame-local `$~` and `$_` outside a `define_method` body (§ The special variables) | `gvar-write` | `global.write` |
 | `@@cv` read | `cvar-read` | `global.read` |
 | `@@cv` write | `cvar-write` | `mutate.static` |
 | `@iv` write in a body that runs on an instance (§ Which side a definition lands on) | `ivar-write` | `mutate.self` |
@@ -110,6 +110,16 @@ Language constructs, by origin name:
 | an `attr_writer`'s synthesised body | `attr-writer` | `mutate.self` (`mutate.static` where `self` is the singleton class) |
 
 Catalogued origins are keyed by the callee key the row matched (`catalogue:Kernel#puts`, `catalogue:Time.now`).
+
+### The special variables
+
+Not every `$` name is global state ([#1363](https://github.com/rigortype/rigor/issues/1363)); [`control-flow-analysis.md`](../type-specification/control-flow-analysis.md) states where each one lives.
+
+- `$~` and `$_` are **frame-local** (§ Regexp match-predicate narrowing, § Last-line (`$_`) narrowing there). Ruby keeps them in the special-variable slot of the method, class, module or file body that runs them. The blocks that body creates reach the same slot, except the root block of a `Thread.new`, `Fiber.new` or `Ractor.new`, which has a slot of its own. A call into a method defined with `def` has its own slot too. A read of one is not `global.read`. A write in any form (`$_ = line`, `$~ = nil`, `$_ ||= …`, `$_, rest = …`, `for $_ in …`, `rescue => $_`) binds only that slot, so it earns no label, as a local-variable write earns none. The exception is a `define_method` body (below). It is not `mutate.local` either: that label is a mutation of an object the frame allocated, and a write to the slot mutates no object. The rest of the match family (`$&`, `` $` ``, `$'`, `$+`, `$1`…) are back- and numbered-reference nodes that the scan does not colour, and none of them can be assigned.
+- `$!` and `$@`, the exception being rescued and its backtrace, are **not frame-local** (§ Rescue and subprocess globals there). A read of `$!` reaches the dynamically enclosing rescue clause, whichever frame runs it. That may be a caller's, or a callee's that yields to a block written in this body: in `with_rescue { $! }` the block reads the exception `with_rescue` rescued. So `$!` is an implicit argument of the running call rather than program state, and a read of it is not `global.read`. A read of `$@` reads that exception's backtrace as `e.backtrace` would, and a read of an object's state is never labelled. A write is the other side of that asymmetry: `$@ = bt` changes the exception object, and the rescuing frame observes the change (`rescue => e` there sees the new backtrace), so the write stays `global.write`. Ruby refuses a write to `$!` (`NameError`).
+- `$?`, the status of the last child process the thread waited for, is **thread-local**, and a subprocess that a callee runs sets it for the caller. A read of it stays `global.read`.
+
+A `define_method` block runs on the slot of the body that calls `define_method`, not on a slot of its own. Two methods that one class body defines that way share one `$_` and one `$~`: after `define_method(:set) { |v| $_ = v }` and `define_method(:get) { $_ }`, a `set("shared")` makes `get` answer `"shared"`. A write to `$~` or `$_` in a `define_method` unit's body therefore stays `gvar-write` / `global.write`, in every form above. The scan carries this as a bit on the unit (`UnitScan`'s `shared_slot:`), set for a literal-named `define_method` in a class body and for one that a method body runs. A `def` nested in either still has a slot of its own. A read in such a body is still not `global.read`: most such reads are of a match the same body just ran, and the scan cannot tell that from a sibling's write.
 
 ### Ownership
 

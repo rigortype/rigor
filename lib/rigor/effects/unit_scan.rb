@@ -37,9 +37,27 @@ module Rigor
     # Long by construction: the walk carries one `when` per Ruby construct that originates an effect, and
     # splitting that table across classes would put the vocabulary in one file and the reasons in another.
     class UnitScan # rubocop:disable Metrics/ClassLength
-      # `$~` and friends are frame-local, not global state: a read of one is not `global.read`. (Prism
-      # gives `$1` and `$&` node types of their own, so only the named specials need listing.)
-      FRAME_LOCAL_GLOBALS = %w[$~ $_ $& $` $' $+ $!].to_set.freeze
+      # `$~` and `$_` are frame-local, not global state (#1363): Ruby keeps them in the special-variable slot
+      # of the body that runs them. The blocks that body creates reach the same slot, except the root block
+      # of a `Thread.new`, `Fiber.new` or `Ractor.new`, which has its own; a call into a method defined with
+      # `def` does not reach it. A read of one is not `global.read`, and a write (`$_ = line`, `$~ = nil`)
+      # binds only that slot, so it earns no label, as a local-variable write earns none — except in a
+      # `define_method` body (`@shared_slot`), which runs on the slot of the body that defined it and so
+      # shares it with every sibling defined there. The rest of the match family (`$&`, `` $` ``, `$'`, `$+`,
+      # `$1`…) are Prism nodes of their own that this scan does not colour, and none can be assigned.
+      FRAME_LOCAL_GLOBALS = %i[$~ $_].to_set.freeze
+
+      # `$!` and `$@` are the exception being rescued and its backtrace. They are not frame-local: a read
+      # reaches the dynamically enclosing rescue clause, whichever frame runs it — a caller's, or a callee's
+      # that yields to a block written here. So `$!` is an implicit argument of the running call rather than
+      # program state, and a read of it is not `global.read`. A read of `$@` reads that exception's backtrace
+      # as `e.backtrace` would, and a read of an object's state is never labelled. A write is another matter
+      # and stays `gvar-write`: `$@ = bt` changes that object, which the rescuing frame observes
+      # (`rescue => e` sees the new backtrace). Ruby refuses `$! = x`.
+      RESCUED_EXCEPTION_GLOBALS = %i[$! $@].to_set.freeze
+
+      # The globals whose read is not `global.read`.
+      UNCOLOURED_READS = (FRAME_LOCAL_GLOBALS | RESCUED_EXCEPTION_GLOBALS).freeze
 
       REFLECTIVE_SEND = %i[send public_send __send__].to_set.freeze
 
@@ -155,10 +173,14 @@ module Rigor
       #   controller's PUBLIC instance methods, so a private helper is never implicitly rendered — while
       #   a project that happens to ship a template of the same name would otherwise hand that
       #   template's effects to the helper.
+      # @param shared_slot — whether the body is a `define_method` block, which runs on the special-variable
+      #   slot of the body that defined it rather than on one of its own (#1363). A write to a
+      #   {FRAME_LOCAL_GLOBALS} name there reaches every sibling defined in that body, so it stays
+      #   `global.write`.
       def initialize(context:, parameters:, block_parameter:, owned_locals:, calls:, # rubocop:disable Metrics/ParameterLists
                      attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
                      plugin_facts: PluginFacts.empty, owner_class: nil, method_name: nil,
-                     non_public: false)
+                     non_public: false, shared_slot: false)
         singleton = context.singleton?
         @singleton = singleton
         # The context at the walk's current position. It starts as the body's own and moves only inside a
@@ -172,6 +194,7 @@ module Rigor
         @owner_class = owner_class
         @method_name = method_name
         @non_public = non_public ? true : false
+        @shared_slot = shared_slot ? true : false
         @mutation = MutationClassifier.new(
           singleton: singleton, parameters: parameters, owned_locals: owned_locals
         )
@@ -216,8 +239,9 @@ module Rigor
       end
 
       # Units discovered inside this one — a nested `def`, or a `define_method` with a literal name whose
-      # block becomes that method's body. Each is `[name, body context, body_node, parameters_node]`, the
-      # context being the {DefinitionContext}'s answer at the definition. One it cannot place is omitted.
+      # block becomes that method's body. Each is `[name, body context, body_node, parameters_node,
+      # shared_slot]`, the context being the {DefinitionContext}'s answer at the definition and `shared_slot`
+      # true for the `define_method` block (see {#initialize}). One it cannot place is omitted.
       attr_reader :nested
 
       # Whether this body reaches `super` — an override that delegates upward still runs whatever the
@@ -324,7 +348,7 @@ module Rigor
         case node
         when Prism::DefNode
           context = @context.def_body(node)
-          @nested << [node.name.to_s, context, node.body, node.parameters] if context
+          @nested << [node.name.to_s, context, node.body, node.parameters, false] if context
           true
         when Prism::CallNode
           declared = self.class.define_method_unit(node)
@@ -332,7 +356,7 @@ module Rigor
 
           name, body, parameters = declared
           context = @context.module_call_body
-          @nested << [name, context, body, parameters] if context
+          @nested << [name, context, body, parameters, true] if context
           add(DEFINE_METHOD, MUTATE_STATIC)
           true
         else
@@ -346,10 +370,12 @@ module Rigor
         when Prism::XStringNode, Prism::InterpolatedXStringNode
           add(XSTRING, IO_PROCESS)
         when Prism::GlobalVariableReadNode
-          add(GVAR_READ, GLOBAL_READ) unless FRAME_LOCAL_GLOBALS.include?(node.name.to_s)
+          add(GVAR_READ, GLOBAL_READ) unless UNCOLOURED_READS.include?(node.name)
         when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
-             Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode
-          add(GVAR_WRITE, GLOBAL_WRITE)
+             Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+             Prism::GlobalVariableTargetNode
+          # A target is a multiple assignment's, a `for` loop's or a `rescue =>` clause's.
+          add(GVAR_WRITE, GLOBAL_WRITE) unless !@shared_slot && FRAME_LOCAL_GLOBALS.include?(node.name)
         when Prism::ClassVariableReadNode
           add(CVAR_READ, GLOBAL_READ)
         when Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,

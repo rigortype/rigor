@@ -298,11 +298,16 @@ module Rigor
         reader_type?(type, name, scope)
       end
 
+      # Issue #1362 (ADR-117 WD1) — a `$stdin` the file writes reads its declared `IO` joined with the written values,
+      # so a union whose every member is a reader's class (`IO | StringIO`) counts as one.
       def reader_global?(global_name, name, scope)
         return false unless READER_GLOBALS.include?(global_name)
 
         bound = scope.global(global_name)
-        bound.nil? || reader_type?(bound, name, scope)
+        return true if bound.nil?
+
+        members = bound.is_a?(Type::Union) ? bound.members : [bound]
+        members.all? { |member| reader_type?(member, name, scope) }
       end
 
       def reader_type?(type, name, scope)

@@ -1247,6 +1247,54 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1362 (ADR-117 WD1) — a write to a global Ruby's own signatures declare only widens the declared type every
+  # method body starts from, and the declared members are not diagnostic fuel (ADR-58 parity). The seeding is per
+  # file, so each shape lives in an entry of its own, and each entry runs through the runner, as `rigor check` runs
+  # it, against the fixture's `sig/`: the harness reports no `call.argument-type-mismatch` against a project
+  # signature.
+  describe "fixtures/interpreter_global_seed/ — a builtin global's seed joins its declared type (#1362)",
+           type: :runner do
+    # The number of `# QUIET-1362` lines each entry carries.
+    quiet_counts = {
+      "demo.rb" => 10, "verbose_false.rb" => 1, "verbose_nil.rb" => 4, "copies.rb" => 13, "nil_written.rb" => 0,
+      "arguments.rb" => 20, "stream_alias.rb" => 3
+    }.freeze
+
+    def fixture_source(name) = File.read(File.join(__dir__, "fixtures/interpreter_global_seed", name))
+
+    def fixture_sig
+      Dir[File.join(__dir__, "fixtures/interpreter_global_seed/sig/*.rbs")].to_h do |path|
+        [File.basename(path), File.read(path)]
+      end
+    end
+
+    # Every 1-indexed line of `source` whose comment carries `# FIRES-1362 <rule>`, with that rule.
+    def fired_lines(source)
+      source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1362 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+    end
+
+    def reported(result)
+      result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+    end
+
+    # Must-not-fire / must-still-fire in one assertion. The issue's example, the stream reads, the copies of a
+    # declared `nil` and the arguments and returns the file's writes satisfy stay quiet; a global no core or stdlib
+    # signature declares still folds, and a `nil` or a type the file's own writes bring still reports. Comparing the
+    # exact `[line, rule]` set keeps the quiet half from passing because a rule stopped firing at all, and it counts
+    # an `assert_type` mismatch as well.
+    quiet_counts.each do |entry, quiet|
+      it "reports exactly the marked controls in #{entry}, and marks #{quiet} quiet lines" do
+        source = fixture_source(entry)
+        result = analyze(source, sig: fixture_sig)
+        expect(reported(result).map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+        expect(source.lines.count { |line| line.include?("# QUIET-1362") }).to eq(quiet)
+      end
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

@@ -1,0 +1,15 @@
+---
+locals: {}
+assertions:
+  '1': bool
+  '2': '","'
+  '3': IO | StringIO
+  '4': nil
+  '5': Dynamic[top]
+  '6': File | IO
+  '7': IO | StringIO
+  '8': String
+  '9': Dynamic[top] | true
+  '10': '"prog" | String'
+  '11': 'true'
+  '12': 'true'

@@ -1621,6 +1621,45 @@ module Rigor
         project_declared_classes.include?(class_name.to_s.delete_prefix("::"))
       end
 
+      # Issue #1362 — the translated type of the RBS declaration of the global variable `name` (`:$stdout`, declared
+      # `IO` by the core signatures), or nil when no loaded signature declares it. Translated without an alias
+      # expander, as {#constant_type} translates a constant, so `$DEBUG: boolish` reads `Dynamic[top]` rather than
+      # `top`.
+      def global_type(name)
+        global_declarations[name.to_sym]&.first
+      end
+
+      # True when `name`'s RBS declaration lives in the `rbs` gem's own `core/` or `stdlib/` tree: a global the
+      # interpreter or a default library sets. Attributed by buffer name, as {#core_or_stdlib_class?} is, with the
+      # same limit: an environment blob without buffer names answers false for every global.
+      def core_or_stdlib_global?(name)
+        global_declarations[name.to_sym]&.last || false
+      end
+
+      # `name => [type, core_or_stdlib]` for every global the environment declares; a declaration whose type
+      # translates to `bot` is left out. Memoised per loader: the core signatures declare about fifty.
+      def global_declarations
+        @state[:global_declarations] ||= build_global_declarations
+      end
+      private :global_declarations
+
+      def build_global_declarations
+        environment = env
+        return {}.freeze if environment.nil?
+
+        table = environment.global_decls.each_with_object({}) do |(name, entry), acc|
+          type = Inference::RbsTypeTranslator.translate(entry.decl.type)
+          next if type.is_a?(Type::Bot)
+
+          path = self.class.declaration_buffer_name(entry.decl)
+          acc[name.to_sym] = [type, !path.nil? && CORE_STDLIB_ROOTS.any? { |root| path.start_with?(root) }].freeze
+        end
+        table.freeze
+      rescue ::RBS::BaseError
+        {}.freeze
+      end
+      private :build_global_declarations
+
       # The total RBS-environment build failure captured this run, or nil when the env built. Unlike
       # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived so a
       # cache HIT reports it too — a total failure collapses the WHOLE env to nil. Project-vs-bundled

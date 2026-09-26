@@ -839,17 +839,22 @@ RSpec.describe Rigor::Inference::Narrowing do
     it "uses exact matching for instance_of?" do
       numeric = Rigor::Type::Combinator.nominal_of("Numeric")
       bound = scope.with_local(:x, numeric)
-      # `instance_of?(Integer)` requires the class to be exactly Integer. A truthy answer says the object's class IS
-      # Integer, whatever the receiver was typed, so the truthy edge narrows to Integer rather than collapsing to Bot
-      # (issue #1429: a class guard in the code outranks the inferred Nominal). The ordinary reading proved the edge
-      # dead, so the narrowing is gradual (`Dynamic[Integer]`) and the edge is marked live only through the guard.
-      # The falsey edge keeps the entry type.
+      # `instance_of?(Integer)` requires the class to be exactly Integer, a class below `Numeric`, so the truthy edge
+      # holds an `Integer` (issue #1429; it collapsed to Bot before). The falsey edge keeps the entry type.
       pred = parse_predicate("x.instance_of?(Integer)")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
-      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.dynamic(integer_nominal))
-      expect(truthy.guard_live?).to be(true)
+      expect(truthy.local(:x)).to eq(integer_nominal)
       expect(falsey.local(:x)).to eq(numeric)
-      expect(falsey.guard_live?).to be(false)
+    end
+
+    # The rest of `instance_of?`'s truthy edge is Bot: a module is never an object's class, and a class that is not
+    # below the receiver's leaves no class the object can have.
+    it "keeps Bot for instance_of? against a module, a superclass or a disjoint class" do
+      bound = scope.with_local(:x, integer_nominal)
+      %w[Comparable Numeric String].each do |class_name|
+        truthy, = described_class.predicate_scopes(parse_predicate("x.instance_of?(#{class_name})"), bound)
+        expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.bot), class_name
+      end
     end
 
     it "narrows nested constants like x.is_a?(::String)" do

@@ -2,10 +2,10 @@ require "stringio"
 require "rigor/testing"
 include Rigor::Testing
 
-# Issue #1429 (the maintainer's amendment) — a guard the ordinary reading proves dead makes its arm gradual: the
-# receiver reads `Dynamic[C]`, and the arm's value and the bindings it changes leave it as `Dynamic[T]`. What only the
-# guard introduced therefore crosses a typed boundary by gradual consistency and is never diagnostic fuel. The
-# signatures in `sig/arm_values.rbs` are the correct ones, and Ruby 4.0.5 runs every method below without error.
+# Issue #1429 — a class guard disjoint from the receiver's inferred `Nominal` narrows the receiver to `bot` in the arm,
+# so the guarded class never reaches a typed boundary after it. Keeping the arm without leaking its type is #1465; each
+# shape below is one its design must keep quiet. The signatures in `sig/arm_values.rbs` are the correct ones, and Ruby
+# 4.0.5 runs every method below without error.
 
 class Sink
   def self.take_io(io) = 1
@@ -36,17 +36,18 @@ class Sink
   # Issue #655's shadowed pattern, passed into a `(String)` parameter (Ruby 4.0.5: 1, from the `else` arm).
   def shadow_into_string(other) = Sink.take_str(case other when Random then 1 else "else" end) # QUIET-1429
 
-  # The arm's value is gradual; the variable it narrowed joins back with a gradual member.
+  # As before #1429, an `if` keeps its arm's value (a `case` value drops the arm, see `locals.rb`), and the variable the
+  # guard narrowed joins back as it was.
   def arm_value_types(value)
-    assert_type('"no" | Dynamic[:yes]', value.is_a?(Symbol) ? :yes : "no")
+    assert_type('"no" | :yes', value.is_a?(Symbol) ? :yes : "no")
     value.to_s if value.is_a?(Symbol)
-    assert_type("Dynamic[Symbol] | String", value)
+    assert_type("String", value)
   end
 
-  # Only the arm the guard made live is gradual; the falsey arm keeps its value (Ruby 4.0.5: nil).
+  # Ruby 4.0.5: nil.
   def arm_binding(value)
     label = value.is_a?(Symbol) ? :sym : nil
-    assert_type("Dynamic[:sym]?", label)
+    assert_type(":sym?", label)
   end
 
   class Random

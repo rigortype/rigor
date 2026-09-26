@@ -1140,8 +1140,8 @@ module Rigor
           return live
         end
 
-        then_type, then_scope = gradual_arm(eval_branch_or_nil(node.statements, truthy_scope), truthy_scope, post_pred)
-        else_type, else_scope = gradual_arm(eval_branch_or_nil(node.subsequent, falsey_scope), falsey_scope, post_pred)
+        then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
+        else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
         # Slice 7 phase 14 — early-return narrowing. When the then-branch unconditionally exits (return / next / break /
         # raise) and there is no else, the post-scope is the falsey edge of the predicate (subsequent statements observe
         # the predicate-was-false world). The then-body is the *skipped* path, so the bare narrowing (no body
@@ -1181,8 +1181,8 @@ module Rigor
           return live
         end
 
-        then_type, then_scope = gradual_arm(eval_branch_or_nil(node.statements, falsey_scope), falsey_scope, post_pred)
-        else_type, else_scope = gradual_arm(eval_branch_or_nil(node.else_clause, truthy_scope), truthy_scope, post_pred)
+        then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
+        else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
         # Slice 7 phase 14 — same early-return narrowing as `if`: when the body unconditionally exits and there is no
         # else, the post-scope is the truthy edge (the body is the skipped path, so the bare narrowing is correct).
         return [Type::Combinator.union(then_type, else_type), truthy_scope] \
@@ -1324,29 +1324,10 @@ module Rigor
           # recursion) so no condition sub-expression is newly typed; `propagate` preserves the entry because it already
           # keys the node.
           record_clause_entry_scope(branch, falsey_scope)
-          clause_entry = falsey_scope
           body_scope, falsey_scope = branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
-          results << gradual_arm(sub_eval(branch, body_scope), body_scope, clause_entry)
+          results << sub_eval(branch, body_scope)
         end
         [results, falsey_scope]
-      end
-
-      # Issue #1429 (the maintainer's amendment) — an arm run from an edge only a class guard's second pass made live
-      # (`arm_entry` carries {Scope#with_guard_live} and `entry`, the scope before the guard, does not) is gradual:
-      # its value and the bindings it changed leave it as `Dynamic[T]` ({Scope#with_gradual_bindings}). The ordinary
-      # reading proves no value takes the arm, so what it computes reaches the code after it through gradual
-      # consistency only: `v.to_s if v.is_a?(Symbol); take_str(v)` with `v: String` stays quiet.
-      def gradual_arm(result, arm_entry, entry)
-        return result unless arm_entry.guard_live? && !entry.guard_live?
-
-        type, post = result
-        [gradual_value(type), post.with_gradual_bindings(entry)]
-      end
-
-      def gradual_value(type)
-        return type if type.is_a?(Type::Bot) || type.is_a?(Type::Dynamic)
-
-        Type::Combinator.dynamic(type)
       end
 
       # What a `when` / `in` clause runs to decide whether it matches, without its body: the `when` conditions, or the

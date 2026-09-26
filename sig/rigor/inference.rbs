@@ -106,7 +106,7 @@ module Rigor
       def self?.narrow_non_nil: (Type::t type) -> Type::t
       def self?.narrow_equal: (Type::t type, untyped literal) -> Type::t
       def self?.narrow_not_equal: (Type::t type, untyped literal) -> Type::t
-      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?, ?guard: bool) -> Type::t
+      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
       def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment, ?scope: Scope?) -> Type::t
       def self?.narrow_not_refinement: (Type::t current_type, Type::t refinement_type) -> Type::t
       def self?.narrow_for_fact: (Type::t current, untyped fact, untyped environment) -> Type::t

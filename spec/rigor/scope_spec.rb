@@ -698,7 +698,7 @@ RSpec.describe Rigor::Scope do
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
           local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
-          constant_narrowings guard_records guard_facets guard_live
+          constant_narrowings guard_records
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -749,9 +749,7 @@ RSpec.describe Rigor::Scope do
         repeated_or_writes: { node => true }.compare_by_identity.freeze,
         match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
         constant_narrowings: { "C" => type }.freeze,
-        guard_records: { %i[global $g] => type, [:constant, "C"] => type }.freeze,
-        guard_facets: { %i[local x] => type }.freeze,
-        guard_live: true
+        guard_records: { %i[global $g] => type, [:constant, "C"] => type }.freeze
       )
     end
 

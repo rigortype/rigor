@@ -1043,8 +1043,7 @@ module Rigor
       # `case` reduces to a `if c1; ...; elsif c2` chain that statement-level narrowing already handles.
       # Issue #1429 — each arm is typed under the subject's clause narrowing (`Narrowing.case_when_scopes`), the
       # scope the statement evaluator runs the arm in: `when Symbol then n` on `n: Integer | Symbol` answers
-      # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out. An arm only a class guard
-      # made live joins as `Dynamic[T]` ({StatementEvaluator#gradual_arm}).
+      # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out.
       def type_of_case(node)
         return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
 
@@ -1058,7 +1057,7 @@ module Rigor
           body_scope, next_scope = Narrowing.case_when_scopes(node.predicate, conditions, clause_scope)
           certainty = case_when_branch_certainty(subject_type, when_node)
           # :no — drop the branch
-          candidates << case_arm_type(when_node, body_scope, clause_scope) unless certainty == :no
+          candidates << case_arm_type(when_node, body_scope) unless certainty == :no
           if certainty == :yes
             reached_yes = true
             break
@@ -1066,20 +1065,15 @@ module Rigor
           clause_scope = next_scope
         end
 
-        candidates << case_arm_type(node.else_clause, clause_scope, clause_scope) unless reached_yes
+        candidates << case_arm_type(node.else_clause, clause_scope) unless reached_yes
         Type::Combinator.union(*candidates)
       end
 
-      # The value of one `case` arm (`nil` for an absent `else`), typed under `arm_scope`, and gradual when only a
-      # class guard made the arm live.
-      def case_arm_type(arm, arm_scope, entry)
+      # The value of one `case` arm (`nil` for an absent `else`), typed under `arm_scope`.
+      def case_arm_type(arm, arm_scope)
         return Type::Combinator.constant_of(nil) if arm.nil?
 
-        type = arm_scope.equal?(scope) ? type_of(arm) : arm_scope.type_of(arm, tracer: tracer)
-        return type unless arm_scope.guard_live? && !entry.guard_live?
-        return type if type.is_a?(Type::Bot) || type.is_a?(Type::Dynamic)
-
-        Type::Combinator.dynamic(type)
+        arm_scope.equal?(scope) ? type_of(arm) : arm_scope.type_of(arm, tracer: tracer)
       end
 
       def type_of_case_simple_union(node)

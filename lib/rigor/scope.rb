@@ -29,7 +29,7 @@ module Rigor
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
                 :repeated_or_writes, :match_frame,
-                :constant_narrowings, :guard_records, :guard_facets, :guard_live
+                :constant_narrowings, :guard_records
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -240,16 +240,11 @@ module Rigor
     # binding to the union of this pre-guard type and its narrowed one ({#forget_guard_narrowings}). A write drops
     # the record ({#with_global}), and a name the frame-local special-variable machinery owns is never recorded.
     EMPTY_GUARD_RECORDS = {}.freeze
-    # Issue #1429 (the maintainer's amendment) — the `Dynamic[C]` a class guard's second pass bound to a receiver,
-    # keyed `[:local | :global | :constant, name]`. Method availability on that receiver is still checked against `C`
-    # while the binding holds exactly that type (`CheckRules#guard_facet_receiver`); any other `Dynamic[T]` stays
-    # unchecked.
-    EMPTY_GUARD_FACETS = {}.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
                      :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
                      :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES,
-                     :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS, :EMPTY_GUARD_FACETS
+                     :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -290,7 +285,7 @@ module Rigor
       @plugin_typed_calls.key?(node)
     end
 
-    def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one assignment per constructor field
+    def initialize(
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
       self_type: nil,
@@ -318,9 +313,7 @@ module Rigor
       repeated_or_writes: EMPTY_REPEATED_OR_WRITES,
       match_frame: nil,
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
-      guard_records: EMPTY_GUARD_RECORDS,
-      guard_facets: EMPTY_GUARD_FACETS,
-      guard_live: false
+      guard_records: EMPTY_GUARD_RECORDS
     )
       @environment = environment
       @locals = locals
@@ -351,8 +344,6 @@ module Rigor
       @match_frame = match_frame
       @constant_narrowings = constant_narrowings
       @guard_records = guard_records
-      @guard_facets = guard_facets
-      @guard_live = guard_live
       freeze
     end
 
@@ -759,47 +750,6 @@ module Rigor
               guard_records: @guard_records.except([:constant, key]).freeze)
     end
 
-    # Issue #1429 (the maintainer's amendment) — this scope is an edge a class guard made live: the ordinary reading
-    # proved no value can take it (`Bot`), and the guard's second pass narrowed the receiver instead. The arm run from
-    # it is gradual: `StatementEvaluator` joins its value and the bindings it changed as `Dynamic[T]`
-    # ({#with_gradual_bindings}), so a member only the guard introduced never reaches a typed sink as a precise type.
-    # Every scope derived inside the arm inherits the mark; a join keeps it only when both sides carry it.
-    def with_guard_live
-      return self if @guard_live
-
-      rebuild(guard_live: true)
-    end
-
-    alias guard_live? guard_live
-
-    # Issue #1429 — records that the guard's second pass bound the receiver `[kind, name]` to `type`, a
-    # `Dynamic[C]` ({EMPTY_GUARD_FACETS}).
-    def with_guard_facet(kind, name, type)
-      rebuild(guard_facets: @guard_facets.merge([kind, name].freeze => type).freeze)
-    end
-
-    # The `Dynamic[C]` {#with_guard_facet} recorded for `[kind, name]`, or nil.
-    def guard_facet(kind, name)
-      return nil if @guard_facets.empty?
-
-      @guard_facets[[kind, name]]
-    end
-
-    # Issue #1429 — this scope, the end of a guard-live arm ({#with_guard_live}), with every local, instance variable,
-    # global and constant narrowing whose type differs from `entry`'s read as `Dynamic` of that type: what the arm
-    # leaves behind crosses a typed boundary by gradual consistency only. The frame-local `$_` and match globals keep
-    # their own machinery's bindings.
-    def with_gradual_bindings(entry)
-      locals = gradual_table(@locals, entry.locals)
-      ivars = gradual_table(@ivars, entry.ivars)
-      globals = gradual_table(@globals, entry.globals, skip: GRADUAL_SKIPPED_GLOBALS)
-      constants = gradual_table(@constant_narrowings, entry.constant_narrowings)
-      return self if locals.equal?(@locals) && ivars.equal?(@ivars) && globals.equal?(@globals) &&
-                     constants.equal?(@constant_narrowings)
-
-      rebuild(locals: locals, ivars: ivars, globals: globals, constant_narrowings: constants)
-    end
-
     # True when a guard's narrowing of a global or constant is live, the state {#forget_guard_narrowings} drops and
     # so the gate on every scan that decides whether to.
     def guard_narrowed?
@@ -925,9 +875,6 @@ module Rigor
     # ({Inference::LastLine}). It is bound only where a condition on a reader narrows it, or where code writes it.
     LAST_LINE = :$_
     private_constant :LAST_LINE
-    # The specials {#with_gradual_bindings} leaves to their own machinery.
-    GRADUAL_SKIPPED_GLOBALS = (MATCH_DATA_GLOBALS + [LAST_LINE]).freeze
-    private_constant :GRADUAL_SKIPPED_GLOBALS
 
     def forget_last_line
       return self unless last_line_bound?
@@ -2044,20 +1991,7 @@ module Rigor
     end
 
     def same_guard_state?(other)
-      @constant_narrowings == other.constant_narrowings && @guard_records == other.guard_records &&
-        @guard_facets == other.guard_facets && @guard_live == other.guard_live?
-    end
-
-    # `table` with each entry that differs from `entry_table`'s read as `Dynamic` of its type
-    # ({#with_gradual_bindings}), or `table` itself when nothing changes.
-    def gradual_table(table, entry_table, skip: nil)
-      changed = table.each_with_object({}) do |(name, type), acc|
-        next if skip&.include?(name) || entry_table[name] == type
-        next if type.is_a?(Type::Dynamic) || type.is_a?(Type::Bot)
-
-        acc[name] = Type::Combinator.dynamic(type)
-      end
-      changed.empty? ? table : table.merge(changed).freeze
+      @constant_narrowings == other.constant_narrowings && @guard_records == other.guard_records
     end
 
     def rebuild(
@@ -2084,9 +2018,7 @@ module Rigor
       repeated_or_writes: @repeated_or_writes,
       match_frame: @match_frame,
       constant_narrowings: @constant_narrowings,
-      guard_records: @guard_records,
-      guard_facets: @guard_facets,
-      guard_live: @guard_live
+      guard_records: @guard_records
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -2113,9 +2045,7 @@ module Rigor
         repeated_or_writes: repeated_or_writes,
         match_frame: match_frame,
         constant_narrowings: constant_narrowings,
-        guard_records: guard_records,
-        guard_facets: guard_facets,
-        guard_live: guard_live
+        guard_records: guard_records
       )
     end
 
@@ -2213,20 +2143,7 @@ module Rigor
     def join_guard_narrowings(other, joined_globals)
       joined_constants = join_constant_narrowings(other)
       { constant_narrowings: joined_constants,
-        guard_records: join_guard_records(other, joined_globals, joined_constants),
-        guard_facets: join_guard_facets(other),
-        guard_live: @guard_live && other.guard_live? }
-    end
-
-    # A guard facet survives a join only where both sides recorded the same `Dynamic[C]` for the receiver.
-    def join_guard_facets(other)
-      mine = @guard_facets
-      theirs = other.guard_facets
-      return mine if mine.equal?(theirs)
-      return EMPTY_GUARD_FACETS if mine.empty? || theirs.empty?
-
-      kept = mine.select { |key, type| theirs[key] == type }
-      kept.empty? ? EMPTY_GUARD_FACETS : kept.freeze
+        guard_records: join_guard_records(other, joined_globals, joined_constants) }
     end
 
     # Issue #1429 — a constant reference both arms narrow reads the union; one only an arm narrows reads its resolved

@@ -79,9 +79,17 @@ module Rigor
         Prism::LocalVariableOperatorWriteNode => :local, Prism::InstanceVariableOperatorWriteNode => :ivar,
         Prism::ClassVariableOperatorWriteNode => :cvar
       }.freeze
+      # Calls that keep their literal block to run at a later event, after the method returns or between any two of
+      # its statements: an exit handler, a signal handler, a global-assignment hook, a trace hook and a finalizer.
+      # `nil` keys the Kernel function's spellings (`at_exit`, `self.trap`, `Kernel.at_exit`); a constant keys its
+      # singleton methods.
+      DEFERRED_BLOCK_CALLS = {
+        nil => %i[at_exit trap trace_var], Signal: %i[trap], TracePoint: %i[new trace],
+        ObjectSpace: %i[define_finalizer]
+      }.transform_values(&:freeze).freeze
       private_constant :CODE_RUNNING_NAMES, :BLOCK_OR_CODE_NAMES, :UNIVERSAL_DELEGATES, :CODE_OBJECT_CLASSES,
                        :UNIVERSAL_OWNERS, :WRITE_NODES, :FOREIGN_NODES,
-                       :REBINDING_NODES, :IMPLICIT_CALL_NODES, :VARIABLE_OPERATOR_WRITES
+                       :REBINDING_NODES, :IMPLICIT_CALL_NODES, :VARIABLE_OPERATOR_WRITES, :DEFERRED_BLOCK_CALLS
 
       module_function
 
@@ -92,7 +100,7 @@ module Rigor
         return true if call_runs_foreign_code?(call_node, scope)
 
         block = call_node.block
-        block.is_a?(Prism::BlockNode) && may_rebind?(block, scope)
+        block.is_a?(Prism::BlockNode) && may_rebind?(block, ScanScope.block_parameter_scope(call_node, block, scope))
       end
 
       # True when the receiver chain or the arguments of `call_node` may rebind one; Ruby runs them before the call.
@@ -134,7 +142,7 @@ module Rigor
         block = node.block
         return scan(block, scope) unless block.is_a?(Prism::BlockNode)
 
-        scan(block, ScanScope.block_parameter_scope(node, block, scope))
+        scan(block, ScanScope.block_scope(node, block, scope))
       end
 
       # True when `node` is a compound write or `for` loop that calls a method its syntax does not spell.
@@ -200,22 +208,33 @@ module Rigor
         targets.any? { |class_name, kind| foreign_target?(class_name, method_name, kind, scope) }
       end
 
-      # The scope the body of `block_node` (a block or a lambda literal) enters with: `scope` with its guard
-      # narrowings restored where the body may run after code that rebinds them. A lambda, a block the call keeps
-      # to run later (`proc`, `define_method`), the root block of a thread or fiber, the block of a call that
-      # itself may run foreign code (`with_retry { $g.length }` runs after the helper's body), and a body that may
-      # rebind one itself (a later run reads what an earlier one wrote). A block with no owning call is left alone.
+      # The scope the body of `block_node` (a block, a lambda literal or an `END { }` body) enters with: `scope` with
+      # its guard narrowings restored where the body may run after code that rebinds them. A lambda, an `END` body,
+      # a block the call keeps to run later (`proc`, `define_method`) or at a later event ({DEFERRED_BLOCK_CALLS}),
+      # the root block of a thread or fiber, the block of a call that itself may run foreign code (`with_retry {
+      # $g.length }` runs after the helper's body), and a body that may rebind one itself (a later run reads what an
+      # earlier one wrote). A block with no owning call is left alone.
       def block_entry(scope, block_node, call_node)
         return scope unless scope.guard_narrowed?
-        return scope.forget_guard_narrowings if block_node.is_a?(Prism::LambdaNode)
+        return scope.forget_guard_narrowings if block_node.is_a?(Prism::LambdaNode) ||
+                                                block_node.is_a?(Prism::PostExecutionNode)
         return scope unless call_node.is_a?(Prism::CallNode)
 
-        if StoredBlockCall.stores_block?(call_node) || FreshFrameBlocks.fresh_entry?(call_node, scope) ||
-           call_runs_foreign_code?(call_node, scope) || may_rebind?(block_node, scope)
+        if StoredBlockCall.stores_block?(call_node) || deferred_block_call?(call_node) ||
+           FreshFrameBlocks.fresh_entry?(call_node, scope) || call_runs_foreign_code?(call_node, scope) ||
+           may_rebind?(block_node, ScanScope.block_parameter_scope(call_node, block_node, scope))
           return scope.forget_guard_narrowings
         end
 
         scope
+      end
+
+      # True when `call_node` is one of {DEFERRED_BLOCK_CALLS}, spelled on its literal receiver.
+      def deferred_block_call?(call_node)
+        receiver = call_node.receiver
+        key = StoredBlockCall.kernel_spelled?(receiver) ? nil : StoredBlockCall.root_constant_name(receiver)
+        names = DEFERRED_BLOCK_CALLS[key]
+        !names.nil? && names.include?(call_node.name)
       end
 
       # True when the method `call_node` calls may run code other than Ruby core and the standard library (see the
@@ -245,7 +264,7 @@ module Rigor
           return ProjectMethodOwnership.targets(self_type)
         end
 
-        ProjectMethodOwnership.targets(Narrowing.guard_facet_type(receiver, scope.type_of(receiver), scope))
+        ProjectMethodOwnership.targets(scope.type_of(receiver))
       end
 
       def foreign_target?(class_name, method_name, kind, scope)
@@ -282,7 +301,7 @@ module Rigor
         owner&.to_s&.delete_prefix("::")
       end
       private_class_method :scan, :scan_call, :receiver_targets, :foreign_target?, :universal_delegate_foreign?,
-                           :method_owner,
+                           :method_owner, :deferred_block_call?,
                            :compound_write_foreign?,
                            :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
                            :type_method_foreign?
@@ -297,14 +316,14 @@ module Rigor
 
         module_function
 
-        # `scope` with each local `node` writes and `scope` does not bind read as the value it is written, in source
-        # order, so a later write reads an earlier one. A nested `def`, lambda, class or module body is not read.
+        # `scope` with each local `node` writes read as the union of what it held and each value the code writes it,
+        # in source order, so a later write reads an earlier one. A local `scope` already binds keeps its binding in
+        # the union: the scanned code may run before or after its own write (a loop body, a block, a rescue clause).
+        # A nested `def`, lambda, class or module body is not read.
         def with_scanned_locals(node, scope)
           writes = []
           collect_local_writes(node, writes)
           writes.reduce(scope) do |acc, write|
-            next acc if scope.local(write.name)
-
             written = acc.type_of(write.value)
             existing = acc.local(write.name)
             acc.with_local(write.name, existing ? Type::Combinator.union(existing, written) : written)
@@ -319,6 +338,15 @@ module Rigor
 
           writes << node if node.is_a?(Prism::LocalVariableWriteNode)
           node.rigor_each_child { |child| collect_local_writes(child, writes) }
+        end
+
+        # The scope the body of `call_node`'s literal `block` is scanned in, from `scope`, the enclosing scan's: the
+        # block's parameters bound ({.block_parameter_scope}), and the locals the body writes typed again from them
+        # ({.with_scanned_locals}), since the enclosing scan typed those writes before the parameters were bound. A
+        # block without parameters keeps `scope`.
+        def block_scope(call_node, block, scope)
+          bound = block_parameter_scope(call_node, block, scope)
+          bound.equal?(scope) ? scope : with_scanned_locals(block, bound)
         end
 
         # `scope` with the block's required parameters bound to what the method yields them

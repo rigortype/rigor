@@ -37,12 +37,6 @@ module Rigor
     # Issue #1429 — the pre-guard type of each global or constant a guard narrowed.
     # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
     attr_reader guard_records: Hash[[Symbol, Symbol | String], Type::t]
-    # Issue #1429 — the `Dynamic[C]` a class guard's second pass bound to each receiver.
-    # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
-    attr_reader guard_facets: Hash[[Symbol, Symbol | String], Type::t]
-    # Issue #1429 — whether the scope is an edge only a class guard's second pass made live.
-    # sig-gen gap: #1154 — a reader over an ivar `initialize` assigns from a parameter.
-    attr_reader guard_live: bool
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -212,12 +206,6 @@ module Rigor
     def forget_guard_narrowings: () -> Scope
     def forget_guard_narrowing_of: (untyped kind, untyped name) -> Scope
     def without_constant_narrowings_named: (untyped name) -> Scope
-    def with_guard_live: () -> Scope
-    alias guard_live? guard_live
-    def with_guard_facet: (untyped kind, untyped name, untyped type) -> Scope
-    def with_gradual_bindings: (untyped entry) -> Scope
-    # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
-    def guard_facet: (Symbol kind, Symbol | String name) -> Type::t?
     # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
     def constant_narrowing: (String key) -> Type::t?
     # sig-gen gap: #1151 — an `attr_reader` over a frozen Set literal types `untyped`, as the sibling

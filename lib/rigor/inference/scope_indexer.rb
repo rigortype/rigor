@@ -8754,6 +8754,7 @@ module Rigor
         when Prism::RescueModifierNode
           propagate(node.expression, table, current_scope)
           propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
+        when Prism::PostExecutionNode then propagate_end_body(node, table, current_scope)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
@@ -8776,6 +8777,13 @@ module Rigor
         end
 
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
+      end
+
+      # Issue #1429 — an `END { }` body runs at exit, after any code that may rebind a guarded global or constant
+      # ({GuardRebinding.block_entry}).
+      def propagate_end_body(node, table, current_scope)
+        child_scope = GuardRebinding.block_entry(current_scope, node, nil)
+        node.rigor_each_child { |child| propagate(child, table, child_scope) }
       end
 
       def unentered_block_entry(node, block, table, current_scope)

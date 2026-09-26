@@ -578,12 +578,7 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/case_when_value_side_shadow.rb — the value side resolves the pattern too" do
     let(:harness) { harness_for("case_when_value_side_shadow") }
 
-    # Issue #1429 — the disjoint `when` arm is kept as well (a class guard in the
-    # code outranks the inferred subject type), as a gradual value, so the
-    # shadowed position types `"else" | Dynamic[1]`. A pattern resolved to the
-    # core `Random` instead would make the arm certain and type it `1`, which
-    # this still catches.
-    it "keeps the arm Ruby takes when the pattern name is shadowed" do
+    it "types the expression as the arm Ruby takes when the pattern name is shadowed" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
@@ -1392,7 +1387,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The number of `# QUIET-1429` lines each entry carries.
     quiet_counts = {
       "streams.rb" => 4, "locals.rb" => 3, "truthiness.rb" => 7, "invalidation.rb" => 4, "respond_to.rb" => 3,
-      "rebinding_paths.rb" => 2, "arm_values.rb" => 3
+      "rebinding_paths.rb" => 6, "arm_values.rb" => 3
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/global_constant_guards", name))

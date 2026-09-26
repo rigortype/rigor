@@ -49,10 +49,7 @@ module Rigor
       # `scope` is the analysed file's seeded scope where the caller has one, and nil otherwise (the
       # Fact-shaped and RSpec-matcher entries hold an environment but no scope). Only the #898 singleton
       # path reads it, and only to withhold a `Bot`, so a nil scope is the pre-#898 answer exactly.
-      #
-      # `guard` is true only on the second pass {.narrow_class} makes for a class guard whose first answer was `Bot`
-      # (issue #1429, {#disjoint_nominal_to_class}).
-      ClassNarrowingContext = Data.define(:exact, :polarity, :environment, :scope, :guard)
+      ClassNarrowingContext = Data.define(:exact, :polarity, :environment, :scope)
       # A recognised `=~` regex pattern operand: the pattern `source` string and whether it was
       # compiled in extended (`//x`) mode. Extraction from a literal `RegularExpressionNode` and from
       # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
@@ -67,8 +64,12 @@ module Rigor
       # (`Scope#forget_last_line`, `Scope#forget_match_globals`), and `$!` / `$@` read the rescue clause that is
       # running, which a call that returns leaves as it was.
       UNRECORDED_GUARD_GLOBALS = %i[$_ $~ $! $@].freeze
+      # Issue #1429 — the value-pinned classes: a `Nominal` of one of them is the single value itself, which no
+      # program replaces with another class's instance, so it counts with the literal carriers
+      # ({.disjoint_nominal_guard?}, `respond_to?`'s edge).
+      VALUE_PINNED_CLASSES = %w[NilClass TrueClass FalseClass].freeze
       private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext,
-                       :RegexMatchPattern, :ReceiverSlot, :UNRECORDED_GUARD_GLOBALS
+                       :RegexMatchPattern, :ReceiverSlot, :UNRECORDED_GUARD_GLOBALS, :VALUE_PINNED_CLASSES
 
       # Issue #1017 — the tallest stack of conditionals a condition may carry and still contribute facts. A
       # conditional guard analyses its predicate and both arms, so each level can triple the analysis; past this
@@ -166,7 +167,7 @@ module Rigor
       # body scope goes dead derive from one judgment.
       def class_pattern_certainty(subject_type, class_name, environment:, scope: nil)
         truthy_bot = narrow_class(subject_type, class_name, environment: environment,
-                                                            scope: scope, guard: true).is_a?(Type::Bot)
+                                                            scope: scope).is_a?(Type::Bot)
         falsey_bot = narrow_not_class(subject_type, class_name, environment: environment,
                                                                 scope: scope).is_a?(Type::Bot)
 
@@ -336,35 +337,26 @@ module Rigor
       # preserved; disjoint hierarchies collapse to `Bot`. Classes the environment cannot
       # resolve fall back to the conservative answer (the type unchanged) so the analyzer never
       # asserts narrowing it cannot prove.
-      #
-      # `guard: true` marks a class guard the code writes (`is_a?`, `kind_of?`, `instance_of?`, `C === x`,
-      # `case … when C`), as opposed to a class Rigor derives from a pattern (a Range or Regexp `===`) or
-      # reads from a declared fact. Issue #1429 (ADR-117 Decision point 3): such a guard is code evidence, so
-      # when no member of `type` can satisfy it, the answer is not `Bot` (a certainty verdict resting on the
-      # receiver's type against the guard) but a second pass that narrows each disjoint `Nominal` to the
-      # guarded class ({#disjoint_nominal_to_class}). A union with a member that satisfies the guard keeps the
-      # first answer: there the guard selects among the members, and a disjoint one is dropped as before.
-      def narrow_class(type, class_name, exact: false, environment: Environment.default, scope: nil, guard: false)
-        if guard
-          return guarded_narrow_class(type, class_name, exact: exact, environment: environment, scope: scope).first
-        end
-
+      def narrow_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
         context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment,
-                                            scope: scope, guard: false)
+                                            scope: scope)
         narrow_class_dispatch(type, class_name, context)
       end
 
-      # `narrow_class(..., guard: true)` with whether the guard's second pass answered: `[type, live]`, `live` true
-      # when the ordinary reading was `Bot` and the guard pass was not, so the edge is live only through the guard
-      # (issue #1429, {Scope#with_guard_live}).
-      def guarded_narrow_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
-        context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment,
-                                            scope: scope, guard: false)
-        narrowed = narrow_class_dispatch(type, class_name, context)
-        return [narrowed, false] unless narrowed.is_a?(Type::Bot)
-
-        guarded = narrow_class_dispatch(type, class_name, context.with(guard: true))
-        [guarded, !guarded.is_a?(Type::Bot)]
+      # Issue #1429 — true when `type` holds a member whose `Bot` under `is_a?(class_name)` rests only on Rigor's
+      # reading of its type: a `Nominal`, other than the value-pinned `nil` / `true` / `false` classes, whose class
+      # the environment orders `:disjoint` from `class_name`. A `Nominal` is a type Rigor inferred or read from a
+      # signature, and a program can hold another object there: `$stdout` is typed `IO`, and a test runs it with a
+      # `StringIO`, which is not an `IO` subclass. The narrowing still reads such a guard's edge as `Bot`, so the
+      # arm is not checked; what this answers is whether the `Bot` may stand as a verdict that the code is dead
+      # (`flow.unreachable-clause`). The carriers that record what the file literally shows (`Constant`, `Tuple`,
+      # `HashShape`, `Singleton`) and the value-pinned classes do not count, so their verdicts stand.
+      def disjoint_nominal_guard?(type, class_name, environment: Environment.default)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.any? do |member|
+          member.is_a?(Type::Nominal) && !VALUE_PINNED_CLASSES.include?(member.class_name) &&
+            member.class_name != class_name && environment.class_ordering(member.class_name, class_name) == :disjoint
+        end
       end
 
       # Mirror of {.narrow_class} for the falsey edge of `is_a?`/`kind_of?`/`instance_of?`.
@@ -373,7 +365,7 @@ module Rigor
       # cannot prove the negative without a richer carrier.
       def narrow_not_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
         context = ClassNarrowingContext.new(exact: exact, polarity: :negative, environment: environment,
-                                            scope: scope, guard: false)
+                                            scope: scope)
         narrow_class_dispatch(type, class_name, context)
       end
 
@@ -447,30 +439,6 @@ module Rigor
         Source::ConstantPath.rooted?(node) ? "::#{name}" : name
       end
 
-      # Issue #1429 (the maintainer's amendment) — the facet `C` of `type` when it is the `Dynamic[C]` a class guard's
-      # second pass bound to `receiver` (a local, global or constant read) and `scope` still binds it to exactly that
-      # type ({Scope#guard_facet}); `type` otherwise. What reads a call on such a receiver as a call on `C`:
-      # `call.undefined-method`, and the rebinding scan ({GuardRebinding}), since the object is a `C` in the arm.
-      def guard_facet_type(receiver, type, scope)
-        return type unless type.is_a?(Type::Dynamic)
-
-        key = guard_facet_key(receiver)
-        return type if key.nil?
-
-        scope.guard_facet(*key) == type ? type.static_facet : type
-      end
-
-      def guard_facet_key(receiver)
-        case receiver
-        when Prism::LocalVariableReadNode then [:local, receiver.name]
-        when Prism::GlobalVariableReadNode then [:global, receiver.name]
-        when Prism::ConstantReadNode, Prism::ConstantPathNode
-          key = constant_key(receiver)
-          key && [:constant, key]
-        end
-      end
-      private_class_method :guard_facet_key
-
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`, always; when no
       # narrowing rule matches the predicate node both entries are the receiver scope unchanged.
       def predicate_scopes(node, scope)
@@ -508,8 +476,8 @@ module Rigor
         slot = receiver_slot(subject, scope, kinds: CASE_SUBJECT_KINDS)
         return [body_scope, scope] if slot.nil?
 
-        truthy_type, falsey_type, live = case_when_types(scope, slot.current, conditions)
-        [narrow_slot(body_scope, slot, truthy_type, live: live), narrow_slot(scope, slot, falsey_type)]
+        truthy_type, falsey_type = case_when_types(scope, slot.current, conditions)
+        [narrow_slot(body_scope, slot, truthy_type), narrow_slot(scope, slot, falsey_type)]
       end
 
       CASE_SUBJECT_KINDS = %i[local global constant].freeze
@@ -1019,20 +987,14 @@ module Rigor
         # analysers always did. A global or constant is left alone when the edge learns nothing (`type` is what
         # it read), and otherwise narrows with its pre-guard type recorded, so code that may rebind it restores
         # the binding ({Scope#forget_guard_narrowings}); the frame-local specials skip the record.
-        #
-        # `live:` marks the edge as live only through a class guard's second pass ({#guarded_narrow_class}): the scope
-        # is flagged ({Scope#with_guard_live}), and a `Dynamic[C]` the pass bound is recorded so a call on the receiver
-        # is still checked against `C` ({Scope#with_guard_facet}).
-        def narrow_slot(scope, slot, type, live: false)
-          narrowed =
-            case slot.kind
-            when :local then scope.with_local(slot.name, type)
-            when :ivar then scope.with_ivar(slot.name, type)
-            when :global then narrow_global_slot(scope, slot, type)
-            else
-              type == slot.current ? scope : scope.with_constant_narrowing(slot.name, type, slot.current)
-            end
-          live ? mark_guard_live(narrowed, slot.kind, slot.name, type) : narrowed
+        def narrow_slot(scope, slot, type)
+          case slot.kind
+          when :local then scope.with_local(slot.name, type)
+          when :ivar then scope.with_ivar(slot.name, type)
+          when :global then narrow_global_slot(scope, slot, type)
+          else
+            type == slot.current ? scope : scope.with_constant_narrowing(slot.name, type, slot.current)
+          end
         end
 
         def narrow_global_slot(scope, slot, type)
@@ -1040,13 +1002,6 @@ module Rigor
 
           record = !UNRECORDED_GUARD_GLOBALS.include?(slot.name)
           scope.with_guarded_global(slot.name, type, slot.current, record: record)
-        end
-
-        def mark_guard_live(scope, kind, name, type)
-          marked = scope.with_guard_live
-          return marked unless kind && type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Nominal)
-
-          marked.with_guard_facet(kind, name, type)
         end
 
         # `if /(?<x>...)/ =~ str` — Prism wraps the `=~` call in a `MatchWriteNode` listing the
@@ -1297,28 +1252,27 @@ module Rigor
           slot = receiver_slot(node.receiver, scope)
           return nil if slot.nil?
 
-          admitted, live = respond_to_admitted(narrow_non_nil(slot.current), sym.to_sym, scope)
+          admitted = respond_to_admitted(narrow_non_nil(slot.current), sym.to_sym, scope)
           return nil if admitted.equal?(slot.current) || admitted == slot.current
 
-          [narrow_slot(scope, slot, admitted, live: live), scope]
+          [narrow_slot(scope, slot, admitted), scope]
         end
 
-        # `[type, live]`: the members of `type` that may respond to `method_name`, or, when Rigor knows every member
-        # lacks it ({#lacks_method?}), `Dynamic[top]` with `live` true. That is the class guards' reading of an edge
-        # the ordinary reading proves dead: the arm is gradual ({Scope#with_guard_live}). No class is named, so the
-        # receiver keeps no facet to check calls against. A member Rigor cannot judge (`Dynamic`, `Bot`, a class no
+        # The members of `type` that may respond to `method_name`, or, when Rigor knows every member lacks it
+        # ({#lacks_method?}), `Dynamic[top]`: the members Rigor read the edge from are wrong about the object there,
+        # and no class is named to read it as instead. A member Rigor cannot judge (`Dynamic`, `Bot`, a class no
         # signature declares) may respond.
         #
-        # The class guards' carrier rule holds here too: when every member lacking `m` records what the file literally
-        # shows (a literal, a `Tuple`, a `HashShape`, a class object, `nil` / `true` / `false`), the edge stays `Bot`.
+        # When every member lacking `m` records what the file literally shows (a literal, a `Tuple`, a `HashShape`, a
+        # class object, `nil` / `true` / `false`), the edge is `Bot`: `1.respond_to?(:string)` is false in every run.
         def respond_to_admitted(type, method_name, scope)
           members = type.is_a?(Type::Union) ? type.members : [type]
           kept = members.reject { |member| lacks_method?(member, method_name, scope) }
-          return [type, false] if kept.size == members.size
-          return [Type::Combinator.union(*kept), false] unless kept.empty?
-          return [Type::Combinator.bot, false] if members.all? { |member| literal_carrier?(member) }
+          return type if kept.size == members.size
+          return Type::Combinator.union(*kept) unless kept.empty?
+          return Type::Combinator.bot if members.all? { |member| literal_carrier?(member) }
 
-          [Type::Combinator.untyped, true]
+          Type::Combinator.untyped
         end
 
         LITERAL_CARRIERS = [Type::Constant, Type::Tuple, Type::HashShape, Type::Singleton].freeze
@@ -2237,10 +2191,9 @@ module Rigor
 
         def class_slot_scopes(scope, slot, class_name, exact:)
           environment = scope.environment
-          truthy, live = guarded_narrow_class(slot.current, class_name, exact: exact, environment: environment,
-                                                                        scope: scope)
+          truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           [
-            narrow_slot(scope, slot, truthy, live: live),
+            narrow_slot(scope, slot, truthy),
             narrow_slot(scope, slot, narrow_not_class(slot.current, class_name, exact: exact,
                                                                                 environment: environment, scope: scope))
           ]
@@ -2283,12 +2236,15 @@ module Rigor
           current = scope.type_of(node.receiver)
           return nil if current.nil?
 
-          truthy_type, live = guarded_narrow_class(current, class_name, exact: exact,
-                                                                        environment: scope.environment, scope: scope)
+          truthy_type = narrow_class(current, class_name, exact: exact, environment: scope.environment,
+                                                          scope: scope)
           falsey_type = narrow_not_class(current, class_name, exact: exact, environment: scope.environment,
                                                               scope: scope)
-          truthy_scope = scope.with_method_chain_narrowing(*address, truthy_type)
-          [live ? truthy_scope.with_guard_live : truthy_scope, scope.with_method_chain_narrowing(*address, falsey_type)]
+
+          [
+            scope.with_method_chain_narrowing(*address, truthy_type),
+            scope.with_method_chain_narrowing(*address, falsey_type)
+          ]
         end
 
         # Returns `[receiver_kind, receiver_name, method_name]` iff `chain_call` is a stable
@@ -2442,12 +2398,14 @@ module Rigor
           current = scope.type_of(chain_arg)
           return nil if current.nil?
 
-          truthy_type, live = guarded_narrow_class(current, class_name, exact: false,
-                                                                        environment: scope.environment, scope: scope)
+          truthy_type = narrow_class(current, class_name, exact: false, environment: scope.environment,
+                                                          scope: scope)
           falsey_type = narrow_not_class(current, class_name, exact: false, environment: scope.environment,
                                                               scope: scope)
-          truthy_scope = scope.with_method_chain_narrowing(*address, truthy_type)
-          [live ? truthy_scope.with_guard_live : truthy_scope, scope.with_method_chain_narrowing(*address, falsey_type)]
+          [
+            scope.with_method_chain_narrowing(*address, truthy_type),
+            scope.with_method_chain_narrowing(*address, falsey_type)
+          ]
         end
 
         def analyse_case_equality_receiver(receiver, scope, local_name, current)
@@ -2663,17 +2621,13 @@ module Rigor
         # edge is the entry type (because we cannot prove the unknown condition didn't match).
         #
         # `[body type, next-clause type]` of a `when` clause's conditions over the subject type `current`.
-        # Issue #1429 — the class guards among the conditions are code evidence: when the clause as a whole
-        # proves no member can match (its body type is `Bot`), the class conditions are read again as guards
-        # ({.narrow_class}'s `guard:` pass), so `case io when StringIO` does not drop a clause the program takes.
-        # A clause some member matches keeps its answer (`when Integer, String` on an `Integer` stays `Integer`).
-        def case_when_types(scope, current, conditions, guard: false)
+        def case_when_types(scope, current, conditions)
           truthy_members = []
           falsey_type = current
           fully_narrowable = true
 
           conditions.each do |condition|
-            applied = apply_case_when_condition(scope, current, condition, falsey_type, guard: guard)
+            applied = apply_case_when_condition(scope, current, condition, falsey_type)
             if applied
               truthy_members << applied[:truthy]
               falsey_type = applied[:falsey]
@@ -2684,17 +2638,13 @@ module Rigor
           end
 
           truthy = truthy_members.empty? ? current : Type::Combinator.union(*truthy_members)
-          falsey = fully_narrowable ? falsey_type : current
-          return [truthy, falsey, false] if guard || !truthy.is_a?(Type::Bot)
-
-          guarded = case_when_types(scope, current, conditions, guard: true).first
-          [guarded, falsey, !guarded.is_a?(Type::Bot)]
+          [truthy, fully_narrowable ? falsey_type : current]
         end
 
         # Per-condition rule. Returns `nil` when the condition shape is not recognised (caller
         # marks `fully_narrowable = false`), or `{truthy:, falsey:, fully_narrowable:}` when it
         # is.
-        def apply_case_when_condition(scope, current, condition, falsey_acc, guard:)
+        def apply_case_when_condition(scope, current, condition, falsey_acc)
           int_range = case_equality_integer_range(condition)
           return integer_range_when_result(current, int_range, falsey_acc) if int_range && integer_rooted_type?(current)
 
@@ -2703,12 +2653,8 @@ module Rigor
             return integer_literal_when_result(current, int_literal, falsey_acc)
           end
 
-          if (target = lexical_class_name(condition, scope))
-            return class_when_result(scope, current, target, falsey_acc, guard: guard)
-          end
-
-          target = case_equality_target_class(condition)
-          return class_when_result(scope, current, target, falsey_acc, guard: false) if target
+          target = lexical_class_name(condition, scope) || case_equality_target_class(condition)
+          return class_when_result(scope, current, target, falsey_acc) if target
 
           nil
         end
@@ -2743,12 +2689,9 @@ module Rigor
           { truthy: truthy, falsey: falsey_acc, fully_narrowable: false }
         end
 
-        # `guard:` is true for a `when` naming a class or module (#1429), false for the class a Range or Regexp
-        # pattern implies.
-        def class_when_result(scope, current, target, falsey_acc, guard:)
+        def class_when_result(scope, current, target, falsey_acc)
           {
-            truthy: narrow_class(current, target, exact: false, environment: scope.environment, scope: scope,
-                                                  guard: guard),
+            truthy: narrow_class(current, target, exact: false, environment: scope.environment, scope: scope),
             falsey: narrow_not_class(falsey_acc, target, exact: false, environment: scope.environment,
                                                          scope: scope),
             fully_narrowable: true
@@ -2944,28 +2887,19 @@ module Rigor
         # Narrow a Nominal under `is_a?(class_name)`: when the nominal's class is already a
         # subclass of `class_name` (or matches under `exact: true`) preserve it; when
         # `class_name` is a subclass of the nominal's class (`Nominal[Numeric]` under
-        # `is_a?(Integer)`) narrow DOWN to `Nominal[class_name]`.
+        # `is_a?(Integer)`) narrow DOWN to `Nominal[class_name]`; otherwise (disjoint
+        # hierarchies under `is_a?`, mismatch under `instance_of?`) collapse to `Bot`.
+        # Conservative when the analyzer environment cannot resolve either class.
         #
-        # Issue #1429 (ADR-117 Decision point 3) — a class guard is code evidence, so the truthy edge never
-        # collapses a `Nominal` to `Bot` because its class is disjoint from the guarded one. A `Nominal` is a
-        # type Rigor inferred or read from a signature, and it can be an idiomatic expectation the program
-        # does not hold to: `$stdout` is typed `IO`, and a test runs it with a `StringIO`, which is not an
-        # `IO` subclass. `$stdout.is_a?(StringIO) ? $stdout.string : nil` and `case io when StringIO` are
-        # correct code, and a `Bot` made the first report `undefined method` and the second
-        # `flow.unreachable-clause` with its arm dropped. The disjoint edge narrows to the guarded class
-        # ({#disjoint_nominal_to_class}). The carriers that record what the file literally shows
-        # (`Constant`, `Tuple`, `HashShape`, `Singleton`) and the value-pinned `nil` / `true` / `false`
-        # classes keep their `Bot`, as does `instance_of?` against a module.
+        # A disjoint `Bot` narrows the edge but is not always a verdict that the code is dead: see
+        # {.disjoint_nominal_guard?} (issue #1429).
         def narrow_nominal_to_class(nominal, class_name, context)
           return nominal if nominal.class_name == class_name
-          if context.exact
-            return context.guard ? exact_nominal_to_class(nominal, class_name, context) : Type::Combinator.bot
-          end
+          return exact_nominal_to_class(nominal, class_name, context) if context.exact
 
           case class_ordering(nominal.class_name, class_name, context)
           when :superclass then Type::Combinator.nominal_of(class_name)
-          when :disjoint
-            context.guard ? disjoint_nominal_to_class(nominal, class_name, context) : Type::Combinator.bot
+          when :disjoint then Type::Combinator.bot
           when :subclass then nominal
           else
             # :unknown — the guard proved membership in a class the environment cannot order against the
@@ -2976,38 +2910,15 @@ module Rigor
           end
         end
 
-        # The value-pinned classes: a `Nominal` of one of them is the single value itself, which no program
-        # replaces with another class's instance, so the #1429 rule below does not reach them.
-        VALUE_PINNED_CLASSES = %w[NilClass TrueClass FalseClass].freeze
-        private_constant :VALUE_PINNED_CLASSES
-
-        # The truthy edge of `is_a?` / `kind_of?` / `case … when` for a `Nominal` whose class the environment
-        # orders `:disjoint` from the guarded one (#1429). Two classes: no object is an instance of both, so
-        # the guard running truthy says the receiver's type was wrong, and the guarded class is the type the
-        # arm has. A module on either side: an object can be both (a subclass that includes the module), and
-        # no carrier spells that meet, so the arm reads `Dynamic[top]`, the answer an `:unknown` ordering
-        # gets. Naming the guarded module alone would drop the receiver's own methods from the arm.
-        def disjoint_nominal_to_class(nominal, class_name, context)
-          return Type::Combinator.bot if VALUE_PINNED_CLASSES.include?(nominal.class_name)
-          return Type::Combinator.untyped if module_name?(nominal.class_name, context) ||
-                                             module_name?(class_name, context)
-
-          Type::Combinator.dynamic(Type::Combinator.nominal_of(class_name))
-        end
-
-        # `instance_of?(class_name)` compares the exact class. A module is never an object's class, so that
-        # guard's `Bot` rests on its own semantics and stays. Against a class it is the #1429 rule: a
-        # truthy `instance_of?` says the object's class IS `class_name`, whatever the receiver's type was, so
-        # `Numeric` under `instance_of?(Integer)` narrows to `Integer` rather than to `Bot`.
+        # `instance_of?(class_name)` compares the exact class, so its truthy edge holds `class_name` itself. Issue
+        # #1429: when `class_name` is a class below the nominal's (`Numeric` under `instance_of?(Integer)`), that is
+        # the edge's type; the edge was `Bot` before, for every class but the nominal's own. A module is never an
+        # object's class, and any other ordering leaves no class the object can have, so those stay `Bot`.
         def exact_nominal_to_class(nominal, class_name, context)
-          return Type::Combinator.bot if VALUE_PINNED_CLASSES.include?(nominal.class_name)
-          return Type::Combinator.bot if module_name?(class_name, context)
+          return Type::Combinator.bot if context.environment.rbs_module?(class_name)
+          return Type::Combinator.bot unless class_ordering(nominal.class_name, class_name, context) == :superclass
 
-          Type::Combinator.dynamic(Type::Combinator.nominal_of(class_name))
-        end
-
-        def module_name?(name, context)
-          context.environment.rbs_module?(name)
+          Type::Combinator.nominal_of(class_name)
         end
 
         def narrow_nominal_not_class(nominal, class_name, context)

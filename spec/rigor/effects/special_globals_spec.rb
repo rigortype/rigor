@@ -7,13 +7,15 @@ require "rigor/analysis/runner"
 
 # #1363 — which global-variable spellings the scan colours `global.*`.
 #
-# `$~` and `$_` are frame-local: Ruby keeps them in the special-variable slot of the body that runs them, which that
-# body and the blocks it creates reach and no other method's frame does. A read of one is not `global.read`, and a
-# write binds only that slot, so it earns no label, as a local-variable write earns none. `$!` and `$@` are the
-# exception being rescued and its backtrace: no callee can make `$!` name another exception for its caller, so a read
-# of either is not `global.read`, but `$@ = bt` sets that exception's backtrace, which the rescuing frame holds, so it
-# stays `global.write`. `$?` is the thread's, and a subprocess a callee runs sets it, so a read stays `global.read`.
-# The spec is `docs/internal-spec/effect-summaries.md` § The special variables.
+# `$~` and `$_` are frame-local: Ruby keeps them in the special-variable slot of the body that runs them, and a call
+# into a method defined with `def` has a slot of its own. A read of one is not `global.read`, and a write binds only
+# that slot, so it earns no label, as a local-variable write earns none — except in a `define_method` body, which runs
+# on the slot of the body that defined it, shared with every sibling defined there, so a write stays `global.write`.
+# `$!` is the exception of the dynamically enclosing rescue clause, an implicit argument of the running call rather
+# than program state, so a read is not `global.read`; a `$@` read reads its backtrace as `e.backtrace` would, and an
+# object-state read is never labelled. `$@ = bt` changes that object, which the rescuing frame observes, so it stays
+# `global.write`. `$?` is the thread's, and a subprocess a callee runs sets it, so a read stays `global.read`. The
+# spec is `docs/internal-spec/effect-summaries.md` § The special variables.
 RSpec.describe "effect labels for the special global variables" do
   def configuration
     data = { "paths" => ["lib"], "parallel" => { "workers" => 0 }, "effects" => {} }
@@ -49,6 +51,18 @@ RSpec.describe "effect labels for the special global variables" do
               [rest, other]
             end
 
+            def for_line
+              for $_ in ["x"]; end
+            end
+
+            def rescue_into_line
+              begin
+                nil
+              rescue => $_
+                nil
+              end
+            end
+
             def write_global = ($counter = 1)
             def or_write_global = ($counter ||= 1)
 
@@ -57,7 +71,30 @@ RSpec.describe "effect labels for the special global variables" do
               rest
             end
 
+            def for_global
+              for $counter in [1]; end
+            end
+
+            def rescue_into_global
+              begin
+                nil
+              rescue => $counter
+                nil
+              end
+            end
+
             def set_rescued_backtrace = ($@ = ["x:1"])
+
+            # A `define_method` block runs on this class body's slot, so these share one `$_` and one `$~`.
+            define_method(:set_shared_line) { |line| $_ = line }
+            define_method(:clear_shared_match) { $~ = nil }
+            define_method(:or_write_shared_line) { $_ ||= "x" }
+            define_method(:read_shared_line) { $_ }
+
+            def self.define_nested
+              define_method(:nested_set_shared_line) { |line| $_ = line }
+              def nested_write_line = ($_ = "x")
+            end
           end
         RUBY
 
@@ -109,16 +146,43 @@ RSpec.describe "effect labels for the special global variables" do
       expect(proven("nested_multi_write_match")).to eq([])
     end
 
+    it "does not colour one as a `for` or `rescue =>` target" do
+      expect(proven("for_line")).to eq([])
+      expect(proven("rescue_into_line")).to eq([])
+    end
+
     it "keeps a write to an ordinary global as global.write, in every form" do
       expect(proven("write_global")).to eq(["global.write"])
       expect(proven("or_write_global")).to eq(["global.write"])
       expect(proven("multi_write_global")).to eq(["global.write"])
+      expect(proven("for_global")).to eq(["global.write"])
+      expect(proven("rescue_into_global")).to eq(["global.write"])
     end
 
     # The rescuing frame holds the exception `$@` names, often a caller's (`rescue => e` sees the new backtrace), so
     # the write reaches another frame.
     it "keeps a write to `$@` as global.write" do
       expect(proven("set_rescued_backtrace")).to eq(["global.write"])
+    end
+  end
+
+  # `define_method(:set) { |v| $_ = v }` and `define_method(:get) { $_ }` in one class body: after `set("shared")`,
+  # `get` answers `"shared"`, so a `%a{pure}` on `set` is a claim the write breaks.
+  describe "in a define_method body, which shares the defining body's slot" do
+    it "keeps a write to `$_` or `$~` as global.write, in every form" do
+      expect(proven("set_shared_line")).to eq(["global.write"])
+      expect(proven("clear_shared_match")).to eq(["global.write"])
+      expect(proven("or_write_shared_line")).to eq(["global.write"])
+    end
+
+    it "keeps it for a define_method a method body runs, and not for a def nested there" do
+      expect(proven("nested_set_shared_line")).to eq(["global.write"])
+      expect(proven("nested_write_line")).to eq([])
+    end
+
+    # Most such reads are of a match the same body just ran, which the scan cannot tell from a sibling's write.
+    it "still does not colour a read" do
+      expect(proven("read_shared_line")).to eq([])
     end
   end
 end

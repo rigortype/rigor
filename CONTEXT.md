@@ -34,6 +34,23 @@ define *behaviour*.
   (`docs/type-specification/control-flow-analysis.md`).
 - **folding** — evaluating an expression to a value-precise carrier at analysis time
   (`[1,2].first → Constant[1]`).
+- **declaration-sourced** — type information whose only origin is a declaration, not the flow of
+  the body being read: a constructor's `@x = nil` seed, or the declared members joined into a
+  global's program-global seed. It stays in the type but is not diagnostic fuel by itself.
+  [ADR-58](docs/adr/58-ivar-field-typing.md) defines it; the scope mark that carries it is
+  `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark". Its opposite is
+  **flow-live**. _Avoid_: "declared type" alone, which also names a signature a report may rest on.
+- **idiomatic expectation** — the type a value holds by the language's idioms where the runtime
+  guarantees less: `$stdout` holds an `IO`, though its setter requires only `write`. Rigor reads a
+  value by it; the runtime's guarantee is what a write is checked against.
+  [ADR-117](docs/adr/117-standard-streams-typed-by-idiom.md) Decision point 2 defines it, and
+  `docs/type-specification/global-variables.md` applies it to globals. Not a claim about the runtime
+  class.
+- **frame-local special** — a special variable Ruby keeps in the special-variable slot of the
+  method, class, module or file body that runs the code: `$~`, the match globals derived from it, and
+  `$_`. A block shares its body's slot; a called method and a thread's root block have their own.
+  `$!` / `$@` (the rescue frame) and `$?` (the thread) are specials but not frame-local. The slot
+  table is `docs/type-specification/global-variables.md` § "Special-variable slots".
 - **type-shaped comment** — a type written where Rigor never checks it: a YARD `[Type]` slot or a
   type in a doc sentence. Never written in this tree
   ([ADR-107](docs/adr/107-checked-types-and-typeless-comments.md), gated by

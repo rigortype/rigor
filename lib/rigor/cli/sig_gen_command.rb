@@ -232,8 +232,8 @@ module Rigor
       def dispatch_write(candidates, configuration, options)
         results = build_writer(configuration, options).write_all(candidates)
 
-        SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
         refused = refused_candidates(candidates)
+        SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format), refused: refused)
         SigGen::Renderer.refusal_lines(refused).each { |line| @err.puts(line) }
         # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8,
         # or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the user asked for a

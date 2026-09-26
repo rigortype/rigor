@@ -663,11 +663,21 @@ module Rigor
         return [source, []] if eligible.empty?
 
         replaced = []
+        done = {}
         # Apply replacements from highest byte position downward so earlier byte offsets remain valid as the
         # source grows or shrinks.
-        sorted = eligible.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
+        sorted = eligible.sort_by { |c| -member_position(decl, c) }
         sorted.each do |candidate|
-          source = apply_replacement(source, decl, candidate, state) and replaced << candidate
+          member = replaceable_member(decl, candidate)
+          # An `attr_accessor` answers for two methods; its one replacement covers both candidates.
+          next replaced << candidate if member && done[member.location.start_pos]
+
+          result = apply_replacement(source, decl, candidate, state)
+          next if result.nil?
+
+          done[member.location.start_pos] = true
+          source = result
+          replaced << candidate
         end
         [source, replaced]
       end
@@ -716,9 +726,28 @@ module Rigor
         rbs.scan(/\buntyped\b/).size
       end
 
-      def member_position(decl, method_name, kind)
-        member = find_method_member(decl, method_name, kind)
+      def member_position(decl, candidate)
+        member = replaceable_member(decl, candidate)
         member ? member.location.start_pos : -1
+      end
+
+      # The member a replacement overwrites. An inline overwrite may also land on an `attr_*` declaration of
+      # the same method (ADR-112 WD4), which it replaces in the inline attribute's own spelling; an
+      # `overloading?` member (`| ...`) is never its target.
+      def replaceable_member(decl, candidate)
+        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        return member unless candidate.classification == Classification::INLINE_OVERWRITE
+
+        member = nil if member.respond_to?(:overloading?) && member.overloading?
+        member || find_attr_member(decl, candidate.method_name, candidate.kind)
+      end
+
+      def find_attr_member(decl, method_name, kind)
+        decl.members.find do |m|
+          pairs = []
+          collect_pairs_for_member(m, pairs) unless m.is_a?(RBS::AST::Members::MethodDefinition)
+          m.respond_to?(:kind) && m.kind == kind && pairs.any? { |name, _| name == method_name }
+        end
       end
 
       def find_method_member(decl, method_name, kind)
@@ -731,7 +760,7 @@ module Rigor
       # starts at the `def` keyword, NOT at the column zero of the line, so the leading whitespace stays inside
       # `source[0...start_pos]` and we do not re-emit it.
       def apply_replacement(source, decl, candidate, state)
-        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        member = replaceable_member(decl, candidate)
         return nil if member.nil?
 
         loc = member.location

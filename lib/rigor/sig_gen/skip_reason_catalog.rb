@@ -113,16 +113,19 @@ module Rigor
         "sig.skipped.inline-differs" => Entry.new(
           id: "sig.skipped.inline-differs",
           summary: "The method's inline declaration and its `sig/` declaration disagree; neither was changed.",
-          explanation: "The method is declared inline by `# @rbs` / `#:` and in `sig/`, and the two do not state " \
-                       "the same types (a leading `::` and spacing aside) or `sig/` lacks an annotation written " \
-                       "inline. sig-gen does not presume either side right: the inline one may be a newer edit, " \
-                       "the `sig/` one a reviewed, deliberately wider contract. It refuses, and `--write` and " \
-                       "`--check` exit 1, so a CI job cannot pass while the two contradict each other.",
+          explanation: "The method is declared inline by `# @rbs` / `#:` and in `sig/` (a `def` or an `attr_*`), " \
+                       "and the two do not state the same types, or `sig/` lacks an annotation written inline. " \
+                       "Parameter names, union spelling and a `::` that does not change what a name resolves to " \
+                       "are ignored; overload order is not, because RBS answers a call with the first overload " \
+                       "that matches. For a parameter-only annotation (`# @rbs name: T`, no `return:`) only the " \
+                       "parameters are compared, and the return follows the ordinary proposal rules. sig-gen " \
+                       "does not presume either side right, so it refuses, and `--write` and `--check` exit 1.",
           next_step: "Decide which declaration is right. To keep the inline one, re-run with `--overwrite`, which " \
-                     "replaces the whole `sig/` member with it; to keep the `sig/` one, edit the annotation to " \
-                     "match, or delete it. A parameter-only annotation (`# @rbs name: T`, no `return:`) whose " \
-                     "parameters differ from `sig/` stays refused under `--overwrite`, because its return would " \
-                     "be inferred under the `sig/` parameters: delete the `sig/` member and re-run instead."
+                     "replaces the whole `sig/` member with it (an overload written only in `sig/` is dropped); " \
+                     "to keep the `sig/` one, edit the annotation to match, or delete it. A parameter-only " \
+                     "annotation whose parameters differ stays refused under `--overwrite`, because its return " \
+                     "would be inferred under the `sig/` parameters: delete the `sig/` member and re-run, or add " \
+                     "`# @rbs return:` so nothing is inferred."
         ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",

@@ -519,10 +519,14 @@ A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only
 annotation keeps its parameters and takes the return from the body,
 and `initialize` is always `-> void`. When `sig/` already declares
-the method and the two disagree, sig-gen changes neither: the method
-is refused (`sig.skipped.inline-differs`), and `--write` / `--check`
-exit `1` until you make them agree or pass `--overwrite`, which
-replaces the whole `sig/` member with the inline declaration. A class
+the method (a `def` or an `attr_*`) and the two disagree as types —
+parameter names and union spelling do not count, overload order
+does — sig-gen changes neither: the method is refused
+(`sig.skipped.inline-differs`, listed under `refused` in `--format=json`),
+and `--write` / `--check` exit `1` until you make them agree or pass
+`--overwrite`, which replaces the whole `sig/` member with the inline
+declaration. For a parameter-only annotation only the parameters are
+compared; the return follows the ordinary proposal rules. A class
 made generic inline is not written unless `sig/` declares it with the
 same type parameters. A project whose Steep reads the same
 annotations sets `sig_gen.inline_declared: skip` in `.rigor.yml` to

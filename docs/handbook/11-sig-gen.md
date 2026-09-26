@@ -218,36 +218,56 @@ file.
 
 Once `sig/` holds the copy, it is the declaration `rigor
 check` reads (the `.rbs` wins over the inline one for the same
-member), and sig-gen compares the two on every run. When they
-state the same types — spacing and a leading `::` aside — and
-`sig/` carries every annotation you wrote inline, there is
-nothing to do.
+member), and sig-gen compares the two on every run, `attr_*`
+declarations included. They are compared as types, not text:
+parameter names, spacing, how a union is spelled (`String?`
+and `String | nil`, `Integer | String` and `String |
+Integer`, `bool` and `true | false`) and a leading `::` do
+not count. The `::` only counts when it changes what the name
+means: inside `module NS`, `Foo` is `NS::Foo` if `NS`
+declares one, and then it is not `::Foo`. Overload order does
+count, because RBS answers a call with the first overload that
+matches. When the two agree, and `sig/` carries every
+annotation you wrote inline, there is nothing to do.
 
-When they differ in any way, sig-gen does not pick a side. The
-inline annotation may be your newer edit; the `sig/` member may
-be a reviewed contract someone widened on purpose (`-> Numeric`
-over a body that proves `Integer`). The method is refused as
-`sig.skipped.inline-differs`: nothing is written, `--write`
-prints a `REFUSED` line and exits `1`, and `--check` fails, so
-the contradiction cannot pass CI unnoticed. Resolve it one of
-two ways:
+When they differ, sig-gen does not pick a side. The inline
+annotation may be your newer edit; the `sig/` member may be a
+reviewed contract someone changed on purpose. The method is
+refused as `sig.skipped.inline-differs`: nothing is written,
+`--write` prints a `REFUSED` line and exits `1` (under
+`--format=json` the refused methods are listed under
+`refused`), and `--check` fails, so the contradiction cannot
+pass CI unnoticed. Resolve it one of two ways:
 
 - Keep the inline declaration: re-run with `--overwrite`. The
   whole `sig/` member is replaced by the inline line, as
   rbs-inline reads it — a parameter you left unannotated is
   `untyped`, an unannotated `&block` is `?{ (?) -> untyped }`
-  — and a parameter-only annotation's return is taken from the
-  body. The two sides are never mixed slot by slot: their
-  overloads and type variables need not correspond. Comments
-  inside the replaced member, and annotations already on it,
-  are kept.
+  — and an `attr_*` declaration is replaced by the inline
+  attribute in the same spelling. The two sides are never
+  mixed slot by slot: their overloads and type variables need
+  not correspond. That also means an overload written only in
+  `sig/` is dropped, and a caller that relied on it can stop
+  type-checking; read the `--diff` first. Comments inside the
+  replaced member, and annotations already on it, are kept.
 - Keep the `sig/` member: edit or delete the inline annotation
   to match.
 
-One case stays refused under `--overwrite`: a parameter-only
-annotation whose parameters differ from the `sig/` member's.
-The body is typed under the parameters the `sig/` member
-declares, so a return inferred for the new line would describe
+A `sig/` member written `def m: ... | ...` is not a copy: it
+adds overloads to the inline declaration, and sig-gen leaves it
+alone.
+
+A parameter-only annotation (`# @rbs name: String`, no
+`return:`) states the parameters and nothing else, so only the
+parameters are compared. When they match, the return in `sig/`
+is weighed like any declared return: a `-> void`, a type wider
+than what the body proves, or a literal the body happens to
+return (`-> String` over `"x"`) is left as it is, and a return
+the body proves strictly narrower is a `tighter-return`
+proposal, applied only with `--overwrite`. When the parameters
+differ, the method is refused even under `--overwrite`: the
+body is typed under the parameters the `sig/` member declares,
+so a return inferred for the new line would describe
 parameters that are about to change. Delete the `sig/` member
 and re-run; sig-gen then writes the method afresh.
 

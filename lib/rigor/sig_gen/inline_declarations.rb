@@ -29,7 +29,9 @@ module Rigor
       # - `return_inferred` — the author declared the parameters and not the return: rbs-inline defaulted it,
       #   and the synthesizer marked it `rigor:v1:inferred-return`.
       # - `signature_inferred` — every type slot defaulted; the author said nothing about this member.
-      Member = Data.define(:method_types, :annotations, :return_inferred, :signature_inferred) do
+      # - `attr_line` — for an attribute, the member in RBS's own `attr_*` spelling (`attr_reader name: String`),
+      #   which is what replaces an `attr_*` declaration in `sig/` under `--overwrite`; nil for a `def`.
+      Member = Data.define(:method_types, :annotations, :return_inferred, :signature_inferred, :attr_line) do
         def declared?
           !signature_inferred
         end
@@ -153,13 +155,28 @@ module Rigor
         [:"#{member.name}=", member.kind, [::RBS::Parser.parse_method_type("(#{member.type}) -> #{member.type}")]]
       end
 
+      ATTR_KEYWORDS = {
+        ::RBS::AST::Members::AttrReader => "attr_reader",
+        ::RBS::AST::Members::AttrWriter => "attr_writer",
+        ::RBS::AST::Members::AttrAccessor => "attr_accessor"
+      }.freeze
+      private_constant :ATTR_KEYWORDS
+
+      def attr_line(member)
+        keyword = ATTR_KEYWORDS[member.class]
+        return nil if keyword.nil?
+
+        "#{keyword} #{'self.' if member.kind == :singleton}#{member.name}: #{member.type}"
+      end
+
       def build_member(member, method_types)
         strings = member.annotations.map { |annotation| annotation.string.to_s.strip }
         Member.new(
           method_types: method_types.freeze,
           annotations: (strings - MARKERS).freeze,
           return_inferred: strings.include?(RbsExtended::INFERRED_RETURN_DIRECTIVE),
-          signature_inferred: strings.include?(RbsExtended::INFERRED_SIGNATURE_DIRECTIVE)
+          signature_inferred: strings.include?(RbsExtended::INFERRED_SIGNATURE_DIRECTIVE),
+          attr_line: attr_line(member)
         )
       end
     end

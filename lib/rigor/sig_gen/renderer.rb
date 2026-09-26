@@ -130,9 +130,12 @@ module Rigor
 
       # Renders the per-source-file outcomes of a `--write` run. Distinct from {#render} because the write
       # path's reporting surface is action-oriented (created / updated / skipped) rather than candidate-oriented.
-      def render_write(results:, format:)
+      # @param refused — methods refused as `sig.skipped.inline-differs`; the JSON payload names them under
+      #   `refused` (absent when there are none, so an ordinary payload is unchanged), and text mode leaves them
+      #   to the command's stderr `REFUSED` lines.
+      def render_write(results:, format:, refused: [])
         case format
-        when "json" then render_write_json(results)
+        when "json" then render_write_json(results, refused)
         when "text" then render_write_text(results)
         else raise ArgumentError, "unsupported format: #{format}"
         end
@@ -283,8 +286,10 @@ module Rigor
         @out.puts("  Re-save the file as UTF-8 and re-run; sig-gen never modifies a file it cannot read faithfully.")
       end
 
-      def render_write_json(results)
-        @out.puts(JSON.pretty_generate({ results: results.map(&:to_h) }))
+      def render_write_json(results, refused)
+        payload = { results: results.map(&:to_h) }
+        payload[:refused] = refused.map(&:to_h) unless refused.empty?
+        @out.puts(JSON.pretty_generate(payload))
       end
     end
   end

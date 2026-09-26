@@ -257,10 +257,10 @@ RSpec.describe Rigor::SigGen::Generator do
       run_generator(write_fixture("lib/p.rb", source), sig: true, overwrite: overwrite)
     end
 
-    it "refuses every one of them without --overwrite, inferring no line for any" do
+    it "refuses every one whose authored parameters differ, inferring no line for any" do
       candidates = classify
 
-      %i[overl two blk over_same c].each do |name|
+      %i[overl two blk over_same].each do |name|
         candidate = find(candidates, name)
         expect([name, candidate.skip_reason, candidate.rbs]).to eq([name, :inline_differs, nil])
       end
@@ -277,12 +277,199 @@ RSpec.describe Rigor::SigGen::Generator do
       end
     end
 
-    it "proposes the inline line, whole, under --overwrite where only the return differs" do
-      c = find(classify(overwrite: true), :c)
+    # Final review of #1422: with the authored parameters matching, only the inferred return is left, and it
+    # follows the ordinary proposal rules — a strictly narrower body is a `tighter-return`, declined without
+    # --overwrite, spelled with the authored parameters.
+    it "proposes a narrower inferred return as tighter-return once the authored parameters match" do
+      c = find(classify, :c)
 
-      expect([c.classification, c.rbs, c.declared_rbs])
-        .to eq([Rigor::SigGen::Classification::INLINE_OVERWRITE, "def c: (Integer x) -> Integer",
-                "def c: (Integer x) -> Numeric"])
+      expect([c.classification, c.rbs, c.declared_return_rbs])
+        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def c: (Integer x) -> Integer", "Numeric"])
+    end
+  end
+
+  # Final review of #1422: a parameter-only annotation does not overrule the return `sig/` declares on purpose.
+  describe "a parameter-only annotation whose parameters sig/ already matches" do
+    let(:source) do
+      <<~RUBY
+        class R
+          # @rbs s: String
+          def voidret(s)
+            @x = s
+          end
+
+          # @rbs s: String
+          def lit(s) = "x"
+
+          # @rbs name: String
+          def pair(name) = [name, name.to_s]
+        end
+      RUBY
+    end
+
+    it "leaves a declared void, a wider type over a literal and a widened collection equivalent" do
+      write_fixture("sig/r.rbs", <<~RBS)
+        class R
+          def voidret: (String s) -> void
+          def lit: (String) -> String
+          def pair: (String name) -> Array[String]
+        end
+      RBS
+
+      candidates = run_generator(write_fixture("lib/r.rb", source), sig: true)
+
+      expect(%i[voidret lit pair].map { |name| find(candidates, name).classification })
+        .to all(eq(Rigor::SigGen::Classification::EQUIVALENT))
+    end
+  end
+
+  # Final review of #1422 (probe `eq`): the two declarations are compared as types, not text.
+  describe "comparing an inline declaration with its sig/ counterpart" do
+    let(:source) do
+      <<~RUBY
+        module NS
+          class E
+            #: (String) -> Integer
+            def noname(s) = s.size
+
+            # @rbs s: String
+            # @rbs return: Integer
+            def named(s) = s.size
+
+            #: (String?) -> Integer
+            def opt(s) = s.to_s.size
+
+            #: (String | Integer) -> String
+            def uni(x) = x.to_s
+
+            #: () -> bool
+            def boo = true
+
+            #: (String) -> String
+            #: (Integer) -> Integer
+            def ovl(x) = x
+
+            #: (String) -> String
+            def dots(s) = s
+          end
+        end
+      RUBY
+    end
+
+    let(:sig) do
+      <<~RBS
+        module NS
+          class E
+            def noname: (String s) -> Integer
+            def named: (String) -> Integer
+            def opt: (String | nil) -> Integer
+            def uni: (Integer | String) -> String
+            def boo: () -> (true | false)
+            def ovl: (Integer) -> Integer
+                   | (String) -> String
+            def dots: (Integer) -> Integer | ...
+          end
+        end
+      RBS
+    end
+
+    let(:candidates) do
+      write_fixture("sig/e.rbs", sig)
+      run_generator(write_fixture("lib/e.rb", source), sig: true)
+    end
+
+    it "ignores parameter names, in either direction, and how a union is spelled" do
+      expect(%i[noname named opt uni boo].map { |name| find(candidates, name).classification })
+        .to all(eq(Rigor::SigGen::Classification::EQUIVALENT))
+    end
+
+    it "keeps overload order, because RBS answers a call with the first overload that matches" do
+      expect(find(candidates, :ovl).skip_reason).to eq(:inline_differs)
+    end
+
+    it "leaves a `| ...` member alone, since it adds to the inline declaration rather than restating it" do
+      expect(find(candidates, :dots).skip_reason).not_to eq(:inline_differs)
+    end
+  end
+
+  # Final review of #1422 (probe `ns`): `::Foo` and `Foo` are the same only where `Foo` resolves to `::Foo`.
+  describe "a name written with a leading `::`" do
+    let(:sig) do
+      <<~RBS
+        class Foo
+        end
+        class Bar
+        end
+        module NS
+          class Foo
+          end
+          class E
+            def f: () -> ::Foo
+            def g: () -> ::Bar
+          end
+        end
+      RBS
+    end
+
+    let(:source) do
+      <<~RUBY
+        class Foo; end
+        class Bar; end
+
+        module NS
+          class Foo; end
+
+          class E
+            #: () -> Foo
+            def f = Foo.new
+
+            #: () -> Bar
+            def g = Bar.new
+          end
+        end
+      RUBY
+    end
+
+    it "counts the `::` only when the relative name resolves to the same constant" do
+      write_fixture("sig/n.rbs", sig)
+      candidates = run_generator(write_fixture("lib/n.rb", source), sig: true)
+
+      expect(find(candidates, :f).skip_reason).to eq(:inline_differs)
+      expect(find(candidates, :g).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+  end
+
+  # Final review of #1422 (probe `at`): an `attr_*` declaration in `sig/` is compared like a `def`.
+  describe "an inline-typed attribute against an attr_* declaration in sig/" do
+    let(:source) do
+      <<~RUBY
+        class A
+          attr_reader :p #: String
+          attr_accessor :r #: String
+          attr_reader :s #: String
+        end
+      RUBY
+    end
+
+    let(:sig) { "class A\n  attr_reader p: Integer\n  attr_accessor r: Integer\n  attr_reader s: String\nend\n" }
+
+    def classify(overwrite: false)
+      write_fixture("sig/a.rbs", sig)
+      run_generator(write_fixture("lib/a.rb", source), sig: true, overwrite: overwrite)
+    end
+
+    it "refuses the ones that differ and leaves the matching one equivalent" do
+      candidates = classify
+
+      expect(%i[p r r=].map { |name| find(candidates, name).skip_reason }).to all(eq(:inline_differs))
+      expect(find(candidates, :s).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "replaces them in their own attr_* spelling under --overwrite" do
+      candidates = classify(overwrite: true)
+
+      expect(%i[p r].map { |name| find(candidates, name).rbs })
+        .to eq(["attr_reader p: String", "attr_accessor r: String"])
     end
   end
 

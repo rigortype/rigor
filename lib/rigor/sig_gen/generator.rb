@@ -19,6 +19,7 @@ require_relative "meta_class_shape"
 require_relative "rbs_validity"
 require_relative "classification"
 require_relative "effect_annotation"
+require_relative "declaration_equivalence"
 require_relative "inline_declarations"
 require_relative "layout_index"
 require_relative "method_candidate"
@@ -945,20 +946,36 @@ module Rigor
 
         scope = scope_index[def_node]
         method_def = lookup_existing_method(class_name, def_node.name, kind, scope&.environment, scope)
-        inferred = nil
-        overloads = types.map(&:to_s)
+        head = "#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: "
         if return_defaulted
-          # The body is typed under the parameters the environment binds, which are `sig/`'s once it declares
-          # the member. A return inferred under parameters the inline line would change describes no method.
-          if parameters_differ?(signature_member(method_def, class_name), types)
-            return skipped(path, def_node, class_name, kind, :inline_differs)
-          end
-
-          inferred, overloads = inferred_overloads(def_node, scope_index, class_name, types)
-          return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil?
+          return mixed_provenance_candidate(path, def_node, class_name, kind, scope_index, inline, method_def, head)
         end
 
-        rbs = "#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: #{overloads.join(' | ')}"
+        inline_candidate(path, class_name, def_node.name, kind, head + types.join(" | "), inline, method_def)
+      end
+
+      # A parameter-only annotation (`# @rbs name: String`, no `return:`): parameters authored, return inferred.
+      # Only the authored half is weighed against `sig/`. When the parameters differ the method is refused, even
+      # under `--overwrite` — the body is typed under the parameters the environment binds, which are `sig/`'s
+      # once it declares the member, so a return inferred for the new line would describe parameters about to
+      # change. When they match, the return is an ordinary inferred proposal: {#compare_against_declared}
+      # leaves a declared `void`, a deliberately wider type and a declined literal alone, and proposes a
+      # strictly narrower return as `tighter-return`, spelled with the authored parameters.
+      def mixed_provenance_candidate(path, def_node, class_name, kind, scope_index, inline, method_def, head) # rubocop:disable Metrics/ParameterLists
+        types = inline.method_types
+        existing = signature_member(method_def, class_name)
+        if existing && parameters_differ?(existing, types, def_node.name, class_name)
+          return skipped(path, def_node, class_name, kind, :inline_differs)
+        end
+
+        inferred, overloads = inferred_overloads(def_node, scope_index, class_name, types)
+        return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil?
+
+        rbs = head + overloads.join(" | ")
+        if existing && annotations_present?(existing, inline) && existing_types(existing, def_node.name)
+          return compare_against_declared(path, def_node, class_name, kind, inferred, method_def, rendered: rbs)
+        end
+
         inline_candidate(path, class_name, def_node.name, kind, rbs, inline, method_def, inferred)
       end
 
@@ -973,15 +990,11 @@ module Rigor
       # Whether a `sig/` member's overloads, returns aside, differ from the inline declaration's. Such a member is
       # refused even under `--overwrite` when the inline return is to be inferred (see {#inline_def_candidate});
       # deleting the `sig/` member lets the next run infer it under the inline parameters.
-      def parameters_differ?(existing, types)
-        return false unless existing.is_a?(::RBS::AST::Members::MethodDefinition)
-
-        written = member_types(existing.location&.source)
+      def parameters_differ?(existing, types, method_name, class_name)
+        written = existing_types(existing, method_name)
         return false if written.nil?
 
-        placeholder = ::RBS::Parser.parse_type(INFERRED_RETURN_PLACEHOLDER)
-        canonical(written.map { |mt| with_return_type(mt, placeholder) }) !=
-          canonical(types.map { |mt| with_return_type(mt, placeholder) })
+        !equivalence(class_name).same_parameters?(written, types)
       end
 
       def initialize_def?(def_node, kind)
@@ -1031,19 +1044,23 @@ module Rigor
         if existing.nil?
           build_candidate(**fields, classification: Classification::NEW_METHOD, rbs: rbs,
                                     declared_annotations: inline.annotation_lines)
-        elsif current_copy?(existing, rbs, inline)
+        elsif current_copy?(existing, rbs, inline, method_name, class_name)
           build_candidate(**fields, classification: Classification::EQUIVALENT)
         elsif @overwrite
-          build_candidate(**fields, classification: Classification::INLINE_OVERWRITE, rbs: rbs,
+          # An `attr_*` member is replaced in its own spelling, by the inline attribute's.
+          line = attr_member?(existing) && inline.attr_line ? inline.attr_line : rbs
+          build_candidate(**fields, classification: Classification::INLINE_OVERWRITE, rbs: line,
                                     declared_annotations: inline.annotation_lines,
-                                    declared_rbs: squish(existing.location.source))
+                                    declared_rbs: squish(existing.location&.source))
         else
           build_candidate(**fields, classification: Classification::SKIPPED, skip_reason: :inline_differs)
         end
       end
 
       # The member a project `.rbs` declares for `class_name` itself — not an ancestor's, and not the inline
-      # declaration, whose buffer is the synthesizer's `virtual:` one.
+      # declaration, whose buffer is the synthesizer's `virtual:` one. An `overloading?` member (`def x: … |
+      # ...`) is not a counterpart either: it adds overloads to the inline declaration rather than restating
+      # it, and sig-gen leaves it alone.
       def signature_member(method_def, class_name)
         return nil if method_def.nil?
 
@@ -1051,20 +1068,66 @@ module Rigor
           next unless type_def.defined_in.to_s.delete_prefix("::") == class_name
 
           member = type_def.member
+          next if member.respond_to?(:overloading?) && member.overloading?
+
           member unless member.location&.buffer&.name.to_s.start_with?("virtual:")
         end.first
       end
 
-      # The two declarations are compared as RBS types, whitespace-insensitive and blind to a leading `::` (the
-      # `sig/` side is often written with absolute names, the inline side never is), and the copy must carry
-      # every annotation the author wrote inline. A `sig/` member the writer cannot replace (an `attr_*`
-      # spelling), or whose text is unavailable, is left as it is rather than refused for good.
-      def current_copy?(member, rbs, inline)
-        written = member.is_a?(::RBS::AST::Members::MethodDefinition) ? member_types(member.location&.source) : nil
-        return true if written.nil?
+      # The two declarations are compared as types ({DeclarationEquivalence}): parameter names, union spelling
+      # and a leading `::` that resolves to the same constant do not count; overload order does. The copy must
+      # also carry every annotation the author wrote inline. A `sig/` member whose text is unavailable is left
+      # as it is rather than refused for good.
+      def current_copy?(member, rbs, inline, method_name, class_name)
+        written = existing_types(member, method_name)
+        mine = member_types(rbs)
+        return true if written.nil? || mine.nil?
 
-        canonical(written) == canonical(member_types(rbs)) &&
-          (inline.annotations - member.annotations.map { |annotation| annotation.string.to_s.strip }).empty?
+        equivalence(class_name).same?(written, mine) && annotations_present?(member, inline)
+      end
+
+      def annotations_present?(member, inline)
+        (inline.annotations - member.annotations.map { |annotation| annotation.string.to_s.strip }).empty?
+      end
+
+      def attr_member?(member)
+        member.is_a?(::RBS::AST::Members::AttrReader) || member.is_a?(::RBS::AST::Members::AttrWriter) ||
+          member.is_a?(::RBS::AST::Members::AttrAccessor)
+      end
+
+      # The overloads a `sig/` member declares for `method_name`: a `def`'s, parsed from its own text; an
+      # attribute's reader (`() -> T`) or writer (`(T) -> T`), from its type.
+      def existing_types(member, method_name)
+        return member_types(member.location&.source) if member.is_a?(::RBS::AST::Members::MethodDefinition)
+        return nil unless attr_member?(member)
+
+        shape = method_name.to_s.end_with?("=") ? "(#{member.type}) -> #{member.type}" : "() -> #{member.type}"
+        [::RBS::Parser.parse_method_type(shape)]
+      rescue ::RBS::BaseError
+        nil
+      end
+
+      def equivalence(class_name)
+        @equivalence ||= {}
+        @equivalence[class_name] ||= DeclarationEquivalence.new(resolve: type_name_resolver(class_name))
+      end
+
+      # A type name as written, resolved the way RBS resolves it inside `class_name`'s declaration: an absolute
+      # `::Foo` is `Foo`; a relative `Foo` is the innermost `…::Foo` the environment knows, so inside `module NS`
+      # it is `NS::Foo` when `NS` declares one, and `::Foo` only when it does not.
+      def type_name_resolver(class_name)
+        nesting = class_name.split("::")
+        lambda do |name|
+          next name.delete_prefix("::") if name.start_with?("::")
+
+          nesting.size.downto(1).map { |n| (nesting.first(n) + [name]).join("::") }
+                 .find { |candidate| class_known?(candidate) } || name
+        end
+      end
+
+      def class_known?(name)
+        @class_known ||= {}
+        @class_known.fetch(name) { @class_known[name] = Reflection.rbs_class_known?(name, environment: @environment) }
       end
 
       # A member line's overloads, parsed with type names unresolved so the two sides compare as written.
@@ -1076,10 +1139,6 @@ module Rigor
         parsed.is_a?(::RBS::AST::Members::MethodDefinition) ? parsed.overloads.map(&:method_type) : nil
       rescue ::RBS::BaseError
         nil
-      end
-
-      def canonical(method_types)
-        squish(Array(method_types).join(" | ")).gsub(/(?<![\w:])::(?=[A-Z])/, "")
       end
 
       def squish(text)
@@ -1141,11 +1200,15 @@ module Rigor
       VOID_RETURN_RBS = "void"
       private_constant :VOID_RETURN_RBS
 
-      def compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
+      # @param rendered — the line a proposal is spelled as when it is not the ordinary inferred one: a
+      #   parameter-only inline annotation keeps its authored parameters ({#mixed_provenance_candidate}).
+      def compare_against_declared(path, def_node, class_name, kind, inferred, method_def, rendered: nil)
         return equivalent(path, def_node, class_name, kind, inferred, VOID_RETURN_RBS) if declares_void?(method_def)
 
         declared = build_declared_return(method_def)
-        return declared_untyped_candidate(path, def_node, class_name, kind, inferred) if declared_untyped?(declared)
+        if declared_untyped?(declared)
+          return declared_untyped_candidate(path, def_node, class_name, kind, inferred, rendered: rendered)
+        end
 
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = inferred.erase_to_rbs
@@ -1166,7 +1229,7 @@ module Rigor
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
           declared_return_rbs: declared_rbs,
-          rbs: render_rbs_line(def_node, inferred, class_name, kind)
+          rbs: rendered || render_rbs_line(def_node, inferred, class_name, kind)
         )
       end
 
@@ -1209,7 +1272,7 @@ module Rigor
       # `untyped` return carries no information to weigh {#tighter?} or {#literal_decline?} against, the same
       # position a method with no declaration at all is in. `declared_return_rbs` still carries `"untyped"` so
       # `--diff` and the `[tighter, was: untyped]` print tag tell the reader a declaration existed.
-      def declared_untyped_candidate(path, def_node, class_name, kind, inferred)
+      def declared_untyped_candidate(path, def_node, class_name, kind, inferred, rendered: nil)
         build_candidate(
           path: path,
           class_name: class_name,
@@ -1218,7 +1281,7 @@ module Rigor
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
           declared_return_rbs: "untyped",
-          rbs: render_rbs_line(def_node, inferred, class_name, kind)
+          rbs: rendered || render_rbs_line(def_node, inferred, class_name, kind)
         )
       end
 

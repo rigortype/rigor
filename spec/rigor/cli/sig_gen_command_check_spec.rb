@@ -152,9 +152,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(sig_gen("--check", "--overwrite").first).to eq(1)
   end
 
-  # Review probe `f1` of #1422: a reviewed, hand-widened return on a parameter-only annotation disagrees with
-  # the inline line, so it is refused — not narrowed — and sig/ stays byte-identical.
-  it "refuses a hand-widened return on a parameter-only annotation, leaving sig/ untouched" do
+  # Review probe `f1` of #1422: a parameter-only annotation authors the parameters only, so a reviewed,
+  # hand-widened return in sig/ is an ordinary declaration the inferred one is weighed against — kept as
+  # `equivalent` by the lenience guards, or a `tighter-return` --write declines without --overwrite.
+  it "leaves a hand-widened return on a parameter-only annotation alone unless --overwrite asks" do
     write("lib/chain.rb", <<~RUBY)
       class Chain
         # @rbs x: Integer
@@ -167,9 +168,40 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     sig = "class Chain\n  def c: (Integer x) -> Numeric\n  def pair: (String name) -> Array[String]\nend\n"
     write("sig/chain.rbs", sig)
 
-    expect(sig_gen("--write", "lib/chain.rb").first).to eq(1)
+    expect(sig_gen("--write", "lib/chain.rb").first).to eq(0)
     expect(File.read(File.join(root, "sig/chain.rbs"))).to eq(sig)
-    expect(sig_gen("--check", "lib/chain.rb").first).to eq(1)
+    expect(sig_gen("--check", "lib/chain.rb").first).to eq(0)
+    expect(sig_gen("--check", "--overwrite", "lib/chain.rb").first).to eq(1)
+  end
+
+  # Final review of #1422 (probe `at`): an `attr_*` declaration in sig/ is compared, refused, and under
+  # --overwrite replaced whole in the inline attribute's own spelling — an accessor once, not twice.
+  it "refuses a differing attr_* declaration, and --overwrite replaces it in attr_* spelling" do
+    write("lib/a.rb", <<~RUBY)
+      class A
+        attr_reader :p #: String
+        attr_accessor :r #: String
+
+        # @rbs %a{pure}
+        #: () -> Integer
+        def cm = 1
+      end
+    RUBY
+    sig = "class A\n  attr_reader p: Integer\n  attr_accessor r: Integer\n\n  # a note about cm\n  %a{deprecated}\n  " \
+          "def cm: () -> String\nend\n"
+    write("sig/a.rbs", sig)
+
+    status, out, = sig_gen("--write", "--format=json", "lib/a.rb")
+    expect(status).to eq(1)
+    expect(JSON.parse(out)["refused"].map { |r| r["method"] }).to contain_exactly("p", "r", "r=", "cm")
+    expect(File.read(File.join(root, "sig/a.rbs"))).to eq(sig)
+
+    expect(sig_gen("--write", "--overwrite", "lib/a.rb").first).to eq(0)
+    expect(File.read(File.join(root, "sig/a.rbs"))).to eq(
+      "class A\n  attr_reader p: String\n  attr_accessor r: String\n\n  # a note about cm\n  %a{pure}\n  " \
+      "%a{deprecated}\n  def cm: () -> Integer\nend\n"
+    )
+    expect(sig_gen("--check", "lib/a.rb").first).to eq(0)
   end
 
   # Review probes `a3` / `a4` of #1422 (round 3): `--overwrite` replaces the whole member, so a method type

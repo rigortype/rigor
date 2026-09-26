@@ -1207,6 +1207,73 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` reader narrows `$_` while the file shows no `self` whose
+  # reader may be written in Ruby.
+  describe "fixtures/lastline_implicit_self.rb — an implicit-self reader narrows `$_` on the file's evidence (#1415)" do
+    let(:harness) { harness_for("lastline_implicit_self") }
+
+    it "narrows on `main` and a plain ancestry, and declines on every `self` that may hold a Ruby reader" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The defensive reads stay quiet, and the dead tail after the loop is the one report the narrowing earns. The exact
+    # `[line, rule]` set keeps the quiet half from passing because the rule stopped firing at all.
+    it "reports only the marked dead condition, and nothing on the marked defensive reads" do
+      expect(marked_lines(harness, "# QUIET-1415").size).to eq(9)
+      fired = harness.source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1415 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+      reported = harness.diagnostics.reject { |d| d.rule.to_s == "call.unresolved-toplevel" }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to eq(fired)
+    end
+  end
+
+  # Each shape that may change the reader `main` or `Object` reaches declines every implicit-self reader in its file,
+  # so each lives in an entry of its own, run through the runner as `rigor check` runs it (its default libraries load
+  # `CSV`, `Tempfile` and `delegate`). `ruby_line_reader.rb` is the Ruby support each entry requires; no entry is
+  # analysed with it.
+  describe "fixtures/lastline_self_evidence/ — the counter-evidence about `self` a file shows (#1415)",
+           type: :runner do
+    entries = %w[
+      self_mixin_include.rb self_mixin_extend.rb self_mixin_using.rb self_mixin_send.rb self_mixin_singleton_body.rb
+      self_mixin_singleton_class.rb self_mixin_toplevel_binding.rb self_mixin_object.rb self_mixin_object_reopen.rb
+      self_mixin_kernel.rb self_mixin_basic_object.rb self_reader_def.rb self_reader_singleton_method.rb
+      self_reader_delegator.rb self_proc_rebinder.rb self_stdin_readline.rb
+    ].freeze
+
+    def entry_source(name) = File.read(File.join(__dir__, "fixtures/lastline_self_evidence", name))
+    def mismatches(result) = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
+
+    entries.then do |names|
+      it "covers every entry in the directory" do
+        listed = Dir.children(File.join(__dir__, "fixtures/lastline_self_evidence")) - ["ruby_line_reader.rb"]
+        expect(listed.sort).to eq(names.sort)
+      end
+    end
+
+    entries.each do |entry|
+      it "declines the implicit-self readers #{entry} marks, and keeps its control" do
+        source = entry_source(entry)
+        expect(source).to include('assert_type("Dynamic[top]", $_)').and include('assert_type("String", $_)')
+        expect(mismatches(analyze(source))).to be_empty
+      end
+    end
+
+    # The runner evaluates each assertion, so a decline read as `String` would report.
+    it "reports an assertion the decline contradicts" do
+      source = entry_source("self_mixin_include.rb").gsub('assert_type("Dynamic[top]", $_)',
+                                                          'assert_type("String", $_)')
+      expect(mismatches(analyze(source)).size).to eq(2)
+    end
+
+    it "runs the main fixture through the runner with the default libraries loaded" do
+      source = File.read(File.join(__dir__, "fixtures/lastline_implicit_self.rb"))
+      expect(mismatches(analyze(source))).to be_empty
+    end
+  end
+
   describe "fixtures/errinfo_status.rb — `$!` / `$@` in a rescue clause and `$?` after a subprocess (#1360)" do
     let(:harness) { harness_for("errinfo_status") }
 

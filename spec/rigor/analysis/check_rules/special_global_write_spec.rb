@@ -197,21 +197,34 @@ RSpec.describe "special global writes", type: :runner do
         "class Integer\n  attr_accessor :write\nend\n" => "$stdout = 1",
         "class Integer\n  extend Forwardable\n  def_delegator :to_s, :to_str\nend\n" => "$0 = 1",
         "class Integer\n  delegate_missing_to :to_s\nend\n" => "$0 = 1",
-        "Object.send(:define_method, :write) { |*| 0 }\n" => "$stdout = 1",
-        "Integer.module_eval(\"def write(*) = 0\")\n" => "$stdout = 1",
+        "k = Integer\nk.send(:define_method, :write) { |*| 0 }\n" => "$stdout = 1",
+        "k = Integer\nk.module_eval(\"def write(*) = 0\")\n" => "$stdout = 1",
         "class Recorder\n  def write(*) = 0\nend\n" => "$stdout = 1"
       }.each { |patch, write| expect_quiet(patch, write) }
     end
 
+    # A non-constant receiver keeps each out of the ancestor's rewritten-surface mark, so the census alone declines.
     it "declines on a definition whose name no literal spells" do
-      expect_quiet("class Integer\n  %i[write].each { |name| define_method(name) { |*| 0 } }\nend\n", "$stdout = 1")
-      expect_quiet("name = :write\nInteger.class_eval(\"def \#{name}(*) = 0\")\n", "$stdout = 1")
+      expect_quiet("name = :write\nk = Integer\nk.define_method(name) { |*| 0 }\n", "$stdout = 1")
+      expect_quiet("name = :write\nk = Integer\nk.class_eval(\"def \#{name}(*) = 0\")\n", "$stdout = 1")
       expect_quiet("class Integer\n  attr_reader(*%i[write])\nend\n", "$stdout = 1")
+      expect_quiet("include(const_get(:Nowhere))\n", "$stdout = 1")
     end
 
     it "still reports when the program defines only other names" do
-      source = "class Integer\n  def writer(*) = 0\n  alias_method :to_string, :to_s\nend\n$stdout = 1\n$0 = 1\n"
-      expect(fired(source)).to eq([[5, "global.write-type-mismatch"], [6, "global.write-type-mismatch"]])
+      source = <<~RUBY
+        class Integer
+          def writer(*) = 0
+          alias_method :to_string, :to_s
+          extend Forwardable
+          delegate [:size] => :to_s
+        end
+        k = Integer
+        k.class_eval("def size_in_words = 0")
+        $stdout = 1
+        $0 = 1
+      RUBY
+      expect(fired(source)).to eq([[9, "global.write-type-mismatch"], [10, "global.write-type-mismatch"]])
     end
 
     it "declines on a receiver-form rewrite of an ancestor" do

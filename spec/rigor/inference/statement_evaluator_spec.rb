@@ -3785,6 +3785,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$_)).to eq(nil_t)
     end
 
+    # The implicit-self `gets` declines for want of a file index's evidence about `self` (issue #1415).
     it "leaves `$_` unbound after a reader that is not a condition, and on an untyped receiver's condition" do
       reads, = last_line_reads(<<~RUBY)
         if $stdin.gets

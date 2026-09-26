@@ -1,0 +1,1 @@
+- **[engine]** A write to a global the interpreter sets, such as `$VERBOSE = true` or `$stdout = StringIO.new`, no longer replaces its built-in type in the file's methods: the write widens the declared type, so `warn "x" if $VERBOSE` is no longer reported as always truthy. ([#1433](https://github.com/rigortype/rigor/pull/1433))

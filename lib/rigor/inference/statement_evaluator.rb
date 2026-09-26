@@ -1853,19 +1853,22 @@ module Rigor
       #
       # Issue #1415 — the clause also runs after a `return`, `break` or `next` out of the body, from a scope other than
       # the one it enters with here, so a bound `$_` reads `Dynamic[top]` in it (`while gets; return $_ if …; end`
-      # ensures with the line, not the loop's `nil`). Past the clause `$_` is what it entered with unless the clause
-      # may set it.
+      # ensures with the line, not the loop's `nil`). Past the clause `$_` is what it entered with, but only where the
+      # clause left that `Dynamic[top]` in place and cannot set `$_` itself: a call the statement rules forget `$_` for
+      # (a closure of the frame, `binding`, a forwarded block) leaves it unbound, and the clause's scope then stands.
       def eval_ensure(node)
-        entry = scope.forget_error_info.forget_last_status.untyped_last_line
+        entry = scope.forget_error_info.forget_last_status
+        bound = scope.last_line_bound?
+        entry = entry.untyped_last_line if bound
         type, after = eval_branch_or_nil(node.statements, entry)
-        after = restore_last_line(after) unless LastLine.may_set?(node.statements, scope)
+        after = after.with_global(:$_, scope.global(:$_)) if bound && last_line_kept?(after, node)
         [type, LastStatus.restore_unless_set(ErrorInfo.restore(after, scope), scope)]
       end
 
-      # `after` with `$_` as this evaluator's scope binds it, or unbound where the scope leaves it unbound.
-      def restore_last_line(after)
-        bound = scope.global(:$_)
-        bound.nil? ? after.forget_last_line : after.with_global(:$_, bound)
+      # True when the clause's scope `after` still binds `$_` to the `Dynamic[top]` the entry gave it and the clause
+      # holds nothing that may set it ({LastLine.may_set?}).
+      def last_line_kept?(after, node)
+        after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
       end
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names

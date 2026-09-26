@@ -3791,6 +3791,14 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$_)).to be_nil
     end
 
+    # A call the statement rules forget `$_` for (here one in a frame that makes a closure that may read) leaves it
+    # unbound in the clause, and the entry binding is not put back past it.
+    it "keeps `$_` unbound past an `ensure` clause whose call may run a reader of the frame" do
+      source = "hook = -> { $stdin.gets }\nif $stdin.gets\n  begin\n    1\n  ensure\n    fire\n  end\n  $_\nend\n"
+      reads, = last_line_reads(source)
+      expect(reads).to eq([nil])
+    end
+
     it "narrows `$_` on a reader condition's edges and leaves it nil after a `while gets` loop" do
       reads, post = last_line_reads(<<~RUBY)
         if $stdin.gets then $_ else $_ end

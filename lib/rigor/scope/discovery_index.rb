@@ -48,7 +48,8 @@ module Rigor
       :run_generation,
       :patched_line_readers,
       :clears_last_status,
-      :defines_case_equality
+      :defines_case_equality,
+      :implicit_self_evidence
     )
 
     class DiscoveryIndex
@@ -274,7 +275,12 @@ module Rigor
         # name is `===` (`Inference::ErrorInfo.defines_case_equality?`), which may give a class the singleton `===`
         # `rescue` matches with; the class it lands on is not recorded, so no rescued class binds `$!` in the file.
         # Filled by `Inference::ScopeIndexer.index` from the file's own tree only.
-        defines_case_equality: false
+        defines_case_equality: false,
+        # Issue #1415 — the file's evidence about the `self` its implicit-self `gets` / `readline` readers run with
+        # (`Inference::LastLine::SelfEvidence`, read on the first ask), which `Inference::LastLine.reads_line?` reads
+        # them by. Filled by `Inference::ScopeIndexer.index` from the file's own tree only; nil, where no file was
+        # indexed, declines every such reader.
+        implicit_self_evidence: nil
       )
     end
   end

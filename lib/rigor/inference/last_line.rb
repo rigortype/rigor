@@ -77,24 +77,28 @@ module Rigor
       # `ARGF` read so by their types, and a project constant that shadows either reads by its own). A receiver typed
       # `IO` or `File` that is a subclass instance at runtime is read as the class it is typed as.
       #
-      # An implicit-self or `self.` reader never is: `self` may be any object whose `gets` is Ruby's. A top-level
-      # method runs with whatever `self` calls it, `main` can carry a mixin or a singleton method (`include
-      # Readline`, `class << self`, `def self.gets`), and a file can run under a wrapper module (`load(file, M)`) or
-      # `instance_eval`. Nor is any reader of a name the program defines or patches in anywhere
+      # Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` `gets` is one while the file shows no `self` whose
+      # reader may be Ruby's ({ImplicitSelf.reader?}). An implicit-self `readline` is not yet: it never returns
+      # falsey, so a `while readline` loop leaves only through a `break` or its `EOFError`, but the scope after the
+      # loop still joins the scope the body started from, where its narrowed line would report correct code.
+      #
+      # No reader is one whose name the program defines or patches in anywhere
       # ({BlockCallTiming.project_defines_anywhere?}): a reopened `IO` or `Kernel`, or a project object bound to
       # `$stdin` in another file, runs the program's Ruby method, which sets its own frame's `$_`.
       def reads_line?(call_node, scope)
         return false unless call_node.is_a?(Prism::CallNode) && READERS.include?(call_node.name)
+        return false unless call_node.block.nil?
+
+        name = call_node.name
+        return false if BlockCallTiming.project_defines_anywhere?(name, scope)
+        return false if scope.discovery.patched_line_readers.include?(name)
 
         receiver = call_node.receiver
-        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode) || !call_node.block.nil?
-        return false if BlockCallTiming.project_defines_anywhere?(call_node.name, scope)
-        return false if scope.discovery.patched_line_readers.include?(call_node.name)
-
-        if receiver.is_a?(Prism::GlobalVariableReadNode)
-          reader_global?(receiver.name, call_node.name, scope)
-        else
-          reader_receiver?(scope.type_of(receiver), call_node.name, scope)
+        case receiver
+        when nil, Prism::SelfNode
+          name == :gets && ImplicitSelf.reader?(call_node, scope)
+        when Prism::GlobalVariableReadNode then reader_global?(receiver.name, name, scope)
+        else reader_receiver?(scope.type_of(receiver), name, scope)
         end
       rescue StandardError
         false
@@ -332,3 +336,5 @@ module Rigor
     end
   end
 end
+
+require_relative "last_line/implicit_self"

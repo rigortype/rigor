@@ -19,9 +19,9 @@ assert_type('"top"', $_)
 def fresh = assert_type("Dynamic[top]", $_)
 
 # The loop body runs only when `gets` returned a line, so `$_` is that line (Ruby: the line), and the loop exits
-# when `gets` returns nil (Ruby: nil). Written with an implicit-self `gets`, as the issue has it, the reader proves
-# nothing: `self` may be any object whose `gets` is Ruby's (a top-level method runs with whatever `self` calls it,
-# as `Importer#import` below shows), so `$_` stays unbound. On `$stdin` it narrows.
+# when `gets` returns nil (Ruby: nil). This file includes `Rigor::Testing` into `main`, a mixin that may bring a Ruby
+# reader, so no implicit-self reader in it narrows `$_` (issue #1415; `lastline_implicit_self.rb` holds the shapes
+# that do). On `$stdin` it narrows.
 def lines
   while gets
     assert_type("Dynamic[top]", $_)
@@ -239,11 +239,11 @@ def unentered_block(items)
   end
 end
 
-# An implicit-self reader never narrows. Inside a class it may be one the ancestry defines in Ruby: a class built on
-# `DelegateClass(File)` records no superclass, and its `gets` is a Ruby forwarder (Ruby: nil, the forwarder's frame
-# took the line), and so does a block whose `self` `instance_exec` rebinds to one. A top-level method called on a
-# `CSV` reads `CSV#gets`, an alias of its Ruby `shift` (Ruby: `Importer.new(file).import` runs the first loop of
-# `lines` once per row and reads nil there). A plain class narrows nothing either (Ruby: the line).
+# No implicit-self reader in this file narrows, for the `include Rigor::Testing` above. A class built on
+# `DelegateClass(File)` would decline anyway: its `gets` is a Ruby forwarder (Ruby: nil, the forwarder's frame took
+# the line), and so is the reader of a block whose `self` `instance_exec` rebinds to one. A top-level method called
+# on a `CSV` reads `CSV#gets`, an alias of its Ruby `shift` (Ruby: `Importer.new(file).import` runs the first loop of
+# `lines` once per row and reads nil there), which ADR-117 WD4 assumes away. A plain class reads the line in Ruby.
 class DelegatedSource < DelegateClass(File)
   def first
     assert_type("Dynamic[top]", $_) if gets
@@ -476,9 +476,8 @@ def quiet_checked_elsewhere
   copy = $_
   copy.chomp # QUIET-1359
 end
-# The script body reads an implicit-self reader the same way: `main` can carry a mixin or a singleton `gets`, and a
-# file can run under `load(file, Wrapper)` or `instance_eval` (Ruby, run with `read` as the first argument: the
-# line, then nil). A `$stdin` reader narrows there as anywhere (Ruby: the line).
+# The script body declines its implicit-self readers the same way, `main` carrying this file's mixin (Ruby, run with
+# `read` as the first argument: the line, then nil). A `$stdin` reader narrows there as anywhere (Ruby: the line).
 if ARGV.first == "read"
   while gets
     assert_type("Dynamic[top]", $_)

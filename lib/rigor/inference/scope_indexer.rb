@@ -2132,7 +2132,9 @@ module Rigor
       # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
       # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
       # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
-      # Issue #1367 — and the file's {GlobalWriteCensus}, which the `global.*` write rules read.
+      # Issue #1415 — the census also carries the file's evidence about the `self` of its implicit-self readers
+      # ({LastLine::SelfEvidence}), which walks the file only when a reader condition first asks. Issue #1367 — and the
+      # file's {GlobalWriteCensus}, which the `global.*` write rules read.
       # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
@@ -2140,6 +2142,7 @@ module Rigor
                    write_census: GlobalWriteCensus::Collector.new }
         gather_global_writes(root, default_scope, accumulator, census)
         census[:patched_line_readers] = census[:patched_line_readers].freeze
+        census[:implicit_self_evidence] = LastLine::SelfEvidence.new(root)
         [accumulator.freeze, census]
       end
 

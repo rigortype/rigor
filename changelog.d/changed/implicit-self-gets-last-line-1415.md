@@ -1,0 +1,4 @@
+- **[engine]** An implicit-self or `self.` `gets` condition now narrows `$_` the way `$stdin.gets` does, so `while gets; $_; end` reads `String` inside the loop and `nil` after it. ([#1449](https://github.com/rigortype/rigor/pull/1449))
+  - The narrowing is declined when the file shows that `self`'s reader may be written in Ruby: a mixin into `main`, `Object` or a core class, a reader defined on `main`, a block that rebinds `self` (`instance_eval`, `class_exec`, `define_method`, …), or a class whose ancestry may hold a Ruby reader (`DelegateClass(File)`, `Tempfile`, `CSV`, an unresolved superclass or mixin).
+  - An `ensure` clause reads a narrowed `$_` as untyped, because it also runs after a `return` out of the loop.
+  - An implicit-self `readline` does not narrow yet ([#1458](https://github.com/rigortype/rigor/issues/1458)).

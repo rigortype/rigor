@@ -3772,6 +3772,33 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       [reads, post]
     end
 
+    # Issue #1415 — an `ensure` clause also runs after a `return`, `break` or `next` out of the body, from another
+    # scope, so it reads a bound `$_` as `Dynamic[top]`; past it `$_` is what the clause entered with, unless the clause
+    # may set it.
+    it "reads `$_` as `Dynamic[top]` in an `ensure` clause, and keeps it past a clause that cannot set it" do
+      reads, post = last_line_reads(<<~RUBY)
+        begin
+          while $stdin.gets
+          end
+        ensure
+          $_
+        end
+      RUBY
+      expect(reads).to eq([Rigor::Type::Combinator.untyped])
+      expect(post.global(:$_)).to eq(nil_t)
+
+      _, post = last_line_reads("begin\n  while $stdin.gets\n  end\nensure\n  gets\nend\n")
+      expect(post.global(:$_)).to be_nil
+    end
+
+    # A call the statement rules forget `$_` for (here one in a frame that makes a closure that may read) leaves it
+    # unbound in the clause, and the entry binding is not put back past it.
+    it "keeps `$_` unbound past an `ensure` clause whose call may run a reader of the frame" do
+      source = "hook = -> { $stdin.gets }\nif $stdin.gets\n  begin\n    1\n  ensure\n    fire\n  end\n  $_\nend\n"
+      reads, = last_line_reads(source)
+      expect(reads).to eq([nil])
+    end
+
     it "narrows `$_` on a reader condition's edges and leaves it nil after a `while gets` loop" do
       reads, post = last_line_reads(<<~RUBY)
         if $stdin.gets then $_ else $_ end
@@ -3785,6 +3812,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$_)).to eq(nil_t)
     end
 
+    # The implicit-self `gets` declines for want of a file index's evidence about `self` (issue #1415).
     it "leaves `$_` unbound after a reader that is not a condition, and on an untyped receiver's condition" do
       reads, = last_line_reads(<<~RUBY)
         if $stdin.gets

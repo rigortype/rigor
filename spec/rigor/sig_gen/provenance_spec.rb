@@ -174,6 +174,8 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # so `Scope#singleton_def_through_ancestors`'s `queue.shift` after `enqueue_ancestors(current, queue, …)` reads
 # `untyped` where the seed read `String` — correct at runtime, so a precision loss — and the row joins
 # `declared_divergent` (`scope.rbs` +1; the reason is at its pin).
+# 711 since #1449. `DiscoveryIndex` gains the `implicit_self_evidence` member, whose `Data` row is residue as
+# every member row of that class is (`scope.rbs` +1; the reason is at its pin).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -308,7 +310,10 @@ SIG_PROVENANCE_RESIDUE = {
   # the seed `[class_name.to_s]` was right: this is a precision loss the callee floor causes, not a
   # correction. `user_def_through_ancestors` (already residue) loses its `[Prism::DefNode, String]` arm the
   # same way.
-  "sig/rigor/scope.rbs" => 112,
+  # +1 (#1449): the new `DiscoveryIndex#implicit_self_evidence` `Data` member is `synthetic_source`
+  # residue, like every member row of that class (#1150). It is declared `untyped` because its value, an
+  # `Inference::LastLine::SelfEvidence`, carries no signature.
+  "sig/rigor/scope.rbs" => 113,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

@@ -77,9 +77,10 @@ module Rigor
       # `ARGF` read so by their types, and a project constant that shadows either reads by its own). A receiver typed
       # `IO` or `File` that is a subclass instance at runtime is read as the class it is typed as.
       #
-      # Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` reader is one while the file shows no `self` whose
-      # reader may be Ruby's ({ImplicitSelf.reader?}). `Kernel#readline` reads through `$stdin` (`ARGF.readline`
-      # hands a non-`File` input its own `readline`), so it also needs `$stdin` bound to nothing but a reader.
+      # Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` `gets` is one while the file shows no `self` whose
+      # reader may be Ruby's ({ImplicitSelf.reader?}). An implicit-self `readline` is not yet: it never returns
+      # falsey, so a `while readline` loop leaves only through a `break` or its `EOFError`, but the scope after the
+      # loop still joins the scope the body started from, where its narrowed line would report correct code.
       #
       # No reader is one whose name the program defines or patches in anywhere
       # ({BlockCallTiming.project_defines_anywhere?}): a reopened `IO` or `Kernel`, or a project object bound to
@@ -95,7 +96,7 @@ module Rigor
         receiver = call_node.receiver
         case receiver
         when nil, Prism::SelfNode
-          ImplicitSelf.reader?(call_node, scope) && (name == :gets || reader_global?(:$stdin, name, scope))
+          name == :gets && ImplicitSelf.reader?(call_node, scope)
         when Prism::GlobalVariableReadNode then reader_global?(receiver.name, name, scope)
         else reader_receiver?(scope.type_of(receiver), name, scope)
         end

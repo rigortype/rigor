@@ -45,7 +45,9 @@ RSpec.describe Rigor::Inference::LastLine::SelfEvidence do
      "Struct.new(:a) { def x = gets }", "Data.define(:a) { def x = gets }", "[1].each { def x = gets }",
      "o.instance_eval { def x = gets }", "class << obj\n  def x = gets\nend", "def obj.x = gets",
      "module M\n  def x = gets\nend", "module M\n  module_function\n  def x = gets\nend",
-     "o.send(:instance_eval) { gets }", "o.public_send(name) { gets }"].each do |source|
+     "o.send(:instance_eval) { gets }", "o.public_send(name) { gets }",
+     "class A\n  def setup\n    class << self\n      def x = gets\n    end\n  end\nend",
+     "def m\n  def n = gets\nend"].each do |source|
       expect(context_of(source)).to be_nil, source
     end
   end
@@ -56,7 +58,10 @@ RSpec.describe Rigor::Inference::LastLine::SelfEvidence do
      "class A\n  def initialize = extend(M)\n  def x = gets\nend", "class A\n  include(*mods)\n  def x = gets\nend",
      "class A\n  include mod\n  def x = gets\nend", "class A\n  if ok\n    include M\n  end\n  def x = gets\nend",
      "class A\n  class << self\n    include M\n  end\n  def self.x = gets\nend",
-     "class A\n  singleton_class.include(M)\n  def self.x = gets\nend"].each do |source|
+     "class A\n  singleton_class.include(M)\n  def self.x = gets\nend",
+     "class A\n  self.include(M)\n  def x = gets\nend",
+     "module A\n  self.extend(M)\n  def self.x = gets\nend",
+     "class A\n  def initialize = extend(M)\nend\nclass A\n  def x = gets\nend"].each do |source|
       expect(context_of(source)).to be_nil, source
     end
   end
@@ -70,7 +75,9 @@ RSpec.describe Rigor::Inference::LastLine::SelfEvidence do
      "obj.extend(M)", "class Object\n  include M\nend", "module Kernel\n  prepend M\nend", "Object.send(:include, M)",
      "o.instance_eval { include M }", "blk = -> { 1 }\no.instance_exec(&blk)", "define_method(:x, blk)",
      "class A\n  using R\nend", "eval(code)", "Object.class_eval('include M')", "binding.eval(src)",
-     "Object.const_set(:W, Class.new(CSV))"].each do |shape|
+     "Object.const_set(:W, Class.new(CSV))", "X.send(:define_method, :m, blk)", "method(:extend).call(M)",
+     "Module.instance_method(:include).bind_call(Object, M)", "o.method(:instance_exec).call { 1 }",
+     "BasicObject.instance_method(:instance_exec).bind_call(o) { 1 }", "public_method(:using)"].each do |shape|
       expect(context_of("#{shape}\nwhile gets; end")).to be_nil, shape
       expect(context_of("while gets; end\n#{shape}")).to be_nil, shape
     end
@@ -85,9 +92,17 @@ RSpec.describe Rigor::Inference::LastLine::SelfEvidence do
     end
   end
 
+  it "keeps a class dirty by its last name segment, for the walk to consult along the ancestry" do
+    evidence = described_class.new(Prism.parse("class A::B < Struct.new(:io); end\nclass C; end").value)
+    expect(evidence.dirty?("A::B")).to be(true)
+    expect(evidence.dirty?("Other::B")).to be(true)
+    expect(evidence.dirty?("C")).to be(false)
+  end
+
   it "keeps the context across a call that only names a reader, and a block argument that runs one" do
     ["respond_to?(:gets)", "io.send(:gets)", "method(:gets)", "ios.each(&:gets)", "o.instance_exec(&:gets)",
-     "o.instance_exec(1, 2) { |a, b| a }", "items.map { |i| i }", "class A\n  include Comparable\nend"].each do |shape|
+     "o.instance_exec(1, 2) { |a, b| a }", "items.map { |i| i }", "class A\n  include Comparable\nend",
+     "method(:puts).call(1)", "X.send(:define_method, :m) { 1 }"].each do |shape|
       expect(context_of("#{shape}\nwhile gets; end")).to eq(described_class::MAIN), shape
     end
   end

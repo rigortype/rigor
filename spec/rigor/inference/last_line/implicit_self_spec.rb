@@ -24,14 +24,14 @@ RSpec.describe Rigor::Inference::LastLine::ImplicitSelf do
 
   # Ruby: the line on each.
   it "narrows on `main` and on a class or module whose ancestry holds only `Kernel`'s or a C reader" do
-    ["while gets; end", "def lines = (1 if gets)", "self.readline", "items.each { gets }",
+    ["while gets; end", "def lines = (1 if gets)", "self.gets", "items.each { gets }",
      "class A\n  def x = gets\nend", "class A\n  def self.x = gets\nend", "module M\n  def self.x = gets\nend",
      "class B; end\nclass A < B\n  def x = gets\nend", "class A\n  include Comparable\n  def x = gets\nend",
-     "class A < File\n  def x = gets\nend", "class A < StringIO\n  def x = readline\nend",
+     "class A < File\n  def x = gets\nend", "class A < StringIO\n  def x = gets\nend",
      "class IO\n  def first_line = gets\nend", "class Object\n  def first_line = gets\nend",
      "module H; end\nclass A\n  include H\n  def x = gets\nend",
      "class B\n  extend Comparable\nend\nclass A < B\n  def self.x = gets\nend",
-     "$stdin = StringIO.new('a')\nreadline"].each do |source|
+     "class IO\n  prepend Comparable\nend\nclass A < File\n  def x = gets\nend"].each do |source|
       expect(reads_line?(source)).to be(true), source
     end
   end
@@ -62,11 +62,41 @@ RSpec.describe Rigor::Inference::LastLine::ImplicitSelf do
     expect(reads_line?("class A\n  include Comparable\n  def x = gets\nend", openssl)).to be(true)
   end
 
-  # `Kernel#readline` reads through `$stdin`, which hands a Ruby object its own `readline` (Ruby: nil), while
   # `Kernel#gets` sets `$_` to the line whatever `$stdin` holds (Ruby: the line).
-  it "declines `readline`, and not `gets`, after the file binds `$stdin` to a non-reader" do
-    expect(reads_line?("$stdin = Object.new\nreadline")).to be(false)
+  it "narrows `gets` after the file binds `$stdin`, and never an implicit-self `readline`" do
     expect(reads_line?("$stdin = Object.new\ngets")).to be(true)
+    expect(reads_line?("readline")).to be(false)
+  end
+
+  # A dirty class stays dirty in a reopening, a subclass and an includer (Ruby with `RubyReader`: nil on each).
+  it "declines where the ancestry reaches a class or module a body of the file makes dirty" do
+    ["class B\n  def initialize = extend(M)\nend\nclass B\n  def x = gets\nend",
+     "class B\n  def initialize = extend(M)\nend\nclass A < B\n  def x = gets\nend",
+     "module M\n  include(*mods)\nend\nclass A\n  include M\n  def x = gets\nend",
+     "class B\n  self.include(M)\nend\nclass B\n  def x = gets\nend",
+     "class B\n  singleton_class.include(M)\nend\nclass B\n  def self.x = gets\nend",
+     "class IO\n  def initialize(*) = extend(M)\nend\nclass A < File\n  def x = gets\nend"].each do |source|
+      expect(reads_line?(source)).to be(false), source
+    end
+  end
+
+  # A mixin into a core ancestor reaches every class below it (Ruby: nil), and one into `Module` every class object.
+  it "declines on a mixin the program writes into an RBS ancestor, or into `Module` for a class object" do
+    expect(reads_line?("class IO\n  prepend RubyReader\nend\nclass A < File\n  def x = gets\nend")).to be(false)
+    expect(reads_line?("class IO\n  prepend RubyReader\nend\nclass A < StringIO\n  def x = gets\nend")).to be(true)
+    expect(reads_line?("class Module\n  include RubyReader\nend\nclass A\n  def self.x = gets\nend")).to be(false)
+    expect(reads_line?("class Module\n  include RubyReader\nend\nclass A\n  def x = gets\nend")).to be(true)
+  end
+
+  # A constant the program writes shadows the core class an ancestor name would reach (Ruby: nil).
+  it "declines an ancestor name the program writes as a constant" do
+    ["module W\n  File = RubyReaderClass\n  class A < File\n    def x = gets\n  end\nend",
+     "module W\n  Comparable = RubyReader\n  class A\n    include Comparable\n    def x = gets\n  end\nend",
+     "File = RubyReaderClass\nclass A < File\n  def x = gets\nend"].each do |source|
+      expect(reads_line?(source)).to be(false), source
+    end
+    seeded = project.with_discovery(project.discovery.with(constant_writers: { "File" => ["Other::File"] }))
+    expect(reads_line?("class A < File\n  def x = gets\nend", seeded)).to be(true)
   end
 
   # A mixin into `Object` another file of the program declares reaches every object (Ruby: nil).

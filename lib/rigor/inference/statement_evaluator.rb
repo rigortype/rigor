@@ -5023,12 +5023,13 @@ module Rigor
         seeded.reduce(body_scope) { |acc, (name, type)| acc.with_cvar(name, type) }
       end
 
-      # Globals are process-wide. The body scope already inherited the program-globals accumulator through
-      # `with_program_globals`; seeding here just materialises each entry into the body's `globals` map so reads observe
-      # a precise type without consulting the accumulator on every lookup. The frame-local `$_` and `$~` are not in it
-      # (issue #1359): a method body starts with a slot of its own.
+      # Globals are process-wide. The body scope already inherited the program-global seeds through its discovery
+      # index; seeding here just materialises each entry into the body's `globals` map so reads observe a precise type
+      # without consulting the index on every lookup. The frame-local `$_` and `$~` are not in it (issue #1359): a
+      # method body starts with a slot of its own. A global Ruby's own signatures declare is seeded with its declared
+      # type joined with the file's writes (issue #1362, `ScopeIndexer#join_declared_globals`).
       def seed_program_globals(body_scope)
-        seeded = scope.program_globals
+        seeded = scope.discovery.program_global_seeds
         return body_scope if seeded.empty?
 
         seeded.reduce(body_scope) { |acc, (name, type)| acc.with_global(name, type) }

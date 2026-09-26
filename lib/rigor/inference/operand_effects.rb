@@ -120,7 +120,8 @@ module Rigor
       private_class_method :outliving_read?
 
       # The locals (bare names), instance variables and globals (sigil-prefixed names, as {CapturedLocals.bind}
-      # reads them) `node` writes on the terms {.any?} counts a write, in first-write order.
+      # reads them) `node` writes on the terms {.any?} counts a write, in first-write order. A global is named by the
+      # key its binding is kept under, so a write to `$>` names `$stdout` ({Scope::GLOBAL_ALIASES}).
       def written_variables(node)
         names = []
         collect_written(node, 0, names) if node.is_a?(Prism::Node)
@@ -153,8 +154,10 @@ module Rigor
         klass = node.class
         if LOCAL_WRITE_NODES.include?(klass)
           names << node.name if node.depth >= nesting
-        elsif INSTANCE_WRITE_NODES.include?(klass) || GLOBAL_WRITE_NODES.include?(klass)
+        elsif INSTANCE_WRITE_NODES.include?(klass)
           names << node.name
+        elsif GLOBAL_WRITE_NODES.include?(klass)
+          names << Scope::GLOBAL_ALIASES.fetch(node.name, node.name)
         end
         return if OPAQUE_NODES.include?(klass)
 

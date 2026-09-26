@@ -750,6 +750,17 @@ module Rigor
       end
     end
 
+    # Issue #1362 — the translated type of the RBS declaration of the global variable `name` (`$stdout: IO` answers
+    # `Nominal[IO]`), or nil when no signature declares it or the environment carries no RBS loader. With
+    # `builtin: true` it answers only for a declaration in Ruby's own core or stdlib signatures, a global the
+    # interpreter sets; a project's or a gem's declaration then answers nil.
+    def global_for_name(name, builtin: false)
+      return nil if rbs_loader.nil?
+      return nil if builtin && !rbs_loader.core_or_stdlib_global?(name)
+
+      rbs_loader.global_type(name)
+    end
+
     # Returns true when the constant name is known to either the static registry or the RBS loader. Useful
     # for callers that only need a presence check without materialising a type carrier.
     def class_known?(name)

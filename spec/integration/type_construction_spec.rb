@@ -1247,6 +1247,37 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1362 (ADR-117 WD1) — a write to a global Ruby's own signatures declare only widens the declared type every
+  # method body starts from. The seeding is per file, so each `$VERBOSE` value lives in an entry of its own.
+  describe "fixtures/interpreter_global_seed/ — a builtin global's seed joins its declared type (#1362)" do
+    let(:entries) do
+      %w[demo.rb verbose_false.rb verbose_nil.rb].to_h do |entry|
+        [entry, Rigor::IntegrationSupport::FixtureHarness.new("interpreter_global_seed", entry: entry)]
+      end
+    end
+
+    it "types each global as its declared type joined with the file's writes" do
+      mismatches = entries.transform_values { |h| h.errors.select { |d| d.message.start_with?("assert_type ") } }
+      expect(mismatches.values.flatten).to be_empty, mismatches.inspect
+    end
+
+    # Must-not-fire / must-still-fire in one assertion: the issue's example and the stream reads stay quiet, and a
+    # global no core or stdlib signature declares — the project's `$declared_flag` included — still folds. The exact
+    # line set keeps the quiet half from passing because the rule stopped firing at all.
+    it "reports only the controls' folds, and nothing on a quiet line" do
+      entries.each do |entry, harness|
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# FIRES-1362").map { |line| [line, "flow.always-truthy-condition"] }), entry
+      end
+    end
+
+    it "marks the quiet lines it claims" do
+      quiet = entries.transform_values { |h| marked_lines(h, "# QUIET-1362").size }
+      expect(quiet).to eq("demo.rb" => 10, "verbose_false.rb" => 1, "verbose_nil.rb" => 2)
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

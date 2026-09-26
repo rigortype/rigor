@@ -15,6 +15,7 @@ module Rigor
       :class_ivars,
       :class_cvars,
       :program_globals,
+      :program_global_seeds,
       :discovered_classes,
       :in_source_constants,
       :discovered_methods,
@@ -110,6 +111,11 @@ module Rigor
         class_ivars: EMPTY_TABLE,
         class_cvars: EMPTY_TABLE,
         program_globals: EMPTY_TABLE,
+        # Issue #1362 — `program_globals`, the union of each global's writes in the file, joined with the declared
+        # type of a global Ruby's own signatures declare (`$VERBOSE: bool?`, `$stdout: IO`): what every method body and
+        # the top level start from. `program_globals` keeps the writes alone for the checks that ask what the file
+        # writes (`$;` for `split`). Filled by `Inference::ScopeIndexer.index` from the file's own tree only.
+        program_global_seeds: EMPTY_TABLE,
         discovered_classes: EMPTY_TABLE,
         in_source_constants: EMPTY_TABLE,
         discovered_methods: EMPTY_TABLE,

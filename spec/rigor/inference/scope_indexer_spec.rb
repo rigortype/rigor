@@ -150,6 +150,41 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         .to eq([nil, nil, nil])
     end
 
+    # Issue #1362 — the interpreter sets a builtin global before any write, and another file may write it, so its
+    # seed is the declared type joined with the file's writes. `program_globals` keeps the writes alone, which the
+    # `split`-on-`$;` check reads.
+    it "joins a builtin global's declared type into its seed, and keeps the writes apart" do
+      program, idx = index_for(<<~RUBY)
+        $VERBOSE = true
+        $; = ","
+        $verbose = true
+        def m = [$VERBOSE, $;, $verbose]
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+      discovery = idx[program].discovery
+
+      expect(discovery.program_globals.transform_values(&:describe))
+        .to eq({ "$VERBOSE": "true", "$;": '","', "$verbose": "true" })
+      expect(discovery.program_global_seeds.transform_values(&:describe))
+        .to eq({ "$VERBOSE": "bool?", "$;": '"," | Regexp | String | nil', "$verbose": "true" })
+      expect(idx[program].global(:$VERBOSE).describe).to eq("bool?")
+      expect(idx[method_body].global(:$VERBOSE).describe).to eq("bool?")
+      expect(idx[method_body].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    # `$>` is `$stdout`: its writes join `$stdout`'s entry, and a read of either name reads it.
+    it "keys a write to `$>` under `$stdout`" do
+      program, idx = index_for(<<~RUBY)
+        $> = 1
+        def m = $stdout
+      RUBY
+      method_body = program.statements.body.last.body.body.first
+
+      expect(idx[program].program_globals.keys).to eq([:$stdout])
+      expect(idx[method_body].global(:$stdout).describe).to eq("1 | IO")
+      expect(idx[method_body].global(:$>)).to equal(idx[method_body].global(:$stdout))
+    end
+
     it "shows branch-internal bindings inside their branch only" do
       program, idx = index_for(<<~RUBY)
         if cond

@@ -530,8 +530,13 @@ module Rigor
       @cvars[name.to_sym]
     end
 
+    # Issue #1362 (ADR-117 WD1) — the names Ruby gives one variable twice, each keyed by the name its binding is kept
+    # under. `$>` is `$stdout`: a write to either sets both, so a binding, a narrowing and the program-global seed
+    # of one are the other's.
+    GLOBAL_ALIASES = { "$>": :$stdout }.freeze
+
     def global(name)
-      @globals[name.to_sym]
+      @globals[global_key(name)]
     end
 
     def with_ivar(name, type)
@@ -650,8 +655,15 @@ module Rigor
     end
 
     def with_global(name, type)
-      rebuild(globals: @globals.merge(name.to_sym => type).freeze)
+      rebuild(globals: @globals.merge(global_key(name) => type).freeze)
     end
+
+    # The name `name`'s binding is kept under ({GLOBAL_ALIASES}).
+    def global_key(name)
+      name = name.to_sym
+      GLOBAL_ALIASES.fetch(name, name)
+    end
+    private :global_key
 
     # Mark `nodes`, index `||=` sites, as ones whose slot an earlier run of a repeating block body may have
     # filled ({EMPTY_REPEATED_OR_WRITES}).

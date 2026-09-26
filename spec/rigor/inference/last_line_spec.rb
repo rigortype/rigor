@@ -88,6 +88,25 @@ RSpec.describe Rigor::Inference::LastLine do
         .to be(false)
     end
 
+    # Issue #1362 (ADR-117 WD1) — a `$stdin` the file writes is seeded with its declared `IO` joined with the written
+    # value, which counts while every member of the union is a core reader's class.
+    it "reads a `$stdin` joined from core readers as a reader, and one with any other member as none" do
+      project = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: []))
+      read = last_statement("$stdin.gets")
+      io = Rigor::Type::Combinator.nominal_of("IO")
+      joined = lambda do |*names|
+        members = names.map { |name| Rigor::Type::Combinator.nominal_of(name) }
+        project.with_global(:$stdin, Rigor::Type::Combinator.union(io, *members))
+      end
+
+      expect(described_class.reads_line?(read, joined.call("StringIO"))).to be(true)
+      expect(described_class.reads_line?(read, joined.call("File", "StringIO"))).to be(true)
+      expect(described_class.reads_line?(read, joined.call("Tempfile"))).to be(false)
+      expect(described_class.reads_line?(read, joined.call("Object"))).to be(false)
+      dynamic = Rigor::Type::Combinator.union(io, Rigor::Type::Combinator.untyped)
+      expect(described_class.reads_line?(read, project.with_global(:$stdin, dynamic))).to be(false)
+    end
+
     # RBS answers `Kernel` for a reader it leaves out, such as `CSV#gets` (an alias of its Ruby `shift`).
     it "does not name a receiver whose reader RBS places in `Kernel`" do
       project = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: []))

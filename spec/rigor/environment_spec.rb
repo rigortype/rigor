@@ -122,6 +122,44 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  # Issue #1362 — the RBS declaration of a global variable, the lookup the program-global seed joins and #1366's
+  # read fallback reuses.
+  describe "#global_for_name" do
+    let(:env) { described_class.default }
+
+    def type(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    it "translates a core declaration, by Symbol or String name" do
+      expect(env.global_for_name(:$stdout)).to eq(type("IO"))
+      expect(env.global_for_name("$>")).to eq(type("IO"))
+      expect(env.global_for_name(:$0, builtin: true)).to eq(type("String"))
+      expect(env.global_for_name(:$VERBOSE).describe).to eq("bool?")
+      expect(env.global_for_name(:$/).describe).to eq("String?")
+    end
+
+    # `boolish` is an alias; translated as a constant's declaration is, without an expander, it reads
+    # `Dynamic[top]` rather than `top`.
+    it "reads an aliased declaration as `Dynamic[top]`" do
+      expect(env.global_for_name(:$DEBUG)).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "answers nil for a global no signature declares, and on an RBS-blind Environment" do
+      expect(env.global_for_name(:$no_such_global)).to be_nil
+      expect(described_class.new.global_for_name(:$stdout)).to be_nil
+    end
+
+    it "answers a project's declaration, but not under `builtin: true`" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "globals.rbs"), "$project_flag: bool\n")
+        project = described_class.for_project(signature_paths: [dir])
+
+        expect(project.global_for_name(:$project_flag).describe).to eq("bool")
+        expect(project.global_for_name(:$project_flag, builtin: true)).to be_nil
+        expect(project.global_for_name(:$stdout, builtin: true)).to eq(type("IO"))
+      end
+    end
+  end
+
   describe "#class_ordering" do
     it "answers built-in hierarchy questions through the registry/RBS chain" do
       env = described_class.default

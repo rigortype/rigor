@@ -8,7 +8,7 @@ assertions:
   '5': String
   '6': nil
   '7': String
-  '8': String
+  '8': Dynamic[top]
   '9': String
   '10': String
   '11': String
@@ -46,3 +46,18 @@ assertions:
   '43': Dynamic[top]
   '44': Dynamic[top]
   '45': Dynamic[top]
+  '46': Dynamic[top]
+  '47': Dynamic[top]
+  '48': Dynamic[top]
+  '49': Dynamic[top]
+  '50': Dynamic[top]
+  '51': Dynamic[top]
+  '52': Dynamic[top]
+  '53': Dynamic[top]
+  '54': Dynamic[top]
+  '55': Dynamic[top]
+  '56': Dynamic[top]
+  '57': Dynamic[top]
+  '58': Dynamic[top]
+  '59': Dynamic[top]
+  '60': Dynamic[top]

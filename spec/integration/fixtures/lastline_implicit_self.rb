@@ -6,8 +6,8 @@ require "tempfile"
 require "rigor/testing"
 require_relative "lastline_self_evidence/ruby_line_reader"
 
-# Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` `gets` / `readline` narrows `$_` as `$stdin.gets` does,
-# unless the file shows a `self` whose reader may be written in Ruby. This file mixes nothing into `main`, so it calls
+# Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` `gets` narrows `$_` as `$stdin.gets` does, unless the file
+# shows a `self` whose reader may be written in Ruby. This file mixes nothing into `main`, so it calls
 # `Rigor::Testing.assert_type` rather than including `Rigor::Testing`, which would count as such a mixin (each mixin
 # shape declines in a file of its own, under `lastline_self_evidence/`). Each case cites what Ruby 4.0.5 answers with
 # "a\nb\n" on standard input, the read kept in the reader's frame. `RubyReader` and `RubyReaderClass`
@@ -39,11 +39,24 @@ def branches
   end
 end
 
-# `self.` reaches the same private `Kernel#gets`, and `Kernel#readline` reads through `$stdin`, which this file never
-# binds (Ruby: "a\n" and "b\n", then `EOFError`).
+# `self.` reaches the same private `Kernel#gets` (Ruby: "a\n"). An implicit-self `readline` does not narrow yet (Ruby:
+# "b\n", then `EOFError`): it never returns nil, so its loop leaves through `break` or `EOFError`, and the scope after
+# the loop, which still joins the body's entry, would read the narrowed line where Ruby never reaches.
 def self_receiver
   Rigor::Testing.assert_type("String", $_) if self.gets
-  Rigor::Testing.assert_type("String", $_) while self.readline
+  Rigor::Testing.assert_type("Dynamic[top]", $_) while self.readline
+rescue EOFError
+  nil
+end
+
+# A `while readline` loop left by `break` stays quiet after it (Ruby with "a\nbx\n": "bx\n").
+def quiet_readline_break
+  x = nil
+  while readline
+    x = $_
+    break if x.start_with?("b")
+  end
+  x.chomp # QUIET-1415
 rescue EOFError
   nil
 end
@@ -185,6 +198,114 @@ class SingletonMixedSource
   def self.first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
 end
 
+# So does a mixin through `self.` or `singleton_class.`, and one in a block of the body, which the discovery tables do
+# not record either (Ruby with `RubyReader`: nil on each).
+class SelfPrepended
+  self.prepend(RubyReader)
+
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class SelfExtended
+  self.extend RubyReader
+
+  def self.first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+module SelfExtendedModule
+  self.extend(RubyReader)
+
+  def self.first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class SingletonIncluded
+  singleton_class.include(RubyReader)
+end
+
+class BlockIncluded
+  [RubyReader].each { |mod| include mod }
+end
+
+class LaterExtended
+  def self.setup = extend(RubyReader)
+end
+
+# A dirty class stays dirty past its own body: in a reopening, in a subclass, and in a class that includes a dirty
+# module (Ruby, after `ExtendedSource.new`, `LaterExtended.setup` and each mixin above: nil on each).
+class ExtendedSource
+  def second = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class ExtendedChild < ExtendedSource
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class StructChild < StructSource
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class SingletonIncluded
+  def self.first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class BlockIncluded
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+class LaterExtended
+  def self.first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+module SplatModule
+  include(*[RubyReader])
+end
+
+class SplatIncluder
+  include SplatModule
+
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+end
+
+# A constant the program writes shadows the core class or module an ancestor name would reach (Ruby with each alias
+# a `RubyReader` kin: nil on each).
+module AliasedIO
+  IO = Class.new(RubyReaderClass)
+
+  class Source < IO
+    def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+  end
+end
+
+module AliasedFile
+  File = RubyReaderClass
+
+  class Source < File
+    def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+  end
+end
+
+module AliasedComparable
+  Comparable = RubyReader
+
+  class Source
+    include Comparable
+
+    def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+  end
+end
+
+# `class << self` in a method opens the singleton of the method's receiver, an instance here, whose `gets` is
+# `RubyReader`'s (Ruby, after `SingletonInMethod.new.setup`: nil).
+class SingletonInMethod
+  include RubyReader
+
+  def setup
+    class << self
+      def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
+    end
+  end
+end
+
 # A block whose `self` the method rebinds declines, for a receiver whose reader is Ruby's (Ruby with a
 # `RubyReaderClass`, or a class or module extended with `RubyReader`: nil on each).
 def rebound(source, klass, mod)
@@ -259,6 +380,18 @@ def quiet_unless
     end
     $_.chomp # QUIET-1415
   end
+end
+
+# An `ensure` clause also runs after a `return` out of the loop, where `$_` is the line (Ruby with "a\n": warns with
+# "a\n"), so it reads `$_` as `Dynamic[top]` and reports nothing.
+def quiet_ensure
+  while gets
+    return $_ if $_.start_with?("a")
+  end
+  nil
+ensure
+  Rigor::Testing.assert_type("Dynamic[top]", $_)
+  warn "stopped at nil" if $_ # QUIET-1415
 end
 
 # A report the narrowing earns (ADR-117 Decision 4): after the loop `$_` is nil, so the tail never prints (Ruby: nil).

@@ -1220,7 +1220,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The defensive reads stay quiet, and the dead tail after the loop is the one report the narrowing earns. The exact
     # `[line, rule]` set keeps the quiet half from passing because the rule stopped firing at all.
     it "reports only the marked dead condition, and nothing on the marked defensive reads" do
-      expect(marked_lines(harness, "# QUIET-1415").size).to eq(9)
+      expect(marked_lines(harness, "# QUIET-1415").size).to eq(11)
       fired = harness.source.lines.each_with_index.filter_map do |line, i|
         rule = line[/# FIRES-1415 (\S+)/, 1]
         [i + 1, rule] if rule
@@ -1240,7 +1240,8 @@ RSpec.describe "Rigor type construction (integration)" do
       self_mixin_include.rb self_mixin_extend.rb self_mixin_using.rb self_mixin_send.rb self_mixin_singleton_body.rb
       self_mixin_singleton_class.rb self_mixin_toplevel_binding.rb self_mixin_object.rb self_mixin_object_reopen.rb
       self_mixin_kernel.rb self_mixin_basic_object.rb self_reader_def.rb self_reader_singleton_method.rb
-      self_reader_delegator.rb self_proc_rebinder.rb self_stdin_readline.rb
+      self_reader_delegator.rb self_proc_rebinder.rb self_send_define_method.rb self_method_object_extend.rb
+      self_method_object_include.rb self_method_object_instance_exec.rb self_core_prepend.rb self_module_include.rb
     ].freeze
 
     def entry_source(name) = File.read(File.join(__dir__, "fixtures/lastline_self_evidence", name))

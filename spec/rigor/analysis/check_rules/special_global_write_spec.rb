@@ -212,7 +212,8 @@ RSpec.describe "special global writes", type: :runner do
       expect_quiet("include(const_get(:Nowhere))\n", "$stdout = 1")
     end
 
-    # Only an `eval`-family call's first argument is code: `__FILE__` and `__LINE__ + 1` name no method.
+    # Only an `eval`-family call's first argument is code: `__FILE__` and `__LINE__ + 1` name no method, and a block
+    # form has none. A `send` of a literal name that defines nothing, or of no name at all, defines nothing.
     it "still reports when the program defines only other names" do
       source = <<~RUBY
         class Integer
@@ -223,6 +224,9 @@ RSpec.describe "special global writes", type: :runner do
         end
         k = Integer
         k.class_eval("def size_in_words = 0")
+        k.class_eval { def size_in_bits = 0 }
+        k.public_send(:size)
+        notice.send
         class Widget
           class_eval <<~CODE, __FILE__, __LINE__ + 1
             def label = "w"
@@ -234,7 +238,7 @@ RSpec.describe "special global writes", type: :runner do
         $stdout = 1
         $0 = 1
       RUBY
-      expect(fired(source)).to eq([[17, "global.write-type-mismatch"], [18, "global.write-type-mismatch"]])
+      expect(fired(source)).to eq([[20, "global.write-type-mismatch"], [21, "global.write-type-mismatch"]])
     end
 
     it "declines on a receiver-form rewrite of an ancestor" do

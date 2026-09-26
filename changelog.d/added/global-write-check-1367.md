@@ -1,0 +1,4 @@
+- **[rigor check]** Two new rules report a write to a special global that Ruby rejects every time it runs. ([#1448](https://github.com/rigortype/rigor/pull/1448))
+  - `global.write-type-mismatch` reports a literal the setter refuses with `TypeError`, such as `$/ = 1`, `$~ = "x"`, `$0 = nil` or `$stdout = 1`. It judges only a value written as a literal, follows Ruby's setter rather than the global's RBS type, and never checks `$stdin`.
+  - `global.readonly-write` reports a write to a read-only special such as `$!`, `$$`, `$?` or `$LOAD_PATH`, which raises `NameError`.
+  - Both are errors under the default `balanced` profile, so such a write now fails `rigor check`; `global.write-type-mismatch` is a warning under `lenient`.

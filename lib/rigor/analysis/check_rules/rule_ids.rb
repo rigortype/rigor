@@ -6,9 +6,9 @@ module Rigor
       # Canonical identifiers for each rule. Per ADR-8 § "Diagnostic ID family hierarchy", rule names are
       # `family.rule-name` two-segment strings; the families group diagnostics by where they originate
       # (`call.*` for call-site rules, `flow.*` for flow-analysis proofs, `assert.*` for runtime-assertion
-      # rules, `dump.*` for debug helpers, `def.*` for method-definition rules). Used by the configuration
-      # `disable:` list and the in-source `# rigor:disable <rule>` suppression comment system; new rules MUST
-      # register here so user configuration can refer to them.
+      # rules, `dump.*` for debug helpers, `def.*` for method-definition rules, `global.*` for writes to special
+      # globals). Used by the configuration `disable:` list and the in-source `# rigor:disable <rule>`
+      # suppression comment system; new rules MUST register here so user configuration can refer to them.
       #
       # ADR-87 WD4 — this pure-data constant table is split out of the (engine-heavy) `check_rules.rb` so
       # {Analysis::RuleCatalog} — which the CLI's JSON `evidence_tier` / `documentation_url` enrichment reads
@@ -72,6 +72,12 @@ module Rigor
       # the RBS the environment is built from, whichever file spelled it; not `rbs_extended.`, whose rows
       # are payload validity, since most contradictions involve no `RBS::Extended` annotation at all.
       RULE_CONTRADICTING_SIGNATURE = "rbs.contradicting-signature"
+      # Issue #1367 (ADR-117 WD2) — the `global.*` family: a write to a special global that its setter rejects, so
+      # the write raises on every run. Two ids so a project can tune the type check without hiding read-only
+      # writes; the `write` wording follows `def.ivar-write-mismatch`. The envelope is the interpreter's setter
+      # (`SpecialGlobalSetters`), not the global's RBS declaration.
+      RULE_GLOBAL_WRITE_TYPE_MISMATCH = "global.write-type-mismatch"
+      RULE_GLOBAL_READONLY_WRITE = "global.readonly-write"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -97,6 +103,8 @@ module Rigor
         RULE_OVERRIDE_RETURN_WIDENED,
         RULE_OVERRIDE_PARAM_NARROWED,
         RULE_IVAR_WRITE_MISMATCH,
+        RULE_GLOBAL_WRITE_TYPE_MISMATCH,
+        RULE_GLOBAL_READONLY_WRITE,
         RULE_SUPPRESSION_UNKNOWN_RULE,
         RULE_SUPPRESSION_EMPTY,
         RULE_SUPPRESSION_UNKNOWN_MARKER,
@@ -135,7 +143,7 @@ module Rigor
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
-      RULE_FAMILIES = %w[call flow assert dump def suppression static effect].freeze
+      RULE_FAMILIES = %w[call flow assert dump def global suppression static effect].freeze
 
       # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
       # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,

@@ -656,6 +656,90 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH => Entry.new(
+          id: CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH,
+          summary: "A special global is assigned a literal its setter rejects (TypeError at runtime).",
+          fires_when: [
+            "The write is `$g = literal` to a special whose setter checks the value: `$/` / `$-0`, `$,` and " \
+            "`$\\` (a String or nil), `$;` / `$-F` (a String, a Regexp, nil, or an object with `to_str`), `$~` " \
+            "(a MatchData or nil), `$0` / `$PROGRAM_NAME` (a String or an object with `to_str`), `$.` (an " \
+            "Integer, a Float, or an object with `to_int`), `$-i` (a String, nil, false, or an object with " \
+            "`to_str`), and `$stdout` / `$>` / `$stderr` (an object that responds to `write`, ADR-117 WD2).",
+            "The value is a literal node — an Integer, Float, Rational or imaginary literal, a String, Symbol " \
+            "or Regexp literal (interpolated or not), an Array or Hash literal, or `nil` / `true` / `false`, " \
+            "parenthesised or not — whose class the setter does not take: `$/ = 1`, `$/ = /x/`, `$~ = \"x\"`, " \
+            "`$0 = nil`, `$. = \"3\"`, `$stdout = 1`.",
+            "Where the setter also converts (`to_str`, `to_int`) or asks for `write`, the literal's object " \
+            "cannot answer that method: RBS gives its class neither the method nor a `method_missing` / " \
+            "`respond_to_missing?` / `respond_to?` of its own, and the program defines none of them anywhere.",
+            "The envelope is the interpreter's setter, not the global's RBS declaration: `$/ = /x/` fires " \
+            "although `$;` takes a Regexp."
+          ],
+          does_not_fire_when: [
+            "The special's setter accepts every value: `$stdin` (never checked, ADR-117 WD2), `$_`, `$VERBOSE`, " \
+            "`$DEBUG`, `$=`; nor `$@`, whose setter depends on whether `$!` is set.",
+            "The value is not a literal — a variable, a method call, a constant, a conditional — whatever its " \
+            "inferred type: a class RBS declares without `write` or `to_str` does not prove the object lacks it.",
+            "RBS gives the literal's class the method or a hatch of its own (a `sig/` reopening or `include` " \
+            "counts).",
+            "The program — any project or `pre_eval:` file — defines the method or a `method_missing` / " \
+            "`respond_to_missing?` / `respond_to?` anywhere, in any spelling (`def`, `define_method`, " \
+            "`define_singleton_method`, `alias`, `alias_method`, `attr_*`, a delegation macro, a string `eval`, " \
+            "the same through `send`) and on any receiver, or defines a method whose name no literal spells (a " \
+            "computed `define_method` or `send` name, a string `eval` whose code is not a plain literal, a name " \
+            "whose bytes are not valid in its encoding). " \
+            "This is blanket: no census of where a definition lands can be complete, so the literal of every " \
+            "class declines, whatever the definition's owner.",
+            "An ancestor's surface is rewritten from outside (`Integer.include(M)`, `Object.include(M)`, a string " \
+            "`class_eval`), or a top-level `include` / `prepend` / `extend`, or an ancestor's `include`, names a " \
+            "module RBS does not rule out.",
+            "For `$stdout` / `$>` / `$stderr`, a refinement that may add `write`, to any class, and a `using` in " \
+            "effect at the write. Which class it refines is not followed. The `to_str` / `to_int` conversions, and a " \
+            "refined `respond_to_missing?` / `respond_to?`, ignore refinements, so those still fire.",
+            "Any project or `pre_eval:` file aliases the special (`alias $stdout $out`, on either side).",
+            "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a multiple-assignment target, a `for` index, or a " \
+            "`rescue => $g` reference: their value is not type-checked.",
+            "The write sits in the dead arm of a decidable version guard. Other code that never runs (`if " \
+            "false`, after `return`) is not recognised, and a write there still fires."
+          ],
+          suppression: "`# rigor:disable global.write-type-mismatch` on the write.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          # A literal's class is exact, the setter's envelope is the running interpreter's, and every way a program can
+          # give the object the method the setter asks for declines; the write then raises every time it runs.
+          evidence_tier: :high,
+          since: "0.4.0"
+        ),
+
+        CheckRules::RULE_GLOBAL_READONLY_WRITE => Entry.new(
+          id: CheckRules::RULE_GLOBAL_READONLY_WRITE,
+          summary: "A read-only special global is written (NameError at runtime).",
+          fires_when: [
+            "The write is `$g = value`, `$g op= value`, or a target of a multiple assignment (`$g, x = ...`, " \
+            "`*$g`) — forms that always write — to a special Ruby defines read-only: `$!`, `$$`, `$?`, `$<`, " \
+            "`$FILENAME`, `$*`, `$:` / `$LOAD_PATH` / `$-I`, `$\"` / `$LOADED_FEATURES`, `$-W`, `$-p`, `$-l`, " \
+            "`$-a`.",
+            "Whatever the value: the setter raises `NameError` (`$! is a read-only variable`) before it " \
+            "looks at it."
+          ],
+          does_not_fire_when: [
+            "The write is `$g ||= v` or `$g &&= v`, which writes only when the current value is falsy " \
+            "(truthy): `$LOAD_PATH ||= []` never writes.",
+            "The write is a `for` index or a `rescue => $g` reference.",
+            "Any project or `pre_eval:` file aliases the special (`alias $! $err`, on either side), which can " \
+            "make the name another variable.",
+            "Mutating the value is not a write: `$LOAD_PATH << dir` and `$LOADED_FEATURES.delete(f)` stay silent.",
+            "The write sits in the dead arm of a decidable version guard. Other code that never runs is not " \
+            "recognised, and a write there still fires."
+          ],
+          suppression: "`# rigor:disable global.readonly-write` on the write.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          # Syntactic: the name alone decides it, and the write raises every time it runs.
+          evidence_tier: :high,
+          since: "0.4.0"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE,
           summary: "A `# rigor:disable[-file]` comment names a rule that does not exist.",

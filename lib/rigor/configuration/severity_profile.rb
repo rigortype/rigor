@@ -54,6 +54,11 @@ module Rigor
           "def.override-return-widened" => :off,
           "def.override-param-narrowed" => :off,
           "def.ivar-write-mismatch" => :warning,
+          # Issue #1367 — both report a write its setter rejects, so it raises on every run. The type check rests on
+          # an inferred value type, so it follows `call.argument-type-mismatch` (warning under lenient); the
+          # read-only write needs no type at all, so it is an error in every profile.
+          "global.write-type-mismatch" => :warning,
+          "global.readonly-write" => :error,
           # ADR-8 companion (PHPStan IgnoreParseErrorRule-modelled): a broken suppression comment is
           # equally bad in every profile — it silently fails to do what the author believes it does — so
           # both rules stay :warning across all three profiles (including strict).
@@ -115,6 +120,8 @@ module Rigor
           "def.override-return-widened" => :warning,
           "def.override-param-narrowed" => :warning,
           "def.ivar-write-mismatch" => :warning,
+          "global.write-type-mismatch" => :error,
+          "global.readonly-write" => :error,
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
@@ -153,6 +160,8 @@ module Rigor
           "def.override-return-widened" => :error,
           "def.override-param-narrowed" => :error,
           "def.ivar-write-mismatch" => :error,
+          "global.write-type-mismatch" => :error,
+          "global.readonly-write" => :error,
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,

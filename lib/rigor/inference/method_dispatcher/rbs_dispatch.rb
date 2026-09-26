@@ -754,7 +754,7 @@ module Rigor
           end
 
           def dynamic_surface?(scope, class_name)
-            scope.parameter_envelopes_of(class_name).key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+            Scope::DiscoveryIndex.rewritten_surface?(scope.parameter_envelopes_of(class_name))
           end
 
           # ADR-110's precedence, asked of both tables the project's own members land in. Either one

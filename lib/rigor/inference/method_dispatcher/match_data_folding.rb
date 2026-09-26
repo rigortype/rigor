@@ -30,7 +30,7 @@ module Rigor
       # it — so every index must be at most K. Declines (RBS answers) when:
       #
       # - `$~` is not proven non-nil, or no scope is threaded through,
-      # - no `$1`..`$9` is bound (named-only captures read through `$~[:name]`, `when /a/, /b/`),
+      # - no `$1`..`$9` narrows to `String` (every group optional, no group at all, `when /a/, /b/`),
       # - any index is above K, negative, or not a constant Integer, or a Range bound is nil (endless /
       #   beginless),
       # - the slice is empty.
@@ -50,7 +50,7 @@ module Rigor
 
           scope = context.scope
           return nil if scope.nil?
-          return nil unless last_match_read?(context.call_node)
+          return nil unless last_match_read?(context.call_node, scope)
           return nil unless RegexpFolding.proven_match?(scope.global(:$~))
 
           highest = highest_bound_group(scope)
@@ -62,9 +62,10 @@ module Rigor
           Type::Combinator.tuple_of(*indices.map { |index| slot_type(index, scope) })
         end
 
-        # The receiver expression reads the frame's current match: `$~`, or `Regexp.last_match` /
-        # `::Regexp.last_match` with no arguments and no block.
-        def last_match_read?(call_node)
+        # The receiver expression reads the frame's current match: `$~`, or `last_match` with no arguments and no block
+        # on an expression that types as the core `Regexp` class. A project class that happens to be named `Regexp`
+        # (`Foo::Regexp` read as `Regexp` inside `module Foo`) types as its own singleton and does not count.
+        def last_match_read?(call_node, scope)
           return false unless call_node.is_a?(Prism::CallNode)
 
           receiver = call_node.receiver
@@ -73,18 +74,17 @@ module Rigor
             receiver.name == :$~
           when Prism::CallNode
             receiver.name == :last_match && receiver.arguments.nil? && receiver.block.nil? &&
-              regexp_constant?(receiver.receiver)
+              regexp_class?(receiver.receiver, scope)
           else
             false
           end
         end
 
-        def regexp_constant?(node)
-          case node
-          when Prism::ConstantReadNode then node.name == :Regexp
-          when Prism::ConstantPathNode then node.parent.nil? && node.name == :Regexp
-          else false
-          end
+        def regexp_class?(node, scope)
+          return false if node.nil?
+
+          type = scope.type_of(node)
+          type.is_a?(Type::Singleton) && type.class_name == "Regexp"
         end
 
         # The highest N in 1..9 whose `$N` is narrowed to `String`, or nil when none is.

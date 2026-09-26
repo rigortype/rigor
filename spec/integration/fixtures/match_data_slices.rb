@@ -99,4 +99,19 @@ def named_only(line)
 
   assert_type("[String, String]", $~[1..2])
 end
+
+# A project class named `Regexp` is not the core class, so its `last_match` is not the frame's match; the core class
+# spelled `::Regexp` still is.
+module ShadowedRegexp
+  class Regexp
+    def self.last_match = "k".match(/(k)/)
+  end
+
+  def self.slice(line)
+    return unless line =~ /(a)(b)(c)/
+
+    assert_type("Array[String?]", Regexp.last_match[1..3])
+    assert_type("[String, String, String]", ::Regexp.last_match[1..3])
+  end
+end
 # rubocop:enable Style/SpecialGlobalVars

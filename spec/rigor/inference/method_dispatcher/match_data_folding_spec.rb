@@ -79,7 +79,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MatchDataFolding do
       expect(fold("$~.values_at(1, 4)", :values_at, c(1), c(4))).to be_nil
     end
 
-    it "when no numbered group is bound (named captures, `when /a/, /b/`)" do
+    it "when no numbered group narrows (every group optional, no group, `when /a/, /b/`)" do
       expect(fold("$~[0..0]", :[], c(0..0), scope: proven_scope({}))).to be_nil
     end
 

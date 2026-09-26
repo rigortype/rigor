@@ -187,6 +187,64 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       end
     end
 
+    # Issue #1430 — `(?)` is `RBS::Types::UntypedFunction`, which carries no parameter lists. Before the guard the
+    # binder's slot providers called `required_positionals` on it and the whole file failed with an internal error.
+    context "with an untyped-parameter `(?)` signature" do
+      def with_untyped_demo
+        Dir.mktmpdir do |dir|
+          FileUtils.mkdir_p(File.join(dir, "sig"))
+          File.write(File.join(dir, "sig/untyped_demo.rbs"), <<~RBS)
+            class UntypedDemo
+              def uf2: (?) -> Integer
+              def mixed: (?) -> Integer
+                       | (String a) -> Integer
+              %a{rigor:v1:param: id is non-empty-string}
+              def with_override: (?) -> String
+            end
+          RBS
+          project_env = Rigor::Environment.for_project(root: dir)
+          yield described_class.new(environment: project_env, class_path: "UntypedDemo", singleton: false)
+        end
+      end
+
+      it "binds every parameter to Dynamic[Top]" do
+        with_untyped_demo do |binder|
+          result = binder.bind(def_node("def uf2(a, b); a; end"))
+
+          expect(result.keys).to eq(%i[a b])
+          result.each_value { |t| expect(t).to equal(Rigor::Type::Combinator.untyped) }
+        end
+      end
+
+      it "binds every slot kind to Dynamic[Top]" do
+        with_untyped_demo do |binder|
+          result = binder.bind(def_node("def uf2(a, b=1, *rest, c, d:, e: 1, **kw, &blk); a; end"))
+
+          expect(result.keys).to eq(%i[a b rest c d e kw blk])
+          result.each_value { |t| expect(t).to equal(Rigor::Type::Combinator.untyped) }
+        end
+      end
+
+      it "keeps Dynamic[Top] when a `(?)` overload sits beside a typed one" do
+        # The `(?)` overload admits any argument in every slot, so narrowing `a` to the typed sibling's `String`
+        # would read a value the method legitimately receives as a contradiction inside the body.
+        with_untyped_demo do |binder|
+          result = binder.bind(def_node("def mixed(a); a; end"))
+
+          expect(result[:a]).to equal(Rigor::Type::Combinator.untyped)
+        end
+      end
+
+      it "still applies a `rigor:v1:param:` override to a `(?)` method" do
+        with_untyped_demo do |binder|
+          result = binder.bind(def_node("def with_override(id, other); id; end"))
+
+          expect(result[:id]).to eq(Rigor::Type::Combinator.non_empty_string)
+          expect(result[:other]).to equal(Rigor::Type::Combinator.untyped)
+        end
+      end
+    end
+
     context "with a self-typed singleton parameter (self_and_instance_type)" do
       it "binds a `self`-typed singleton-method parameter to Type::Singleton, not the instance type" do
         Dir.mktmpdir do |dir|

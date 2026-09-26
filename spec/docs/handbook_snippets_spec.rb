@@ -166,13 +166,14 @@ RSpec.describe "handbook executable snippets", :aggregate_failures do
   # shards to each other, and `binpacker`'s "discovered" figure is a count of FILES, not examples).
   #
   # Exact, not a floor. The count is not static — it moved eight times between 2026-05-07 and 2026-06-11
-  # (17 → 19 → 21 → 22 → 17 → 18 → 20 → 24 → 20) — but it has been 20 since, and every one of those moves
-  # belonged in the diff that caused it. A floor is what a GROWING corpus gets
+  # (17 → 19 → 21 → 22 → 17 → 18 → 20 → 24 → 20), was 20 until #1429 added three narrowing examples (a disjoint
+  # `is_a?`, a disjoint `when`, and `respond_to?`), and every one of those moves belonged in the diff that caused
+  # it. A floor is what a GROWING corpus gets
   # (`plugin_io_boundary_spec.rb` guards 169 files with a floor of 50, one per plugin); carrying that
   # shape over here bought nothing and cost everything — at `>= 15` any single handbook file, or five
   # snippets, could be deleted green.
-  it "runs every executable snippet in the handbook, and there are exactly 20 of them" do
-    expect(HANDBOOK_SNIPPET_COUNT).to eq(20)
+  it "runs every executable snippet in the handbook, and there are exactly 23 of them" do
+    expect(HANDBOOK_SNIPPET_COUNT).to eq(23)
   end
 
   # The pin above catches a snippet that STOPS being counted. It cannot catch one that was never counted:

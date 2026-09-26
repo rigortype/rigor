@@ -238,15 +238,18 @@ The `Regexp` "specific narrowing rule" the trust levels above defer to is the `=
 
 A class guard written in the code is evidence about its receiver ([ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 3, [#1429](https://github.com/rigortype/rigor/issues/1429)). A receiver's `Nominal` type may be an idiomatic expectation the program does not hold to: `$stdout` is typed `IO`, and a test runs the same code with a `StringIO`, which is not an `IO` subclass. `$stdout.is_a?(StringIO) ? $stdout.string : nil` and `case io when StringIO then io.string end` are correct code.
 
-- **The truthy edge.** The class guards are `is_a?`, `kind_of?`, `instance_of?`, `C === x` with a class or module constant `C`, and `case x when C`. On the truthy edge of such a guard, when no member of the receiver's type can satisfy it (the narrowing would otherwise be `bot`), Rigor MUST NOT prove the edge unreachable because of a `Nominal` member:
-  - A `Nominal` member whose class is disjoint from `C` narrows to `C` when both are classes: no object is an instance of both, so the guard running truthy says the receiver's type was wrong.
-  - It narrows to `Dynamic[top]` when either is a module, since an object can be both (a subclass that includes the module) and no carrier spells that meet.
-  - Under `instance_of?` a member of any class other than `C` narrows to `C`, since the guard says the object's class is exactly `C`: `Numeric` under `instance_of?(Integer)` reads `Integer`.
+The class guards are `is_a?`, `kind_of?`, `instance_of?`, `C === x` with a class or module constant `C`, and `case x when C`. On the truthy edge of such a guard, when no member of the receiver's type can satisfy it (the ordinary narrowing is `bot`), Rigor MUST NOT prove the edge unreachable because of a `Nominal` member. Instead, the guard makes the edge gradual:
+
+- **The receiver.** A `Nominal` member whose class is disjoint from `C` narrows to `Dynamic[C]` when both are classes: no object is an instance of both, so the guard running truthy says the receiver's type was wrong. It narrows to `Dynamic[top]` when either is a module, since an object can be both (a subclass that includes the module) and no carrier spells that meet. Under `instance_of?` a member of any class other than `C` narrows to `Dynamic[C]`, since the guard says the object's class is exactly `C`: `Numeric` under `instance_of?(Integer)` reads `Dynamic[Integer]`.
+- **Method availability** on a receiver the guard bound to `Dynamic[C]` is still checked against `C` while it holds that binding: `$stdout.string` in the arm is typed `String`, and `$stdout.strnig` reports `call.undefined-method`. Every other `Dynamic[T]` keeps today's unchecked reading.
+- **The arm's value.** An arm live only through the guard joins its value, and every binding it changed, as `Dynamic[T]`. This holds for `if`, `unless`, the ternary and `case` on the value side, and for the variables after the join. What only the guard introduced therefore crosses a typed boundary by gradual consistency and is never diagnostic fuel: with `v: String`, `v.to_s if v.is_a?(Symbol); take_str(v)` passes `Dynamic[Symbol] | String` to a `(String)` parameter, and `v.is_a?(Symbol) ? v : v.strip` returns into a `-> String` signature, both quietly.
 - **What keeps `bot`.** A member that records what the file literally shows keeps its `bot`: a literal (`Constant`), a `Tuple`, a `HashShape`, or a class object (`Singleton`, under the [#657](https://github.com/rigortype/rigor/issues/657) / [#898](https://github.com/rigortype/rigor/issues/898) declines). So do `nil`, `true` and `false`, and `instance_of?` naming a module, which no object's class is.
-- **Selection.** A union with a member that satisfies the guard keeps the member that does, and drops the disjoint ones as before: `x.is_a?(Array)` on `Array[Integer] | Hash[Symbol, Integer]` reads `Array[Integer]`.
-- **Not class guards.** A class Rigor derives from a pattern (the `Numeric` of an Integer `Range`, the `String` of a `Regexp`) is not a guard the code writes, and keeps its `bot`.
+- **Selection.** A union with a member that satisfies the guard keeps the member that does, and drops the disjoint ones as before, with no gradual reading: `x.is_a?(Array)` on `Array[Integer] | Hash[Symbol, Integer]` reads `Array[Integer]`. A `case … when` clause is judged as a whole, so `when Integer, String` on an `Integer` reads `Integer`.
+- **Not class guards.** A class Rigor derives from a pattern (the `Numeric` of an Integer `Range`, the `String` of a `Regexp`) is not a guard the code writes, and keeps its `bot`. A `case … in` clause applies the rule to a bare class pattern (`in C`, `in C => x`) only, not to an alternation of classes ([#1463](https://github.com/rigortype/rigor/issues/1463)), and a refinement carrier such as `non-negative-int` is not narrowed by a class guard at all yet ([#1461](https://github.com/rigortype/rigor/issues/1461)).
 - **The falsey edge** is unchanged.
-- **Consequences.** The `when` arm of such a guard does not report `flow.unreachable-clause`, and the value of the `case` keeps its arm on the value side too. Where the guarded arm falls through, the receiver joins back as the union of the guarded class and its entry type. The rule holds for every disjoint `Nominal`, including one the file constructs (`other = ::Random.new; case other when Other::Random then 1 else "else" end` types `"else" | 1`). Rigor cannot tell a declared or idiomatic type from a constructed one without tracking provenance, and a guard in the code outranks an inferred `Nominal`.
+- **Consequences.** The `when` arm of such a guard does not report `flow.unreachable-clause`, and the value of the `case` keeps its arm on the value side too. The rule holds for every disjoint `Nominal`, including one the file constructs (`other = ::Random.new; case other when Other::Random then 1 else "else" end` types `"else" | Dynamic[1]`). Rigor cannot tell a declared or idiomatic type from a constructed one without tracking provenance, and a guard in the code outranks an inferred `Nominal`.
+
+A value-position `case` types each arm under the subject's clause narrowing, as the statement form runs it: `case n when Symbol then n else n.to_s end` on `n: Integer | Symbol` reads `Symbol | String`.
 
 `respond_to?(:m)` with a statically known `m` is a guard in the same sense. On its truthy edge:
 - The receiver loses `nil`, unless `NilClass` defines `m`, in which case nothing narrows.
@@ -255,7 +258,7 @@ A class guard written in the code is evidence about its receiver ([ADR-117](../a
   - it is not a mixin module, `Object` or `BasicObject`, whose instances may be of any class;
   - it is not a plugin's open receiver;
   - neither its signature nor the project defines `m` on it.
-- When no member may respond, the receiver reads `Dynamic[top]`, so the guarded call does not report. It reads `Dynamic[top]` and not `Dynamic[T]`, because method availability on `Dynamic[T]` is checked against `T` ([special-types.md](special-types.md)).
+- When no member may respond, the ordinary reading proves the edge dead, and the guard reads it as the class guards do: a `Nominal` member makes the edge gradual, with the receiver `Dynamic[top]` (no class is named, so no facet is checked), and when every member is a literal carrier the edge keeps `bot`.
 
 The falsey edge is unchanged.
 
@@ -263,35 +266,45 @@ The falsey edge is unchanged.
 
 Truthiness, `nil?`, `!`, safe navigation (`$g&.m`, and a safe-navigation chain), the class guards, `C === x`, `case … when` and `respond_to?` narrow a global read (`$stdout`) and a constant reference (`STDOUT`, `Foo::BAR`, `::Foo`) as they narrow a local read ([#1429](https://github.com/rigortype/rigor/issues/1429)). Truthiness, `nil?`, safe navigation and `respond_to?` narrow an instance variable as well; the class guards do not narrow one yet ([#1446](https://github.com/rigortype/rigor/issues/1446)).
 - **An unbound global** is narrowed from the type its read has. An edge that learns nothing leaves a global or constant alone.
-- **Constants.** A constant's narrowing is keyed by how the reference is spelled, so `::STDOUT` and `STDOUT` narrow apart. A write to the constant ends its narrowing.
+- **Constants.** A constant's narrowing is keyed by how the reference is spelled, so `::STDOUT` and `STDOUT` narrow apart. A write to a constant ends the narrowing of every spelling whose last segment is the written name, since `Foo::BAR = nil` inside `module Foo` writes the constant `BAR` reads.
+- **`$stdout` and `$>`** are one variable: a write to either ends a guard's narrowing of the other.
 
-A guard's narrowing of a global or constant MUST be restored where code may run between the guard and a read that rebinds it: Ruby code may assign the global (`$stdout = StringIO.new` in a helper) or `const_set` the constant, and the analysis cannot see that code. Restoring binds the union of the binding the guard narrowed and the narrowed type. That union still holds the guarded class, so `$stdout.is_a?(StringIO) ? (helper; $stdout.string) : nil` reads `IO | StringIO` after `helper`, and the guarded call stays quiet. `$sep` guarded non-nil reads `String?` again after a call that may set it to `nil`.
+A guard's narrowing of a global or constant MUST be restored where code may run between the guard and a read that rebinds it, except in the gaps named below: Ruby code may assign the global (`$stdout = StringIO.new` in a helper) or `const_set` the constant, and the analysis cannot see that code. Restoring binds the union of the binding the guard narrowed and the narrowed type. That union still holds the guarded member, so `$stdout.is_a?(StringIO) ? (helper; $stdout.string) : nil` reads `Dynamic[StringIO] | IO` after `helper`, and the guarded call stays quiet. `$sep` guarded non-nil reads `String?` again after a call that may set it to `nil`.
 
 Code that may rebind a global or constant is:
 - a call that may run project, gem or unresolved code:
   - a method the project defines on the receiver's class or its ancestry;
   - a method whose signature is owned outside Ruby core and the standard library;
   - a core method on a project or gem receiver, since a core module's method may call back (`Enumerable#map` runs the class's `each`);
+  - a method `Kernel`, `Object` or `BasicObject` owns that calls a method the project defines on the receiver (`r != 1` runs `r == 1`; likewise `===`, `!~` and `respond_to?`);
   - an unresolved callee (a `Dynamic` receiver, or a name no signature declares);
-  - `send`, `__send__`, `public_send`, `instance_eval`, `instance_exec`, `class_eval`, `class_exec`, `module_eval`, `module_exec`, `eval`, `require`, `require_relative` and `load`;
+  - `send`, `__send__`, `public_send`, `eval`, `require`, `require_relative`, `load`, `const_set` and `remove_const`, and `instance_eval`, `instance_exec`, `class_eval`, `class_exec`, `module_eval` and `module_exec` given anything but a literal block;
   - any call on a `Proc`, `Method`, `UnboundMethod`, `Binding`, `Enumerator`, `Fiber`, `Thread` or delegator;
   - a call that passes a `&expr` block argument;
-- a literal block whose body writes a global or constant, or holds such a call;
+- a method a compound write or a `for` loop calls without spelling it: the operator of `r += 1`, the reader and writer of `r.val ||= 1` and `r[0] += 1` (and the operator on what the reader returns), and the `each` of `for x in r`;
+- a literal block whose body writes a global or constant, or holds such code;
 - `yield` and `super`.
 
-The rule reads a statement's own call, the calls in its receiver chain and arguments, which Ruby runs first, and the calls in a value the statement types without evaluating them one by one: an array, hash or interpolation literal, a `rescue` modifier, a constant's value. A block or lambda body enters with the narrowings restored when it may run after such code:
+Where the rule reads code:
+- a statement's own call, the calls in its receiver chain and arguments, which Ruby runs first, and the calls in a value the statement types without evaluating them one by one (an array, hash or interpolation literal, a `rescue` modifier, a constant's value);
+- the later operand of `&&` and `||`, before its own edges narrow;
+- a loop's body and predicate, at the loop's entry, since they run again after each iteration; a rescue clause's entry, which runs after any prefix of the body; and the body a `retry` re-enters.
+
+The scan types a local the scanned code writes as the code writes it, and a literal block's parameters as the method's signature yields them. A block or lambda body enters with the narrowings restored when it may run after such code:
 - a lambda literal;
 - a block its call keeps to run later (`proc`, `lambda`, `define_method`);
 - the root block of a thread, fiber or ractor;
 - the block of a call that may itself run such code (`with_retry { $sep.length }`);
 - a body that may rebind one itself, since a later iteration reads what an earlier one wrote.
 
-A method `Kernel`, `Object` or `BasicObject` owns (`puts`, `format`, `obj.frozen?`), and a core or standard-library method on a core or standard-library receiver (`$sep.strip`, `$stdout.rewind`, `File.read(path)`), keep the narrowing. So `if $sep; $sep.strip; $sep.length; end` keeps `$sep` non-nil.
+Any other method `Kernel`, `Object` or `BasicObject` owns (`puts`, `format`, `obj.frozen?`), and a core or standard-library method on a core or standard-library receiver (`$sep.strip`, `$stdout.rewind`, `File.read(path)`), keep the narrowing. So `if $sep; $sep.strip; $sep.length; end` keeps `$sep` non-nil. A call on a receiver a class guard bound to `Dynamic[C]` is read as a call on `C`.
 
 The frame-local `$_` and `$~` ([#1359](https://github.com/rigortype/rigor/issues/1359)) and the rescue-scoped `$!` and `$@` are narrowed the same way but not restored by this rule. A called method cannot reach the first two, and a call that returns leaves the last two as they were; their own rules above forget them. `$?` is restored by it.
 
-- **Accepted gap: implicit conversion.** A core method that calls back into a method the program does not spell is read as the core method alone. `puts obj` runs `obj.to_s`, `hash[obj]` runs `obj.hash` and `list.sort` runs `<=>`. A project `to_s` that assigns a global therefore does not end the narrowing.
-- **Imprecision: calls on block parameters.** A call on a block parameter inside a scanned block body is read as an unresolved callee, because its receiver has no binding where the scan runs. That is conservative: `items.each { |i| i.to_s }` restores the narrowing although it runs only core code.
+The gaps, where Ruby code can run that the rule does not read:
+- **Implicit conversion.** A core method that calls back into a method the program does not spell is read as the core method alone: `puts obj` runs `obj.to_s`, `"#{obj}"` runs it too, `hash[obj]` runs `obj.hash`, `list.sort` runs `<=>`, `1 + obj` runs `obj.coerce`, `[*obj]` runs `obj.to_a`, and `case obj when 1` runs `1 === obj`. A project `to_s` that assigns a global does not end the narrowing.
+- **Another thread** may assign a global between any two reads; the rule reads the code of the current flow only.
+- **A write the flow does not join.** A direct write to a global is not joined across a loop's back edge or into a rescue clause ([#1464](https://github.com/rigortype/rigor/issues/1464)); the rule restores a guard's narrowing there, but a global the loop body only writes keeps its first iteration's value.
 
 ## Fact stability and mutation
 

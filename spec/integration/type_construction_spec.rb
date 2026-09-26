@@ -1297,7 +1297,7 @@ RSpec.describe "Rigor type construction (integration)" do
 
   describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
     # The number of `# QUIET-1367` lines each entry carries.
-    quiet_counts = { "setter_rejections.rb" => 18, "special_aliases.rb" => 2 }.freeze
+    quiet_counts = { "setter_rejections.rb" => 22, "special_aliases.rb" => 2, "refined_literals.rb" => 2 }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
 
@@ -1318,6 +1318,15 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
         expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(quiet)
       end
+    end
+
+    # An alias in one file exempts the special in every other: `cross_file/writes.rb` runs after `aliases.rb`.
+    it "exempts a special that another project file aliases, on either side" do
+      files = %w[aliases.rb writes.rb].to_h { |name| [name, fixture_source("cross_file/#{name}")] }
+      reported = analyze(files: files).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+      expect(reported.map { |d| [File.basename(d.path.to_s), d.line, d.rule.to_s] }.sort)
+        .to eq(fired_lines(files.fetch("writes.rb")).map { |line, rule| ["writes.rb", line, rule] })
+      expect(files.fetch("writes.rb").lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
     end
   end
 

@@ -2372,30 +2372,28 @@ module Rigor
         end
 
         # Issue #1367 (ADR-117 Decision point 1, WD2) — `global.write-type-mismatch` and `global.readonly-write`: a
-        # write to a special global that the interpreter's setter rejects, so the write raises on every run it
-        # executes. The envelope is {SpecialGlobalSetters} — the setter, not the global's RBS declaration — and the
-        # read-only half needs no type at all.
+        # write to a special global that the interpreter's setter rejects, so the write raises every time it runs.
+        # The envelope is {SpecialGlobalSetters}: the setter, not the global's RBS declaration.
         #
-        # Write forms:
-        # - `$g = v` is checked by both rules.
-        # - `$g op= v` and a target of a multiple assignment (`$g, x = …`, `*$g`) always write, so a read-only
-        #   special reports. Their value is not type-checked: `op=` writes what the operator returns from the
-        #   global's current value, and a multiple assignment's per-target value is not typed here.
-        # - `$g ||= v` and `$g &&= v` write only when the current value is falsy (truthy), so neither rule fires.
-        # - A `for` index and a `rescue => $g` reference are not checked.
-        #
-        # Both rules decline when the file aliases the special (`alias $stdout $out`), which makes it name another
-        # variable with that variable's setter. The type check fires only on a proof ({#global_write_verdict}).
+        # - `global.readonly-write` needs no type. `$g = v`, `$g op= v` and a target of a multiple assignment
+        #   (`$g, x = …`, `*$g`) always write, so a write to a read-only special raises.
+        # - `global.write-type-mismatch` checks `$g = v` only when `v` is a literal node
+        #   ({SpecialGlobalSetters.literal_class}), whose class the syntax fixes. Any other value is never reported,
+        #   whatever its inferred type: a class RBS declares without `write` or `to_str` does not prove the object
+        #   lacks it (a singleton `def`, an `extend`, or a run-time `alias to_str to_s`, as URI has).
+        # - `$g ||= v` and `$g &&= v` write only when the current value is falsy (truthy), so neither rule checks
+        #   them, nor a `for` index or a `rescue => $g` reference.
+        # - A special that any project file aliases (`alias $stdout $out`, either side) is exempt from both.
         def special_global_write_diagnostics(path, node, scope_index, lexical_sites)
           case node
           when Prism::GlobalVariableWriteNode
-            [readonly_global_write_diagnostic(path, node, lexical_sites) ||
+            [readonly_global_write_diagnostic(path, node, scope_index) ||
               global_write_type_diagnostic(path, node, scope_index, lexical_sites)].compact
           when Prism::GlobalVariableOperatorWriteNode
-            [readonly_global_write_diagnostic(path, node, lexical_sites)].compact
+            [readonly_global_write_diagnostic(path, node, scope_index)].compact
           when Prism::MultiWriteNode
             multi_write_global_targets(node).filter_map do |target|
-              readonly_global_write_diagnostic(path, target, lexical_sites)
+              readonly_global_write_diagnostic(path, target, scope_index)
             end
           else
             []
@@ -2416,9 +2414,9 @@ module Rigor
           end
         end
 
-        def readonly_global_write_diagnostic(path, node, lexical_sites)
+        def readonly_global_write_diagnostic(path, node, scope_index)
           return nil unless SpecialGlobalSetters.read_only?(node.name)
-          return nil if lexical_sites&.global_rebound?(node.name)
+          return nil if global_aliased?(scope_index[node], node.name)
 
           location = node.respond_to?(:name_loc) ? node.name_loc : node.location
           Diagnostic.from_location(
@@ -2434,82 +2432,31 @@ module Rigor
           contract = SpecialGlobalSetters.contract_for(node.name)
           return nil if contract.nil?
 
-          value = node.value
-          scope = scope_index[value] || scope_index[node]
-          return nil if scope.nil? || scope.environment.nil?
-          return nil if global_write_value_withheld?(value, scope)
-          return nil if lexical_sites&.global_rebound?(node.name)
+          class_name = SpecialGlobalSetters.literal_class(node.value)
+          return nil if class_name.nil?
 
-          value_type = scope.type_of(value)
-          return nil unless global_write_verdict(value_type, contract, scope) == :rejected
+          scope = scope_index[node]
+          return nil unless literal_rejected?(class_name, contract, node, scope, lexical_sites)
+          return nil if global_aliased?(scope, node.name)
 
-          build_global_write_type_diagnostic(path, node, contract, value_type)
+          build_global_write_type_diagnostic(path, node, contract, class_name)
         end
 
-        # A value no rejection may rest on: one rooted at an inferred parameter (a lower bound, ADR-67 WD6b), a read
-        # whose `nil` is declaration-sourced (ADR-58), or a read of a builtin global still on its declared seed
-        # (#1362, ADR-117 Decision point 2).
-        def global_write_value_withheld?(value, scope)
-          InferredParamGuard.rooted?(value, scope) || DeclarationSourcedGuard.marked?(value, scope) ||
-            !DeclarationSourcedGuard.global_sources(value, scope).empty?
+        # Whether any project file aliases `name`, which then names another variable, setter included. The answer is
+        # a function of every file's aliases, so the consumer depends on the name whichever way it answers
+        # (`IncrementalSession#global_alias_affected`).
+        def global_aliased?(scope, name)
+          DependencyRecorder.read_name(:"global-alias", name) if DependencyRecorder.active?
+          scope.discovered_global_aliases.include?(name)
         end
 
-        # Trinary verdict of a written value against a setter contract — `:accepted` / `:rejected` / `:unknown`.
-        # Only `:rejected` fires: a union is rejected only when every member is, and a member the engine cannot place
-        # (`Dynamic`, `top`, an unresolved or project-declared class, a class or module object) is `:unknown`.
-        def global_write_verdict(type, contract, scope)
-          return written_class_verdict(type, contract, scope) unless type.is_a?(Type::Union)
+        # A literal is rejected when its class is none the setter takes and, for a setter that also converts
+        # (`to_str`, `to_int`) or asks for `write`, the literal's object cannot answer that method.
+        def literal_rejected?(class_name, contract, node, scope, lexical_sites)
+          return false if contract.accepts_class?(class_name)
+          return true if contract.conversion.nil?
 
-          verdicts = type.members.map { |member| global_write_verdict(member, contract, scope) }
-          return :rejected if verdicts.all?(:rejected)
-
-          verdicts.all?(:accepted) ? :accepted : :unknown
-        end
-
-        # One member: accepted when its class is (a subclass of) a class the contract takes, rejected when it is
-        # provably disjoint from all of them and, for a contract with a conversion, provably lacks the method.
-        def written_class_verdict(type, contract, scope)
-          class_name, exact = written_class(type)
-          return :unknown if class_name.nil? || !global_write_class_placeable?(class_name, scope)
-
-          orderings = contract.classes.map do |accepted|
-            Rigor::Reflection.class_ordering(class_name, accepted, scope: scope)
-          end
-          return :accepted if orderings.intersect?(%i[equal subclass])
-          return :unknown unless orderings.all?(:disjoint)
-          return :rejected if contract.conversion.nil?
-
-          global_write_conversion_verdict(class_name, contract.conversion, exact, scope)
-        end
-
-        # The class of a written value's runtime object, and whether it is exact: a literal (`Type::Constant`) or an
-        # Array / Hash carrier is an instance of that very class, while a nominal type may stand for an instance of a
-        # subclass that adds a method. A class or module object (`Type::Singleton`) answers nil: its singleton surface
-        # is not checked (`IO.write` exists, so `$stdout = IO` is accepted).
-        def written_class(type)
-          case type
-          when Type::Constant then [type.value.class.name, true]
-          when Type::Tuple then ["Array", true]
-          when Type::HashShape then ["Hash", true]
-          when Type::Singleton then nil
-          else
-            class_name = concrete_class_name(type)
-            class_name && [class_name, false]
-          end
-        end
-
-        # A class whose ancestry and method table RBS answers for alone: RBS-known, not a module, not one of the
-        # generic carriers (`Object`, `Class`, …), not an ADR-26 open receiver or a synthesized stub, and not declared
-        # by the project — whose `sig/` may omit a superclass and whose source may add methods, as
-        # `call.raise-non-exception` also reads it.
-        def global_write_class_placeable?(class_name, scope)
-          return false if RAISE_UNEXACT_INSTANCE_CLASSES.include?(class_name)
-          return false if unbounded_receiver_surface?(class_name, scope)
-          return false if Rigor::Reflection.discovered_class?(class_name, scope: scope)
-          return false if Rigor::Reflection.project_declared_class?(class_name, scope: scope)
-          return false unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
-
-          !scope.environment.rbs_module?(class_name)
+          !literal_may_answer?(class_name, contract.conversion, node, scope, lexical_sites)
         end
 
         # The escape hatches through which an object answers a method its class does not define: the setter's
@@ -2521,37 +2468,20 @@ module Rigor
         DEFAULT_HATCH_OWNERS = %w[::BasicObject ::Kernel ::Object].freeze
         private_constant :DEFAULT_HATCH_OWNERS
 
-        # What every class inherits, so a project definition on it reaches any value.
-        UNIVERSAL_OWNERS = %w[Object Kernel BasicObject].freeze
-        private_constant :UNIVERSAL_OWNERS
-
-        # Rejected only when RBS builds the class, declares no `method_name` (public or private) and no hatch of its
-        # own, and the project defines neither where the value could reach it ({#project_answers_conversion?}).
-        def global_write_conversion_verdict(class_name, method_name, exact, scope)
-          return :unknown if project_answers_conversion?(class_name, method_name, exact, scope)
-
+        # Whether the literal's object may answer `method_name` after all: RBS gives its class the method or a hatch
+        # of its own (a project `sig/` reopening or `include` included), project source reaches one of its
+        # ancestors with either ({#project_reaches_literal?}), or — for `write` only — a refinement of an ancestor
+        # that defines `write` is active at the write. `respond_to?(:write)` honours an active refinement on Ruby
+        # 4.0.5; the `to_str` / `to_int` conversions, and a refined hatch, do not.
+        def literal_may_answer?(class_name, method_name, node, scope, lexical_sites)
           definition = Rigor::Reflection.instance_definition(class_name, scope: scope)
-          return :unknown if definition.nil?
-          return :accepted if definition.methods.key?(method_name)
-          return :unknown if overridden_hatch?(definition)
+          return true if definition.nil?
+          return true if definition.methods.key?(method_name) || overridden_hatch?(definition)
 
-          :rejected
-        end
-
-        # For an exact value, a project `def` of the method or a hatch — in source, cross-file, or `pre_eval:` — on its
-        # class or on `Object` / `Kernel` / `BasicObject` (a top-level `def` included). For a nominal value, whose
-        # runtime object may be an instance of a subclass, such a `def` on any class.
-        def project_answers_conversion?(class_name, method_name, exact, scope)
+          ancestors = definition.ancestors.ancestors.to_set { |ancestor| ancestor.name.to_s.delete_prefix("::") }
           names = [method_name, *GLOBAL_WRITE_HATCHES]
-          return names.any? { |name| Inference::BlockCallTiming.project_defines_anywhere?(name, scope) } unless exact
-
-          owners = [class_name, *UNIVERSAL_OWNERS]
-          names.any? do |name|
-            scope.top_level_def_for(name) ||
-              owners.any? do |owner|
-                source_declared_method?(scope, owner, name, :instance) || scope.discovered_def_nodes[owner]&.key?(name)
-              end
-          end
+          project_reaches_literal?(ancestors, names, scope) ||
+            (method_name == :write && refined_writer_active?(ancestors, node, scope, lexical_sites))
         end
 
         def overridden_hatch?(definition)
@@ -2561,13 +2491,98 @@ module Rigor
           end
         end
 
-        def build_global_write_type_diagnostic(path, node, contract, value_type)
+        # Whether project source can give an instance of the literal's class one of `names`, in any file:
+        #
+        # - a top-level `def` (a private `Object` method, which a conversion still calls), or a `pre_eval:` patch;
+        # - a definition on one of its `ancestors` — `def`, `define_method`, `alias`, `alias_method`, `attr_*`, a
+        #   `class_eval` block — or an ancestor whose method table the project rewrites in a way no literal name
+        #   spells (`Integer.include(M)`, `Integer.define_method(:write)`, `Object.include(M)`, a computed
+        #   `define_method`: the `ENVELOPE_DYNAMIC_MARK`);
+        # - such a definition on any project module, since a module reaches an ancestor through `include` /
+        #   `prepend` in any spelling, a top-level `include` among them;
+        # - a module an ancestor mixes in through a class body, followed through project modules
+        #   ({#mixin_may_answer?}).
+        def project_reaches_literal?(ancestors, names, scope)
+          return true if names.any? { |name| scope.top_level_def_for(name) }
+          return true if pre_eval_patches_any?(names, scope)
+
+          record_literal_ancestor_reads(ancestors, names)
+          module_mark = Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK
+          scope.discovered_parameter_envelopes.any? do |owner, bucket|
+            if ancestors.include?(owner)
+              literal_surface_rewritten?(bucket, names)
+            elsif bucket.key?(module_mark)
+              names.any? { |name| bucket.key?([:instance, name]) }
+            end
+          end || mixin_may_answer?(ancestors, names, scope)
+        end
+
+        def literal_surface_rewritten?(bucket, names)
+          bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK) || names.any? { |name| bucket.key?([:instance, name]) }
+        end
+
+        def pre_eval_patches_any?(names, scope)
+          patched = scope.environment&.project_patched_methods
+          !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| names.include?(name) }
+        end
+
+        # ADR-46 — the answer depends on a definition of one of `names` on an ancestor appearing in some file, which
+        # the appeared-symbol diff maps to these keys.
+        def record_literal_ancestor_reads(ancestors, names)
+          return unless DependencyRecorder.active?
+
+          ancestors.each do |owner|
+            names.each { |name| DependencyRecorder.read_missing(:method, "#{owner}##{name}") }
+          end
+        end
+
+        # A module an ancestor of the literal's class mixes in through a class body (`class Integer; include
+        # Writable; end`), followed through the modules it mixes in in turn. A project module answers when its
+        # surface is rewritten or holds one of `names`; any other module when RBS does not know it or declares one.
+        def mixin_may_answer?(ancestors, names, scope)
+          queue = ancestors.flat_map { |owner| scope.includes_of(owner) }
+          seen = Set.new
+          until queue.empty?
+            mixin = queue.shift
+            next unless seen.add?(mixin)
+
+            bucket = scope.parameter_envelopes_of(mixin)
+            if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
+              return true if literal_surface_rewritten?(bucket, names)
+
+              queue.concat(scope.includes_of(mixin))
+            elsif rbs_mixin_may_answer?(mixin, names, scope)
+              return true
+            end
+          end
+          false
+        end
+
+        def rbs_mixin_may_answer?(mixin, names, scope)
+          definition = Rigor::Reflection.instance_definition(mixin, scope: scope)
+          definition.nil? || definition.methods.key?(names.first) || overridden_hatch?(definition)
+        end
+
+        # For `write` only: a refinement of one of `ancestors` that defines `write`, in effect at the write
+        # (`LexicalMethodSites#refinement_active?`). The answer is a function of every refinement of the name in the
+        # project, so the consumer depends on it whichever way it answers.
+        def refined_writer_active?(ancestors, node, scope, lexical_sites)
+          DependencyRecorder.read_name(:refinement, :write) if DependencyRecorder.active?
+          modules = scope.discovered_refinements.flat_map do |refined, methods|
+            ancestors.include?(refined) ? methods.fetch(:write, []) : []
+          end
+          return false if modules.empty?
+
+          lexical_sites.nil? || lexical_sites.refinement_active?(node, modules)
+        end
+
+        def build_global_write_type_diagnostic(path, node, contract, class_name)
           Diagnostic.from_name_loc(
             node,
             rule: RULE_GLOBAL_WRITE_TYPE_MISMATCH,
             path: path,
             message: "`#{node.name}' accepts only #{contract.accepts}; this write assigns " \
-                     "#{value_type.describe(:short)}, which raises TypeError at runtime",
+                     "#{SpecialGlobalSetters.literal_description(class_name)}, which raises TypeError at runtime",
             severity: :error
           )
         end

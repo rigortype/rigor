@@ -23,10 +23,6 @@ module Rigor
       #   is not changed; `o.m` is simply not reported within the scope the `def` is written in (the
       #   enclosing `def`, `class` / `module` body, or file — a block shares its enclosing scope's locals).
       #
-      # It also answers one question about a global rather than a method, for the `global.*` rules (issue #1367):
-      # whether the file aliases a name (`alias $stdout $out`), which makes that name another variable with that
-      # variable's setter, so a write to it is not judged by the special's.
-      #
       # Built lazily: the walk runs the first time a would-fire call asks, so a file with no such call pays
       # one small object and nothing else.
       class LexicalMethodSites
@@ -53,12 +49,6 @@ module Rigor
         def refinement_def?(def_node)
           build
           @refinement_defs.include?(def_node.location.start_offset)
-        end
-
-        # Does an `alias $name $other` anywhere in the file make `name` (a Symbol, `:$stdout`) another variable?
-        def global_rebound?(name)
-          build
-          @rebound_globals.include?(name)
         end
 
         # Does a `def <local>.<name>` for this call's local receiver and method name sit in the scope the call
@@ -95,7 +85,6 @@ module Rigor
           @singleton_defs = []
           @scopes = []
           @refinement_defs = Set.new
-          @rebound_globals = Set.new
           @unresolved_using = false
           return if @root.nil?
 
@@ -121,8 +110,6 @@ module Rigor
             return walk_children(node.body, prefix, body, scope_span(node), true)
           when Prism::CallNode
             record_call(node, prefix, body, in_def)
-          when Prism::AliasGlobalVariableNode
-            @rebound_globals << node.new_name.name if node.new_name.is_a?(Prism::GlobalVariableReadNode)
           end
 
           walk_children(node, prefix, body, locals, in_def)

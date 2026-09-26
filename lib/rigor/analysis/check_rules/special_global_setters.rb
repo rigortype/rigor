@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 module Rigor
   module Analysis
     module CheckRules
@@ -20,7 +22,14 @@ module Rigor
         # since the setter tests the object's built-in type) or, when `conversion` names a method, responds to it:
         # the implicit conversion the setter calls (`to_str`, `to_int`) or the method it asks `respond_to?` about
         # (`write`). `accepts` is the phrase the diagnostic quotes.
-        Contract = Data.define(:classes, :conversion, :accepts)
+        Contract = Data.define(:classes, :conversion, :accepts) do
+          # Whether an instance of the core class `class_name` is one the setter takes by type. Both sides are core
+          # classes, whose hierarchy is Ruby's own, so the running interpreter answers it.
+          def accepts_class?(class_name)
+            klass = ::Object.const_get(class_name)
+            classes.any? { |accepted| klass <= ::Object.const_get(accepted) }
+          end
+        end
 
         # `rb_str_setter` (string.c), reached through `rb_deprecated_str_setter` and io.c's `deprecated_rs_setter`,
         # tests `T_STRING` and calls no conversion: `$/ = 1` raises "value of $/ must be String", and so do a
@@ -92,8 +101,40 @@ module Rigor
 
         # The setter contract a write of `name` is checked against, or nil when its setter accepts every value or the
         # global is no special.
+        # The literal nodes `global.write-type-mismatch` judges, by the core class of the object each evaluates to.
+        # An interpolated String, Symbol or Regexp is still a new instance of that class.
+        LITERAL_CLASSES = {
+          Prism::IntegerNode => "Integer", Prism::FloatNode => "Float", Prism::RationalNode => "Rational",
+          Prism::ImaginaryNode => "Complex", Prism::StringNode => "String", Prism::InterpolatedStringNode => "String",
+          Prism::SymbolNode => "Symbol", Prism::InterpolatedSymbolNode => "Symbol", Prism::ArrayNode => "Array",
+          Prism::HashNode => "Hash", Prism::RegularExpressionNode => "Regexp",
+          Prism::InterpolatedRegularExpressionNode => "Regexp", Prism::NilNode => "NilClass",
+          Prism::TrueNode => "TrueClass", Prism::FalseNode => "FalseClass"
+        }.freeze
+
+        # How the diagnostic names a literal of each class.
+        LITERAL_DESCRIPTIONS = { "NilClass" => "nil", "TrueClass" => "true", "FalseClass" => "false" }.freeze
+
         def contract_for(name)
           CONTRACTS[name]
+        end
+
+        # The core class of the object `node` evaluates to when it is a literal ({LITERAL_CLASSES}), looking
+        # through parentheses around a single expression, or nil for any other expression.
+        def literal_class(node)
+          while node.is_a?(Prism::ParenthesesNode)
+            body = node.body
+            return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
+
+            node = body.body.first
+          end
+          LITERAL_CLASSES[node.class]
+        end
+
+        def literal_description(class_name)
+          LITERAL_DESCRIPTIONS.fetch(class_name) do
+            "#{class_name.start_with?('A', 'E', 'I', 'O', 'U') ? 'an' : 'a'} #{class_name} literal"
+          end
         end
 
         def read_only?(name)

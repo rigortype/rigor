@@ -282,6 +282,49 @@ def block_in_loop_prebound_local
   end
 end
 
+# Every name a block's parameter list declares is bound in the scan, so none reads an outer local of the same name. A
+# plain required parameter reads what the method yields at its own position in the list; any other reads untyped,
+# which counts as an unresolved callee.
+def destructured_parameter
+  a = "str"
+  pairs = [[Resetter.new, 1]]
+  return unless $sep
+
+  pairs.each { |(a, b)| a.length }
+  copy = $sep
+  copy.length # FIRES-1429 call.possible-nil-receiver
+  a.strip
+end
+
+def optional_parameter
+  a = "str"
+  list = [Resetter.new]
+  return unless $sep
+
+  list.each { |a = nil| a.length }
+  copy = $sep
+  copy.length # FIRES-1429 call.possible-nil-receiver
+  a.strip
+end
+
+# `memo` is the second value `each_with_object` yields, whatever the destructured first parameter holds.
+def parameter_after_destructured
+  r = Resetter.new
+  return unless $sep
+
+  [%w[a b]].each_with_object(r) { |(x, y), memo| memo.length }
+  copy = $sep
+  copy.length # FIRES-1429 call.possible-nil-receiver
+end
+
+def parameter_after_destructured_kept
+  return unless $sep
+
+  [%w[a b]].each_with_object(+"memo") { |(x, y), memo| memo.length }
+  copy = $sep
+  copy.length # QUIET-1429
+end
+
 def retry_scanned_local
   return unless $sep
 

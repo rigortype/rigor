@@ -312,7 +312,19 @@ module Rigor
       # and a literal block's parameters, which the scope before the code does not bind.
       module ScanScope
         LOCAL_SCAN_BARRIERS = [Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode].freeze
-        private_constant :LOCAL_SCAN_BARRIERS
+        # The parameter nodes a block's parameter list names a local with: every kind of parameter, a destructured
+        # one's parts included, and a `;`-block-local.
+        PARAMETER_NAME_NODES = [
+          Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
+          Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode, Prism::KeywordRestParameterNode,
+          Prism::BlockParameterNode, Prism::BlockLocalVariableNode
+        ].freeze
+        # The nodes that read a local's binding, an operator write reading it before it writes.
+        LOCAL_READ_NODES = [
+          Prism::LocalVariableReadNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+          Prism::LocalVariableAndWriteNode
+        ].freeze
+        private_constant :LOCAL_SCAN_BARRIERS, :PARAMETER_NAME_NODES, :LOCAL_READ_NODES
 
         module_function
 
@@ -349,33 +361,90 @@ module Rigor
           bound.equal?(scope) ? scope : with_scanned_locals(block, bound)
         end
 
-        # `scope` with the block's required parameters bound to what the method yields them
-        # (`MethodDispatcher.expected_block_param_types`), or `scope` when nothing can be read.
+        # `scope` with every local the block's parameter list names bound, so none reads a binding of the same name
+        # from outside the block. A plain required parameter reads what the method yields at its position in
+        # `requireds` (`MethodDispatcher.expected_block_param_types`); every other name, a destructured, optional,
+        # splat, post, keyword, block or `;`-block-local one, reads `Dynamic[top]`, so a call on it counts as an
+        # unresolved callee. `scope` itself when the body reads no parameter where the scan types it
+        # ({.reads_parameters?}): the bindings would change nothing.
         def block_parameter_scope(call_node, block, scope)
-          names = block_parameter_names(block)
-          return scope if names.empty?
+          parameters = block.parameters
+          return scope unless parameters.is_a?(Prism::BlockParametersNode)
 
+          names = []
+          collect_parameter_names(parameters, names)
+          return scope if names.empty? || !reads_parameters?(block.body, names)
+
+          bindings = names.to_h { |name| [name, Type::Combinator.untyped] }
+          requireds = parameters.parameters&.requireds || []
+          unless requireds.none?(Prism::RequiredParameterNode)
+            yielded = yielded_types(call_node, scope)
+            requireds.each_with_index do |parameter, index|
+              next unless parameter.is_a?(Prism::RequiredParameterNode)
+
+              bindings[parameter.name] = yielded[index] || Type::Combinator.untyped
+            end
+          end
+          bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        end
+
+        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read.
+        def yielded_types(call_node, scope)
           receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
           arguments = call_node.arguments&.arguments || []
-          yielded = MethodDispatcher.expected_block_param_types(
+          MethodDispatcher.expected_block_param_types(
             receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
             arg_types: arguments.map { |argument| scope.type_of(argument) }
           )
-          names.each_with_index.reduce(scope) do |acc, (name, index)|
-            acc.with_local(name, yielded[index] || Type::Combinator.untyped)
-          end
         rescue StandardError
-          scope
+          []
         end
 
-        def block_parameter_names(block)
-          parameters = block.parameters
-          return [] unless parameters.is_a?(Prism::BlockParametersNode) && parameters.parameters
+        def collect_parameter_names(node, names)
+          return unless node.is_a?(Prism::Node)
 
-          parameters.parameters.requireds.grep(Prism::RequiredParameterNode).map(&:name)
+          if PARAMETER_NAME_NODES.any? { |klass| node.is_a?(klass) }
+            names << node.name if node.name
+            return
+          end
+          node.rigor_each_child { |child| collect_parameter_names(child, names) }
         end
 
-        private_class_method :collect_local_writes, :block_parameter_names
+        # True when the block body `body` reads one of `names` where the scan types it. A read the scan never types is
+        # a bare argument of a statement that calls a method on `self` without a literal block (`puts i`): the scan
+        # reads such a call by its receiver and name alone, and types none of its arguments. Any other read counts,
+        # and so does every read under a body that is not a plain statement list (a `rescue` in a `do` block).
+        def reads_parameters?(body, names)
+          return false if body.nil?
+          return names_read?(body, names) unless body.is_a?(Prism::StatementsNode)
+
+          body.body.any? { |statement| statement_reads?(statement, names) }
+        end
+
+        def statement_reads?(statement, names)
+          return names_read?(statement, names) unless self_call_without_block?(statement)
+
+          arguments = statement.arguments&.arguments || []
+          arguments.any? { |argument| !argument.is_a?(Prism::LocalVariableReadNode) && names_read?(argument, names) } ||
+            names_read?(statement.block, names)
+        end
+
+        def self_call_without_block?(node)
+          node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+            !node.block.is_a?(Prism::BlockNode)
+        end
+
+        def names_read?(node, names)
+          return false unless node.is_a?(Prism::Node)
+          return true if LOCAL_READ_NODES.any? { |klass| node.is_a?(klass) } && names.include?(node.name)
+
+          found = false
+          node.rigor_each_child { |child| found ||= names_read?(child, names) }
+          found
+        end
+
+        private_class_method :collect_local_writes, :yielded_types, :collect_parameter_names, :reads_parameters?,
+                             :statement_reads?, :self_call_without_block?, :names_read?
       end
     end
   end

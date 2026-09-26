@@ -29,7 +29,7 @@ def members(flag)
   assert_type('"one" | 1', value) unless value.respond_to?(:upcase)
 end
 
-# A literal carrier that lacks the method reads `bot`: it never gains the method (Ruby 4.0.5: 1).
+# A literal value that lacks the method reads `bot`: it never gains the method (Ruby 4.0.5: 1).
 def literal_receiver
   number = 1
   number.respond_to?(:upcase) ? assert_type("bot", number) : number

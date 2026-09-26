@@ -71,6 +71,37 @@ RSpec.describe Rigor::Inference::GuardRebinding do
     end
   end
 
+  describe "ScanScope.block_parameter_scope" do
+    let(:untyped) { Rigor::Type::Combinator.untyped }
+
+    def parameter_scope(source)
+      node = call(source)
+      [node, described_class::ScanScope.block_parameter_scope(node, node.block, scope)]
+    end
+
+    # A plain required parameter reads what the method yields at its position in `requireds`, a destructured one
+    # before it included; every other name the list declares reads untyped, so no outer binding shows through.
+    it "binds each required parameter by its position and every other parameter name to untyped" do
+      _, bound = parameter_scope("[%w[a b]].each_with_object(s) { |(a, b), memo, c = 1, *d, e, f:, g: 2, **h, &i; j| " \
+                                 "memo.length }")
+      expect(bound.local(:memo)).to eq(string_t)
+      %i[a b c d e f g h i j].each { |name| expect(bound.local(name)).to eq(untyped), name.to_s }
+    end
+
+    # The bindings change nothing when the body reads no parameter where the scan types it: a bare argument of a
+    # statement calling a method on `self` without a block is never typed.
+    it "binds nothing when the body reads its parameters only as bare arguments of a self call" do
+      node, bound = parameter_scope("list.each { |x, y| puts x; format('%s', y) }")
+      expect(bound).to equal(scope)
+      ["list.each { |x| x.length }", "list.each { |x| r = x }", "list.each { |x| puts x.length }",
+       "list.each { |x| puts(*x) }", "list.each { |x| helper(x) { } }", "list.each { |x| x += 1 }"].each do |source|
+        node, bound = parameter_scope(source)
+        expect(bound).not_to equal(scope), source
+        expect(bound.local(node.block.parameters.parameters.requireds.first.name)).not_to be_nil, source
+      end
+    end
+  end
+
   describe ".block_entry" do
     let(:guarded) { scope.with_guarded_global(:$g, string_t, Rigor::Type::Combinator.union(string_t, nil_t)) }
 

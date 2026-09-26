@@ -1264,7 +1264,9 @@ module Rigor
         # signature declares) may respond.
         #
         # When every member lacking `m` records what the file literally shows (a literal, a `Tuple`, a `HashShape`, a
-        # class object, `nil` / `true` / `false`), the edge is `Bot`: `1.respond_to?(:string)` is false in every run.
+        # class object, `nil` / `true` / `false`), the edge is `Bot`. For a literal value that is exact
+        # (`1.respond_to?(:string)` is false in every run); a class object's arm goes unchecked when a gem without a
+        # signature adds the method (`Time.respond_to?(:zone)` under ActiveSupport).
         def respond_to_admitted(type, method_name, scope)
           members = type.is_a?(Type::Union) ? type.members : [type]
           kept = members.reject { |member| lacks_method?(member, method_name, scope) }

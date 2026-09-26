@@ -1387,7 +1387,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The number of `# QUIET-1429` lines each entry carries.
     quiet_counts = {
       "streams.rb" => 4, "locals.rb" => 3, "truthiness.rb" => 7, "invalidation.rb" => 4, "respond_to.rb" => 3,
-      "rebinding_paths.rb" => 6, "arm_values.rb" => 3
+      "rebinding_paths.rb" => 7, "arm_values.rb" => 3
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/global_constant_guards", name))

@@ -204,7 +204,8 @@ RSpec.describe "special global writes", type: :runner do
                    sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
       expect_quiet("class Integer\n  include Nowhere\nend\n", "$stdout = 1")
       expect_quiet("class Integer\n  include Lenient\nend\n", "$0 = 1",
-                   sig: { "lenient.rbs" => "module Lenient\n  def method_missing: (Symbol, *untyped) -> untyped\nend\n" })
+                   sig: { "lenient.rbs" => "module Lenient\n  def method_missing: (Symbol, *untyped) -> untyped\n" \
+                                           "end\n" })
     end
 
     it "follows a project module an ancestor mixes in to the modules it mixes in" do

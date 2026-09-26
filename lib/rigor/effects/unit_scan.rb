@@ -37,9 +37,23 @@ module Rigor
     # Long by construction: the walk carries one `when` per Ruby construct that originates an effect, and
     # splitting that table across classes would put the vocabulary in one file and the reasons in another.
     class UnitScan # rubocop:disable Metrics/ClassLength
-      # `$~` and friends are frame-local, not global state: a read of one is not `global.read`. (Prism
-      # gives `$1` and `$&` node types of their own, so only the named specials need listing.)
-      FRAME_LOCAL_GLOBALS = %w[$~ $_ $& $` $' $+ $!].to_set.freeze
+      # `$~` and `$_` are frame-local, not global state (#1363): Ruby keeps them in the special-variable slot
+      # of the body that runs them, which that body and the blocks it creates reach and no other method's
+      # frame does. A read of one is not `global.read`, and a write (`$_ = line`, `$~ = nil`) binds only
+      # that slot, so it earns no label, as a local-variable write earns none. The rest of the match family
+      # (`$&`, `` $` ``, `$'`, `$+`, `$1`…) are Prism nodes of their own that this scan does not colour, and
+      # none of them can be assigned.
+      FRAME_LOCAL_GLOBALS = %i[$~ $_].to_set.freeze
+
+      # `$!` and `$@` are the exception being rescued and its backtrace. They are not frame-local — a read
+      # walks to the nearest rescue clause, a caller's included — but neither is state a callee can set: a
+      # rescue the callee runs has ended when it returns. So a read of one is not `global.read` either. A
+      # write stays `gvar-write`: `$@ = bt` sets the backtrace of an exception the rescuing frame holds, often
+      # a caller (`rescue => e` sees it), and Ruby refuses `$! = x`.
+      RESCUED_EXCEPTION_GLOBALS = %i[$! $@].to_set.freeze
+
+      # The globals whose read is not `global.read`.
+      UNCOLOURED_READS = (FRAME_LOCAL_GLOBALS | RESCUED_EXCEPTION_GLOBALS).freeze
 
       REFLECTIVE_SEND = %i[send public_send __send__].to_set.freeze
 
@@ -346,10 +360,12 @@ module Rigor
         when Prism::XStringNode, Prism::InterpolatedXStringNode
           add(XSTRING, IO_PROCESS)
         when Prism::GlobalVariableReadNode
-          add(GVAR_READ, GLOBAL_READ) unless FRAME_LOCAL_GLOBALS.include?(node.name.to_s)
+          add(GVAR_READ, GLOBAL_READ) unless UNCOLOURED_READS.include?(node.name)
         when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode,
-             Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode
-          add(GVAR_WRITE, GLOBAL_WRITE)
+             Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+             Prism::GlobalVariableTargetNode
+          # A target is a multiple assignment's, a `for` loop's or a `rescue =>` clause's.
+          add(GVAR_WRITE, GLOBAL_WRITE) unless FRAME_LOCAL_GLOBALS.include?(node.name)
         when Prism::ClassVariableReadNode
           add(CVAR_READ, GLOBAL_READ)
         when Prism::ClassVariableWriteNode, Prism::ClassVariableOperatorWriteNode,

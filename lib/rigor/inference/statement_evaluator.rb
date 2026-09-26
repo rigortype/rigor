@@ -1850,9 +1850,22 @@ module Rigor
       # reads `$!`, `$@` and `$?` unbound, whatever it enters with. It cannot write them, so past the clause they are
       # what it entered with — the scope of a `begin` that finished, the only one the code after it runs from — unless
       # it ran a subprocess itself.
+      #
+      # Issue #1415 — the clause also runs after a `return`, `break` or `next` out of the body, from a scope other than
+      # the one it enters with here, so a bound `$_` reads `Dynamic[top]` in it (`while gets; return $_ if …; end`
+      # ensures with the line, not the loop's `nil`). Past the clause `$_` is what it entered with unless the clause
+      # may set it.
       def eval_ensure(node)
-        type, after = eval_branch_or_nil(node.statements, scope.forget_error_info.forget_last_status)
+        entry = scope.forget_error_info.forget_last_status.untyped_last_line
+        type, after = eval_branch_or_nil(node.statements, entry)
+        after = restore_last_line(after) unless LastLine.may_set?(node.statements, scope)
         [type, LastStatus.restore_unless_set(ErrorInfo.restore(after, scope), scope)]
+      end
+
+      # `after` with `$_` as this evaluator's scope binds it, or unbound where the scope leaves it unbound.
+      def restore_last_line(after)
+        bound = scope.global(:$_)
+        bound.nil? ? after.forget_last_line : after.with_global(:$_, bound)
       end
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names

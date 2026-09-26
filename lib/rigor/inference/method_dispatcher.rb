@@ -28,6 +28,7 @@ require_relative "method_dispatcher/math_folding"
 require_relative "method_dispatcher/random_folding"
 require_relative "method_dispatcher/time_folding"
 require_relative "method_dispatcher/regexp_folding"
+require_relative "method_dispatcher/match_data_folding"
 require_relative "method_dispatcher/process_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
@@ -874,11 +875,8 @@ module Rigor
           return result if result
         end
 
-        receiver = context.receiver
-        if receiver.is_a?(Type::Singleton) && (folder = STDLIB_SINGLETON_FOLDERS[receiver.class_name])
-          result = folder.try_dispatch(context)
-          return result if result
-        end
+        folder_result = dispatch_receiver_keyed_folder(context)
+        return folder_result if folder_result
 
         kernel_result = dispatch_kernel_intrinsic(context)
         return kernel_result if kernel_result
@@ -888,6 +886,19 @@ module Rigor
           return result if result
         end
         nil
+      end
+
+      # The folders the receiver's class selects, at most one per call: a stdlib singleton folder, or for a
+      # `MatchData` receiver the slice fold of the proven `$~` (issue #1381). Every other receiver skips them without
+      # a trial.
+      def dispatch_receiver_keyed_folder(context)
+        receiver = context.receiver
+        folder =
+          case receiver
+          when Type::Singleton then STDLIB_SINGLETON_FOLDERS[receiver.class_name]
+          when Type::Nominal then MatchDataFolding if receiver.class_name == "MatchData"
+          end
+        folder&.try_dispatch(context)
       end
 
       # ADR-91 WD1 — the single dispatcher-held ownership gate for the Kernel module-function surface

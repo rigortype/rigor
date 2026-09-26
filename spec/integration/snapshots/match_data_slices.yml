@@ -1,0 +1,19 @@
+---
+locals: {}
+assertions:
+  '1': "[String, String?, String]"
+  '2': "[String, String?]"
+  '3': "[String, String]"
+  '4': "[String, String?]"
+  '5': "[String, String]"
+  '6': "[String, String?]"
+  '7': "[String?, String]"
+  '8': Array[String?]
+  '9': Array[String?]
+  '10': Array[String?]
+  '11': Array[String?]
+  '12': Array[String?]
+  '13': Array[String?]
+  '14': Array[String?]
+  '15': Array[String?]
+  '16': Array[String?]

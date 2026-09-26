@@ -11,6 +11,7 @@ require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
 require_relative "last_line"
+require_relative "operand_effects"
 require_relative "optimistic_origin"
 require_relative "project_method_ownership"
 require_relative "receiver_alias"
@@ -446,6 +447,37 @@ module Rigor
 
         result = analyse(node, scope)
         result || [scope, scope]
+      end
+
+      # Issue #1468 — the scope the arguments and block of a safe-navigation call `recv&.m(…)` run under. Ruby
+      # evaluates them only once `recv` is known non-nil, so `klass&.new(klass.flag?)` reads `klass` without its
+      # `nil`, as `if klass then klass.new(klass.flag?) end` does. Only `nil` is removed: `false&.m(x)` still calls
+      # `m`. The call's own value keeps its skipped-call `nil` (`ExpressionTyper#safe_navigation_call_type`).
+      #
+      # The receiver is one a guard narrows ({.receiver_slot}: a local, instance variable, global or constant), or a
+      # safe-navigation call on such a receiver whose own arguments and block hold no write or jump
+      # ({OperandEffects}): `a&.b(a.c)&.d(a.e)` runs `d` only when `a&.b(…)` answered non-nil, which it cannot on a
+      # nil `a`, and nothing between the two reads rebinds `a`. `scope` itself when nothing narrows, and for a call
+      # that is not `&.`.
+      def safe_navigation_scope(call_node, scope)
+        return scope unless call_node.safe_navigation?
+
+        non_nil_receiver_scope(call_node.receiver, scope) || scope
+      end
+
+      # The scope the block of a safe-navigation call is entered from: {.safe_navigation_scope}, unless the narrowing
+      # may not hold for the whole body. An argument that writes may rebind the receiver before the block runs
+      # (`f&.two(f = nil) { f.run }`), and a block that writes the receiver hands the next iteration what it wrote
+      # (`a&.each { a.size; a = nil }`); either keeps `scope`.
+      def safe_navigation_block_scope(call_node, scope)
+        return scope unless call_node.safe_navigation?
+        return scope if OperandEffects.any?(call_node.arguments)
+
+        root = call_node.receiver
+        root = root.receiver while root.is_a?(Prism::CallNode) && root.safe_navigation?
+        return scope if root.respond_to?(:name) && OperandEffects.written_variables(call_node.block).include?(root.name)
+
+        safe_navigation_scope(call_node, scope)
       end
 
       # Slice 7 phase 5 — `case`/`when` narrowing.
@@ -3208,6 +3240,25 @@ module Rigor
           return nil if non_nil.equal?(slot.current)
 
           narrow_slot(scope, slot, non_nil)
+        end
+
+        # The scope {.safe_navigation_scope} answers for a receiver, seen through the `&.` links of a chain whose
+        # operands leave the root's binding alone, or nil. Unlike {.non_nil_slot_scope} it compares the fragment
+        # structurally: `narrow_non_nil` rebuilds a union it removed nothing from, and a receiver that cannot be nil
+        # must leave the call's operands on the scope they are typed from.
+        def non_nil_receiver_scope(node, scope)
+          if node.is_a?(Prism::CallNode)
+            return nil unless node.safe_navigation?
+            return nil if OperandEffects.any?(node.arguments) || OperandEffects.any?(node.block)
+
+            return non_nil_receiver_scope(node.receiver, scope)
+          end
+
+          slot = receiver_slot(node, scope)
+          return nil if slot.nil?
+
+          non_nil = narrow_non_nil(slot.current)
+          non_nil == slot.current ? nil : narrow_slot(scope, slot, non_nil)
         end
 
         # Issue #606 slice 1 — the SAFE-NAV CHAIN forms. {.analyse_safe_nav_receiver} above proves

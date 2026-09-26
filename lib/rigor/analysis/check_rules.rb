@@ -27,6 +27,7 @@ require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
 require_relative "check_rules/lexical_method_sites"
+require_relative "check_rules/special_global_setters"
 
 module Rigor
   module Analysis
@@ -150,6 +151,8 @@ module Rigor
           ].compact
         when Prism::IfNode, Prism::UnlessNode
           [unreachable_branch_diagnostic(path, node, scope_index)].compact
+        when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::MultiWriteNode
+          special_global_write_diagnostics(path, node, scope_index, lexical_sites)
         else
           []
         end
@@ -2365,6 +2368,207 @@ module Rigor
                      "`#exception' — this raises TypeError at runtime",
             severity: :error,
             method_name: call_node.name.to_s
+          )
+        end
+
+        # Issue #1367 (ADR-117 Decision point 1, WD2) — `global.write-type-mismatch` and `global.readonly-write`: a
+        # write to a special global that the interpreter's setter rejects, so the write raises on every run it
+        # executes. The envelope is {SpecialGlobalSetters} — the setter, not the global's RBS declaration — and the
+        # read-only half needs no type at all.
+        #
+        # Write forms:
+        # - `$g = v` is checked by both rules.
+        # - `$g op= v` and a target of a multiple assignment (`$g, x = …`, `*$g`) always write, so a read-only
+        #   special reports. Their value is not type-checked: `op=` writes what the operator returns from the
+        #   global's current value, and a multiple assignment's per-target value is not typed here.
+        # - `$g ||= v` and `$g &&= v` write only when the current value is falsy (truthy), so neither rule fires.
+        # - A `for` index and a `rescue => $g` reference are not checked.
+        #
+        # Both rules decline when the file aliases the special (`alias $stdout $out`), which makes it name another
+        # variable with that variable's setter. The type check fires only on a proof ({#global_write_verdict}).
+        def special_global_write_diagnostics(path, node, scope_index, lexical_sites)
+          case node
+          when Prism::GlobalVariableWriteNode
+            [readonly_global_write_diagnostic(path, node, lexical_sites) ||
+              global_write_type_diagnostic(path, node, scope_index, lexical_sites)].compact
+          when Prism::GlobalVariableOperatorWriteNode
+            [readonly_global_write_diagnostic(path, node, lexical_sites)].compact
+          when Prism::MultiWriteNode
+            multi_write_global_targets(node).filter_map do |target|
+              readonly_global_write_diagnostic(path, target, lexical_sites)
+            end
+          else
+            []
+          end
+        end
+
+        # The `GlobalVariableTargetNode`s a multiple assignment writes, through a splat (`*$g`) and nested
+        # destructuring (`(a, $g), b = …`).
+        def multi_write_global_targets(node)
+          [*node.lefts, node.rest, *node.rights].flat_map do |target|
+            case target
+            when Prism::GlobalVariableTargetNode then [target]
+            when Prism::SplatNode
+              target.expression.is_a?(Prism::GlobalVariableTargetNode) ? [target.expression] : []
+            when Prism::MultiTargetNode then multi_write_global_targets(target)
+            else []
+            end
+          end
+        end
+
+        def readonly_global_write_diagnostic(path, node, lexical_sites)
+          return nil unless SpecialGlobalSetters.read_only?(node.name)
+          return nil if lexical_sites&.global_rebound?(node.name)
+
+          location = node.respond_to?(:name_loc) ? node.name_loc : node.location
+          Diagnostic.from_location(
+            location,
+            rule: RULE_GLOBAL_READONLY_WRITE,
+            path: path,
+            message: "`#{node.name}' is a read-only variable; this write raises NameError at runtime",
+            severity: :error
+          )
+        end
+
+        def global_write_type_diagnostic(path, node, scope_index, lexical_sites)
+          contract = SpecialGlobalSetters.contract_for(node.name)
+          return nil if contract.nil?
+
+          value = node.value
+          scope = scope_index[value] || scope_index[node]
+          return nil if scope.nil? || scope.environment.nil?
+          return nil if global_write_value_withheld?(value, scope)
+          return nil if lexical_sites&.global_rebound?(node.name)
+
+          value_type = scope.type_of(value)
+          return nil unless global_write_verdict(value_type, contract, scope) == :rejected
+
+          build_global_write_type_diagnostic(path, node, contract, value_type)
+        end
+
+        # A value no rejection may rest on: one rooted at an inferred parameter (a lower bound, ADR-67 WD6b), a read
+        # whose `nil` is declaration-sourced (ADR-58), or a read of a builtin global still on its declared seed
+        # (#1362, ADR-117 Decision point 2).
+        def global_write_value_withheld?(value, scope)
+          InferredParamGuard.rooted?(value, scope) || DeclarationSourcedGuard.marked?(value, scope) ||
+            !DeclarationSourcedGuard.global_sources(value, scope).empty?
+        end
+
+        # Trinary verdict of a written value against a setter contract — `:accepted` / `:rejected` / `:unknown`.
+        # Only `:rejected` fires: a union is rejected only when every member is, and a member the engine cannot place
+        # (`Dynamic`, `top`, an unresolved or project-declared class, a class or module object) is `:unknown`.
+        def global_write_verdict(type, contract, scope)
+          return written_class_verdict(type, contract, scope) unless type.is_a?(Type::Union)
+
+          verdicts = type.members.map { |member| global_write_verdict(member, contract, scope) }
+          return :rejected if verdicts.all?(:rejected)
+
+          verdicts.all?(:accepted) ? :accepted : :unknown
+        end
+
+        # One member: accepted when its class is (a subclass of) a class the contract takes, rejected when it is
+        # provably disjoint from all of them and, for a contract with a conversion, provably lacks the method.
+        def written_class_verdict(type, contract, scope)
+          class_name, exact = written_class(type)
+          return :unknown if class_name.nil? || !global_write_class_placeable?(class_name, scope)
+
+          orderings = contract.classes.map do |accepted|
+            Rigor::Reflection.class_ordering(class_name, accepted, scope: scope)
+          end
+          return :accepted if orderings.intersect?(%i[equal subclass])
+          return :unknown unless orderings.all?(:disjoint)
+          return :rejected if contract.conversion.nil?
+
+          global_write_conversion_verdict(class_name, contract.conversion, exact, scope)
+        end
+
+        # The class of a written value's runtime object, and whether it is exact: a literal (`Type::Constant`) or an
+        # Array / Hash carrier is an instance of that very class, while a nominal type may stand for an instance of a
+        # subclass that adds a method. A class or module object (`Type::Singleton`) answers nil: its singleton surface
+        # is not checked (`IO.write` exists, so `$stdout = IO` is accepted).
+        def written_class(type)
+          case type
+          when Type::Constant then [type.value.class.name, true]
+          when Type::Tuple then ["Array", true]
+          when Type::HashShape then ["Hash", true]
+          when Type::Singleton then nil
+          else
+            class_name = concrete_class_name(type)
+            class_name && [class_name, false]
+          end
+        end
+
+        # A class whose ancestry and method table RBS answers for alone: RBS-known, not a module, not one of the
+        # generic carriers (`Object`, `Class`, …), not an ADR-26 open receiver or a synthesized stub, and not declared
+        # by the project — whose `sig/` may omit a superclass and whose source may add methods, as
+        # `call.raise-non-exception` also reads it.
+        def global_write_class_placeable?(class_name, scope)
+          return false if RAISE_UNEXACT_INSTANCE_CLASSES.include?(class_name)
+          return false if unbounded_receiver_surface?(class_name, scope)
+          return false if Rigor::Reflection.discovered_class?(class_name, scope: scope)
+          return false if Rigor::Reflection.project_declared_class?(class_name, scope: scope)
+          return false unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+
+          !scope.environment.rbs_module?(class_name)
+        end
+
+        # The escape hatches through which an object answers a method its class does not define: the setter's
+        # `respond_to?` and implicit conversion both consult them.
+        GLOBAL_WRITE_HATCHES = %i[method_missing respond_to_missing? respond_to?].freeze
+        private_constant :GLOBAL_WRITE_HATCHES
+
+        # Where RBS core declares the hatches every object inherits unchanged.
+        DEFAULT_HATCH_OWNERS = %w[::BasicObject ::Kernel ::Object].freeze
+        private_constant :DEFAULT_HATCH_OWNERS
+
+        # What every class inherits, so a project definition on it reaches any value.
+        UNIVERSAL_OWNERS = %w[Object Kernel BasicObject].freeze
+        private_constant :UNIVERSAL_OWNERS
+
+        # Rejected only when RBS builds the class, declares no `method_name` (public or private) and no hatch of its
+        # own, and the project defines neither where the value could reach it ({#project_answers_conversion?}).
+        def global_write_conversion_verdict(class_name, method_name, exact, scope)
+          return :unknown if project_answers_conversion?(class_name, method_name, exact, scope)
+
+          definition = Rigor::Reflection.instance_definition(class_name, scope: scope)
+          return :unknown if definition.nil?
+          return :accepted if definition.methods.key?(method_name)
+          return :unknown if overridden_hatch?(definition)
+
+          :rejected
+        end
+
+        # For an exact value, a project `def` of the method or a hatch — in source, cross-file, or `pre_eval:` — on its
+        # class or on `Object` / `Kernel` / `BasicObject` (a top-level `def` included). For a nominal value, whose
+        # runtime object may be an instance of a subclass, such a `def` on any class.
+        def project_answers_conversion?(class_name, method_name, exact, scope)
+          names = [method_name, *GLOBAL_WRITE_HATCHES]
+          return names.any? { |name| Inference::BlockCallTiming.project_defines_anywhere?(name, scope) } unless exact
+
+          owners = [class_name, *UNIVERSAL_OWNERS]
+          names.any? do |name|
+            scope.top_level_def_for(name) ||
+              owners.any? do |owner|
+                source_declared_method?(scope, owner, name, :instance) || scope.discovered_def_nodes[owner]&.key?(name)
+              end
+          end
+        end
+
+        def overridden_hatch?(definition)
+          GLOBAL_WRITE_HATCHES.any? do |name|
+            method = definition.methods[name]
+            method && !DEFAULT_HATCH_OWNERS.include?(method.defined_in.to_s)
+          end
+        end
+
+        def build_global_write_type_diagnostic(path, node, contract, value_type)
+          Diagnostic.from_name_loc(
+            node,
+            rule: RULE_GLOBAL_WRITE_TYPE_MISMATCH,
+            path: path,
+            message: "`#{node.name}' accepts only #{contract.accepts}; this write assigns " \
+                     "#{value_type.describe(:short)}, which raises TypeError at runtime",
+            severity: :error
           )
         end
 

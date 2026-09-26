@@ -19,10 +19,12 @@ module Rigor
       # accumulated {Diagnostic}s, in the same emission order the inline `NodeWalker.each` produced them (the
       # shared walk is the same visit-before-descend DFS over `compact_child_nodes`).
       class MainPassCollector
-        # The node classes the former inline pass branched on. A plain `Prism::IfNode` covers ternaries and
-        # postfix `if` too (the legacy `when Prism::IfNode, Prism::UnlessNode` arm did the same).
+        # The node classes the main pass branches on. A plain `Prism::IfNode` covers ternaries and postfix `if`
+        # too (the legacy `when Prism::IfNode, Prism::UnlessNode` arm did the same). The three global-write
+        # classes carry issue #1367's `global.*` rules.
         NODE_CLASSES = [
-          Prism::CallNode, Prism::DefNode, Prism::IfNode, Prism::UnlessNode
+          Prism::CallNode, Prism::DefNode, Prism::IfNode, Prism::UnlessNode,
+          Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::MultiWriteNode
         ].freeze
 
         # @param node_diagnostics — maps a `Prism::Node` to the array of diagnostics the main pass emits

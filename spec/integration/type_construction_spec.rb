@@ -1295,6 +1295,32 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
+    # The number of `# QUIET-1367` lines each entry carries.
+    quiet_counts = { "writes.rb" => 18, "aliased.rb" => 2 }.freeze
+
+    def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
+
+    # Every 1-indexed line of `source` whose comment carries `# FIRES-1367 <rule>`, with that rule.
+    def fired_lines(source)
+      source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1367 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+    end
+
+    # Must-fire and must-stay-quiet in one assertion: comparing the exact `[line, rule]` set keeps the quiet half
+    # from passing because a rule stopped firing at all. Each firing line's comment quotes the error Ruby raises.
+    quiet_counts.each do |entry, quiet|
+      it "reports exactly the marked writes in #{entry}, and marks #{quiet} quiet lines" do
+        source = fixture_source(entry)
+        reported = analyze(source).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+        expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+        expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(quiet)
+      end
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

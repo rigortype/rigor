@@ -656,6 +656,76 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH => Entry.new(
+          id: CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH,
+          summary: "A special global is assigned a value its setter rejects (TypeError at runtime).",
+          fires_when: [
+            "The write is `$g = value` to a special whose setter checks the value: `$/` / `$-0`, `$,` and `$\\` " \
+            "(a String or nil), `$;` / `$-F` (a String, a Regexp, nil, or an object with `to_str`), `$~` " \
+            "(a MatchData or nil), `$0` / `$PROGRAM_NAME` (a String or an object with `to_str`), `$.` (an " \
+            "Integer, a Float, or an object with `to_int`), `$-i` (a String, nil, false, or an object with " \
+            "`to_str`), and `$stdout` / `$>` / `$stderr` (an object that responds to `write`, ADR-117 WD2).",
+            "The envelope is the interpreter's setter, not the global's RBS declaration: `$/ = /x/` fires " \
+            "although `$;` takes a Regexp.",
+            "Every member of the value's type is provably rejected: its class is RBS-known and disjoint from " \
+            "every class the setter takes and, where the setter also takes a conversion or `write`, RBS " \
+            "declares no such method and no `method_missing` / `respond_to_missing?` / `respond_to?` of its " \
+            "own (`$stdout = 1`, `$stdout = nil`, `$/ = 1`, `$~ = \"x\"`, `$0 = nil`)."
+          ],
+          does_not_fire_when: [
+            "The special's setter accepts every value: `$stdin` (never checked, ADR-117 WD2), `$_`, `$VERBOSE`, " \
+            "`$DEBUG`, `$=`; nor `$@`, whose setter depends on whether `$!` is set.",
+            "The value is `Dynamic[T]` / untyped / unresolved, or a union with any accepted or unknown member " \
+            "(`$/ = c ? 1 : \"x\"`).",
+            "The value is a class or module object, or typed as `Object` / `BasicObject` / `Class` / `Module` " \
+            "or a module.",
+            "The value's class is declared by the project (source or `sig/`) or is an ADR-26 open receiver.",
+            "The project defines the method the setter asks for (`write`, `to_str`, `to_int`) or a " \
+            "`method_missing` / `respond_to_missing?` / `respond_to?` hatch on the value's class or on " \
+            "`Object` / `Kernel` / `BasicObject` — or, for a value that is not a literal, on any class, since " \
+            "the runtime object may be an instance of a subclass.",
+            "The value is rooted at an inferred parameter, is a read whose `nil` is declaration-sourced " \
+            "(ADR-58), or reads a builtin global still on its declared seed.",
+            "The file aliases the special (`alias $stdout $out`).",
+            "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a target of a multiple assignment, a `for` " \
+            "index, or a `rescue => $g` reference: their written value is not type-checked."
+          ],
+          suppression: "`# rigor:disable global.write-type-mismatch` on the write.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          # A firing needs every member of the value provably outside the setter's envelope, read from RBS on a
+          # class the project does not declare, with the conversion and duck escapes excluded; the write then
+          # raises on every run.
+          evidence_tier: :high,
+          since: "0.4.0"
+        ),
+
+        CheckRules::RULE_GLOBAL_READONLY_WRITE => Entry.new(
+          id: CheckRules::RULE_GLOBAL_READONLY_WRITE,
+          summary: "A read-only special global is written (NameError at runtime).",
+          fires_when: [
+            "The write is `$g = value`, `$g op= value`, or a target of a multiple assignment (`$g, x = ...`, " \
+            "`*$g`) — forms that always write — to a special Ruby defines read-only: `$!`, `$$`, `$?`, `$<`, " \
+            "`$FILENAME`, `$*`, `$:` / `$LOAD_PATH` / `$-I`, `$\"` / `$LOADED_FEATURES`, `$-W`, `$-p`, `$-l`, " \
+            "`$-a`.",
+            "Whatever the value: the setter raises `NameError` (`$! is a read-only variable`) before it " \
+            "looks at it."
+          ],
+          does_not_fire_when: [
+            "The write is `$g ||= v` or `$g &&= v`, which writes only when the current value is falsy " \
+            "(truthy): `$LOAD_PATH ||= []` never writes.",
+            "The write is a `for` index or a `rescue => $g` reference.",
+            "The file aliases the special (`alias $! $err`), which makes the name another variable.",
+            "Mutating the value is not a write: `$LOAD_PATH << dir` and `$LOADED_FEATURES.delete(f)` stay silent."
+          ],
+          suppression: "`# rigor:disable global.readonly-write` on the write.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          # Syntactic: the name alone decides it, and the write raises on every run.
+          evidence_tier: :high,
+          since: "0.4.0"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE,
           summary: "A `# rigor:disable[-file]` comment names a rule that does not exist.",

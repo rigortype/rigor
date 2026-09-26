@@ -312,19 +312,7 @@ module Rigor
       # and a literal block's parameters, which the scope before the code does not bind.
       module ScanScope
         LOCAL_SCAN_BARRIERS = [Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode].freeze
-        # The parameter nodes a block's parameter list names a local with: every kind of parameter, a destructured
-        # one's parts included, and a `;`-block-local.
-        PARAMETER_NAME_NODES = [
-          Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
-          Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode, Prism::KeywordRestParameterNode,
-          Prism::BlockParameterNode, Prism::BlockLocalVariableNode
-        ].freeze
-        # The nodes that read a local's binding, an operator write reading it before it writes.
-        LOCAL_READ_NODES = [
-          Prism::LocalVariableReadNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-          Prism::LocalVariableAndWriteNode
-        ].freeze
-        private_constant :LOCAL_SCAN_BARRIERS, :PARAMETER_NAME_NODES, :LOCAL_READ_NODES
+        private_constant :LOCAL_SCAN_BARRIERS
 
         module_function
 
@@ -400,14 +388,17 @@ module Rigor
           []
         end
 
+        # The names a block's parameter list declares: every kind of parameter, a destructured one's parts included,
+        # and a `;`-block-local. A default value is not read.
         def collect_parameter_names(node, names)
-          return unless node.is_a?(Prism::Node)
-
-          if PARAMETER_NAME_NODES.any? { |klass| node.is_a?(klass) }
+          case node
+          when Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
+               Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode, Prism::KeywordRestParameterNode,
+               Prism::BlockParameterNode, Prism::BlockLocalVariableNode
             names << node.name if node.name
-            return
+          when Prism::Node
+            node.rigor_each_child { |child| collect_parameter_names(child, names) }
           end
-          node.rigor_each_child { |child| collect_parameter_names(child, names) }
         end
 
         # True when the block body `body` reads one of `names` where the scan types it. A read the scan never types is
@@ -434,9 +425,14 @@ module Rigor
             !node.block.is_a?(Prism::BlockNode)
         end
 
+        # True when `node` reads one of `names`: a read, or an operator write, which reads the local before it writes.
         def names_read?(node, names)
+          case node
+          when Prism::LocalVariableReadNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+               Prism::LocalVariableAndWriteNode
+            return true if names.include?(node.name)
+          end
           return false unless node.is_a?(Prism::Node)
-          return true if LOCAL_READ_NODES.any? { |klass| node.is_a?(klass) } && names.include?(node.name)
 
           found = false
           node.rigor_each_child { |child| found ||= names_read?(child, names) }

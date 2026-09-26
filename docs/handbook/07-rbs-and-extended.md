@@ -467,17 +467,22 @@ Notes:
   falls back to no inline-RBS contribution and analysis
   continues.
 - When a method is declared **both** in `sig/` and by an
-  inline annotation, the `.rbs` wins for that one method and
-  the inline signature is dropped — reported as a
-  `source-rbs-annotation-not-honoured` `:info` naming both
-  files. Only the overlapping member stands down; every other
-  annotation in the file still binds, and the class keeps its
-  method surface. This matters while migrating in either
-  direction: rbs and Steep merge the two sources without
-  ranking them, so left to collide they fail the class's
-  definition build and every call on it — real methods and
-  typos alike — reads `Dynamic[top]`. Delete one of the two
-  declarations to make the inline one take effect.
+  inline annotation, Rigor compares the two and one of them
+  binds. If one refines the other — `Symbol` in `sig/`,
+  `:asc | :desc` inline — the more precise one binds and
+  nothing is reported; `untyped` and `void` are consistent
+  with anything. If they contradict — a `String` parameter
+  against an `Integer` one — the `.rbs` binds and the run
+  reports `rbs.contradicting-signature`, an error, at the
+  `sig/` line: usually a stale generated signature. If Rigor
+  cannot tell, the `.rbs` binds and the dropped inline
+  signature is reported as a `source-rbs-annotation-not-honoured`
+  `:info` naming both files. Only the overlapping member is
+  affected; every other annotation in the file still binds,
+  and the class keeps its method surface. rbs and Steep merge
+  the two sources without ranking them, so left to collide
+  they fail the class's definition build and every call on it
+  — real methods and typos alike — reads `Dynamic[top]`.
 
 Full plugin documentation, configuration options (including
 the `require_magic_comment: false` host-context override the

@@ -731,6 +731,43 @@ module Rigor
       !@globals.empty? && @globals.key?(LAST_LINE)
     end
 
+    # Issue #1360 — the exception being rescued, `$!`, and its backtrace, `$@`. Ruby finds them through the nearest
+    # rescue frame of the running execution context, not through the method frame, so they are bound only inside a
+    # `rescue` clause or a rescue modifier's fallback and read their earlier binding again once it exits
+    # ({Inference::ErrorInfo}). `$?`, the status of the last child process, is thread-local, and is bound after a
+    # subprocess call ({Inference::LastStatus}).
+    ERROR_INFO_GLOBALS = %i[$! $@].freeze
+    LAST_STATUS_GLOBALS = %i[$?].freeze
+    private_constant :ERROR_INFO_GLOBALS, :LAST_STATUS_GLOBALS
+
+    # This scope with `$!` and `$@` unbound: the view of a body that runs outside the rescue clause it is written in.
+    def forget_error_info = forget_globals(ERROR_INFO_GLOBALS)
+
+    # This scope with a bound `$!` or `$@` rebound to `Dynamic[top]`, and an unbound one left unbound, as
+    # {#untyped_match_globals} gives a `define_method` body.
+    def untyped_error_info = untyped_globals(ERROR_INFO_GLOBALS)
+
+    # This scope with `$?` unbound: the view of a body that may run on another thread.
+    def forget_last_status = forget_globals(LAST_STATUS_GLOBALS)
+
+    # The `$?` half of {#untyped_error_info}.
+    def untyped_last_status = untyped_globals(LAST_STATUS_GLOBALS)
+
+    def forget_globals(names)
+      return self if @globals.empty? || names.none? { |name| @globals.key?(name) }
+
+      rebuild(globals: @globals.except(*names).freeze)
+    end
+
+    def untyped_globals(names)
+      return self if @globals.empty? || names.none? { |name| @globals.key?(name) }
+
+      untyped = Type::Combinator.untyped
+      rebound = names.each_with_object({}) { |name, acc| acc[name] = untyped if @globals.key?(name) }
+      rebuild(globals: @globals.merge(rebound).freeze)
+    end
+    private :forget_globals, :untyped_globals
+
     # Issue #1358 — stamps the frame `body` runs in ({Inference::MatchRebinding::Frame}) on a method, class or
     # file body's entry scope; a method passes its `parameters` too, whose defaults run in the same frame. Every
     # scope derived from it, a block's included, runs in that frame.

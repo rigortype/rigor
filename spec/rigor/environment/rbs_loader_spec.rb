@@ -1805,11 +1805,13 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
-  # Issue #824 / ADR-32 WD13 — the MEMBER-level sibling of the file-level quarantine above. A method
-  # declared by both `sig/` and an inline annotation used to raise `RBS::DuplicatedMethodDefinitionError`
-  # at definition-build time, taking the whole class to `Dynamic[top]`. `sig/` now wins per member: the
-  # inline member stands down, everything else in the file still binds, and the stand-down is reported.
-  describe "inline member stand-down against sig/ (issue #824)" do
+  # Issue #824 / ADR-32 WD13, replaced by #1075 / ADR-112 WD5 — the MEMBER-level sibling of the file-level
+  # quarantine above. A method declared by both `sig/` and an inline annotation used to raise
+  # `RBS::DuplicatedMethodDefinitionError` at definition-build time, taking the whole class to
+  # `Dynamic[top]`. #824 let `sig/` win per member; #1075 compares the two instead: consistent declarations
+  # merge to the more precise side, a contradiction keeps `sig/` and is reported as an error, and a pair
+  # Rigor cannot rank keeps `sig/` and is reported at `:info`.
+  describe "inline member against sig/ (issues #824, #1075)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-inline-member-spec-") }
     let(:sig_file) { File.join(tmpdir, "demo.rbs") }
     let(:virtual_name) { "virtual:rbs-inline:/app/lib/demo.rb" }
@@ -1843,17 +1845,31 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader
     end
 
-    # The example PR #779 introduced, kept as the behavioural core: the duplicate goes, the inline-only
-    # method stays. What #779 lacked — and what ADR-32 WD12 requires — is the report, pinned below.
-    it "keeps an inline method that sig/ does not declare, and drops the duplicate" do
+    # The rows `Environment.for_project` reports are derived with an `RbsProof`; without one nothing is
+    # ever a contradiction (the environment build needs none).
+    def records(loader)
+      loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader))
+    end
+
+    def outcomes(loader)
+      records(loader).map { |record| [record.method_name, record.outcome] }
+    end
+
+    def method_types(definition, name)
+      definition.methods[name].method_types.map(&:to_s)
+    end
+
+    # ADR-32 WD13's reproduction: every shared member contradicts. The class still builds with the `sig/`
+    # side, which is what #824 fixed, and the inline-only method still binds.
+    it "keeps an inline method that sig/ does not declare, and binds sig/ on a contradiction" do
       definition = build_loader.instance_definition("Demo")
       expect(definition).not_to be_nil
       expect(definition.methods.keys).to include(:shared, :only_sig, :only_inline)
-      expect(definition.methods[:shared].method_types.map(&:to_s)).to eq(["(::String) -> ::Integer"])
-      expect(definition.methods[:only_inline].method_types.map(&:to_s)).to eq(["(::Integer) -> ::Integer"])
+      expect(method_types(definition, :shared)).to eq(["(::String) -> ::Integer"])
+      expect(method_types(definition, :only_inline)).to eq(["(::Integer) -> ::Integer"])
     end
 
-    # The whole point of the change: before it, ONE duplicated member cost the class every other member.
+    # The whole point of #824: before it, ONE duplicated member cost the class every other member.
     it "leaves the class buildable, so definition_build_failures stays empty" do
       loader = build_loader
       loader.instance_definition("Demo")
@@ -1861,58 +1877,75 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.definition_build_failures).to be_empty
     end
 
-    it "matches the member kind: the singleton duplicate stands down on the singleton side" do
+    it "matches the member kind: the singleton contradiction binds sig/ on the singleton side" do
       definition = build_loader.singleton_definition("Demo")
       expect(definition).not_to be_nil
-      expect(definition.methods[:shared_singleton].method_types.map(&:to_s)).to eq(["() -> ::Integer"])
+      expect(method_types(definition, :shared_singleton)).to eq(["() -> ::Integer"])
     end
 
     # An `attr_reader foo` and a `def foo` are one method to `RBS::DefinitionBuilder`, so they collide —
     # the member key has to be the method name the attribute generates, not the attribute's own name.
     it "treats an inline attribute and a sig/ def of the same name as one member" do
       definition = build_loader.instance_definition("Demo")
-      expect(definition.methods[:shared_attr].method_types.map(&:to_s)).to eq(["() -> ::Integer"])
+      expect(method_types(definition, :shared_attr)).to eq(["() -> ::Integer"])
     end
 
-    it "reports each stand-down with the class, member, kind and both source paths" do
-      expect(build_loader.inline_member_standdowns).to eq(
-        [
-          ["Demo", :shared, :instance, sig_file, virtual_name],
-          ["Demo", :shared_attr, :instance, sig_file, virtual_name],
-          ["Demo", :shared_singleton, :singleton, sig_file, virtual_name]
-        ]
-      )
+    it "records each contradiction with the class, member, kind, the deciding position and both sources" do
+      rows = records(build_loader)
+      expect(rows.map { |r| [r.class_name, r.method_name, r.kind, r.outcome, r.signature_path, r.virtual_name] })
+        .to eq(
+          [
+            ["Demo", :shared, :instance, :contradiction, sig_file, virtual_name],
+            ["Demo", :shared_attr, :instance, :contradiction, sig_file, virtual_name],
+            ["Demo", :shared_singleton, :singleton, :contradiction, sig_file, virtual_name]
+          ]
+        )
+      shared = rows.first
+      expect(shared.signature_line).to eq(2)
+      expect(shared.detail).to include("parameter 1", "::String", "::Integer")
     end
 
-    it "reports nothing when the inline members do not overlap sig/" do
+    it "records nothing when the inline members do not overlap sig/" do
       virtual = [[virtual_name, "class Demo\n  def only_inline: () -> ::Integer\nend\n"]]
       loader = build_loader(virtual)
-      expect(loader.inline_member_standdowns).to be_empty
+      expect(records(loader)).to be_empty
       expect(loader.instance_definition("Demo").methods[:only_inline]).not_to be_nil
     end
 
-    it "reports nothing for a project with no inline contribution at all" do
-      expect(build_loader([]).inline_member_standdowns).to be_empty
+    it "records nothing for a project with no inline contribution at all" do
+      expect(records(build_loader([]))).to be_empty
     end
 
     # `def x: ... | ...` is filed under `overloads`, not `originals`, so rbs composes it with an existing
-    # declaration instead of raising. Standing it down would drop a contribution that was designed to
-    # coexist — the one shape upstream sanctions for having both.
+    # declaration instead of raising — the one shape upstream sanctions for having both.
     it "keeps an overloading inline member, which rbs composes rather than duplicates" do
       virtual = [[virtual_name, "class Demo\n  def shared: (::Symbol) -> ::Integer | ...\nend\n"]]
       loader = build_loader(virtual)
-      expect(loader.inline_member_standdowns).to be_empty
-      expect(loader.instance_definition("Demo").methods[:shared].method_types.map(&:to_s))
+      expect(records(loader)).to be_empty
+      expect(method_types(loader.instance_definition("Demo"), :shared))
         .to eq(["(::Symbol) -> ::Integer", "(::String) -> ::Integer"])
     end
 
     # The answer must not depend on cache state: the derivation reads the loader's own inputs, never the
     # built environment, so a loader that has never built one answers identically.
-    it "answers without building the environment" do
+    it "answers without building the environment when no proof is asked for" do
       loader = build_loader
-      expect(loader.inline_member_standdowns.map { |record| record[1] }).to eq(%i[shared shared_attr
-                                                                                  shared_singleton])
+      expect(loader.member_consistency.map(&:method_name)).to eq(%i[shared shared_attr shared_singleton])
       expect(loader.instance_variable_get(:@state)[:env_loaded]).to be_nil
+    end
+
+    # The environment build decides without a proof. A proof may turn an undecided row into a
+    # contradiction, but both keep the `.rbs` member, so which declaration binds must not move with it.
+    it "strips the same members with and without a proof" do
+      loader = build_loader
+      files = described_class.project_sig_files([tmpdir])
+      proof = Rigor::Environment::MemberConsistency::RbsProof.new(loader)
+      plain = described_class.member_consistency_for(files, virtual_rbs)
+      proven = described_class.member_consistency_for(files, virtual_rbs, proof: proof)
+      expect(proven.inline_standdowns).to eq(plain.inline_standdowns)
+      expect(proven.signature_standdowns).to eq(plain.signature_standdowns)
+      expect(plain.records.map(&:outcome).uniq).to eq([:undecided])
+      expect(proven.records.map(&:outcome).uniq).to eq([:contradiction])
     end
 
     # Nesting is what makes the two sides comparable at all: the writer emits `module Outer\n class Inner`
@@ -1921,10 +1954,327 @@ RSpec.describe Rigor::Environment::RbsLoader do
       File.write(sig_file, "module Outer\nend\n\nclass Outer::Inner\n  def shared: () -> ::Integer\nend\n")
       virtual = [[virtual_name, "module Outer\n  class Inner\n    def shared: () -> ::String\n  end\nend\n"]]
       loader = build_loader(virtual)
-      expect(loader.inline_member_standdowns)
-        .to eq([["Outer::Inner", :shared, :instance, sig_file, virtual_name]])
-      expect(loader.instance_definition("Outer::Inner").methods[:shared].method_types.map(&:to_s))
-        .to eq(["() -> ::Integer"])
+      expect(outcomes(loader)).to eq([%i[shared contradiction]])
+      expect(method_types(loader.instance_definition("Outer::Inner"), :shared)).to eq(["() -> ::Integer"])
+    end
+
+    describe "consistent declarations (ADR-112 WD5)" do
+      def loader_for(sig_body, inline_body)
+        File.write(sig_file, "class Demo\n#{sig_body}\nend\n")
+        build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]])
+      end
+
+      # The issue's own example: the inline refinement used to vanish behind `sig/` with only an `:info`.
+      it "merges `String` in sig/ and `non-empty-string` inline to the refinement, silently" do
+        loader = loader_for("  def name: () -> ::String",
+                            "  %a{rigor:v1:return: non-empty-string}\n  def name: () -> ::String")
+        expect(outcomes(loader)).to eq([%i[name inline]])
+        method = loader.instance_method(class_name: "Demo", method_name: :name)
+        expect(method.annotations.map(&:string)).to include("rigor:v1:return: non-empty-string")
+        expect(loader.definition_build_failures).to be_empty
+      end
+
+      it "merges a narrower inline parameter type to the inline side" do
+        loader = loader_for("  def order: (::Symbol dir) -> void", "  def order: (:asc | :desc dir) -> void")
+        expect(outcomes(loader)).to eq([%i[order inline]])
+        expect(method_types(loader.instance_definition("Demo"), :order)).to eq(["(:asc | :desc dir) -> void"])
+      end
+
+      it "keeps sig/ when sig/ is the more precise side" do
+        loader = loader_for("  def name: () -> ::String", "  def name: () -> untyped")
+        expect(outcomes(loader)).to eq([%i[name signature]])
+        expect(method_types(loader.instance_definition("Demo"), :name)).to eq(["() -> ::String"])
+      end
+
+      # ADR-93's herb case: a migrating project's `sig/` reads `-> untyped` beside an inline `-> void`.
+      # RBS defines the two as the same top type, so neither is more precise and sig/ keeps binding.
+      it "treats `untyped` in sig/ beside `void` inline as equal, and stays quiet" do
+        loader = loader_for("  def run: (untyped x) -> untyped", "  def run: (untyped x) -> void")
+        expect(outcomes(loader)).to eq([%i[run equal]])
+        expect(method_types(loader.instance_definition("Demo"), :run)).to eq(["(untyped x) -> untyped"])
+      end
+
+      it "treats identical declarations as equal (sig-gen writing an inline member into sig/)" do
+        loader = loader_for("  def name: (::Integer) -> ::String", "  def name: (Integer) -> String")
+        expect(outcomes(loader)).to eq([%i[name equal]])
+      end
+
+      it "reads each side more precise in a different position as undecided and keeps sig/" do
+        loader = loader_for("  def name: (untyped) -> ::String", "  def name: (::Integer) -> untyped")
+        expect(outcomes(loader)).to eq([%i[name undecided]])
+        expect(method_types(loader.instance_definition("Demo"), :name)).to eq(["(untyped) -> ::String"])
+      end
+
+      # rbs-inline's skeleton for a def nobody annotated (ADR-93 WD6): there is no inline author to disagree.
+      it "binds sig/ silently against an inferred-signature skeleton" do
+        loader = loader_for("  def name: (::Integer) -> ::String",
+                            "  %a{rigor:v1:inferred-return}\n  %a{rigor:v1:inferred-signature}\n  " \
+                            "def name: (untyped a, untyped b) -> untyped")
+        expect(outcomes(loader)).to eq([%i[name signature]])
+      end
+    end
+
+    describe "what Rigor cannot rank stays undecided, never a contradiction" do
+      def outcome_for(sig_body, inline_body)
+        File.write(sig_file, "class Demo\n#{sig_body}\nend\n")
+        outcomes(build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]))
+      end
+
+      # A project `sig/` routinely omits a superclass (`class Admin` for Ruby's `Admin < User`), so two
+      # classes the project declares are never proven disjoint, whatever their RBS says.
+      it "does not prove two project classes disjoint, even when their RBS is unrelated" do
+        File.write(File.join(tmpdir, "types.rbs"), "class Alpha\nend\nclass Beta\nend\nclass Gamma < Alpha\nend\n")
+        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Beta")).to eq([%i[x undecided]])
+        expect(outcome_for("  def x: () -> ::Alpha", "  def x: () -> ::Gamma")).to eq([%i[x undecided]])
+      end
+
+      # `Point = Struct.new(...)`, `Data.define` and `Class.new(Base)` constants have no superclass in RBS.
+      it "does not prove a project class disjoint from the core class it is built from" do
+        File.write(File.join(tmpdir, "types.rbs"), "class Point\nend\nclass Coord\nend\n")
+        expect(outcome_for("  def p: () -> ::Struct[untyped]", "  def p: () -> ::Point")).to eq([%i[p undecided]])
+        expect(outcome_for("  def c: () -> ::Data", "  def c: () -> ::Coord")).to eq([%i[c undecided]])
+      end
+
+      # A relative name may be a class the project defines only in Ruby (`String` inside `module App` may
+      # be `App::String`); telling would take a scan of the run's files, so only `::String` proves.
+      it "does not prove through a relative class name, however core it looks" do
+        expect(outcome_for("  def x: () -> String", "  def x: () -> Integer")).to eq([%i[x undecided]])
+        expect(outcome_for("  def x: () -> ::String", "  def x: () -> ::Integer")).to eq([%i[x contradiction]])
+      end
+
+      # Where rbs's ancestry disagrees with Ruby's the proof must not trust it: `Tempfile.new` is a
+      # `Delegator` and `Random.new` a `Random::Base`, though rbs 4.2 places neither there
+      # (`RbsProof::UNRELIABLE_ANCESTRY`; `member_consistency_ancestry_guard_spec.rb` keeps the list whole).
+      it "does not prove disjointness from an RBS ancestry Ruby contradicts" do
+        verdict = lambda do |sig_type, inline_type|
+          File.write(sig_file, "class Demo\n  def f: () -> #{sig_type}\nend\n")
+          inline = "class Demo\n  def f: () -> #{inline_type}\nend\n"
+          outcomes(described_class.new(signature_paths: [tmpdir], libraries: %w[tempfile delegate],
+                                       virtual_rbs: [[virtual_name, inline]]))
+        end
+        expect(verdict.call("::Delegator", "::Tempfile")).to eq([%i[f undecided]])
+        expect(verdict.call("::Random::Base", "::Random")).to eq([%i[f undecided]])
+      end
+
+      # A referenced name no RBS declares gets a stub class so the environment still builds; a stub
+      # has no known superclass, so it proves nothing.
+      it "does not prove a class RBS does not declare disjoint from anything" do
+        expect(outcome_for("  def x: () -> ::String", "  def x: () -> ::NotDeclaredAnywhere"))
+          .to eq([%i[x undecided]])
+      end
+
+      # rbs declares `Tempfile < File`; the `tempfile` library defines `Tempfile < Delegator`. The answer
+      # must be the RBS one whether or not the analyzer process has required `tempfile`.
+      it "reads Tempfile against File and Object from RBS, whatever the process has loaded" do
+        loader_for = lambda do |sig_type|
+          File.write(sig_file, "class Demo\n  def f: () -> #{sig_type}\nend\n")
+          described_class.new(signature_paths: [tmpdir], libraries: ["tempfile"],
+                              virtual_rbs: [[virtual_name, "class Demo\n  def f: () -> ::Tempfile\nend\n"]])
+        end
+        verdicts = lambda do
+          %w[::File ::Object].map { |type| outcomes(loader_for.call(type)) }
+        end
+        hide_const("Tempfile") if defined?(Tempfile)
+        without = verdicts.call
+        require "tempfile"
+        with = verdicts.call
+        expect(without).to eq([[%i[f undecided]], [%i[f undecided]]])
+        expect(with).to eq(without)
+      end
+
+      it "does not compare through a type alias" do
+        expect(outcome_for("  type t = ::Integer\n  def x: () -> t", "  def x: () -> ::String"))
+          .to eq([%i[x undecided]])
+      end
+
+      it "reads a different overload count as undecided" do
+        expect(outcome_for("  def x: (::Integer) -> ::String | (::String) -> ::String",
+                           "  def x: (::Integer) -> ::String")).to eq([%i[x undecided]])
+      end
+
+      it "reads overlapping parameter lists of different shapes as undecided" do
+        expect(outcome_for("  def x: (::Integer, ?::Integer) -> void", "  def x: (::Integer) -> void"))
+          .to eq([%i[x undecided]])
+      end
+    end
+
+    # PR #1428 review: shapes that once read as contradictions on correct or compatible pairs. A
+    # contradiction must be PROVEN — no value, and no call, satisfies both sides — so each of these stays
+    # undecided (sig/ binds, the WD12 `:info`) or merges; none reports an error.
+    describe "shapes that are not proven contradictions" do
+      def outcome_for(sig_body, inline_body, sig_prefix: "class Demo\n", inline_prefix: "class Demo\n",
+                      suffix: "end\n")
+        File.write(sig_file, "#{sig_prefix}#{sig_body}\n#{suffix}")
+        outcomes(build_loader([[virtual_name, "#{inline_prefix}#{inline_body}\n#{suffix}"]]))
+      end
+
+      it "pairs reordered overloads by correspondence, not by position" do
+        expect(outcome_for("  def m: (::Integer) -> ::Integer | (::String) -> ::String",
+                           "  def m: (::String) -> ::String | (::Integer) -> ::Integer")).to eq([%i[m equal]])
+        expect(outcome_for("  def m: (::Integer) -> ::Integer | (::Integer, ::Integer) -> ::Integer",
+                           "  def m: (::Integer, ::Integer) -> ::Integer | (::Integer) -> ::Integer"))
+          .to eq([%i[m equal]])
+      end
+
+      it "leaves overloads that do not pair one to one undecided" do
+        expect(outcome_for("  def m: (::Integer) -> ::String | (::String) -> ::String",
+                           "  def m: (::Symbol) -> ::String | (::Float) -> ::String")).to eq([%i[m undecided]])
+      end
+
+      it "never proves disjointness through a module" do
+        expect(outcome_for("  def m: () -> ::Comparable", "  def m: () -> ::Enumerable[untyped]"))
+          .to eq([%i[m undecided]])
+        # A String subclass may include Enumerable, so the two can share a value.
+        expect(outcome_for("  def m: () -> ::String", "  def m: () -> ::Enumerable[untyped]"))
+          .to eq([%i[m undecided]])
+      end
+
+      it "reads `TrueClass` as a refinement of `bool`, not a contradiction" do
+        expect(outcome_for("  def m: () -> bool", "  def m: () -> ::TrueClass")).to eq([%i[m inline]])
+        expect(outcome_for("  def m: () -> bool", "  def m: () -> (true | false)")).to eq([%i[m equal]])
+      end
+
+      it "does not read two element types of one container as disjoint (an empty Array is both)" do
+        expect(outcome_for("  def m: () -> ::Array[::Integer]", "  def m: () -> ::Array[::String]"))
+          .to eq([%i[m undecided]])
+      end
+
+      # `Data` inside `module App` is `App::Data` when the project declares one, not core `::Data`.
+      it "does not read a relative name the project may shadow as its top-level namesake" do
+        prefix = "module App\n  class Data < ::Hash[::Symbol, untyped]\n  end\n\n  class Box\n"
+        expect(outcome_for("    def payload: () -> Data", "    def payload: () -> Hash[Symbol, untyped]",
+                           sig_prefix: prefix, inline_prefix: "module App\n  class Box\n",
+                           suffix: "  end\nend\n")).to eq([%i[payload undecided]])
+      end
+
+      it "leaves a keyword against a positional Hash, or against a rest, undecided" do
+        expect(outcome_for("  def m: (foo: ::Integer) -> void", "  def m: (::Hash[::Symbol, untyped] opts) -> void"))
+          .to eq([%i[m undecided]])
+        expect(outcome_for("  def m: (foo: ::Integer) -> void", "  def m: (*untyped) -> void"))
+          .to eq([%i[m undecided]])
+      end
+
+      # A call that leaves the position empty satisfies both sides.
+      it "never contradicts in a position a call may leave empty" do
+        expect(outcome_for("  def m: (?::Integer) -> void", "  def m: (?::String) -> void")).to eq([%i[m undecided]])
+        expect(outcome_for("  def m: (*::Integer) -> void", "  def m: (*::String) -> void")).to eq([%i[m undecided]])
+        expect(outcome_for("  def m: (?foo: ::Integer) -> void", "  def m: (?foo: ::String) -> void"))
+          .to eq([%i[m undecided]])
+        expect(outcome_for("  def m: () ?{ (::Integer) -> void } -> void",
+                           "  def m: () ?{ (::String) -> void } -> void"))
+          .to eq([%i[m undecided]])
+      end
+
+      it "still contradicts in a required keyword" do
+        expect(outcome_for("  def m: (foo: ::Integer) -> void", "  def m: (foo: ::String) -> void"))
+          .to eq([%i[m contradiction]])
+      end
+
+      # A body that never yields, or an untyped block, satisfies both sides.
+      it "never contradicts in a required block's positions" do
+        expect(outcome_for("  def m: () { (::Integer) -> void } -> void", "  def m: () { (::String) -> void } -> void"))
+          .to eq([%i[m undecided]])
+      end
+
+      # p7 of the round-3 review: `App::Set < Array` exists only in Ruby. The verdict may not depend on
+      # whether the run's files include it, so a relative `Set` never proves anything.
+      it "does not prove through a relative name the project may define only in Ruby" do
+        File.write(sig_file, "module App\n  class Box\n    def items: () -> Set[Integer]\n  end\nend\n")
+        virtual = [[virtual_name, "module App\n  class Box\n    def items: () -> Array[Integer]\n  end\nend\n"]]
+        expect(outcomes(build_loader(virtual))).to eq([%i[items undecided]])
+      end
+
+      it "never contradicts a block by its parameter count" do
+        expect(outcome_for("  def m: () { (::Integer) -> void } -> void",
+                           "  def m: () { (::Integer, ::Integer) -> void } -> void")).to eq([%i[m undecided]])
+      end
+    end
+
+    # ADR-32 WD12 — the inline side may bind only when nothing the `.rbs` member said is lost.
+    describe "an inline member that is more precise but cannot replace the sig/ member" do
+      it "keeps sig/ when the sig/ member carries an RBS::Extended annotation the inline one lacks" do
+        File.write(sig_file, "class Demo\n  %a{rigor:v1:predicate-if-true value is String}\n  " \
+                             "def self.str?: (untyped value) -> bool\nend\n")
+        loader = build_loader([[virtual_name, "class Demo\n  def self.str?: (::Object value) -> bool\nend\n"]])
+        expect(outcomes(loader)).to eq([%i[str? undecided]])
+        method = loader.singleton_method(class_name: "Demo", method_name: :str?)
+        expect(method.annotations.map(&:string)).to include("rigor:v1:predicate-if-true value is String")
+      end
+
+      it "keeps sig/ when the two declare different visibility" do
+        File.write(sig_file, "class Demo\n  private def secret: (untyped x) -> ::Integer\nend\n")
+        loader = build_loader([[virtual_name, "class Demo\n  def secret: (::Integer x) -> ::Integer\nend\n"]])
+        expect(outcomes(loader)).to eq([%i[secret undecided]])
+        expect(method_types(loader.instance_definition("Demo"), :secret)).to eq(["(untyped x) -> ::Integer"])
+      end
+
+      it "still binds the inline side when the annotation is on both" do
+        annotation = "  %a{rigor:v1:predicate-if-true value is String}\n"
+        File.write(sig_file, "class Demo\n#{annotation}  def self.str?: (untyped value) -> bool\nend\n")
+        loader = build_loader([[virtual_name,
+                                "class Demo\n#{annotation}  def self.str?: (::Object value) -> bool\nend\n"]])
+        expect(outcomes(loader)).to eq([%i[str? inline]])
+      end
+    end
+
+    describe "contradictions beyond a single type position" do
+      def outcome_for(sig_body, inline_body)
+        File.write(sig_file, "class Demo\n#{sig_body}\nend\n")
+        records(build_loader([[virtual_name, "class Demo\n#{inline_body}\nend\n"]]))
+      end
+
+      it "reports disjoint positional arity" do
+        records = outcome_for("  def x: () -> void", "  def x: (::Integer) -> void")
+        expect(records.map(&:outcome)).to eq([:contradiction])
+        expect(records.first.detail).to include("0", "1", "positional")
+      end
+
+      it "reports a keyword one side requires and the other cannot accept" do
+        records = outcome_for("  def x: (name: ::String) -> void", "  def x: () -> void")
+        expect(records.map(&:outcome)).to eq([:contradiction])
+        expect(records.first.detail).to include("`name:`")
+      end
+    end
+
+    # rbs-extended.md: "an annotation whose refinement exceeds the ordinary RBS contract is a conflict".
+    describe "a refinement outside its own declared type" do
+      it "records the inline member whose return refinement its declared return does not accept" do
+        virtual = [[virtual_name,
+                    "class Demo\n  %a{rigor:v1:return: positive-int}\n  def label: () -> ::String\nend\n"]]
+        rows = records(build_loader(virtual, paths: []))
+        expect(rows.map { |r| [r.method_name, r.outcome, r.virtual_name, r.signature_path] })
+          .to eq([[:label, :refinement, virtual_name, nil]])
+        expect(rows.first.detail).to include("rigor:v1:return:", "::String")
+      end
+
+      it "records a sig/ member that overlaps an inline one, at its own line" do
+        File.write(sig_file,
+                   "class Demo\n  %a{rigor:v1:param: n is non-empty-string}\n  def x: (::Integer n) -> void\nend\n")
+        virtual = [[virtual_name, "class Demo\n  def x: (::Integer n) -> void\nend\n"]]
+        refinement = records(build_loader(virtual)).find { |r| r.outcome == :refinement }
+        expect(refinement).to have_attributes(signature_path: sig_file, signature_line: 3, virtual_name: nil)
+        expect(refinement.detail).to include("rigor:v1:param: n")
+      end
+
+      # `RBS::Definition::Method#annotations` does not carry an overload's own annotations, so call sites
+      # never honour one; the rule does not enforce it either.
+      it "ignores a refinement scoped to one overload" do
+        virtual = [[virtual_name, "class Demo\n  def m: %a{rigor:v1:param: v positive-int} (::Integer v) -> void " \
+                                  "| (::String v) -> void\nend\n"]]
+        expect(records(build_loader(virtual, paths: []))).to be_empty
+      end
+
+      it "stays quiet for a member-level refinement that fits one of its overloads" do
+        virtual = [[virtual_name, "class Demo\n  %a{rigor:v1:param: v positive-int}\n  " \
+                                  "def m: (::Integer v) -> void | (::String v) -> void\nend\n"]]
+        expect(records(build_loader(virtual, paths: []))).to be_empty
+      end
+
+      it "stays quiet for a refinement inside its declared type" do
+        virtual = [[virtual_name,
+                    "class Demo\n  %a{rigor:v1:return: non-empty-string}\n  def label: () -> ::String\nend\n"]]
+        expect(records(build_loader(virtual, paths: []))).to be_empty
+      end
     end
   end
 end

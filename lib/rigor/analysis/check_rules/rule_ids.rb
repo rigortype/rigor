@@ -66,6 +66,12 @@ module Rigor
       # annotation must never turn collection on by itself (that would be a project-wide cost cliff
       # nobody asked for), and it must equally never be silently inert.
       RULE_EFFECT_ANNOTATIONS_UNCHECKED = "effect.annotations-unchecked"
+      # ADR-112 WD5 / #1075 — two statements of one member's contract that contradict: a `sig/` declaration
+      # against an inline `@rbs` / `#:` one (and, once #1073 reads it, `@rbs` / `#:` against `@extrbs`), or a
+      # `rigor:v1:` refinement outside the member's own declared type. `rbs.` because the finding is about
+      # the RBS the environment is built from, whichever file spelled it; not `rbs_extended.`, whose rows
+      # are payload validity, since most contradictions involve no `RBS::Extended` annotation at all.
+      RULE_CONTRADICTING_SIGNATURE = "rbs.contradicting-signature"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -98,7 +104,8 @@ module Rigor
         RULE_EFFECT_ENVELOPE_EXCEEDED,
         RULE_EFFECT_LISKOV_WIDENED,
         RULE_EFFECT_UNKNOWN_LABEL,
-        RULE_EFFECT_ANNOTATIONS_UNCHECKED
+        RULE_EFFECT_ANNOTATIONS_UNCHECKED,
+        RULE_CONTRADICTING_SIGNATURE
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with

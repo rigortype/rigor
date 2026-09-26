@@ -9,8 +9,10 @@ require_relative "../environment"
 require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
+require_relative "guard_rebinding"
 require_relative "last_line"
 require_relative "optimistic_origin"
+require_relative "project_method_ownership"
 require_relative "receiver_alias"
 
 module Rigor
@@ -53,8 +55,21 @@ module Rigor
       # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
       # extended-mode bail read one shape.
       RegexMatchPattern = Data.define(:source, :extended)
+      # Issue #1429 — a predicate receiver whose binding an edge can narrow ({.receiver_slot}): a local, an instance
+      # variable or a global (`name` its Symbol), or a constant reference (`name` its {.constant_key}). `current` is
+      # the type the receiver reads before the predicate, a global's read type when the scope does not bind it.
+      ReceiverSlot = Data.define(:kind, :name, :current)
+      # The globals a guard narrows without a record ({Scope#with_guarded_global}): `$_` and `$~` live in the frame's
+      # special-variable slot, which a called method does not reach and their own machinery forgets
+      # (`Scope#forget_last_line`, `Scope#forget_match_globals`), and `$!` / `$@` read the rescue clause that is
+      # running, which a call that returns leaves as it was.
+      UNRECORDED_GUARD_GLOBALS = %i[$_ $~ $! $@].freeze
+      # Issue #1429 — the value-pinned classes: a `Nominal` of one of them is the single value itself, which no
+      # program replaces with another class's instance, so it counts with the literal carriers
+      # ({.disjoint_nominal_guard?}, `respond_to?`'s edge).
+      VALUE_PINNED_CLASSES = %w[NilClass TrueClass FalseClass].freeze
       private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext,
-                       :RegexMatchPattern
+                       :RegexMatchPattern, :ReceiverSlot, :UNRECORDED_GUARD_GLOBALS, :VALUE_PINNED_CLASSES
 
       # Issue #1017 — the tallest stack of conditionals a condition may carry and still contribute facts. A
       # conditional guard analyses its predicate and both arms, so each level can triple the analysis; past this
@@ -328,6 +343,22 @@ module Rigor
         narrow_class_dispatch(type, class_name, context)
       end
 
+      # Issue #1429 — true when `type` holds a member whose `Bot` under `is_a?(class_name)` rests only on Rigor's
+      # reading of its type: a `Nominal`, other than the value-pinned `nil` / `true` / `false` classes, whose class
+      # the environment orders `:disjoint` from `class_name`. A `Nominal` is a type Rigor inferred or read from a
+      # signature, and a program can hold another object there: `$stdout` is typed `IO`, and a test runs it with a
+      # `StringIO`, which is not an `IO` subclass. The narrowing still reads such a guard's edge as `Bot`, so the
+      # arm is not checked; what this answers is whether the `Bot` may stand as a verdict that the code is dead
+      # (`flow.unreachable-clause`). The carriers that record what the file literally shows (`Constant`, `Tuple`,
+      # `HashShape`, `Singleton`) and the value-pinned classes do not count, so their verdicts stand.
+      def disjoint_nominal_guard?(type, class_name, environment: Environment.default)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.any? do |member|
+          member.is_a?(Type::Nominal) && !VALUE_PINNED_CLASSES.include?(member.class_name) &&
+            member.class_name != class_name && environment.class_ordering(member.class_name, class_name) == :disjoint
+        end
+      end
+
       # Mirror of {.narrow_class} for the falsey edge of `is_a?`/`kind_of?`/`instance_of?`.
       # Inhabitants that DO satisfy the predicate are removed; inhabitants that do not are
       # preserved. Conservative on Top/Dynamic/Bot (preserved unchanged) because the analyzer
@@ -398,6 +429,16 @@ module Rigor
         fact.type
       end
 
+      # Issue #1429 — the key a constant reference's guard narrowing is recorded under ({Scope#constant_narrowing}):
+      # its spelling, with a leading `::` kept, since `::Foo` and `Foo` may name two constants. nil for a path on a
+      # dynamic base (`expr::Foo`) and for any other node.
+      def constant_key(node)
+        name = Source::ConstantPath.qualified_name_or_nil(node)
+        return nil if name.nil?
+
+        Source::ConstantPath.rooted?(node) ? "::#{name}" : name
+      end
+
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`, always; when no
       # narrowing rule matches the predicate node both entries are the receiver scope unchanged.
       def predicate_scopes(node, scope)
@@ -431,16 +472,16 @@ module Rigor
         # a different regex. Applied even when the subject is not a narrowable local read.
         body_scope = apply_when_regex_globals(conditions, scope)
 
-        return [body_scope, scope] unless subject.is_a?(Prism::LocalVariableReadNode)
+        # Issue #1429 — a global or constant subject (`case $stdout when StringIO`) narrows as a local does.
+        slot = receiver_slot(subject, scope, kinds: CASE_SUBJECT_KINDS)
+        return [body_scope, scope] if slot.nil?
 
-        local_name = subject.name
-        current = scope.local(local_name)
-        return [body_scope, scope] if current.nil?
-
-        truthy, = accumulate_case_when_scopes(body_scope, local_name, current, conditions)
-        _, falsey = accumulate_case_when_scopes(scope, local_name, current, conditions)
-        [truthy, falsey]
+        truthy_type, falsey_type = case_when_types(scope, slot.current, conditions)
+        [narrow_slot(body_scope, slot, truthy_type), narrow_slot(scope, slot, falsey_type)]
       end
+
+      CASE_SUBJECT_KINDS = %i[local global constant].freeze
+      private_constant :CASE_SUBJECT_KINDS
 
       # When the clause has exactly one `RegularExpressionNode` literal condition, narrow the
       # match-data globals on the body edge (same rule as `analyse_regex_match_predicate`'s
@@ -498,10 +539,10 @@ module Rigor
           analyse_local_write(node, scope)
         when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode
           analyse_ivar(node, scope)
-        when Prism::ClassVariableWriteNode
-          analyse_cvar_write(node, scope)
-        when Prism::GlobalVariableWriteNode
-          analyse_global_write(node, scope)
+        when Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode
+          analyse_cvar_or_global_write(node, scope)
+        when Prism::GlobalVariableReadNode, Prism::ConstantReadNode, Prism::ConstantPathNode
+          analyse_slot_read(node, scope)
         when Prism::CallNode
           analyse_call(write_receiver_as_read(node) || node, scope)
         when Prism::AndNode, Prism::OrNode, Prism::IfNode, Prism::UnlessNode
@@ -867,6 +908,12 @@ module Rigor
           ]
         end
 
+        def analyse_cvar_or_global_write(node, scope)
+          return analyse_cvar_write(node, scope) if node.is_a?(Prism::ClassVariableWriteNode)
+
+          analyse_global_write(node, scope)
+        end
+
         def analyse_cvar_write(node, scope)
           current = scope.cvar(node.name)
           return nil if current.nil?
@@ -885,6 +932,76 @@ module Rigor
             scope.with_global(node.name, narrow_truthy(current)),
             scope.with_global(node.name, narrow_falsey(current))
           ]
+        end
+
+        # Issue #1429 — `if $g`, `return unless $g`, `if CONFIG`: the truthiness guard on a global or constant
+        # read, the counterpart of {#analyse_local_read} ({#narrow_slot}).
+        def analyse_slot_read(node, scope)
+          slot = receiver_slot(node, scope, kinds: GLOBAL_AND_CONSTANT)
+          return nil if slot.nil?
+
+          [
+            narrow_slot(scope, slot, narrow_truthy(slot.current)),
+            narrow_slot(scope, slot, narrow_falsey(slot.current))
+          ]
+        end
+
+        GLOBAL_AND_CONSTANT = %i[global constant].freeze
+        ALL_SLOT_KINDS = %i[local ivar global constant].freeze
+        private_constant :GLOBAL_AND_CONSTANT, :ALL_SLOT_KINDS
+
+        # The {ReceiverSlot} `node` reads, among `kinds`, or nil. A local or instance variable needs a binding. A
+        # global the scope does not bind is read as it reads unbound, and a constant reference as it resolves
+        # (through any narrowing already on it), so a guard narrows it from that type.
+        def receiver_slot(node, scope, kinds: ALL_SLOT_KINDS)
+          case node
+          when Prism::LocalVariableReadNode then variable_slot(:local, node.name, scope.local(node.name), kinds)
+          when Prism::InstanceVariableReadNode then variable_slot(:ivar, node.name, scope.ivar(node.name), kinds)
+          when Prism::GlobalVariableReadNode then global_slot(node, scope, kinds)
+          when Prism::ConstantReadNode, Prism::ConstantPathNode then constant_slot(node, scope, kinds)
+          end
+        end
+
+        def variable_slot(kind, name, current, kinds)
+          return nil if current.nil? || !kinds.include?(kind)
+
+          ReceiverSlot.new(kind: kind, name: name, current: current)
+        end
+
+        def global_slot(node, scope, kinds)
+          return nil unless kinds.include?(:global)
+
+          ReceiverSlot.new(kind: :global, name: node.name, current: scope.global(node.name) || scope.type_of(node))
+        end
+
+        def constant_slot(node, scope, kinds)
+          return nil unless kinds.include?(:constant)
+
+          key = constant_key(node)
+          return nil if key.nil?
+
+          ReceiverSlot.new(kind: :constant, name: key, current: scope.type_of(node))
+        end
+
+        # `scope` with `slot`'s receiver read as `type` on one edge. A local or instance variable rebinds as its
+        # analysers always did. A global or constant is left alone when the edge learns nothing (`type` is what
+        # it read), and otherwise narrows with its pre-guard type recorded, so code that may rebind it restores
+        # the binding ({Scope#forget_guard_narrowings}); the frame-local specials skip the record.
+        def narrow_slot(scope, slot, type)
+          case slot.kind
+          when :local then scope.with_local(slot.name, type)
+          when :ivar then scope.with_ivar(slot.name, type)
+          when :global then narrow_global_slot(scope, slot, type)
+          else
+            type == slot.current ? scope : scope.with_constant_narrowing(slot.name, type, slot.current)
+          end
+        end
+
+        def narrow_global_slot(scope, slot, type)
+          return scope if type == slot.current
+
+          record = !UNRECORDED_GUARD_GLOBALS.include?(slot.name)
+          scope.with_guarded_global(slot.name, type, slot.current, record: record)
         end
 
         # `if /(?<x>...)/ =~ str` — Prism wraps the `=~` call in a `MatchWriteNode` listing the
@@ -1111,11 +1228,19 @@ module Rigor
         # symbol is one of `NilClass`'s own methods (`:to_s`, `:inspect`, `:nil?`, …) — `nil`
         # DOES respond to those, so the truthy edge admits a nil receiver and we narrow nothing.
         #
+        # Issue #1429 — the truthy edge also admits `m` itself. `respond_to?` is a guard written in the code
+        # (ADR-117 Decision point 3), so a member of the receiver's type whose class Rigor knows to lack `m`
+        # is not what the edge holds: members that may respond keep their type, and when no member may, the
+        # receiver reads `Dynamic[top]` ({#respond_to_admitted}). `$stdout.respond_to?(:string) ?
+        # $stdout.string : ""` on an `IO`-typed `$stdout` therefore does not report `undefined method`.
+        # `Dynamic[top]` rather than `Dynamic[IO]`: method availability on a `Dynamic[T]` is checked against
+        # `T` (special-types.md), so only the untyped carrier is sure to keep the guarded call quiet.
+        #
         # Conservative floor: narrow only on a literal `Symbol`/`String` argument resolved
         # against the RBS environment; a non-literal symbol, a missing argument, or a symbol
         # that IS in `NilClass`'s method set declines. The falsey edge is always the no-op
-        # ("does not respond" proves little about the receiver's type). Narrowing-only: it
-        # removes the `nil` constituent and never promotes a non-nil type.
+        # ("does not respond" proves little about the receiver's type). A local, instance variable,
+        # global or constant receiver narrows ({#receiver_slot}).
         def analyse_respond_to_predicate(node, scope)
           return nil if node.block
           return nil if node.arguments.nil? || node.arguments.arguments.size != 1
@@ -1124,16 +1249,63 @@ module Rigor
           return nil if sym.nil?
           return nil if nilclass_method?(sym, scope)
 
-          reader, writer = emptiness_receiver_accessors(node.receiver)
-          return nil if reader.nil?
+          slot = receiver_slot(node.receiver, scope)
+          return nil if slot.nil?
 
-          current = scope.public_send(reader, node.receiver.name)
-          return nil if current.nil?
+          admitted = respond_to_admitted(narrow_non_nil(slot.current), sym.to_sym, scope)
+          return nil if admitted.equal?(slot.current) || admitted == slot.current
 
-          non_nil = narrow_non_nil(current)
-          return nil if non_nil.equal?(current)
+          [narrow_slot(scope, slot, admitted), scope]
+        end
 
-          [scope.public_send(writer, node.receiver.name, non_nil), scope]
+        # The members of `type` that may respond to `method_name`, or, when Rigor knows every member lacks it
+        # ({#lacks_method?}), `Dynamic[top]`: the members Rigor read the edge from are wrong about the object there,
+        # and no class is named to read it as instead. A member Rigor cannot judge (`Dynamic`, `Bot`, a class no
+        # signature declares) may respond.
+        #
+        # When every member lacking `m` records what the file literally shows (a literal, a `Tuple`, a `HashShape`, a
+        # class object, `nil` / `true` / `false`), the edge is `Bot`. For a literal value that is exact
+        # (`1.respond_to?(:string)` is false in every run); a class object's arm goes unchecked when a gem without a
+        # signature adds the method (`Time.respond_to?(:zone)` under ActiveSupport).
+        def respond_to_admitted(type, method_name, scope)
+          members = type.is_a?(Type::Union) ? type.members : [type]
+          kept = members.reject { |member| lacks_method?(member, method_name, scope) }
+          return type if kept.size == members.size
+          return Type::Combinator.union(*kept) unless kept.empty?
+          return Type::Combinator.bot if members.all? { |member| literal_carrier?(member) }
+
+          Type::Combinator.untyped
+        end
+
+        LITERAL_CARRIERS = [Type::Constant, Type::Tuple, Type::HashShape, Type::Singleton].freeze
+        private_constant :LITERAL_CARRIERS
+
+        def literal_carrier?(member)
+          LITERAL_CARRIERS.any? { |carrier| member.is_a?(carrier) } ||
+            (member.is_a?(Type::Nominal) && VALUE_PINNED_CLASSES.include?(member.class_name))
+        end
+
+        # True only when every class `member` dispatches through is declared in RBS, is not a mixin module or
+        # `Object` / `BasicObject` (whose instances may be of any class), is not a plugin's open receiver, and
+        # neither its signature nor the project defines `method_name` on it.
+        def lacks_method?(member, method_name, scope)
+          targets = ProjectMethodOwnership.targets(member)
+          return false if targets.nil? || targets.empty?
+
+          targets.all? { |class_name, kind| class_lacks_method?(class_name, method_name, kind, scope) }
+        end
+
+        OPEN_SURFACE_CLASSES = %w[Object BasicObject].freeze
+        private_constant :OPEN_SURFACE_CLASSES
+
+        def class_lacks_method?(class_name, method_name, kind, scope)
+          return false if kind == :instance && OPEN_SURFACE_CLASSES.include?(class_name)
+          return false unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          return false if kind == :instance && scope.environment.rbs_module?(class_name)
+          return false if scope.environment.plugin_registry&.open_receiver?(class_name)
+          return false if ProjectMethodOwnership.defines?(class_name, method_name, kind, scope)
+
+          ExternalAncestorResolution.method_definition(class_name, method_name, kind, scope: scope).nil?
         end
 
         # True when `nil` responds to `sym` — i.e. `NilClass` (own, inherited
@@ -2005,7 +2177,28 @@ module Rigor
             analyse_class_predicate_on_local(node, scope, class_name, exact)
           when Prism::CallNode
             analyse_class_predicate_on_chain(node, scope, class_name, exact)
+          else
+            analyse_class_predicate_on_slot(node.receiver, scope, class_name, exact)
           end
+        end
+
+        # Issue #1429 — `$stdout.is_a?(StringIO)`, `STDOUT.kind_of?(StringIO)`: a global or constant receiver
+        # narrows as a local does ({#class_predicate_scopes}), with the pre-guard type recorded ({#narrow_slot}).
+        def analyse_class_predicate_on_slot(receiver, scope, class_name, exact)
+          slot = receiver_slot(receiver, scope, kinds: GLOBAL_AND_CONSTANT)
+          return nil if slot.nil?
+
+          class_slot_scopes(scope, slot, class_name, exact: exact)
+        end
+
+        def class_slot_scopes(scope, slot, class_name, exact:)
+          environment = scope.environment
+          truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
+          [
+            narrow_slot(scope, slot, truthy),
+            narrow_slot(scope, slot, narrow_not_class(slot.current, class_name, exact: exact,
+                                                                                environment: environment, scope: scope))
+          ]
         end
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level
@@ -2139,16 +2332,8 @@ module Rigor
         end
 
         def class_predicate_scopes(scope, name, current, class_name, exact:)
-          [
-            scope.with_local(
-              name,
-              narrow_class(current, class_name, exact: exact, environment: scope.environment, scope: scope)
-            ),
-            scope.with_local(
-              name,
-              narrow_not_class(current, class_name, exact: exact, environment: scope.environment, scope: scope)
-            )
-          ]
+          slot = ReceiverSlot.new(kind: :local, name: name, current: current)
+          class_slot_scopes(scope, slot, class_name, exact: exact)
         end
 
         # Slice 7 phase 4 — `===`-narrowing. The case-equality predicate `<receiver> === local`
@@ -2182,7 +2367,21 @@ module Rigor
             analyse_case_equality_receiver(node.receiver, scope, arg.name, current)
           when Prism::CallNode
             analyse_case_equality_on_chain(node.receiver, arg, scope)
+          else
+            analyse_case_equality_on_slot(node.receiver, arg, scope)
           end
+        end
+
+        # Issue #1429 — `StringIO === $stdout`, `StringIO === STDOUT`: the class-constant receiver form on a global or
+        # constant argument. The Range / Regexp receivers stay local-only.
+        def analyse_case_equality_on_slot(receiver, arg, scope)
+          class_name = lexical_class_name(receiver, scope)
+          return nil if class_name.nil?
+
+          slot = receiver_slot(arg, scope, kinds: GLOBAL_AND_CONSTANT)
+          return nil if slot.nil?
+
+          class_slot_scopes(scope, slot, class_name, exact: false)
         end
 
         # `Class === <local/ivar>.<method>` — the case-equality counterpart of
@@ -2422,7 +2621,9 @@ module Rigor
         # cannot statically classify are treated as "no narrowing": the body falls back to the
         # union of what we did learn (or the entry type when nothing learned), and the falsey
         # edge is the entry type (because we cannot prove the unknown condition didn't match).
-        def accumulate_case_when_scopes(scope, local_name, current, conditions)
+        #
+        # `[body type, next-clause type]` of a `when` clause's conditions over the subject type `current`.
+        def case_when_types(scope, current, conditions)
           truthy_members = []
           falsey_type = current
           fully_narrowable = true
@@ -2439,10 +2640,7 @@ module Rigor
           end
 
           truthy = truthy_members.empty? ? current : Type::Combinator.union(*truthy_members)
-          [
-            scope.with_local(local_name, truthy),
-            scope.with_local(local_name, fully_narrowable ? falsey_type : current)
-          ]
+          [truthy, fully_narrowable ? falsey_type : current]
         end
 
         # Per-condition rule. Returns `nil` when the condition shape is not recognised (caller
@@ -2694,9 +2892,12 @@ module Rigor
         # `is_a?(Integer)`) narrow DOWN to `Nominal[class_name]`; otherwise (disjoint
         # hierarchies under `is_a?`, mismatch under `instance_of?`) collapse to `Bot`.
         # Conservative when the analyzer environment cannot resolve either class.
+        #
+        # A disjoint `Bot` narrows the edge but is not always a verdict that the code is dead: see
+        # {.disjoint_nominal_guard?} (issue #1429).
         def narrow_nominal_to_class(nominal, class_name, context)
           return nominal if nominal.class_name == class_name
-          return Type::Combinator.bot if context.exact
+          return exact_nominal_to_class(nominal, class_name, context) if context.exact
 
           case class_ordering(nominal.class_name, class_name, context)
           when :superclass then Type::Combinator.nominal_of(class_name)
@@ -2709,6 +2910,17 @@ module Rigor
             # and fired on `.value`); the honest join is Dynamic — the guard destroyed the old knowledge.
             Type::Combinator.untyped
           end
+        end
+
+        # `instance_of?(class_name)` compares the exact class, so its truthy edge holds `class_name` itself. Issue
+        # #1429: when `class_name` is a class below the nominal's (`Numeric` under `instance_of?(Integer)`), that is
+        # the edge's type; the edge was `Bot` before, for every class but the nominal's own. A module is never an
+        # object's class, and any other ordering leaves no class the object can have, so those stay `Bot`.
+        def exact_nominal_to_class(nominal, class_name, context)
+          return Type::Combinator.bot if context.environment.rbs_module?(class_name)
+          return Type::Combinator.bot unless class_ordering(nominal.class_name, class_name, context) == :superclass
+
+          Type::Combinator.nominal_of(class_name)
         end
 
         def narrow_nominal_not_class(nominal, class_name, context)
@@ -2855,25 +3067,15 @@ module Rigor
           context.environment.class_ordering(lhs, rhs)
         end
 
+        # `x.nil?` on a local, instance variable, global or constant (#1429) read.
         def analyse_nil_predicate(receiver, scope)
-          case receiver
-          when Prism::LocalVariableReadNode
-            current = scope.local(receiver.name)
-            return nil if current.nil?
+          slot = receiver_slot(receiver, scope)
+          return nil if slot.nil?
 
-            [
-              scope.with_local(receiver.name, narrow_nil(current)),
-              scope.with_local(receiver.name, narrow_non_nil(current))
-            ]
-          when Prism::InstanceVariableReadNode
-            current = scope.ivar(receiver.name)
-            return nil if current.nil?
-
-            [
-              scope.with_ivar(receiver.name, narrow_nil(current)),
-              scope.with_ivar(receiver.name, narrow_non_nil(current))
-            ]
-          end
+          [
+            narrow_slot(scope, slot, narrow_nil(slot.current)),
+            narrow_slot(scope, slot, narrow_non_nil(slot.current))
+          ]
         end
 
         # The three value-pinned classes a union arm can name whose instances are the single
@@ -2992,21 +3194,20 @@ module Rigor
         def analyse_safe_nav_receiver(node, scope)
           return nil unless node.safe_navigation?
 
-          receiver = node.receiver
-          reader, writer =
-            case receiver
-            when Prism::LocalVariableReadNode then %i[local with_local]
-            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
-            else return nil
-            end
+          narrowed = non_nil_slot_scope(node.receiver, scope)
+          narrowed && [narrowed, scope]
+        end
 
-          current = scope.public_send(reader, receiver.name)
-          return nil if current.nil?
+        # `scope` with the receiver `node` reads (a local, instance variable, global or constant, #1429) narrowed to
+        # its non-nil fragment, or nil when there is no such receiver or it holds no `nil` to remove.
+        def non_nil_slot_scope(node, scope)
+          slot = receiver_slot(node, scope)
+          return nil if slot.nil?
 
-          non_nil = narrow_non_nil(current)
-          return nil if non_nil.equal?(current)
+          non_nil = narrow_non_nil(slot.current)
+          return nil if non_nil.equal?(slot.current)
 
-          [scope.public_send(writer, receiver.name, non_nil), scope]
+          narrow_slot(scope, slot, non_nil)
         end
 
         # Issue #606 slice 1 — the SAFE-NAV CHAIN forms. {.analyse_safe_nav_receiver} above proves
@@ -3078,11 +3279,16 @@ module Rigor
           return nil if suffixes.empty? && !allow_bare
 
           receiver = current.receiver
-          return nil unless receiver.is_a?(Prism::LocalVariableReadNode) ||
-                            receiver.is_a?(Prism::InstanceVariableReadNode)
+          return nil unless SLOT_READ_NODES.any? { |klass| receiver.is_a?(klass) }
 
           [receiver, suffixes]
         end
+
+        SLOT_READ_NODES = [
+          Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode,
+          Prism::ConstantReadNode, Prism::ConstantPathNode
+        ].freeze
+        private_constant :SLOT_READ_NODES
 
         # Which edge — if either — a chain's outcome narrows on. The inner suffixes (everything
         # below the outermost) only ever have to NOT return, so they are held to the raise test
@@ -3098,20 +3304,7 @@ module Rigor
         end
 
         def safe_nav_chain_narrowed_scope(receiver, scope)
-          reader, writer =
-            case receiver
-            when Prism::LocalVariableReadNode then %i[local with_local]
-            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
-            else return nil
-            end
-
-          current = scope.public_send(reader, receiver.name)
-          return nil if current.nil?
-
-          non_nil = narrow_non_nil(current)
-          return nil if non_nil.equal?(current)
-
-          scope.public_send(writer, receiver.name, non_nil)
+          non_nil_slot_scope(receiver, scope)
         end
 
         # Issue #606 slice 1, second form — a safe-nav chain COMPARED to a value that cannot be
@@ -3221,14 +3414,13 @@ module Rigor
           return edges unless node.safe_navigation? && edges
 
           truthy, falsey = edges
-          safe = analyse_safe_nav_receiver(node, scope)
-          return edges unless safe
+          slot = receiver_slot(node.receiver, scope)
+          return edges if slot.nil?
 
-          receiver = node.receiver
-          reader = receiver.is_a?(Prism::InstanceVariableReadNode) ? :ivar : :local
-          non_nil = safe.first.public_send(reader, receiver.name)
-          writer = receiver.is_a?(Prism::InstanceVariableReadNode) ? :with_ivar : :with_local
-          [truthy.public_send(writer, receiver.name, non_nil), falsey]
+          non_nil = narrow_non_nil(slot.current)
+          return edges if non_nil.equal?(slot.current)
+
+          [narrow_slot(truthy, slot, non_nil), falsey]
         end
 
         # The predicates composed from other predicates, whose edges are built from their
@@ -3265,8 +3457,13 @@ module Rigor
         # step `&&` and `||` both take for their right operand. Issue #1359 — the operand runs after
         # that edge, so a `$_` the earlier operand narrowed is forgotten when the operand may set it
         # (`gets && log(items.each { gets })`), before the operand's own edges narrow it again.
+        # Issue #1429 — likewise a guard's narrowing of a global or constant the operand may rebind
+        # (`$sep && reset_sep && $sep.length`).
         def operand_edges(node, edge_scope)
           edge_scope = LastLine.forget_if_set(edge_scope, node)
+          if edge_scope.guard_narrowed? && GuardRebinding.may_rebind?(node, edge_scope)
+            edge_scope = edge_scope.forget_guard_narrowings
+          end
           analyse(node, edge_scope) || [edge_scope, edge_scope]
         end
 

@@ -25,6 +25,7 @@ require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "guard_rebinding"
 require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
@@ -344,12 +345,25 @@ module Rigor
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
-        return send(handler, node) if handler
+        return forget_implicit_call_guards(node, send(handler, node)) if handler
 
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
         [@scope.type_of(node, tracer: @tracer), forget_rebound_specials(@scope, node)]
+      end
+
+      # Issue #1429 — a compound write or a `for` loop calls a method its syntax does not spell (`r += r` calls `r.+`,
+      # `r[0] ||= 1` calls `r.[]` and `r.[]=`, `for x in r` calls `r.each`). When that method may run code that rebinds
+      # a global or constant, the guard narrowings past the node are restored
+      # ({GuardRebinding.implicit_call_may_rebind?}).
+      def forget_implicit_call_guards(node, result)
+        type, after = result
+        return result unless after.is_a?(Scope) && after.guard_narrowed? &&
+                             GuardRebinding.implicit_call_node?(node) &&
+                             GuardRebinding.implicit_call_may_rebind?(node, @scope)
+
+        [type, after.forget_guard_narrowings]
       end
 
       # Issue #1359 — the nodes whose handler runs their parts in order, each from the scope the parts before it
@@ -645,7 +659,8 @@ module Rigor
       # `attr_reader`, the very macro #319 silenced at every other position); inside a module, the module's own
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
-        result = [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node.value)]
+        after = forget_constant_guard(forget_rebound_specials(scope, node.value), node)
+        result = [scope.type_of(node, tracer: tracer), after]
         call_node = meta_new_block_call(node)
         return result if call_node.nil?
 
@@ -654,6 +669,16 @@ module Rigor
 
         enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
         result
+      end
+
+      # Issue #1429 — a write to a constant ends a guard's narrowing of every spelling that may name it: `Foo::BAR =
+      # nil` inside `module Foo` writes the constant `BAR` reads, so each narrowing whose last segment is the written
+      # name is dropped, whatever its prefix.
+      def forget_constant_guard(after, node)
+        return after if after.constant_narrowings.empty?
+
+        target = node.respond_to?(:target) ? node.target : node
+        after.without_constant_narrowings_named(target.name.to_s)
       end
 
       # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze`
@@ -1430,11 +1455,9 @@ module Rigor
         # Issue #1359 — `$_` is not among the bindings the retry widening below carries, so a body that runs again
         # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
         # prefix of the body, and so reads it forgotten whenever the body may set it.
-        entry = edge ? LastLine.forget_if_set(scope, node) : scope
+        entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(
-          node.rescue_clause, LastLine.forget_if_set(entry, node.statements), edge: edge
-        )
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry_scope(node, entry), edge: edge)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -1460,6 +1483,12 @@ module Rigor
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The scope a rescue clause of `node` enters with: it runs after any prefix of the body, so neither a `$_`
+      # (issue #1359) nor a guard's narrowing of a global or constant (issue #1429) the body may rebind holds there.
+      def rescue_entry_scope(node, entry)
+        forget_guard_if_rebinds(LastLine.forget_if_set(entry, node.statements), node.statements)
       end
 
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
@@ -1919,7 +1948,21 @@ module Rigor
       # Issue #1359 — the scope a loop's predicate first runs from: a body that may set `$_` runs again after it ran,
       # so neither the predicate nor any pass over the body reads a `$_` narrowing from before the loop. A `while
       # gets` predicate narrows it afresh.
-      def loop_entry_scope(node) = LastLine.forget_if_set(scope, node.statements)
+      #
+      # Issue #1429 — nor a guard's narrowing of a global or constant, when the body or the predicate, which run again
+      # after each iteration, may rebind it by a write or a call ({#forget_guard_if_rebinds}).
+      def loop_entry_scope(node)
+        forget_guard_if_rebinds(LastLine.forget_if_set(scope, node.statements), node.statements, node.predicate)
+      end
+
+      # Issue #1429 — `entry` with its guard narrowings restored when any of `nodes` may rebind a global or constant
+      # ({GuardRebinding.may_rebind?}): the loop and retry back edges and a rescue clause, which runs after any prefix
+      # of the body, reach the code again after such a node ran.
+      def forget_guard_if_rebinds(entry, *nodes)
+        return entry unless entry.guard_narrowed? && nodes.any? { |node| GuardRebinding.may_rebind?(node, entry) }
+
+        entry.forget_guard_narrowings
+      end
 
       # {#eval_loop}'s single body pass. It enters on the predicate's loop-entry edge, as every fixpoint pass does,
       # except a `begin … end while` body, which runs once before the predicate is tested, and a body a `redo`
@@ -2327,6 +2370,7 @@ module Rigor
         element_type = for_iteration_element_type(coll_type)
         # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
         body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
+        body_entry = forget_guard_for_body(node, post_coll, body_entry)
         body_entry = loop_content_entry(node.statements, post_coll, body_entry)
 
         if node.statements.nil?
@@ -2342,6 +2386,14 @@ module Rigor
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = join_break_scopes(continuation, breaks, pre_existing + body_first)
         [Type::Combinator.constant_of(nil), continuation]
+      end
+
+      # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.
+      def forget_guard_for_body(node, post_coll, body_entry)
+        return body_entry unless body_entry.guard_narrowed?
+        return body_entry.forget_guard_narrowings if GuardRebinding.implicit_call_may_rebind?(node, post_coll)
+
+        forget_guard_if_rebinds(body_entry, node.statements)
       end
 
       # `for x in coll` is semantically `coll.each { |x| ... }`. We ask the method dispatcher for `coll.each`'s expected
@@ -2925,9 +2977,14 @@ module Rigor
       # `post_scope`, past a statement call, with the specials the call rebinds: the match globals and `$_` forgotten
       # when it may rebind them in this frame, and `$?` bound when it, or an operand, certainly ran a subprocess, since
       # `$?` is the thread's (issue #1360, {LastStatus.after}).
+      # Issue #1429 — and a guard's narrowing of a global or constant restored when the call may run code that rebinds
+      # it ({GuardRebinding.call_may_rebind?}).
       def rebind_statement_specials(node, post_scope)
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
+        if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
+          post_scope = post_scope.forget_guard_narrowings
+        end
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
       end
 
@@ -2966,6 +3023,10 @@ module Rigor
         if invoked.match_globals_bound? && MatchRebinding.operands_may_rebind?(node, scope)
           invoked = invoked.forget_match_globals
         end
+        # Issue #1429 — a guard narrowing the receiver chain or an argument may rebind.
+        if invoked.guard_narrowed? && GuardRebinding.operands_may_rebind?(node, scope)
+          invoked = invoked.forget_guard_narrowings
+        end
         return invoked unless invoked.last_line_bound? && LastLine.operands_may_set?(node, scope)
 
         invoked.forget_last_line
@@ -2983,6 +3044,8 @@ module Rigor
           after = after.forget_match_globals
         end
         after = after.forget_last_line if after.last_line_bound? && LastLine.may_set?(node, scope)
+        # Issue #1429 — and a guard's narrowing of a global or constant, when a call in it may rebind one.
+        after = after.forget_guard_narrowings if after.guard_narrowed? && GuardRebinding.may_rebind?(node, scope)
         forget_rescued_status(after, node)
       end
 

@@ -176,6 +176,9 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # `declared_divergent` (`scope.rbs` +1; the reason is at its pin).
 # 711 since #1449. `DiscoveryIndex` gains the `implicit_self_evidence` member, whose `Data` row is residue as
 # every member row of that class is (`scope.rbs` +1; the reason is at its pin).
+# 707 since #1429. A value-position `case` types each arm under the subject's `when` narrowing, so four rows
+# whose body is a `case … when <Class>` render their return (`inference.rbs` -1, `type.rbs` -3; the reasons are
+# at the pins). The new `Scope` guard rows are sig-gen output or carry the #1154 marker, so they add none.
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -255,7 +258,10 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
-  "sig/rigor/inference.rbs" => 84,
+  # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
+  # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
+  # and its return renders.
+  "sig/rigor/inference.rbs" => 83,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -318,7 +324,11 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
-  "sig/rigor/type.rbs" => 211
+  # -3 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so the
+  # `when Constant then type.value.is_a?(String)` arms of `Combinator#literal_string_compatible?`,
+  # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
+  # rather than `untyped`, and each `bool` return renders.
+  "sig/rigor/type.rbs" => 208
 }.freeze
 
 module SigProvenanceSpecHelpers

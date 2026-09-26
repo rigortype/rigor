@@ -1,0 +1,2 @@
+- **[engine]** Truthiness, `nil?`, `!` and `&.` guards now narrow global and constant reads, so `return unless $sep; $sep.length` no longer reads `$sep` as possibly nil. ([#1453](https://github.com/rigortype/rigor/pull/1453), [#1429](https://github.com/rigortype/rigor/issues/1429))
+  - The narrowing is restored wherever code may run that rebinds the global or constant, such as a project method, an unresolved call, a block or lambda (including an `at_exit` or `trap` handler), a loop's next pass, a rescue clause, or `const_set`, while core and standard-library calls keep it.

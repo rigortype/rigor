@@ -1,0 +1,19 @@
+class Sink
+  def self.take_io: (IO) -> Integer
+  def self.take_str: (String) -> Integer
+  def pass_io: () -> Integer
+  def pass_str: (String) -> Integer
+  def ret_str: (String) -> String
+  def norm2: (String) -> String
+  def shadow_into_string: (::Random) -> Integer
+  def arm_value_types: (String) -> void
+  def arm_binding: (String) -> void
+
+  # Declared so the class orders `:disjoint` against the core `::Random`, as #655's shadow does.
+  class Random
+  end
+end
+
+class Labeler
+  def label: (Integer | Symbol) -> (String | Symbol)
+end

@@ -725,7 +725,17 @@ module Rigor
       # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo` resolves to
       # `Rigor::Inference::FallbackTracer`.
       def type_of_constant_read(node)
-        resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
+        guard_narrowed_constant(node) ||
+          resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
+      end
+
+      # Issue #1429 — the type a guard narrowed this constant reference to on the edge being typed
+      # (`STDOUT.is_a?(StringIO) ? STDOUT.string : nil`), or nil. Keyed by spelling ({Narrowing.constant_key}).
+      def guard_narrowed_constant(node)
+        return nil if scope.constant_narrowings.empty?
+
+        key = Narrowing.constant_key(node)
+        key && scope.constant_narrowing(key)
       end
 
       # A leading `::` (`::Rails`, `::Rails::Application`) is Ruby's escape hatch out of the lexical ladder:
@@ -733,6 +743,9 @@ module Rigor
       # deliberately un-rooted (the discovery tables are keyed that way), so the marker rides alongside it
       # into the resolver (#614).
       def type_of_constant_path(node)
+        narrowed = guard_narrowed_constant(node)
+        return narrowed if narrowed
+
         full_name = Source::ConstantPath.qualified_name_or_nil(node)
         return fallback_for(node, family: :prism) if full_name.nil?
 
@@ -1028,27 +1041,39 @@ module Rigor
       # The `case ... in` pattern-matching form (`CaseMatchNode`) and the predicate-less form (`case; when
       # c1; ...`) bypass the `===` analysis: pattern matching has richer semantics, and a predicate-less
       # `case` reduces to a `if c1; ...; elsif c2` chain that statement-level narrowing already handles.
+      # Issue #1429 — each arm is typed under the subject's clause narrowing (`Narrowing.case_when_scopes`), the
+      # scope the statement evaluator runs the arm in: `when Symbol then n` on `n: Integer | Symbol` answers
+      # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out.
       def type_of_case(node)
         return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
 
         subject_type = type_of(node.predicate)
         candidates = []
         reached_yes = false
+        clause_scope = scope
 
         node.conditions.each do |when_node|
-          case case_when_branch_certainty(subject_type, when_node)
-          when :yes
-            candidates << type_of(when_node)
+          conditions = when_node.respond_to?(:conditions) ? when_node.conditions : []
+          body_scope, next_scope = Narrowing.case_when_scopes(node.predicate, conditions, clause_scope)
+          certainty = case_when_branch_certainty(subject_type, when_node)
+          # :no — drop the branch
+          candidates << case_arm_type(when_node, body_scope) unless certainty == :no
+          if certainty == :yes
             reached_yes = true
             break
-          when :maybe
-            candidates << type_of(when_node)
-            # :no — drop the branch
           end
+          clause_scope = next_scope
         end
 
-        candidates << type_of_case_else(node) unless reached_yes
+        candidates << case_arm_type(node.else_clause, clause_scope) unless reached_yes
         Type::Combinator.union(*candidates)
+      end
+
+      # The value of one `case` arm (`nil` for an absent `else`), typed under `arm_scope`.
+      def case_arm_type(arm, arm_scope)
+        return Type::Combinator.constant_of(nil) if arm.nil?
+
+        arm_scope.equal?(scope) ? type_of(arm) : arm_scope.type_of(arm, tracer: tracer)
       end
 
       def type_of_case_simple_union(node)

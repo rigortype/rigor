@@ -48,9 +48,9 @@ module Rigor
       #
       # `body` is the clause's statements or the fallback, and `reference` the name of the local a `rescue … => e`
       # clause binds. When the body guards `$!`, or that local, which is the same object, by its class ({.guarded?}),
-      # the clause reads `$!` and `$@` unbound, as it did before issue #1360: a class guard does not narrow a global
-      # receiver yet, so `$!.key if e.is_a?(KeyError)` would report the bound `StandardError` against the guard
-      # (ADR-117, point 3). Lift when #1429 narrows global receivers.
+      # the clause reads `$!` and `$@` unbound, as it did before issue #1360: `$!.key if e.is_a?(KeyError)` would report
+      # the bound `StandardError` against the guard (ADR-117, point 3), since narrowing `e` does not narrow `$!`. #1429
+      # made a class guard on `$!` itself narrow it; #1447 narrows this decline to the guards that still do not.
       #
       # `$@` calls the exception's `backtrace`, which is an `Array[String]` for a raised exception. It is left unbound
       # in a program that defines a method named `backtrace` anywhere, which may return anything, and in a clause
@@ -61,7 +61,7 @@ module Rigor
       # there leaves it nil.
       def rescue_entry(scope, exception_type, body = nil, reference = nil)
         entered = scope.forget_error_info.forget_last_status
-        # Lift when #1429 narrows global receivers.
+        # Narrowed to the guards #1429 does not narrow in #1447.
         return entered if guarded?(body, reference)
 
         entered = entered.with_global(ERROR_INFO, rescued_type(exception_type, scope))

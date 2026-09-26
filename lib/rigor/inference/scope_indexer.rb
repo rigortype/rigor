@@ -14,6 +14,7 @@ require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
 require_relative "global_write_census"
+require_relative "guard_rebinding"
 require_relative "last_line"
 require_relative "last_status"
 require_relative "error_info"
@@ -8783,6 +8784,7 @@ module Rigor
         when Prism::RescueModifierNode
           propagate(node.expression, table, current_scope)
           propagate(node.rescue_expression, table, current_scope.forget_error_info.forget_last_status)
+        when Prism::PostExecutionNode then propagate_end_body(node, table, current_scope)
         else
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
@@ -8807,8 +8809,18 @@ module Rigor
         node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
       end
 
+      # Issue #1429 — an `END { }` body runs at exit, after any code that may rebind a guarded global or constant
+      # ({GuardRebinding.block_entry}).
+      def propagate_end_body(node, table, current_scope)
+        child_scope = GuardRebinding.block_entry(current_scope, node, nil)
+        node.rigor_each_child { |child| propagate(child, table, child_scope) }
+      end
+
       def unentered_block_entry(node, block, table, current_scope)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
+
+        # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
+        current_scope = GuardRebinding.block_entry(current_scope, block, node)
         return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
 
         LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
@@ -8832,6 +8844,7 @@ module Rigor
       # redeclaring them — keep the enclosing binding. Issue #1360 — a `->` body and its parameter defaults run
       # whenever the lambda is called, so they read `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
       def closure_scope(closure, scope)
+        scope = GuardRebinding.block_entry(scope, closure, nil)
         scope = FreshFrameBlocks.closure_entry(scope, closure, nil)
         scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
         closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }

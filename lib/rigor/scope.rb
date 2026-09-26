@@ -28,7 +28,8 @@ module Rigor
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars,
-                :repeated_or_writes, :match_frame
+                :repeated_or_writes, :match_frame,
+                :constant_narrowings, :guard_records
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -230,10 +231,22 @@ module Rigor
     # site, so no rebind or narrowing of a variable drops it, and a join keeps a site either arm holds: the
     # mark only ever withholds that reading, whose answer is the narrower one.
     EMPTY_REPEATED_OR_WRITES = {}.compare_by_identity.freeze
+    # Issue #1429 — the narrowing a guard leaves on a constant reference (`STDOUT.is_a?(StringIO)`, `if CONFIG`),
+    # keyed by the reference's spelling ({Inference::Narrowing.constant_key}: `"STDOUT"`, `"::Foo::BAR"`). A constant
+    # has no binding of its own in the scope, so the table is what a read in the guarded edge answers
+    # (`ExpressionTyper#type_of_constant_read`); a spelling it does not hold resolves as before.
+    EMPTY_CONSTANT_NARROWINGS = {}.freeze
+    # Issue #1429 — what each global and constant a guard narrowed was bound to before the guard, keyed
+    # `[:global, :$name]` / `[:constant, key]`. Ruby may rebind a global (or `const_set` a constant) whenever code the
+    # analysis cannot see runs, so a call or block that may run project or unresolved code restores each recorded
+    # binding to the union of this pre-guard type and its narrowed one ({#forget_guard_narrowings}). A write drops
+    # the record ({#with_global}), and a name the frame-local special-variable machinery owns is never recorded.
+    EMPTY_GUARD_RECORDS = {}.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
                      :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS, :EMPTY_PUBLISHED_CONSTANT_SOURCED,
-                     :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES
+                     :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES,
+                     :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -300,7 +313,9 @@ module Rigor
       optimistic_locals: EMPTY_ORIGINS,
       optimistic_ivars: EMPTY_ORIGINS,
       repeated_or_writes: EMPTY_REPEATED_OR_WRITES,
-      match_frame: nil
+      match_frame: nil,
+      constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
+      guard_records: EMPTY_GUARD_RECORDS
     )
       @environment = environment
       @locals = locals
@@ -329,6 +344,8 @@ module Rigor
       @optimistic_ivars = optimistic_ivars
       @repeated_or_writes = repeated_or_writes
       @match_frame = match_frame
+      @constant_narrowings = constant_narrowings
+      @guard_records = guard_records
       freeze
     end
 
@@ -656,9 +673,112 @@ module Rigor
 
     # Issue #1362 — a write or narrowing of a global is flow-live, so it drops the ADR-58 `:global` mark
     # {#seed_declaration_sourced_global} stamped on the program-global seed.
+    #
+    # Issue #1429 — `$stdout` and `$>` are one variable, so a write to either also restores a guard's narrowing of the
+    # other ({#forget_guard_narrowing_of}).
     def with_global(name, type)
-      rebuild(globals: @globals.merge(name.to_sym => type).freeze,
-              declaration_sourced: drop_declaration_sourced_for(:global, name))
+      name = name.to_sym
+      written = rebuild(globals: @globals.merge(name => type).freeze,
+                        declaration_sourced: drop_declaration_sourced_for(:global, name),
+                        guard_records: drop_guard_record(:global, name))
+      alias_name = STDOUT_ALIASES[name]
+      alias_name ? written.forget_guard_narrowing_of(:global, alias_name) : written
+    end
+
+    STDOUT_ALIASES = { :$stdout => :$>, :$> => :$stdout }.freeze
+    private_constant :STDOUT_ALIASES
+
+    # Issue #1429 — {#forget_guard_narrowings} for the one name `[kind, name]`.
+    def forget_guard_narrowing_of(kind, name)
+      key = [kind, name]
+      pre_guard = @guard_records[key]
+      return self if pre_guard.nil?
+
+      if kind == :global
+        current = @globals[name]
+        globals = current ? @globals.merge(name => Type::Combinator.union(pre_guard, current)).freeze : @globals
+        rebuild(globals: globals, guard_records: @guard_records.except(key).freeze)
+      else
+        current = @constant_narrowings[name]
+        constants = if current
+                      @constant_narrowings.merge(name => Type::Combinator.union(pre_guard, current)).freeze
+                    else
+                      @constant_narrowings
+                    end
+        rebuild(constant_narrowings: constants, guard_records: @guard_records.except(key).freeze)
+      end
+    end
+
+    # Issue #1429 — binds the global `name` to `type` on a guard's edge, recording `pre_guard`, the binding the guard
+    # narrowed, unless an earlier guard already recorded one ({EMPTY_GUARD_RECORDS}). `record: false` is the
+    # frame-local specials' form, which binds without a record: their own machinery forgets them.
+    def with_guarded_global(name, type, pre_guard, record: true)
+      name = name.to_sym
+      records = record ? add_guard_record([:global, name].freeze, pre_guard) : drop_guard_record(:global, name)
+      rebuild(globals: @globals.merge(name => type).freeze,
+              declaration_sourced: drop_declaration_sourced_for(:global, name),
+              guard_records: records)
+    end
+
+    # Issue #1429 — the type a guard narrowed the constant reference `key` to, or nil.
+    def constant_narrowing(key)
+      return nil if @constant_narrowings.empty?
+
+      @constant_narrowings[key]
+    end
+
+    # Issue #1429 — the constant reference `key` read as `type` on a guard's edge, recording `pre_guard` as
+    # {#with_guarded_global} does.
+    def with_constant_narrowing(key, type, pre_guard)
+      rebuild(constant_narrowings: @constant_narrowings.merge(key => type).freeze,
+              guard_records: add_guard_record([:constant, key].freeze, pre_guard))
+    end
+
+    # Issue #1429 — every constant reference whose last segment is `name` with no narrowing: what a write to a constant
+    # named `name` leaves, since `Foo::BAR` and `BAR` may name the one it wrote.
+    def without_constant_narrowings_named(name)
+      keys = @constant_narrowings.keys.select { |key| key.split("::").last == name }
+      return self if keys.empty?
+
+      records = @guard_records.reject { |(kind, key), _| kind == :constant && keys.include?(key) }
+      rebuild(constant_narrowings: @constant_narrowings.except(*keys).freeze, guard_records: records.freeze)
+    end
+
+    # Issue #1429 — the constant reference `key` with no narrowing.
+    def without_constant_narrowing(key)
+      return self unless @constant_narrowings.key?(key)
+
+      rebuild(constant_narrowings: @constant_narrowings.except(key).freeze,
+              guard_records: @guard_records.except([:constant, key]).freeze)
+    end
+
+    # True when a guard's narrowing of a global or constant is live, the state {#forget_guard_narrowings} drops and
+    # so the gate on every scan that decides whether to.
+    def guard_narrowed?
+      !@guard_records.empty?
+    end
+
+    # Issue #1429 — this scope past code that may rebind a global or a constant: each one a guard narrowed reads
+    # the union of its narrowed type and the binding the guard narrowed, and no record is left. The union, not the
+    # pre-guard binding alone, because the code may leave the value as it was: `$stdout.is_a?(StringIO)`, then a
+    # helper, reads `IO | StringIO`, which keeps `$stdout.string` quiet as the guard intended.
+    def forget_guard_narrowings
+      return self if @guard_records.empty?
+
+      globals = @globals
+      constants = @constant_narrowings
+      @guard_records.each do |(kind, name), pre_guard|
+        if kind == :global
+          current = globals[name]
+          globals = globals.merge(name => Type::Combinator.union(pre_guard, current)) if current
+        else
+          current = constants[name]
+          constants = constants.merge(name => Type::Combinator.union(pre_guard, current)) if current
+        end
+      end
+      rebuild(globals: globals.frozen? ? globals : globals.freeze,
+              constant_narrowings: constants.frozen? ? constants : constants.freeze,
+              guard_records: EMPTY_GUARD_RECORDS)
     end
 
     # Issue #1362 (ADR-58 parity, ADR-117 Decision point 2) — used by the method-entry and top-level seeds to bind a
@@ -1816,6 +1936,23 @@ module Rigor
       build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
     end
 
+    # Issue #1429 — a join keeps a guard record while the joined scope still narrows its name: a global both arms
+    # bind, a constant both arms narrow (one an arm does not narrow reads its resolved type after the join, so its
+    # narrowing is gone). An arm without a record contributes nothing to the restore target, whose union with the
+    # joined binding {#forget_guard_narrowings} takes, so it still covers that arm's binding.
+    def join_guard_records(other, joined_globals, joined_constants)
+      mine = @guard_records
+      theirs = other.guard_records
+      return EMPTY_GUARD_RECORDS if mine.empty? && theirs.empty?
+
+      merged = mine.merge(theirs) { |_key, left, right| Type::Combinator.union(left, right) }
+      kept = merged.select do |(kind, name), _|
+        kind == :global ? joined_globals.key?(name) : joined_constants.key?(name)
+      end
+      kept.empty? ? EMPTY_GUARD_RECORDS : kept.freeze
+    end
+    private :join_guard_records
+
     # Issue #1359 — arms that bind `$_` apart join with it unbound rather than to their union. The arms of a reader
     # condition bind `String` and `nil`, and `String?` after `if gets … end` would report correct code that proves the
     # line some other way (`ok = gets ? true : false; return unless ok; line = $_; line.chomp`).
@@ -1847,11 +1984,16 @@ module Rigor
 
     private
 
-    # The marks {#==} compares: ADR-58's, issue #667's and the repeated `||=` sites.
+    # The marks {#==} compares: ADR-58's, issue #667's and the repeated `||=` sites, and #1429's guard state.
     def same_marks?(other)
       @declaration_sourced == other.declaration_sourced &&
         @published_constant_sourced == other.published_constant_sourced &&
-        @repeated_or_writes == other.repeated_or_writes
+        @repeated_or_writes == other.repeated_or_writes &&
+        same_guard_state?(other)
+    end
+
+    def same_guard_state?(other)
+      @constant_narrowings == other.constant_narrowings && @guard_records == other.guard_records
     end
 
     def rebuild(
@@ -1876,7 +2018,9 @@ module Rigor
       optimistic_locals: @optimistic_locals,
       optimistic_ivars: @optimistic_ivars,
       repeated_or_writes: @repeated_or_writes,
-      match_frame: @match_frame
+      match_frame: @match_frame,
+      constant_narrowings: @constant_narrowings,
+      guard_records: @guard_records
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -1901,7 +2045,9 @@ module Rigor
         optimistic_locals: optimistic_locals,
         optimistic_ivars: optimistic_ivars,
         repeated_or_writes: repeated_or_writes,
-        match_frame: match_frame
+        match_frame: match_frame,
+        constant_narrowings: constant_narrowings,
+        guard_records: guard_records
       )
     end
 
@@ -1990,8 +2136,28 @@ module Rigor
         # Issue #1358 — the frame the body runs in, stamped at its entry like the nesting above, so both arms
         # of a merge inside one body carry the same one; `||` keeps it should either arm lack it, since dropping
         # it only loses the frame's resets.
-        match_frame: @match_frame || other.match_frame
+        match_frame: @match_frame || other.match_frame,
+        # Issue #1429 — the guard narrowings of globals and constants and their pre-guard records.
+        **join_guard_narrowings(other, joined_globals)
       )
+    end
+
+    def join_guard_narrowings(other, joined_globals)
+      joined_constants = join_constant_narrowings(other)
+      { constant_narrowings: joined_constants,
+        guard_records: join_guard_records(other, joined_globals, joined_constants) }
+    end
+
+    # Issue #1429 — a constant reference both arms narrow reads the union; one only an arm narrows reads its resolved
+    # type again, which the other arm reads too.
+    def join_constant_narrowings(other)
+      mine = @constant_narrowings
+      theirs = other.constant_narrowings
+      return mine if mine.equal?(theirs)
+      return EMPTY_CONSTANT_NARROWINGS if mine.empty? || theirs.empty?
+
+      joined = join_bindings(mine, theirs)
+      joined.empty? ? EMPTY_CONSTANT_NARROWINGS : joined
     end
 
     # Issue #589 — intersect the struct fold-safe grants. Zero-alloc on the common path, where both arms
@@ -2185,6 +2351,19 @@ module Rigor
       return dropped unless dropped.any? { |ref| ref[0] == :global_copy && ref[1] == name }
 
       dropped.dup.delete_if { |ref| ref[0] == :global_copy && ref[1] == name }.freeze
+    end
+
+    def add_guard_record(key, pre_guard)
+      return @guard_records if @guard_records.key?(key)
+
+      @guard_records.merge(key => pre_guard).freeze
+    end
+
+    def drop_guard_record(kind, name)
+      return @guard_records if @guard_records.empty?
+
+      key = [kind, name]
+      @guard_records.key?(key) ? @guard_records.except(key).freeze : @guard_records
     end
 
     def drop_chain_narrowings_for(receiver_kind, receiver_name)

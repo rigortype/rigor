@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../../inference/narrowing"
 require_relative "inferred_param_guard"
 
 module Rigor
@@ -29,6 +30,12 @@ module Rigor
       # The false-positive envelope mirrors `flow.always-truthy-condition`: clauses inside loops / blocks are
       # skipped (mutation tracking through those is incomplete), and the rule reads the engine's own
       # narrowing rather than recomputing it, so the diagnostic and the body typing can never diverge.
+      #
+      # Issue #1429 — a `:disjoint` clause is not reported when its `Bot` rests on a `Nominal` subject member whose
+      # class is disjoint from a condition's ({Inference::Narrowing.disjoint_nominal_guard?}): the `when C` or `in C`
+      # is code evidence that the subject can hold such an object (`io = STDOUT; case io when StringIO`), and Rigor's
+      # reading of the subject's type is what the evidence contradicts. The body scope stays `Bot`, so no call on the
+      # subject in it is checked. A subject that is a literal carrier (`x = 1; case x when String`) is still reported.
       class UnreachableClauseCollector
         LOOP_OR_BLOCK_NODE_CLASSES = [
           Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode
@@ -139,11 +146,28 @@ module Rigor
           return if scope.nil?
           return unless scope.local(subject_name).is_a?(Type::Bot)
 
+          kind = when_clause_kind(clause, subject_name)
+          return if kind == :disjoint &&
+                    disjoint_nominal_subject?(@scope_index[clause.conditions.first], subject_name, clause.conditions)
+
           @results << Result.new(
             clause: clause, body: clause.statements, subject_name: subject_name,
             condition_source: clause.conditions.map(&:slice).join(", "),
-            kind: when_clause_kind(clause, subject_name), keyword: "when"
+            kind: kind, keyword: "when"
           )
+        end
+
+        # True when the subject, as `entry` binds it, holds a non-literal `Nominal` whose class the class one of
+        # `patterns` names is disjoint from (issue #1429, see the class comment).
+        def disjoint_nominal_subject?(entry, subject_name, patterns)
+          subject_type = entry&.local(subject_name)
+          return false if subject_type.nil?
+
+          patterns.any? do |condition|
+            class_name = Inference::Narrowing.lexical_class_name(condition, entry)
+            class_name &&
+              Inference::Narrowing.disjoint_nominal_guard?(subject_type, class_name, environment: entry.environment)
+          end
         end
 
         # A dead `when` is `:prior_exhaustion` when the subject was already narrowed to `bot` BEFORE this
@@ -170,11 +194,21 @@ module Rigor
           return if scope.nil?
           return unless scope.local(subject_name).is_a?(Type::Bot)
 
+          kind = in_clause_kind(clause, subject_name)
+          return if kind == :disjoint && disjoint_nominal_pattern?(clause, subject_name)
+
           @results << Result.new(
             clause: clause, body: clause.statements, subject_name: subject_name,
             condition_source: clause.pattern.slice,
-            kind: in_clause_kind(clause, subject_name), keyword: "in"
+            kind: kind, keyword: "in"
           )
+        end
+
+        # {#disjoint_nominal_subject?} for a bare class pattern, `in C` or `in C => x`.
+        def disjoint_nominal_pattern?(clause, subject_name)
+          pattern = clause.pattern
+          pattern = pattern.value if pattern.is_a?(Prism::CapturePatternNode)
+          disjoint_nominal_subject?(@scope_index[clause.pattern], subject_name, [pattern])
         end
 
         def in_clause_kind(clause, subject_name)

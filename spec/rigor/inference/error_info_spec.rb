@@ -34,7 +34,7 @@ RSpec.describe Rigor::Inference::ErrorInfo do
       expect(entered.global(:$?)).to be_nil
     end
 
-    # A class guard does not narrow a global receiver yet (#1429): a bound `$!` would report against the guard.
+    # The decline predates #1429's narrowing of a guarded global and stays until #1447 narrows it.
     it "binds neither `$!` nor `$@` for a body that guards `$!` by its class" do
       outer = scope.with_global(:$!, error_t).with_global(:$@, trace_t)
       ["$!.key if $!.is_a?(KeyError)", "$!.kind_of?(KeyError)", "$!.instance_of?(KeyError)",

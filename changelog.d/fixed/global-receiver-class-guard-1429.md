@@ -1,0 +1,5 @@
+- **[engine]** A class guard on a global or constant receiver now narrows it as it narrows a local, so `$stdout.is_a?(StringIO) ? $stdout.string : nil` no longer reports on an `IO`-typed `$stdout`. ([#1453](https://github.com/rigortype/rigor/pull/1453), [#1429](https://github.com/rigortype/rigor/issues/1429))
+  - When the guard names a class the receiver's inferred type cannot hold, the branch reads the receiver as `bot`, as it already did for a local, so calls on it are not checked.
+  - A `when` or `in` clause naming such a class is no longer reported by `flow.unreachable-clause`. A clause on a literal subject still is. The `case` value still leaves the clause out ([#1465](https://github.com/rigortype/rigor/issues/1465) tracks keeping it), and each arm of a value-position `case` is now typed under the subject's clause narrowing.
+  - `respond_to?(:string)` on an `IO`-typed receiver lets the guarded `string` call through, and it drops union members known to lack the method.
+  - `instance_of?(Integer)` on a `Numeric` receiver narrows it to `Integer` instead of `bot`.

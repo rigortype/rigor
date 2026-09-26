@@ -32,7 +32,7 @@ assertions:
   '29': "[Dynamic[top]]"
   '30': "[1]"
   '31': Dynamic[top]
-  '32': Dynamic[top]?
+  '32': KeyError?
   '33': Dynamic[top]
   '34': Dynamic[top]
   '35': AppError

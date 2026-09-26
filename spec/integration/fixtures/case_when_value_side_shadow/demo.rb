@@ -32,6 +32,12 @@ module Bar
       # `other` is a core `::Random`; the pattern names
       # `Bar::Nested::Random`, which it can never be. Ruby's answer is
       # the `else` arm, and `.upcase` on it is a String method call.
+      #
+      # The `when` arm is dropped because `other` is typed `::Random`,
+      # a class disjoint from the pattern's. A class guard can hold an
+      # object its subject's type rules out, so keeping such an arm is
+      # tracked in #1465; until then only `flow.unreachable-clause`
+      # stays quiet on it (#1429).
       def shadowed_pattern_keeps_the_live_arm
         other = ::Random.new
         assert_type('"else"', (case other when Random then 1 else "else" end))

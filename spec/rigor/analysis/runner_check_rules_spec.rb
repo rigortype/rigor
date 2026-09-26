@@ -1774,6 +1774,42 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(clause_diags(result)).to be_empty
       end
 
+      # Issue #1429 — a `when` or bare `in` naming a class disjoint from a subject Rigor typed as a `Nominal` is
+      # evidence that the subject can hold such an object (a test's `StringIO` where `STDOUT` is typed `IO`), so the
+      # clause's `bot` is not reported. The body still reads the subject as `bot`, so no call on it is checked.
+      it "does not fire on a disjoint `when` or `in` when the subject is a non-literal Nominal" do
+        result = analyze(<<~RUBY)
+          require "stringio"
+          io = STDOUT
+          case io
+          when StringIO then io.string
+          end
+          case io
+          in StringIO then io.string
+          in StringIO => captured then captured.string
+          else nil
+          end
+          size = Integer(ARGV.first)
+          case size
+          when String, Symbol then size.upcase
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+        expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
+      end
+
+      # The subjects whose type records what the file literally shows keep the report: a literal, an Array or Hash
+      # literal, a class object, and `nil` / `true` / `false`. So does a clause an earlier one exhausted, whatever the
+      # subject.
+      it "still fires on a literal subject and on a clause an earlier one exhausted" do
+        ["1", "[1, 2]", "{ a: 1 }", "Integer", "nil", "true"].each do |literal|
+          result = analyze("x = #{literal}\ncase x\nwhen String then 1\nend\n")
+          expect(clause_diags(result).map(&:message)).to contain_exactly(include("disjoint")), literal
+        end
+        result = analyze("io = STDOUT\ncase io\nwhen IO then 1\nwhen File then 2\nend\n")
+        expect(clause_diags(result).map(&:message)).to contain_exactly(include("already covered"))
+      end
+
       it "does not fire on non-constant clauses (`when nil` / ranges are out of WD1 scope)" do
         result = analyze(<<~RUBY)
           x = 1

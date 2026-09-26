@@ -77,6 +77,32 @@ unless x.is_a?(Integer)
 end
 ```
 
+A guard can also name a class the variable's type says it cannot
+be. Inside such a branch the variable reads `bot`, so no call on
+it is checked. That matters when the type is one Rigor inferred
+or read from a signature: `$stdout` is typed `IO`, and a test runs
+the same code with a `StringIO`, which is not an `IO` subclass, so
+the guarded call below is correct code and stays quiet. A guard
+on `$stdout`, `STDOUT` or another global or constant narrows the
+same way:
+
+```ruby
+require "stringio"
+
+def captured_output
+  out = STDOUT
+  if out.is_a?(StringIO)
+    assert_type("bot", out)
+    out.string
+  end
+end
+```
+
+The rest of the branch is still checked, and its `bot` variable
+never reaches the code after it. A `case` drops such a branch
+from its value (see below); keeping it is tracked in
+[#1465](https://github.com/rigortype/rigor/issues/1465).
+
 ## Equality with literal values
 
 Rigor narrows `==` and `!=` against trusted literal values:
@@ -117,17 +143,78 @@ The result type unions the per-branch results. When the input
 is a finite literal union, Rigor proves the `else` branch is
 unreachable when every member is matched.
 
-The same narrowing also works in reverse: when a `when <Class>`
-clause is disjoint from the subject's type, or an earlier
-clause already covered it, the clause is dead — Rigor emits
+The same narrowing also works in reverse: when an earlier clause
+already covered the subject, or a `when <Class>` clause is
+disjoint from the subject's type, the clause is dead — Rigor emits
 [`flow.unreachable-clause`](08-understanding-errors.md) so you
 can delete it. (It ships at `:info` under the default profile.)
+
+A disjoint `when <Class>` is reported only when the subject's
+type is what the code literally shows: a literal (`1`, `"s"`,
+`:a`), an array or hash literal, a class object, or `nil` /
+`true` / `false`. When the subject's type is one Rigor inferred
+or read from a signature, the `when` is evidence that it can hold
+something else, as in the `is_a?` example above, so the clause is
+not reported. It is still read as `bot`, and the `case` value
+drops it:
+
+```ruby
+require "stringio"
+
+io = STDOUT
+assert_type(":io", (case io when StringIO then :string_io else :io end))
+
+count = 3
+assert_type(":number", (case count when String then :text else :number end))
+
+case io
+when StringIO then puts io.string # not reported
+end
+
+case count
+when String then puts count # flow.unreachable-clause
+end
+```
+
+Both values leave the `when` branch out. Of the two `case`
+statements after them, only the second reports
+`flow.unreachable-clause`. The check reads a `case` the code runs
+as a statement or assigns to a variable; one passed straight to a
+method, like the two `assert_type` lines, is not checked.
 
 `case x; in pattern` (one-line pattern matching) narrows the
 same way for the patterns Rigor understands — class checks,
 literal equality, array / hash structural patterns. The
 clause-reachability check extends to bare-class `in` patterns
-(`in String` / `in MyClass => x`) too.
+(`in String` / `in MyClass => x`) too, under the same literal
+rule.
+
+## `respond_to?`
+
+A truthy `respond_to?(:name)` with a literal symbol removes `nil`
+from the receiver (unless `nil` itself responds to `name`) and the
+members whose class Rigor knows lacks `name`. When no member could
+respond, the receiver reads `Dynamic[top]` if its type is one
+Rigor inferred or read from a signature, so the guarded call is
+not an error. It reads `bot` if it is a literal, an array or hash
+literal, a class object, or `nil` / `true` / `false`, so the
+branch goes unchecked. For a literal value that is exact: it
+never gains the method. A class object can gain one from a gem
+Rigor has no signature for (`Time.respond_to?(:zone)` under
+ActiveSupport), and its branch is then not checked either:
+
+```ruby
+require "stringio"
+
+value = [1, "one"].sample
+assert_type('"one"', value) if value.respond_to?(:upcase)
+
+io = STDOUT
+assert_type("Dynamic[top]", io) if io.respond_to?(:string)
+
+count = 3
+assert_type("bot", count) if count.respond_to?(:upcase)
+```
 
 ## Boolean composition
 
@@ -343,12 +430,10 @@ not chase mutation).
 A few forms you might expect that Rigor does **not** narrow
 today:
 
-- `respond_to?(:method_name)` records only a non-nil
-  narrowing — a truthy check with a statically-known symbol
-  removes `nil` from the receiver (since `nil` does not
-  respond to most methods) — but it does **not** yet expose a
-  structural "this object responds to that method" capability
-  fact you could dispatch against.
+- `respond_to?(:method_name)` narrows by removing members (see
+  [`respond_to?`](#respond_to) below), but it does **not** yet
+  expose a structural "this object responds to that method"
+  capability fact you could dispatch against.
 - `frozen?` and other mutation guards — Rigor does not track
   mutability as a narrowing fact yet.
 - Open-ended class-comparison via `===` against arbitrary

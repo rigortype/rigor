@@ -1,0 +1,447 @@
+# frozen_string_literal: true
+
+require "prism"
+
+require_relative "../source/node_children"
+require_relative "../type"
+require_relative "external_ancestor_resolution"
+require_relative "fresh_frame_blocks"
+require_relative "project_method_ownership"
+require_relative "stored_block_call"
+
+module Rigor
+  module Inference
+    # Issue #1429 — where a guard's narrowing of a global or constant stops holding. A guard narrows `$stdout` or
+    # `STDOUT` on its edge ({Narrowing}), but any Ruby code that runs between the guard and a read may rebind the
+    # global (`$stdout = StringIO.new`) or the constant (`const_set`), and the analysis cannot see that code. So the
+    # statement evaluator restores each narrowed name to the union of its pre-guard binding and its narrowed one
+    # ({Scope#forget_guard_narrowings}) wherever code this module counts may run:
+    #
+    # - a call that may run project, gem or unresolved code ({.call_runs_foreign_code?}): a method the project
+    #   defines on the receiver's class or its ancestry, one whose signature is owned outside Ruby core and the
+    #   standard library, a core method on a project or gem receiver (`Enumerable#map` runs the class's `each`),
+    #   an unresolved callee (a `Dynamic` receiver, a name no signature declares), a call that runs code by name
+    #   (`send`, `instance_eval`, `eval`, `require`, `load`), a call on a code object (`Proc`, `Method`,
+    #   `Enumerator`, `Fiber`, `Thread`, a delegator), and a block-pass argument (`&blk`);
+    # - a literal block whose body may do either, or writes a global or constant itself;
+    # - `yield` and `super`, which run code the method does not show.
+    #
+    # A core or standard-library method on a core or standard-library receiver keeps the narrowing (`$sep.strip`,
+    # `$stdout.flush`, `File.read(path)`), and so does a method `Kernel`, `Object` or `BasicObject` owns on any
+    # receiver (`puts`, `format`, `obj.frozen?`), so `if $sep; $sep.strip; $sep.length; end` keeps `$sep` non-nil.
+    #
+    # The accepted gap is implicit conversion: a core method that calls back into a project method the program
+    # does not spell (`puts obj` runs `obj.to_s`, `hash[obj]` runs `obj.hash`, `a.sort` runs `<=>`) is read as the
+    # core method alone.
+    module GuardRebinding
+      # Calls that run code chosen by name or by a String.
+      CODE_RUNNING_NAMES = Set[
+        :send, :__send__, :public_send, :eval, :require, :require_relative, :load,
+        # These rebind a constant on any receiver (`Object.const_set(:SEP, nil)`).
+        :const_set, :remove_const
+      ].freeze
+      # These run their literal block, which the scan reads as any block, or a String of code, which it cannot read.
+      BLOCK_OR_CODE_NAMES = Set[
+        :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec
+      ].freeze
+      # Methods `Kernel`, `Object` or `BasicObject` own that call another method of the receiver, which a project class
+      # may define: `r != 1` runs `r == 1`.
+      UNIVERSAL_DELEGATES = { :!= => :==, :!~ => :=~, :=== => :==, :respond_to? => :respond_to_missing? }.freeze
+      # Receivers whose methods run code the receiver holds: a block, a method, a generator or a delegate.
+      CODE_OBJECT_CLASSES = Set[
+        "Proc", "Method", "UnboundMethod", "Binding", "Enumerator", "Enumerator::Lazy", "Enumerator::Chain",
+        "Enumerator::Yielder", "Fiber", "Thread", "Delegator", "SimpleDelegator"
+      ].freeze
+      # The owners whose methods a project object answers the same way any object does.
+      UNIVERSAL_OWNERS = Set["Kernel", "Object", "BasicObject"].freeze
+      # The nodes that write a global or a constant.
+      WRITE_NODES = [
+        Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+        Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableTargetNode,
+        Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode,
+        Prism::ConstantOperatorWriteNode, Prism::ConstantTargetNode, Prism::ConstantPathWriteNode,
+        Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode, Prism::ConstantPathOperatorWriteNode,
+        Prism::ConstantPathTargetNode
+      ].freeze
+      # Code that runs code the method does not show.
+      FOREIGN_NODES = [Prism::YieldNode, Prism::SuperNode, Prism::ForwardingSuperNode].freeze
+      REBINDING_NODES = (WRITE_NODES + FOREIGN_NODES).to_set.freeze
+      # Nodes that call methods the syntax does not spell as a `CallNode`: an operator write calls its operator (`r +=
+      # 1` calls `r.+`), an attribute or index compound write calls the reader and the writer (`r.val ||= 1`, `r[0] +=
+      # 1`), and a `for` loop calls `each` on its collection.
+      IMPLICIT_CALL_NODES = Set[
+        Prism::LocalVariableOperatorWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::ClassVariableOperatorWriteNode, Prism::CallOperatorWriteNode, Prism::CallOrWriteNode,
+        Prism::CallAndWriteNode, Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
+        Prism::ForNode
+      ].freeze
+      VARIABLE_OPERATOR_WRITES = {
+        Prism::LocalVariableOperatorWriteNode => :local, Prism::InstanceVariableOperatorWriteNode => :ivar,
+        Prism::ClassVariableOperatorWriteNode => :cvar
+      }.freeze
+      # Calls that keep their literal block to run at a later event, after the method returns or between any two of
+      # its statements: an exit handler, a signal handler, a global-assignment hook, a trace hook and a finalizer.
+      # `nil` keys the Kernel function's spellings (`at_exit`, `self.trap`, `Kernel.at_exit`); a constant keys its
+      # singleton methods.
+      DEFERRED_BLOCK_CALLS = {
+        nil => %i[at_exit trap trace_var], Signal: %i[trap], TracePoint: %i[new trace],
+        ObjectSpace: %i[define_finalizer]
+      }.transform_values(&:freeze).freeze
+      private_constant :CODE_RUNNING_NAMES, :BLOCK_OR_CODE_NAMES, :UNIVERSAL_DELEGATES, :CODE_OBJECT_CLASSES,
+                       :UNIVERSAL_OWNERS, :WRITE_NODES, :FOREIGN_NODES,
+                       :REBINDING_NODES, :IMPLICIT_CALL_NODES, :VARIABLE_OPERATOR_WRITES, :DEFERRED_BLOCK_CALLS
+
+      module_function
+
+      # True when `call_node`, a statement's own call, may rebind a global or constant once its operands ran: its
+      # method may run foreign code, or its literal block may.
+      def call_may_rebind?(call_node, scope)
+        return true unless call_node.is_a?(Prism::CallNode)
+        return true if call_runs_foreign_code?(call_node, scope)
+
+        block = call_node.block
+        block.is_a?(Prism::BlockNode) && may_rebind?(block, ScanScope.block_parameter_scope(call_node, block, scope))
+      end
+
+      # True when the receiver chain or the arguments of `call_node` may rebind one; Ruby runs them before the call.
+      def operands_may_rebind?(call_node, scope)
+        may_rebind?(call_node.receiver, scope) || may_rebind?(call_node.arguments, scope) ||
+          (call_node.block.is_a?(Prism::BlockArgumentNode) && may_rebind?(call_node.block, scope))
+      end
+
+      # True when running `node` may rebind one: it writes a global or constant, yields, calls `super`, or holds a
+      # call, spelled or implicit ({.implicit_call_may_rebind?}), whose method may run foreign code. A `def` and a
+      # lambda literal run nothing where they are written. Each node is visited once: a call's literal block is
+      # reached as one of its children, so a nested block chain costs its size, not its depth's power.
+      #
+      # A local the scanned code writes has no binding in `scope` yet, so the scan reads it as the code writes it
+      # ({ScanScope.with_scanned_locals}): `copy = $sep; copy.length` is a `String` call. A literal block's parameters
+      # read as the method's signature yields them ({ScanScope.block_parameter_scope}).
+      def may_rebind?(node, scope)
+        return false unless node.is_a?(Prism::Node)
+
+        scan(node, ScanScope.with_scanned_locals(node, scope))
+      end
+
+      def scan(node, scope)
+        return false unless node.is_a?(Prism::Node)
+        return true if REBINDING_NODES.include?(node.class)
+        return false if node.is_a?(Prism::DefNode) || node.is_a?(Prism::LambdaNode)
+        return scan_call(node, scope) if node.is_a?(Prism::CallNode)
+        return true if IMPLICIT_CALL_NODES.include?(node.class) && implicit_call_may_rebind?(node, scope)
+
+        found = false
+        node.rigor_each_child { |child| found ||= scan(child, scope) }
+        found
+      end
+
+      def scan_call(node, scope)
+        return true if call_runs_foreign_code?(node, scope)
+        return true if scan(node.receiver, scope) || scan(node.arguments, scope)
+
+        block = node.block
+        return scan(block, scope) unless block.is_a?(Prism::BlockNode)
+
+        scan(block, ScanScope.block_scope(node, block, scope))
+      end
+
+      # True when `node` is a compound write or `for` loop that calls a method its syntax does not spell.
+      def implicit_call_node?(node)
+        IMPLICIT_CALL_NODES.include?(node.class)
+      end
+
+      # True when the method a compound write or a `for` loop calls without spelling it may run foreign code
+      # ({IMPLICIT_CALL_NODES}). The operator of an attribute or index operator write runs on the value the reader
+      # returns, typed through the dispatcher; one it cannot type counts.
+      def implicit_call_may_rebind?(node, scope)
+        kind = VARIABLE_OPERATOR_WRITES[node.class]
+        return type_method_foreign?(variable_type(kind, node.name, scope), node.binary_operator, scope) if kind
+        return type_method_foreign?(scope.type_of(node.collection), :each, scope) if node.is_a?(Prism::ForNode)
+
+        compound_write_foreign?(node, scope)
+      rescue StandardError
+        true
+      end
+
+      def compound_write_foreign?(node, scope)
+        receiver_type = compound_receiver_type(node, scope)
+        reader, writer = compound_accessors(node)
+        return true if [reader, writer].any? { |name| type_method_foreign?(receiver_type, name, scope) }
+        return false unless node.respond_to?(:binary_operator)
+
+        read = compound_read_type(node, receiver_type, reader, scope)
+        read.nil? || type_method_foreign?(read, node.binary_operator, scope)
+      end
+
+      def compound_receiver_type(node, scope)
+        return scope.type_of(node.receiver) if node.receiver
+
+        scope.self_type || Type::Combinator.nominal_of("Object")
+      end
+
+      def compound_accessors(node)
+        return %i[[] []=] if node.respond_to?(:arguments) && !node.respond_to?(:read_name)
+
+        [node.read_name, node.write_name]
+      end
+
+      def compound_read_type(node, receiver_type, reader, scope)
+        arguments = node.respond_to?(:arguments) && node.arguments ? node.arguments.arguments : []
+        MethodDispatcher.dispatch(receiver_type: receiver_type, method_name: reader,
+                                  arg_types: arguments.map { |argument| scope.type_of(argument) },
+                                  environment: scope.environment, scope: scope)
+      end
+
+      def variable_type(kind, name, scope)
+        case kind
+        when :local then scope.local(name)
+        when :ivar then scope.ivar(name)
+        else scope.cvar(name)
+        end || Type::Combinator.untyped
+      end
+
+      # True when `method_name` on a value of `type` may run foreign code ({.foreign_target?}).
+      def type_method_foreign?(type, method_name, scope)
+        targets = ProjectMethodOwnership.targets(type)
+        return true if targets.nil? || targets.empty?
+
+        targets.any? { |class_name, kind| foreign_target?(class_name, method_name, kind, scope) }
+      end
+
+      # The scope the body of `block_node` (a block, a lambda literal or an `END { }` body) enters with: `scope` with
+      # its guard narrowings restored where the body may run after code that rebinds them. A lambda, an `END` body,
+      # a block the call keeps to run later (`proc`, `define_method`) or at a later event ({DEFERRED_BLOCK_CALLS}),
+      # the root block of a thread or fiber, the block of a call that itself may run foreign code (`with_retry {
+      # $g.length }` runs after the helper's body), and a body that may rebind one itself (a later run reads what an
+      # earlier one wrote). A block with no owning call is left alone.
+      def block_entry(scope, block_node, call_node)
+        return scope unless scope.guard_narrowed?
+        return scope.forget_guard_narrowings if block_node.is_a?(Prism::LambdaNode) ||
+                                                block_node.is_a?(Prism::PostExecutionNode)
+        return scope unless call_node.is_a?(Prism::CallNode)
+
+        if StoredBlockCall.stores_block?(call_node) || deferred_block_call?(call_node) ||
+           FreshFrameBlocks.fresh_entry?(call_node, scope) || call_runs_foreign_code?(call_node, scope) ||
+           may_rebind?(block_node, ScanScope.block_parameter_scope(call_node, block_node, scope))
+          return scope.forget_guard_narrowings
+        end
+
+        scope
+      end
+
+      # True when `call_node` is one of {DEFERRED_BLOCK_CALLS}, spelled on its literal receiver.
+      def deferred_block_call?(call_node)
+        receiver = call_node.receiver
+        key = StoredBlockCall.kernel_spelled?(receiver) ? nil : StoredBlockCall.root_constant_name(receiver)
+        names = DEFERRED_BLOCK_CALLS[key]
+        !names.nil? && names.include?(call_node.name)
+      end
+
+      # True when the method `call_node` calls may run code other than Ruby core and the standard library (see the
+      # module comment). Its operands and literal block are not read here.
+      def call_runs_foreign_code?(call_node, scope)
+        return true if call_node.block.is_a?(Prism::BlockArgumentNode)
+        return true if CODE_RUNNING_NAMES.include?(call_node.name)
+        return true if BLOCK_OR_CODE_NAMES.include?(call_node.name) &&
+                       !(call_node.block.is_a?(Prism::BlockNode) && call_node.arguments.nil?)
+
+        targets = receiver_targets(call_node, scope)
+        return true if targets.nil? || targets.empty?
+
+        targets.any? { |class_name, kind| foreign_target?(class_name, call_node.name, kind, scope) }
+      rescue StandardError
+        true
+      end
+
+      # The `[class_name, kind]` pairs the call dispatches on ({ProjectMethodOwnership.targets}); an implicit or
+      # `self.` receiver reads the scope's `self`, and the top level's `main` is an `Object`.
+      def receiver_targets(call_node, scope)
+        receiver = call_node.receiver
+        if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          self_type = scope.self_type
+          return [["Object", :instance]] if self_type.nil?
+
+          return ProjectMethodOwnership.targets(self_type)
+        end
+
+        ProjectMethodOwnership.targets(scope.type_of(receiver))
+      end
+
+      def foreign_target?(class_name, method_name, kind, scope)
+        return true if CODE_OBJECT_CLASSES.include?(class_name)
+        return true if ProjectMethodOwnership.defines?(class_name, method_name, kind, scope)
+
+        owner = method_owner(class_name, method_name, kind, scope)
+        return true if owner.nil?
+        return universal_delegate_foreign?(class_name, method_name, kind, scope) if UNIVERSAL_OWNERS.include?(owner)
+
+        loader = scope.environment.rbs_loader
+        return true if loader.nil?
+
+        !(loader.core_or_stdlib_class?(owner) && loader.core_or_stdlib_class?(class_name))
+      end
+
+      # A universal method is foreign only when it calls another method of the receiver the project defines
+      # ({UNIVERSAL_DELEGATES}).
+      def universal_delegate_foreign?(class_name, method_name, kind, scope)
+        delegate = UNIVERSAL_DELEGATES[method_name]
+        !delegate.nil? && ProjectMethodOwnership.defines?(class_name, delegate, kind, scope)
+      end
+
+      # The class or module whose signature answers `method_name` on `class_name`: its own RBS, an RBS ancestor of a
+      # project class ({ExternalAncestorResolution.resolve}), or `Object`'s for an instance method nothing earlier
+      # declares (a project class with no signature calling `puts`). nil when none does.
+      def method_owner(class_name, method_name, kind, scope)
+        definition = ExternalAncestorResolution.method_definition(class_name, method_name, kind, scope: scope)
+        if definition.nil? && kind == :instance
+          definition = ExternalAncestorResolution.resolve(class_name, method_name, :instance, scope: scope)&.first
+          definition ||= ExternalAncestorResolution.method_definition("Object", method_name, :instance, scope: scope)
+        end
+        owner = definition.respond_to?(:defined_in) ? definition.defined_in : nil
+        owner&.to_s&.delete_prefix("::")
+      end
+      private_class_method :scan, :scan_call, :receiver_targets, :foreign_target?, :universal_delegate_foreign?,
+                           :method_owner, :deferred_block_call?,
+                           :compound_write_foreign?,
+                           :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
+                           :type_method_foreign?
+    end
+
+    module GuardRebinding
+      # The scope {GuardRebinding.may_rebind?} types a scanned node's receivers in: the locals the scanned code writes
+      # and a literal block's parameters, which the scope before the code does not bind.
+      module ScanScope
+        LOCAL_SCAN_BARRIERS = [Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode].freeze
+        private_constant :LOCAL_SCAN_BARRIERS
+
+        module_function
+
+        # `scope` with each local `node` writes read as the union of what it held and each value the code writes it,
+        # in source order, so a later write reads an earlier one. A local `scope` already binds keeps its binding in
+        # the union: the scanned code may run before or after its own write (a loop body, a block, a rescue clause).
+        # A nested `def`, lambda, class or module body is not read.
+        def with_scanned_locals(node, scope)
+          writes = []
+          collect_local_writes(node, writes)
+          writes.reduce(scope) do |acc, write|
+            written = acc.type_of(write.value)
+            existing = acc.local(write.name)
+            acc.with_local(write.name, existing ? Type::Combinator.union(existing, written) : written)
+          end
+        rescue StandardError
+          scope
+        end
+
+        def collect_local_writes(node, writes)
+          return unless node.is_a?(Prism::Node)
+          return if LOCAL_SCAN_BARRIERS.any? { |barrier| node.is_a?(barrier) }
+
+          writes << node if node.is_a?(Prism::LocalVariableWriteNode)
+          node.rigor_each_child { |child| collect_local_writes(child, writes) }
+        end
+
+        # The scope the body of `call_node`'s literal `block` is scanned in, from `scope`, the enclosing scan's: the
+        # block's parameters bound ({.block_parameter_scope}), and the locals the body writes typed again from them
+        # ({.with_scanned_locals}), since the enclosing scan typed those writes before the parameters were bound. A
+        # block without parameters keeps `scope`.
+        def block_scope(call_node, block, scope)
+          bound = block_parameter_scope(call_node, block, scope)
+          bound.equal?(scope) ? scope : with_scanned_locals(block, bound)
+        end
+
+        # `scope` with every local the block's parameter list names bound, so none reads a binding of the same name
+        # from outside the block. A plain required parameter reads what the method yields at its position in
+        # `requireds` (`MethodDispatcher.expected_block_param_types`); every other name, a destructured, optional,
+        # splat, post, keyword, block or `;`-block-local one, reads `Dynamic[top]`, so a call on it counts as an
+        # unresolved callee. `scope` itself when the body reads no parameter where the scan types it
+        # ({.reads_parameters?}): the bindings would change nothing.
+        def block_parameter_scope(call_node, block, scope)
+          parameters = block.parameters
+          return scope unless parameters.is_a?(Prism::BlockParametersNode)
+
+          names = []
+          collect_parameter_names(parameters, names)
+          return scope if names.empty? || !reads_parameters?(block.body, names)
+
+          bindings = names.to_h { |name| [name, Type::Combinator.untyped] }
+          requireds = parameters.parameters&.requireds || []
+          unless requireds.none?(Prism::RequiredParameterNode)
+            yielded = yielded_types(call_node, scope)
+            requireds.each_with_index do |parameter, index|
+              next unless parameter.is_a?(Prism::RequiredParameterNode)
+
+              bindings[parameter.name] = yielded[index] || Type::Combinator.untyped
+            end
+          end
+          bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        end
+
+        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read.
+        def yielded_types(call_node, scope)
+          receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
+          arguments = call_node.arguments&.arguments || []
+          MethodDispatcher.expected_block_param_types(
+            receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
+            arg_types: arguments.map { |argument| scope.type_of(argument) }
+          )
+        rescue StandardError
+          []
+        end
+
+        # The names a block's parameter list declares: every kind of parameter, a destructured one's parts included,
+        # and a `;`-block-local. A default value is not read.
+        def collect_parameter_names(node, names)
+          case node
+          when Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
+               Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode, Prism::KeywordRestParameterNode,
+               Prism::BlockParameterNode, Prism::BlockLocalVariableNode
+            names << node.name if node.name
+          when Prism::Node
+            node.rigor_each_child { |child| collect_parameter_names(child, names) }
+          end
+        end
+
+        # True when the block body `body` reads one of `names` where the scan types it. A read the scan never types is
+        # a bare argument of a statement that calls a method on `self` without a literal block (`puts i`): the scan
+        # reads such a call by its receiver and name alone, and types none of its arguments. Any other read counts,
+        # and so does every read under a body that is not a plain statement list (a `rescue` in a `do` block).
+        def reads_parameters?(body, names)
+          return false if body.nil?
+          return names_read?(body, names) unless body.is_a?(Prism::StatementsNode)
+
+          body.body.any? { |statement| statement_reads?(statement, names) }
+        end
+
+        def statement_reads?(statement, names)
+          return names_read?(statement, names) unless self_call_without_block?(statement)
+
+          arguments = statement.arguments&.arguments || []
+          arguments.any? { |argument| !argument.is_a?(Prism::LocalVariableReadNode) && names_read?(argument, names) } ||
+            names_read?(statement.block, names)
+        end
+
+        def self_call_without_block?(node)
+          node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+            !node.block.is_a?(Prism::BlockNode)
+        end
+
+        # True when `node` reads one of `names`: a read, or an operator write, which reads the local before it writes.
+        def names_read?(node, names)
+          case node
+          when Prism::LocalVariableReadNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+               Prism::LocalVariableAndWriteNode
+            return true if names.include?(node.name)
+          end
+          return false unless node.is_a?(Prism::Node)
+
+          found = false
+          node.rigor_each_child { |child| found ||= names_read?(child, names) }
+          found
+        end
+
+        private_class_method :collect_local_writes, :yielded_types, :collect_parameter_names, :reads_parameters?,
+                             :statement_reads?, :self_call_without_block?, :names_read?
+      end
+    end
+  end
+end

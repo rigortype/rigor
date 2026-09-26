@@ -1624,13 +1624,17 @@ module Rigor
         # `String`; every other numbered group present in the pattern stays `String | nil` on
         # both edges (a truthy match leaves an optional group nil at runtime), so we do not
         # narrow it on the truthy edge.
+        #
+        # Both edges start from `scope` with the match globals forgotten (#1385): the match rebinds every one of them,
+        # so a `$N` an earlier match narrowed says nothing here. Without that, a `when /(x)/` arm, or the right operand
+        # of `s =~ /(a)(b)(c)/ && t =~ /(x)/`, kept `$2` and `$3` narrowed to `String` where Ruby reads nil.
         def regex_match_predicate_scopes(scope, unconditional)
           string_t = Type::Combinator.nominal_of("String")
           match_data_t = Type::Combinator.nominal_of("MatchData")
           nil_t = Type::Combinator.constant_of(nil)
 
-          truthy = scope
-          falsey = scope
+          truthy = scope.forget_match_globals
+          falsey = truthy
           truthy = truthy.with_global(:$~, match_data_t)
           falsey = falsey.with_global(:$~, nil_t)
           REGEX_MATCH_GLOBALS.each do |name|

@@ -1179,6 +1179,13 @@ RSpec.describe "Rigor type construction (integration)" do
       nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
       expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
     end
+
+    # A slice after a later match with fewer groups must not fold to the earlier match's length, or the size checks
+    # the fixture makes on it fold to a constant (#1385).
+    it "folds no size check on a slice" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_file_frame.rb — the file's top level is a frame of its own (#1358)" do

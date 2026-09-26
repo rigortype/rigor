@@ -17,3 +17,4 @@ assertions:
   '14': Array[String?]
   '15': Array[String?]
   '16': Array[String?]
+  '17': "[String, String, String]"

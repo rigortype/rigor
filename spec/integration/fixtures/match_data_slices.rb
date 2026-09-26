@@ -54,4 +54,32 @@ def unproven(line)
   assert_type("Array[String?]", Regexp.last_match[1..2])
   assert_type("Array[String?]", Regexp.last_match[1..2]) unless line =~ /(a)(b)/
 end
+
+# A match with fewer groups after an earlier one: the slice follows the later match, so a size check on it is not
+# folded (Ruby: `("abc", "x")` gives `$~[1..3] == ["x"]`) (#1385).
+def when_arm_after_match(line, t)
+  return unless line =~ /(a)(b)(c)/
+
+  case t
+  when /(x)/
+    parts = $~[1..3]
+    return :short if parts.size == 1
+  end
+  :long
+end
+
+def and_operand_after_match(line, t)
+  if line =~ /(a)(b)(c)/ && t =~ /(x)/
+    parts = $~[1..3]
+    return :short if parts.size < 3
+  end
+  :long
+end
+
+# Control: a genuine three-group match still folds.
+def three_groups(line)
+  return unless line =~ /(a)(b)(c)/
+
+  assert_type("[String, String, String]", $~[1..3])
+end
 # rubocop:enable Style/SpecialGlobalVars

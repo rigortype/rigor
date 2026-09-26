@@ -163,12 +163,16 @@ module Rigor
         end
 
         # A name the file's in-source constant table holds, or one the project's census of written constant names
-        # spells, exactly or as a `*::` wildcard of its last segment.
+        # spells, exactly, as a `*::` wildcard of its last segment, or as a path relative to a namespace the census
+        # does not record (`module P; Q::Qux = Class.new(CSV); end` spells `Q::Qux` for `P::Q::Qux`), which a
+        # same-named constant elsewhere also matches, and only declines.
         def written_constant?(name, scope)
           record_name(:constant, name.split("::").last)
           return true if scope.in_source_constants.key?(name)
 
-          scope.bound_constant_names(name).any? { |written| written == name || written.start_with?("*::") }
+          scope.bound_constant_names(name).any? do |written|
+            written == name || written.start_with?("*::") || name.end_with?("::#{written}")
+          end
         end
 
         # Both readers in `Kernel`, `IO` or its kin; a module may declare neither, while a class without one is a

@@ -1147,9 +1147,10 @@ module Rigor
         private_constant :VENDORED_GEM_SIGS_ROOT
 
         # Rigor-owned core-overlay RBS (`data/core_overlay/`). Reopens Ruby core classes to add methods
-        # upstream `ruby/rbs` omits but which every concrete value answers at runtime — loaded last so
-        # upstream always wins on conflict. Public so the cache descriptor can digest these files into the
-        # env-blob key.
+        # upstream `ruby/rbs` omits but which every concrete value answers at runtime. A direct `def` that
+        # another source also declares is a `DuplicatedMethodDefinitionError`, not a precedence question, so a
+        # method a project `sig/` or a later rbs is likely to declare goes on a module the class extends
+        # (`process.rbs`). Public so the cache descriptor can digest these files into the env-blob key.
         CORE_OVERLAY_SIGS_ROOT = File.expand_path(
           "../../../data/core_overlay",
           __dir__
@@ -1250,12 +1251,12 @@ module Rigor
         private_constant :RBS_LINE_CORE_OVERLAYS
 
         # Adds the Rigor-shipped signature sources to `rbs_loader`: every `data/vendored_gem_sigs/<gem>/`
-        # directory, then the `data/core_overlay/` files — the overlay LAST so an upstream declaration
-        # always wins on conflict (these reopenings only fill genuine holes, e.g. `Numeric#to_f`/`to_i`/
-        # `to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
-        # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
-        # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and `RBS_LINE_CORE_OVERLAYS` files must
-        # be gated individually.
+        # directory, then the `data/core_overlay/` files, which fill genuine holes only (e.g. `Numeric#to_f`/
+        # `to_i`/`to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
+        # that Rigor's arithmetic-chain widening produces). Load order does not settle a conflict: a method
+        # both sides declare directly raises `DuplicatedMethodDefinitionError` for the whole class. The
+        # overlay is added per-file, not per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` and
+        # `RBS_LINE_CORE_OVERLAYS` files must be gated individually.
         #
         # @param loaded_library_names — libraries that actually resolved on this loader.
         def add_bundled_signatures(rbs_loader, loaded_library_names)

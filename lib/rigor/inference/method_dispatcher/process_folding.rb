@@ -17,28 +17,39 @@ module Rigor
       # rather than the global (`system("make"); Process.last_status.success?`). The same reasoning, for
       # `Regexp.last_match` and `$~`, is {RegexpFolding.fold_last_match}.
       #
-      # The consult reads the binding and never invents one, so it rides every rule that forgets `$?`
-      # (rescue clauses, closures, thread roots, joins with a path that ran no subprocess). It declines —
-      # deferring to the overlay's `Process::Status?` — when `$?` is unbound or bound to anything but a
-      # `Process::Status` (a `define_method` body reads it as `Dynamic[top]`), when the call passes
-      # arguments (the RBS tier reports the arity), and when the project defines its own `Process.last_status`.
+      # A bound `$?` is answered as it stands, so the method reads what the global reads in every body the
+      # binding rules reach, `Dynamic[top]` in a `define_method` body included. The consult never invents a
+      # binding: where `$?` is unbound (rescue clauses, closures, thread roots, joins with a path that ran no
+      # subprocess) it declines to the declaration. It also declines an argument-bearing call, whose arity
+      # the RBS tier reports.
+      #
+      # A project that defines `Process.last_status` itself answers `Dynamic[top]`: its method may return
+      # anything, and declining would hand the call to the overlay's declaration, which outranks a
+      # discovered method. A definition the discovery pass does not record — `def Process.last_status` outside
+      # `module Process`, `define_singleton_method`, `alias_method`, a prepended module — keeps the binding's answer.
       module ProcessFolding
-        LAST_STATUS = :$?
-        private_constant :LAST_STATUS
-
         module_function
 
-        # @return the bound `$?` type, or nil to defer.
+        # @return the answer, or nil to defer.
         def try_dispatch(context)
           return nil unless SingletonFolding.receiver?(context.receiver, "Process")
           return nil unless context.method_name == :last_status && context.args.empty?
 
           scope = context.scope
-          return nil if scope.nil? || scope.discovered_method?("Process", :last_status, :singleton)
+          return nil if scope.nil?
+          return Type::Combinator.untyped if project_defines_last_status?(scope)
 
-          status = scope.global(LAST_STATUS)
-          status if status.is_a?(Type::Nominal) && status.class_name == "Process::Status"
+          scope.global(:$?)
         end
+
+        def project_defines_last_status?(scope)
+          return true if scope.discovered_method?("Process", :last_status, :singleton)
+          return true if scope.discovered_singleton_def_nodes["Process"]&.key?(:last_status)
+
+          patched = scope.environment&.project_patched_methods
+          !patched.nil? && !patched.lookup(class_name: "Process", method_name: :last_status, kind: :singleton).nil?
+        end
+        private_class_method :project_defines_last_status?
       end
     end
   end

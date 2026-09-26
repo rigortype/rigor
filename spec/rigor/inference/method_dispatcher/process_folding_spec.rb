@@ -16,13 +16,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ProcessFolding do
     expect(fold_in(ran_scope)).to eq(status_t)
   end
 
-  it "declines (defers to the overlay's Process::Status?) when $? is unbound" do
-    expect(fold_in(Rigor::Scope.empty)).to be_nil
+  # A `define_method` body rebinds a bound `$?` to `Dynamic[top]`, and the method reads it the same way.
+  it "answers a $? bound to Dynamic[top] as it stands" do
+    untyped = Rigor::Type::Combinator.untyped
+
+    expect(fold_in(Rigor::Scope.empty.with_global(:$?, untyped))).to eq(untyped)
   end
 
-  # A `define_method` body rebinds a bound `$?` to `Dynamic[top]`.
-  it "declines when $? is bound to anything but Process::Status" do
-    expect(fold_in(Rigor::Scope.empty.with_global(:$?, Rigor::Type::Combinator.untyped))).to be_nil
+  it "declines (defers to the overlay's Process::Status?) when $? is unbound" do
+    expect(fold_in(Rigor::Scope.empty)).to be_nil
   end
 
   it "declines an argument-bearing call, leaving the arity to the RBS tier" do

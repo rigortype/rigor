@@ -40,6 +40,37 @@ RSpec.describe Rigor::Inference::GuardRebinding do
     end
   end
 
+  describe ".may_rebind?" do
+    # A call's literal block is one of its children, so the scan reaches every node once: a chain of nested blocks
+    # costs its size. Scanning the block through the call and again as a child doubled the work per level, which
+    # made a live guard exponential in the nesting depth.
+    it "visits each node of a nested block chain at most once" do
+      depth = 12
+      source = "#{'list.each { ' * depth}puts 1#{' }' * depth}"
+      node = call(source)
+      size = 0
+      counter = lambda do |current|
+        size += 1
+        current.rigor_each_child { |child| counter.call(child) }
+      end
+      counter.call(node)
+      allow(described_class).to receive(:may_rebind?).and_call_original
+
+      expect(described_class.may_rebind?(node, scope)).to be(false)
+      expect(described_class).to have_received(:may_rebind?).at_most(size).times
+    end
+
+    it "counts a compound write and a `for` loop whose implicit method may run project code" do
+      ["s += s", "list[0] ||= 1", "for x in list do x end"].each do |source|
+        expect(described_class.may_rebind?(call(source), scope)).to be(false), source
+      end
+      # The operator runs on what the reader returns; an element the scope cannot type may be any object.
+      expect(described_class.may_rebind?(call("list[0] += 1"), scope)).to be(true)
+      expect(described_class.may_rebind?(call("unknown.val += 1"), scope)).to be(true)
+      expect(described_class.may_rebind?(call("Object.const_set(:A, 1)"), scope)).to be(true)
+    end
+  end
+
   describe ".block_entry" do
     let(:guarded) { scope.with_guarded_global(:$g, string_t, Rigor::Type::Combinator.union(string_t, nil_t)) }
 

@@ -1041,27 +1041,45 @@ module Rigor
       # The `case ... in` pattern-matching form (`CaseMatchNode`) and the predicate-less form (`case; when
       # c1; ...`) bypass the `===` analysis: pattern matching has richer semantics, and a predicate-less
       # `case` reduces to a `if c1; ...; elsif c2` chain that statement-level narrowing already handles.
+      # Issue #1429 — each arm is typed under the subject's clause narrowing (`Narrowing.case_when_scopes`), the
+      # scope the statement evaluator runs the arm in: `when Symbol then n` on `n: Integer | Symbol` answers
+      # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out. An arm only a class guard
+      # made live joins as `Dynamic[T]` ({StatementEvaluator#gradual_arm}).
       def type_of_case(node)
         return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
 
         subject_type = type_of(node.predicate)
         candidates = []
         reached_yes = false
+        clause_scope = scope
 
         node.conditions.each do |when_node|
-          case case_when_branch_certainty(subject_type, when_node)
-          when :yes
-            candidates << type_of(when_node)
+          conditions = when_node.respond_to?(:conditions) ? when_node.conditions : []
+          body_scope, next_scope = Narrowing.case_when_scopes(node.predicate, conditions, clause_scope)
+          certainty = case_when_branch_certainty(subject_type, when_node)
+          # :no — drop the branch
+          candidates << case_arm_type(when_node, body_scope, clause_scope) unless certainty == :no
+          if certainty == :yes
             reached_yes = true
             break
-          when :maybe
-            candidates << type_of(when_node)
-            # :no — drop the branch
           end
+          clause_scope = next_scope
         end
 
-        candidates << type_of_case_else(node) unless reached_yes
+        candidates << case_arm_type(node.else_clause, clause_scope, clause_scope) unless reached_yes
         Type::Combinator.union(*candidates)
+      end
+
+      # The value of one `case` arm (`nil` for an absent `else`), typed under `arm_scope`, and gradual when only a
+      # class guard made the arm live.
+      def case_arm_type(arm, arm_scope, entry)
+        return Type::Combinator.constant_of(nil) if arm.nil?
+
+        type = arm_scope.equal?(scope) ? type_of(arm) : arm_scope.type_of(arm, tracer: tracer)
+        return type unless arm_scope.guard_live? && !entry.guard_live?
+        return type if type.is_a?(Type::Bot) || type.is_a?(Type::Dynamic)
+
+        Type::Combinator.dynamic(type)
       end
 
       def type_of_case_simple_union(node)

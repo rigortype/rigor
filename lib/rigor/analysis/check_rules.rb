@@ -711,7 +711,9 @@ module Rigor
           # below — preserving that keeps `&.` from newly firing on the
           # non-nil constituent (which, for a cross-file project def, would
           # be a working-code false positive).
-          receiver_type = safe_navigation_receiver(call_node, scope)
+          #
+          # Issue #1429 — a receiver a class guard's second pass bound to `Dynamic[C]` is checked against `C`.
+          receiver_type = guard_facet_receiver(call_node, scope)
 
           # #320 — the private-singleton-object idiom (`class << Merger = Object.new`). The body's methods
           # are recorded on the constant's own name, but the receiver reads back as `Object`, so the
@@ -780,6 +782,13 @@ module Rigor
           return nil if project_sidecar_owns_method?(scope, class_name, call_node.name, kind)
 
           build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
+        end
+
+        # Issue #1429 (the maintainer's amendment) — inside the arm a class guard's second pass made live, a call on the
+        # receiver it bound to `Dynamic[C]` is checked against `C` ({Inference::Narrowing.guard_facet_type}), so
+        # `$stdout.strnig` under `$stdout.is_a?(StringIO)` reports. Every other `Dynamic[T]` stays unchecked.
+        def guard_facet_receiver(call_node, scope)
+          Inference::Narrowing.guard_facet_type(call_node.receiver, safe_navigation_receiver(call_node, scope), scope)
         end
 
         # Issue #1120 — the method exists at THIS call site but not everywhere: a refinement whose `using` is in

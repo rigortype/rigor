@@ -34,15 +34,16 @@ module Bar
       # the `else` arm, and `.upcase` on it is a String method call.
       #
       # The `when` arm is kept too (#1429): a class guard written in the
-      # code outranks the `Nominal` the engine inferred for the subject,
-      # so a disjoint `Nominal` subject narrows to the guarded class
-      # instead of proving the arm dead. What this fixture pins for #655
-      # is that the LIVE arm is never the one dropped: the expression
-      # keeps `"else"`, and `.upcase` stays quiet on the union because
-      # one of its arms defines it.
+      # code outranks the `Nominal` the engine inferred for the subject.
+      # The ordinary reading proves the arm dead, so the guard makes it
+      # gradual, and its value joins as `Dynamic[1]`: a typed sink
+      # accepts it by gradual consistency. What this fixture pins for
+      # #655 is that the LIVE arm is never the one dropped: the
+      # expression keeps `"else"`, and `.upcase` stays quiet on the
+      # union because a `Dynamic` arm never makes the call undefined.
       def shadowed_pattern_keeps_the_live_arm
         other = ::Random.new
-        assert_type('"else" | 1', (case other when Random then 1 else "else" end))
+        assert_type('"else" | Dynamic[1]', (case other when Random then 1 else "else" end))
         (case other when Random then 1 else "else" end).upcase
       end
 

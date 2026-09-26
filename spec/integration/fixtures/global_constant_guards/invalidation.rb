@@ -5,8 +5,11 @@ include Rigor::Testing
 # Issue #1429 — a guard's narrowing of a global holds until code may run that rebinds the global. A method the project
 # defines may (`reset_sep`, `helper_that_writes_stdout`), and so may a block such a method runs, a lambda, and an
 # unresolved callee. A core or standard-library method does not, so the narrowing survives `$sep.strip`, `puts` and
-# `$stdout.rewind`. Restoring reads the union of the pre-guard binding and the narrowed one (Ruby: the copy is nil
-# after `reset_sep`, so the reported calls raise there).
+# `$stdout.rewind`. Restoring reads the union of the pre-guard binding and the narrowed one.
+#
+# Each example puts only the call under test between the guard and the read: an `assert_type` is itself a call the
+# scan cannot resolve, so it asserts after that call or in a method of its own. Ruby 4.0.5, with an argument given
+# (`$sep` is ","): the reported calls raise NoMethodError on nil, the quiet ones return 1.
 
 $stdout = STDOUT
 $sep = nil if ARGV.empty?
@@ -86,22 +89,32 @@ def dropped_by_unresolved_callee(untyped)
   assert_type('","?', $sep)
 end
 
-# The issue's pair: a helper that may rewrite `$stdout` restores it to the union, which still has the guarded
-# `StringIO` and keeps `.string` quiet; a core `rewind` keeps the narrowing (Ruby: the captured text under a
-# `StringIO`, nil under `STDOUT`).
+# The issue's pair. A helper that may rewrite `$stdout` restores it to the union, whose gradual `StringIO` member
+# keeps `.string` quiet; a core `rewind` keeps the narrowing. Ruby 4.0.5: the captured text under a `StringIO`, nil
+# under `STDOUT`.
 def with_helper
-  $stdout.is_a?(StringIO) ? (helper_that_writes_stdout; assert_type("IO | StringIO", $stdout); $stdout.string) : nil # QUIET-1429
+  $stdout.is_a?(StringIO) ? (helper_that_writes_stdout; assert_type("Dynamic[StringIO] | IO", $stdout); $stdout.string) : nil # QUIET-1429
 end
 
 def with_rewind
-  $stdout.is_a?(StringIO) ? ($stdout.rewind; assert_type("StringIO", $stdout); $stdout.string) : nil # QUIET-1429
+  $stdout.is_a?(StringIO) ? ($stdout.rewind; assert_type("Dynamic[StringIO]", $stdout); $stdout.string) : nil # QUIET-1429
 end
 
-# A constant's narrowing is restored the same way.
+# A constant's narrowing is restored the same way; the guard's own reading is asserted apart.
+def constant_narrowed = (assert_type("Dynamic[StringIO]", STDOUT) if STDOUT.is_a?(StringIO))
+
 def constant_restored
   return unless STDOUT.is_a?(StringIO)
 
-  assert_type("StringIO", STDOUT)
   reset_sep
-  assert_type("IO | StringIO", STDOUT)
+  assert_type("Dynamic[StringIO] | IO", STDOUT)
+end
+
+# `$>` is the variable `$stdout` names, so a write to it ends a guard's narrowing of `$stdout` (Ruby 4.0.5: `$stdout`
+# is `STDOUT` after the write).
+def alias_write
+  return unless $stdout.is_a?(StringIO)
+
+  $> = STDOUT
+  assert_type("Dynamic[StringIO] | IO", $stdout)
 end

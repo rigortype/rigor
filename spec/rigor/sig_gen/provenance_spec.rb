@@ -253,7 +253,10 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
   "sig/rigor/environment.rbs" => 39,
-  "sig/rigor/inference.rbs" => 84,
+  # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
+  # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
+  # and its return renders.
+  "sig/rigor/inference.rbs" => 83,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -313,7 +316,11 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
   "sig/rigor/trinary.rbs" => 5,
-  "sig/rigor/type.rbs" => 211
+  # -3 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so the
+  # `when Constant then type.value.is_a?(String)` arms of `Combinator#literal_string_compatible?`,
+  # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
+  # rather than `untyped`, and each `bool` return renders.
+  "sig/rigor/type.rbs" => 208
 }.freeze
 
 module SigProvenanceSpecHelpers

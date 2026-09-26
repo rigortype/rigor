@@ -345,12 +345,25 @@ module Rigor
         @on_enter&.call(node, @scope)
 
         handler = HANDLERS[node.class]
-        return send(handler, node) if handler
+        return forget_implicit_call_guards(node, send(handler, node)) if handler
 
         # Default: the node is treated as a pure expression. Type it through the existing expression typer (which
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
         [@scope.type_of(node, tracer: @tracer), forget_rebound_specials(@scope, node)]
+      end
+
+      # Issue #1429 — a compound write or a `for` loop calls a method its syntax does not spell (`r += r` calls `r.+`,
+      # `r[0] ||= 1` calls `r.[]` and `r.[]=`, `for x in r` calls `r.each`). When that method may run code that rebinds
+      # a global or constant, the guard narrowings past the node are restored
+      # ({GuardRebinding.implicit_call_may_rebind?}).
+      def forget_implicit_call_guards(node, result)
+        type, after = result
+        return result unless after.is_a?(Scope) && after.guard_narrowed? &&
+                             GuardRebinding.implicit_call_node?(node) &&
+                             GuardRebinding.implicit_call_may_rebind?(node, @scope)
+
+        [type, after.forget_guard_narrowings]
       end
 
       # Issue #1359 — the nodes whose handler runs their parts in order, each from the scope the parts before it
@@ -658,13 +671,14 @@ module Rigor
         result
       end
 
-      # Issue #1429 — a write to a constant ends a guard's narrowing of the reference it writes.
+      # Issue #1429 — a write to a constant ends a guard's narrowing of every spelling that may name it: `Foo::BAR =
+      # nil` inside `module Foo` writes the constant `BAR` reads, so each narrowing whose last segment is the written
+      # name is dropped, whatever its prefix.
       def forget_constant_guard(after, node)
         return after if after.constant_narrowings.empty?
 
         target = node.respond_to?(:target) ? node.target : node
-        key = target.is_a?(Prism::ConstantPathNode) ? Narrowing.constant_key(target) : node.name.to_s
-        key ? after.without_constant_narrowing(key) : after
+        after.without_constant_narrowings_named(target.name.to_s)
       end
 
       # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze`
@@ -1126,8 +1140,8 @@ module Rigor
           return live
         end
 
-        then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
-        else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
+        then_type, then_scope = gradual_arm(eval_branch_or_nil(node.statements, truthy_scope), truthy_scope, post_pred)
+        else_type, else_scope = gradual_arm(eval_branch_or_nil(node.subsequent, falsey_scope), falsey_scope, post_pred)
         # Slice 7 phase 14 — early-return narrowing. When the then-branch unconditionally exits (return / next / break /
         # raise) and there is no else, the post-scope is the falsey edge of the predicate (subsequent statements observe
         # the predicate-was-false world). The then-body is the *skipped* path, so the bare narrowing (no body
@@ -1167,8 +1181,8 @@ module Rigor
           return live
         end
 
-        then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
-        else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
+        then_type, then_scope = gradual_arm(eval_branch_or_nil(node.statements, falsey_scope), falsey_scope, post_pred)
+        else_type, else_scope = gradual_arm(eval_branch_or_nil(node.else_clause, truthy_scope), truthy_scope, post_pred)
         # Slice 7 phase 14 — same early-return narrowing as `if`: when the body unconditionally exits and there is no
         # else, the post-scope is the truthy edge (the body is the skipped path, so the bare narrowing is correct).
         return [Type::Combinator.union(then_type, else_type), truthy_scope] \
@@ -1310,10 +1324,29 @@ module Rigor
           # recursion) so no condition sub-expression is newly typed; `propagate` preserves the entry because it already
           # keys the node.
           record_clause_entry_scope(branch, falsey_scope)
+          clause_entry = falsey_scope
           body_scope, falsey_scope = branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
-          results << sub_eval(branch, body_scope)
+          results << gradual_arm(sub_eval(branch, body_scope), body_scope, clause_entry)
         end
         [results, falsey_scope]
+      end
+
+      # Issue #1429 (the maintainer's amendment) — an arm run from an edge only a class guard's second pass made live
+      # (`arm_entry` carries {Scope#with_guard_live} and `entry`, the scope before the guard, does not) is gradual:
+      # its value and the bindings it changed leave it as `Dynamic[T]` ({Scope#with_gradual_bindings}). The ordinary
+      # reading proves no value takes the arm, so what it computes reaches the code after it through gradual
+      # consistency only: `v.to_s if v.is_a?(Symbol); take_str(v)` with `v: String` stays quiet.
+      def gradual_arm(result, arm_entry, entry)
+        return result unless arm_entry.guard_live? && !entry.guard_live?
+
+        type, post = result
+        [gradual_value(type), post.with_gradual_bindings(entry)]
+      end
+
+      def gradual_value(type)
+        return type if type.is_a?(Type::Bot) || type.is_a?(Type::Dynamic)
+
+        Type::Combinator.dynamic(type)
       end
 
       # What a `when` / `in` clause runs to decide whether it matches, without its body: the `when` conditions, or the
@@ -1441,11 +1474,9 @@ module Rigor
         # Issue #1359 — `$_` is not among the bindings the retry widening below carries, so a body that runs again
         # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
         # prefix of the body, and so reads it forgotten whenever the body may set it.
-        entry = edge ? LastLine.forget_if_set(scope, node) : scope
+        entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
         primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(
-          node.rescue_clause, LastLine.forget_if_set(entry, node.statements), edge: edge
-        )
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry_scope(node, entry), edge: edge)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -1471,6 +1502,12 @@ module Rigor
         end
 
         [exit_type, exit_scope]
+      end
+
+      # The scope a rescue clause of `node` enters with: it runs after any prefix of the body, so neither a `$_`
+      # (issue #1359) nor a guard's narrowing of a global or constant (issue #1429) the body may rebind holds there.
+      def rescue_entry_scope(node, entry)
+        forget_guard_if_rebinds(LastLine.forget_if_set(entry, node.statements), node.statements)
       end
 
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
@@ -1914,7 +1951,21 @@ module Rigor
       # Issue #1359 — the scope a loop's predicate first runs from: a body that may set `$_` runs again after it ran,
       # so neither the predicate nor any pass over the body reads a `$_` narrowing from before the loop. A `while
       # gets` predicate narrows it afresh.
-      def loop_entry_scope(node) = LastLine.forget_if_set(scope, node.statements)
+      #
+      # Issue #1429 — nor a guard's narrowing of a global or constant, when the body or the predicate, which run again
+      # after each iteration, may rebind it by a write or a call ({#forget_guard_if_rebinds}).
+      def loop_entry_scope(node)
+        forget_guard_if_rebinds(LastLine.forget_if_set(scope, node.statements), node.statements, node.predicate)
+      end
+
+      # Issue #1429 — `entry` with its guard narrowings restored when any of `nodes` may rebind a global or constant
+      # ({GuardRebinding.may_rebind?}): the loop and retry back edges and a rescue clause, which runs after any prefix
+      # of the body, reach the code again after such a node ran.
+      def forget_guard_if_rebinds(entry, *nodes)
+        return entry unless entry.guard_narrowed? && nodes.any? { |node| GuardRebinding.may_rebind?(node, entry) }
+
+        entry.forget_guard_narrowings
+      end
 
       # {#eval_loop}'s single body pass. It enters on the predicate's loop-entry edge, as every fixpoint pass does,
       # except a `begin … end while` body, which runs once before the predicate is tested, and a body a `redo`
@@ -2322,6 +2373,7 @@ module Rigor
         element_type = for_iteration_element_type(coll_type)
         # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
         body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
+        body_entry = forget_guard_for_body(node, post_coll, body_entry)
         body_entry = loop_content_entry(node.statements, post_coll, body_entry)
 
         if node.statements.nil?
@@ -2337,6 +2389,14 @@ module Rigor
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = join_break_scopes(continuation, breaks, pre_existing + body_first)
         [Type::Combinator.constant_of(nil), continuation]
+      end
+
+      # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.
+      def forget_guard_for_body(node, post_coll, body_entry)
+        return body_entry unless body_entry.guard_narrowed?
+        return body_entry.forget_guard_narrowings if GuardRebinding.implicit_call_may_rebind?(node, post_coll)
+
+        forget_guard_if_rebinds(body_entry, node.statements)
       end
 
       # `for x in coll` is semantically `coll.each { |x| ... }`. We ask the method dispatcher for `coll.each`'s expected

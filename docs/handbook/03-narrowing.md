@@ -82,8 +82,9 @@ be. Inside such a branch the variable reads `bot`, so no call on
 it is checked. That matters when the type is one Rigor inferred
 or read from a signature: `$stdout` is typed `IO`, and a test runs
 the same code with a `StringIO`, which is not an `IO` subclass, so
-the guarded call below is correct code and stays quiet. The same
-holds for `$stdout`, `STDOUT` and other globals and constants:
+the guarded call below is correct code and stays quiet. A guard
+on `$stdout`, `STDOUT` or another global or constant narrows the
+same way:
 
 ```ruby
 require "stringio"
@@ -148,13 +149,14 @@ disjoint from the subject's type, the clause is dead — Rigor emits
 [`flow.unreachable-clause`](08-understanding-errors.md) so you
 can delete it. (It ships at `:info` under the default profile.)
 
-That report needs the subject's type to be what the code
-literally shows: a literal (`1`, `"s"`, `:a`), an array or hash
-literal, a class object, or `nil` / `true` / `false`. When the
-subject's type is one Rigor inferred or read from a signature,
-the `when` is evidence that it can hold something else, as in
-the `is_a?` example above, so the clause is not reported. It is
-still read as `bot`, and the `case` value drops it:
+A disjoint `when <Class>` is reported only when the subject's
+type is what the code literally shows: a literal (`1`, `"s"`,
+`:a`), an array or hash literal, a class object, or `nil` /
+`true` / `false`. When the subject's type is one Rigor inferred
+or read from a signature, the `when` is evidence that it can hold
+something else, as in the `is_a?` example above, so the clause is
+not reported. It is still read as `bot`, and the `case` value
+drops it:
 
 ```ruby
 require "stringio"
@@ -166,14 +168,15 @@ count = 3
 assert_type(":number", (case count when String then :text else :number end))
 ```
 
-Neither `case` above is kept in the value, but only the second
-reports `flow.unreachable-clause`.
+Both values leave the `when` branch out, but only the second
+`case` reports `flow.unreachable-clause`.
 
 `case x; in pattern` (one-line pattern matching) narrows the
 same way for the patterns Rigor understands — class checks,
 literal equality, array / hash structural patterns. The
 clause-reachability check extends to bare-class `in` patterns
-(`in String` / `in MyClass => x`) too.
+(`in String` / `in MyClass => x`) too, under the same literal
+rule.
 
 ## `respond_to?`
 

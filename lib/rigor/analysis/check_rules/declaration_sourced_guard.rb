@@ -38,9 +38,12 @@ module Rigor
       # Issue #1362 adds a third carrier, a global still on its program-global seed, which joins the declared type
       # of a global Ruby's own signatures declare with the file's writes (ADR-117 Decision point 2: never warn that
       # a value might deviate from the idiom). Its declared members, `nil` among them, are the declaration-sourced
-      # part. A consumer that can compare against the file's writes does so ({.global_source},
+      # part. A consumer that can compare against the file's writes does so ({.global_sources},
       # {.withholds_nil?}), so a report the writes alone earn still fires.
       module DeclarationSourcedGuard
+        NO_GLOBALS = [].freeze
+        private_constant :NO_GLOBALS
+
         module_function
 
         # True when `node` is a direct read of a binding whose optionality is purely declaration-sourced. Any
@@ -55,21 +58,52 @@ module Rigor
           end
         end
 
-        # The global whose declared seed `node` still reads, or nil: a bare read of a marked global, or of a local
-        # copied from one (`sep = $/`, `Scope#declaration_sourced_global_copy`).
-        def global_source(node, scope)
+        # The globals whose declared seeds `node` still reads, empty for none: a read of a marked global, or of a
+        # local copied from one or more (`sep = $/`, `Scope#declaration_sourced_global_copies`), bare or in
+        # parentheses (`($stdout)`).
+        def global_sources(node, scope)
+          node = unparenthesised(node)
           case node
           when Prism::GlobalVariableReadNode
-            node.name if scope.declaration_sourced?(:global, node.name)
+            scope.declaration_sourced?(:global, node.name) ? [node.name] : NO_GLOBALS
           when Prism::LocalVariableReadNode
-            scope.declaration_sourced_global_copy(node.name)
+            scope.declaration_sourced_global_copies(node.name)
+          else NO_GLOBALS
           end
         end
 
-        # The union of the file's own writes to the global `node` reads its seed from ({.global_source}), or nil.
+        # The globals a local written from `value` copies the declared seeds of, empty for none: a read of a marked
+        # global, bare or in parentheses (`sep = ($/)`), or a bare read of a local that copies some (`s = sep`).
+        # Unlike an ivar copy's, this mark follows bare local-to-local copies; a method result (`$/.dup`) or a
+        # container element (`[$/].each { |s| … }`) carries none, as ADR-58's one-hop boundary has it.
+        def copied_globals(value, scope)
+          return scope.declaration_sourced_global_copies(value.name) if value.is_a?(Prism::LocalVariableReadNode)
+
+          read = unparenthesised(value)
+          return NO_GLOBALS unless read.is_a?(Prism::GlobalVariableReadNode) &&
+                                   scope.declaration_sourced?(:global, read.name)
+
+          [read.name]
+        end
+
+        # `node` with its enclosing parentheses taken off while they hold a single expression.
+        def unparenthesised(node)
+          while node.is_a?(Prism::ParenthesesNode)
+            body = node.body
+            break unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
+
+            node = body.body.first
+          end
+          node
+        end
+
+        # The union of the file's own writes to the globals `node` reads the seeds of ({.global_sources}), or nil.
         def written_type(node, scope)
-          source = global_source(node, scope)
-          source && scope.program_globals[source]
+          sources = global_sources(node, scope)
+          return nil if sources.empty?
+
+          written = sources.map { |source| scope.program_globals[source] }
+          written.include?(nil) ? nil : Type::Combinator.union(*written)
         end
 
         # True when a `nil` in `node`'s type is not diagnostic fuel: for a global's seed or its copy, when the file
@@ -99,7 +133,7 @@ module Rigor
               (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
           end
         end
-        private_class_method :nil_bearing?
+        private_class_method :nil_bearing?, :unparenthesised
       end
     end
   end

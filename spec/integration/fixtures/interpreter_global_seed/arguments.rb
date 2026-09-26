@@ -40,6 +40,15 @@ def take_copy
   Cap.take(out) # QUIET-1362
 end
 
+# A copy of a copy, and a parenthesised read, count as the bare read (Ruby: "").
+def take_copy_of_copy
+  out = $stdout
+  io = out
+  Cap.take(io) # QUIET-1362
+end
+
+def take_parenthesised = Cap.take(($stdout)) # QUIET-1362
+
 # Ruby: "/dev/null".
 def file_direct = Cap.file($stderr) # QUIET-1362
 

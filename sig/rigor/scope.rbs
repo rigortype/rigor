@@ -199,10 +199,11 @@ module Rigor
     def declaration_sourced: () -> Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]]
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
     def seed_declaration_sourced_global: (String | Symbol name, Type::t type) -> Scope
-    def with_global_copy_mark: (String | Symbol name, String | Symbol global) -> Scope
-    # sig-gen gap: #1154 — the record comes out of `@declaration_sourced`, an ivar assigned in `initialize` from a
+    def with_global_copy_marks: (String | Symbol name, Array[String | Symbol] globals) -> Scope
+    def without_local_declaration_marks: (String | Symbol name) -> Scope
+    # sig-gen gap: #1154 — the records come out of `@declaration_sourced`, an ivar assigned in `initialize` from a
     # parameter, which reaches `untyped`.
-    def declaration_sourced_global_copy: (String | Symbol name) -> Symbol?
+    def declaration_sourced_global_copies: (String | Symbol name) -> Array[Symbol]
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope
     # `rigor sig-gen --params=observed` output; the siblings' hand-written `String | Symbol` / `Type::t`

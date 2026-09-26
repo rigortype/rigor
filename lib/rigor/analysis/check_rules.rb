@@ -3155,7 +3155,7 @@ module Rigor
           # fuel: the argument fires only when the file's writes alone are rejected, as they were before the join.
           # This subsumes the nil-only gate below for such an argument, which would also withhold a `nil` the file
           # writes itself.
-          unless DeclarationSourcedGuard.global_source(arg, scope).nil?
+          unless DeclarationSourcedGuard.global_sources(arg, scope).empty?
             return !DeclarationSourcedGuard.written_accepted?(arg, scope, param_type)
           end
 

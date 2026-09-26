@@ -579,16 +579,19 @@ module Rigor
       end
 
       # The scope binding the written local with ADR-58's `:local` mark when the write copies a declaration-sourced
-      # value, or nil. Issue #1362 — a bare read of a global still on its declared seed (`sep = $/`) counts as an ivar
-      # read does, and the local also records the global it copies, which the consumers compare against the file's
-      # own writes to it.
+      # value, or nil. Issue #1362 — a read of a global still on its declared seed counts as an ivar read does, bare
+      # or parenthesised (`sep = $/`, `sep = ($/)`), and so does a bare read of a local that copies one (`s = sep`);
+      # the local also records the global it copies, which the consumers compare against the file's own writes to it
+      # ({Analysis::CheckRules::DeclarationSourcedGuard.copied_globals}).
       def declaration_sourced_copy(node, rhs_type, post_rhs)
         value = node.value
-        if declaration_sourced_ivar_read?(value, post_rhs)
-          post_rhs.with_declaration_sourced_local(node.name, rhs_type)
-        elsif declaration_sourced_global_read?(value, post_rhs)
-          post_rhs.with_declaration_sourced_local(node.name, rhs_type).with_global_copy_mark(node.name, value.name)
-        end
+        return post_rhs.with_declaration_sourced_local(node.name, rhs_type) if
+          declaration_sourced_ivar_read?(value, post_rhs)
+
+        globals = Analysis::CheckRules::DeclarationSourcedGuard.copied_globals(value, post_rhs)
+        return nil if globals.empty?
+
+        post_rhs.with_declaration_sourced_local(node.name, rhs_type).with_global_copy_marks(node.name, globals)
       end
 
       # True when `value_node` is a bare instance-variable read whose binding in `scope_at_read` is currently marked
@@ -597,14 +600,6 @@ module Rigor
         return false unless value_node.is_a?(Prism::InstanceVariableReadNode)
 
         scope_at_read.declaration_sourced?(:ivar, value_node.name)
-      end
-
-      # True when `value_node` is a bare global-variable read whose binding in `scope_at_read` is still the declared
-      # seed (issue #1362).
-      def declaration_sourced_global_read?(value_node, scope_at_read)
-        return false unless value_node.is_a?(Prism::GlobalVariableReadNode)
-
-        scope_at_read.declaration_sourced?(:global, value_node.name)
       end
 
       # Slice 7 phase 1 — instance/class/global variable writes. Each handler evaluates the rvalue under the entry scope
@@ -1712,7 +1707,10 @@ module Rigor
           next if post.nil? || retry_rebind_settled?(widening, name, widening.entry.public_send(getter, name), post)
 
           current = scope_acc.public_send(getter, name)
-          next if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
+          if current ? retry_binding_accepted?(current, post) : widening.edge.body_writes.include?(name)
+            scope_acc = forget_diverged_copy(scope_acc, post_scope, kind, name)
+            next
+          end
 
           scope_acc = rebind_retried(scope_acc, post_scope, kind, name,
                                      retry_widened_type(current, post, kind, widening.envelope))
@@ -1722,13 +1720,33 @@ module Rigor
 
       # The rebind joins the binding a retry re-enters with into the accumulated one, so ADR-58's local mark stays only
       # when both scopes carry it, as `Scope#join` keeps it (issue #1287): `up(r)` in the body floors `r` in place and
-      # keeps the mark, while `r = other` in the rescue arm is a write and drops it.
+      # keeps the mark, while `r = other` in the rescue arm is a write and drops it. Issue #1362 — as in `Scope#join`, a
+      # copy of global seeds keeps its mark with the union of both scopes' globals, and only when both copy some.
       def rebind_retried(scope_acc, post_scope, kind, name, type)
         rebound = rebind_variable(scope_acc, kind, name, type)
         return rebound unless kind == :local && scope_acc.declaration_sourced?(:local, name) &&
                               post_scope.declaration_sourced?(:local, name)
 
-        rebound.with_local_declaration_mark(name)
+        copies = scope_acc.declaration_sourced_global_copies(name)
+        post_copies = post_scope.declaration_sourced_global_copies(name)
+        return rebound unless copies.empty? == post_copies.empty?
+
+        rebound.with_local_declaration_mark(name).with_global_copy_marks(name, copies | post_copies)
+      end
+
+      # Issue #1362 — a re-entered binding the accumulated one already accepts is not rebound, so ADR-58's mark would
+      # stand on a local that copies a global's seed while the retried pass holds something else. As at a join, a copy
+      # of other global seeds adds their globals to the record, and any other value makes the local flow-live.
+      def forget_diverged_copy(scope_acc, post_scope, kind, name)
+        return scope_acc unless kind == :local
+
+        copies = scope_acc.declaration_sourced_global_copies(name)
+        return scope_acc if copies.empty?
+
+        post_copies = post_scope.declaration_sourced_global_copies(name)
+        return scope_acc.without_local_declaration_marks(name) if post_copies.empty?
+
+        scope_acc.with_global_copy_marks(name, post_copies)
       end
 
       # Whether `post` needs no weighing: this widening has weighed it for `name` already, or it is the entry's binding.

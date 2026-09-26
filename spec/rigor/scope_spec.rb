@@ -198,23 +198,34 @@ RSpec.describe Rigor::Scope do
       expect(seeded.with_global(:$/, type).declaration_sourced?(:global, :$/)).to be(false)
     end
 
-    it "records which global a marked local copies, and drops the record with the local's mark" do
+    it "records which globals a marked local copies, and drops the record with the local's mark" do
       copied = scope.seed_declaration_sourced_global(:$/, type).with_declaration_sourced_local(:sep, type)
-                    .with_global_copy_mark(:sep, :$/)
+                    .with_global_copy_marks(:sep, [:$/])
       expect(copied.declaration_sourced?(:local, :sep)).to be(true)
-      expect(copied.declaration_sourced_global_copy(:sep)).to eq(:$/)
-      expect(copied.with_mutated_local(:sep, type).declaration_sourced_global_copy(:sep)).to eq(:$/)
+      expect(copied.declaration_sourced_global_copies(:sep)).to eq([:$/])
+      expect(copied.with_mutated_local(:sep, type).declaration_sourced_global_copies(:sep)).to eq([:$/])
 
       rebound = copied.with_local(:sep, type)
-      expect(rebound.declaration_sourced_global_copy(:sep)).to be_nil
-      expect(rebound.with_declaration_sourced_local(:sep, type).declaration_sourced_global_copy(:sep)).to be_nil
+      expect(rebound.declaration_sourced_global_copies(:sep)).to eq([])
+      expect(rebound.with_declaration_sourced_local(:sep, type).declaration_sourced_global_copies(:sep)).to eq([])
+      expect(copied.without_local_declaration_marks(:sep).declaration_sourced?(:local, :sep)).to be(false)
+      expect(copied.without_local_declaration_marks(:sep).local(:sep)).to eq(type)
     end
 
-    it "keeps a copy's record through a join only when both branches copy the same global" do
-      copy = ->(global) { scope.with_declaration_sourced_local(:sep, type).with_global_copy_mark(:sep, global) }
-      expect(copy.call(:$/).join(copy.call(:$/)).declaration_sourced_global_copy(:sep)).to eq(:$/)
-      expect(copy.call(:$/).join(copy.call(:$,)).declaration_sourced_global_copy(:sep)).to be_nil
-      expect(copy.call(:$/).join(copy.call(:$,)).declaration_sourced?(:local, :sep)).to be(true)
+    # A join of two copies keeps the mark with both branches' globals, so the consumers compare against the writes to
+    # each; a copy of a global joined with an ivar copy, or with an unmarked binding, is flow-live.
+    it "joins copy records by union, and drops the mark where only one branch copies a global" do
+      copy = ->(global) { scope.with_declaration_sourced_local(:sep, type).with_global_copy_marks(:sep, [global]) }
+      expect(copy.call(:$/).join(copy.call(:$/)).declaration_sourced_global_copies(:sep)).to eq([:$/])
+
+      mixed = copy.call(:$/).join(copy.call(:$,))
+      expect(mixed.declaration_sourced?(:local, :sep)).to be(true)
+      expect(mixed.declaration_sourced_global_copies(:sep)).to contain_exactly(:$/, :$,)
+
+      ivar_copy = scope.with_declaration_sourced_local(:sep, type)
+      expect(copy.call(:$/).join(ivar_copy).declaration_sourced?(:local, :sep)).to be(false)
+      expect(ivar_copy.join(copy.call(:$/)).declaration_sourced_global_copies(:sep)).to eq([])
+      expect(copy.call(:$/).join(scope.with_local(:sep, type)).declaration_sourced?(:local, :sep)).to be(false)
     end
   end
 

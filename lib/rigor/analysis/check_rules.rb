@@ -2416,7 +2416,9 @@ module Rigor
 
         def readonly_global_write_diagnostic(path, node, scope_index)
           return nil unless SpecialGlobalSetters.read_only?(node.name)
-          return nil if global_aliased?(scope_index[node], node.name)
+
+          scope = scope_index[node]
+          return nil if scope.nil? || global_aliased?(scope, node.name)
 
           location = node.respond_to?(:name_loc) ? node.name_loc : node.location
           Diagnostic.from_location(
@@ -2436,18 +2438,23 @@ module Rigor
           return nil if class_name.nil?
 
           scope = scope_index[node]
+          return nil if scope.nil?
           return nil unless literal_rejected?(class_name, contract, node, scope, lexical_sites)
           return nil if global_aliased?(scope, node.name)
 
           build_global_write_type_diagnostic(path, node, contract, class_name)
         end
 
-        # Whether any project file aliases `name`, which then names another variable, setter included. The answer is
-        # a function of every file's aliases, so the consumer depends on the name whichever way it answers
-        # (`IncrementalSession#global_alias_affected`).
+        # The project's {Inference::GlobalWriteCensus} with the `pre_eval:` files' own.
+        def global_write_census(scope)
+          census = scope.discovered_global_write_census
+          pre_eval = scope.environment&.project_patched_methods&.write_census
+          pre_eval.nil? || pre_eval.empty? ? census : census | pre_eval
+        end
+
+        # Whether any project or `pre_eval:` file aliases `name`, on either side, which can make it another variable.
         def global_aliased?(scope, name)
-          DependencyRecorder.read_name(:"global-alias", name) if DependencyRecorder.active?
-          scope.discovered_global_aliases.include?(name)
+          Inference::GlobalWriteCensus.aliased?(global_write_census(scope), name)
         end
 
         # A literal is rejected when its class is none the setter takes and, for a setter that also converts
@@ -2468,11 +2475,15 @@ module Rigor
         DEFAULT_HATCH_OWNERS = %w[::BasicObject ::Kernel ::Object].freeze
         private_constant :DEFAULT_HATCH_OWNERS
 
-        # Whether the literal's object may answer `method_name` after all: RBS gives its class the method or a hatch
-        # of its own (a project `sig/` reopening or `include` included), project source reaches one of its
-        # ancestors with either ({#project_reaches_literal?}), or — for `write` only — a refinement of an ancestor
-        # that defines `write` is active at the write. `respond_to?(:write)` honours an active refinement on Ruby
-        # 4.0.5; the `to_str` / `to_int` conversions, and a refined hatch, do not.
+        # Whether the literal's object may answer `method_name` after all:
+        #
+        # - RBS gives its class the method, or a hatch of its own (a project `sig/` reopening or `include` counts);
+        # - the program defines the method or a hatch anywhere, in any spelling, on any receiver
+        #   ({Inference::GlobalWriteCensus}): no census of where a definition lands can be complete
+        #   (`class << nil`, `K = Integer; class K`, `[Integer].each { |k| k.define_method(:write) }`);
+        # - an ancestor's surface is rewritten from outside (`Integer.include(M)`, `Object.include(M)`, a string
+        #   `class_eval`: the `ENVELOPE_DYNAMIC_MARK`), or it or `Object` mixes in a module RBS does not rule out;
+        # - for `write` only, a refinement that may add it is in effect at the write ({#refined_writer_in_effect?}).
         def literal_may_answer?(class_name, method_name, node, scope, lexical_sites)
           definition = Rigor::Reflection.instance_definition(class_name, scope: scope)
           return true if definition.nil?
@@ -2480,8 +2491,9 @@ module Rigor
 
           ancestors = definition.ancestors.ancestors.to_set { |ancestor| ancestor.name.to_s.delete_prefix("::") }
           names = [method_name, *GLOBAL_WRITE_HATCHES]
-          project_reaches_literal?(ancestors, names, scope) ||
-            (method_name == :write && refined_writer_active?(ancestors, node, scope, lexical_sites))
+          census = global_write_census(scope)
+          program_may_answer?(ancestors, names, census, scope) ||
+            (method_name == :write && refined_writer_in_effect?(ancestors, census, node, scope, lexical_sites))
         end
 
         def overridden_hatch?(definition)
@@ -2491,54 +2503,22 @@ module Rigor
           end
         end
 
-        # Whether project source can give an instance of the literal's class one of `names`, in any file:
-        #
-        # - a top-level `def` (a private `Object` method, which a conversion still calls), or a `pre_eval:` patch;
-        # - a definition on one of its `ancestors` — `def`, `define_method`, `alias`, `alias_method`, `attr_*`, a
-        #   `class_eval` block — or an ancestor whose method table the project rewrites in a way no literal name
-        #   spells (`Integer.include(M)`, `Integer.define_method(:write)`, `Object.include(M)`, a computed
-        #   `define_method`: the `ENVELOPE_DYNAMIC_MARK`);
-        # - such a definition on any project module, since a module reaches an ancestor through `include` /
-        #   `prepend` in any spelling, a top-level `include` among them;
-        # - a module an ancestor mixes in through a class body, followed through project modules
-        #   ({#mixin_may_answer?}).
-        def project_reaches_literal?(ancestors, names, scope)
-          return true if names.any? { |name| scope.top_level_def_for(name) }
-          return true if pre_eval_patches_any?(names, scope)
+        def program_may_answer?(ancestors, names, census, scope)
+          return true if Inference::GlobalWriteCensus.defines_any_of?(census, names)
 
-          record_literal_ancestor_reads(ancestors, names)
-          module_mark = Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK
-          scope.discovered_parameter_envelopes.any? do |owner, bucket|
-            if ancestors.include?(owner)
-              literal_surface_rewritten?(bucket, names)
-            elsif bucket.key?(module_mark)
-              names.any? { |name| bucket.key?([:instance, name]) }
-            end
-          end || mixin_may_answer?(ancestors, names, scope)
-        end
+          dynamic_mark = Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK
+          return true if ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(dynamic_mark) }
 
-        def literal_surface_rewritten?(bucket, names)
-          bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK) || names.any? { |name| bucket.key?([:instance, name]) }
-        end
-
-        def pre_eval_patches_any?(names, scope)
-          patched = scope.environment&.project_patched_methods
-          !patched.nil? && patched.by_key.any? { |(_class_name, name, _kind), _entry| names.include?(name) }
-        end
-
-        # ADR-46 — the answer depends on a definition of one of `names` on an ancestor appearing in some file, which
-        # the appeared-symbol diff maps to these keys.
-        def record_literal_ancestor_reads(ancestors, names)
-          return unless DependencyRecorder.active?
-
-          ancestors.each do |owner|
-            names.each { |name| DependencyRecorder.read_missing(:method, "#{owner}##{name}") }
-          end
+          main_mixins = Inference::GlobalWriteCensus.main_mixins(census)
+          main_mixins.any? { |mixin| rbs_mixin_may_answer?(mixin, names, scope) } ||
+            mixin_may_answer?(ancestors, names, scope)
         end
 
         # A module an ancestor of the literal's class mixes in through a class body (`class Integer; include
         # Writable; end`), followed through the modules it mixes in in turn. A project module answers when its
-        # surface is rewritten or holds one of `names`; any other module when RBS does not know it or declares one.
+        # surface is rewritten beyond literal names (a `send(:include, …)`, a non-constant mixin); its literal
+        # definitions are the census's. Any other module answers when RBS does not know it or declares one of
+        # `names`.
         def mixin_may_answer?(ancestors, names, scope)
           queue = ancestors.flat_map { |owner| scope.includes_of(owner) }
           seen = Set.new
@@ -2548,7 +2528,7 @@ module Rigor
 
             bucket = scope.parameter_envelopes_of(mixin)
             if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
-              return true if literal_surface_rewritten?(bucket, names)
+              return true if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
 
               queue.concat(scope.includes_of(mixin))
             elsif rbs_mixin_may_answer?(mixin, names, scope)
@@ -2563,17 +2543,18 @@ module Rigor
           definition.nil? || definition.methods.key?(names.first) || overridden_hatch?(definition)
         end
 
-        # For `write` only: a refinement of one of `ancestors` that defines `write`, in effect at the write
-        # (`LexicalMethodSites#refinement_active?`). The answer is a function of every refinement of the name in the
-        # project, so the consumer depends on it whichever way it answers.
-        def refined_writer_active?(ancestors, node, scope, lexical_sites)
-          DependencyRecorder.read_name(:refinement, :write) if DependencyRecorder.active?
-          modules = scope.discovered_refinements.flat_map do |refined, methods|
-            ancestors.include?(refined) ? methods.fetch(:write, []) : []
-          end
-          return false if modules.empty?
+        # For `write` only: some refinement may add `write` (a `def`, `define_method` or `alias_method` in a `refine`
+        # block, or an `import_methods`), the literal's class or an ancestor is refined, and a `using` is in effect at
+        # the write. `respond_to?(:write)` honours an active refinement on Ruby 4.0.5; a refined
+        # `respond_to_missing?` or `respond_to?`, and every implicit conversion, do not, so a refinement that adds
+        # only those leaves the write reported.
+        def refined_writer_in_effect?(ancestors, census, node, scope, lexical_sites)
+          return false unless Inference::GlobalWriteCensus.refines_write?(census)
 
-          lexical_sites.nil? || lexical_sites.refinement_active?(node, modules)
+          refined_mark = Scope::DiscoveryIndex::ENVELOPE_REFINED_MARK
+          return false unless ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(refined_mark) }
+
+          lexical_sites.nil? || lexical_sites.using_in_effect?(node)
         end
 
         def build_global_write_type_diagnostic(path, node, contract, class_name)

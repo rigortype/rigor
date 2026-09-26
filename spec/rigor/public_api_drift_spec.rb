@@ -50,7 +50,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     discovered_def_sources()
     discovered_deferred_ranges()
     discovered_extends()
-    discovered_global_aliases()
+    discovered_global_write_census()
     discovered_includes()
     discovered_method?(req:class_name,req:method_name,req:kind)
     discovered_method_through_ancestors?(req:class_name,req:method_name,req:kind,key:name_memo)

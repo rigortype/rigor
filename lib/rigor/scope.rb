@@ -59,9 +59,8 @@ module Rigor
     # Issue #1120 — `{refined class name => {method name => [refining module names]}}`: what each
     # `refine X do … end` block defines, visible only where a `using` of its module is in effect.
     def discovered_refinements = @discovery.discovered_refinements
-    # Issue #1367 — `Set[Symbol]`: every global variable name an `alias $new $old` names, on either side, in any
-    # project file.
-    def discovered_global_aliases = @discovery.discovered_global_aliases
+    # Issue #1367 — the project's `Inference::GlobalWriteCensus`, a `Set` of frozen entries.
+    def discovered_global_write_census = @discovery.discovered_global_write_census
     def discovered_includes = @discovery.discovered_includes
     # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`, in
     # instance-ancestor search order (nearest prepend first). Feeds {#prepends_of}, the one table that tells

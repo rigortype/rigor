@@ -1297,7 +1297,10 @@ RSpec.describe "Rigor type construction (integration)" do
 
   describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
     # The number of `# QUIET-1367` lines each entry carries.
-    quiet_counts = { "setter_rejections.rb" => 22, "special_aliases.rb" => 2, "refined_literals.rb" => 2 }.freeze
+    quiet_counts = {
+      "setter_rejections.rb" => 19, "non_literal_writers.rb" => 3, "special_aliases.rb" => 2,
+      "refined_literals.rb" => 2, "refined_definitions.rb" => 2, "refined_hatches.rb" => 0
+    }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
 
@@ -1327,6 +1330,17 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reported.map { |d| [File.basename(d.path.to_s), d.line, d.rule.to_s] }.sort)
         .to eq(fired_lines(files.fetch("writes.rb")).map { |line, rule| ["writes.rb", line, rule] })
       expect(files.fetch("writes.rb").lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
+    end
+
+    # A `pre_eval:` patch outside the analysed `paths:` is loaded ahead of the code, so its aliases exempt too.
+    it "exempts a special that a `pre_eval:` file aliases" do
+      files = { "patches/aliases.rb" => fixture_source("pre_eval/patches/aliases.rb"),
+                "lib/writes.rb" => fixture_source("pre_eval/lib/writes.rb") }
+      config = { "paths" => ["lib"], "pre_eval" => ["patches/aliases.rb"] }
+      reported = analyze(files: files, config: config).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+      expect(reported.map { |d| [File.basename(d.path.to_s), d.line, d.rule.to_s] }.sort)
+        .to eq(fired_lines(files.fetch("lib/writes.rb")).map { |line, rule| ["writes.rb", line, rule] })
+      expect(files.fetch("lib/writes.rb").lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
     end
   end
 

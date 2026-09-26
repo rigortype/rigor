@@ -29,7 +29,7 @@ module Rigor
       :discovered_superclasses,
       :discovered_deferred_ranges,
       :discovered_refinements,
-      :discovered_global_aliases,
+      :discovered_global_write_census,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_prepends,
@@ -175,12 +175,12 @@ module Rigor
         # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
         # round-trips it unchanged.
         discovered_refinements: EMPTY_TABLE,
-        # Issue #1367 — every global variable name an `alias $new $old` statement names, on either side, anywhere in
-        # the project (inside method bodies too). `alias $stdout $out` makes `$stdout` name `$out`'s variable,
-        # setter included, so the `global.*` write rules read a special that any file aliases as exempt. The
-        # project pre-pass seeds the whole project's names and `Inference::ScopeIndexer.index` adds the analysed
-        # file's own. Plain data, so the ADR-85 seed bundle round-trips it unchanged.
-        discovered_global_aliases: EMPTY_NAME_SET,
+        # Issue #1367 — the project's `Inference::GlobalWriteCensus`: the globals any `alias` names, the
+        # `write` / `to_str` / `to_int` / hatch names any file defines (inside a refinement or not), and the
+        # modules a top-level mixin names, over every file and inside method bodies too. The `global.*` write rules
+        # read it. The project pre-pass seeds the whole project's census and `Inference::ScopeIndexer.index` adds the
+        # analysed file's own. Plain data, so the ADR-85 seed bundle round-trips it unchanged.
+        discovered_global_write_census: EMPTY_NAME_SET,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified

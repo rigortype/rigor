@@ -101,7 +101,7 @@ module Rigor
           def_nodes def_nestings singleton_def_nodes def_sources singleton_def_sources superclasses includes
           prepends
           method_visibilities methods parameter_envelopes data_member_layouts struct_member_layouts
-          deferred_ranges refinements global_aliases
+          deferred_ranges refinements global_write_census
         ].each do |slot|
           tables[seed_key(slot)] = def_index.fetch(slot)
         end

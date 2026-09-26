@@ -13,6 +13,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
+require_relative "global_write_census"
 require_relative "last_line"
 require_relative "last_status"
 require_relative "error_info"
@@ -2099,8 +2100,8 @@ module Rigor
       # nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
         program_globals, census = build_program_global_index(root, seeded_scope)
-        census[:discovered_global_aliases] =
-          union_global_aliases(seeded_scope.discovered_global_aliases, census.delete(:global_aliases))
+        census[:discovered_global_write_census] =
+          union_write_census(seeded_scope.discovered_global_write_census, census.delete(:write_census).census)
         seeds = join_declared_globals(program_globals, seeded_scope.environment)
         seeded_scope = seeded_scope.with_discovery(
           seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
@@ -2131,11 +2132,12 @@ module Rigor
       # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
       # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
       # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
+      # Issue #1367 — and the file's {GlobalWriteCensus}, which the `global.*` write rules read.
       # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
         census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false,
-                   global_aliases: Set.new }
+                   write_census: GlobalWriteCensus::Collector.new }
         gather_global_writes(root, default_scope, accumulator, census)
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         [accumulator.freeze, census]
@@ -2178,7 +2180,8 @@ module Rigor
       UNJOINED_SEPARATORS = %i[$/ $, $; $\\ $-0 $-F $-i].freeze
       private_constant :UNJOINED_SEPARATORS
 
-      def gather_global_writes(node, scope, accumulator, census)
+      # `top_level` is false inside a `class` / `module` body, for the census's top-level mixins.
+      def gather_global_writes(node, scope, accumulator, census, top_level: true)
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::GlobalVariableWriteNode) && !UNSEEDED_GLOBALS.include?(node.name)
@@ -2188,37 +2191,16 @@ module Rigor
         census[:patched_line_readers].merge(readers) if readers
         census[:clears_last_status] ||= LastStatus.clears?(node)
         census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
-        record_global_alias(node, census[:global_aliases]) if node.is_a?(Prism::AliasGlobalVariableNode)
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census) }
+        census[:write_census].visit(node, top_level: top_level)
+        inner = top_level && !(node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode))
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census, top_level: inner) }
       end
 
-      # Issue #1367 — the global variable names an `alias $new $old` names, both sides: after it, `$new` is `$old`'s
-      # variable, setter included. A back-reference or numbered-reference side (`alias $m $&`) names no global the
-      # `global.*` rules check, so it is left out.
-      def record_global_alias(node, names)
-        [node.new_name, node.old_name].each do |side|
-          names << side.name if side.is_a?(Prism::GlobalVariableReadNode)
-        end
-      end
+      # The project's census with the analysed file's own, answering `seed` itself when the file adds nothing to it.
+      def union_write_census(seed, file_census)
+        return seed if file_census.empty? || file_census.subset?(seed)
 
-      # Issue #1367 — every global name the `alias` statements anywhere under `root` name ({#record_global_alias}), for
-      # the project pre-pass, which walks each file once for it.
-      def global_alias_names(root)
-        names = Set.new
-        collect_global_aliases(root, names)
-        names.freeze
-      end
-
-      def collect_global_aliases(node, names)
-        record_global_alias(node, names) if node.is_a?(Prism::AliasGlobalVariableNode)
-        node.rigor_each_child { |child| collect_global_aliases(child, names) }
-      end
-
-      # The project's aliased globals with the analysed file's own, answering `seed` itself when the file adds none.
-      def union_global_aliases(seed, file_names)
-        return seed if file_names.empty? || file_names.subset?(seed)
-
-        (seed | file_names).freeze
+        (seed | file_census).freeze
       end
 
       def record_global_write(node, scope, accumulator)
@@ -6878,14 +6860,12 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # Issue #1367 — and each file's aliased global names, diffed against its seed bundle the same way.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, global_aliases: }`.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
-        global_aliases = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -6895,12 +6875,11 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
-          global_aliases[path] = file_index[:global_aliases].to_a unless file_index[:global_aliases].empty?
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements, global_aliases: global_aliases }
+          declaration_signatures: declaration_signatures, refinements: refinements }
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level
@@ -7201,13 +7180,10 @@ module Rigor
         acc[:deferred_ranges].merge!(file_index[:deferred_ranges] || {})
         fold_refinements(acc, file_index[:refinements])
         # Issue #1367 — a union, so the fold is order-independent; a pre-29 bundle carries no key.
-        acc[:global_aliases].merge(file_index[:global_aliases] || EMPTY_GLOBAL_ALIASES)
+        acc[:global_write_census].merge(file_index[:global_write_census] || GlobalWriteCensus::EMPTY)
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
       end
-
-      EMPTY_GLOBAL_ALIASES = Set.new.freeze
-      private_constant :EMPTY_GLOBAL_ALIASES
 
       # Issue #1120 — a union, so the fold is order-independent and a bundle-served file folds exactly as its live
       # walk would. The slot stays nil until some file refines something (see {#finalize_def_index}).
@@ -7363,8 +7339,8 @@ module Rigor
           # Issue #1120 — plain `{String => {Symbol => Array[String]}}` data (nil when the file refines
           # nothing), so the bundle stays Marshal-clean.
           refinements: file_index[:refinements],
-          # Issue #1367 — the file's aliased global names, a Set of Symbols, which Marshal round-trips.
-          global_aliases: file_index[:global_aliases]
+          # Issue #1367 — the file's {GlobalWriteCensus}, a Set of frozen Arrays, which Marshal round-trips.
+          global_write_census: file_index[:global_write_census]
         }
       end
 
@@ -7403,7 +7379,7 @@ module Rigor
           # Issue #1120 — absent from a pre-28 bundle, which the SCHEMA bump rebuilds cold.
           refinements: bundle[:refinements],
           # Issue #1367 — absent from a pre-29 bundle, which the SCHEMA bump rebuilds cold.
-          global_aliases: bundle[:global_aliases] || EMPTY_GLOBAL_ALIASES
+          global_write_census: bundle[:global_write_census] || GlobalWriteCensus::EMPTY
         }
       end
 
@@ -7442,8 +7418,8 @@ module Rigor
           compact_headers: {},
           constant_writes: {},
           data_member_layouts: {}, struct_member_layouts: {},
-          # Issue #1367 — every global name an `alias` statement names, project-wide.
-          global_aliases: Set.new }
+          # Issue #1367 — the project's {GlobalWriteCensus}.
+          global_write_census: Set.new }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
@@ -7476,7 +7452,7 @@ module Rigor
       def finalize_call_surface_tables(acc)
         acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
         acc[:refinements] = freeze_refinements(acc[:refinements])
-        acc[:global_aliases] = acc[:global_aliases].freeze
+        acc[:global_write_census] = acc[:global_write_census].freeze
       end
 
       # Removes, per class, the method names that have a project `def` node, leaving only
@@ -7508,7 +7484,6 @@ module Rigor
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
         fold_refinements(acc, file_refinements)
-        acc[:global_aliases].merge(global_alias_names(root))
         # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
         acc[:def_nestings].merge!(build_def_nestings(root))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
@@ -7544,11 +7519,14 @@ module Rigor
 
       # Issue #644 — folds one file's publication census into the cross-file accumulator, keyed by
       # (name, path) (kept out of {#accumulate_project_index} to hold its ABC budget). The conflict rule that
-      # makes the fold order irrelevant runs at {#finalize_constant_writes}.
+      # makes the fold order irrelevant runs at {#finalize_constant_writes}. Issue #1367 — the same walk carries the
+      # file's {GlobalWriteCensus}, so the project pre-pass needs no descent of its own for it.
       def merge_constant_literal_tables(acc, root, path)
-        constant_writes_for_file(root).each do |name, descriptor|
+        census = constant_write_census(root)
+        census.writes.each do |name, descriptor|
           (acc[:constant_writes][name] ||= {})[path] = descriptor
         end
+        acc[:global_write_census].merge(census.write_census.census)
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
@@ -7640,12 +7618,14 @@ module Rigor
       # unpublishable rvalue shape whose provenance is still knowable ([#667](https://github.com/rigortype/rigor/issues/667)):
       # a plain `MODE2 = AppConfig::MODE`. The census cannot publish a VALUE for it — resolving the source
       # is the typed walk's job, not this syntactic one — but it can record that the name is a rename of
-      # another, which is all the withholding guard needs.
-      CensusTables = Data.define(:writes, :seen, :declared, :aliases)
+      # another, which is all the withholding guard needs. `write_census` is issue #1367's {GlobalWriteCensus}, fed the
+      # same nodes; a node outside every named `class` / `module` body counts as top-level.
+      CensusTables = Data.define(:writes, :seen, :declared, :aliases, :write_census)
       private_constant :CensusTables
 
       def constant_write_census(root)
-        tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new, aliases: {})
+        tables = CensusTables.new(writes: {}, seen: Set.new, declared: Set.new, aliases: {},
+                                  write_census: GlobalWriteCensus::Collector.new)
         walk_constant_write_census(root, [], tables)
         tables
       end
@@ -7669,6 +7649,7 @@ module Rigor
                                          singleton_cref)
         else
           census_constant_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?)
         end
 
         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner,

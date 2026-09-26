@@ -44,6 +44,18 @@ module Rigor
           end
         end
 
+        # Issue #1367 — is any refinement in effect at `node`: a `using` of any module, a `using` of a non-constant, or
+        # the inside of a `refine` block? The `global.*` stream check asks it where it cannot name the refining
+        # module (a `define_method` or `alias_method` inside `refine` records none).
+        def using_in_effect?(node)
+          build
+          return true if @unresolved_using
+
+          offset = node.location.start_offset
+          @refine_blocks.any? { |start, stop| offset >= start && offset < stop } ||
+            @usings.any? { |start, stop, _candidates| offset >= start && offset < stop }
+        end
+
         # Is `def_node` one of the defs a `refine X do … end` body defines on X? Such a def redefines X's method by
         # design, so X's declared signature for the name is not its contract (issue #1120, maintainer ruling a′).
         def refinement_def?(def_node)

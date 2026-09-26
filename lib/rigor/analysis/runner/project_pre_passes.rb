@@ -58,7 +58,7 @@ module Rigor
           :discovered_superclasses, :discovered_header_nestings, :discovered_includes, :discovered_prepends,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
           :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
-          :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :discovered_global_aliases
+          :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :discovered_global_write_census
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -186,7 +186,7 @@ module Rigor
             # `*_def_shadows_call?` predicates order `sig`-shadowing defs against.
             discovered_deferred_ranges: def_index.fetch(:deferred_ranges),
             discovered_refinements: def_index.fetch(:refinements), # Issue #1120
-            discovered_global_aliases: def_index.fetch(:global_aliases) # Issue #1367
+            discovered_global_write_census: def_index.fetch(:global_write_census) # Issue #1367
           )
         end
 

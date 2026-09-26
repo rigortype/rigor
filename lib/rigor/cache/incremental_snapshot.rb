@@ -134,9 +134,10 @@ module Rigor
       # body, which `call.undefined-method` reads where a `using` of the refining module is in effect. A
       # pre-28 bundle would fold as "refines nothing", and a warm run would report a refined call a cold run
       # declines.
-      # 29: issue #1367 gives each seed bundle a `global_aliases` list — the global names its `alias $new $old`
-      # statements name, which the `global.*` write rules exempt project-wide. A pre-29 bundle would fold as
-      # "aliases nothing", and a warm run would report a write a cold run exempts.
+      # 29: issue #1367 gives each seed bundle a `global_write_census` — the globals its `alias` statements name and
+      # the `write` / `to_str` / `to_int` / hatch definitions and top-level mixins it holds, which the `global.*`
+      # write rules decline on project-wide. A pre-29 bundle would fold as "none of those", and a warm run would
+      # report a write a cold run exempts.
       SCHEMA = 29
 
       # The persisted per-file state.

@@ -55,20 +55,6 @@ def inplace_mode_off = ($-i = false) # QUIET-1367
 def stdout_stringio = ($stdout = StringIO.new) # QUIET-1367
 def stdout_constant = ($stdout = STDOUT) # QUIET-1367
 def last_match_data = ($~ = "ab".match(/b/)) # QUIET-1367
-def stdout_singleton_writer = ($stdout = Object.new.tap { def _1.write(*) = 0 }) # QUIET-1367
-
-def stdout_string_buffer
-  buf = +""
-  def buf.write(text) = (self << text; text.size)
-  $stdout = buf # QUIET-1367
-end
-
-def stdout_array_buffer
-  out = []
-  out.define_singleton_method(:write) { |*texts| concat(texts).size }
-  $stdout = out # QUIET-1367
-end
-
 def program_name_uri = ($0 = URI("https://x")) # QUIET-1367 — URI defines `alias to_str to_s` at run time
 def dynamic_value(value) = ($stdout = value) # QUIET-1367
 def conditional(flag) = ($/ = flag ? 1 : :lf) # QUIET-1367 — Ruby raises either way, but the value is no literal

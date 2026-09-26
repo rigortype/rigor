@@ -41,10 +41,11 @@ module Rigor
       def scan(paths, buffer: nil)
         entries = []
         diagnostics = []
-        paths.each { |path| scan_file(path, entries, diagnostics, buffer) }
+        census = Set.new
+        paths.each { |path| scan_file(path, entries, diagnostics, buffer, census) }
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
-          registry: ProjectPatchedMethods.new(entries: entries),
+          registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze),
           diagnostics: diagnostics
         )
       end
@@ -77,7 +78,7 @@ module Rigor
       end
       private_class_method :duplicate_declaration_diagnostics
 
-      def scan_file(path, entries, diagnostics, buffer = nil)
+      def scan_file(path, entries, diagnostics, buffer = nil, census = Set.new)
         physical = buffer ? buffer.resolve(path) : path
         parse_result =
           if physical == path
@@ -91,6 +92,9 @@ module Rigor
         end
 
         walk_node(parse_result.value, [], false, path, entries)
+        # Issue #1367 — the file's `global.*` write facts: a patch file may alias a special or give a class the
+        # method a setter asks for, as any project file may.
+        census.merge(GlobalWriteCensus.scan(parse_result.value))
       rescue StandardError => e
         diagnostics << build_diagnostic(
           path: path, line: 1, column: 1,

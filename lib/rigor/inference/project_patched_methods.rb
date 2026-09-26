@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "global_write_census"
+
 module Rigor
   module Inference
     # ADR-17 § "Inference contract" — project-wide patched-method registry populated by the pre-eval
@@ -26,16 +28,19 @@ module Rigor
         end
       end
 
-      attr_reader :by_key
+      attr_reader :by_key, :write_census
 
       # @param entries — flat list of declarations observed during the pre-pass.
       #   First-write-wins on `(class_name, method_name, kind)` duplicates so the
       #   `pre-eval.duplicate-declaration` diagnostic emission stays decoupled from registry behaviour.
-      def initialize(entries: [])
+      # @param write_census — issue #1367: the `pre_eval:` files' {GlobalWriteCensus}, which the `global.*` write
+      #   rules join with the project's, since a patch file is loaded ahead of the code it patches.
+      def initialize(entries: [], write_census: GlobalWriteCensus::EMPTY)
         @by_key = entries.each_with_object({}) do |entry, acc|
           key = [entry.class_name, entry.method_name, entry.kind]
           acc[key] ||= entry
         end.freeze
+        @write_census = write_census.frozen? ? write_census : write_census.dup.freeze
         freeze
       end
 

@@ -168,35 +168,65 @@ RSpec.describe "special global writes", type: :runner do
     end
   end
 
-  # A literal is rejected by its class's RBS surface, which a program can widen in many spellings. Each example is
-  # one Ruby 4.0.5 accepts, and each would report were its guard removed.
-  describe "program code that gives a literal the method its setter asks for" do
+  # A literal's verdict rests on its class's RBS surface, which a program can widen in more spellings than any census
+  # of where a definition lands could follow. So a definition of the method a setter asks for, or of a hatch, anywhere
+  # in the program declines every literal; the loss of recall is accepted. Each example declines, and each would
+  # report were its guard removed.
+  describe "program code that may give a literal the method its setter asks for" do
     def expect_quiet(patch, write, sig: {})
       expect(fired("#{patch}#{write}\n", sig: sig)).to be_empty
     end
 
-    it "declines on a definition in a reopened class or ancestor, in any spelling" do
+    it "declines on a definition of the method or a hatch anywhere, in any spelling and on any receiver" do
       {
         "class Integer\n  def write(*) = 0\nend\n" => "$stdout = 1",
         "class Numeric\n  def to_str = \"n\"\nend\n" => "$0 = 1",
         "module Comparable\n  def to_int = 1\nend\n" => "$. = \"3\"",
-        "class Integer\n  define_method(:write) { |*| 0 }\nend\n" => "$stdout = 1",
-        "class Integer\n  alias write to_s\nend\n" => "$stdout = 1",
-        "class Integer\n  alias_method :write, :to_s\nend\n" => "$stdout = 1",
         "class Object\n  def method_missing(*) = 0\nend\n" => "$0 = 1",
         "module Kernel\n  def respond_to?(*) = true\nend\n" => "$stdout = 1",
-        "def to_str = \"top\"\n" => "$0 = 1"
+        "class Symbol\n  def respond_to_missing?(*) = true\nend\n" => "$0 = :name",
+        "def to_str = \"top\"\n" => "$0 = 1",
+        "class << nil\n  def write(*) = 0\nend\n" => "$stdout = nil",
+        "def nil.write(*) = 0\n" => "$stdout = nil",
+        "K = Integer\nclass K\n  def write(*) = 0\nend\n" => "$stdout = 1",
+        "class Integer\n  define_method(:write) { |*| 0 }\nend\n" => "$stdout = 1",
+        "nil.define_singleton_method(:write) { |*| 0 }\n" => "$stdout = nil",
+        "[Integer, Float].each { |k| k.define_method(:write) { |*| 0 } }\n" => "$stdout = 1",
+        "class Integer\n  alias write to_s\nend\n" => "$stdout = 1",
+        "Integer.alias_method(:write, :to_s)\n" => "$stdout = 1",
+        "class Integer\n  attr_accessor :write\nend\n" => "$stdout = 1",
+        "class Integer\n  extend Forwardable\n  def_delegator :to_s, :to_str\nend\n" => "$0 = 1",
+        "class Integer\n  delegate_missing_to :to_s\nend\n" => "$0 = 1",
+        "Object.send(:define_method, :write) { |*| 0 }\n" => "$stdout = 1",
+        "Integer.module_eval(\"def write(*) = 0\")\n" => "$stdout = 1",
+        "class Recorder\n  def write(*) = 0\nend\n" => "$stdout = 1"
       }.each { |patch, write| expect_quiet(patch, write) }
     end
 
+    it "declines on a definition whose name no literal spells" do
+      expect_quiet("class Integer\n  %i[write].each { |name| define_method(name) { |*| 0 } }\nend\n", "$stdout = 1")
+      expect_quiet("name = :write\nInteger.class_eval(\"def \#{name}(*) = 0\")\n", "$stdout = 1")
+      expect_quiet("class Integer\n  attr_reader(*%i[write])\nend\n", "$stdout = 1")
+    end
+
+    it "still reports when the program defines only other names" do
+      source = "class Integer\n  def writer(*) = 0\n  alias_method :to_string, :to_s\nend\n$stdout = 1\n$0 = 1\n"
+      expect(fired(source)).to eq([[5, "global.write-type-mismatch"], [6, "global.write-type-mismatch"]])
+    end
+
     it "declines on a receiver-form rewrite of an ancestor" do
-      expect_quiet("Integer.define_method(:write) { |*| 0 }\n", "$stdout = 1")
       expect_quiet("Object.include(Writable)\n", "$stdout = 1",
                    sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
     end
 
-    it "declines on a project module that defines the method, which any `include` can mix in" do
-      expect_quiet("module Out\n  def write(*) = 0\nend\ninclude Out\n", "$stdout = 1")
+    # A top-level `include` mixes the module into `Object`, and `extend` into `main`; a module RBS does not know, or
+    # declares with the method, may answer for every class. One RBS declares without it answers for none.
+    it "declines on a top-level mixin of a module RBS does not rule out" do
+      expect_quiet("include Nowhere\n", "$stdout = 1")
+      expect_quiet("extend Nowhere\n", "$stdout = 1")
+      expect_quiet("include Writable\n", "$stdout = 1",
+                   sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
+      expect(fired("include Comparable\n$stdout = 1\n")).to eq([[2, "global.write-type-mismatch"]])
     end
 
     it "declines on a module an ancestor mixes in that RBS declares with the method, or does not know" do
@@ -213,9 +243,9 @@ RSpec.describe "special global writes", type: :runner do
                    sig: { "writable.rbs" => "module Writable\n  def write: (*untyped) -> Integer\nend\n" })
     end
 
-    it "declines on a project module an ancestor mixes in whose surface is rewritten" do
-      expect_quiet("module Dyn\n  %i[write].each { |name| define_method(name) { |*| 0 } }\nend\n" \
-                   "class Integer\n  include Dyn\nend\n", "$stdout = 1")
+    it "declines on a project module an ancestor mixes in whose surface is rewritten beyond literal names" do
+      expect_quiet("module Dyn\n  include const_get(:Comparable)\nend\nclass Integer\n  include Dyn\nend\n",
+                   "$stdout = 1")
     end
 
     it "declines on a project sig/ that gives the class the method or a hatch of its own" do
@@ -240,23 +270,10 @@ RSpec.describe "special global writes", type: :runner do
       expect(fired("class Object\n  def method_missing(*) = 0\nend\n$/ = 1\n"))
         .to eq([[4, "global.write-type-mismatch"]])
     end
-
-    it "still reports when the program defines the method only where it cannot reach the literal" do
-      source = <<~RUBY
-        class Recorder
-          def write(*) = 0
-        end
-
-        module Unmixed
-          %i[write].each { |name| define_method(name) { |*| 0 } }
-        end
-
-        $stdout = 1
-      RUBY
-      expect(fired(source)).to eq([[9, "global.write-type-mismatch"]])
-    end
   end
 
+  # `fixtures/special_global_writes/refined_*.rb` pin where a refinement is and is not in effect, and that only a
+  # refined `write` counts.
   describe "a refinement of `write`" do
     let(:source) do
       <<~RUBY
@@ -281,14 +298,17 @@ RSpec.describe "special global writes", type: :runner do
       expect(fired(source)).to eq([[6, "global.write-type-mismatch"]])
     end
 
+    it "still reports when the refined class is not the literal's class or an ancestor of it" do
+      source = "module HashWriter\n  refine(Hash) { def write(*) = 0 }\nend\nusing HashWriter\n$stdout = 1\n"
+      expect(fired(source)).to eq([[5, "global.write-type-mismatch"]])
+    end
+
     # A `using` of a non-constant counts every refinement as in effect in its file, but none of these refines `write`.
     it "still reports under an unresolved `using` when no refinement defines `write`" do
       expect(fired("using Module.new { refine(String) { def shout = upcase } }\n$stdout = 1\n"))
         .to eq([[2, "global.write-type-mismatch"]])
     end
 
-    # `fixtures/special_global_writes/refined_literals.rb` pins where the refinement is and is not in effect; this
-    # pins the answer a direct caller that builds no lexical sites gets.
     it "declines for a caller that passes no lexical sites" do
       tree = Prism.parse(source).value
       index = Rigor::Inference::ScopeIndexer.index(tree, default_scope: Rigor::Scope.empty)
@@ -297,11 +317,20 @@ RSpec.describe "special global writes", type: :runner do
     end
   end
 
-  # An alias in one file exempts the special in every file, so an edit to the aliasing file must reach the writing
-  # file on a warm run: nothing in the writing file changed, and no method or class moved.
-  describe "an alias edited between runs" do
+  it "declines both rules for a caller whose scope index has no scope for the write" do
+    tree = Prism.parse("$stdout = 1\n$! = nil\n").value
+    diagnostics = tree.statements.body.flat_map do |write|
+      Rigor::Analysis::CheckRules.main_pass_node_diagnostics("mem.rb", write, {})
+    end
+    expect(diagnostics).to be_empty
+  end
+
+  # What exempts a write is a fact of the whole program, which no name-keyed edge can follow, so a file whose last
+  # result holds a `global.*` diagnostic re-checks on every warm run. These are the round-2 review's scenarios: each
+  # edit lands in a file the writing file does not depend on, and the warm answer must be the cold one.
+  describe "a program fact edited between runs" do
     around do |example|
-      Dir.mktmpdir("rigor-global-alias-") { |dir| Dir.chdir(dir) { example.run } }
+      Dir.mktmpdir("rigor-global-write-") { |dir| Dir.chdir(dir) { example.run } }
     end
 
     let(:fires) { [["w.rb", 1, "global.write-type-mismatch"]] }
@@ -322,6 +351,11 @@ RSpec.describe "special global writes", type: :runner do
 
     def cache_root = File.join(Dir.pwd, ".rigor", "cache")
 
+    def cold_rows
+      rows_of(guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+                .diagnostics)
+    end
+
     def cached_rows
       runner = Rigor::Analysis::Runner.new(configuration: configuration,
                                            cache_store: Rigor::Cache::Store.new(root: cache_root))
@@ -338,43 +372,40 @@ RSpec.describe "special global writes", type: :runner do
       [rows_of(found), warm]
     end
 
-    it "re-checks the writing file under --incremental when another file aliases the special, and when it stops" do
-      write("lib/a.rb", "x = 1\n")
-      write("lib/w.rb", "$stdout = 1\n")
-      expect(incremental_rows).to eq([fires, false])
+    {
+      "C: a receiver-form `define_method` on the literal's class" => "Integer.define_method(:write) { |*| 0 }\n",
+      "D: a project module with the method, mixed in at the top level" =>
+        "module Out\n  def write(*) = 0\nend\ninclude Out\n",
+      "F: a class-body mixin of a module RBS does not know" => "class Integer\n  include Nowhere\nend\n",
+      "J: a receiver-form mixin into Object of a module RBS does not know" => "Object.include(Nowhere)\n"
+    }.each do |scenario, edit|
+      it "answers a warm run as a cold one after #{scenario}" do
+        write("lib/a.rb", "x = 1\n")
+        write("lib/w.rb", "$stdout = 1\n")
+        expect(incremental_rows).to eq([fires, false])
 
-      write("lib/a.rb", "alias $captured $stdout\n")
-      expect(incremental_rows).to eq([[], true])
-
-      write("lib/a.rb", "x = 1\n")
-      expect(incremental_rows).to eq([fires, true])
+        write("lib/a.rb", edit)
+        expect(incremental_rows).to eq([cold_rows, true])
+        expect(cold_rows).to eq([])
+      end
     end
 
-    # The aliasing file is unchanged, so the warm run restores its names from its seed bundle.
-    it "serves an unchanged aliasing file's names from its seed bundle" do
-      write("lib/a.rb", "alias $stdout $captured\n")
-      write("lib/w.rb", "$stdout = 1\n")
+    it "re-checks a read-only write under --incremental when another file aliases the special" do
+      write("lib/a.rb", "x = 1\n")
+      write("lib/w.rb", "$! = nil\n")
+      expect(incremental_rows).to eq([[["w.rb", 1, "global.readonly-write"]], false])
+
+      write("lib/a.rb", "alias $saved $!\n")
+      expect(incremental_rows).to eq([[], true])
+    end
+
+    # The aliasing file is unchanged, so the warm run restores its census from its seed bundle.
+    it "serves an unchanged aliasing file's census from its seed bundle" do
+      write("lib/a.rb", "alias $saved $!\n")
+      write("lib/w.rb", "$! = nil\n")
       expect(incremental_rows).to eq([[], false])
 
-      write("lib/w.rb", "$stdout = 1\n$stdout = 2\n")
-      expect(incremental_rows).to eq([[], true])
-    end
-
-    it "re-checks the writing file when another file reopens the literal's class with the method" do
-      write("lib/a.rb", "x = 1\n")
-      write("lib/w.rb", "$stdout = 1\n")
-      expect(incremental_rows).to eq([fires, false])
-
-      write("lib/a.rb", "class Integer\n  def write(*) = 0\nend\n")
-      expect(incremental_rows).to eq([[], true])
-    end
-
-    it "re-checks the writing file when a refinement it uses gains `write`" do
-      write("lib/a.rb", "module Writer\n  refine(Array) { def shout = 1 }\nend\n")
-      write("lib/w.rb", "using Writer\n$stdout = []\n")
-      expect(incremental_rows).to eq([[["w.rb", 2, "global.write-type-mismatch"]], false])
-
-      write("lib/a.rb", "module Writer\n  refine(Array) { def write(*) = 0 }\nend\n")
+      write("lib/w.rb", "$! = nil\n$! = 1\n")
       expect(incremental_rows).to eq([[], true])
     end
 

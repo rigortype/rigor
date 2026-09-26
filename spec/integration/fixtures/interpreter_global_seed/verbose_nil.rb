@@ -13,6 +13,16 @@ def warn_when_verbose
   assert_type("bool?", $VERBOSE)
 end
 
+class Cap
+  def self.flag(flag) = flag
+end
+
+# The `nil` this file writes is judged as a `nil` argument was before the join: the `bool` parameter of `Cap.flag`
+# (this fixture's `sig/`) is not held against it, and the declared `true` / `false` add nothing (Ruby: nil, or true
+# or false once another file set them).
+def flag_direct = Cap.flag($VERBOSE) # QUIET-1362
+def flag_conditional(flag) = Cap.flag(flag ? $VERBOSE : nil) # QUIET-1362
+
 $> = StringIO.new
 
 # `$>` keeps an entry of its own, joined with its own declaration (`$>: IO`), so a `StringIO`-only method on it

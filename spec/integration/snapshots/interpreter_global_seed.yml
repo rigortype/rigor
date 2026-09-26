@@ -1,8 +1,8 @@
 ---
 locals: {}
 assertions:
-  '1': bool?
-  '2': '"," | String | nil'
+  '1': bool
+  '2': '","'
   '3': IO | StringIO
   '4': nil
   '5': Dynamic[top]

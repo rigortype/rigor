@@ -1256,8 +1256,8 @@ RSpec.describe "Rigor type construction (integration)" do
            type: :runner do
     # The number of `# QUIET-1362` lines each entry carries.
     quiet_counts = {
-      "demo.rb" => 10, "verbose_false.rb" => 1, "verbose_nil.rb" => 2, "copies.rb" => 12, "nil_written.rb" => 0,
-      "arguments.rb" => 12, "stream_alias.rb" => 3
+      "demo.rb" => 10, "verbose_false.rb" => 1, "verbose_nil.rb" => 4, "copies.rb" => 13, "nil_written.rb" => 0,
+      "arguments.rb" => 20, "stream_alias.rb" => 3
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/interpreter_global_seed", name))

@@ -3,6 +3,8 @@ class Cap
   def self.file: (File) -> String
   def self.text: (String) -> String
   def self.count: (Integer) -> Integer
+  def self.take_list: (Array[StringIO]) -> Array[String]
+  def self.flag: (bool) -> bool
 end
 
 class Ret
@@ -11,4 +13,6 @@ class Ret
   def separator: () -> String
   def verbose: () -> bool
   def out_count: () -> Integer
+  def input: () -> StringIO
+  def out_conditional: (untyped flag) -> StringIO
 end

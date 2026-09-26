@@ -7,10 +7,11 @@ include Rigor::Testing
 
 $VERBOSE = false
 
-# Under `ruby -w`, or once another file sets `$VERBOSE = true`, the condition is true.
+# Under `ruby -w`, or once another file sets `$VERBOSE = true`, the condition is true. The declared `nil` is not
+# joined (#1437).
 def warn_when_verbose
   warn "verbose" if $VERBOSE # QUIET-1362
-  assert_type("bool?", $VERBOSE)
+  assert_type("bool", $VERBOSE)
 end
 
 $stdout = File.open(File::NULL, "w")

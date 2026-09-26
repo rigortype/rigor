@@ -10,17 +10,24 @@ include Rigor::Testing
 
 $VERBOSE = true
 
-# The issue's example. Under `ruby -W0`, or once another file sets `$VERBOSE = nil`, the condition is false.
+# The issue's example. Under `ruby -W0`, or once another file sets `$VERBOSE = false`, the condition is false. The
+# declared `nil` is not joined (#1437), so the seed is `bool`.
 def warn_when_verbose
   warn "verbose" if $VERBOSE # QUIET-1362
-  assert_type("bool?", $VERBOSE)
+  assert_type("bool", $VERBOSE)
 end
 
 $/ = ","
 
-# `ruby -0777` leaves `$/` nil, and another file may set any String. The written `","` stays a member of the join
-# beside the declared `String?` (normalization.md keeps a value-pinned member beside its nominal base).
-def record_separator = assert_type('"," | String | nil', $/)
+# The nil-bearing separators are not joined yet (#1437): `$/` reads this file's write, as before #1362, and the
+# issue's guard on it still folds although `ruby -0777` leaves `$/` nil. Flip the fold to QUIET-1362 when #1437 lands.
+def record_separator = assert_type('","', $/)
+
+def separator_guard
+  return unless $/ # FIRES-1362 flow.always-truthy-condition
+
+  $/.size
+end
 
 $stdout = StringIO.new
 

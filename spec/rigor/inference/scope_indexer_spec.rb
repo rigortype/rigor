@@ -151,27 +151,31 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     # Issue #1362 — the interpreter sets a builtin global before any write, and another file may write it, so its
-    # seed is the declared type joined with the file's writes, bound under the ADR-58 `:global` mark.
-    # `program_globals` keeps the writes alone, which the mark's gates and the `split`-on-`$;` check read.
+    # seed is the non-nil part of its declared type joined with the file's writes, bound under the ADR-58 `:global`
+    # mark. `program_globals` keeps the writes alone, which the mark's gates and the `split`-on-`$;` check read. A
+    # nil-bearing separator such as `$;` is not joined yet (#1437), and a `nil` the file writes is joined as any
+    # write is.
     it "joins a builtin global's declared type into a marked seed, and keeps the writes apart" do
       program, idx = index_for(<<~RUBY)
         $VERBOSE = true
         $; = ","
         $verbose = true
-        def m = [$VERBOSE, $;, $verbose]
+        $stdout = nil
+        def m = [$VERBOSE, $;, $verbose, $stdout]
       RUBY
       method_body = program.statements.body.last.body.body.first
       discovery = idx[program].discovery
 
       expect(discovery.program_globals.transform_values(&:describe))
-        .to eq({ "$VERBOSE": "true", "$;": '","', "$verbose": "true" })
+        .to eq({ "$VERBOSE": "true", "$;": '","', "$verbose": "true", "$stdout": "nil" })
       expect(discovery.program_global_seeds.transform_values(&:describe))
-        .to eq({ "$VERBOSE": "bool?", "$;": '"," | Regexp | String | nil' })
+        .to eq({ "$VERBOSE": "bool", "$stdout": "IO?" })
       [idx[program], idx[method_body]].each do |scope|
-        expect(scope.global(:$VERBOSE).describe).to eq("bool?")
+        expect(scope.global(:$VERBOSE).describe).to eq("bool")
+        expect(scope.global(:$;)).to eq(Rigor::Type::Combinator.constant_of(","))
         expect(scope.global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
-        expect(%i[$VERBOSE $; $verbose].map { |name| scope.declaration_sourced?(:global, name) })
-          .to eq([true, true, false])
+        expect(%i[$VERBOSE $; $verbose $stdout].map { |name| scope.declaration_sourced?(:global, name) })
+          .to eq([true, false, false, true])
       end
     end
 

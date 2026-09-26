@@ -35,11 +35,12 @@ module Rigor
       # So `marked?` matches exactly the node shapes the scope actually models and invents no propagation of its
       # own; anything flow-live keeps firing.
       #
-      # Issue #1362 adds a third carrier, a global still on its program-global seed, which joins the declared type
-      # of a global Ruby's own signatures declare with the file's writes (ADR-117 Decision point 2: never warn that
-      # a value might deviate from the idiom). Its declared members, `nil` among them, are the declaration-sourced
-      # part. A consumer that can compare against the file's writes does so ({.global_sources},
-      # {.withholds_nil?}), so a report the writes alone earn still fires.
+      # Issue #1362 adds a third carrier, a global still on its program-global seed, which joins the non-nil part of
+      # the declared type of a global Ruby's own signatures declare with the file's writes (ADR-117 Decision point
+      # 2: never warn that a value might deviate from the idiom). Its declared members are the declaration-sourced
+      # part. The consumers judge such a value by the file's writes ({.written_type}, {.withholds_nil?}), and a
+      # value that mixes it with something else without the declared members the file never writes
+      # ({.declared_only_rejection?}), so a report the writes alone earn still fires.
       module DeclarationSourcedGuard
         NO_GLOBALS = [].freeze
         private_constant :NO_GLOBALS
@@ -116,14 +117,90 @@ module Rigor
           !nil_bearing?(written)
         end
 
-        # True when the file's writes to the global `node` reads its seed from would pass where `expected` is
-        # required, so a rejection rests on the declared members alone. `expected` is asked the question the
-        # caller's rule asks of the whole type, gradually.
-        def written_accepted?(node, scope, expected)
-          written = written_type(node, scope)
-          return false if written.nil?
+        # Issue #1362 — true when every member of `type` that `expected` rejects is a declared member of a builtin
+        # global this file writes and joins ({#declared_only_members}), so the rejection rests on the join alone. The
+        # argument and return gates read it for a value that mixes such a global with something else
+        # (`c ? $stdout : StringIO.new`), which the ADR-58 mark does not follow. It is a type-level reading: it also
+        # withholds a rejection of such a member that comes from elsewhere in the file (`STDOUT` passed where a
+        # `StringIO` is required, in a file that writes `$stdout`).
+        #
+        # Otherwise the value with those members taken out of every union inside it ({#without_declared_only}) is
+        # handed to the block, which answers whether the caller's rule accepts it: the value as it was before the
+        # join, one level into a container it builds as well (`[$stdout]` or `{ io: $stdout }` passed where an
+        # `Array[StringIO]` is required), and with a `nil` the file writes judged as the rule judges a `nil`.
+        def declared_only_rejection?(type, expected, scope)
+          declared_only = declared_only_members(scope)
+          return false if declared_only.empty?
 
-          !Inference::Acceptance.accepts(expected, written, mode: :gradual).no?
+          members = type.is_a?(Type::Union) ? type.members : [type]
+          rejected = members.select { |member| Inference::Acceptance.accepts(expected, member, mode: :gradual).no? }
+          return false if rejected.empty?
+          return true if rejected.all? { |member| declared_only.include?(member) }
+
+          stripped = without_declared_only(type, declared_only)
+          !stripped.equal?(type) && yield(stripped)
+        end
+
+        # `type` with each member of `declared_only` taken out of every union in it, through tuples, hash shapes and
+        # generic arguments; a union with nothing else left keeps its members. Answers `type` itself when nothing
+        # was taken out.
+        def without_declared_only(type, declared_only)
+          case type
+          when Type::Union then union_without_declared_only(type, declared_only)
+          when Type::Tuple
+            elements = type.elements.map { |element| without_declared_only(element, declared_only) }
+            elements == type.elements ? type : Type::Combinator.tuple_of(*elements)
+          when Type::HashShape
+            pairs = type.pairs.transform_values { |value| without_declared_only(value, declared_only) }
+            pairs == type.pairs ? type : rebuild_hash_shape(type, pairs)
+          when Type::Nominal
+            args = type.type_args.map { |arg| without_declared_only(arg, declared_only) }
+            args == type.type_args ? type : Type::Combinator.nominal_of(type.class_name, type_args: args)
+          else type
+          end
+        end
+
+        def union_without_declared_only(union, declared_only)
+          kept = union.members.reject { |member| declared_only.include?(member) }
+          kept = union.members if kept.empty?
+          rebuilt = kept.map { |member| without_declared_only(member, declared_only) }
+          rebuilt == union.members ? union : Type::Combinator.union(*rebuilt)
+        end
+
+        def rebuild_hash_shape(shape, pairs)
+          Type::Combinator.hash_shape_of(
+            pairs, required_keys: shape.required_keys, optional_keys: shape.optional_keys,
+                   read_only_keys: shape.read_only_keys, extra_keys: shape.extra_keys
+          )
+        end
+
+        # For each builtin global this file writes and joins, the non-nil members of its declared type that the file's
+        # writes to that global do not hold (`IO` after `$stdout = StringIO.new`, nothing after `$stderr = STDERR`),
+        # gathered over the globals. A declared literal also counts in its class form, which a method called on the
+        # joined union returns: `$VERBOSE.itself` reads `FalseClass | TrueClass` after `$VERBOSE = true`.
+        def declared_only_members(scope)
+          seeds = scope.discovery.program_global_seeds
+          return NO_GLOBALS if seeds.empty?
+
+          seeds.keys.flat_map do |name|
+            written = type_members(scope.program_globals[name])
+            type_members(scope.environment.global_for_name(name, builtin: true))
+              .reject { |member| nil_bearing?(member) }
+              .flat_map { |member| [member, *class_form(member)] }
+              .reject { |member| written.include?(member) }
+          end.uniq
+        end
+
+        def class_form(member)
+          return NO_GLOBALS unless member.is_a?(Type::Constant)
+
+          [Type::Combinator.nominal_of(member.value.class.name)]
+        end
+
+        def type_members(type)
+          return NO_GLOBALS if type.nil?
+
+          type.is_a?(Type::Union) ? type.members : [type]
         end
 
         def nil_bearing?(type)
@@ -133,7 +210,8 @@ module Rigor
               (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
           end
         end
-        private_class_method :nil_bearing?, :unparenthesised
+        private_class_method :nil_bearing?, :unparenthesised, :declared_only_members, :type_members, :class_form,
+                             :without_declared_only, :union_without_declared_only, :rebuild_hash_shape
       end
     end
   end

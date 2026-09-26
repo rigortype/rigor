@@ -1,1 +1,0 @@
-- **[inference]** A conditional used as the condition of another conditional, such as `(s.nil? ? false : x.finite?) ? x : 0.0`, now narrows its arms exactly as the equivalent `&&` / `||` condition does. [#1024](https://github.com/rigortype/rigor/pull/1024)

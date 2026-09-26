@@ -1,1 +1,0 @@
-- **[docs]** A new type-specification topic, [Global variables](docs/type-specification/global-variables.md), states where a global variable's type comes from, where each special variable lives, and which evidence changes a type Rigor reads by idiom ([#1478](https://github.com/rigortype/rigor/pull/1478)).

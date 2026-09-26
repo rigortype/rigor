@@ -1945,4 +1945,19 @@ def successful_and_operand_after_match(line, t)
   assert_type("String", $1)
   assert_type("String?", $3)
 end
+
+# Issue #1471 — once a pattern has a named group, a plain `(…)` does not capture, so `$2` of `/(?<x>a)(b)/` is nil
+# (Ruby: `"ab" =~ /(?<x>a)(b)/` leaves `$~.size == 2`). `(?'name'…)` is a named group too.
+def named_and_plain_groups(line)
+  return unless line =~ /(?<x>a)(b)/
+
+  assert_type("String", $1)
+  assert_type("String?", $2)
+end
+
+def quoted_named_group(line)
+  return unless line =~ /(?'x'a)(?'y'b)/
+
+  assert_type("String", $2)
+end
 # rubocop:enable Style/PerlBackrefs

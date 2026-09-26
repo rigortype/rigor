@@ -82,4 +82,21 @@ def three_groups(line)
 
   assert_type("[String, String, String]", $~[1..3])
 end
+
+# A named group makes a plain group non-capturing, so `/(?<key>\w+)=(\w+)/` has one group and the slice is not
+# folded to two slots (Ruby: `"k=v"` gives `$~[1..2] == ["k"]`) (#1471). Named groups alone fold.
+def named_and_plain(line)
+  return unless line =~ /(?<key>\w+)=(\w+)/
+
+  parts = $~[1..2]
+  return :one if parts.size == 1
+
+  :two
+end
+
+def named_only(line)
+  return unless line =~ /(?<a>x)(?<b>y)/
+
+  assert_type("[String, String]", $~[1..2])
+end
 # rubocop:enable Style/SpecialGlobalVars

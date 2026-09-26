@@ -1668,8 +1668,10 @@ module Rigor
         # them to non-nil `String` would be unsound. The walker is intentionally light (char
         # scan, not a regex-AST parse): backslash escapes are skipped; `(?:…)`, lookahead
         # `(?=…)`/`(?!…)`, and lookbehind `(?<=…)`/`(?<!…)` do not capture; named groups
-        # `(?<name>…)` do. Conservatism is one-directional — when in doubt a group is treated
-        # as conditional (dropped from the Set), never the reverse.
+        # `(?<name>…)` / `(?'name'…)` do. Once the pattern has a named group, Ruby numbers only
+        # the named groups and a plain `(…)` does not capture (#1471): `/(?<x>a)(b)/` has one
+        # group, so `$2` is nil. Conservatism is one-directional — when in doubt a group is
+        # treated as conditional (dropped from the Set), never the reverse.
         def unconditional_capture_groups(source)
           # `unconditional` collects every capturing index; a group is later removed (with its
           # whole subtree) when it is optionally quantified, nested under an optional ancestor,
@@ -1679,7 +1681,15 @@ module Rigor
           # mutually exclusive, so its descendant captures may be absent on a successful match;
           # the group itself still participates. Closing a frame rolls its subtree up to the
           # parent so an optional / alternated ancestor disqualifies it.
-          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0 }
+          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0, named: named_groups?(source) }
+          each_structural_char(source) { |pos, chr| scan_group_char(source, pos, chr, state) }
+          # Drain the virtual root: a top-level `|` disqualifies all.
+          finalize_frame(state, state[:stack].pop, optional: false)
+          state[:unconditional]
+        end
+
+        # Yields each position of `source` outside a backslash escape and a character class, with its char.
+        def each_structural_char(source)
           pos = 0
           length = source.length
           while pos < length
@@ -1692,12 +1702,13 @@ module Rigor
               pos = skip_char_class(source, pos) + 1
               next
             end
-            scan_group_char(source, pos, chr, state)
+            yield pos, chr
             pos += 1
           end
-          # Drain the virtual root: a top-level `|` disqualifies all.
-          finalize_frame(state, state[:stack].pop, optional: false)
-          state[:unconditional]
+        end
+
+        def named_groups?(source)
+          each_structural_char(source) { |pos, chr| break true if chr == "(" && named_group?(source, pos) } == true
         end
 
         # Updates the walk `state` at a group-relevant char during
@@ -1707,7 +1718,7 @@ module Rigor
           case chr
           when "("
             idx = nil
-            if capturing_group?(source, pos)
+            if capturing_group?(source, pos, named: state[:named])
               idx = (state[:group_index] += 1)
               state[:unconditional] << idx
             end
@@ -1746,11 +1757,20 @@ module Rigor
           end
         end
 
-        def capturing_group?(source, pos)
-          return true unless source[pos + 1] == "?"
+        # A plain `(…)` captures unless the pattern has a named group (`named:`); of the `(?…)` forms only a named
+        # group does.
+        def capturing_group?(source, pos, named:)
+          return !named unless source[pos + 1] == "?"
 
-          # `(?<name>…)` captures; `(?<=…)`/`(?<!…)` (lookbehind) and
-          # `(?:…)`/`(?=…)`/`(?!…)` do not.
+          named_group?(source, pos)
+        end
+
+        # `(?<name>…)` and `(?'name'…)` are named groups; `(?<=…)`/`(?<!…)` (lookbehind) and
+        # `(?:…)`/`(?=…)`/`(?!…)` are not.
+        def named_group?(source, pos)
+          return false unless source[pos + 1] == "?"
+          return true if source[pos + 2] == "'"
+
           source[pos + 2] == "<" && source[pos + 3] != "=" && source[pos + 3] != "!"
         end
 

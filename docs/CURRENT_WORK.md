@@ -15,71 +15,85 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## Special-variable semantics (2026-09-25/26)
+## Special-variable semantics, second pass (2026-09-26/27)
 
-The effort audited Rigor's special variables against dak2's talk 「特殊変数大全」
-(<https://speakerdeck.com/dak2/tokushu-hensuu-taizen>). `$~` and `$_` live in the method frame's
-svar, `$!` and `$@` come from the rescue frame, `$?` is thread-local, and `$/` and `$stdout` are
-process-wide. The audit filed #1358–#1367 and landed them one lane at a time. Each lane had its own
-worktree, an implementer agent, an independent Opus review, and CI.
+This continues the audit of the special variables against dak2's talk 「特殊変数大全」, governed by
+[ADR-117](adr/117-standard-streams-typed-by-idiom.md). v0.4.0 release prep is under way, so file
+every newly found defect to milestone `v0.4.x`, never `v0.4.0`.
 
-Landed on master:
+Landed on master, each with CI green on the merge commit:
 
-- #1370 (#1358): a match inside a block or closure rebinds the method's `$~`. The spec now calls the
-  match globals frame-local.
-- #1374 (#1364): a call into a Ruby method keeps the caller's `$~`.
-- #1378 (#1365): builtins that rebind `$~` are recognised precisely, including in operand position.
-- #1392 (#1361): Thread, Fiber and Ractor root blocks get a fresh `$~`. `define_method` bodies read
-  bound globals as `Dynamic`.
-- #1405 (#1359): `$_` is frame-local, and a `$stdin.gets`-style reader condition narrows it. An
-  implicit-self `gets` does not narrow, which was the user's conservative call.
-- #1418: ADR-117, "Standard streams: typed by idiom, checked by runtime contract".
-- #1425 (#1360): `$!` and `$@` are bound in rescue clauses, and `$?` after a subprocess.
-- #1433 (#1362, in part): a builtin global's seed joins its non-nil RBS type. The nil-bearing
-  separators are split out to #1437.
-- #1442 (#1363): effect labels for the special variables.
-- #1444: fix for `type-of`, `annotate`, `sig-gen` and `trace` crashing with `NameError` after #1433.
-- Check that master CI on `7e48c8705` finished green; it was still in progress at handoff.
+- #1449 (#1415): an implicit-self or `self.` `gets` narrows `$_`, and declines on counter-evidence
+  about `self` in the file. An `ensure` clause reads `$_` untyped. Implicit `readline` does not
+  narrow yet (#1458).
+- #1448 (#1367): new rules `global.write-type-mismatch` (literal values only) and
+  `global.readonly-write`. A program-wide census declines on any definition of `write`, `to_str`,
+  `to_int` or a hatch.
+- #1453 (#1429): truthiness, class, `respond_to?` and `case` guards narrow global and constant
+  receivers, and the narrowing is restored at any call that may rebind. A class guard disjoint from a
+  non-literal subject reads `Bot` without `flow.unreachable-clause`, but a `case` value still drops
+  that arm (#1465). A value-position `case` narrows each arm; the corpus lost 12 false positives.
+
+Maintainer decisions recorded on the issues:
+
+- #1426: the scoped `pre_eval:` shape is a mixed array. A string entry is project-wide; a mapping
+  `{path:, scope:}` applies to its scope roots only.
+- #1367: rule ids, severities and tier `high`; the literal-only amendment.
+- #1429: three amendments. The last one is the conservative reading above.
 
 ## What the next session should do
 
-1. Two user decisions are pending. Ask before implementing either one.
-   - #1426: the config shape for scoped `pre_eval:` entries and global writes as patches. It amends
-     ADR-17. #1427, where `rigor-project-init` writes the entry, is blocked on it.
-   - #1367: rule ids and default severity. The scope is already fixed by ADR-117 WD2: only
-     `_Writer` violations on `$stdout`, `$stderr` and `$>`, never `$stdin`.
-2. #1366 (unbound global reads fall back to RBS) has a fixed order under ADR-117:
-   - first #1429 (class guards and truthiness on global and constant receivers);
-   - then #1426, then #1427, then #1366's stream part, which now also carries the `$>` → `$stdout`
-     alias;
-   - the `$_` part waits for #1415;
-   - WD6 holds throughout: a declined or forgotten `$_` stays `Dynamic`.
-3. `ready-for-agent` follow-ups, all in milestone `v0.4.x`, most fundamental first:
-   - #1429: class guards on global and constant receivers.
-   - #1415: implicit-self `gets` narrows, under ADR-117 WD5.
-   - #1437: the separators, which need a nil-only provenance record.
-   - #1423: a singleton `def gets` in any file declines `$_` narrowing.
-   - #1375: loop back edge versus `$1`.
-   - #1372: a failing `when` / `in`.
-   - #1371: gsub, sub, scan and grep blocks, and lambda bodies.
-   - #1379: `!~` guards.
-   - #1416: `then` / `tap` blocks that run once.
-   - #1373: Regexp constants from another file.
-   - #1443: the `English` aliases.
-4. Triage queue: #1376, #1377, #1380, and #1445 (LSP intermittently reports
-   `unresolved-toplevel`). Ready for a human: #1400, #1417.
+1. **Pending user decision:** a one-line ruby/rbs PR adding `alias to_str to_s` to
+   `stdlib/uri/0/generic.rbs`. Ruby has had it since 2018 (ruby/ruby `0164ce893f`), and rbs master
+   still lacks it. It is an outward publication, so wait for a yes. It causes no Rigor report today.
+2. **ADR-117 order:** #1426, then #1427, then #1366's stream part, which also carries the `$>` →
+   `$stdout` alias. #1429 and #1415 are done, so #1366's `$_` part is unblocked. WD6 still holds:
+   a declined or forgotten `$_` stays `Dynamic`. #1366 is still `ready-for-human`, because the
+   go/no-go rests on its corpus result.
+3. **#1454, phase 2** is unblocked now. It adds `docs/type-specification/global-variables.md`, an
+   internal-spec "Special variables" map and `CONTEXT.md` terms. Phase 3, the handbook chapter,
+   waits for #1366, #1426 and #1427.
+4. **`ready-for-agent` in `v0.4.x`, cheapest first:**
+   - #1467: `verify-changed` misses `provenance_spec`. This bit two lanes this session.
+   - #1447: the ErrorInfo `$!` decline.
+   - #1446: ivar class guards.
+   - #1437: the separators.
+   - #1423: a singleton `def gets`.
+   - #1379: `!~`.
+   - #1375: a loop back edge versus `$1`.
+   - #1372: a failing `when` or `in`.
+   - #1371: gsub-family blocks.
+   - #1416: `then` / `tap` blocks.
+   - #1373: cross-file Regexp constants.
+   - #1443: `English` aliases. Its write side should reuse `SpecialGlobalSetters`.
+5. **Triage queue (`needs-triage`)** — lanes filed these this session:
+   - `ensure` and loop bugs: #1457 (#1397 may cover it), #1458, #1464.
+   - Reader bugs: #1450, #1451, #1452, #1459.
+   - Guard design and precision: #1465, #1461, #1462, #1463.
+   - Perf: #1466.
+   - Other: #1455 (misses of the `global.*` rules) and #1456 (OpenStruct fields report
+     `call.undefined-method`, a real false positive on master).
+   - Still waiting from before: #1376, #1377, #1380, #1445. Ready for a human: #1400, #1417.
+6. Sibling Draft #1397 (another session's) restructures `eval_ensure`. It must keep #1449's ensure
+   rule for `$_`; a PR comment explains how.
 
 ## How the lanes were run (and what bit)
 
-- The invariant, relative to the base: add no diagnostic on correct code, and never newly keep a
-  narrowing where Ruby rebinds. The review stops at three rounds. Each time round 3 was still
-  severe, the user chose the conservative reading or a split (#1374, #1378, #1405, #1433). Escalate
-  to the user; do not decide alone.
-- The corpus A/B came out 0/0 on every lane, because these shapes barely occur in the survey
-  targets. The fixtures carry the evidence, so do not treat a clean corpus as proof of FP safety.
-- In-process specs cannot see a missing `require`; #1444's crash passed CI. A CLI path that skips
-  `check_rules` needs a subprocess spec (`spec/rigor/cli/type_of_standalone_load_spec.rb`).
-- Master moved under the lanes. Before merging, merge origin/master, rerun the overlapping specs,
-  and wait for CI on the merged head.
-- Subagents hit the weekly API limit once; it resets 2026-09-30 18:00 JST. Resuming the same agent
-  with a status note recovered the lane.
+- Three parallel lanes. Each had its own `bin/rigor-worktree` worktree, an implementer subagent, an
+  independent Opus reviewer in a separate worktree, and a cold corpus A/B run by one lane at a time
+  on a private rsync copy. The invariant against the base: add no diagnostic on correct code, and
+  never newly keep a narrowing where Ruby rebinds. Resuming the same reviewer for delta rounds was
+  fast.
+- **Round 3 was still severe twice.** Both times (#1448 and #1453) the user chose to apply the
+  reviewer's decline-only fallbacks and merge without a fourth round. Once, after round 2, they chose
+  to withdraw a design that kept leaking (#1453's gradual arm, which moved to #1465). Escalate at
+  these points; do not decide alone.
+- **Designs that leaked:** a type introduced only by a guard crossed joins into typed sinks
+  (`Nominal[C]`, then `Dynamic[C]`). Most severe findings in later rounds sat in code the previous
+  round's fixes had added, including a crash on invalid-UTF-8 literals in #1448's new census.
+- `make verify-changed` does not run `provenance_spec` (#1467). Run it yourself after touching
+  `sig/`, or after an engine change that alters `sig-gen` inference.
+- Selecting a `type_construction_spec` group by its `describe` line can run the previous group. Use
+  `-e` or the `it` line when mutation-testing.
+- The corpus copy and base-engine arms lived in the session scratchpad (`g1429/`), which is gone.
+  Rebuild them per `docs/agents/measurement.md`.

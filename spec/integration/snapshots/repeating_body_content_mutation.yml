@@ -2,4 +2,5 @@
 locals: {}
 assertions:
   '1': Array[Dynamic[top]]
-  '2': Dynamic[top] | []
+  '2': Array[Dynamic[top]]
+  '3': Integer

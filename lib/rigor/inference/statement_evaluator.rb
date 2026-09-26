@@ -2248,11 +2248,16 @@ module Rigor
         end
       end
 
-      # {CapturedLocals.loop_content_mutations} of a loop body, once per body: every pass asks, and neither input
-      # changes between them.
+      # {CapturedLocals.loop_content_mutations} of a loop body against `base`, once per pair: every pass of one
+      # loop asks with the same body and the same post-predicate scope. The slot is keyed on both, so a body asked
+      # against another scope is scanned again.
       def loop_content_mutations(statements, base)
-        (@loop_content_mutations ||= {}.compare_by_identity)[statements] ||=
-          CapturedLocals.loop_content_mutations(statements, base)
+        memo = (@loop_content_mutations ||= {}.compare_by_identity)[statements]
+        return memo[1] if memo && memo[0].equal?(base)
+
+        stores = CapturedLocals.loop_content_mutations(statements, base)
+        @loop_content_mutations[statements] = [base, stores]
+        stores
       end
 
       # `for index in collection; body; end`. Unlike `each {}` blocks, `for` does NOT create a new variable scope: the
@@ -4797,7 +4802,7 @@ module Rigor
           if call_node.receiver
             explicit_receiver_type(call_node)
           else
-            scope.self_type || scope.environment.nominal_for_name("Object")
+            operand_scope.self_type || operand_scope.environment.nominal_for_name("Object")
           end
         return nil if receiver_type.nil?
 
@@ -4812,22 +4817,44 @@ module Rigor
         nil
       end
 
-      # The binding each outer local or ivar the body rebinds ({CapturedLocals.writes}) enters a repeating
-      # `:unknown` call's body with: its call-site binding joined with `Dynamic[top]`, since an earlier pass may
-      # have stored anything and no pass types what it stored — the rebind counterpart of the unknown-store
-      # widening, and the gradual arm the `:unknown` continuation drops the name to ({#drop_captured_narrowing}).
-      # A call the write-back reaches ({#write_back_block_captures}: an explicit receiver classified
-      # `:non_escaping`) answers none: its fixpoint enters every pass it records at the converged binding.
+      # The binding each outer local or ivar the body rebinds ({CapturedLocals.writes}) enters a repeating call's
+      # body with when the write-back will not run its passes for it ({#write_back_block_captures} reaches only an
+      # explicit receiver classified `:non_escaping`). The call-site binding is what the first pass reads; a later
+      # pass reads what an earlier one stored, and no pass types that here, so the seed is loosened
+      # ({#unproven_rebind_binding}). A call the write-back reaches answers none: its fixpoint
+      # enters every pass it records at the converged binding.
       def unproven_rebind_bindings(call_node, block, classification)
         return NO_CAPTURE_BINDINGS if call_node.receiver && classification == :non_escaping
 
         names = CapturedLocals.writes(block, scope, ivars: true)
         return NO_CAPTURE_BINDINGS if names.empty?
 
-        untyped = Type::Combinator.untyped
         names.each_with_object({}) do |name, acc|
           seed = CapturedLocals.bound_type(scope, name)
-          acc[name] = Type::Combinator.union(seed, untyped) unless seed.nil?
+          acc[name] = unproven_rebind_binding(seed) unless seed.nil?
+        end
+      end
+
+      # A sentinel seed — `nil` or `false`, alone or as a union of the two — is a placeholder the body replaces
+      # before the reads it guards (`names = nil; io.each_line { |l| if state == :start; names = {}; else names[l]
+      # = true; end }`), so its entry is joined with `Dynamic[top]`: nothing says what replaced it. Any other seed
+      # enters widened past its value pins, a literal collection floored to its bare carrier
+      # (`UnknownStoreWidening.literal_floor`), so `count = 0` enters as `Integer` and `name = "x"` as `String`. The
+      # widened type contains the seed and stays one type rather than a union with it, since an undefined-method
+      # report needs a single receiver: a read no pass could answer — `count.upcase`, `name.no_such_method` —
+      # still reports, while a comparison only the first pass's value decides (`mode == :body` against `mode =
+      # :start`) no longer folds. A rebind to another class is not seen, as it was not before.
+      def unproven_rebind_binding(seed)
+        return Type::Combinator.union(seed, Type::Combinator.untyped) if sentinel_seed?(seed)
+
+        Type::Combinator.widen_value_pinned(UnknownStoreWidening.literal_floor(seed))
+      end
+
+      def sentinel_seed?(type)
+        case type
+        when Type::Constant then type.value.nil? || type.value == false
+        when Type::Union then type.members.all? { |member| sentinel_seed?(member) }
+        else false
         end
       end
 

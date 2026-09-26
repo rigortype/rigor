@@ -113,6 +113,18 @@ module Rigor
         carrier ? carrier_floor(carrier) : type
       end
 
+      # {.content_floor} for the literal carriers alone: a `Tuple` or `HashShape` (alone or as a `Union` member) reads
+      # as its bare carrier, and anything else — a nominal, a String — is returned untouched. A literal records slots
+      # the next value need not have; a nominal is a claim about every value, which this does not loosen.
+      def literal_floor(type)
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| literal_floor(member) })
+        when Type::Tuple then carrier_floor("Array")
+        when Type::HashShape then carrier_floor("Hash")
+        else type
+        end
+      end
+
       # `"Array"`, `"Hash"` or `"String"` when `type` is a form of that carrier — a literal, a nominal, or a
       # difference, refinement or intersection over one (`non-empty-array[Integer]`, `decimal-int-string`,
       # `non-empty-uppercase-string`) — else nil.

@@ -98,12 +98,12 @@ end
 
 # --- A rebind on an untyped receiver. The escape analysis leaves the call
 # `:unknown`, so no ADR-56 write-back ran and the rebind was pinned to `[]`
-# the same way. It enters at its seed joined with the gradual arm, for
-# what an earlier pass stored. ---
+# the same way. The literal enters as its bare carrier, for what an
+# earlier pass stored. ---
 def rebinds_on_untyped(lines)
   depth = []
   lines.each do |tl|
-    assert_type("Dynamic[top] | []", depth)
+    assert_type("Array[Dynamic[top]]", depth)
     puts depth.last.length if depth.last
     depth = [tl]
   end
@@ -121,6 +121,71 @@ def state_machine(io)
     else
       names[line] = true
     end
+  end
+end
+
+# --- Control: a rebound counter enters as `Integer`, not as a gradual
+# type, so a method no pass could answer still reports. ---
+def counter_read_before_rebind(items)
+  count = 0
+  items.each do |_i|
+    assert_type("Integer", count)
+    count.upcase # STILL-REPORTED
+    count += 1
+  end
+end
+
+# --- Control: the same for a rebound String. ---
+def name_read_before_rebind(items)
+  name = "x"
+  items.each do |i|
+    name.no_such_method # STILL-REPORTED
+    name = i.to_s
+  end
+end
+
+# --- Control: an implicit-self iterator in an `Enumerable` class. ---
+class Tree
+  include Enumerable
+
+  def each
+    yield 1
+    yield 2
+  end
+
+  def prev_read_before_rebind
+    prev = 0
+    each_with_index do |x, _i|
+      prev.upcase # STILL-REPORTED
+      prev = x
+    end
+  end
+end
+
+# --- Control: a known receiver takes the write-back, whose entry keeps the
+# `nil` the first pass reads. ---
+def known_receiver_first_pass
+  items = [1, 2, 3]
+  x = nil
+  items.each do |i|
+    x.length # STILL-REPORTED
+    x = i.to_s
+  end
+end
+
+# --- Control: a project `each` that yields once is not read as repeating
+# (issue #1234). ---
+class Once
+  def each
+    yield 1
+  end
+end
+
+def project_each_once
+  x = nil
+  Once.new.each do |i|
+    x.foo # STILL-REPORTED
+    x = i
   end
 end
 

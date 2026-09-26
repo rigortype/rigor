@@ -2407,8 +2407,9 @@ RSpec.describe "Rigor type construction (integration)" do
       end
 
       # Must-not-fire / must-still-fire in one assertion: every guarded read of an appended collection is
-      # live at runtime, and the three controls — a body that never mutates, a run-once block and an
-      # uncatalogued call — still report theirs.
+      # live at runtime. The controls still report: a read of a rebound counter, String or implicit-self
+      # `Enumerable` local no pass could answer, a known receiver's first-pass `nil`, a project `each` that
+      # yields once, a body that never mutates, a run-once block and an uncatalogued call.
       it "silences the first-pass nil reads without silencing the controls" do
         calls = harness.diagnostics.select { |d| d.rule.to_s.start_with?("call.") }
         calls = calls.reject { |d| d.rule.to_s == "call.unresolved-toplevel" }

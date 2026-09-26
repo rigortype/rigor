@@ -170,6 +170,10 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # 709 since #1424. `StatementEvaluator::ClassFrame` gains an optional `refinement:` member, and the keyword
 # default is written as an explicit `def initialize`, so its declared `initialize` now has a source `def`
 # sig-gen reproduces instead of the `Data`-synthesised one it could only find at runtime (`inference.rbs` -1).
+# 710 since #1412. A loop body now enters with each local it mutates in place at its unknown-store widening,
+# so `Scope#singleton_def_through_ancestors`'s `queue.shift` after `enqueue_ancestors(current, queue, …)` reads
+# `untyped` where the first iteration's seed read `String`, and the row joins `declared_divergent`
+# (`scope.rbs` +1; the reason is at its pin).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -296,7 +300,14 @@ SIG_PROVENANCE_RESIDUE = {
   # block `return` now reaches its inferred return, which matches the declared `Type::t?`.
   "sig/rigor/rbs_extended.rbs" => 21,
   "sig/rigor/reflection.rbs" => 8,
-  "sig/rigor/scope.rbs" => 111,
+  # +1 (#1412): `singleton_def_through_ancestors` walks `until queue.empty?; current = queue.shift; …;
+  # enqueue_ancestors(current, queue, …)`. The loop body now enters with `queue` at its unknown-store
+  # widening, and a callee store floors it to `Array[untyped]`, as straight-line code after the same call
+  # already reads it, so `current` and the `[found, current]` return are `untyped`. The `String` sig-gen
+  # proved before came from typing every iteration from the seed `[class_name.to_s]`: the same walk with a
+  # literal seed read `current` as `"a"` on every pass. `user_def_through_ancestors` (already residue)
+  # loses its `[Prism::DefNode, String]` arm the same way.
+  "sig/rigor/scope.rbs" => 112,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

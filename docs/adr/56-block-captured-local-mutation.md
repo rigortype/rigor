@@ -1122,10 +1122,15 @@ out of `ExpressionTyper` so both passes share it), so #1234's iterator
 name on a `Dynamic` receiver counts, and `then`, a one-element receiver
 and an uncatalogued name do not. Where the write-back will not run its
 passes (an `:unknown` class, or no explicit receiver), a name the body
-rebinds enters at its call-site binding joined with `Dynamic[top]`,
-the rebind counterpart of the unknown-store widening: an earlier pass
-wrote something no pass typed, and the continuation already drops the
-name to `Dynamic[top]`. The loop seam takes the same widening
+rebinds enters loosened, since no pass types what an earlier one
+stored. A sentinel seed (`nil` or `false`) enters joined with
+`Dynamic[top]`: it is a placeholder the body replaces before the reads
+it guards, as in a line reader's state machine. Any other seed enters
+widened past its value pins, with a literal collection floored to its
+bare carrier, as one type rather than a union with the seed, since a
+union receiver draws no `undefined method`: `count = 0` enters as
+`Integer`, so `count.upcase` still reports and `mode == :body` against
+`mode = :start` no longer folds. The loop seam takes the same widening
 (`#loop_pass_entry`, so the single pass and every fixpoint pass, and a
 `for` body's only pass) over `CapturedLocals.loop_content_mutations`.
 A widened name the body does not rebind keeps its #1287 marks
@@ -1133,33 +1138,50 @@ A widened name the body does not rebind keeps its #1287 marks
 
 The rule is the one this section already chose: a body's entry must
 describe every pass it records, and where no pass types what a later
-pass reads, the gradual arm is the answer. Two alternatives were
-rejected. Running the write-back for a body that only mutates (dropping
+pass reads, it takes a reading that holds on every pass — the gradual
+arm for stored contents and for a sentinel, the seed's widened class
+otherwise. Three alternatives were rejected. Running the write-back for a body that only mutates (dropping
 its `names.empty?` fast path) costs a second body pass for every such
 block, where the widening needs none. Running its fixpoint for an
 `:unknown` call costs passes on the most common untyped receiver, and
 it keeps the `nil` seed beside what the body stores, so the line
-readers below would still read a possible `nil`. The price is the
-false negative the write-back already pays: a read only the first pass
-makes goes gradual (`last = nil; items.each { |x| last.length; last =
-x }` on an untyped `items` no longer reports).
+readers below would still read a possible `nil`. Routing an
+implicit-self call the gate classifies `:non_escaping` through the
+write-back would change the escape reading and the continuation of
+every such call, and its fixpoint enters `prev = 0;
+each_with_index { |x, _i| prev.upcase; prev = x }` in an `Enumerable`
+class at `0 | Dynamic[top]`, which draws no report, where the widened
+seed `Integer` does. The price is paid
+on the first pass. A read of a mutated collection that only the first
+pass makes goes gradual, as it already does on the write-back's
+passes, and so does an unguarded read of a sentinel seed (`x = nil;
+items.each { |i| x.length; x = i.to_s }` on an untyped `items` no
+longer reports, though the first iteration raises). A loop that feeds
+a collection through a callee reads its contents gradually from the
+first pass on: `Scope#singleton_def_through_ancestors`'s `queue.shift`
+after `enqueue_ancestors(current, queue, …)` now reads `untyped`, as
+straight-line code after that call already did, where every iteration
+used to read the seed's `String`, and sig-gen's row for it moved to
+residue.
 
 A body that can neither rebind nor mutate a captured binding skips the
 gate (`CapturedLocals.may_touch_capture?`, an allocation-free scan),
 and the block's receiver is typed once per call
 (`StatementEvaluator#explicit_receiver_type`) instead of at each of
 the four sites that asked. On textbringer (`--workers=0`) that is
-6,371,968 → 6,058,445 allocated objects; the gate alone, before the
+6,371,966 → 6,057,059 allocated objects; the gate alone, before the
 memo, cost +35k (+0.55%).
 
 Gate: the `repeating_body_content_mutation` fixture's must-not-fire
 shapes (the repro, `each_with_index`, `push`, an index write, a Hash
 slot, a typed receiver, `while`, `until`, `for`, an untyped-receiver
-rebind and a line reader's state machine) and its three controls (a
-body that never appends, `5.then`, `Mutex#synchronize`), which still
-report. Corpus (redmine, textbringer, mail, mastodon): the three redmine
-errors the issue names are gone, with the same fix removing four
-more state-machine reads under `io.each_line` (`cvs_adapter.rb:196`
+rebind and a line reader's state machine) and its controls, which
+still report: a rebound counter, String and implicit-self `Enumerable`
+local read before the rebind, a known receiver's first-pass `nil`, a
+project `each` that yields once, a body that never appends, `5.then`
+and `Mutex#synchronize`. Corpus (redmine, textbringer, mail,
+mastodon): the three redmine errors the issue names are gone, with the
+same fix removing four more state-machine reads under `io.each_line` (`cvs_adapter.rb:196`
 and `:214`, `git_adapter.rb:262` and `:308`), and nothing is added.
 One error keeps its line and changes its type: `diff.rb:78` calls a
 method Redmine patches onto `Array` and now reads the receiver as

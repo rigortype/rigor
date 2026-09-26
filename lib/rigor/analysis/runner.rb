@@ -417,6 +417,8 @@ module Rigor
         @project_discovered_deferred_ranges = {}.freeze
         # Issue #1120 — `{refined class => {method => [refining modules]}}`, every `refine X do … end` body.
         @project_discovered_refinements = {}.freeze
+        # Issue #1367 — every global name an `alias $new $old` statement names, in any project file.
+        @project_discovered_global_aliases = Set.new.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
@@ -1465,7 +1467,7 @@ module Rigor
         @project_discovered_header_nestings = discovery.discovered_header_nestings
         apply_discovery_mixin_tables(discovery)
         @project_discovered_deferred_ranges = discovery.discovered_deferred_ranges
-        @project_discovered_refinements = discovery.discovered_refinements
+        apply_discovery_call_surface_tables(discovery)
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
@@ -1478,6 +1480,13 @@ module Rigor
         @project_discovered_parameter_envelopes = discovery.discovered_parameter_envelopes
         @project_data_member_layouts = discovery.data_member_layouts
         @project_struct_member_layouts = discovery.struct_member_layouts
+      end
+
+      # The tables only check rules read beyond dispatch — the issue #1120 refinements and the issue #1367 aliased
+      # globals. Extracted to keep {#apply_discovery_result} under its ABC budget.
+      def apply_discovery_call_surface_tables(discovery)
+        @project_discovered_refinements = discovery.discovered_refinements
+        @project_discovered_global_aliases = discovery.discovered_global_aliases
       end
 
       # The three mixin tables the discovery pass carries — the ADR-24 `include` map, its issue #1123
@@ -1997,14 +2006,18 @@ module Rigor
         tables
       end
 
-      # The two tables only call rules read: the issue #992 parameter envelopes (`call.wrong-arity`) and the
-      # issue #1120 refinements (`call.undefined-method`). Split out of {#project_scope_seed_tables} to keep it
-      # under the complexity budget.
+      # The tables only check rules read: the issue #992 parameter envelopes (`call.wrong-arity`), the issue #1120
+      # refinements (`call.undefined-method`), and the issue #1367 aliased globals (the `global.*` write rules). Split
+      # out of {#project_scope_seed_tables} to keep it under the complexity budget.
       def seed_call_surface_tables(tables)
         unless @project_discovered_parameter_envelopes.empty?
           tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
         end
         tables[:discovered_refinements] = @project_discovered_refinements unless @project_discovered_refinements.empty?
+        # Issue #1367 — read by the `global.*` write rules, which exempt an aliased special.
+        return if @project_discovered_global_aliases.empty?
+
+        tables[:discovered_global_aliases] = @project_discovered_global_aliases
       end
 
       # The three mixin tables: the ADR-24 instance-side `include` map, its issue #1123 `prepend` twin

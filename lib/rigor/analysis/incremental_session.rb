@@ -833,6 +833,7 @@ module Rigor
       # appeared `"ClassName#method"` to the negative-dependency key it would satisfy (`toplevel:foo` for a
       # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
       # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}).
+      # Issue #1367 — and of any global name an edit aliased or stopped aliasing ({#global_alias_affected}).
       def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls, summary = nil)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
@@ -849,7 +850,19 @@ module Rigor
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
-        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary)
+        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
+          global_alias_affected(changed + removed, summary)
+      end
+
+      # Issue #1367 — the consumers whose `global.*` write check read the project's aliased globals for a name an
+      # edit aliased or stopped aliasing, diffed as {#refinement_affected} diffs refinements.
+      def global_alias_affected(paths, summary)
+        after = (summary && summary[:global_aliases]) || {}
+        before = paths.to_h { |path| [path, @seed_bundles.dig(path, :global_aliases)] }
+        names = Incremental.changed_global_alias_names(paths, before, after)
+        return Set.new if names.empty?
+
+        Incremental.negative_closure(names.map { |name| "global-alias:#{name}" }, @negative_dependents)
       end
 
       # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method

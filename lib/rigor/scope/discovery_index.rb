@@ -29,6 +29,7 @@ module Rigor
       :discovered_superclasses,
       :discovered_deferred_ranges,
       :discovered_refinements,
+      :discovered_global_aliases,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_prepends,
@@ -94,9 +95,20 @@ module Rigor
       #   of those names it from outside.
       # - {ENVELOPE_OBJECT_EXTENDED_MARK}: some method body passes the module to `extend`, so an object of any
       #   class may carry its instance methods ahead of that class's own.
+      # - {ENVELOPE_REFINED_MARK}: a `refine` block refines the class, which redefines its methods wherever a `using`
+      #   is in effect. Issue #1367 splits it from {ENVELOPE_DYNAMIC_MARK}, which it used to share: an implicit
+      #   conversion (`to_str`, `to_int`) ignores a refinement, so the `global.*` rules must tell the two apart.
+      #   Every reader that asks whether a surface is rewritten reads both ({.rewritten_surface?}).
       ENVELOPE_MODULE_MARK = :"<module>"
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
+      ENVELOPE_REFINED_MARK = :"<refined>"
+
+      # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a
+      # dynamic rewrite, or a refinement.
+      def self.rewritten_surface?(bucket)
+        bucket.key?(ENVELOPE_DYNAMIC_MARK) || bucket.key?(ENVELOPE_REFINED_MARK)
+      end
 
       # Issue #992 — the class key a WHOLE-PROJECT discovery pass adds to `discovered_parameter_envelopes`
       # (`ScopeIndexer#finalize_def_index`), with an empty bucket. A single file's walk alone — `run_source`,
@@ -163,6 +175,12 @@ module Rigor
         # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
         # round-trips it unchanged.
         discovered_refinements: EMPTY_TABLE,
+        # Issue #1367 — every global variable name an `alias $new $old` statement names, on either side, anywhere in
+        # the project (inside method bodies too). `alias $stdout $out` makes `$stdout` name `$out`'s variable,
+        # setter included, so the `global.*` write rules read a special that any file aliases as exempt. The
+        # project pre-pass seeds the whole project's names and `Inference::ScopeIndexer.index` adds the analysed
+        # file's own. Plain data, so the ADR-85 seed bundle round-trips it unchanged.
+        discovered_global_aliases: EMPTY_NAME_SET,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified

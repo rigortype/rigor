@@ -2099,6 +2099,8 @@ module Rigor
       # nil or define a singleton `===`.
       def seed_program_globals(root, seeded_scope)
         program_globals, census = build_program_global_index(root, seeded_scope)
+        census[:discovered_global_aliases] =
+          union_global_aliases(seeded_scope.discovered_global_aliases, census.delete(:global_aliases))
         seeds = join_declared_globals(program_globals, seeded_scope.environment)
         seeded_scope = seeded_scope.with_discovery(
           seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
@@ -2132,7 +2134,8 @@ module Rigor
       # @return the `program_globals` table and the census, keyed by the discovery index members it fills
       def build_program_global_index(root, default_scope)
         accumulator = {}
-        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false }
+        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false,
+                   global_aliases: Set.new }
         gather_global_writes(root, default_scope, accumulator, census)
         census[:patched_line_readers] = census[:patched_line_readers].freeze
         [accumulator.freeze, census]
@@ -2185,7 +2188,37 @@ module Rigor
         census[:patched_line_readers].merge(readers) if readers
         census[:clears_last_status] ||= LastStatus.clears?(node)
         census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
+        record_global_alias(node, census[:global_aliases]) if node.is_a?(Prism::AliasGlobalVariableNode)
         node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census) }
+      end
+
+      # Issue #1367 — the global variable names an `alias $new $old` names, both sides: after it, `$new` is `$old`'s
+      # variable, setter included. A back-reference or numbered-reference side (`alias $m $&`) names no global the
+      # `global.*` rules check, so it is left out.
+      def record_global_alias(node, names)
+        [node.new_name, node.old_name].each do |side|
+          names << side.name if side.is_a?(Prism::GlobalVariableReadNode)
+        end
+      end
+
+      # Issue #1367 — every global name the `alias` statements anywhere under `root` name ({#record_global_alias}), for
+      # the project pre-pass, which walks each file once for it.
+      def global_alias_names(root)
+        names = Set.new
+        collect_global_aliases(root, names)
+        names.freeze
+      end
+
+      def collect_global_aliases(node, names)
+        record_global_alias(node, names) if node.is_a?(Prism::AliasGlobalVariableNode)
+        node.rigor_each_child { |child| collect_global_aliases(child, names) }
+      end
+
+      # The project's aliased globals with the analysed file's own, answering `seed` itself when the file adds none.
+      def union_global_aliases(seed, file_names)
+        return seed if file_names.empty? || file_names.subset?(seed)
+
+        (seed | file_names).freeze
       end
 
       def record_global_write(node, scope, accumulator)
@@ -6435,14 +6468,14 @@ module Rigor
         end
       end
 
-      # `refine Widget do def f(a, b) … end end` redefines `Widget#f` in every file that says `using`, and this
-      # walk records the block's `def`s on the refining module instead.
+      # `refine Widget do def f(a, b) … end end` redefines `Widget#f` in every file that says `using`, so `Widget`
+      # takes {Scope::DiscoveryIndex::ENVELOPE_REFINED_MARK}; the block's `def`s go to the refinement table.
       def record_refinement(node, qualified_prefix, tables)
         target = node.arguments&.arguments&.first
         return unless target.is_a?(Prism::ConstantReadNode) || target.is_a?(Prism::ConstantPathNode)
 
         constant_receiver_candidates(target, qualified_prefix).each do |name|
-          record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+          record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_REFINED_MARK)
         end
       end
 
@@ -6845,12 +6878,14 @@ module Rigor
       # {#discovered_project_index_incremental}'s changed-file branch) yields the live def nodes the signature
       # reads their parameter structure from. Issue #1120 — and each file's own refinement table, which the merged
       # def-index cannot attribute back to a file, so the session can diff it against the file's seed bundle.
-      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements: }`.
+      # Issue #1367 — and each file's aliased global names, diffed against its seed bundle the same way.
+      # @return `{ def_index:, code_fingerprints:, declaration_signatures:, refinements:, global_aliases: }`.
       def scan_summary_for_paths(paths, buffer: nil)
         acc = new_def_index_accumulator
         code_fingerprints = {}
         declaration_signatures = {}
         refinements = {}
+        global_aliases = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
@@ -6860,11 +6895,12 @@ module Rigor
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
           declaration_signatures[path] = declaration_signature(file_index)
           refinements[path] = file_index[:refinements] if file_index[:refinements]
+          global_aliases[path] = file_index[:global_aliases].to_a unless file_index[:global_aliases].empty?
         rescue StandardError
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
-          declaration_signatures: declaration_signatures, refinements: refinements }
+          declaration_signatures: declaration_signatures, refinements: refinements, global_aliases: global_aliases }
       end
 
       # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level
@@ -7164,9 +7200,14 @@ module Rigor
         # contributes exactly the ranges its cold walk recorded).
         acc[:deferred_ranges].merge!(file_index[:deferred_ranges] || {})
         fold_refinements(acc, file_index[:refinements])
+        # Issue #1367 — a union, so the fold is order-independent; a pre-29 bundle carries no key.
+        acc[:global_aliases].merge(file_index[:global_aliases] || EMPTY_GLOBAL_ALIASES)
         fold_ancestry_tables(acc, file_index)
         fold_constant_tables(acc, file_index)
       end
+
+      EMPTY_GLOBAL_ALIASES = Set.new.freeze
+      private_constant :EMPTY_GLOBAL_ALIASES
 
       # Issue #1120 — a union, so the fold is order-independent and a bundle-served file folds exactly as its live
       # walk would. The slot stays nil until some file refines something (see {#finalize_def_index}).
@@ -7321,7 +7362,9 @@ module Rigor
           deferred_ranges: file_index[:deferred_ranges],
           # Issue #1120 — plain `{String => {Symbol => Array[String]}}` data (nil when the file refines
           # nothing), so the bundle stays Marshal-clean.
-          refinements: file_index[:refinements]
+          refinements: file_index[:refinements],
+          # Issue #1367 — the file's aliased global names, a Set of Symbols, which Marshal round-trips.
+          global_aliases: file_index[:global_aliases]
         }
       end
 
@@ -7358,7 +7401,9 @@ module Rigor
           # rebuild, but default so any in-flight fold stays total.
           deferred_ranges: bundle[:deferred_ranges] || {},
           # Issue #1120 — absent from a pre-28 bundle, which the SCHEMA bump rebuilds cold.
-          refinements: bundle[:refinements]
+          refinements: bundle[:refinements],
+          # Issue #1367 — absent from a pre-29 bundle, which the SCHEMA bump rebuilds cold.
+          global_aliases: bundle[:global_aliases] || EMPTY_GLOBAL_ALIASES
         }
       end
 
@@ -7396,7 +7441,9 @@ module Rigor
           # Issue #722 residue 2 — compact-header re-anchor candidates, adjudicated in {#finalize_def_index}.
           compact_headers: {},
           constant_writes: {},
-          data_member_layouts: {}, struct_member_layouts: {} }
+          data_member_layouts: {}, struct_member_layouts: {},
+          # Issue #1367 — every global name an `alias` statement names, project-wide.
+          global_aliases: Set.new }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
@@ -7429,6 +7476,7 @@ module Rigor
       def finalize_call_surface_tables(acc)
         acc[:parameter_envelopes][Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE] ||= {}
         acc[:refinements] = freeze_refinements(acc[:refinements])
+        acc[:global_aliases] = acc[:global_aliases].freeze
       end
 
       # Removes, per class, the method names that have a project `def` node, leaving only
@@ -7460,6 +7508,7 @@ module Rigor
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         fold_parameter_envelopes(acc, file_envelopes)
         fold_refinements(acc, file_refinements)
+        acc[:global_aliases].merge(global_alias_names(root))
         # Issue #681 — node-identity keyed, so this is a flat union: no two files can contribute the same key.
         acc[:def_nestings].merge!(build_def_nestings(root))
         # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,

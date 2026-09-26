@@ -136,6 +136,18 @@ module Rigor
         moved.freeze
       end
 
+      # Issue #1367 — the global names an `alias` statement gained or lost in any file in `paths`: a `global.*` write
+      # rule records a `global-alias:<name>` edge for the special it checks, because its answer is a function of the
+      # whole project's aliases of that name. `paths` MUST include removed files. `before` / `after` map a path to
+      # that file's aliased names (nil when it aliases nothing).
+      def changed_global_alias_names(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          moved.merge((before[path] || []).to_set ^ (after[path] || []).to_set)
+        end
+        moved.freeze
+      end
+
       def refinement_entries(table)
         entries = Set.new
         table&.each do |refined, methods|

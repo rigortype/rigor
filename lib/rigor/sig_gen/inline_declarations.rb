@@ -11,11 +11,11 @@ module Rigor
     # `.rb` file says, member by member, as `rigor sig-gen` needs it to copy that declaration into `sig/`.
     #
     # Read from the RBS the `rigor-rbs-inline` synthesizer contributed (`RbsLoader#virtual_rbs`), not from the
-    # built environment. The environment is the wrong witness twice over: once `sig/` declares a member, ADR-32
-    # WD13 strips the inline one before the build, so the declaration a stale `sig/` copy should be compared
-    # against is no longer there to read; and a member's origin is only recoverable off its location, which the
-    # ADR-54 environment cache does not keep. The synthesized text is the loader's input, identical on every
-    # run.
+    # built environment. The environment is the wrong witness twice over: once `sig/` declares a member, the
+    # loader stands one of the two down before the build (ADR-112 WD5), so the declaration a stale `sig/` copy
+    # should be compared against may no longer be there to read; and a member's origin is only recoverable off
+    # its location, which the ADR-54 environment cache does not keep. The synthesized text is the loader's input,
+    # identical on every run.
     #
     # A member the synthesizer marks `rigor:v1:inferred-signature` is in the text only because rbs-inline
     # declares every `def` of a file it reads: the author annotated nothing on it, so it is present here

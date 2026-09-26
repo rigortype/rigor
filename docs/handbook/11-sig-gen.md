@@ -216,10 +216,11 @@ ends with. A member annotation you wrote inline, such as
 annotation of its own is proposed exactly as in any other
 file.
 
-Once `sig/` holds the copy, it is the declaration `rigor
-check` reads (the `.rbs` wins over the inline one for the same
-member), and sig-gen compares the two on every run, `attr_*`
-declarations included. They are compared as types, not text:
+Once `sig/` holds the copy, `rigor check` reads it beside the
+inline declaration, and an identical pair is quiet
+([ADR-112](../adr/112-extrbs-comment-channel.md) WD5).
+sig-gen compares the two on every run, `attr_*` declarations
+included. They are compared as types, not text:
 parameter names, spacing, how a union is spelled (`String?`
 and `String | nil`, `Integer | String` and `String |
 Integer`, `bool` and `true | false`) and a leading `::` do

@@ -52,7 +52,7 @@ module Rigor
           summary: "An RBS declaration for this method already exists and was left alone.",
           explanation: "Not a gap. The project already states a type for this member, and sig-gen does not " \
                        "overwrite a hand-authored contract without being told to. Where `sig/` and an inline " \
-                       "annotation both declare the member, `sig/` wins.",
+                       "annotation both declare the member, ADR-112 WD5's consistency rule decides which binds.",
           next_step: "Read the existing declaration. If it disagrees with what Rigor infers, raise the " \
                      "disagreement rather than silently retyping it; pass `--overwrite` only once you have " \
                      "decided the generated type is the better contract."

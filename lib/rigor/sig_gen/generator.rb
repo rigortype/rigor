@@ -927,9 +927,9 @@ module Rigor
       end
 
       # ADR-112 WD4 — a `def` the author declared inline is written from that declaration, as rbs-inline reads it,
-      # not from what the body infers: under ADR-32 WD13 a `sig/` member wins over the inline one, so a line built
-      # from inference (`untyped` parameters, a return the body happens to prove) would silently replace the
-      # contract the author wrote beside the code.
+      # not from what the body infers: `rigor check` reads the `sig/` member beside the inline one (ADR-112 WD5),
+      # so a line built from inference (`untyped` parameters, a return the body happens to prove) would override
+      # or contradict the contract the author wrote beside the code.
       #
       # The one inferred part is a return the author left unwritten (`# @rbs name: String`, no `return:`) —
       # ADR-107's mixed provenance, parameters authored and return generated — filled from the body; a body that

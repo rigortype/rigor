@@ -101,6 +101,14 @@ RSpec.describe "effect.envelope-exceeded over the envelopes fixture" do
       expect(keys(configuration)).not_to include("Envelopes::UserRepository#collect")
     end
 
+    # #1363 — a write to `$_` or `$~` binds only the method's own special-variable slot, and `$@` is the rescued
+    # exception's backtrace; neither is state another frame shares.
+    it "reads a frame-local special-variable write and a `$@` read as no effect under %a{pure}" do
+      expect(keys(configuration)).not_to include(
+        "Envelopes::LastLine#remember", "Envelopes::LastLine#forget_match", "Envelopes::LastLine#rescued_backtrace"
+      )
+    end
+
     it "lets a per-method envelope win over the distributed class-level one" do
       expect(keys(configuration)).not_to include("Envelopes::Console#write")
     end

@@ -95,4 +95,21 @@ module Envelopes
     attr_reader :size
     attr_writer :items
   end
+
+  # Declared `%a{pure}` (#1363). `$_` and `$~` are frame-local: a write binds only this method's
+  # special-variable slot, which no caller can see. `$@` is the backtrace of the exception being rescued,
+  # which no callee can change for its caller.
+  class LastLine
+    def remember(line)
+      $_ = line
+    end
+
+    def forget_match
+      $~ = nil
+    end
+
+    def rescued_backtrace
+      $@
+    end
+  end
 end

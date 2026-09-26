@@ -54,4 +54,15 @@ module Envelopes
 
     attr_writer items: Array[untyped]
   end
+
+  class LastLine
+    %a{pure}
+    def remember: (String line) -> String
+
+    %a{pure}
+    def forget_match: () -> nil
+
+    %a{pure}
+    def rescued_backtrace: () -> Array[String]?
+  end
 end

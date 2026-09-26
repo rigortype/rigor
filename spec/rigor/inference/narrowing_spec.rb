@@ -1620,7 +1620,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect([truthy.global(:$_), falsey.global(:$_)]).to eq([constant_nil, string_t])
     end
 
-    it "binds nothing for a reader it cannot name, an implicit-self one, or a reader's value read another way" do
+    # An implicit-self reader narrows on the evidence a file index gathers (issue #1415), which `reader_scope` lacks.
+    it "binds nothing for a reader it cannot name, an unindexed implicit-self one, or a value read otherwise" do
       ["io.gets", "gets", "self.gets", "$stdin.gets.nil?", "(line = $stdin.gets).nil?", "x"].each do |source|
         truthy, falsey = edges(source)
         expect([truthy.global(:$_), falsey.global(:$_)]).to eq([nil, nil]), source

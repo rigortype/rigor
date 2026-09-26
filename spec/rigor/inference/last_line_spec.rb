@@ -38,14 +38,23 @@ RSpec.describe Rigor::Inference::LastLine do
       end
     end
 
-    # `self` may be any object whose `gets` is Ruby's: a top-level method runs with whatever `self` calls it, `main`
-    # can carry a mixin or a singleton method, and a file can run under a wrapper module or `instance_eval`.
-    it "never names an implicit-self or `self.` reader" do
-      ["gets", "self.gets", "readline", "self.readline"].each do |source|
+    # Issue #1415 (ADR-117 WD5) — an implicit-self or `self.` `gets` is `Kernel`'s, or a reopened `IO`'s, unless the
+    # file shows a `self` whose reader may be Ruby's ({Rigor::Inference::LastLine::ImplicitSelf}). A scope no file
+    # index built carries no such evidence, and declines. An implicit-self `readline` never narrows yet: it never
+    # returns nil, and the scope after its loop still joins the body's entry.
+    it "names an implicit-self or `self.` `gets` on the file's evidence about `self`, and no `readline`" do
+      ["gets", "self.gets"].each do |source|
         expect(described_class.reads_line?(last_statement(source), scope)).to be(false), source
-        expect(reads_line?(source, source.end_with?("readline") ? :readline : :gets)).to be(false), source
+        expect(reads_line?(source)).to be(true), source
+      end
+      ["readline", "self.readline"].each do |source|
+        expect(reads_line?(source, :readline)).to be(false), source
       end
       ["def top = gets", "class IO; def first = gets; end", "[1].each { gets }"].each do |source|
+        expect(reads_line?(source)).to be(true), source
+      end
+      ["include Readline\ngets", "o.instance_exec { gets }", "class W < DelegateClass(File); def f = gets; end",
+       "def self.gets = 'x'\ngets", "gets { }"].each do |source|
         expect(reads_line?(source)).to be(false), source
       end
     end

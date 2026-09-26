@@ -1898,9 +1898,25 @@ module Rigor
       # reads `$!`, `$@` and `$?` unbound, whatever it enters with. It cannot write them, so past the clause they are
       # what it entered with — the scope of a `begin` that finished, the only one the code after it runs from — unless
       # it ran a subprocess itself.
+      #
+      # Issue #1415 — the clause also runs after a `return`, `break` or `next` out of the body, from a scope other than
+      # the one it enters with here, so a bound `$_` reads `Dynamic[top]` in it (`while gets; return $_ if …; end`
+      # ensures with the line, not the loop's `nil`). Past the clause `$_` is what it entered with, but only where the
+      # clause left that `Dynamic[top]` in place and cannot set `$_` itself: a call the statement rules forget `$_` for
+      # (a closure of the frame, `binding`, a forwarded block) leaves it unbound, and the clause's scope then stands.
       def eval_ensure(node)
-        type, after = eval_branch_or_nil(node.statements, scope.forget_error_info.forget_last_status)
+        entry = scope.forget_error_info.forget_last_status
+        line = scope.global(:$_)
+        entry = entry.untyped_last_line if line
+        type, after = eval_branch_or_nil(node.statements, entry)
+        after = after.with_global(:$_, line) if line && last_line_kept?(after, node)
         [type, LastStatus.restore_unless_set(ErrorInfo.restore(after, scope), scope)]
+      end
+
+      # True when the clause's scope `after` still binds `$_` to the `Dynamic[top]` the entry gave it and the clause
+      # holds nothing that may set it ({LastLine.may_set?}).
+      def last_line_kept?(after, node)
+        after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
       end
 
       # `while pred; body; end` / `until pred; body; end`. The body might run zero or more times, so half-bound names

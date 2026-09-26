@@ -813,12 +813,12 @@ RSpec.describe Rigor::Inference::Narrowing do
     it "uses exact matching for instance_of?" do
       numeric = Rigor::Type::Combinator.nominal_of("Numeric")
       bound = scope.with_local(:x, numeric)
-      # `Numeric#instance_of?(Numeric)` could be true (a literal Numeric instance) but `instance_of?(Integer)` requires
-      # the class to be exactly Integer. Under exact matching the truthy edge therefore collapses (we cannot prove it is
-      # Integer-exact from a Nominal[Numeric] alone).
+      # `instance_of?(Integer)` requires the class to be exactly Integer. A truthy answer says the object's class IS
+      # Integer, whatever the receiver was typed, so the truthy edge narrows to Integer rather than collapsing to Bot
+      # (issue #1429: a class guard in the code outranks the inferred Nominal). The falsey edge keeps the entry type.
       pred = parse_predicate("x.instance_of?(Integer)")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
-      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.bot)
+      expect(truthy.local(:x)).to eq(integer_nominal)
       expect(falsey.local(:x)).to eq(numeric)
     end
 

@@ -578,7 +578,11 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/case_when_value_side_shadow.rb — the value side resolves the pattern too" do
     let(:harness) { harness_for("case_when_value_side_shadow") }
 
-    it "types the expression as the arm Ruby takes when the pattern name is shadowed" do
+    # Issue #1429 — the disjoint `when` arm is kept as well (a class guard in the
+    # code outranks the inferred subject type), so the shadowed position types
+    # `"else" | 1`. A pattern resolved to the core `Random` instead would make
+    # the arm certain and type it `1`, which this still catches.
+    it "keeps the arm Ruby takes when the pattern name is shadowed" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end

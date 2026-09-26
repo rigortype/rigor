@@ -1,0 +1,27 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Process.last_status ---
+#
+# CRuby's `process.c` defines `Process.last_status` as a singleton method
+# answering the calling thread's last child status — the object `$?` reads:
+#
+#   rb_define_singleton_method(rb_mProcess, "last_status", proc_s_last_status, 0);
+#
+# It is `nil` until the thread has waited on a child process. Upstream
+# `ruby/rbs` names `::last_status` in `Process`'s doc comment but has never
+# declared it (no commit to `core/process.rbs` through 4.2 adds a `def`), so
+#
+#   system("true")
+#   status = Process.last_status
+#
+# reported `call.undefined-method` on correct code. The return mirrors rbs
+# core's own `$?: Process::Status?`.
+#
+# Unconditional: `Process` and `Process::Status` are rbs core on every
+# supported release. Should an upstream release declare the method, this file
+# MUST be gated off that release through `RbsLoader::RBS_LINE_CORE_OVERLAYS` —
+# a second `def` is a `DuplicatedMethodDefinitionError` that takes `Process`'s
+# whole singleton surface down to `Dynamic[top]`.
+module Process
+  def self.last_status: () -> Process::Status?
+end

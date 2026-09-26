@@ -293,6 +293,18 @@ module Rigor
         closure.freeze
       end
 
+      # Issue #1367 — every file whose last result holds a `global.*` diagnostic re-checks on any recheck. What
+      # exempts such a write is a fact of the whole program — an alias, or a `write` / `to_str` / `to_int` / hatch
+      # defined in any spelling on any receiver, a rewritten ancestor, a mixin — which no name-keyed edge can
+      # follow, so a stale report would outlive the edit that exempts it. Such files are rare, so this costs little.
+      # A file the census silenced is not re-checked when the exemption goes away: that stale answer misses a
+      # report, it never makes one.
+      def global_write_reporters
+        @cache.each_with_object(Set.new) do |(path, diagnostics), reporters|
+          reporters << path if diagnostics.any? { |diagnostic| diagnostic.rule.to_s.start_with?("global.") }
+        end
+      end
+
       # ADR-67 WD6c lift — the seed-invalidated callees' own contribution to the closure: the files
       # themselves, plus — on a pre-slice-4 snapshot with no symbol edges, where the pairs' symbol fan-out
       # found nothing — their file-level dependents (wider, always sound).
@@ -832,7 +844,8 @@ module Rigor
       # a prior missed lookup, and (issue #639) because a class DECLARATION appeared or vanished. Maps each
       # appeared `"ClassName#method"` to the negative-dependency key it would satisfy (`toplevel:foo` for a
       # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
-      # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}).
+      # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}). Issue #1367 —
+      # and every file whose last result holds a `global.*` diagnostic ({#global_write_reporters}).
       def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls, summary = nil)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
@@ -849,7 +862,8 @@ module Rigor
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
-        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary)
+        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary) |
+          global_write_reporters
       end
 
       # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method

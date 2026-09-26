@@ -160,7 +160,8 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
           data_member_layouts: :data_member_layouts_marker,
           struct_member_layouts: :struct_member_layouts_marker,
           deferred_ranges: :deferred_ranges_marker,
-          refinements: :refinements_marker
+          refinements: :refinements_marker,
+          global_write_census: :global_write_census_marker
         }
       }
       pre_passes = build_pre_passes
@@ -189,6 +190,7 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
       expect(discovery.struct_member_layouts).to eq(:struct_member_layouts_marker)
       expect(discovery.discovered_deferred_ranges).to eq(:deferred_ranges_marker)
       expect(discovery.discovered_refinements).to eq(:refinements_marker)
+      expect(discovery.discovered_global_write_census).to eq(:global_write_census_marker)
     end
 
     it "#discover walks the real project once and returns a Discovery whose class table finds a cross-file class" do

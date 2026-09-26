@@ -1377,11 +1377,11 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
-  # Issue #1429 (ADR-117 Decision point 3) — a class guard protects the call it guards on a global, constant or local
-  # receiver typed by a class the guard names as outside it; truthiness, `nil?`, `!` and `&.` narrow a global or
-  # constant read; `respond_to?(:m)` admits `m`; and a guard's narrowing of a global or constant is restored where code
-  # may run that rebinds it. Each entry runs as `rigor check` runs a project (`analyze(files:)`), so the file's own
-  # methods are discovered, and each carries its own global writes.
+  # Issue #1429 (ADR-117 Decision point 3) — class guards, truthiness, `nil?`, `!` and `&.` narrow a global or constant
+  # read as they narrow a local; a class guard disjoint from an inferred `Nominal` reads the receiver as `bot` without
+  # reporting its clause unreachable; `respond_to?(:m)` admits `m`; and a guard's narrowing of a global or constant is
+  # restored where code may run that rebinds it. Each entry runs as `rigor check` runs a project (`analyze(files:)`), so
+  # the file's own methods are discovered, and each carries its own global writes.
   describe "fixtures/global_constant_guards/ — class guards and truthiness on global and constant receivers (#1429)",
            type: :runner do
     # The number of `# QUIET-1429` lines each entry carries.
@@ -1422,6 +1422,66 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result.diagnostics.map(&:rule).map(&:to_s)).not_to include("flow.unreachable-clause")
         expect(source.lines.count { |line| line.include?("# QUIET-1429") }).to eq(quiet)
       end
+    end
+  end
+
+  describe "fixtures/special_global_writes/ — a write the special's setter rejects (#1367)", type: :runner do
+    # The number of `# QUIET-1367` lines each entry carries.
+    quiet_counts = {
+      "setter_rejections.rb" => 19, "non_literal_writers.rb" => 3, "special_aliases.rb" => 2,
+      "refined_literals.rb" => 3, "refined_definitions.rb" => 2, "refined_hatches.rb" => 0,
+      "refined_computed_target.rb" => 1, "refined_aliased_target.rb" => 1
+    }.freeze
+
+    def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
+
+    # Every 1-indexed line of `source` whose comment carries `# FIRES-1367 <rule>`, with that rule.
+    def fired_lines(source)
+      source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1367 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+    end
+
+    # Must-fire and must-stay-quiet in one assertion: comparing the exact `[line, rule]` set keeps the quiet half
+    # from passing because a rule stopped firing at all. Each firing line's comment quotes the error Ruby raises.
+    quiet_counts.each do |entry, quiet|
+      it "reports exactly the marked writes in #{entry}, and marks #{quiet} quiet lines" do
+        source = fixture_source(entry)
+        reported = analyze(source).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+        expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+        expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(quiet)
+      end
+    end
+
+    # A name literal the census cannot read must not fail the file. Every diagnostic is compared, not only the
+    # `global.*` ones, so an internal analyzer error in place of the file's findings fails the example.
+    it "analyses a file whose name literals are not valid UTF-8, and reports exactly the marked lines" do
+      source = fixture_source("invalid_names.rb")
+      reported = analyze(source).diagnostics.reject { |d| d.severity == :info }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+      expect(fired_lines(source).map(&:last)).to include("call.undefined-method")
+      expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
+    end
+
+    # An alias in one file exempts the special in every other: `cross_file/writes.rb` runs after `aliases.rb`.
+    it "exempts a special that another project file aliases, on either side" do
+      files = %w[aliases.rb writes.rb].to_h { |name| [name, fixture_source("cross_file/#{name}")] }
+      reported = analyze(files: files).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+      expect(reported.map { |d| [File.basename(d.path.to_s), d.line, d.rule.to_s] }.sort)
+        .to eq(fired_lines(files.fetch("writes.rb")).map { |line, rule| ["writes.rb", line, rule] })
+      expect(files.fetch("writes.rb").lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
+    end
+
+    # A `pre_eval:` patch outside the analysed `paths:` is loaded ahead of the code, so its aliases exempt too.
+    it "exempts a special that a `pre_eval:` file aliases" do
+      files = { "patches/aliases.rb" => fixture_source("pre_eval/patches/aliases.rb"),
+                "lib/writes.rb" => fixture_source("pre_eval/lib/writes.rb") }
+      config = { "paths" => ["lib"], "pre_eval" => ["patches/aliases.rb"] }
+      reported = analyze(files: files, config: config).diagnostics.select { |d| d.rule.to_s.start_with?("global.") }
+      expect(reported.map { |d| [File.basename(d.path.to_s), d.line, d.rule.to_s] }.sort)
+        .to eq(fired_lines(files.fetch("lib/writes.rb")).map { |line, rule| ["writes.rb", line, rule] })
+      expect(files.fetch("lib/writes.rb").lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
     end
   end
 

@@ -27,6 +27,7 @@ require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 require_relative "check_rules/source_arity"
 require_relative "check_rules/lexical_method_sites"
+require_relative "check_rules/special_global_setters"
 
 module Rigor
   module Analysis
@@ -150,6 +151,8 @@ module Rigor
           ].compact
         when Prism::IfNode, Prism::UnlessNode
           [unreachable_branch_diagnostic(path, node, scope_index)].compact
+        when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::MultiWriteNode
+          special_global_write_diagnostics(path, node, scope_index, lexical_sites)
         else
           []
         end
@@ -2365,6 +2368,200 @@ module Rigor
                      "`#exception' — this raises TypeError at runtime",
             severity: :error,
             method_name: call_node.name.to_s
+          )
+        end
+
+        # Issue #1367 (ADR-117 Decision point 1, WD2) — `global.write-type-mismatch` and `global.readonly-write`: a
+        # write to a special global that the interpreter's setter rejects, so the write raises every time it runs.
+        # The envelope is {SpecialGlobalSetters}: the setter, not the global's RBS declaration.
+        #
+        # - `global.readonly-write` needs no type. `$g = v`, `$g op= v` and a target of a multiple assignment
+        #   (`$g, x = …`, `*$g`) always write, so a write to a read-only special raises.
+        # - `global.write-type-mismatch` checks `$g = v` only when `v` is a literal node
+        #   ({SpecialGlobalSetters.literal_class}), whose class the syntax fixes. Any other value is never reported,
+        #   whatever its inferred type: a class RBS declares without `write` or `to_str` does not prove the object
+        #   lacks it (a singleton `def`, an `extend`, or a run-time `alias to_str to_s`, as URI has).
+        # - `$g ||= v` and `$g &&= v` write only when the current value is falsy (truthy), so neither rule checks
+        #   them, nor a `for` index or a `rescue => $g` reference.
+        # - A special that any project file aliases (`alias $stdout $out`, either side) is exempt from both.
+        def special_global_write_diagnostics(path, node, scope_index, lexical_sites)
+          case node
+          when Prism::GlobalVariableWriteNode
+            [readonly_global_write_diagnostic(path, node, scope_index) ||
+              global_write_type_diagnostic(path, node, scope_index, lexical_sites)].compact
+          when Prism::GlobalVariableOperatorWriteNode
+            [readonly_global_write_diagnostic(path, node, scope_index)].compact
+          when Prism::MultiWriteNode
+            multi_write_global_targets(node).filter_map do |target|
+              readonly_global_write_diagnostic(path, target, scope_index)
+            end
+          else
+            []
+          end
+        end
+
+        # The `GlobalVariableTargetNode`s a multiple assignment writes, through a splat (`*$g`) and nested
+        # destructuring (`(a, $g), b = …`).
+        def multi_write_global_targets(node)
+          [*node.lefts, node.rest, *node.rights].flat_map do |target|
+            case target
+            when Prism::GlobalVariableTargetNode then [target]
+            when Prism::SplatNode
+              target.expression.is_a?(Prism::GlobalVariableTargetNode) ? [target.expression] : []
+            when Prism::MultiTargetNode then multi_write_global_targets(target)
+            else []
+            end
+          end
+        end
+
+        def readonly_global_write_diagnostic(path, node, scope_index)
+          return nil unless SpecialGlobalSetters.read_only?(node.name)
+
+          scope = scope_index[node]
+          return nil if scope.nil? || global_aliased?(scope, node.name)
+
+          location = node.respond_to?(:name_loc) ? node.name_loc : node.location
+          Diagnostic.from_location(
+            location,
+            rule: RULE_GLOBAL_READONLY_WRITE,
+            path: path,
+            message: "`#{node.name}' is a read-only variable; this write raises NameError at runtime",
+            severity: :error
+          )
+        end
+
+        def global_write_type_diagnostic(path, node, scope_index, lexical_sites)
+          contract = SpecialGlobalSetters.contract_for(node.name)
+          return nil if contract.nil?
+
+          class_name = SpecialGlobalSetters.literal_class(node.value)
+          return nil if class_name.nil?
+
+          scope = scope_index[node]
+          return nil if scope.nil?
+          return nil unless literal_rejected?(class_name, contract, node, scope, lexical_sites)
+          return nil if global_aliased?(scope, node.name)
+
+          build_global_write_type_diagnostic(path, node, contract, class_name)
+        end
+
+        # The project's {Inference::GlobalWriteCensus} with the `pre_eval:` files' own.
+        def global_write_census(scope)
+          census = scope.discovered_global_write_census
+          pre_eval = scope.environment&.project_patched_methods&.write_census
+          pre_eval.nil? || pre_eval.empty? ? census : census | pre_eval
+        end
+
+        # Whether any project or `pre_eval:` file aliases `name`, on either side, which can make it another variable.
+        def global_aliased?(scope, name)
+          Inference::GlobalWriteCensus.aliased?(global_write_census(scope), name)
+        end
+
+        # A literal is rejected when its class is none the setter takes and, for a setter that also converts
+        # (`to_str`, `to_int`) or asks for `write`, the literal's object cannot answer that method.
+        def literal_rejected?(class_name, contract, node, scope, lexical_sites)
+          return false if contract.accepts_class?(class_name)
+          return true if contract.conversion.nil?
+
+          !literal_may_answer?(class_name, contract.conversion, node, scope, lexical_sites)
+        end
+
+        # The escape hatches through which an object answers a method its class does not define: the setter's
+        # `respond_to?` and implicit conversion both consult them.
+        GLOBAL_WRITE_HATCHES = %i[method_missing respond_to_missing? respond_to?].freeze
+        private_constant :GLOBAL_WRITE_HATCHES
+
+        # Where RBS core declares the hatches every object inherits unchanged.
+        DEFAULT_HATCH_OWNERS = %w[::BasicObject ::Kernel ::Object].freeze
+        private_constant :DEFAULT_HATCH_OWNERS
+
+        # Whether the literal's object may answer `method_name` after all:
+        #
+        # - RBS gives its class the method, or a hatch of its own (a project `sig/` reopening or `include` counts);
+        # - the program defines the method or a hatch anywhere, in any spelling, on any receiver
+        #   ({Inference::GlobalWriteCensus}): no census of where a definition lands can be complete
+        #   (`class << nil`, `K = Integer; class K`, `[Integer].each { |k| k.define_method(:write) }`);
+        # - an ancestor's surface is rewritten from outside (`Integer.include(M)`, `Object.include(M)`, a string
+        #   `class_eval`: the `ENVELOPE_DYNAMIC_MARK`), or it or `Object` mixes in a module RBS does not rule out;
+        # - for `write` only, a refinement that may add it is in effect at the write ({#refined_writer_in_effect?}).
+        def literal_may_answer?(class_name, method_name, node, scope, lexical_sites)
+          definition = Rigor::Reflection.instance_definition(class_name, scope: scope)
+          return true if definition.nil?
+          return true if definition.methods.key?(method_name) || overridden_hatch?(definition)
+
+          ancestors = definition.ancestors.ancestors.to_set { |ancestor| ancestor.name.to_s.delete_prefix("::") }
+          names = [method_name, *GLOBAL_WRITE_HATCHES]
+          census = global_write_census(scope)
+          program_may_answer?(ancestors, names, census, scope) ||
+            (method_name == :write && refined_writer_in_effect?(census, node, lexical_sites))
+        end
+
+        def overridden_hatch?(definition)
+          GLOBAL_WRITE_HATCHES.any? do |name|
+            method = definition.methods[name]
+            method && !DEFAULT_HATCH_OWNERS.include?(method.defined_in.to_s)
+          end
+        end
+
+        def program_may_answer?(ancestors, names, census, scope)
+          return true if Inference::GlobalWriteCensus.defines_any_of?(census, names)
+
+          dynamic_mark = Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK
+          return true if ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(dynamic_mark) }
+
+          main_mixins = Inference::GlobalWriteCensus.main_mixins(census)
+          main_mixins.any? { |mixin| rbs_mixin_may_answer?(mixin, names, scope) } ||
+            mixin_may_answer?(ancestors, names, scope)
+        end
+
+        # A module an ancestor of the literal's class mixes in through a class body (`class Integer; include
+        # Writable; end`), followed through the modules it mixes in in turn. A project module answers when its
+        # surface is rewritten beyond literal names (a `send(:include, …)`, a non-constant mixin); its literal
+        # definitions are the census's. Any other module answers when RBS does not know it or declares one of
+        # `names`.
+        def mixin_may_answer?(ancestors, names, scope)
+          queue = ancestors.flat_map { |owner| scope.includes_of(owner) }
+          seen = Set.new
+          until queue.empty?
+            mixin = queue.shift
+            next unless seen.add?(mixin)
+
+            bucket = scope.parameter_envelopes_of(mixin)
+            if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
+              return true if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
+
+              queue.concat(scope.includes_of(mixin))
+            elsif rbs_mixin_may_answer?(mixin, names, scope)
+              return true
+            end
+          end
+          false
+        end
+
+        def rbs_mixin_may_answer?(mixin, names, scope)
+          definition = Rigor::Reflection.instance_definition(mixin, scope: scope)
+          definition.nil? || definition.methods.key?(names.first) || overridden_hatch?(definition)
+        end
+
+        # For `write` only: some refinement may add `write` (a `def`, `define_method` or `alias_method` in a `refine`
+        # block, or an `import_methods`), and a `using` is in effect at the write. Which class it refines is not asked:
+        # the target may be computed (`[Array].each { |k| refine(k) { … } }`) or a constant alias (`T = Array;
+        # refine(T)`), so a refined `write` on any class declines every literal. `respond_to?(:write)` honours an
+        # active refinement on Ruby 4.0.5; a refined `respond_to_missing?` or `respond_to?`, and every implicit
+        # conversion, do not, so a refinement that adds only those leaves the write reported.
+        def refined_writer_in_effect?(census, node, lexical_sites)
+          Inference::GlobalWriteCensus.refines_write?(census) &&
+            (lexical_sites.nil? || lexical_sites.using_in_effect?(node))
+        end
+
+        def build_global_write_type_diagnostic(path, node, contract, class_name)
+          Diagnostic.from_name_loc(
+            node,
+            rule: RULE_GLOBAL_WRITE_TYPE_MISMATCH,
+            path: path,
+            message: "`#{node.name}' accepts only #{contract.accepts}; this write assigns " \
+                     "#{SpecialGlobalSetters.literal_description(class_name)}, which raises TypeError at runtime",
+            severity: :error
           )
         end
 

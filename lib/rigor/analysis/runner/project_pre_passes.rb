@@ -57,8 +57,8 @@ module Rigor
           :discovered_singleton_def_nodes, :discovered_def_sources, :discovered_singleton_def_sources,
           :discovered_superclasses, :discovered_header_nestings, :discovered_includes, :discovered_prepends,
           :discovered_extends, :discovered_class_sources, :constant_values, :constant_sources, :constant_writes,
-          :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes,
-          :data_member_layouts, :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements
+          :discovered_method_visibilities, :discovered_methods, :discovered_parameter_envelopes, :data_member_layouts,
+          :struct_member_layouts, :discovered_deferred_ranges, :discovered_refinements, :discovered_global_write_census
         )
 
         # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
@@ -175,8 +175,7 @@ module Rigor
             discovered_extends: def_index.fetch(:extends),
             discovered_class_sources: def_index.fetch(:class_sources),
             # Issue #644 — the cross-file value-constant publication table and its write attribution.
-            constant_values: def_index.fetch(:constant_values),
-            constant_sources: def_index.fetch(:constant_sources),
+            constant_values: def_index.fetch(:constant_values), constant_sources: def_index.fetch(:constant_sources),
             constant_writes: def_index.fetch(:constant_writes),
             discovered_method_visibilities: def_index.fetch(:method_visibilities),
             discovered_methods: def_index.fetch(:methods),
@@ -186,7 +185,8 @@ module Rigor
             # Issue #1097 — per-file def / block / lambda body ranges, the execution-timing table the
             # `*_def_shadows_call?` predicates order `sig`-shadowing defs against.
             discovered_deferred_ranges: def_index.fetch(:deferred_ranges),
-            discovered_refinements: def_index.fetch(:refinements) # Issue #1120
+            discovered_refinements: def_index.fetch(:refinements), # Issue #1120
+            discovered_global_write_census: def_index.fetch(:global_write_census) # Issue #1367
           )
         end
 

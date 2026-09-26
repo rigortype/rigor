@@ -105,11 +105,14 @@ RSpec.describe "special global writes", type: :runner do
   end
 
   describe "values the rules cannot prove rejected (silent)" do
+    # A class or module object is judged by its singleton surface, which the rules do not read (`IO.write` exists,
+    # so Ruby takes `$stdout = IO`), so they decline every one: `$stdout = Time` raises, yet stays silent.
     it "stays silent on Dynamic, a union with an accepted member, and a class or module object" do
       source = <<~RUBY
         def dynamic(v) = ($stdout = v)
         def union(c) = ($/ = c ? 1 : "\\n")
         $stdout = IO
+        $stdout = Time
         $0 = String
         $stdout = Comparable
       RUBY
@@ -126,6 +129,20 @@ RSpec.describe "special global writes", type: :runner do
       expect(fired(source)).to be_empty
     end
 
+    # A project `sig/` may declare a class without the superclass its source gives it; RBS then orders it apart from
+    # String although Ruby takes it. A class only the project's `sig/` declares is read the same way.
+    it "stays silent on a class the project declares, whose ancestry its sig/ may omit" do
+      sig = { "sep.rbs" => "class Separator\nend\nclass Generated\nend\n" }
+      source = <<~RUBY
+        class Separator < String
+        end
+        $/ = Separator.new(",")
+        $/ = Generated.new
+      RUBY
+      diagnostics = analyze(source, sig: sig).diagnostics
+      expect(diagnostics.select { |d| d.rule.to_s.start_with?("global.") }).to be_empty
+    end
+
     it "stays silent on a delegator, which answers `write` through method_missing" do
       expect(fired(%(require "delegate"\n$stdout = SimpleDelegator.new(1)\n))).to be_empty
     end
@@ -140,7 +157,14 @@ RSpec.describe "special global writes", type: :runner do
           def restore = ($stdout = @out)
         end
 
-        $/ = $VERBOSE
+        $VERBOSE = true
+        def separator = ($/ = $VERBOSE)
+        def parenthesised_separator = ($/ = ($VERBOSE))
+
+        def copied_separator
+          verbose = $VERBOSE
+          $/ = verbose
+        end
       RUBY
       expect(fired(source)).to be_empty
     end
@@ -163,6 +187,15 @@ RSpec.describe "special global writes", type: :runner do
 
     it "stays silent when the project reopens the value's class" do
       expect(fired("class Integer\n  def write(*) = 0\nend\n$stdout = 1\n")).to be_empty
+    end
+
+    it "stays silent when another project file gives every object the hatch" do
+      files = {
+        "patch.rb" => "class Object\n  def method_missing(*) = 0\nend\n",
+        "main.rb" => "$0 = 1\n$stdout = :sym\n"
+      }
+      diagnostics = analyze(files: files).diagnostics
+      expect(diagnostics.select { |d| d.rule.to_s.start_with?("global.") }).to be_empty
     end
 
     it "judges a literal by its own class, but a nominal value, which may be a subclass, by any project `write`" do

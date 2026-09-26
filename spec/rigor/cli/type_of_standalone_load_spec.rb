@@ -17,7 +17,7 @@ RSpec.describe "rigor type-of in a fresh process" do
 
       expect(stderr).not_to include("NameError")
       expect(status.exitstatus).to eq(0)
-      expect(stdout).to include("1")
+      expect(stdout).to match(/^type:\s+1$/)
     end
   end
 end

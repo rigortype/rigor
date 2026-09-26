@@ -140,8 +140,8 @@ module Rigor
       attr_reader clears_last_status: bool
       # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class.
       attr_reader defines_case_equality: bool
-      # sig-gen gap: #1150 — `Data.define` members carry no type, as for every other row in this class. The value is an
-      # `Inference::LastLine::SelfEvidence`, which no signature declares.
+      # `untyped`: the value is an `Inference::LastLine::SelfEvidence` (or nil), and that class carries no signature,
+      # as `Inference::MatchRebinding::Frame` carries none for `match_frame`.
       attr_reader implicit_self_evidence: untyped
 
       EMPTY: DiscoveryIndex

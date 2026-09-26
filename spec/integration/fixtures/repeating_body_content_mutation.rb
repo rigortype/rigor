@@ -124,6 +124,31 @@ def state_machine(io)
   end
 end
 
+# --- The Hash redmine's git log reader rebinds per commit and stores every
+# field into: its entry floors to a bare `Hash`, not the element types one
+# pass stored (`String | Array[String]`), which a `String` parameter
+# (`Time.parse` in redmine) rejects. ---
+def commit_reader(io)
+  changeset = {}
+  state = 0
+  io.each_line do |line|
+    assert_type("Hash[Dynamic[top], Dynamic[top]]", changeset)
+    if line =~ /^commit (\w+)( \w+)?$/
+      parents_str = $2
+      if state == 1
+        state = 0
+        puts ENV.fetch(changeset[:date])
+        changeset = {}
+      end
+      changeset[:commit] = $1
+      changeset[:parents] = parents_str.strip.split(" ") unless parents_str.nil?
+    elsif line =~ /^(\w+):\s*(.*)$/
+      changeset[:date] = $2
+      state = 1
+    end
+  end
+end
+
 # --- Control: a rebound counter enters as `Integer`, not as a gradual
 # type, so a method no pass could answer still reports. ---
 def counter_read_before_rebind(items)
@@ -135,16 +160,41 @@ def counter_read_before_rebind(items)
   end
 end
 
-# --- Control: the same for a rebound String. ---
+# --- Control: the same for a rebound String. (`i.to_s` on an untyped `i`
+# would be `Dynamic[top]`, and the entry would join it; an interpolation is
+# a `String` whatever `i` is.) ---
 def name_read_before_rebind(items)
   name = "x"
   items.each do |i|
     name.no_such_method # STILL-REPORTED
-    name = i.to_s
+    name = "#{i}!"
   end
 end
 
-# --- Control: an implicit-self iterator in an `Enumerable` class. ---
+# --- A local the body rebinds to another class enters as the union, so a
+# read that only later passes make, on the class they store, does not
+# report on the first pass's `Integer`. ---
+def rebinds_to_another_class(items)
+  n = 0
+  items.each do |i|
+    assert_type("Integer | String", n)
+    puts n.upcase unless n == 0
+    n = "#{i}!"
+  end
+end
+
+# --- The same behind a class guard. ---
+def rebinds_behind_a_guard(items)
+  last = 0
+  items.each do |i|
+    puts last.abs if last.is_a?(Integer)
+    last = i.to_s
+  end
+end
+
+# --- Control: an implicit-self iterator in an `Enumerable` class. Its
+# element is untyped (the class declares none), so the rebind stores a
+# value of the seed's class, which keeps the entry one class. ---
 class Tree
   include Enumerable
 
@@ -155,9 +205,9 @@ class Tree
 
   def prev_read_before_rebind
     prev = 0
-    each_with_index do |x, _i|
+    each_with_index do |_x, _i|
       prev.upcase # STILL-REPORTED
-      prev = x
+      prev = prev.succ
     end
   end
 end

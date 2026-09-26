@@ -4820,34 +4820,60 @@ module Rigor
       # The binding each outer local or ivar the body rebinds ({CapturedLocals.writes}) enters a repeating call's
       # body with when the write-back will not run its passes for it ({#write_back_block_captures} reaches only an
       # explicit receiver classified `:non_escaping`). The call-site binding is what the first pass reads; a later
-      # pass reads what an earlier one stored, and no pass types that here, so the seed is loosened
-      # ({#unproven_rebind_binding}). A call the write-back reaches answers none: its fixpoint
-      # enters every pass it records at the converged binding.
+      # pass reads what an earlier one stored, so the entry is loosened to cover both ({#unproven_rebind_binding}).
+      # A call the write-back reaches answers none: its fixpoint enters every pass it records at the converged
+      # binding.
       def unproven_rebind_bindings(call_node, block, classification)
         return NO_CAPTURE_BINDINGS if call_node.receiver && classification == :non_escaping
 
         names = CapturedLocals.writes(block, scope, ivars: true)
         return NO_CAPTURE_BINDINGS if names.empty?
 
-        names.each_with_object({}) do |name, acc|
+        seeds = names.each_with_object({}) do |name, acc|
           seed = CapturedLocals.bound_type(scope, name)
-          acc[name] = unproven_rebind_binding(seed) unless seed.nil?
+          acc[name] = seed unless seed.nil?
         end
+        exits = (first_pass_exits(call_node, block, seeds) if seeds.any? { |_name, seed| !sentinel_seed?(seed) })
+        exits ||= NO_CAPTURE_BINDINGS
+        stored = block_content_mutations(block)
+        seeds.to_h { |name, seed| [name, unproven_rebind_binding(seed, exits[name], stored: stored.key?(name))] }
+      end
+
+      # The binding each of `seeds` leaves one unrecorded pass with, entered as the statement pass enters without
+      # this rule — so the pass is the block's first run. nil when the pass fails, which the caller reads as "the
+      # body may store anything".
+      def first_pass_exits(call_node, block, seeds)
+        entry = narrow_define_method_block_self(call_node, block_pass_entry(call_node, block, NO_CAPTURE_BINDINGS))
+        _type, exit_scope = sub_eval(block, entry, **UNRECORDED)
+        seeds.to_h { |name, _seed| [name, CapturedLocals.bound_type(exit_scope, name)] }
+      rescue StandardError
+        nil
       end
 
       # A sentinel seed — `nil` or `false`, alone or as a union of the two — is a placeholder the body replaces
       # before the reads it guards (`names = nil; io.each_line { |l| if state == :start; names = {}; else names[l]
       # = true; end }`), so its entry is joined with `Dynamic[top]`: nothing says what replaced it. Any other seed
-      # enters widened past its value pins, a literal collection floored to its bare carrier
-      # (`UnknownStoreWidening.literal_floor`), so `count = 0` enters as `Integer` and `name = "x"` as `String`. The
-      # widened type contains the seed and stays one type rather than a union with it, since an undefined-method
-      # report needs a single receiver: a read no pass could answer — `count.upcase`, `name.no_such_method` —
-      # still reports, while a comparison only the first pass's value decides (`mode == :body` against `mode =
-      # :start`) no longer folds. A rebind to another class is not seen, as it was not before.
-      def unproven_rebind_binding(seed)
-        return Type::Combinator.union(seed, Type::Combinator.untyped) if sentinel_seed?(seed)
+      # enters as the seed joined with what the block's first run leaves the name bound to (`exit`, from
+      # {#first_pass_exits}), widened past its value pins with a literal collection floored to its bare carrier
+      # (`UnknownStoreWidening.literal_floor`). When both widen to one class the entry is that class — `count = 0 …
+      # count += 1` enters as `Integer`, `name = "x" … name = i.to_s` as `String` — so a read no pass could answer
+      # (`count.upcase`, `name.no_such_method`) still reports; an undefined-method report needs a single receiver.
+      # When the body rebinds the name to another class the entry is the union (`n = 0 … n = i.to_s` enters as
+      # `Integer | String`), so `puts n.upcase unless n == 0`, which later passes answer, does not report. A
+      # comparison only the first pass's value decides (`mode == :body` against `mode = :start`) no longer folds.
+      # Without an exit (the pass failed) the seed takes the sentinel's gradual arm.
+      #
+      # A name the body also mutates in place (`stored:`) floors every collection it can hold to its bare carrier
+      # (`UnknownStoreWidening.content_floor`), a precise nominal included: the exit's element types are what one
+      # pass stored, and later passes store values nothing typed. Without it redmine's git log reader, which
+      # rebinds `changeset = {}` per commit and stores `:date`, `:parents` and the rest into it, read
+      # `changeset[:date]` as `String | Array[String]` and reported `Time.parse(changeset[:date])`.
+      def unproven_rebind_binding(seed, exit, stored:)
+        return Type::Combinator.union(seed, Type::Combinator.untyped) if sentinel_seed?(seed) || exit.nil?
 
-        Type::Combinator.widen_value_pinned(UnknownStoreWidening.literal_floor(seed))
+        joined = Type::Combinator.union(seed, exit)
+        floored = stored ? UnknownStoreWidening.content_floor(joined) : UnknownStoreWidening.literal_floor(joined)
+        Type::Combinator.widen_value_pinned(floored)
       end
 
       def sentinel_seed?(type)

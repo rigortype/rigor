@@ -1220,7 +1220,7 @@ RSpec.describe "Rigor type construction (integration)" do
     # The defensive reads stay quiet, and the dead tail after the loop is the one report the narrowing earns. The exact
     # `[line, rule]` set keeps the quiet half from passing because the rule stopped firing at all.
     it "reports only the marked dead condition, and nothing on the marked defensive reads" do
-      expect(marked_lines(harness, "# QUIET-1415").size).to eq(11)
+      expect(marked_lines(harness, "# QUIET-1415").size).to eq(12)
       fired = harness.source.lines.each_with_index.filter_map do |line, i|
         rule = line[/# FIRES-1415 (\S+)/, 1]
         [i + 1, rule] if rule
@@ -1242,6 +1242,7 @@ RSpec.describe "Rigor type construction (integration)" do
       self_mixin_kernel.rb self_mixin_basic_object.rb self_reader_def.rb self_reader_singleton_method.rb
       self_reader_delegator.rb self_proc_rebinder.rb self_send_define_method.rb self_method_object_extend.rb
       self_method_object_include.rb self_method_object_instance_exec.rb self_core_prepend.rb self_module_include.rb
+      self_ensure_binding.rb
     ].freeze
 
     def entry_source(name) = File.read(File.join(__dir__, "fixtures/lastline_self_evidence", name))
@@ -1249,7 +1250,8 @@ RSpec.describe "Rigor type construction (integration)" do
 
     entries.then do |names|
       it "covers every entry in the directory" do
-        listed = Dir.children(File.join(__dir__, "fixtures/lastline_self_evidence")) - ["ruby_line_reader.rb"]
+        dir = File.join(__dir__, "fixtures/lastline_self_evidence")
+        listed = Dir.children(dir).select { |entry| File.file?(File.join(dir, entry)) } - ["ruby_line_reader.rb"]
         expect(listed.sort).to eq(names.sort)
       end
     end
@@ -1267,6 +1269,18 @@ RSpec.describe "Rigor type construction (integration)" do
       source = entry_source("self_mixin_include.rb").gsub('assert_type("Dynamic[top]", $_)',
                                                           'assert_type("String", $_)')
       expect(mismatches(analyze(source)).size).to eq(2)
+    end
+
+    # A constant write in another file spells its path relative to the module it is written in, and the census
+    # keeps it so: each class the writer makes, reopens and subclasses declines in the reader.
+    it "declines a class another file makes by a relative-path constant write" do
+      dir = File.join(__dir__, "fixtures/lastline_self_evidence/relative_constant")
+      files = %w[relative_constant_writer.rb relative_constant_reader.rb].to_h do |name|
+        [name, File.read(File.join(dir, name))]
+      end
+      expect(files["relative_constant_reader.rb"]).to include('assert_type("Dynamic[top]", $_)')
+        .and include('assert_type("String", $_)')
+      expect(mismatches(analyze(files: files))).to be_empty
     end
 
     it "runs the main fixture through the runner with the default libraries loaded" do

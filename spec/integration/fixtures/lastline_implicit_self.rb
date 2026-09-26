@@ -116,9 +116,10 @@ end
 # An ancestry that may hold a Ruby reader declines. `DelegateClass(File)` builds `gets` as a Ruby forwarder, which sets
 # the forwarder's `$_` (Ruby: nil); so do `Tempfile`'s forwarders (Ruby: nil); `CSV#gets` and `#readline` are aliases
 # of its Ruby `shift` (Ruby: nil on both); a superclass or mixin the analysis cannot resolve may be a gem's Ruby reader
-# (Ruby with `RubyReaderClass` or `RubyReader`: nil); `OpenSSL::Buffering` and `Reline`, whose RBS this analysis does
-# not load, define theirs in Ruby (Ruby: nil); and a `BasicObject` or `SimpleDelegator` subclass has no `Kernel` reader
-# (Ruby: `NameError`, and nil through the delegate's forwarder).
+# (Ruby with `RubyReaderClass` or `RubyReader`: nil); `OpenSSL::Buffering`, whose RBS this analysis does not load,
+# defines its reader in Ruby (Ruby: nil), and `Reline`, which it does not load either, is a mixin it cannot resolve
+# (Ruby: the line, since `Reline`'s Ruby reader is `readline`; declined all the same); and a `BasicObject` or
+# `SimpleDelegator` subclass has no `Kernel` reader (Ruby: `NameError`, and nil through the delegate's forwarder).
 class DelegatedSource < DelegateClass(File)
   def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
 end
@@ -129,12 +130,7 @@ end
 
 class CsvSource < CSV
   def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
-
-  def second
-    Rigor::Testing.assert_type("Dynamic[top]", $_) while readline
-  rescue EOFError
-    nil
-  end
+  def second = (Rigor::Testing.assert_type("Dynamic[top]", $_) if self.gets)
 end
 
 class GemSource < RubyReaderClass
@@ -156,11 +152,7 @@ end
 class PromptSource
   include Reline
 
-  def first
-    Rigor::Testing.assert_type("Dynamic[top]", $_) while readline
-  rescue EOFError
-    nil
-  end
+  def first = (Rigor::Testing.assert_type("Dynamic[top]", $_) if gets)
 end
 
 class ProxySource < BasicObject
@@ -391,7 +383,29 @@ def quiet_ensure
   nil
 ensure
   Rigor::Testing.assert_type("Dynamic[top]", $_)
-  warn "stopped at nil" if $_ # QUIET-1415
+  warn "stopped at #{$_.inspect}" if $_ # QUIET-1415
+end
+
+# An `ensure` clause keeps what a call the statement rules forget `$_` for did: `fire` runs a lambda of this frame,
+# which may read a line into the frame's `$_` (Ruby 4.0.5 with "a\n" on standard input: the lambda reads nil, so
+# `run` prints "NONE"). So `$_` stays unbound past the clause, and the `ensure`'s entry binding is not put back
+# (`lastline_self_evidence/self_ensure_binding.rb` hands out `binding` the same way).
+class HookedJob
+  def run
+    @hook = -> { $stdin.gets }
+    if $stdin.gets
+      begin
+        1
+      ensure
+        fire
+      end
+      Rigor::Testing.assert_type("Dynamic[top]", $_)
+      x = $_ ? 1 : "none"
+      puts x.upcase # QUIET-1415
+    end
+  end
+
+  def fire = @hook.call
 end
 
 # A report the narrowing earns (ADR-117 Decision 4): after the loop `$_` is nil, so the tail never prints (Ruby: nil).

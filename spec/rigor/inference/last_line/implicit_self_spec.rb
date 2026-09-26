@@ -39,7 +39,7 @@ RSpec.describe Rigor::Inference::LastLine::ImplicitSelf do
   # Ruby: nil on each (a `Struct.new` superclass and a `BasicObject` one aside: the line, and `NameError`).
   it "declines where the ancestry may hold a reader written in Ruby" do
     ["class A < Tempfile\n  def x = gets\nend", "class A < CSV\n  def x = gets\nend",
-     "class A < CSV\n  def x = readline\nend",
+     "class A < CSV\n  def x = self.gets\nend", "class A\n  include Reline\n  def x = gets\nend",
      "class A < Unknown\n  def x = gets\nend", "class A\n  include Unknown\n  def x = gets\nend",
      "class A < SimpleDelegator\n  def x = gets\nend", "class A < BasicObject\n  def x = gets\nend",
      "class A < DelegateClass(File)\n  def x = gets\nend",

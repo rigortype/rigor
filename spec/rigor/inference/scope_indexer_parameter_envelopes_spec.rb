@@ -12,7 +12,7 @@ RSpec.describe "ScopeIndexer parameter envelopes (#992)" do
   let(:dynamic_mark) { Rigor::Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK }
 
   def envelopes(source)
-    Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse(source).value).last
+    Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse(source).value).fetch(2)
   end
 
   it "records a def's envelope under [kind, name], on both sides of the class" do

@@ -415,6 +415,8 @@ module Rigor
         # Issue #898 — the singleton-side twin of the include table (`extend M` / `extend self`).
         @project_discovered_extends = {}.freeze
         @project_discovered_deferred_ranges = {}.freeze
+        # Issue #1120 — `{refined class => {method => [refining modules]}}`, every `refine X do … end` body.
+        @project_discovered_refinements = {}.freeze
         @project_discovered_class_sources = {}.freeze
         # Issue #644 — the cross-file VALUE-constant publication table (`{qualified name => Type::Constant}`,
         # literal writes only) and its per-name write attribution. The first seeds `in_source_constants` on
@@ -1463,6 +1465,7 @@ module Rigor
         @project_discovered_header_nestings = discovery.discovered_header_nestings
         apply_discovery_mixin_tables(discovery)
         @project_discovered_deferred_ranges = discovery.discovered_deferred_ranges
+        @project_discovered_refinements = discovery.discovered_refinements
         @project_discovered_class_sources = discovery.discovered_class_sources
         @project_constant_values = discovery.constant_values
         @published_constant_name_set = nil
@@ -1987,18 +1990,21 @@ module Rigor
         unless @project_discovered_deferred_ranges.empty?
           tables[:discovered_deferred_ranges] = @project_discovered_deferred_ranges
         end
-        seed_parameter_envelope_table(tables)
+        seed_call_surface_tables(tables)
         seed_opt_in_pre_pass_tables(tables)
         seed_member_layout_tables(tables)
         seed_dependency_attribution_tables(tables)
         tables
       end
 
-      # Issue #992 — split out of {#project_scope_seed_tables} to keep it under the complexity budget.
-      def seed_parameter_envelope_table(tables)
-        return if @project_discovered_parameter_envelopes.empty?
-
-        tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
+      # The two tables only call rules read: the issue #992 parameter envelopes (`call.wrong-arity`) and the
+      # issue #1120 refinements (`call.undefined-method`). Split out of {#project_scope_seed_tables} to keep it
+      # under the complexity budget.
+      def seed_call_surface_tables(tables)
+        unless @project_discovered_parameter_envelopes.empty?
+          tables[:discovered_parameter_envelopes] = @project_discovered_parameter_envelopes
+        end
+        tables[:discovered_refinements] = @project_discovered_refinements unless @project_discovered_refinements.empty?
       end
 
       # The three mixin tables: the ADR-24 instance-side `include` map, its issue #1123 `prepend` twin

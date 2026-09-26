@@ -120,6 +120,32 @@ module Rigor
         appeared.freeze
       end
 
+      # Issue #1120 — the method names whose refinements moved in this edit: a `[refined class, method, refining
+      # module]` entry that appeared in, or vanished from, any file in `paths`. A consumer whose
+      # `call.undefined-method` answer consulted the refinement table recorded a `refinement:<method>` edge
+      # whichever way it answered, because the answer is a function of the whole project's refinements of that
+      # name. `paths` MUST include removed files, whose whole before-table vanished. `before` / `after` map a
+      # path to that file's `{refined class => {method => [modules]}}` table (nil when it refines nothing).
+      def changed_refinement_names(paths, before, after)
+        moved = Set.new
+        paths.each do |path|
+          entries_before = refinement_entries(before[path])
+          entries_after = refinement_entries(after[path])
+          (entries_before ^ entries_after).each { |(_refined, method_name, _module)| moved << method_name }
+        end
+        moved.freeze
+      end
+
+      def refinement_entries(table)
+        entries = Set.new
+        table&.each do |refined, methods|
+          methods.each do |method_name, modules|
+            modules.each { |refining| entries << [refined, method_name, refining] }
+          end
+        end
+        entries
+      end
+
       # Issue #639 — the SYMMETRIC reading of {appeared_classes}: the names whose declaration in a file
       # appeared OR VANISHED. Appearance alone answered the miss side, which was the only side recording a
       # `class:` edge; a bare reference that RESOLVED now records one too, and what invalidates it is the

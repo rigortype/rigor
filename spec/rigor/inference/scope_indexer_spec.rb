@@ -850,6 +850,66 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  # Issue #1120 — a refine body's defs are refinement methods of the refined class, active only under `using`,
+  # so they go to their own table and to no class's method tables.
+  describe "refinement discovery (#1120)" do
+    let(:source) do
+      <<~RUBY
+        module App
+          module CoreExt
+            refine String do
+              def shout = upcase
+              def self.nope = 1
+            end
+            refine(Integer) { def double = self * 2 }
+            def own = 1
+          end
+        end
+      RUBY
+    end
+
+    it "records a refine body's instance defs under every name the refined constant can denote" do
+      methods, def_nodes, _envelopes, refinements = described_class.build_methods_and_def_nodes(parse(source))
+
+      expect(refinements.fetch("App::CoreExt::String")).to eq(shout: ["App::CoreExt"])
+      expect(refinements.fetch("String")).to eq(shout: ["App::CoreExt"])
+      expect(refinements.fetch("Integer")).to eq(double: ["App::CoreExt"])
+      expect(methods.fetch("App::CoreExt")).to eq(own: :instance)
+      expect(def_nodes.fetch("App::CoreExt").keys).to eq([:own])
+      expect(methods).not_to have_key("String")
+    end
+
+    it "shares one frozen empty table for a file that refines nothing" do
+      refinements = described_class.build_methods_and_def_nodes(parse("class A\n  def f = 1\nend\n")).last
+
+      expect(refinements).to be_empty
+      expect(refinements).to be_frozen
+    end
+
+    it "folds the same table from a cached seed bundle as from a cold walk" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "core_ext.rb")
+        File.write(path, source)
+        cold = described_class.discovered_project_index_incremental([path], seed_bundles: {})
+        bundles = Marshal.load(Marshal.dump(cold.fetch(:bundles)))
+        warm = described_class.discovered_project_index_incremental([path], seed_bundles: bundles)
+
+        expect(cold.fetch(:def_index).fetch(:refinements).fetch("String")).to eq(shout: ["App::CoreExt"])
+        expect(warm.fetch(:def_index).fetch(:refinements)).to eq(cold.fetch(:def_index).fetch(:refinements))
+      end
+    end
+
+    it "overlays a file's refinements on the cross-file seed in the per-file index" do
+      seeded = default_scope.with_discovery(
+        default_scope.discovery.with(discovered_refinements: { "String" => { whisper: ["Other"] } })
+      )
+      program = parse(source)
+      scope = described_class.index(program, default_scope: seeded)[program]
+
+      expect(scope.discovered_refinements.fetch("String")).to eq(whisper: ["Other"], shout: ["App::CoreExt"])
+    end
+  end
+
   describe "declaration overrides (Slice A-declarations)" do
     it "annotates the constant_path of `module Foo` with Singleton[Foo]" do
       program = parse("module Foo\nend")

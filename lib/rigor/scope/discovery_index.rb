@@ -27,6 +27,7 @@ module Rigor
       :discovered_parameter_envelopes,
       :discovered_superclasses,
       :discovered_deferred_ranges,
+      :discovered_refinements,
       :discovered_header_nestings,
       :discovered_includes,
       :discovered_prepends,
@@ -147,6 +148,14 @@ module Rigor
         # inside another deferred range carry nils and answer only the containment half. Plain data,
         # so the ADR-85 seed bundle round-trips it unchanged.
         discovered_deferred_ranges: EMPTY_TABLE,
+        # Issue #1120 — `{refined class name => {method name => [refining module names]}}`, the instance
+        # methods a `refine X do … end` block defines. They are not X's methods everywhere: Ruby activates them
+        # only lexically after a `using` of the refining module, so `call.undefined-method` reads this table
+        # together with the call site's file ({Analysis::CheckRules::LexicalMethodSites}) and never through
+        # `discovered_methods`. A refinement a `Module.new { … }` block defines has no nameable module; it is
+        # keyed by the name the walk gives the block's owner. Plain data, so the ADR-85 seed bundle
+        # round-trips it unchanged.
+        discovered_refinements: EMPTY_TABLE,
         # Issue #682 — `{qualified class name => Module.nesting where its declaration HEADER is written}`,
         # innermost first and EXCLUDING the declaration's own entry. Read by `Scope#ancestor_name_candidates`,
         # which resolves a superclass / include name in that cref instead of peeling the subclass's qualified

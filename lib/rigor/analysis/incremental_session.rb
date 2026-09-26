@@ -287,7 +287,7 @@ module Rigor
         symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set |
-                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls)
+                  negative_affected(scan, removed, new_fps, new_class_decls, new_constant_decls, summary)
         closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
@@ -832,7 +832,8 @@ module Rigor
       # a prior missed lookup, and (issue #639) because a class DECLARATION appeared or vanished. Maps each
       # appeared `"ClassName#method"` to the negative-dependency key it would satisfy (`toplevel:foo` for a
       # top-level def, `method:C#m` otherwise), then unions the recorded negative-dependents of those keys.
-      def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls)
+      # Issue #1120 — plus the consumers of any refinement name the edit moved ({#refinement_affected}).
+      def negative_affected(changed, removed, new_fingerprints, new_class_decls, new_constant_decls, summary = nil)
         appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
         # Issue #639 — a class DISAPPEARING satisfies the `class:` kind too, now that a resolved bare
         # reference records the edge and not only a failed one; removed files join the diff for it.
@@ -848,7 +849,20 @@ module Rigor
         keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
         keys.concat(moved_classes.map { |klass| "class:#{klass.split('::').last}" })
         keys.concat(moved_constants.map { |name| "constant:#{name.split('::').last}" })
-        Incremental.negative_closure(keys, @negative_dependents)
+        Incremental.negative_closure(keys, @negative_dependents) | refinement_affected(changed + removed, summary)
+      end
+
+      # Issue #1120 — the consumers whose `call.undefined-method` answer read the refinement table for a method
+      # name whose refinements moved in this edit. The before-state is each file's seed bundle (the per-file
+      # table the last run recorded), the after-state the scan's per-file tables. A refine body is not a class's
+      # method, so neither the symbol fingerprints nor the appeared-symbol diff above sees it.
+      def refinement_affected(paths, summary)
+        after = (summary && summary[:refinements]) || {}
+        before = paths.to_h { |path| [path, @seed_bundles.dig(path, :refinements)] }
+        names = Incremental.changed_refinement_names(paths, before, after)
+        return Set.new if names.empty?
+
+        Incremental.negative_closure(names.map { |name| "refinement:#{name}" }, @negative_dependents)
       end
 
       # The qualified class/module names declared in the pre-parsed `index` (shared with

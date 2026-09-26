@@ -98,8 +98,8 @@ Language constructs, by origin name:
 | Construct | Origin | Labels |
 | --- | --- | --- |
 | `` `cmd` ``, `%x(cmd)` | `xstring` | `io.process` |
-| `$g` read (excluding the frame-local specials `$~ $_ $& $` $' $+ $!`) | `gvar-read` | `global.read` |
-| `$g = …` and its operator forms | `gvar-write` | `global.write` |
+| `$g` read, except the frame-local `$~` and `$_`, and `$!` and `$@` (§ The special variables) | `gvar-read` | `global.read` |
+| `$g = …`, its operator forms, and `$g` as a multiple-assignment, `for` or `rescue =>` target, except the frame-local `$~` and `$_` (§ The special variables) | `gvar-write` | `global.write` |
 | `@@cv` read | `cvar-read` | `global.read` |
 | `@@cv` write | `cvar-write` | `mutate.static` |
 | `@iv` write in a body that runs on an instance (§ Which side a definition lands on) | `ivar-write` | `mutate.self` |
@@ -110,6 +110,16 @@ Language constructs, by origin name:
 | an `attr_writer`'s synthesised body | `attr-writer` | `mutate.self` (`mutate.static` where `self` is the singleton class) |
 
 Catalogued origins are keyed by the callee key the row matched (`catalogue:Kernel#puts`, `catalogue:Time.now`).
+
+### The special variables
+
+Not every `$` name is global state ([#1363](https://github.com/rigortype/rigor/issues/1363)); [`control-flow-analysis.md`](../type-specification/control-flow-analysis.md) states where each one lives.
+
+- `$~` and `$_` are **frame-local** (§ Regexp match-predicate narrowing, § Last-line (`$_`) narrowing there). Ruby keeps them in the special-variable slot of the method, class, module or file body that runs them. That body and the blocks it creates reach the slot, and a call into another Ruby method does not. A read of one is not `global.read`. A write in any form (`$_ = line`, `$~ = nil`, `$_ ||= …`, `$_, rest = …`) binds only that slot, so it earns no label, as a local-variable write earns none. It is not `mutate.local` either: that label is a mutation of an object the frame allocated, and a write to the slot mutates no object. The rest of the match family (`$&`, `` $` ``, `$'`, `$+`, `$1`…) are back- and numbered-reference nodes that the scan does not colour, and none of them can be assigned.
+- `$!` and `$@`, the exception being rescued and its backtrace, are **not frame-local** (§ Rescue and subprocess globals there): a read reaches the nearest running rescue clause, a caller's included. Still, no callee can make `$!` name another exception for its caller, because a rescue the callee runs has ended by the time it returns, so a read of `$!` is not `global.read`. Nor is a read of `$@`, which reads that exception's backtrace as `e.backtrace` would, and reading an object's state earns no label. A write to `$@` stays `global.write`: it sets the backtrace of the exception that the rescuing frame holds, which is often a caller's, and `rescue => e` there sees the change. Ruby refuses a write to `$!` (`NameError`).
+- `$?`, the status of the last child process the thread waited for, is **thread-local**, and a subprocess that a callee runs sets it for the caller. A read of it stays `global.read`.
+
+A `define_method` block runs on the slot of the body that defines it, so two methods a class body defines that way share one `$_` and one `$~`. The scan does not follow that: a write in one of them earns no label, just as a read in the other is not `global.read`.
 
 ### Ownership
 

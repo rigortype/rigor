@@ -10,10 +10,10 @@ require "rigor/analysis/runner"
 # `$~` and `$_` are frame-local: Ruby keeps them in the special-variable slot of the body that runs them, which that
 # body and the blocks it creates reach and no other method's frame does. A read of one is not `global.read`, and a
 # write binds only that slot, so it earns no label, as a local-variable write earns none. `$!` and `$@` are the
-# exception being rescued and its backtrace: a read of either is not `global.read`, since no callee can change what
-# the caller's rescue clause holds, but `$@ = bt` sets that exception's backtrace, which the rescuing frame holds, so
-# it stays `global.write`. `$?` is the thread's, and a subprocess a callee runs sets it, so a read stays
-# `global.read`.
+# exception being rescued and its backtrace: no callee can make `$!` name another exception for its caller, so a read
+# of either is not `global.read`, but `$@ = bt` sets that exception's backtrace, which the rescuing frame holds, so it
+# stays `global.write`. `$?` is the thread's, and a subprocess a callee runs sets it, so a read stays `global.read`.
+# The spec is `docs/internal-spec/effect-summaries.md` § The special variables.
 RSpec.describe "effect labels for the special global variables" do
   def configuration
     data = { "paths" => ["lib"], "parallel" => { "workers" => 0 }, "effects" => {} }

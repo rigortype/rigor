@@ -46,10 +46,11 @@ module Rigor
       FRAME_LOCAL_GLOBALS = %i[$~ $_].to_set.freeze
 
       # `$!` and `$@` are the exception being rescued and its backtrace. They are not frame-local — a read
-      # walks to the nearest rescue clause, a caller's included — but neither is state a callee can set: a
-      # rescue the callee runs has ended when it returns. So a read of one is not `global.read` either. A
-      # write stays `gvar-write`: `$@ = bt` sets the backtrace of an exception the rescuing frame holds, often
-      # a caller (`rescue => e` sees it), and Ruby refuses `$! = x`.
+      # walks to the nearest rescue clause, a caller's included — but no callee can make `$!` name another
+      # exception for its caller, since a rescue the callee runs has ended when it returns. So a read of `$!`
+      # is not `global.read`, and nor is one of `$@`, which reads that exception's backtrace as `e.backtrace`
+      # would. A write stays `gvar-write`: `$@ = bt` sets the backtrace of an exception the rescuing frame
+      # holds, often a caller (`rescue => e` sees it), and Ruby refuses `$! = x`.
       RESCUED_EXCEPTION_GLOBALS = %i[$! $@].to_set.freeze
 
       # The globals whose read is not `global.read`.

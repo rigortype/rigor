@@ -97,8 +97,8 @@ module Envelopes
   end
 
   # Declared `%a{pure}` (#1363). `$_` and `$~` are frame-local: a write binds only this method's
-  # special-variable slot, which no caller can see. `$@` is the backtrace of the exception being rescued,
-  # which no callee can change for its caller.
+  # special-variable slot, which no caller can see. A `$@` read reads the backtrace of the exception being
+  # rescued, as `e.backtrace` would.
   class LastLine
     def remember(line)
       $_ = line

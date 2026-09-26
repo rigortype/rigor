@@ -263,7 +263,7 @@ A value-position `case` types each arm under the subject's clause narrowing, as 
   - it is not a mixin module, `Object` or `BasicObject`, whose instances may be of any class;
   - it is not a plugin's open receiver;
   - neither its signature nor the project defines `m` on it.
-- When no member may respond, the receiver reads `Dynamic[top]` if a member is a `Nominal` other than the three value-pinned classes (no class is named to read it as), so the guarded call does not report. When every member is a literal carrier as listed above, the edge is `bot`: `1.respond_to?(:upcase)` is false in every run.
+- When no member may respond, the receiver reads `Dynamic[top]` if a member is a `Nominal` other than the three value-pinned classes (no class is named to read it as), so the guarded call does not report. When every member is a literal carrier as listed above, the edge is `bot`. For a literal value that is exact (`1.respond_to?(:upcase)` is false in every run); a class object can gain a singleton method from a gem Rigor has no signature for (`Time.respond_to?(:zone)` under ActiveSupport), and its arm then reads the receiver as `bot` and goes unchecked.
 
 The falsey edge is unchanged.
 

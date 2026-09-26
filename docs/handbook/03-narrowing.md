@@ -166,10 +166,21 @@ assert_type(":io", (case io when StringIO then :string_io else :io end))
 
 count = 3
 assert_type(":number", (case count when String then :text else :number end))
+
+case io
+when StringIO then puts io.string # not reported
+end
+
+case count
+when String then puts count # flow.unreachable-clause
+end
 ```
 
-Both values leave the `when` branch out, but only the second
-`case` reports `flow.unreachable-clause`.
+Both values leave the `when` branch out. Of the two `case`
+statements after them, only the second reports
+`flow.unreachable-clause`. The check reads a `case` the code runs
+as a statement or assigns to a variable; one passed straight to a
+method, like the two `assert_type` lines, is not checked.
 
 `case x; in pattern` (one-line pattern matching) narrows the
 same way for the patterns Rigor understands — class checks,
@@ -185,9 +196,12 @@ from the receiver (unless `nil` itself responds to `name`) and the
 members whose class Rigor knows lacks `name`. When no member could
 respond, the receiver reads `Dynamic[top]` if its type is one
 Rigor inferred or read from a signature, so the guarded call is
-not an error, and `bot` if it is a literal, an array or hash
-literal, a class object, or `nil` / `true` / `false`, since such a
-value never gains the method:
+not an error. It reads `bot` if it is a literal, an array or hash
+literal, a class object, or `nil` / `true` / `false`, so the
+branch goes unchecked. For a literal value that is exact: it
+never gains the method. A class object can gain one from a gem
+Rigor has no signature for (`Time.respond_to?(:zone)` under
+ActiveSupport), and its branch is then not checked either:
 
 ```ruby
 require "stringio"

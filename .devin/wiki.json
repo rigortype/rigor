@@ -108,7 +108,7 @@
       "parent": "Type System",
       "page_notes": [
         {
-          "content": "Source in lib/rigor/type/app.rb, lib/rigor/hkt/. Normative description in docs/adr/20-lightweight-higher-kinded-types.md and docs/handbook/12-lightweight-hkt.md."
+          "content": "Source in lib/rigor/type/app.rb, lib/rigor/inference/hkt_registry.rb, lib/rigor/inference/hkt_reducer.rb, and lib/rigor/builtins/hkt_builtins.rb. Normative description in docs/adr/20-lightweight-hkt.md and docs/handbook/12-lightweight-hkt.md."
         }
       ]
     },
@@ -167,7 +167,7 @@
       "parent": "Inference Engine",
       "page_notes": [
         {
-          "content": "Code in lib/rigor/inference/constant_folding.rb and lib/rigor/inference/shape_dispatch.rb. See ADR-48 and ADR-76."
+          "content": "Code in lib/rigor/inference/method_dispatcher/constant_folding.rb and lib/rigor/inference/method_dispatcher/shape_dispatch.rb. See ADR-48 and ADR-76."
         }
       ]
     },
@@ -177,7 +177,7 @@
       "parent": "Inference Engine",
       "page_notes": [
         {
-          "content": "Code in lib/rigor/inference/synthetic_method.rb and lib/rigor/ast/synthetic_method_scanner.rb. Detailed in ADR-16, ADR-17, ADR-18, ADR-36."
+          "content": "Code in lib/rigor/inference/synthetic_method.rb, lib/rigor/inference/synthetic_method_index.rb, and lib/rigor/inference/synthetic_method_scanner.rb. Detailed in ADR-16, ADR-17, ADR-18, ADR-36."
         }
       ]
     },
@@ -225,7 +225,7 @@
       "parent": "Analysis Runner and Diagnostics",
       "page_notes": [
         {
-          "content": "Implementation in lib/rigor/analysis/suppression.rb and lib/rigor/configuration/severity_profile.rb. Reference ADR-50."
+          "content": "Handled across lib/rigor/analysis/runner.rb, lib/rigor/analysis/check_rules.rb, and lib/rigor/configuration/severity_profile.rb. Reference ADR-50 and docs/manual/04-diagnostics.md."
         }
       ]
     },
@@ -245,7 +245,7 @@
       "parent": "Analysis Runner and Diagnostics",
       "page_notes": [
         {
-          "content": "Implementation in lib/rigor/analysis/pool_coordinator.rb and lib/rigor/analysis/worker_session.rb. Governed by ADR-15."
+          "content": "Implementation in lib/rigor/analysis/runner/pool_coordinator.rb and lib/rigor/analysis/worker_session.rb. Governed by ADR-15."
         }
       ]
     },

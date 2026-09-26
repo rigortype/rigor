@@ -96,21 +96,10 @@ def lists_for(lines)
   end
 end
 
-# --- A rebind on an untyped receiver. The escape analysis leaves the call
-# `:unknown`, so no ADR-56 write-back ran and the rebind was pinned to `[]`
-# the same way. The literal enters as its bare carrier, for what an
-# earlier pass stored. ---
-def rebinds_on_untyped(lines)
-  depth = []
-  lines.each do |tl|
-    assert_type("Array[Dynamic[top]]", depth)
-    puts depth.last.length if depth.last
-    depth = [tl]
-  end
-end
-
 # --- The state machine redmine's CVS log reader runs: the slot write is
-# reached only after an earlier line rebound the map to a Hash. ---
+# reached only after an earlier line rebound the `nil` placeholder to a
+# Hash. The escape analysis leaves the call `:unknown`, so no ADR-56
+# write-back runs; the placeholder enters joined with `Dynamic[top]`. ---
 def state_machine(io)
   state = :start
   names = nil
@@ -124,15 +113,12 @@ def state_machine(io)
   end
 end
 
-# --- The Hash redmine's git log reader rebinds per commit and stores every
-# field into: its entry floors to a bare `Hash`, not the element types one
-# pass stored (`String | Array[String]`), which a `String` parameter
-# (`Time.parse` in redmine) rejects. ---
+# --- A Hash the body rebinds per record and stores every field into, as
+# redmine's git log reader does: it enters at its unknown-store widening. ---
 def commit_reader(io)
   changeset = {}
   state = 0
   io.each_line do |line|
-    assert_type("Hash[Dynamic[top], Dynamic[top]]", changeset)
     if line =~ /^commit (\w+)( \w+)?$/
       parents_str = $2
       if state == 1
@@ -149,52 +135,77 @@ def commit_reader(io)
   end
 end
 
-# --- Control: a rebound counter enters as `Integer`, not as a gradual
-# type, so a method no pass could answer still reports. ---
+# --- A local that is not a `nil` / `false` placeholder keeps its call-site
+# binding on an unproven call, so each read below — which only a later
+# pass makes, behind a guard the seed decides — stays unreported. ---
+def rebinds_to_another_class(items)
+  n = 0
+  items.each { |i| puts n.upcase unless n == 0; n = i.to_s }
+end
+
+def rebinds_behind_a_class_guard(items)
+  last = 0
+  items.each { |i| puts last.abs if last.is_a?(Integer); last = i.to_s }
+end
+
+def rebind_gated_by_a_flag(lines)
+  first = true
+  last = 0
+  lines.each do |line|
+    puts last.strip unless last == 0
+    if first then first = false else last = "#{line}" end
+  end
+end
+
+def rebind_gated_by_a_state(lines)
+  state = :header
+  last = 0
+  lines.each do |line|
+    puts last.strip unless last == 0
+    case state
+    when :header then state = :body
+    when :body then last = "#{line}"
+    end
+  end
+end
+
+def rebind_gated_by_a_counter(lines)
+  n = 0
+  last = 0
+  lines.each do |line|
+    puts last.strip unless last == 0
+    last = "#{line}" if n > 0
+    n += 1
+  end
+end
+
+def self_dependent_rebind(items)
+  x = 0
+  items.each do |_i|
+    puts x.bytesize unless x == 0 || x == 1
+    x = (x == 0 ? 1 : "s")
+  end
+end
+
+# --- Control: the same call-site binding keeps a read that fails on every
+# pass reported. ---
 def counter_read_before_rebind(items)
   count = 0
-  items.each do |_i|
-    assert_type("Integer", count)
+  items.each do
     count.upcase # STILL-REPORTED
     count += 1
   end
 end
 
-# --- Control: the same for a rebound String. (`i.to_s` on an untyped `i`
-# would be `Dynamic[top]`, and the entry would join it; an interpolation is
-# a `String` whatever `i` is.) ---
 def name_read_before_rebind(items)
   name = "x"
   items.each do |i|
     name.no_such_method # STILL-REPORTED
-    name = "#{i}!"
+    name = i.to_s
   end
 end
 
-# --- A local the body rebinds to another class enters as the union, so a
-# read that only later passes make, on the class they store, does not
-# report on the first pass's `Integer`. ---
-def rebinds_to_another_class(items)
-  n = 0
-  items.each do |i|
-    assert_type("Integer | String", n)
-    puts n.upcase unless n == 0
-    n = "#{i}!"
-  end
-end
-
-# --- The same behind a class guard. ---
-def rebinds_behind_a_guard(items)
-  last = 0
-  items.each do |i|
-    puts last.abs if last.is_a?(Integer)
-    last = i.to_s
-  end
-end
-
-# --- Control: an implicit-self iterator in an `Enumerable` class. Its
-# element is untyped (the class declares none), so the rebind stores a
-# value of the seed's class, which keeps the entry one class. ---
+# --- Control: an implicit-self iterator in an `Enumerable` class. ---
 class Tree
   include Enumerable
 
@@ -205,9 +216,9 @@ class Tree
 
   def prev_read_before_rebind
     prev = 0
-    each_with_index do |_x, _i|
+    each_with_index do |x, _i|
       prev.upcase # STILL-REPORTED
-      prev = prev.succ
+      prev = x
     end
   end
 end

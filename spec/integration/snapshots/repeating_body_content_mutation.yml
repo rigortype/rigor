@@ -2,7 +2,3 @@
 locals: {}
 assertions:
   '1': Array[Dynamic[top]]
-  '2': Array[Dynamic[top]]
-  '3': Hash[Dynamic[top], Dynamic[top]]
-  '4': Integer
-  '5': Integer | String

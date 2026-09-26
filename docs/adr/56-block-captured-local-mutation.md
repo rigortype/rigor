@@ -1122,80 +1122,76 @@ out of `ExpressionTyper` so both passes share it), so #1234's iterator
 name on a `Dynamic` receiver counts, and `then`, a one-element
 receiver and an uncatalogued name do not. Where the write-back will
 not run its passes (an `:unknown` class, or no explicit receiver), a
-name the body rebinds enters loosened, since no pass types what an
-earlier one stored. A sentinel seed (`nil` or `false`) enters joined
-with `Dynamic[top]`: it is a placeholder the body replaces before the
-reads it guards, as in a line reader's state machine. Any other seed
-enters as the seed joined with what one unrecorded pass of the block
-leaves the name bound to, widened past its value pins with a literal
-collection floored to its bare carrier (every collection, for a name
-the body also mutates in place). Members that widen to one class give
-one type, and a union receiver draws no `undefined method`: `count = 0
-… count += 1` enters as `Integer`, so `count.upcase` still reports. A
-rebind to another class gives the union: `n = 0; items.each { |i| puts
-n.upcase unless n == 0; n = i.to_s }` enters as `Integer | String` and
-does not report. A first cut widened the seed alone, reported that
-correct loop at error level, and a delta review caught it. The loop
-seam takes the same widening (`#loop_pass_entry`, so the single pass
-and every fixpoint pass, and a `for` body's only pass) over
-`CapturedLocals.loop_content_mutations`. A widened name the body does
-not rebind keeps its #1287 marks (`Scope#with_mutated_local`), on the
-write-back's passes too.
+name the body rebinds from a sentinel seed (`nil` or `false`) enters
+joined with `Dynamic[top]`: it is a placeholder the body replaces
+before the reads it guards, as in a line reader's state machine, and
+no pass types what replaced it. Any other rebound seed keeps its
+call-site binding. The loop seam takes the content widening too
+(`#loop_pass_entry`, so the single pass and every fixpoint pass, and a
+`for` body's only pass) over `CapturedLocals.loop_content_mutations`.
+A widened name the body does not rebind keeps its #1287 marks
+(`Scope#with_mutated_local`), on the write-back's passes too.
 
 The rule is the one this section already chose: a body's entry must
 describe every pass it records, and where no pass types what a later
-pass reads, it takes a reading that holds on every pass — the gradual
-arm for stored contents and for a sentinel, and otherwise the widened
-join of the seed and what the block's first run stores, which costs
-one unrecorded pass for such a call only. Three alternatives were
-rejected. Running the write-back for a body that only mutates
-(dropping its `names.empty?` fast path) costs a second body pass for
-every such block, where the widening needs none. Running its fixpoint
-for an `:unknown` call costs passes on the most common untyped
-receiver, and it keeps the `nil` seed beside what the body stores, so
-the line readers below would still read a possible `nil`. Routing an
-implicit-self call the gate classifies `:non_escaping` through the
-write-back would change the escape reading and the continuation of
-every such call and buy no report: its fixpoint enters `prev = 0;
-each_with_index { |x, _i| prev.upcase; prev = x }` in an `Enumerable`
-class at `0 | Dynamic[top]`, as the loosened entry does. The price is
-paid on the first pass. A read of a mutated collection that only the
-first pass makes goes gradual, as it already does on the write-back's
-passes, and so does an unguarded read of a sentinel seed (`x = nil;
-items.each { |i| x.length; x = i.to_s }` on an untyped `items` no
+pass reads, the gradual arm is the answer — for stored contents, and
+for a sentinel the body replaces. Four alternatives were rejected.
+Running the write-back for a body that only mutates (dropping its
+`names.empty?` fast path) costs a second body pass for every such
+block, where the widening needs none. Running its fixpoint for an
+`:unknown` call costs passes on the most common untyped receiver, and
+it keeps the `nil` seed beside what the body stores, so the line
+readers below would still read a possible `nil`. Widening every other
+rebound seed past its value pins, a first cut here, entered `n = 0 … n
+= i.to_s` as `Integer` and reported `puts n.upcase unless n == 0` at
+error level on correct code. Joining the seed with what one unrecorded
+pass of the block stores, the second cut, fixed that shape but not a
+rebind a flag, state or counter gates (`if first then first = false
+else last = "#{line}" end`), which the first pass never reaches, and
+the extra pass compounded with nesting (11.8 s against 0.3 s at depth
+16). Review caught both. So a non-sentinel rebind keeps the reading
+every such body had before, including #1380 item 3's pinned `pat =
+","`.
+
+The price is paid on the first pass. A read of a mutated collection
+that only the first pass makes goes gradual, as it already does on the
+write-back's passes, and so does an unguarded read of a sentinel (`x =
+nil; items.each { |i| x.length; x = i.to_s }` on an untyped `items` no
 longer reports, though the first iteration raises). A loop that feeds
 a collection through a callee reads its contents gradually from the
 first pass on: `Scope#singleton_def_through_ancestors`'s `queue.shift`
 after `enqueue_ancestors(current, queue, …)` now reads `untyped`, as
-straight-line code after that call already did, where every iteration
-used to read the seed's `String`, and sig-gen's row for it moved to
-residue.
+straight-line code after that call already did. At runtime the queue
+holds only Strings, so the `String` every iteration used to read from
+the seed was right, and sig-gen's row for it moved to residue: a
+precision loss the callee floor causes.
 
 A body that can neither rebind nor mutate a captured binding skips the
 gate (`CapturedLocals.may_touch_capture?`, an allocation-free scan),
 and the block's receiver is typed once per call
 (`StatementEvaluator#explicit_receiver_type`) instead of at each of
 the four sites that asked. On textbringer (`--workers=0`) that is
-6,371,955 → 6,071,205 allocated objects; the gate alone, before the
+6,371,964 → 6,056,782 allocated objects; the gate alone, before the
 memo, cost +35k (+0.55%).
 
 Gate: the `repeating_body_content_mutation` fixture's must-not-fire
 shapes (the repro, `each_with_index`, `push`, an index write, a Hash
-slot, a typed receiver, `while`, `until`, `for`, an untyped-receiver
-rebind and a line reader's state machine) and its controls, which
-still report: a rebound counter, String and implicit-self `Enumerable`
-local read before the rebind, a known receiver's first-pass `nil`, a
-project `each` that yields once, a body that never appends, `5.then`
-and `Mutex#synchronize`. Corpus (redmine, textbringer, mail,
-mastodon): the three redmine errors the issue names are gone, with the
-same fix removing four more state-machine reads under `io.each_line` (`cvs_adapter.rb:196`
-and `:214`, `git_adapter.rb:262` and `:308`), and nothing is added.
-One error keeps its line and changes its type: `diff.rb:78` calls a
-method Redmine patches onto `Array` and now reads the receiver as
-`Array[Dynamic[top]]`, not `[]`.
-What stays open: `Kernel#loop` is not a catalogued iterator, so a
-`loop do … end` body keeps its entry; an instance variable mutated in
-place is still not collected (#1208).
+slot, a typed receiver, `while`, `until`, `for`, a line reader's state
+machine, a Hash rebound per record, and rebinds gated by a class
+check, a flag, a state and a counter, and a self-dependent one) and
+its controls, which still report: a rebound counter, String and
+implicit-self `Enumerable` local read before the rebind, a known
+receiver's first-pass `nil`, a project `each` that yields once, a body
+that never appends, `5.then` and `Mutex#synchronize`. Corpus (redmine,
+textbringer, mail, mastodon): the three redmine errors the issue names
+are gone, with the same fix removing four more state-machine reads
+under `io.each_line` (`cvs_adapter.rb:196` and `:214`,
+`git_adapter.rb:262` and `:308`), and nothing is added. One error
+keeps its line and changes its type: `diff.rb:78` calls a method
+Redmine patches onto `Array` and now reads the receiver as
+`Array[Dynamic[top]]`, not `[]`. What stays open: `Kernel#loop` is not
+a catalogued iterator, so a `loop do … end` body keeps its entry; an
+instance variable mutated in place is still not collected (#1208).
 
 ### WD3 — One mechanism, shared
 

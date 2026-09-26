@@ -2406,10 +2406,11 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
 
-      # Must-not-fire / must-still-fire in one assertion: every guarded read of an appended collection is
-      # live at runtime. The controls still report: a read of a rebound counter, String or implicit-self
-      # `Enumerable` local no pass could answer, a known receiver's first-pass `nil`, a project `each` that
-      # yields once, a body that never mutates, a run-once block and an uncatalogued call.
+      # Must-not-fire / must-still-fire in one assertion: every guarded read of an appended collection, of a
+      # `nil` placeholder the body replaced, and of a local a flag, state or counter rebinds is live at runtime.
+      # The controls still report: a read of a rebound counter, String or implicit-self `Enumerable` local that
+      # fails on every pass, a known receiver's first-pass `nil`, a project `each` that yields once, a body that
+      # never mutates, a run-once block and an uncatalogued call.
       it "silences the first-pass nil reads without silencing the controls" do
         calls = harness.diagnostics.select { |d| d.rule.to_s.start_with?("call.") }
         calls = calls.reject { |d| d.rule.to_s == "call.unresolved-toplevel" }

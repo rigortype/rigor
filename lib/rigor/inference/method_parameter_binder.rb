@@ -198,7 +198,14 @@ module Rigor
       # both `()` and `(int)` overloads — only the second matches a `def first(n)` redefinition)
       # are silently skipped, so the binder defaults to the most informative type the RBS
       # signature provides without having to know which overload the runtime will pick.
+      #
+      # An overload declared `(?)` (`RBS::Types::UntypedFunction`, issue #1430) has no parameter lists and
+      # accepts any argument in every slot, so no slot can be narrowed below `Dynamic[Top]`: binding a typed
+      # sibling overload's parameter type would read a value that overload legitimately passes as a
+      # contradiction inside the body. Every slot keeps its default; the declared return type still applies.
       def apply_rbs_overloads(types, slots, method_types)
+        return unless method_types.all? { |mt| mt.type.respond_to?(:required_positionals) }
+
         slots.each do |slot|
           next if slot.name.nil?
 
@@ -258,9 +265,7 @@ module Rigor
         return nil if contracts.empty?
 
         singleton = def_node.receiver.is_a?(Prism::SelfNode) || @singleton
-        contracts.find do |contract|
-          contract.method_name == def_node.name && contract.singleton == singleton
-        end
+        contracts.find { |contract| contract.method_name == def_node.name && contract.singleton == singleton }
       end
 
       def positional_slot_at(slots, index)

@@ -2403,6 +2403,10 @@ module Rigor
         # that position, or nil when the overload shape does not allow a precise match.
         def lookup_positional_arg(call_node, method_def, target_name)
           arguments = call_node.arguments&.arguments || []
+          # A `(?)` overload (`RBS::Types::UntypedFunction`, #1430) names no parameter and accepts any argument list,
+          # so a call may reach it with the target's position holding anything: no overload proves the target.
+          return nil unless method_def.method_types.all? { |mt| mt.type.respond_to?(:required_positionals) }
+
           method_def.method_types.each do |mt|
             params = mt.type.required_positionals + mt.type.optional_positionals
             index = params.find_index { |param| param.name == target_name }

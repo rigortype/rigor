@@ -130,7 +130,11 @@ module Rigor
       # cleanly and would serve the old call order on a warm run while a cold run searches nearer-first:
       # `include A; include B` would resolve A's methods where a cold run resolves B's — the
       # `--verify-incremental` divergence 14 was bumped for.
-      SCHEMA = 27
+      # 28: issue #1120 gives each seed bundle a `refinements` table — the `def`s of every `refine X do … end`
+      # body, which `call.undefined-method` reads where a `using` of the refining module is in effect. A
+      # pre-28 bundle would fold as "refines nothing", and a warm run would report a refined call a cold run
+      # declines.
+      SCHEMA = 28
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

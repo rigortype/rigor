@@ -51,6 +51,12 @@ rigor sig-gen --format json lib | ruby -e '
 
 ## Step 5-b — Write the baseline sigs
 
+If the project's `Steepfile` reads inline annotations (`inline: true`
+beside `signature "sig"`), first add `sig_gen:` / `inline_declared: skip`
+to `.rigor.yml`. Otherwise sig-gen copies every `# @rbs` / `#:`
+declaration into `sig/`, and Steep reports each copied method as
+`DuplicatedMethodDefinition`.
+
 ```sh
 rigor sig-gen --write lib
 ```

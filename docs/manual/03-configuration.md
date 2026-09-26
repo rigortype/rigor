@@ -74,6 +74,12 @@ cache:
 | `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
+### Signature generation
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `sig_gen.inline_declared` | String | `"write"` | What `rigor sig-gen` does with a method already declared inline by `# @rbs` / `#:`. `write` copies the inline declaration into `sig/`, so the generated signature is the complete contract a gem ships, and refuses (exit 1) a `sig/` declaration that later disagrees with the inline one until the two agree or `--overwrite` replaces it. `skip` leaves every method the inline reader declares out of `sig/` (`sig.skipped.inline-declared`): set it when Steep reads the same annotations (`inline: true` beside `signature "sig"`), where a copy would declare each method twice (`DuplicatedMethodDefinition`). The cost of `skip`: a consumer reading only your shipped `sig/` never sees those methods, and an annotation on one — a Rigor refinement included — takes effect only where the source itself is analysed. Any other value, or any other key under `sig_gen:`, is a load error. Only `rigor sig-gen` reads this key, and changing it invalidates no cache. See [handbook chapter 11](../handbook/11-sig-gen.md#methods-declared-inline). |
+
 ### Config validation warnings
 
 `rigor check` warns on STDERR when a configured value silently resolves to

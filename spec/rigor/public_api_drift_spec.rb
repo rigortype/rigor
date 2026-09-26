@@ -57,6 +57,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     discovered_methods()
     discovered_parameter_envelopes()
     discovered_prepends()
+    discovered_refinements()
     discovered_singleton_def_nodes()
     discovered_singleton_def_sources()
     discovered_superclasses()

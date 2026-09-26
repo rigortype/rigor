@@ -65,6 +65,15 @@ module Rigor
       # declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations
       # from them when no `--observe=PATH` is given. See {#resolved_test_paths}.
       "test_paths" => nil,
+      # ADR-112 WD4 — `rigor sig-gen` settings. `inline_declared:` decides what happens to a method the inline
+      # reader (`rigor-rbs-inline`) already declares from `# @rbs` / `#:`. `write` (the default) copies the
+      # inline declaration into `sig/`, so the generated signature is the complete contract a gem ships;
+      # `skip` leaves every member that reader declares out of `sig/`, for a project whose Steep reads the
+      # same annotations (`inline: true` beside `signature "sig"`), where the copy would be a second
+      # declaration of one method (`DuplicatedMethodDefinition`). See {#sig_gen_inline_declared}.
+      "sig_gen" => {
+        "inline_declared" => "write"
+      },
       # ADR-17 — project-side monkey-patch pre-evaluation. Empty by default; users opt in by listing explicit
       # files that the analyzer walks before per-file inference so patched-method declarations are visible
       # across the project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1 plumbing only — listed files
@@ -269,7 +278,7 @@ module Rigor
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
-                :pre_eval, :baseline_path, :effects,
+                :pre_eval, :baseline_path, :effects, :sig_gen_inline_declared,
                 :effects_snapshot_path, :effects_snapshot_reach, :effects_snapshot_gate, :effects_tolerated,
                 :effects_labels, :effects_attribution, :effects_envelopes
 
@@ -530,6 +539,7 @@ module Rigor
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
       test_paths = data.fetch("test_paths", DEFAULTS.fetch("test_paths"))
       @test_paths = test_paths.nil? ? nil : Array(test_paths).map(&:to_s).freeze
+      @sig_gen_inline_declared = coerce_sig_gen_inline_declared(data.fetch("sig_gen", nil))
       @pre_eval = expand_pre_eval_entries(
         Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s)
       )
@@ -616,7 +626,7 @@ module Rigor
         "signature_paths" => signature_paths,
         # `test_paths:` is deliberately absent, as `effects:` is: `to_h` feeds the run cache key and the
         # incremental-snapshot fingerprint, and the test roots change no diagnostic, so editing them must not
-        # invalidate either.
+        # invalidate either. `sig_gen:` is absent for the same reason: only `rigor sig-gen` reads it.
         "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "parameter_inference" => parameter_inference,
@@ -1003,6 +1013,35 @@ module Rigor
     # not depend on this value being valid.
     VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
     private_constant :VALID_CACHE_VALIDATIONS
+
+    # The `sig_gen.inline_declared:` values, as the Symbols {#sig_gen_inline_declared} answers.
+    VALID_SIG_GEN_INLINE_DECLARED = %w[write skip].freeze
+    private_constant :VALID_SIG_GEN_INLINE_DECLARED
+
+    # Rejects rather than fails soft: an unrecognised value read as `write` would put a second declaration of
+    # every inline-annotated method into `sig/` for exactly the project that asked for none. A `sig_gen:`
+    # block that omits the key, or is written empty, keeps the default.
+    def coerce_sig_gen_inline_declared(section)
+      section = {} if section.nil?
+      raise ConfigurationError, "sig_gen must be a mapping, got #{section.inspect}" unless section.is_a?(Hash)
+
+      # The schema closes this object (`additionalProperties: false`); a misspelled key here would otherwise
+      # load as the default and write exactly what `inline_declare: skip` was meant to prevent.
+      unknown = section.keys.map(&:to_s) - DEFAULTS.fetch("sig_gen").keys
+      unless unknown.empty?
+        raise ConfigurationError,
+              "sig_gen has unknown key(s) #{unknown.inspect}; known keys: #{DEFAULTS.fetch('sig_gen').keys.inspect}"
+      end
+
+      value = section.fetch("inline_declared", DEFAULTS.dig("sig_gen", "inline_declared")).to_s
+      unless VALID_SIG_GEN_INLINE_DECLARED.include?(value)
+        raise ConfigurationError,
+              "sig_gen.inline_declared must be one of #{VALID_SIG_GEN_INLINE_DECLARED.inspect}, " \
+              "got #{section['inline_declared'].inspect}"
+      end
+
+      value.to_sym
+    end
 
     def coerce_cache_validation(value)
       str = value.to_s

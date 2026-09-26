@@ -1915,10 +1915,9 @@ RSpec.describe Rigor::CLI do
       it "rejects --write, --print, --diff combined" do
         status, _out, err = run_cli("sig-gen", "--write", "--print")
 
-        expect(status).to eq(0).or eq(Rigor::CLI::EXIT_USAGE)
-        # --print after --write just overrides the mode; OptionParser does not treat them as exclusive at parse time.
-        # The validation_error path catches invalid mode values; ensure no crash.
-        expect(err).not_to include("Traceback")
+        # Two different mode flags are a usage error, not last-one-wins: `--check --write` must not quietly write.
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to include("mutually exclusive")
       end
     end
   end

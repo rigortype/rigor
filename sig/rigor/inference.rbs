@@ -23,8 +23,10 @@ module Rigor
       class ClassFrame
         attr_reader name: String
         attr_reader singleton: bool
-        def self.new: (name: String, singleton: bool) -> ClassFrame
-        def initialize: (name: String, singleton: bool) -> void
+        # sig-gen gap: #1150 — `Data.define` members carry no type.
+        attr_reader refinement: bool
+        def self.new: (name: String, singleton: bool, ?refinement: bool) -> ClassFrame
+        def initialize: (name: String, singleton: bool, ?refinement: bool) -> void
       end
 
       def initialize: (scope: Scope, ?tracer: FallbackTracer?, ?on_enter: (^(untyped, Scope) -> void)?, ?class_context: Array[ClassFrame]) -> void

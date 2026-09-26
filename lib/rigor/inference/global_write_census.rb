@@ -16,8 +16,10 @@ module Rigor
     #   `alias`, `alias_method`, `attr_*`, a delegation macro, or the same call through `send`. The
     #   type check does not ask where it lands: an object can reach any of them (`class << nil`, `K = Integer;
     #   class K`, `[Integer].each { |k| k.define_method(:write) }`), so a literal of any class declines.
-    # - {DEFINES_ANY} — a definition whose name no literal spells: a computed `define_method` name, a string
-    #   `eval` / `class_eval` whose text is interpolated or not a literal, or a top-level mixin of a non-constant.
+    # - {DEFINES_ANY} — a definition whose name no literal spells: a computed `define_method` name, a `send` whose
+    #   method name is computed, a string `eval` / `class_eval` whose code is interpolated or not a literal, a name
+    #   literal whose bytes are not valid in its encoding, or a top-level mixin of a non-constant. A node the
+    #   collector fails to read records it too ({Collector#visit}).
     # - `[:refines, name]` / {REFINES_ANY} — the same, inside a `refine` block. A refinement changes what
     #   `respond_to?(:write)` answers where a `using` is in effect, and nothing else the setters consult: an
     #   implicit conversion and a refined `respond_to?` / `respond_to_missing?` ignore it, so these entries are
@@ -49,9 +51,15 @@ module Rigor
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
       EVAL_CALLS = %i[eval class_eval module_eval instance_eval].to_set.freeze
       MIXIN_CALLS = %i[include prepend extend].to_set.freeze
+      DEFINING_CALLS =
+        (NAMING_CALLS | ATTRIBUTE_CALLS | DELEGATION_CALLS | MISSING_DELEGATION_CALLS | EVAL_CALLS).freeze
+      # Every call name {Collector#visit} reads; any other call is skipped at once.
+      VISITED_CALLS = (DEFINING_CALLS | SEND_CALLS | MIXIN_CALLS | %i[import_methods]).freeze
+      NO_ARGUMENTS = [].freeze
       NAME_PATTERN = /(?<![\w@$])(?:write|to_str|to_int|method_missing|respond_to_missing\?|respond_to\?)(?![\w?!=])/
       private_constant :NAMING_CALLS, :ATTRIBUTE_CALLS, :DELEGATION_CALLS, :MISSING_DELEGATION_CALLS,
-                       :SEND_CALLS, :EVAL_CALLS, :MIXIN_CALLS, :NAME_PATTERN
+                       :SEND_CALLS, :EVAL_CALLS, :MIXIN_CALLS, :DEFINING_CALLS, :VISITED_CALLS, :NO_ARGUMENTS,
+                       :NAME_PATTERN
 
       EMPTY = Set.new.freeze
 
@@ -99,6 +107,8 @@ module Rigor
           @refine_ranges = []
         end
 
+        # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
+        # feeds: the census then counts it as a definition of every name, which only declines a report.
         def visit(node, top_level:)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)
@@ -106,6 +116,8 @@ module Rigor
           when Prism::AliasMethodNode then record_argument(node, node.new_name)
           when Prism::CallNode then visit_call(node, top_level)
           end
+        rescue StandardError
+          @census << DEFINES_ANY
         end
 
         private
@@ -119,22 +131,22 @@ module Rigor
         def visit_call(node, top_level)
           remember_refine(node)
           name = node.name
-          arguments = node.arguments&.arguments || []
+          return unless VISITED_CALLS.include?(name)
+
+          arguments = node.arguments&.arguments || NO_ARGUMENTS
           if SEND_CALLS.include?(name)
+            return if arguments.empty?
+
+            # A method name no literal spells (computed, or with bytes invalid in its encoding) may be any of them.
             first = literal_name(arguments.first)
-            return unless first && defining_call?(first)
+            return @census << any_entry(node) if first.nil?
+            return unless DEFINING_CALLS.include?(first)
 
             name = first
             arguments = arguments.drop(1)
           end
           visit_defining_call(node, name, arguments)
           visit_main_mixin(node, arguments) if top_level && MIXIN_CALLS.include?(name) && self_receiver?(node)
-        end
-
-        def defining_call?(name)
-          [NAMING_CALLS, ATTRIBUTE_CALLS, DELEGATION_CALLS, MISSING_DELEGATION_CALLS, EVAL_CALLS].any? do |calls|
-            calls.include?(name)
-          end
         end
 
         def visit_defining_call(node, name, arguments)
@@ -146,7 +158,8 @@ module Rigor
             record(node, :method_missing)
             record(node, :respond_to_missing?)
           elsif EVAL_CALLS.include?(name)
-            arguments.each { |argument| record_eval_text(node, argument) }
+            # Only the first argument is code; the rest are a binding, a file name and a line number.
+            record_eval_text(node, arguments.first) unless arguments.empty?
           elsif name == :import_methods && inside_refine?(node)
             @census << REFINES_ANY
           end
@@ -174,7 +187,7 @@ module Rigor
 
         def record_every_literal(node, argument)
           case argument
-          when Prism::SymbolNode, Prism::StringNode then record(node, literal_name(argument))
+          when Prism::SymbolNode, Prism::StringNode then record_argument(node, argument)
           when Prism::ArrayNode then argument.elements.each { |element| record_every_literal(node, element) }
           when Prism::KeywordHashNode, Prism::HashNode
             argument.elements.each { |pair| record_every_literal(node, pair) }
@@ -186,7 +199,7 @@ module Rigor
         end
 
         def record_eval_text(node, argument)
-          if argument.is_a?(Prism::StringNode)
+          if argument.is_a?(Prism::StringNode) && argument.unescaped.valid_encoding?
             argument.unescaped.scan(NAME_PATTERN) { |name| record(node, name.to_sym) }
           else
             @census << any_entry(node)
@@ -195,8 +208,13 @@ module Rigor
 
         def any_entry(node) = inside_refine?(node) ? REFINES_ANY : DEFINES_ANY
 
+        # The name a Symbol or String literal spells, or nil for any other node and for a literal whose bytes are
+        # not valid in its encoding, which names no method Ruby can define.
         def literal_name(argument)
-          argument.unescaped.to_sym if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+          return unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+
+          text = argument.unescaped
+          text.to_sym if text.valid_encoding?
         end
 
         def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)

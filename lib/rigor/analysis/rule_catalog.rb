@@ -685,15 +685,17 @@ module Rigor
             "The program — any project or `pre_eval:` file — defines the method or a `method_missing` / " \
             "`respond_to_missing?` / `respond_to?` anywhere, in any spelling (`def`, `define_method`, " \
             "`define_singleton_method`, `alias`, `alias_method`, `attr_*`, a delegation macro, a string `eval`, " \
-            "the same through `send`) and on any receiver, or defines a method whose name no literal spells. " \
+            "the same through `send`) and on any receiver, or defines a method whose name no literal spells (a " \
+            "computed `define_method` or `send` name, a string `eval` whose code is not a plain literal, a name " \
+            "whose bytes are not valid in its encoding). " \
             "This is blanket: no census of where a definition lands can be complete, so the literal of every " \
             "class declines, whatever the definition's owner.",
             "An ancestor's surface is rewritten from outside (`Integer.include(M)`, `Object.include(M)`, a string " \
             "`class_eval`), or a top-level `include` / `prepend` / `extend`, or an ancestor's `include`, names a " \
             "module RBS does not rule out.",
-            "For `$stdout` / `$>` / `$stderr`, a refinement that may add `write` refines the class or an ancestor " \
-            "and a `using` is in effect at the write. The `to_str` / `to_int` conversions, and a refined " \
-            "`respond_to_missing?` / `respond_to?`, ignore refinements, so those still fire.",
+            "For `$stdout` / `$>` / `$stderr`, a refinement that may add `write`, to any class, and a `using` in " \
+            "effect at the write. Which class it refines is not followed. The `to_str` / `to_int` conversions, and a " \
+            "refined `respond_to_missing?` / `respond_to?`, ignore refinements, so those still fire.",
             "Any project or `pre_eval:` file aliases the special (`alias $stdout $out`, on either side).",
             "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a multiple-assignment target, a `for` index, or a " \
             "`rescue => $g` reference: their value is not type-checked.",

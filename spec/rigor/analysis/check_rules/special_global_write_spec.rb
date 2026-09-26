@@ -206,11 +206,13 @@ RSpec.describe "special global writes", type: :runner do
     # A non-constant receiver keeps each out of the ancestor's rewritten-surface mark, so the census alone declines.
     it "declines on a definition whose name no literal spells" do
       expect_quiet("name = :write\nk = Integer\nk.define_method(name) { |*| 0 }\n", "$stdout = 1")
+      expect_quiet("m = :define_method\nk = Integer\nk.send(m, :write) { |*| 0 }\n", "$stdout = 1")
       expect_quiet("name = :write\nk = Integer\nk.class_eval(\"def \#{name}(*) = 0\")\n", "$stdout = 1")
       expect_quiet("class Integer\n  attr_reader(*%i[write])\nend\n", "$stdout = 1")
       expect_quiet("include(const_get(:Nowhere))\n", "$stdout = 1")
     end
 
+    # Only an `eval`-family call's first argument is code: `__FILE__` and `__LINE__ + 1` name no method.
     it "still reports when the program defines only other names" do
       source = <<~RUBY
         class Integer
@@ -221,10 +223,18 @@ RSpec.describe "special global writes", type: :runner do
         end
         k = Integer
         k.class_eval("def size_in_words = 0")
+        class Widget
+          class_eval <<~CODE, __FILE__, __LINE__ + 1
+            def label = "w"
+          CODE
+          class_eval <<~CODE
+            def name = "w"
+          CODE
+        end
         $stdout = 1
         $0 = 1
       RUBY
-      expect(fired(source)).to eq([[9, "global.write-type-mismatch"], [10, "global.write-type-mismatch"]])
+      expect(fired(source)).to eq([[17, "global.write-type-mismatch"], [18, "global.write-type-mismatch"]])
     end
 
     it "declines on a receiver-form rewrite of an ancestor" do
@@ -340,9 +350,16 @@ RSpec.describe "special global writes", type: :runner do
         .to be_empty
     end
 
-    it "still reports when the refined class is not the literal's class or an ancestor of it" do
-      source = "module HashWriter\n  refine(Hash) { def write(*) = 0 }\nend\nusing HashWriter\n$stdout = 1\n"
-      expect(fired(source)).to eq([[5, "global.write-type-mismatch"]])
+    # The target may be computed or a constant alias (`fixtures/special_global_writes/refined_*_target.rb`), so which
+    # class a refinement refines is not followed.
+    it "declines the stream write under a refinement of `write` on any class" do
+      expect(fired("module HashWriter\n  refine(Hash) { def write(*) = 0 }\nend\nusing HashWriter\n$stdout = 1\n"))
+        .to be_empty
+    end
+
+    it "still reports a stream write no `using` reaches" do
+      expect(fired("module HashWriter\n  refine(Hash) { def write(*) = 0 }\nend\n$stdout = 1\n"))
+        .to eq([[4, "global.write-type-mismatch"]])
     end
 
     # A `using` of a non-constant counts every refinement as in effect in its file, but none of these refines `write`.
@@ -356,6 +373,38 @@ RSpec.describe "special global writes", type: :runner do
       index = Rigor::Inference::ScopeIndexer.index(tree, default_scope: Rigor::Scope.empty)
       write = tree.statements.body.last
       expect(Rigor::Analysis::CheckRules.main_pass_node_diagnostics("mem.rb", write, index)).to be_empty
+    end
+  end
+
+  describe "the census" do
+    let(:census) { Rigor::Inference::GlobalWriteCensus }
+
+    # Inside a `refine` block the literal's unknown name is recorded as a refinement of any name, which only the first
+    # layer does; the fallback below records a definition of any name, wherever the node sits.
+    it "reads a name literal whose bytes are not valid in its encoding as every name" do
+      [
+        'k.class_eval("\\xff def write(*) = 0 end")', 'k.define_method("\\xff") { |*| 0 }', 'k.send("\\xff", :write)',
+        'k.alias_method(:"\\xff", :to_s)', 'k.attr_reader("\\xff")'
+      ].each do |call|
+        tree = Prism.parse("refine(Array) { #{call} }").value
+        expect(census.scan(tree)).to eq(Set[census::REFINES_ANY]), call
+      end
+    end
+
+    it "degrades a node it fails to read to a definition of every name, and never raises" do
+      collector = census::Collector.new
+      allow(collector).to receive(:visit_call).and_raise(EncodingError, "invalid symbol in encoding UTF-8")
+      node = Prism.parse("k.define_method(:size) { 0 }").value.statements.body.first
+      expect { collector.visit(node, top_level: true) }.not_to raise_error
+      expect(collector.census).to eq(Set[census::DEFINES_ANY])
+    end
+
+    it "keeps analysing the file when it fails to read a node" do
+      collector = census::Collector.new
+      allow(collector).to receive(:visit_call).and_raise(ArgumentError, "invalid byte sequence in UTF-8")
+      allow(census::Collector).to receive(:new).and_return(collector)
+      expect(fired("k = Integer\nk.define_method(:size) { 0 }\n$stdout = 1\n$/ = 1\n"))
+        .to eq([[4, "global.write-type-mismatch"]])
     end
   end
 

@@ -1381,7 +1381,8 @@ RSpec.describe "Rigor type construction (integration)" do
     # The number of `# QUIET-1367` lines each entry carries.
     quiet_counts = {
       "setter_rejections.rb" => 19, "non_literal_writers.rb" => 3, "special_aliases.rb" => 2,
-      "refined_literals.rb" => 2, "refined_definitions.rb" => 2, "refined_hatches.rb" => 0
+      "refined_literals.rb" => 3, "refined_definitions.rb" => 2, "refined_hatches.rb" => 0,
+      "refined_computed_target.rb" => 1, "refined_aliased_target.rb" => 1
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/special_global_writes", name))
@@ -1403,6 +1404,16 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
         expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(quiet)
       end
+    end
+
+    # A name literal the census cannot read must not fail the file. Every diagnostic is compared, not only the
+    # `global.*` ones, so an internal analyzer error in place of the file's findings fails the example.
+    it "analyses a file whose name literals are not valid UTF-8, and reports exactly the marked lines" do
+      source = fixture_source("invalid_names.rb")
+      reported = analyze(source).diagnostics.reject { |d| d.severity == :info }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+      expect(fired_lines(source).map(&:last)).to include("call.undefined-method")
+      expect(source.lines.count { |line| line.include?("# QUIET-1367") }).to eq(2)
     end
 
     # An alias in one file exempts the special in every other: `cross_file/writes.rb` runs after `aliases.rb`.

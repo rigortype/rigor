@@ -2493,7 +2493,7 @@ module Rigor
           names = [method_name, *GLOBAL_WRITE_HATCHES]
           census = global_write_census(scope)
           program_may_answer?(ancestors, names, census, scope) ||
-            (method_name == :write && refined_writer_in_effect?(ancestors, census, node, scope, lexical_sites))
+            (method_name == :write && refined_writer_in_effect?(census, node, lexical_sites))
         end
 
         def overridden_hatch?(definition)
@@ -2544,17 +2544,14 @@ module Rigor
         end
 
         # For `write` only: some refinement may add `write` (a `def`, `define_method` or `alias_method` in a `refine`
-        # block, or an `import_methods`), the literal's class or an ancestor is refined, and a `using` is in effect at
-        # the write. `respond_to?(:write)` honours an active refinement on Ruby 4.0.5; a refined
-        # `respond_to_missing?` or `respond_to?`, and every implicit conversion, do not, so a refinement that adds
-        # only those leaves the write reported.
-        def refined_writer_in_effect?(ancestors, census, node, scope, lexical_sites)
-          return false unless Inference::GlobalWriteCensus.refines_write?(census)
-
-          refined_mark = Scope::DiscoveryIndex::ENVELOPE_REFINED_MARK
-          return false unless ancestors.any? { |owner| scope.parameter_envelopes_of(owner).key?(refined_mark) }
-
-          lexical_sites.nil? || lexical_sites.using_in_effect?(node)
+        # block, or an `import_methods`), and a `using` is in effect at the write. Which class it refines is not asked:
+        # the target may be computed (`[Array].each { |k| refine(k) { … } }`) or a constant alias (`T = Array;
+        # refine(T)`), so a refined `write` on any class declines every literal. `respond_to?(:write)` honours an
+        # active refinement on Ruby 4.0.5; a refined `respond_to_missing?` or `respond_to?`, and every implicit
+        # conversion, do not, so a refinement that adds only those leaves the write reported.
+        def refined_writer_in_effect?(census, node, lexical_sites)
+          Inference::GlobalWriteCensus.refines_write?(census) &&
+            (lexical_sites.nil? || lexical_sites.using_in_effect?(node))
         end
 
         def build_global_write_type_diagnostic(path, node, contract, class_name)

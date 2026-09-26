@@ -87,8 +87,9 @@ Supported narrowing sources include:
 - Trusted equality and inequality checks against literals and singleton values.
 - `nil?` checks and nil comparisons.
 - Truthiness checks, where `nil` and `false` narrow the false branch.
-- `is_a?`, `kind_of?`, `instance_of?`, and class/module comparisons.
-- `respond_to?` checks when the method name is statically known. See [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md) for the visibility rules.
+- `is_a?`, `kind_of?`, `instance_of?`, and class/module comparisons. A class guard is evidence about its receiver and never proves a `Nominal` receiver's arm unreachable (see [Class guards](#class-guards)).
+- `respond_to?` checks when the method name is statically known. The true branch admits the method (see [Class guards](#class-guards)); see [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md) for the visibility rules.
+- Guards on a global or constant read, which narrow as they narrow a local and are restored where code may run that rebinds the global or constant (see [Guards on globals and constants](#guards-on-globals-and-constants)).
 - `Hash#key?` / `#has_key?` against a literal Symbol/String key, when the receiver is a hash shape carrying that key as optional. The true branch promotes the key to required so a subsequent index read drops the optionality `nil` (the value's own intrinsic `nil` is preserved — key presence does not imply a non-nil stored value). The false branch is the conservative no-op. This is the Ruby analogue of a set-theoretic `is_map_key`-style key-presence refinement.
 - `Array#empty?` / `#any?` / `#none?` (bare, no block or args) when the receiver is an `Array[T]`. The edge that implies "at least one element" — the false edge of `empty?` / `none?`, the true edge of `any?` — refines the receiver to `non-empty-array[T]`, so length-returning methods (`size` / `length` / `count`) read `positive-int`. The opposite edge is a no-op (`any?` / `none?` being false does not imply emptiness). A Ruby analogue of a non-empty (`tuple_size`-style) collection refinement. The refinement describes the receiver's *content*, not its binding, so an in-place mutator that can empty the receiver (`clear`, `pop`, `shift`, `delete_if`, …) MUST invalidate it: the binding widens back to `Array[T]` and a later `size` reads the base `non-negative-int` envelope again. Retaining the refinement past such a call folds `arr.size == 0` to a constant and reports a false always-falsey condition on correct code.
 - Pattern matching and case analysis.
@@ -233,6 +234,65 @@ The `Regexp` "specific narrowing rule" the trust levels above defer to is the `=
   Otherwise `$?` stays a `Process::Status` once set, so the binding survives later calls, blocks and loops until a join with a path that did not set it: `system("make"); log("built"); $?.success?` reads it. A called method's subprocess also sets its caller's `$?`, which the analysis does not follow, so `def run = system("make"); run; $?` leaves it unbound.
 - **Gaps**: a `WNOHANG` wait or a `waitall` run between a subprocess and a read of `$?` from another file, a gem or a signal handler set up elsewhere, or through a computed `send`; a called method that rescues an exception raised while its own subprocess waited (`Timeout.timeout(1) { %x(make) } rescue nil`), or closes an already-reaped `IO.popen` stream, and so returns with `$?` nil; a block a method runs on another thread (a thread pool's `post { $?.success? }`) or keeps and runs after the rescue clause exited (`on_error { $! }`), which reads the bindings where it is written; a kept block or fiber body that the same statement runs and that falls through a rescue (`Fiber.new { %x(make) rescue nil }.resume`, `-> { %x(make) rescue nil }.call`), which leaves `$?` nil while the statement keeps its binding; a class guard on a copy of `$!` (`err = $!; $!.key if err.is_a?(KeyError)`) or a comparison of its class (`$!.class == KeyError`), which do not narrow `e` either, and `set_backtrace` called by a method the clause calls; a `define_method` naming `===` through `send` or a computed name, or one in another file (`define_singleton_method(:===)` in the file that declares `Matchy3` still leaves `rescue Matchy3` elsewhere binding `$!` to `Matchy3`, as the decline is per file); a gem's Ruby `system` reached through implicit `self`, including a DSL block's rebound `self`; a `Process.last_status` the program defines in a form discovery does not record (`def Process.last_status` outside `module Process`, `define_singleton_method`, `alias_method`, a prepended module), which still reads `$?`'s binding; a gem's exception class that redefines `backtrace` or `self.===`; and the `English` aliases `$ERROR_INFO`, `$ERROR_POSITION` and `$CHILD_STATUS`, which are not read as `$!`, `$@` and `$?`.
 
+### Class guards
+
+A class guard written in the code is evidence about its receiver ([ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 3, [#1429](https://github.com/rigortype/rigor/issues/1429)). A receiver's `Nominal` type may be an idiomatic expectation the program does not hold to: `$stdout` is typed `IO`, and a test runs the same code with a `StringIO`, which is not an `IO` subclass. `$stdout.is_a?(StringIO) ? $stdout.string : nil` and `case io when StringIO then io.string end` are correct code.
+
+- **The truthy edge.** The class guards are `is_a?`, `kind_of?`, `instance_of?`, `C === x` with a class or module constant `C`, and `case x when C`. On the truthy edge of such a guard, when no member of the receiver's type can satisfy it (the narrowing would otherwise be `bot`), Rigor MUST NOT prove the edge unreachable because of a `Nominal` member:
+  - A `Nominal` member whose class is disjoint from `C` narrows to `C` when both are classes: no object is an instance of both, so the guard running truthy says the receiver's type was wrong.
+  - It narrows to `Dynamic[top]` when either is a module, since an object can be both (a subclass that includes the module) and no carrier spells that meet.
+  - Under `instance_of?` a member of any class other than `C` narrows to `C`, since the guard says the object's class is exactly `C`: `Numeric` under `instance_of?(Integer)` reads `Integer`.
+- **What keeps `bot`.** A member that records what the file literally shows keeps its `bot`: a literal (`Constant`), a `Tuple`, a `HashShape`, or a class object (`Singleton`, under the [#657](https://github.com/rigortype/rigor/issues/657) / [#898](https://github.com/rigortype/rigor/issues/898) declines). So do `nil`, `true` and `false`, and `instance_of?` naming a module, which no object's class is.
+- **Selection.** A union with a member that satisfies the guard keeps the member that does, and drops the disjoint ones as before: `x.is_a?(Array)` on `Array[Integer] | Hash[Symbol, Integer]` reads `Array[Integer]`.
+- **Not class guards.** A class Rigor derives from a pattern (the `Numeric` of an Integer `Range`, the `String` of a `Regexp`) is not a guard the code writes, and keeps its `bot`.
+- **The falsey edge** is unchanged.
+- **Consequences.** The `when` arm of such a guard does not report `flow.unreachable-clause`, and the value of the `case` keeps its arm on the value side too. Where the guarded arm falls through, the receiver joins back as the union of the guarded class and its entry type. The rule holds for every disjoint `Nominal`, including one the file constructs (`other = ::Random.new; case other when Other::Random then 1 else "else" end` types `"else" | 1`). Rigor cannot tell a declared or idiomatic type from a constructed one without tracking provenance, and a guard in the code outranks an inferred `Nominal`.
+
+`respond_to?(:m)` with a statically known `m` is a guard in the same sense. On its truthy edge:
+- The receiver loses `nil`, unless `NilClass` defines `m`, in which case nothing narrows.
+- Each member whose class Rigor knows to lack `m` is dropped. Rigor knows this only when:
+  - the class is declared in RBS;
+  - it is not a mixin module, `Object` or `BasicObject`, whose instances may be of any class;
+  - it is not a plugin's open receiver;
+  - neither its signature nor the project defines `m` on it.
+- When no member may respond, the receiver reads `Dynamic[top]`, so the guarded call does not report. It reads `Dynamic[top]` and not `Dynamic[T]`, because method availability on `Dynamic[T]` is checked against `T` ([special-types.md](special-types.md)).
+
+The falsey edge is unchanged.
+
+### Guards on globals and constants
+
+Truthiness, `nil?`, `!`, safe navigation (`$g&.m`, and a safe-navigation chain), the class guards, `C === x`, `case … when` and `respond_to?` narrow a global read (`$stdout`) and a constant reference (`STDOUT`, `Foo::BAR`, `::Foo`) as they narrow a local read ([#1429](https://github.com/rigortype/rigor/issues/1429)). Truthiness, `nil?`, safe navigation and `respond_to?` narrow an instance variable as well; the class guards do not narrow one yet ([#1446](https://github.com/rigortype/rigor/issues/1446)).
+- **An unbound global** is narrowed from the type its read has. An edge that learns nothing leaves a global or constant alone.
+- **Constants.** A constant's narrowing is keyed by how the reference is spelled, so `::STDOUT` and `STDOUT` narrow apart. A write to the constant ends its narrowing.
+
+A guard's narrowing of a global or constant MUST be restored where code may run between the guard and a read that rebinds it: Ruby code may assign the global (`$stdout = StringIO.new` in a helper) or `const_set` the constant, and the analysis cannot see that code. Restoring binds the union of the binding the guard narrowed and the narrowed type. That union still holds the guarded class, so `$stdout.is_a?(StringIO) ? (helper; $stdout.string) : nil` reads `IO | StringIO` after `helper`, and the guarded call stays quiet. `$sep` guarded non-nil reads `String?` again after a call that may set it to `nil`.
+
+Code that may rebind a global or constant is:
+- a call that may run project, gem or unresolved code:
+  - a method the project defines on the receiver's class or its ancestry;
+  - a method whose signature is owned outside Ruby core and the standard library;
+  - a core method on a project or gem receiver, since a core module's method may call back (`Enumerable#map` runs the class's `each`);
+  - an unresolved callee (a `Dynamic` receiver, or a name no signature declares);
+  - `send`, `__send__`, `public_send`, `instance_eval`, `instance_exec`, `class_eval`, `class_exec`, `module_eval`, `module_exec`, `eval`, `require`, `require_relative` and `load`;
+  - any call on a `Proc`, `Method`, `UnboundMethod`, `Binding`, `Enumerator`, `Fiber`, `Thread` or delegator;
+  - a call that passes a `&expr` block argument;
+- a literal block whose body writes a global or constant, or holds such a call;
+- `yield` and `super`.
+
+The rule reads a statement's own call, the calls in its receiver chain and arguments, which Ruby runs first, and the calls in a value the statement types without evaluating them one by one: an array, hash or interpolation literal, a `rescue` modifier, a constant's value. A block or lambda body enters with the narrowings restored when it may run after such code:
+- a lambda literal;
+- a block its call keeps to run later (`proc`, `lambda`, `define_method`);
+- the root block of a thread, fiber or ractor;
+- the block of a call that may itself run such code (`with_retry { $sep.length }`);
+- a body that may rebind one itself, since a later iteration reads what an earlier one wrote.
+
+A method `Kernel`, `Object` or `BasicObject` owns (`puts`, `format`, `obj.frozen?`), and a core or standard-library method on a core or standard-library receiver (`$sep.strip`, `$stdout.rewind`, `File.read(path)`), keep the narrowing. So `if $sep; $sep.strip; $sep.length; end` keeps `$sep` non-nil.
+
+The frame-local `$_` and `$~` ([#1359](https://github.com/rigortype/rigor/issues/1359)) and the rescue-scoped `$!` and `$@` are narrowed the same way but not restored by this rule. A called method cannot reach the first two, and a call that returns leaves the last two as they were; their own rules above forget them. `$?` is restored by it.
+
+- **Accepted gap: implicit conversion.** A core method that calls back into a method the program does not spell is read as the core method alone. `puts obj` runs `obj.to_s`, `hash[obj]` runs `obj.hash` and `list.sort` runs `<=>`. A project `to_s` that assigns a global therefore does not end the narrowing.
+- **Imprecision: calls on block parameters.** A call on a block parameter inside a scanned block body is read as an unresolved callee, because its receiver has no binding where the scan runs. That is conservative: `items.each { |i| i.to_s }` restores the narrowing although it runs only core code.
+
 ## Fact stability and mutation
 
 Flow facts are valid only while the analyzer can trust the path they describe. Rigor MUST invalidate or weaken facts when Ruby behavior can mutate, replace, or escape the observed target.
@@ -253,7 +313,7 @@ Local binding facts are stable across ordinary method calls until assignment to 
 - `x[:key]` or `x.foo` shape facts MAY be weakened by a call that can mutate `x` or escape it;
 - facts about instance variables, class variables, globals, and constants are heap or global-storage facts and are invalidated more aggressively.
 
-Unknown method calls remain conservative for heap facts. They MAY invalidate object-shape, hash-entry, instance-variable, constant-object, and global-storage facts for any target that may have escaped to the call. They MUST NOT invalidate every local binding fact in the current scope.
+Unknown method calls remain conservative for heap facts. They MAY invalidate object-shape, hash-entry, instance-variable, constant-object, and global-storage facts for any target that may have escaped to the call. They MUST NOT invalidate every local binding fact in the current scope. A guard's narrowing of a global or constant is restored by the rule in [Guards on globals and constants](#guards-on-globals-and-constants).
 
 ### Closure captures
 

@@ -3696,9 +3696,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$!)).to be_nil
       _, post = special_reads("y = (x rescue (z = $!))\n", :$!, base: env_scope.with_global(:$!, argument_t))
       expect(post.global(:$!)).to eq(argument_t)
-      # A fallback that guards `$!` by its class reads it unbound (#1429).
+      # A fallback that guards `$!` by its class reads it unbound (ErrorInfo.guarded?), and the guard narrows the
+      # unbound read to the class it names (#1429).
       _, post = special_reads("y = (x rescue (z = ($!.is_a?(KeyError) ? $! : nil)))\n", :$!)
-      expect(post.local(:z).describe(:short)).to eq("Dynamic[top]?")
+      expect(post.local(:z).describe(:short)).to eq("KeyError?")
       type, = evaluate("(raise 'm') rescue $!", base_scope: env_scope)
       expect(type).to eq(error_t)
     end

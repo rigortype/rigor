@@ -698,6 +698,7 @@ RSpec.describe Rigor::Scope do
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self singleton_class_body
           local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
+          constant_narrowings guard_records
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -718,7 +719,7 @@ RSpec.describe Rigor::Scope do
     # One arm, populated so that EVERY constructor keyword holds a non-default value. Both arms are built from
     # the same values, so the agreement / intersection rules keep them and any field the join forgets shows up
     # as the constructor default instead.
-    def populated(fact, type, node) # rubocop:disable Metrics/AbcSize -- one keyword per constructor field
+    def populated(fact, type, node) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword per field
       described_class.new(
         environment: Rigor::Environment.default,
         locals: { x: type }.freeze,
@@ -746,7 +747,9 @@ RSpec.describe Rigor::Scope do
         optimistic_locals: { x: :cause }.freeze,
         optimistic_ivars: { :@i => :cause }.freeze,
         repeated_or_writes: { node => true }.compare_by_identity.freeze,
-        match_frame: Rigor::Inference::MatchRebinding::Frame.new(node)
+        match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
+        constant_narrowings: { "C" => type }.freeze,
+        guard_records: { %i[global $g] => type, [:constant, "C"] => type }.freeze
       )
     end
 

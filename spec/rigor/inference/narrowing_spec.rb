@@ -464,7 +464,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     describe "respond_to? non-nil narrowing (T3)" do
       it "drops nil on the truthy edge for a symbol not in NilClass's set" do
         bound = scope.with_local(:v, union_int_nil)
-        pred = parse_predicate("v.respond_to?(:count)", locals: %i[v])
+        pred = parse_predicate("v.respond_to?(:succ)", locals: %i[v])
         truthy, falsey = described_class.predicate_scopes(pred, bound)
         expect(truthy.local(:v)).to eq(integer_nominal)
         # Falsey edge is the conservative no-op.
@@ -489,9 +489,35 @@ RSpec.describe Rigor::Inference::Narrowing do
 
       it "narrows the same way for an ivar receiver" do
         bound = scope.with_ivar(:@v, union_int_nil)
-        pred = parse_predicate("@v.respond_to?(:count)")
+        pred = parse_predicate("@v.respond_to?(:succ)")
         truthy, = described_class.predicate_scopes(pred, bound)
         expect(truthy.ivar(:@v)).to eq(integer_nominal)
+      end
+
+      # Issue #1429 — the truthy edge admits the method: a member whose class RBS knows to lack it is not what the
+      # edge holds, and a receiver no member of which may respond reads `Dynamic[top]`, so the guarded call does not
+      # report. The falsey edge stays the entry type.
+      it "reads Dynamic[top] on the truthy edge when no member has the method" do
+        io = Rigor::Type::Combinator.nominal_of("IO")
+        bound = scope.with_local(:v, io)
+        truthy, falsey = described_class.predicate_scopes(parse_predicate("v.respond_to?(:string)", locals: %i[v]),
+                                                          bound)
+        expect(truthy.local(:v)).to eq(Rigor::Type::Combinator.untyped)
+        expect(falsey.local(:v)).to eq(io)
+      end
+
+      it "keeps the members that have the method and drops nil and the members that lack it" do
+        union = Rigor::Type::Combinator.union(integer_nominal, string_nominal, constant_nil)
+        bound = scope.with_local(:v, union)
+        truthy, = described_class.predicate_scopes(parse_predicate("v.respond_to?(:upcase)", locals: %i[v]), bound)
+        expect(truthy.local(:v)).to eq(string_nominal)
+      end
+
+      it "keeps a member it cannot judge" do
+        union = Rigor::Type::Combinator.union(integer_nominal, Rigor::Type::Combinator.untyped)
+        bound = scope.with_local(:v, union)
+        truthy, = described_class.predicate_scopes(parse_predicate("v.respond_to?(:upcase)", locals: %i[v]), bound)
+        expect(truthy.local(:v)).to eq(Rigor::Type::Combinator.untyped)
       end
     end
 

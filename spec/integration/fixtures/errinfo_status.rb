@@ -162,9 +162,9 @@ rescue AppError
   -> { assert_type("Dynamic[top]", $!) }
 end
 
-# A clause that guards `$!` by its class reads `$!` and `$@` unbound, as before #1360: a class guard does not narrow a
-# global receiver yet (#1429), so a bound `StandardError` would report `key` against the guard (Ruby: :a in each, and
-# exit status 3 in `guarded_exit_status`).
+# A clause that guards `$!` by its class reads `$!` and `$@` unbound, as before #1360. The decline predates #1429's
+# narrowing of a guarded global and stays until #1447 narrows it (Ruby: :a in each, and exit status 3 in
+# `guarded_exit_status`).
 def guarded_is_a(h)
   h.fetch(:a)
 rescue
@@ -245,11 +245,11 @@ rescue ArgumentError
   k
 end
 
-# A rescue modifier's fallback that guards `$!` by its class reads it unbound in the modifier's value too (Ruby: nil,
-# the RuntimeError not being a KeyError).
+# A rescue modifier's fallback that guards `$!` by its class reads it unbound in the modifier's value too, and the
+# guard narrows that read to the class it names (#1429) (Ruby: nil, the RuntimeError not being a KeyError).
 def guarded_modifier
   found = ((raise "x") rescue ($!.is_a?(KeyError) ? $! : nil))
-  assert_type("Dynamic[top]?", found)
+  assert_type("KeyError?", found)
 end
 
 # A class that gives itself a singleton `===` matches exceptions that are not its instances (Ruby: the RuntimeError).

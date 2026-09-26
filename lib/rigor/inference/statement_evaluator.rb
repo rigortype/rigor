@@ -25,6 +25,7 @@ require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "guard_rebinding"
 require_relative "match_rebinding"
 require_relative "element_read_widening"
 require_relative "hash_lookup_mutation"
@@ -645,7 +646,8 @@ module Rigor
       # `attr_reader`, the very macro #319 silenced at every other position); inside a module, the module's own
       # `self` — a wrong receiver for every implicit-self call in the body.
       def eval_constant_write(node)
-        result = [scope.type_of(node, tracer: tracer), forget_rebound_specials(scope, node.value)]
+        after = forget_constant_guard(forget_rebound_specials(scope, node.value), node)
+        result = [scope.type_of(node, tracer: tracer), after]
         call_node = meta_new_block_call(node)
         return result if call_node.nil?
 
@@ -654,6 +656,15 @@ module Rigor
 
         enter_meta_class_body(call_node.block, build_block_entry_scope(call_node, call_node.block), context)
         result
+      end
+
+      # Issue #1429 — a write to a constant ends a guard's narrowing of the reference it writes.
+      def forget_constant_guard(after, node)
+        return after if after.constant_narrowings.empty?
+
+        target = node.respond_to?(:target) ? node.target : node
+        key = target.is_a?(Prism::ConstantPathNode) ? Narrowing.constant_key(target) : node.name.to_s
+        key ? after.without_constant_narrowing(key) : after
       end
 
       # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze`
@@ -2909,9 +2920,14 @@ module Rigor
       # `post_scope`, past a statement call, with the specials the call rebinds: the match globals and `$_` forgotten
       # when it may rebind them in this frame, and `$?` bound when it, or an operand, certainly ran a subprocess, since
       # `$?` is the thread's (issue #1360, {LastStatus.after}).
+      # Issue #1429 — and a guard's narrowing of a global or constant restored when the call may run code that rebinds
+      # it ({GuardRebinding.call_may_rebind?}).
       def rebind_statement_specials(node, post_scope)
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
+        if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
+          post_scope = post_scope.forget_guard_narrowings
+        end
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
       end
 
@@ -2950,6 +2966,10 @@ module Rigor
         if invoked.match_globals_bound? && MatchRebinding.operands_may_rebind?(node, scope)
           invoked = invoked.forget_match_globals
         end
+        # Issue #1429 — a guard narrowing the receiver chain or an argument may rebind.
+        if invoked.guard_narrowed? && GuardRebinding.operands_may_rebind?(node, scope)
+          invoked = invoked.forget_guard_narrowings
+        end
         return invoked unless invoked.last_line_bound? && LastLine.operands_may_set?(node, scope)
 
         invoked.forget_last_line
@@ -2967,6 +2987,8 @@ module Rigor
           after = after.forget_match_globals
         end
         after = after.forget_last_line if after.last_line_bound? && LastLine.may_set?(node, scope)
+        # Issue #1429 — and a guard's narrowing of a global or constant, when a call in it may rebind one.
+        after = after.forget_guard_narrowings if after.guard_narrowed? && GuardRebinding.may_rebind?(node, scope)
         forget_rescued_status(after, node)
       end
 

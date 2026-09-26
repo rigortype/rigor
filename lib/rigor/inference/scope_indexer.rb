@@ -13,6 +13,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
 require_relative "fresh_frame_blocks"
+require_relative "guard_rebinding"
 require_relative "last_line"
 require_relative "last_status"
 require_relative "error_info"
@@ -8776,6 +8777,9 @@ module Rigor
 
       def unentered_block_entry(node, block, table, current_scope)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
+
+        # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
+        current_scope = GuardRebinding.block_entry(current_scope, block, node)
         return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)
 
         LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
@@ -8799,6 +8803,7 @@ module Rigor
       # redeclaring them — keep the enclosing binding. Issue #1360 — a `->` body and its parameter defaults run
       # whenever the lambda is called, so they read `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
       def closure_scope(closure, scope)
+        scope = GuardRebinding.block_entry(scope, closure, nil)
         scope = FreshFrameBlocks.closure_entry(scope, closure, nil)
         scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
         closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }

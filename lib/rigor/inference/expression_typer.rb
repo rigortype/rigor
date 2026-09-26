@@ -725,7 +725,17 @@ module Rigor
       # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo` resolves to
       # `Rigor::Inference::FallbackTracer`.
       def type_of_constant_read(node)
-        resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
+        guard_narrowed_constant(node) ||
+          resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
+      end
+
+      # Issue #1429 — the type a guard narrowed this constant reference to on the edge being typed
+      # (`STDOUT.is_a?(StringIO) ? STDOUT.string : nil`), or nil. Keyed by spelling ({Narrowing.constant_key}).
+      def guard_narrowed_constant(node)
+        return nil if scope.constant_narrowings.empty?
+
+        key = Narrowing.constant_key(node)
+        key && scope.constant_narrowing(key)
       end
 
       # A leading `::` (`::Rails`, `::Rails::Application`) is Ruby's escape hatch out of the lexical ladder:
@@ -733,6 +743,9 @@ module Rigor
       # deliberately un-rooted (the discovery tables are keyed that way), so the marker rides alongside it
       # into the resolver (#614).
       def type_of_constant_path(node)
+        narrowed = guard_narrowed_constant(node)
+        return narrowed if narrowed
+
         full_name = Source::ConstantPath.qualified_name_or_nil(node)
         return fallback_for(node, family: :prism) if full_name.nil?
 

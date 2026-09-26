@@ -1299,6 +1299,46 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1429 (ADR-117 Decision point 3) — a class guard protects the call it guards on a global, constant or local
+  # receiver typed by a class the guard names as outside it; truthiness, `nil?`, `!` and `&.` narrow a global or
+  # constant read; `respond_to?(:m)` admits `m`; and a guard's narrowing of a global or constant is restored where code
+  # may run that rebinds it. Each entry runs as `rigor check` runs a project (`analyze(files:)`), so the file's own
+  # methods are discovered, and each carries its own global writes.
+  describe "fixtures/global_constant_guards/ — class guards and truthiness on global and constant receivers (#1429)",
+           type: :runner do
+    # The number of `# QUIET-1429` lines each entry carries.
+    quiet_counts = {
+      "streams.rb" => 4, "locals.rb" => 3, "truthiness.rb" => 7, "invalidation.rb" => 4, "respond_to.rb" => 3
+    }.freeze
+
+    def fixture_source(name) = File.read(File.join(__dir__, "fixtures/global_constant_guards", name))
+
+    # Every 1-indexed line of `source` whose comment carries `# FIRES-1429 <rule>`, with that rule.
+    def fired_lines(source)
+      source.lines.each_with_index.filter_map do |line, i|
+        rule = line[/# FIRES-1429 (\S+)/, 1]
+        [i + 1, rule] if rule
+      end
+    end
+
+    def reported(result)
+      result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+    end
+
+    # Must-not-fire and must-still-fire in one assertion: the exact `[line, rule]` set keeps the quiet half from
+    # passing because a rule stopped firing at all, and it counts an `assert_type` mismatch as well. No entry may
+    # report `flow.unreachable-clause`, which is an info diagnostic the set above leaves out.
+    quiet_counts.each do |entry, quiet|
+      it "reports exactly the marked controls in #{entry}, and marks #{quiet} quiet lines" do
+        source = fixture_source(entry)
+        result = analyze(files: { "code.rb" => source })
+        expect(reported(result).map { |d| [d.line, d.rule.to_s] }.sort).to eq(fired_lines(source))
+        expect(result.diagnostics.map(&:rule).map(&:to_s)).not_to include("flow.unreachable-clause")
+        expect(source.lines.count { |line| line.include?("# QUIET-1429") }).to eq(quiet)
+      end
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

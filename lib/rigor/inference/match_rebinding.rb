@@ -6,6 +6,7 @@ require_relative "../source/node_children"
 require_relative "../type"
 require_relative "block_call_timing"
 require_relative "fresh_frame_blocks"
+require_relative "guard_rebinding"
 require_relative "stored_block_call"
 require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
@@ -363,7 +364,11 @@ module Rigor
       # with a narrowed global untyped, since it reads the definer's slot whenever the method is called. `$_`, which
       # shares the slot, enters on the same terms ({LastLine.block_entry}, issue #1359). A closure's body, which runs
       # whenever it is called, enters with `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}, issue #1360).
+      #
+      # Issue #1429 — the entry also restores a guard's narrowing of a global or constant where the body may run after
+      # code that rebinds it ({GuardRebinding.block_entry}).
       def block_entry(scope, block_node, call_node = nil)
+        scope = GuardRebinding.block_entry(scope, block_node, call_node)
         return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
 
         scope = FreshFrameBlocks.closure_entry(scope, block_node, call_node)

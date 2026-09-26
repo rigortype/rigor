@@ -92,7 +92,7 @@ Visibility is a first-class facet of every method-shape entry. Rigor MUST track 
 
 The optional `include_private` argument MUST affect the visibility fact:
 
-- `obj.respond_to?(:foo)` records a public existence fact for `foo` on the true branch. The true branch also drops the members of `obj`'s type whose class Rigor knows to lack `foo`. When no member may respond, a `Nominal` member makes the branch gradual, with `obj` read as `Dynamic[top]`, so the guarded `obj.foo` does not report, and literal carriers alone leave it `bot` ([control-flow-analysis.md](control-flow-analysis.md#class-guards), [#1429](https://github.com/rigortype/rigor/issues/1429)).
+- `obj.respond_to?(:foo)` records a public existence fact for `foo` on the true branch. The true branch also drops the members of `obj`'s type whose class Rigor knows to lack `foo`. When no member may respond, `obj` reads `Dynamic[top]` if a member is a `Nominal`, so the guarded `obj.foo` does not report, and `bot` if every member is a literal carrier ([control-flow-analysis.md](control-flow-analysis.md#class-guards), [#1429](https://github.com/rigortype/rigor/issues/1429)).
 - `obj.respond_to?(:foo, false)` is the same as the default when the second argument is statically false.
 - `obj.respond_to?(:foo, true)` records an existence fact whose visibility may be public, protected, or private. By itself it does not prove that `obj.foo` is legal as an external explicit-receiver call.
 - If the second argument is not statically known, Rigor MUST record a weaker maybe-private visibility fact.

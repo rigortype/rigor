@@ -78,14 +78,12 @@ end
 ```
 
 A guard can also name a class the variable's type says it cannot
-be. Rigor treats the guard as evidence rather than proving the
-branch dead: a type it inferred or read from a signature may be
-an expectation the program does not hold to. `$stdout` is typed
-`IO`, and a test runs the same code with a `StringIO`, which is
-not an `IO` subclass. Inside such a branch the variable reads
-`Dynamic[C]`: calls on it are typed and checked against `C`, and
-what the branch computes leaves it as `Dynamic`, so it never
-turns into an error at a typed boundary later:
+be. Inside such a branch the variable reads `bot`, so no call on
+it is checked. That matters when the type is one Rigor inferred
+or read from a signature: `$stdout` is typed `IO`, and a test runs
+the same code with a `StringIO`, which is not an `IO` subclass, so
+the guarded call below is correct code and stays quiet. The same
+holds for `$stdout`, `STDOUT` and other globals and constants:
 
 ```ruby
 require "stringio"
@@ -93,15 +91,16 @@ require "stringio"
 def captured_output
   out = STDOUT
   if out.is_a?(StringIO)
-    assert_type("Dynamic[StringIO]", out)
-    assert_type("String", out.string)
+    assert_type("bot", out)
+    out.string
   end
 end
 ```
 
-A literal, a tuple or hash shape, and a class object are what
-the code literally shows, so for them such a branch is still
-dead (`bot`).
+The rest of the branch is still checked, and its `bot` variable
+never reaches the code after it. A `case` drops such a branch
+from its value (see below); keeping it is tracked in
+[#1465](https://github.com/rigortype/rigor/issues/1465).
 
 ## Equality with literal values
 
@@ -145,24 +144,30 @@ unreachable when every member is matched.
 
 The same narrowing also works in reverse: when an earlier clause
 already covered the subject, or a `when <Class>` clause is
-disjoint from a literal, tuple or hash-shape subject, the clause
-is dead — Rigor emits
+disjoint from the subject's type, the clause is dead — Rigor emits
 [`flow.unreachable-clause`](08-understanding-errors.md) so you
 can delete it. (It ships at `:info` under the default profile.)
-A `when <Class>` clause disjoint from a type Rigor inferred or
-read from a signature is kept instead, as the `is_a?` section
-above describes: the subject reads `Dynamic[C]` in it, and its
-value joins the result as `Dynamic`:
+
+That report needs the subject's type to be what the code
+literally shows: a literal (`1`, `"s"`, `:a`), an array or hash
+literal, a class object, or `nil` / `true` / `false`. When the
+subject's type is one Rigor inferred or read from a signature,
+the `when` is evidence that it can hold something else, as in
+the `is_a?` example above, so the clause is not reported. It is
+still read as `bot`, and the `case` value drops it:
 
 ```ruby
 require "stringio"
 
 io = STDOUT
-assert_type(":io | Dynamic[:string_io]", (case io when StringIO then :string_io else :io end))
+assert_type(":io", (case io when StringIO then :string_io else :io end))
 
 count = 3
 assert_type(":number", (case count when String then :text else :number end))
 ```
+
+Neither `case` above is kept in the value, but only the second
+reports `flow.unreachable-clause`.
 
 `case x; in pattern` (one-line pattern matching) narrows the
 same way for the patterns Rigor understands — class checks,
@@ -175,9 +180,11 @@ clause-reachability check extends to bare-class `in` patterns
 A truthy `respond_to?(:name)` with a literal symbol removes `nil`
 from the receiver (unless `nil` itself responds to `name`) and the
 members whose class Rigor knows lacks `name`. When no member could
-respond, the branch runs gradually, as a disjoint `is_a?` does:
-the receiver reads `Dynamic[top]`, so the guarded call is not an
-error:
+respond, the receiver reads `Dynamic[top]` if its type is one
+Rigor inferred or read from a signature, so the guarded call is
+not an error, and `bot` if it is a literal, an array or hash
+literal, a class object, or `nil` / `true` / `false`, since such a
+value never gains the method:
 
 ```ruby
 require "stringio"
@@ -187,6 +194,9 @@ assert_type('"one"', value) if value.respond_to?(:upcase)
 
 io = STDOUT
 assert_type("Dynamic[top]", io) if io.respond_to?(:string)
+
+count = 3
+assert_type("bot", count) if count.respond_to?(:upcase)
 ```
 
 ## Boolean composition

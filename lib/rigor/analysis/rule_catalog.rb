@@ -658,44 +658,46 @@ module Rigor
 
         CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH => Entry.new(
           id: CheckRules::RULE_GLOBAL_WRITE_TYPE_MISMATCH,
-          summary: "A special global is assigned a value its setter rejects (TypeError at runtime).",
+          summary: "A special global is assigned a literal its setter rejects (TypeError at runtime).",
           fires_when: [
-            "The write is `$g = value` to a special whose setter checks the value: `$/` / `$-0`, `$,` and `$\\` " \
-            "(a String or nil), `$;` / `$-F` (a String, a Regexp, nil, or an object with `to_str`), `$~` " \
+            "The write is `$g = literal` to a special whose setter checks the value: `$/` / `$-0`, `$,` and " \
+            "`$\\` (a String or nil), `$;` / `$-F` (a String, a Regexp, nil, or an object with `to_str`), `$~` " \
             "(a MatchData or nil), `$0` / `$PROGRAM_NAME` (a String or an object with `to_str`), `$.` (an " \
             "Integer, a Float, or an object with `to_int`), `$-i` (a String, nil, false, or an object with " \
             "`to_str`), and `$stdout` / `$>` / `$stderr` (an object that responds to `write`, ADR-117 WD2).",
+            "The value is a literal node — an Integer, Float, Rational or imaginary literal, a String, Symbol " \
+            "or Regexp literal (interpolated or not), an Array or Hash literal, or `nil` / `true` / `false`, " \
+            "parenthesised or not — whose class the setter does not take: `$/ = 1`, `$/ = /x/`, `$~ = \"x\"`, " \
+            "`$0 = nil`, `$. = \"3\"`, `$stdout = 1`.",
+            "Where the setter also converts (`to_str`, `to_int`) or asks for `write`, the literal's object " \
+            "cannot answer that method: neither RBS nor the program gives its class, or an ancestor, the method " \
+            "or a `method_missing` / `respond_to_missing?` / `respond_to?` of its own.",
             "The envelope is the interpreter's setter, not the global's RBS declaration: `$/ = /x/` fires " \
-            "although `$;` takes a Regexp.",
-            "Every member of the value's type is provably rejected: its class is RBS-known and disjoint from " \
-            "every class the setter takes and, where the setter also takes a conversion or `write`, RBS " \
-            "declares no such method and no `method_missing` / `respond_to_missing?` / `respond_to?` of its " \
-            "own (`$stdout = 1`, `$stdout = nil`, `$/ = 1`, `$~ = \"x\"`, `$0 = nil`)."
+            "although `$;` takes a Regexp."
           ],
           does_not_fire_when: [
             "The special's setter accepts every value: `$stdin` (never checked, ADR-117 WD2), `$_`, `$VERBOSE`, " \
             "`$DEBUG`, `$=`; nor `$@`, whose setter depends on whether `$!` is set.",
-            "The value is `Dynamic[T]` / untyped / unresolved, or a union with any accepted or unknown member " \
-            "(`$/ = c ? 1 : \"x\"`).",
-            "The value is a class or module object, or typed as `Object` / `BasicObject` / `Class` / `Module` " \
-            "or a module.",
-            "The value's class is declared by the project (source or `sig/`) or is an ADR-26 open receiver.",
-            "The project defines the method the setter asks for (`write`, `to_str`, `to_int`) or a " \
-            "`method_missing` / `respond_to_missing?` / `respond_to?` hatch on the value's class or on " \
-            "`Object` / `Kernel` / `BasicObject` — or, for a value that is not a literal, on any class, since " \
-            "the runtime object may be an instance of a subclass.",
-            "The value is rooted at an inferred parameter, is a read whose `nil` is declaration-sourced " \
-            "(ADR-58), or reads a builtin global still on its declared seed.",
-            "The file aliases the special (`alias $stdout $out`).",
-            "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a target of a multiple assignment, a `for` " \
-            "index, or a `rescue => $g` reference: their written value is not type-checked."
+            "The value is not a literal — a variable, a method call, a constant, a conditional — whatever its " \
+            "inferred type: a class RBS declares without `write` or `to_str` does not prove the object lacks it.",
+            "The program gives the literal's class or an ancestor the method or a hatch: RBS (a `sig/` reopening " \
+            "or `include` counts), a `def` / `define_method` / `alias` / `alias_method` / `attr_*` / `class_eval` " \
+            "block in a reopening, a top-level `def`, any project module that defines it, `Integer.include(M)` / " \
+            "`Object.include(M)` / `Integer.define_method(...)`, a module an ancestor mixes in that RBS does not " \
+            "rule out, or a `pre_eval:` patch.",
+            "For `$stdout` / `$>` / `$stderr`, a refinement of the class or an ancestor that defines `write` is in " \
+            "effect at the write. The `to_str` / `to_int` conversions ignore refinements, so those still fire.",
+            "Any project file aliases the special (`alias $stdout $out`, on either side).",
+            "The write is `$g op= v`, `$g ||= v`, `$g &&= v`, a multiple-assignment target, a `for` index, or a " \
+            "`rescue => $g` reference: their value is not type-checked.",
+            "The write sits in the dead arm of a decidable version guard. Other code that never runs (`if " \
+            "false`, after `return`) is not recognised, and a write there still fires."
           ],
           suppression: "`# rigor:disable global.write-type-mismatch` on the write.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
-          # A firing needs every member of the value provably outside the setter's envelope, read from RBS on a
-          # class the project does not declare, with the conversion and duck escapes excluded; the write then
-          # raises on every run.
+          # A literal's class is exact, the setter's envelope is the running interpreter's, and every way a program can
+          # give the object the method the setter asks for declines; the write then raises every time it runs.
           evidence_tier: :high,
           since: "0.4.0"
         ),
@@ -715,13 +717,16 @@ module Rigor
             "The write is `$g ||= v` or `$g &&= v`, which writes only when the current value is falsy " \
             "(truthy): `$LOAD_PATH ||= []` never writes.",
             "The write is a `for` index or a `rescue => $g` reference.",
-            "The file aliases the special (`alias $! $err`), which makes the name another variable.",
-            "Mutating the value is not a write: `$LOAD_PATH << dir` and `$LOADED_FEATURES.delete(f)` stay silent."
+            "Any project file aliases the special (`alias $! $err`, on either side), which can make the name " \
+            "another variable.",
+            "Mutating the value is not a write: `$LOAD_PATH << dir` and `$LOADED_FEATURES.delete(f)` stay silent.",
+            "The write sits in the dead arm of a decidable version guard. Other code that never runs is not " \
+            "recognised, and a write there still fires."
           ],
           suppression: "`# rigor:disable global.readonly-write` on the write.",
           severity_authored: :error,
           severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
-          # Syntactic: the name alone decides it, and the write raises on every run.
+          # Syntactic: the name alone decides it, and the write raises every time it runs.
           evidence_tier: :high,
           since: "0.4.0"
         ),

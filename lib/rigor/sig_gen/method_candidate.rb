@@ -18,6 +18,10 @@ module Rigor
     # - `inferred_return` — `Rigor::Type` instance (or `nil` when the inference pass disqualified the def).
     # - `declared_return_rbs` — the existing RBS-declared return spelling, or `nil` when no RBS declares the
     #   method.
+    # - `declared_rbs` — for an `inline_overwrite`, the whole `sig/` line the inline declaration replaces, so
+    #   `--diff` can show both; `nil` otherwise.
+    # - `declared_annotations` — for a member declared inline, the annotations the author wrote on it
+    #   (`%a{deprecated}`), rendered above `rbs` like `annotations`. Empty otherwise.
     # - `rbs` — the rendered RBS one-liner the generator would emit (`nil` for skipped / equivalent rows).
     # - `skip_reason` — one of {Classification::SKIP_DIAGNOSTIC_IDS} keys when classification is `:skipped`,
     #   else `nil`.
@@ -30,12 +34,12 @@ module Rigor
       attr_reader :path, :class_name, :method_name, :kind, :classification,
                   :inferred_return, :declared_return_rbs, :rbs, :skip_reason,
                   :namespace_kinds, :class_shells, :class_superclasses,
-                  :annotations, :effect_reason
+                  :annotations, :effect_reason, :declared_rbs, :declared_annotations
 
       def initialize(path:, class_name:, method_name:, kind:, classification:, # rubocop:disable Metrics/ParameterLists
                      inferred_return: nil, declared_return_rbs: nil, rbs: nil, skip_reason: nil,
                      namespace_kinds: {}, class_shells: [], class_superclasses: {},
-                     annotations: [], effect_reason: nil)
+                     annotations: [], effect_reason: nil, declared_rbs: nil, declared_annotations: [])
         @path = path
         @class_name = class_name
         @method_name = method_name
@@ -53,13 +57,15 @@ module Rigor
         @class_superclasses = class_superclasses.freeze
         @annotations = annotations.freeze
         @effect_reason = effect_reason
+        @declared_rbs = declared_rbs
+        @declared_annotations = declared_annotations.freeze
         freeze
       end
 
       # Every line this candidate contributes to a declaration body, annotations first. The single place
       # the renderer and the writer agree that an annotation precedes the `def` line it binds.
       def rbs_lines
-        @annotations + [@rbs].compact
+        @declared_annotations + @annotations + [@rbs].compact
       end
 
       # A copy carrying a different annotation decision. The generator's effect pass rebuilds rather than
@@ -70,7 +76,8 @@ module Rigor
           classification: @classification, inferred_return: @inferred_return,
           declared_return_rbs: @declared_return_rbs, rbs: @rbs, skip_reason: @skip_reason,
           namespace_kinds: @namespace_kinds, class_shells: @class_shells,
-          class_superclasses: @class_superclasses, annotations: annotations, effect_reason: reason
+          class_superclasses: @class_superclasses, annotations: annotations, effect_reason: reason,
+          declared_rbs: @declared_rbs, declared_annotations: @declared_annotations
         )
       end
 
@@ -84,6 +91,8 @@ module Rigor
           rbs: rbs,
           inferred_return: inferred_return&.erase_to_rbs,
           declared_return_rbs: declared_return_rbs,
+          declared_rbs: declared_rbs,
+          declared_annotations: declared_annotations.empty? ? nil : declared_annotations,
           skip_reason: skip_reason ? Classification::SKIP_DIAGNOSTIC_IDS.fetch(skip_reason) : nil,
           # Named fields rather than a merge into `rbs`: a consumer routing on the annotation has to be
           # able to find it without re-lexing the rendered line. Both are absent (not empty / null) when

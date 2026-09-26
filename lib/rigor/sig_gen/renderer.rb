@@ -74,6 +74,8 @@ module Rigor
                   when Classification::NEW_FILE then "[new-file]"
                   when Classification::TIGHTER_RETURN
                     "[tighter, was: #{candidate.declared_return_rbs}]"
+                  when Classification::INLINE_OVERWRITE
+                    "[inline-overwrite, was: #{candidate.declared_rbs}]"
                   end
             @out.puts("  # #{tag}")
             # Annotations first: an RBS annotation binds the declaration BELOW it, so `%a{pure}` printed
@@ -103,10 +105,19 @@ module Rigor
 
         candidates.each do |candidate|
           @out.puts("--- #{candidate.path}: #{candidate.class_name}##{candidate.method_name}")
-          declared = candidate.declared_return_rbs
-          @out.puts("- def #{candidate.method_name}: () -> #{declared}") if declared
+          render_removed_line(candidate)
           candidate.rbs_lines.each { |line| @out.puts("+ #{line}") }
           @out.puts
+        end
+      end
+
+      # An inline update replaces a whole `sig/` line, which it carries; every other row knows only the
+      # declared return.
+      def render_removed_line(candidate)
+        if candidate.declared_rbs
+          @out.puts("- #{candidate.declared_rbs}")
+        elsif candidate.declared_return_rbs
+          @out.puts("- def #{candidate.method_name}: () -> #{candidate.declared_return_rbs}")
         end
       end
 
@@ -119,15 +130,93 @@ module Rigor
 
       # Renders the per-source-file outcomes of a `--write` run. Distinct from {#render} because the write
       # path's reporting surface is action-oriented (created / updated / skipped) rather than candidate-oriented.
-      def render_write(results:, format:)
+      # @param refused — methods refused as `sig.skipped.inline-differs`; the JSON payload names them under
+      #   `refused` (absent when there are none, so an ordinary payload is unchanged), and text mode leaves them
+      #   to the command's stderr `REFUSED` lines.
+      def render_write(results:, format:, refused: [])
         case format
-        when "json" then render_write_json(results)
+        when "json" then render_write_json(results, refused)
         when "text" then render_write_text(results)
         else raise ArgumentError, "unsupported format: #{format}"
         end
       end
 
+      # ADR-112 WD4 — `sig-gen --check`: the results of a dry-run `--write`. Only the targets `--write` would
+      # change (or refuse) are shown, each with the lines it would add; the verdict is the exit status, which
+      # the command derives from the same results ({.out_of_date}).
+      #
+      # @param refused — the methods the generator refused to reconcile (`sig.skipped.inline-differs`):
+      #   `sig/` is not up to date while one stands, and `--write` cannot fix it.
+      def render_check(results:, format:, refused: [])
+        stale = self.class.out_of_date(results)
+        case format
+        when "json"
+          @out.puts(JSON.pretty_generate({ up_to_date: stale.empty? && refused.empty?,
+                                           results: stale.map { |r| check_entry(r) },
+                                           refused: refused.map(&:to_h) }))
+        when "text" then render_check_text(stale, refused)
+        else raise ArgumentError, "unsupported format: #{format}"
+        end
+      end
+
+      # One line per method sig-gen refused to reconcile with its `sig/` copy. Shared by `--write` (on stderr,
+      # next to the write report) and `--check`.
+      def self.refusal_lines(refused)
+        refused.map do |candidate|
+          separator = candidate.kind == :singleton ? "." : "#"
+          "REFUSED #{candidate.path}: #{candidate.class_name}#{separator}#{candidate.method_name} — its inline " \
+            "declaration and its sig/ declaration disagree, so neither was changed " \
+            "(#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}). Make them agree, or pass " \
+            "--overwrite to replace the sig/ member with the inline declaration; `rigor explain " \
+            "#{Classification::SKIP_DIAGNOSTIC_IDS.fetch(candidate.skip_reason)}` says when that is not enough."
+        end
+      end
+
+      # The results that make a `--check` fail: a target `--write` would create or change, and one it would
+      # refuse, since a write that cannot happen is not an up-to-date `sig/` either.
+      def self.out_of_date(results)
+        results.reject { |result| %i[noop skipped_outside_sig_root].include?(result.action) }
+      end
+
+      # Nothing was written, so the entry must not read like one that was: `created` / `updated` become
+      # `would_create` / `would_update`. A refusal keeps its action — `--write` would refuse the same way.
+      CHECK_ACTIONS = { created: "would_create", updated: "would_update" }.freeze
+      private_constant :CHECK_ACTIONS
+
       private
+
+      def check_entry(result)
+        entry = result.to_h
+        entry[:action] = CHECK_ACTIONS.fetch(result.action, entry[:action])
+        entry
+      end
+
+      def render_check_text(stale, refused)
+        if stale.empty? && refused.empty?
+          @out.puts("sig/ is up to date")
+          return
+        end
+
+        self.class.refusal_lines(refused).each { |line| @out.puts(line) }
+
+        stale.each do |result|
+          case result.action
+          when :created, :updated then render_check_change(result)
+          when :skipped_invalid_rbs then render_write_invalid(result)
+          when :skipped_invalid_encoding then render_write_invalid_encoding(result)
+          end
+        end
+      end
+
+      def render_check_change(result)
+        counts = result.action == :created ? "#{result.applied.size} method(s)" : applied_counts(result)
+        verb = result.action == :created ? "would create" : "would update"
+        @out.puts("#{verb} #{result.target_path} (#{counts})")
+        result.applied.each do |candidate|
+          @out.puts("  - #{candidate.declared_rbs}") if candidate.declared_rbs
+          candidate.rbs_lines.each { |line| @out.puts("  + #{line}") }
+        end
+      end
 
       def render_write_text(results)
         if results.all? { |r| r.action == :noop }
@@ -146,12 +235,19 @@ module Rigor
         end
       end
 
+      # `+N` counts added lines; an existing line replaced (`--overwrite`, or an inline update) is counted apart,
+      # because "added 2" when one of them rewrote a line the project already had would understate the change.
+      def applied_counts(result)
+        added = "+#{result.applied.size - result.replaced.size}"
+        result.replaced.empty? ? added : "#{added}, replaced #{result.replaced.size}"
+      end
+
       def render_write_created(result)
         @out.puts("created #{result.target_path} (#{result.applied.size} method(s))")
       end
 
       def render_write_updated(result)
-        @out.puts("updated #{result.target_path} (+#{result.applied.size}, " \
+        @out.puts("updated #{result.target_path} (#{applied_counts(result)}, " \
                   "skipped #{result.skipped.size} user-authored)")
         render_left_unreadable(result)
       end
@@ -190,8 +286,10 @@ module Rigor
         @out.puts("  Re-save the file as UTF-8 and re-run; sig-gen never modifies a file it cannot read faithfully.")
       end
 
-      def render_write_json(results)
-        @out.puts(JSON.pretty_generate({ results: results.map(&:to_h) }))
+      def render_write_json(results, refused)
+        payload = { results: results.map(&:to_h) }
+        payload[:refused] = refused.map(&:to_h) unless refused.empty?
+        @out.puts(JSON.pretty_generate(payload))
       end
     end
   end

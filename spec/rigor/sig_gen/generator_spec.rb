@@ -1042,6 +1042,9 @@ RSpec.describe Rigor::SigGen::Generator do
     # neither pin applies here — the plugin still needs an explicit `plugins:` entry, and its class needs to be
     # registered by hand once per process the way `require`'s once-per-process no-op leaves other specs' own
     # `Plugin.unregister!` calls unable to undo (cli_spec.rb's `:rbs_inline_autowire` context does the same).
+    # Since ADR-112 WD4 (#1076) the member is written as its inline declaration, so the authored `Float num`
+    # survives and the row is a `new-method` for `sig/`; what #995 fixed — the inferred return is proposed, not
+    # silently dropped — holds either way.
     it "proposes the inferred return for the ADR-93 inline-annotated, return-bare shape the issue reports" do
       require "rigor-rbs-inline"
       Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
@@ -1064,9 +1067,8 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = generator(paths: [path], plugins: [rbs_inline_plugin_entry]).run
       method = candidates.find { |c| c.method_name == :f }
 
-      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
-      expect(method.declared_return_rbs).to eq("untyped")
-      expect(method.rbs).to eq("def f: (untyped) -> [Float, String]")
+      expect(method.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
+      expect(method.rbs).to eq("def f: (Float num) -> [Float, String]")
     end
 
     it "still classifies a declared `void` equivalent — #836's carve-out is untouched by the untyped fix" do

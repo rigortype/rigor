@@ -111,6 +111,16 @@ end
   member and the `.rbs` that bound. Make one a refinement of the
   other, or delete one, to settle it.
 
+`rigor sig-gen --write` produces this overlap on purpose: by default it
+copies each inline declaration into `sig/`, so the generated signature
+is the complete contract a gem ships. An identical copy is quiet, as
+above. When an inline annotation later disagrees with its copy,
+`rigor sig-gen --write` and `--check` refuse the method and exit `1`
+until you make the two agree or pass `--overwrite`, which replaces the
+`sig/` member with the inline declaration. A project whose Steep reads the same
+annotations sets `sig_gen.inline_declared: skip` instead
+([handbook chapter 11](../../handbook/11-sig-gen.md#methods-declared-inline)).
+
 A `%a{rigor:v1:return: …}` or `%a{rigor:v1:param: …}` refinement on an
 inline annotation must also share values with its own declared type:
 `# @rbs %a{rigor:v1:return: positive-int} () -> ::String` is reported as

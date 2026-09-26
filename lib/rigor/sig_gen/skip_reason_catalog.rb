@@ -52,7 +52,7 @@ module Rigor
           summary: "An RBS declaration for this method already exists and was left alone.",
           explanation: "Not a gap. The project already states a type for this member, and sig-gen does not " \
                        "overwrite a hand-authored contract without being told to. Where `sig/` and an inline " \
-                       "annotation both declare the member, `sig/` wins.",
+                       "annotation both declare the member, ADR-112 WD5's consistency rule decides which binds.",
           next_step: "Read the existing declaration. If it disagrees with what Rigor infers, raise the " \
                      "disagreement rather than silently retyping it; pass `--overwrite` only once you have " \
                      "decided the generated type is the better contract."
@@ -83,6 +83,49 @@ module Rigor
           next_step: "Give the environment the missing ancestor — install or write RBS for the gem that " \
                      "defines it, or add the project file that declares it to the analysed paths — then " \
                      "re-run `rigor sig-gen`."
+        ),
+        "sig.skipped.inline-declared" => Entry.new(
+          id: "sig.skipped.inline-declared",
+          summary: "The member is declared inline, and `sig_gen.inline_declared: skip` keeps it out of `sig/`.",
+          explanation: "Not a gap. The project asked sig-gen to leave every method its inline `# @rbs` / `#:` " \
+                       "reader declares out of `sig/`, the setting for a project whose Steep reads the same " \
+                       "annotations (`inline: true` beside `signature \"sig\"`), where a `sig/` copy would " \
+                       "declare the method twice (`DuplicatedMethodDefinition`). Rigor still reads the inline " \
+                       "declaration when it analyses the source; a consumer reading only the shipped `sig/` " \
+                       "does not see this method.",
+          next_step: "Nothing, if the setting is intended. To ship the member in `sig/`, remove " \
+                     "`sig_gen.inline_declared: skip` from `.rigor.yml` and stop Steep from reading the " \
+                     "annotations of the files you generate for."
+        ),
+        "sig.skipped.inline-generic-class" => Entry.new(
+          id: "sig.skipped.inline-generic-class",
+          summary: "The class is generic by an inline declaration, and sig-gen does not write type parameters.",
+          explanation: "The class (or one it is nested in) takes type parameters from `# @rbs generic`, and " \
+                       "`sig/` either does not declare it yet or declares it with differently named parameters. " \
+                       "sig-gen would have to open it with a header that has no type parameters, which rbs " \
+                       "rejects (`GenericParameterMismatchError`) — the class, and every class whose signature " \
+                       "mentions it, would fail its definition build and read `Dynamic[top]` — or write members " \
+                       "whose `T` the `sig/` declaration does not bind. The inline declaration still binds when " \
+                       "the source is analysed.",
+          next_step: "Declare the class in `sig/` with the same type parameters as the inline declaration " \
+                     "(`class Box[T]` ... `end`) and re-run; sig-gen then writes the members into it."
+        ),
+        "sig.skipped.inline-differs" => Entry.new(
+          id: "sig.skipped.inline-differs",
+          summary: "The method's inline declaration and its `sig/` declaration disagree; neither was changed.",
+          explanation: "The method is declared inline by `# @rbs` / `#:` and in `sig/` (a `def` or an `attr_*`), " \
+                       "and the two do not state the same types, or `sig/` lacks an annotation written inline. " \
+                       "Parameter names, union spelling and a `::` that does not change what a name resolves to " \
+                       "are ignored; overload order is not, because RBS answers a call with the first overload " \
+                       "that matches. For a parameter-only annotation (`# @rbs name: T`, no `return:`) only the " \
+                       "parameters are compared, and the return follows the ordinary proposal rules. sig-gen " \
+                       "does not presume either side right, so it refuses, and `--write` and `--check` exit 1.",
+          next_step: "Decide which declaration is right. To keep the inline one, re-run with `--overwrite`, which " \
+                     "replaces the whole `sig/` member with it (an overload written only in `sig/` is dropped); " \
+                     "to keep the `sig/` one, edit the annotation to match, or delete it. A parameter-only " \
+                     "annotation whose parameters differ stays refused under `--overwrite`, because its return " \
+                     "would be inferred under the `sig/` parameters: delete the `sig/` member and re-run, or add " \
+                     "`# @rbs return:` so nothing is inferred."
         ),
         "sig.skipped.overridden-by-unsigned-subclass" => Entry.new(
           id: "sig.skipped.overridden-by-unsigned-subclass",

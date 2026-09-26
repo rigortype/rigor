@@ -1,6 +1,9 @@
 # ADR-112 — `@extrbs`: a Rigor-read comment channel for what RBS cannot say
 
-Status: **Accepted, 2026-09-19. WD5 implemented for `sig/` against inline `@rbs` / `#:` on 2026-09-26 ([#1075](https://github.com/rigortype/rigor/issues/1075)); the `@extrbs` half of WD5 and WD1–WD4 not yet implemented.** Rules on
+Status: **Accepted, 2026-09-19. WD5 implemented for `sig/` against inline `@rbs` / `#:` on 2026-09-26
+([#1075](https://github.com/rigortype/rigor/issues/1075)); WD4's default write, skip setting and
+`sig-gen --check` implemented 2026-09-26 ([#1422](https://github.com/rigortype/rigor/pull/1422)); the
+`@extrbs` halves of WD4 and WD5, and WD1–WD3, not yet implemented.** Rules on
 [#996](https://github.com/rigortype/rigor/issues/996) the other way from
 [ADR-111](111-inline-refinement-carrier.md)'s recommendation. ADR-111 is superseded as a whole, and
 its probe is this ADR's grounding. This ADR partially supersedes [ADR-32](32-rbs-inline-comment-ingestion.md)
@@ -104,6 +107,16 @@ Rigor never writes into a `.rb` file. Every carrier below is authored intent; th
   `.rbs` is not a fallback (rejected alternative 6).
 
 ### WD4 — The generated signature is `sig/`, and it is an input
+
+> **Status note, 2026-09-26 ([#1422](https://github.com/rigortype/rigor/pull/1422), items 2–3 of
+> [#1076](https://github.com/rigortype/rigor/issues/1076)).** `sig-gen --check` does not pass "when `--diff`
+> is empty". It mirrors `--write` with the same flags: it fails exactly when that `--write` would create,
+> change or refuse something, and under `--overwrite` it also counts `tighter-return` proposals. `--diff`
+> lists every proposal, including a tighter return against a declaration a reviewer deliberately kept wider,
+> and a reviewed, kept wider type must not fail the gate forever. The same change settled the case this WD
+> leaves open, a `sig/` member that disagrees with its inline declaration: sig-gen updates neither
+> automatically. The method is refused (`sig.skipped.inline-differs`, exit 1) until the two agree, or until
+> `--overwrite` replaces the whole `sig/` member with the inline one. It is never merged slot by slot.
 
 - `rigor sig-gen --write` keeps writing `sig/<path>.rbs`
   ([ADR-14](14-rbs-sig-generation.md)). The generated signature is an input like any `sig/` file, and

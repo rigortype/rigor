@@ -899,4 +899,48 @@ RSpec.describe Rigor::Scope do
       expect(described_class.empty.known_user_class?("String")).to be(false)
     end
   end
+
+  # Issue #1429 — a guard's narrowing of a global or constant records the binding it narrowed, and code that may rebind
+  # the name restores the union of the two.
+  describe "guard narrowings of globals and constants" do
+    let(:io) { Rigor::Type::Combinator.nominal_of("IO") }
+    let(:string_io) { Rigor::Type::Combinator.nominal_of("StringIO") }
+    let(:io_or_string_io) { Rigor::Type::Combinator.union(io, string_io) }
+
+    it "restores a guarded global to the union of its pre-guard and narrowed types" do
+      guarded = described_class.empty.with_global(:$out, io).with_guarded_global(:$out, string_io, io)
+      expect(guarded.guard_narrowed?).to be(true)
+
+      restored = guarded.forget_guard_narrowings
+      expect(restored.global(:$out)).to eq(io_or_string_io)
+      expect(restored.guard_narrowed?).to be(false)
+    end
+
+    it "keeps the earliest record, drops it on a write, and binds a frame-local special without one" do
+      twice = described_class.empty.with_guarded_global(:$out, string_io, io).with_guarded_global(:$out, string_io,
+                                                                                                  string_io)
+      expect(twice.forget_guard_narrowings.global(:$out)).to eq(io_or_string_io)
+      expect(twice.with_global(:$out, io).guard_narrowed?).to be(false)
+      expect(described_class.empty.with_guarded_global(:$_, string_io, io, record: false).guard_narrowed?).to be(false)
+    end
+
+    it "narrows a constant reference by its key and restores it the same way" do
+      guarded = described_class.empty.with_constant_narrowing("STDOUT", string_io, io)
+      expect(guarded.constant_narrowing("STDOUT")).to eq(string_io)
+      expect(guarded.constant_narrowing("::STDOUT")).to be_nil
+      expect(guarded.forget_guard_narrowings.constant_narrowing("STDOUT")).to eq(io_or_string_io)
+      expect(guarded.without_constant_narrowing("STDOUT").guard_narrowed?).to be(false)
+    end
+
+    it "keeps a record through a join only while the joined scope still narrows the name" do
+      guarded = described_class.empty.with_global(:$out, io).with_guarded_global(:$out, string_io, io)
+      joined = guarded.join(described_class.empty.with_global(:$out, io))
+      expect(joined.guard_narrowed?).to be(true)
+      expect(joined.forget_guard_narrowings.global(:$out)).to eq(io_or_string_io)
+
+      constant = described_class.empty.with_constant_narrowing("STDOUT", string_io, io)
+      expect(constant.join(described_class.empty).guard_narrowed?).to be(false)
+      expect(constant.join(described_class.empty).constant_narrowing("STDOUT")).to be_nil
+    end
+  end
 end

@@ -1,0 +1,312 @@
+{
+  "repo_notes": [
+    {
+      "content": "Rigor is a type-aware static bug finder for Ruby that requires zero annotations and imposes zero runtime dependencies. It parses code using Prism and infers types directly from the values produced by expressions. Key architectural commitments: (1) Types are facts, not wishes: types are derived from actual execution semantics rather than aspirational comments; (2) False positives outrank worst-case static reading: findings fire only when the receiver type is conclusively known and evidence is sound (tested against corpora like Mastodon, Redmine, GitLab FOSS); (3) Programmable inference beyond unions: tracks literal values, integer ranges, refinements (e.g., non-empty-string), tuple and hash shapes, and effect labels.",
+      "author": "Rigor Maintainers"
+    },
+    {
+      "content": "Domain glossary and terminology traps (defined in CONTEXT.md): (1) 'interface' ALWAYS means structural typing (like Go interfaces or Python Protocols; satisfied by methods, no 'implements' clause); never Java/PHP nominal interfaces. (2) 'protocol' is strictly reserved for ADR-28 path-scoped behavioral method contracts in plugin manifests. (3) 'scope' is overloaded: Rigor::Scope is the immutable inference state; 'analysis scope' is the set of files analyzed in a run; 'publish set' is the LSP notification target. (4) 'Dynamic[T]' is gradual typing ('statically unknown, believed within envelope T') and carries a dynamic origin explaining why it is dynamic (ADR-75, ADR-82). (5) 'erasure' is the conservative mapping of rich internal carriers back to standard RBS.",
+      "author": "Rigor Maintainers"
+    },
+    {
+      "content": "Repository layout and documentation authority: (1) Normative specifications: docs/type-specification/ (type system) and docs/internal-spec/ (inference engine contracts) are binding. (2) Architecture Decision Records: docs/adr/ explains the rationale behind architectural decisions (ADR-0 through ADR-117). (3) Core implementation lives in lib/rigor/ (engine, CLI, language server, MCP server, cache, effects). (4) Production framework plugins live in plugins/ (38 plugins covering Rails, ActiveRecord, RSpec, Sorbet bridge, Sidekiq, Devise, dry-rb, etc.). (5) Agent skills live in skills/ (rigor-next-steps, rigor-ask, rigor-project-init). Upstream submodules in references/ are read-only upstream material.",
+      "author": "Rigor Maintainers"
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "High-level introduction to Rigor: what it is, its core philosophy (inference-first, no inline annotations, zero runtime dependency), key capabilities, and how the major subsystems relate. Links to child pages for installation, configuration, contribution, and editor/agent integrations. Reflects v0.3.x themes plus effect labels (ADR-103), unused-code reachability (ADR-102), checked types and typeless comments (ADR-107), type provenance for agents (ADR-108), Ruby-native range notation (ADR-109), inherited declaration precedence (ADR-110), and inline refinement carrier (ADR-111).",
+      "page_notes": [
+        {
+          "content": "Start with README.md, AGENTS.md, and CONTEXT.md. Emphasize that Rigor is a developer tool and static bug detector, not a type system compiler or runtime type checker."
+        }
+      ]
+    },
+    {
+      "title": "Getting Started",
+      "purpose": "Installation (mise, gem install, Nix flake, container images), quick-start workflow, running rigor check, reading diagnostic output, and core daily commands (init, annotate, type-of, triage, sig-gen, doctor, effects, unused). Explains that Rigor is a global tool running on Ruby 4.0 while analyzing application code running on any Ruby version.",
+      "parent": "Overview",
+      "page_notes": [
+        {
+          "content": "Reference docs/install.md, docs/manual/01-installation.md, and docs/manual/02-cli-reference.md. Highlight global mise installation (mise use -g ruby@4.0 gem:rigortype) keeping tool dependencies separated from project Gemfiles."
+        }
+      ]
+    },
+    {
+      "title": "Project Configuration",
+      "purpose": "Deep dive into .rigor.dist.yml and .rigor.yml: all supported keys, includes: directive, JSON schema (ADR-99), Configuration and SeverityProfile classes, BundleSigDiscovery, LockfileResolver, RbsCollectionDiscovery, ConfigAudit, effects stanzas, bleeding_edge overlay (ADR-50), and config_schema declared defaults (ADR-40).",
+      "parent": "Overview",
+      "page_notes": [
+        {
+          "content": "Source code in lib/rigor/configuration/. Reference schemas/rigor-config.schema.json, docs/manual/03-configuration.md, and ADR-99."
+        }
+      ]
+    },
+    {
+      "title": "Contributing and Development Setup",
+      "purpose": "Development environment using the Nix Flake (Ruby 4.0.5, vendored bundle), running tests (make verify-changed, make check, make test), Makefile targets, git submodules under references/, CI workflows, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, ADR-31/49/98/105 policies, and binpacker parallel test distribution.",
+      "parent": "Overview",
+      "page_notes": [
+        {
+          "content": "Strictly follow AGENTS.md operating rules: run development commands via 'nix develop --command <cmd>', emphasize 'make verify-changed' over full-suite runs, and reference docs/agents/contribution-flow.md."
+        }
+      ]
+    },
+    {
+      "title": "Editor and AI Agent Integrations",
+      "purpose": "Integration surfaces for code editors and AI agents: the Language Server Protocol implementation (rigor lsp), Model Context Protocol server (rigor mcp), and bundled Agent Skills (skills/ directory: rigor-next-steps, rigor-ask, rigor-project-init, rigor-baseline-reduce, etc.).",
+      "parent": "Overview",
+      "page_notes": [
+        {
+          "content": "Implementation lives in lib/rigor/language_server/, lib/rigor/mcp/, and skills/. Reference docs/manual/09-editor-integration.md and docs/manual/10-mcp-server.md."
+        }
+      ]
+    },
+    {
+      "title": "Type System",
+      "purpose": "Overview of Rigor's internal type model — an expressive RBS superset designed for precise value inference. Introduces the type lattice, key carriers, certainty system, and the relationship between RBS types and Rigor's extended representations. Links to child pages.",
+      "page_notes": [
+        {
+          "content": "Primary normative reference is docs/type-specification/ and docs/types.md. Code in lib/rigor/type/. Foundational decisions in ADR-1 and ADR-3."
+        }
+      ]
+    },
+    {
+      "title": "Type Carriers and the Value Lattice",
+      "purpose": "Reference for every type carrier: Constant, Nominal, Singleton, Union, Tuple, HashShape, IntegerRange, Dynamic[Top], Bot, Refined, Difference, BoundMethod, Type::App (HKT), and Intersection. Normalization rules, trinary certainty system, Type::Combinator, dynamic-origin algebra (ADR-83), Dynamic[T] provenance (ADR-75, ADR-82, ADR-108), and Ruby-native range notation (ADR-109).",
+      "parent": "Type System",
+      "page_notes": [
+        {
+          "content": "Inspect lib/rigor/type/ and docs/internal-spec/internal-type-api.md for carrier contracts and certainty representation."
+        }
+      ]
+    },
+    {
+      "title": "Refinement Types and Imported Built-ins",
+      "purpose": "The imported-refinement system: refinement carriers, data/builtins/ruby_core/*.yml YAML catalogs, ImportedRefinements loading, Refined and complement pairs, predefined constant refinements, regex refinements, static return refinements, builtin method catalogs under lib/rigor/inference/builtins/, and the ADR-111 inline refinement carrier probe.",
+      "parent": "Type System",
+      "page_notes": [
+        {
+          "content": "Files in data/builtins/ruby_core/, lib/rigor/builtins/, and lib/rigor/type/refined.rb. Refer to ADR-111."
+        }
+      ]
+    },
+    {
+      "title": "RBS Integration and RBS::Extended Annotations",
+      "purpose": "How Rigor consumes standard RBS, RbsLoader and RbsDispatch tiers, and the RBS::Extended annotation surface (%a{rigor:v1:...}). Erasure back to valid RBS, TypeNodeResolver hook (ADR-13), rigor-rbs-inline plugin (ADR-32/93/94), RBS version-range fidelity (ADR-79), checked types and typeless comments (ADR-107), and inherited declaration precedence (ADR-110).",
+      "parent": "Type System",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/rbs_extended/ and lib/rigor/environment/rbs_loader.rb. Reference docs/type-specification/rbs-erasure.md and docs/manual/16-rbs-extended-annotations.md."
+        }
+      ]
+    },
+    {
+      "title": "Lightweight Higher-Kinded Types (ADR-20)",
+      "purpose": "Type::App opaque carrier, HktRegistry, HktDirectives parsing, HktBodyParser grammar, HktReducer fuel budget and lazy self-recursion, HKT builtins (e.g. JSON.parse returning json::value), URI-based definition scheme, and reduction rules.",
+      "parent": "Type System",
+      "page_notes": [
+        {
+          "content": "Source in lib/rigor/type/app.rb, lib/rigor/hkt/. Normative description in docs/adr/20-lightweight-higher-kinded-types.md and docs/handbook/12-lightweight-hkt.md."
+        }
+      ]
+    },
+    {
+      "title": "Inference Engine",
+      "purpose": "Overview of the flow-sensitive type inference pipeline: how Prism ASTs are walked, how Scope threads through statements, and how method dispatch resolves return types. Links to child pages.",
+      "page_notes": [
+        {
+          "content": "Core engine in lib/rigor/inference/. Normative contract in docs/internal-spec/inference-engine.md and ADR-4."
+        }
+      ]
+    },
+    {
+      "title": "Scope and Statement Evaluation",
+      "purpose": "The immutable Scope, StatementEvaluator, and scope threading through branches, loops, rescue, and defs. Nil-injection at merges, lexical class context, MethodParameterBinder, MultiTargetBinder, ClosureEscapeAnalyzer, block-captured local write-back and loop-body fixpoint (ADR-56), mutation widening/content join, ivar field typing (ADR-58), discovery-index separation (ADR-53), and seed bundles with lazy def handles (ADR-85).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/scope/ and lib/rigor/inference/statement_evaluator.rb. Review ADR-53, ADR-56, ADR-58, and ADR-85."
+        }
+      ]
+    },
+    {
+      "title": "Expression Typing",
+      "purpose": "ExpressionTyper: the PRISM_DISPATCH table, typing of literals, variables, constants, and calls. Lexical constant lookup, branch elision (ADR-101), per-element block fold, user-method inference with recursion guards, FallbackTracer, implicit-self resolution (ADR-24, ADR-57), recursive-method return precision (ADR-55), parameter type inference (ADR-67), and inference budgets (ADR-41).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/inference/expression_typer.rb and lib/rigor/ast/. Note: 'budgets:' table is not user-configurable today (see CONTEXT.md)."
+        }
+      ]
+    },
+    {
+      "title": "Type Narrowing and Flow Contributions",
+      "purpose": "The Narrowing module: predicate_scopes, case_when_scopes, narrow_truthy/falsey/nil/class/integer_comparison. FactStore, relational facts, complement pairs, De Morgan negation, regex capture narrowing, self/receiver narrowing, FlowContribution bundles and Merger, clause reachability (ADR-47), discriminated-union member typing (ADR-66), and reflexive over-fold envelope (ADR-78).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/inference/narrowing.rb and lib/rigor/flow_contribution/. Reference docs/type-specification/control-flow-analysis.md."
+        }
+      ]
+    },
+    {
+      "title": "Method Dispatcher and Dispatch Tiers",
+      "purpose": "The MethodDispatcher tiered pipeline: ConstantFolding, LiteralStringFolding, ShapeDispatch, FileFolding, BlockFolding, IteratorDispatch, KernelDispatch, plugin tier (ADR-52), RbsDispatch, DependencySourceInference (ADR-10 / ADR-90), SyntheticMethod, and user-class fallback. OverloadSelector, RbsTypeTranslator, block parameter binding, receiver affinity, Kernel intrinsic fold ownership gate (ADR-91), and allocation churn mitigations (ADR-44).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/inference/method_dispatcher.rb. Dispatch tier order is normative (docs/internal-spec/inference-engine.md). Covers opt-in gem-source walking (ADR-10)."
+        }
+      ]
+    },
+    {
+      "title": "Constant Folding and Shape Dispatch",
+      "purpose": "Deep dive into ConstantFolding: try_fold pipeline, purity classifications, numeric set normalization, Cartesian fold, widening to IntegerRange, IntegerRange arithmetic, extract_builtin_catalog.rb. ShapeDispatch: Tuple/HashShape access, Difference handling, Nominal tightening. Stdlib folders (Regexp/URI/Math/Time/Set/CGI/Shellwords/File), Struct/Data value folding (ADR-48), and effect modeling for freeze/dup/clone (ADR-76).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/inference/constant_folding.rb and lib/rigor/inference/shape_dispatch.rb. See ADR-48 and ADR-76."
+        }
+      ]
+    },
+    {
+      "title": "Synthetic Method Infrastructure (ADR-16 and ADR-36)",
+      "purpose": "SyntheticMethod value class, SyntheticMethodIndex, and SyntheticMethodScanner pre-pass; project patched scanner and monkey-patch pre-evaluation (ADR-17). How the macro substrate emits synthetic methods, MacroBlockSelfType, precision promotion, per-call-site return types (ADR-18), and nested-class emission tier (ADR-36).",
+      "parent": "Inference Engine",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/inference/synthetic_method.rb and lib/rigor/ast/synthetic_method_scanner.rb. Detailed in ADR-16, ADR-17, ADR-18, ADR-36."
+        }
+      ]
+    },
+    {
+      "title": "Plugin Architecture and Ecosystem",
+      "purpose": "The plugin subsystem design: lib/rigor/plugin/ runtime, Plugin::Base manifest contracts, Plugin::Registry, narrow extension seams (ADR-37), compiled plugin gates keeping execution off hot paths (ADR-52), macro helpers, and authoring guidelines for custom framework plugins.",
+      "page_notes": [
+        {
+          "content": "Implementation in lib/rigor/plugin/. Governed by ADR-2, ADR-37, and ADR-52. Walkthrough in skills/rigor-plugin-author and examples/."
+        }
+      ]
+    },
+    {
+      "title": "Built-in Framework and Gem Plugins",
+      "purpose": "Survey of the 38 production plugins bundled in plugins/: Rails suite (ActiveRecord, ActionPack, ActionMailer, ActiveJob, routes, i18n, Railties), Testing (RSpec, FactoryBot, Minitest, Shoulda Matchers), Ecosystem (Sidekiq, Devise, Pundit, Sinatra, dry-rb, GraphQL, Hanami), and type-system bridges (rigor-sorbet ingesting Sorbet RBI signatures).",
+      "parent": "Plugin Architecture and Ecosystem",
+      "page_notes": [
+        {
+          "content": "Explore plugins/ and plugins/README.md. Highlight how plugins teach Rigor about dynamic metaprogramming without modifying analyzed application code."
+        }
+      ]
+    },
+    {
+      "title": "Analysis Runner and Diagnostics",
+      "purpose": "Overview of how Analysis::Runner orchestrates a full check run: file discovery, exclusions, parsing, scope indexing, rule application, suppression, and severity stamping. Links to child pages for rules, suppression, baseline/triage, worker pool parallelism, incremental analysis, coverage, effect labels, and dead code reachability.",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/analysis/runner.rb. Diagnostic taxonomy and severity rules in docs/type-specification/diagnostic-policy.md."
+        }
+      ]
+    },
+    {
+      "title": "Check Rules and Rule Catalog",
+      "purpose": "All built-in rules organized by family (call.*, flow.*, def.*, assert.*, dump.*, static.*, effect.*). CheckRules.diagnose, RuleCatalog ENTRIES/resolve, the Collector pattern, RBS annotation-driven refinement checks, def.override-* (ADR-35), call.unresolved-toplevel (ADR-34), static.* and void_origins (ADR-100), non-nil argument mismatch (ADR-64), evidence tiers and doc URLs (ADR-65), and RuleWalk consolidation (ADR-53).",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Implementation in lib/rigor/analysis/check_rules.rb and lib/rigor/analysis/rule_catalog.rb. Reference docs/manual/04-diagnostics.md."
+        }
+      ]
+    },
+    {
+      "title": "Diagnostic Suppression and Severity Profiles",
+      "purpose": "The multi-layer suppression system (project disable:, inline rigor:disable-file, rigor:disable, family wildcards). SeverityProfile: lenient/balanced/strict, severity_overrides, normalization, and stamping. The bleeding-edge overlay (ADR-50), bleeding_edge: configuration key, rigor show-bleedingedge, and behavior vs severity feature kinds.",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Implementation in lib/rigor/analysis/suppression.rb and lib/rigor/configuration/severity_profile.rb. Reference ADR-50."
+        }
+      ]
+    },
+    {
+      "title": "Baseline Mechanism and Diagnostic Triage (ADR-22, ADR-23)",
+      "purpose": "Managing existing diagnostics on adoption: the baseline system (.rigor-baseline.yml format, bucket semantics, all-or-nothing matching, generate/regenerate/dump/drift/prune, --baseline-strict CI gate) and the diagnostic triage command (rigor triage: rule-ID distribution, per-file hotspots, heuristic hints, Triage::Catalogue, TriageRenderer, agent-friendly statistics ADR-61).",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/analysis/baseline.rb, lib/rigor/cli/baseline_command.rb, and lib/rigor/triage/. Reference ADR-22, ADR-23, ADR-61, and docs/manual/06-baseline.md."
+        }
+      ]
+    },
+    {
+      "title": "Worker Pool and Parallelism (ADR-15)",
+      "purpose": "The fork-based concurrency model: WorkerSession, COW pre-warmed Environment inheritance, Marshal payloads, PoolCoordinator, DiagnosticAggregator, and reporter merging. The parked Ractor pool, crossover point, IsolationError mitigations, sequential fallback, YJIT re-arming after fork, ForkMap, crash signatures, and analysis guards.",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Implementation in lib/rigor/analysis/pool_coordinator.rb and lib/rigor/analysis/worker_session.rb. Governed by ADR-15."
+        }
+      ]
+    },
+    {
+      "title": "Incremental Analysis (ADR-46, ADR-87, ADR-88, ADR-89)",
+      "purpose": "The incremental analysis system: --incremental flag, cross-file dependency graph, IncrementalSession, IncrementalSnapshot, null-build floor (ADR-87), plugin-fact soundness (ADR-88), semantic propagation gates (ADR-89), seed bundles (ADR-85), unchanged-project fast path (ADR-45), DependencyRecorder, and cross-file return memos (ADR-84).",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Implementation in lib/rigor/analysis/incremental_session.rb and lib/rigor/analysis/dependency_recorder.rb. Review ADR-46, ADR-87, ADR-88, and ADR-89."
+        }
+      ]
+    },
+    {
+      "title": "Type-Protection Coverage (ADR-63, ADR-70)",
+      "purpose": "rigor coverage and its tiers: Tier 1 static dispatch-site protection (--protection), Tier 2 mutation testing (--protection --mutation), and the fused static-dynamic report (ADR-70). ProtectionScanner, MutationScanner, Mutator, TestSuiteOracle, ClosureKillOracle, DiagnosticOracle, pluggable mutation substrate (ADR-69), ForkMap parallelism, and mutation harness tooling under tool/mutation/.",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/protection/. Normative decisions in ADR-63, ADR-69, and ADR-70. Guide in docs/manual/15-type-protection-coverage.md."
+        }
+      ]
+    },
+    {
+      "title": "Effect Labels and Effect Summaries (ADR-103)",
+      "purpose": "The effect-label subsystem under lib/rigor/effects/: Label/LabelSet, Catalog (data/effects/*.yml), Scanner, Collector, Propagator, EffectTable, envelopes and envelope checks, taint causes, entry points, unit scan, Liskov checks, snapshots (.rigor-effects.yml) and snapshot diffing. Covers %a{pure} / %a{rigor:v1:effect ...} annotations, effect.* diagnostic family, rigor effects commands, and boot-slim probe (ADR-104).",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/effects/ and data/effects/. Governed by ADR-103 and ADR-104. Guide in docs/manual/19-effect-labels.md."
+        }
+      ]
+    },
+    {
+      "title": "Dead Code and Unused Reachability Report (ADR-102)",
+      "purpose": "rigor unused: the reachability analysis subsystem (Analysis::Reachability::Scan, Graph, PluginRoots, SignatureScan), how entry-point roots are seeded, signature-driven reachability, plugin-contributed roots, report rendering, false-positive policy, and the rigor-unused-adjudicate agent skill. Companion guide docs/manual/18-removing-dead-code.md.",
+      "parent": "Analysis Runner and Diagnostics",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/analysis/reachability/. Governed by ADR-102. Campaign workflow in docs/manual/18-removing-dead-code.md."
+        }
+      ]
+    },
+    {
+      "title": "Environment and Caching",
+      "purpose": "Overview of Rigor::Environment as the facade for global type state (nominal_for_name, singleton_for_name, constant_for_name, ClassRegistry, RbsLoader wiring of libraries and signatures, quarantine, synthetic namespaces, ancestor chains ADR-43, BundleSigDiscovery, LockfileResolver, gem overlays ADR-72) and links to persistent caching.",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/environment/. Key components include RbsLoader, ClassRegistry, and RbsHierarchy (ADR-43)."
+        }
+      ]
+    },
+    {
+      "title": "Cache Persistence and Invalidation",
+      "purpose": "The disk caching subsystem: Cache::Store (sharded directories, atomic rename, RIGOR magic header, SHA-256 trailer), Cache::Descriptor (FileEntry, GemEntry, compose), cache_key_for, schema versioning, RBS::Location marshal patch, RBS cache producers (constant table, instance definitions, ancestor table, type-param names), cache slimming (ADR-54), and run-result cache (ADR-45).",
+      "parent": "Environment and Caching",
+      "page_notes": [
+        {
+          "content": "Code in lib/rigor/cache/. Detailed in docs/manual/12-caching.md, ADR-45, and ADR-54."
+        }
+      ]
+    }
+  ]
+}

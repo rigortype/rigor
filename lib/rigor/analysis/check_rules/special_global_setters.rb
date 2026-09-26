@@ -97,10 +97,6 @@ module Rigor
           :$-W, :$-p, :$-l, :$-a
         ].freeze
 
-        module_function
-
-        # The setter contract a write of `name` is checked against, or nil when its setter accepts every value or the
-        # global is no special.
         # The literal nodes `global.write-type-mismatch` judges, by the core class of the object each evaluates to.
         # An interpolated String, Symbol or Regexp is still a new instance of that class.
         LITERAL_CLASSES = {
@@ -115,6 +111,10 @@ module Rigor
         # How the diagnostic names a literal of each class.
         LITERAL_DESCRIPTIONS = { "NilClass" => "nil", "TrueClass" => "true", "FalseClass" => "false" }.freeze
 
+        module_function
+
+        # The setter contract a write of `name` is checked against, or nil when its setter accepts every value or the
+        # global is no special.
         def contract_for(name)
           CONTRACTS[name]
         end

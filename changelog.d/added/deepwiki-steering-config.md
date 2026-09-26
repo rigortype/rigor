@@ -1,0 +1,1 @@
+- **[docs]** Add .devin/wiki.json configuration to steer DeepWiki repository documentation generation. ([#1460](https://github.com/rigortype/rigor/pull/1460))

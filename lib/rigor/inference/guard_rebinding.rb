@@ -105,16 +105,36 @@ module Rigor
       # call, spelled or implicit ({.implicit_call_may_rebind?}), whose method may run foreign code. A `def` and a
       # lambda literal run nothing where they are written. Each node is visited once: a call's literal block is
       # reached as one of its children, so a nested block chain costs its size, not its depth's power.
+      #
+      # A local the scanned code writes has no binding in `scope` yet, so the scan reads it as the code writes it
+      # ({ScanScope.with_scanned_locals}): `copy = $sep; copy.length` is a `String` call. A literal block's parameters
+      # read as the method's signature yields them ({ScanScope.block_parameter_scope}).
       def may_rebind?(node, scope)
+        return false unless node.is_a?(Prism::Node)
+
+        scan(node, ScanScope.with_scanned_locals(node, scope))
+      end
+
+      def scan(node, scope)
         return false unless node.is_a?(Prism::Node)
         return true if REBINDING_NODES.include?(node.class)
         return false if node.is_a?(Prism::DefNode) || node.is_a?(Prism::LambdaNode)
-        return true if node.is_a?(Prism::CallNode) && call_runs_foreign_code?(node, scope)
+        return scan_call(node, scope) if node.is_a?(Prism::CallNode)
         return true if IMPLICIT_CALL_NODES.include?(node.class) && implicit_call_may_rebind?(node, scope)
 
         found = false
-        node.rigor_each_child { |child| found ||= may_rebind?(child, scope) }
+        node.rigor_each_child { |child| found ||= scan(child, scope) }
         found
+      end
+
+      def scan_call(node, scope)
+        return true if call_runs_foreign_code?(node, scope)
+        return true if scan(node.receiver, scope) || scan(node.arguments, scope)
+
+        block = node.block
+        return scan(block, scope) unless block.is_a?(Prism::BlockNode)
+
+        scan(block, ScanScope.block_parameter_scope(node, block, scope))
       end
 
       # True when `node` is a compound write or `for` loop that calls a method its syntax does not spell.
@@ -261,10 +281,74 @@ module Rigor
         owner = definition.respond_to?(:defined_in) ? definition.defined_in : nil
         owner&.to_s&.delete_prefix("::")
       end
-      private_class_method :receiver_targets, :foreign_target?, :universal_delegate_foreign?, :method_owner,
+      private_class_method :scan, :scan_call, :receiver_targets, :foreign_target?, :universal_delegate_foreign?,
+                           :method_owner,
                            :compound_write_foreign?,
                            :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
                            :type_method_foreign?
+    end
+
+    module GuardRebinding
+      # The scope {GuardRebinding.may_rebind?} types a scanned node's receivers in: the locals the scanned code writes
+      # and a literal block's parameters, which the scope before the code does not bind.
+      module ScanScope
+        LOCAL_SCAN_BARRIERS = [Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode].freeze
+        private_constant :LOCAL_SCAN_BARRIERS
+
+        module_function
+
+        # `scope` with each local `node` writes and `scope` does not bind read as the value it is written, in source
+        # order, so a later write reads an earlier one. A nested `def`, lambda, class or module body is not read.
+        def with_scanned_locals(node, scope)
+          writes = []
+          collect_local_writes(node, writes)
+          writes.reduce(scope) do |acc, write|
+            next acc if scope.local(write.name)
+
+            written = acc.type_of(write.value)
+            existing = acc.local(write.name)
+            acc.with_local(write.name, existing ? Type::Combinator.union(existing, written) : written)
+          end
+        rescue StandardError
+          scope
+        end
+
+        def collect_local_writes(node, writes)
+          return unless node.is_a?(Prism::Node)
+          return if LOCAL_SCAN_BARRIERS.any? { |barrier| node.is_a?(barrier) }
+
+          writes << node if node.is_a?(Prism::LocalVariableWriteNode)
+          node.rigor_each_child { |child| collect_local_writes(child, writes) }
+        end
+
+        # `scope` with the block's required parameters bound to what the method yields them
+        # (`MethodDispatcher.expected_block_param_types`), or `scope` when nothing can be read.
+        def block_parameter_scope(call_node, block, scope)
+          names = block_parameter_names(block)
+          return scope if names.empty?
+
+          receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
+          arguments = call_node.arguments&.arguments || []
+          yielded = MethodDispatcher.expected_block_param_types(
+            receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,
+            arg_types: arguments.map { |argument| scope.type_of(argument) }
+          )
+          names.each_with_index.reduce(scope) do |acc, (name, index)|
+            acc.with_local(name, yielded[index] || Type::Combinator.untyped)
+          end
+        rescue StandardError
+          scope
+        end
+
+        def block_parameter_names(block)
+          parameters = block.parameters
+          return [] unless parameters.is_a?(Prism::BlockParametersNode) && parameters.parameters
+
+          parameters.parameters.requireds.grep(Prism::RequiredParameterNode).map(&:name)
+        end
+
+        private_class_method :collect_local_writes, :block_parameter_names
+      end
     end
   end
 end

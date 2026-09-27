@@ -1,11 +1,11 @@
 # ADR-116 — Restructuring the engine's hot files: declare each growing kind once, walk each traversal once
 
 Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5 is in
-progress. Its first slice (#1517: the discovery-table shadow harness, the context model, `class_cvars`)
-and its second (the superclass tables, with the first variants) put two tables on the walk. This ADR
-fixes the direction, the three criteria, and the slice order (WD0–WD7). Each slice lands as its own
-PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour;
-WD6 changes it and carries its own corpus diff.
+progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
+`class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
+on the walk. This ADR fixes the direction, the three criteria, and the slice order (WD0–WD7). Each
+slice lands as its own PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and
+WD7 preserve behaviour; WD6 changes it and carries its own corpus diff.
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -139,11 +139,17 @@ never chooses the cut.
     `class`/`module`, `class <<`, `Class.new`-family and eval-family rules. Each table becomes a
     collector that receives events (declaration, def, call, constant write, …) and may decline
     descent.
-  - *Order.* Extract the context model first. Next, port two walkers, `walk_class_cvars` (~L1770)
-    and `walk_class_superclasses` (~L4632), behind a shadow mode that asserts table equality on
+  - *Order.* Extract the context model first. Next, port two walkers, `walk_class_cvars` (~L1973)
+    and `walk_class_superclasses` (~L5079), behind a shadow mode that asserts table equality on
     the self-check tree and the corpus. Then port the rest.
   - *Precondition.* The `RIGOR_SHADOW_RULE_WALK` harness is extended from rule collectors to
-    discovery tables.
+    discovery tables. *Harness contract (amended with #1522):* a divergence in a file's own index
+    reports as an error row on the file. A divergence in the cross-file project pre-pass aborts the
+    run. The pre-pass loops skip a file they cannot read or parse, and the run-result cache path
+    falls back to an uncached run on an error. Both let `DeclarationWalk::ContractError` through: a
+    divergence or a collector naming a variant no rule has. Skipping the file would hide the failure
+    and drop the file from the project index, and the fallback would report the false positives of a
+    run without one.
   - *Payoff.* The walkers share one traversal per file.
   - *Scope limit.* The rule walk stays separate. ADR-53's rejection of folding rule collectors into
     indexing still holds.
@@ -158,8 +164,8 @@ never chooses the cut.
     - Each variant is documented where it is declared: the disagreement, which legacy walker it
       reproduces, and the convergence item that retires it.
     - Collectors that name different variants of one rule still share the traversal. The walk goes
-      through a subtree once per variant in use, and only where the variants give that subtree
-      different contexts.
+      once through the parts every variant walks under the same context. It goes through a subtree
+      once per variant in use only where the variants give that subtree different contexts.
     - Converging the variants is separate, behaviour-changing work: one PR per category, each with a
       corpus diff, tracked in #1521. It does not hold up the ports, and a port never converges a
       variant.
@@ -167,21 +173,21 @@ never chooses the cut.
       front of the walk merge, which is the wall lever.
     - `class_cvars` follows the walk's rules and names none. Carrying both nesting chains, the census
       scope's and the ancestry one, is not a variant: both are fields of the context value above.
-    - *Mechanism (slice 2, the `walk_class_superclasses` port).*
-      - `DeclarationWalk::RULE_VARIANTS` lists each rule a collector may depart from and its variants;
-        the first is the walk's own. A collector class names its departures in `VARIANTS`, and a name
-        no rule has fails the run.
+    - *Mechanism (slice 2, #1522, the `walk_class_superclasses` port).*
+      - `DeclarationWalk::RULE_VARIANTS` lists each rule a collector may depart from, with its
+        variants; the first is the walk's own. A collector class names its departures in `VARIANTS`,
+        and the walk and the collector both read them through the class. A name no rule has raises
+        `DeclarationWalk::UnknownVariant`, a `ContractError` (see the harness contract above).
       - `factory_block` is a traversal rule. `:unnamed_self` is the walk's arm; `:ordinary_call` walks a
-        bare factory block as any call (#1521 item 8). In a run that mixes the two, the walk forks at the
-        factory call: each group walks the parts of the call its variant walks, and every collector
-        sees its own events once.
+        bare factory block as any call (#1521 item 8). In a run that mixes the two, the walk visits
+        the factory call's receiver and arguments once, for every collector, because both variants
+        walk them under the same context. It forks only at the block: the `:unnamed_self` collectors
+        walk its body with an unnamed `self`, and the `:ordinary_call` ones walk the whole block under
+        the enclosing context. Every collector sees exactly the events, in order, of a run of its own.
       - `anonymous_class_path` is a value rule: `Context#anonymous_class_path(variant)` answers it.
         `:whole_file` is the walk's rule; `:outside_class_bodies` drops the path inside class/module,
-        meta-new and eval-family bodies but not in `class <<` (#1521 item 11).
-      - The value rule needed two context fields: `source_path`, the file's path, and `class_body`, a
-        latch the three kinds of body set and nothing else reads. The meta-new, eval-family and factory
-        bodies therefore became three transitions instead of one, because only two of them set the
-        latch. No event was added.
+        meta-new and eval-family bodies but not in `class <<` (#1521 item 11). It needed two context
+        fields, `source_path` and a `class_body` latch. No event was added.
 - **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change;
   #1198).**
   - *Problem.* Block entry-scope construction exists three times: ET ~L3690–3726, SE ~L2984–3061,

@@ -1234,7 +1234,7 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~ match? key? has_key? empty? any?
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ !~ match? key? has_key? empty? any?
              none? respond_to? nan? finite?].include?(name)
         end
 
@@ -1245,13 +1245,17 @@ module Rigor
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
-          when :=~ then analyse_regex_match_predicate(node, scope)
+          when :=~, :!~ then dispatch_regex_match_predicate(node, scope, name)
           when :match? then analyse_whole_regex_match_predicate(node, scope)
           when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
           when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
           when :respond_to? then analyse_respond_to_predicate(node, scope)
           when :nan?, :finite? then analyse_float_class_predicate(node, scope, name)
           end
+        end
+
+        def dispatch_regex_match_predicate(node, scope, name)
+          name == :=~ ? analyse_regex_match_predicate(node, scope) : analyse_regex_not_match_predicate(node, scope)
         end
 
         # T3 (template-corpora survey) — `recv.respond_to?(sym)` truthy edge narrows `recv`
@@ -1532,7 +1536,9 @@ module Rigor
         #
         # Returns nil (no narrowing) when the receiver / argument pair does not resolve to exactly one
         # regex pattern we can count (see {#regex_match_pattern}).
-        def analyse_regex_match_predicate(node, scope)
+        #
+        # `refine: false` leaves out the whole-receiver refinement, which names a String.
+        def analyse_regex_match_predicate(node, scope, refine: true)
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
@@ -1552,8 +1558,94 @@ module Rigor
           # match-global logic above. A successful `str =~ /\A\d+\z/` proves the WHOLE string
           # matched, so the string operand narrows to the imported refinement the anchored pattern
           # names. The falsey edge is untouched: a failed match proves nothing about the shape.
-          truthy = apply_whole_receiver_refinement(truthy, node.receiver, arg, pattern.source, scope)
+          truthy = apply_whole_receiver_refinement(truthy, node.receiver, arg, pattern.source, scope) if refine
           [truthy, falsey]
+        end
+
+        # Issue #1379 — `subject !~ pattern` is `Kernel#!~`, which returns `!(subject =~ pattern)`. It runs the same
+        # match in the caller's frame, so its edges are {#analyse_regex_match_predicate}'s swapped: the falsey edge is
+        # the match edge (`$~` a `MatchData`, an unconditional `$N` a `String`, and the whole-receiver refinement), the
+        # truthy edge the no-match edge (`$~` and `$N` nil). The same patterns are recognised and the same ones
+        # declined (a non-regex operand, an ambiguous constant, `//x`).
+        #
+        # Unlike `=~`'s, an edge here is narrowed only when the receiver proves what the frame holds on it
+        # ({#not_match_receiver_edges}). An edge it cannot vouch for keeps the match globals forgotten, since the call
+        # may still have rebound them. The refinement is kept only when the local it would narrow is known to be a
+        # String on the match edge ({#refinable_operand?}).
+        def analyse_regex_not_match_predicate(node, scope)
+          edges = analyse_regex_match_predicate(node, scope, refine: refinable_operand?(node, scope))
+          return nil if edges.nil?
+
+          match, no_match = edges
+          forgotten = scope.forget_match_globals
+          case not_match_receiver_edges(node, scope)
+          when :both then [no_match, match]
+          when :match then [forgotten, match]
+          else [forgotten, forgotten]
+          end
+        end
+
+        # Which edges of `recv !~ pattern` the receiver lets {#analyse_regex_not_match_predicate} narrow. `Kernel#!~`
+        # dispatches `=~` on the receiver:
+        #
+        # - A Regexp receiver (the pattern on the left) runs `Regexp#=~`, which sets `$~` on both outcomes, a `nil`
+        #   argument included: `:both`.
+        # - `String#=~` and `Symbol#=~` do the same: `:both` when every member of the receiver's type is a String or a
+        #   Symbol.
+        # - `NilClass#=~` answers nil and leaves `$~` alone, so a nil receiver reaches the no-match edge with the
+        #   previous match still bound; it never reaches the match edge. A `Dynamic` receiver may be nil at run time
+        #   whatever its static facet says: `:match` when every member is a String, a Symbol, nil, or a `Dynamic`
+        #   that is untyped or whose facet holds only those.
+        # - Any other receiver may define `=~` in Ruby, which binds `$~` in its own frame, not the caller's: nil.
+        #
+        # A safe-navigation `recv&.!~(pattern)` answers nil without matching on a nil receiver, so it declines too.
+        def not_match_receiver_edges(node, scope)
+          return nil if node.receiver.nil? || node.safe_navigation?
+          return :both if regex_operand_pattern(node.receiver, scope).is_a?(RegexMatchPattern)
+
+          kinds = not_match_member_kinds(scope.type_of(node.receiver), scope)
+          return :both if kinds.all? { |kind| %i[string symbol].include?(kind) }
+
+          :match if kinds.all? { |kind| %i[string symbol nil dynamic].include?(kind) }
+        end
+
+        # Whether the local operand {#apply_whole_receiver_refinement} would narrow holds only Strings and nil, which
+        # the match edge excludes. The refinement names a String, so a member that may be a Symbol — a Symbol, or an
+        # untyped `Dynamic` that `Kernel#!~` accepts as the receiver or `Regexp#=~` as the argument — keeps it out:
+        # `return if raw !~ /\A\d+\z/` on an untyped `raw` must not make `raw.to_proc` an undefined method.
+        def refinable_operand?(node, scope)
+          operand = [node.receiver, *node.arguments&.arguments].find { |o| o.is_a?(Prism::LocalVariableReadNode) }
+          type = operand && scope.local(operand.name)
+          return true if type.nil?
+
+          not_match_member_kinds(type, scope).all? { |kind| %i[string nil].include?(kind) }
+        end
+
+        def not_match_member_kinds(type, scope)
+          (type.is_a?(Type::Union) ? type.members : [type]).map { |member| not_match_member_kind(member, scope) }
+        end
+
+        # `:string` or `:symbol` for a member {.narrow_not_class} proves a String or a Symbol (a value or refinement of
+        # either, or a class the environment orders below it; a project subclass it cannot order reads as neither),
+        # `:nil`, `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil, or nil for
+        # anything else.
+        def not_match_member_kind(member, scope)
+          return not_match_dynamic_kind(member, scope) if member.is_a?(Type::Dynamic)
+          return :nil if narrow_nil(member) == member && !member.is_a?(Type::Bot)
+
+          environment = scope.environment
+          { "String" => :string, "Symbol" => :symbol }.each do |class_name, kind|
+            return kind if narrow_not_class(member, class_name, environment: environment, scope: scope).is_a?(Type::Bot)
+          end
+          nil
+        end
+
+        def not_match_dynamic_kind(member, scope)
+          facet = member.static_facet
+          return :dynamic if facet.is_a?(Type::Top)
+
+          facet_kinds = not_match_member_kinds(facet, scope)
+          :dynamic if facet_kinds.all? { |kind| %i[string symbol nil].include?(kind) }
         end
 
         # `str.match?(/\A\d+\z/)` — `String#match?` is a pure boolean predicate whose truthy edge

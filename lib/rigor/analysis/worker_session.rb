@@ -6,6 +6,7 @@ require_relative "../environment"
 require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../cache/store"
+require_relative "shadow_harness"
 require_relative "../plugin"
 require_relative "../rbs_extended/reporter"
 require_relative "../reflection"
@@ -440,7 +441,7 @@ module Rigor
         results = walk.diagnostics_for_file(
           path: path, scope: scope, root: root, collector_driver: driver
         )
-        if ENV["RIGOR_SHADOW_RULE_WALK"]
+        if ShadowHarness.enabled?
           CheckRules.shadow_verify_converged_collectors(path, root, scope_index, node_collectors)
         end
         results.each_with_object({}.compare_by_identity) do |result, by_plugin|

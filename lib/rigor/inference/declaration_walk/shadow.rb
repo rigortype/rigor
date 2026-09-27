@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../analysis/shadow_harness"
+
 module Rigor
   module Inference
     module DeclarationWalk
@@ -10,20 +12,35 @@ module Rigor
       #
       # Equality is stricter than `Hash#==`: key ORDER counts, and so do a container's frozenness and
       # `compare_by_identity`. A table is iterated when it is merged, folded and written to a seed bundle, so
-      # an order change is a change in what later stages see even where `==` holds.
+      # an order change is a change in what later stages see even where `==` holds. Not compared yet: a
+      # `Set`'s order and frozenness (a `Set` compares by `==` alone), a Hash's `default` / `default_proc`,
+      # and the fields inside a `Data` or `Struct` value beyond its `==`. No ported table holds one yet; a
+      # port whose table does extends {#first_difference} first.
       #
-      # Under `rigor check` the raise lands in the per-file rescue and reports as an error diagnostic on the
-      # file carrying the message, the same way a rule-walk divergence does.
+      # ## Running it
+      #
+      # Set the variable for the whole `rigor check` process, pool workers included: `RIGOR_SHADOW_RULE_WALK=1
+      # rigor check …`. Under `rigor check` a raise lands in the per-file rescue and reports as an error
+      # diagnostic on the file, carrying the message, the same way a rule-walk divergence does; a run with no
+      # such row found no divergence. The rule-walk harness reads the same variable
+      # ({Analysis::ShadowHarness}).
+      #
+      # A warm cache cannot answer for a run the harness did not check. The ADR-45 run-result cache (and the
+      # ADR-87 boot-slim probe and the effects sidecar, which share its key) and the ADR-46 incremental
+      # snapshot, seed bundles included, key on {Analysis::ShadowHarness.cache_identity}. So a run with the
+      # variable never replays a result computed without it, and a divergence row cached under it never
+      # replays into a run without it. A warm hit WITH the variable replays what the same engine computed on
+      # the same inputs with the harness on, divergence rows included; `--no-cache` sends every file through
+      # the check again.
       module Shadow
-        ENV_KEY = "RIGOR_SHADOW_RULE_WALK"
+        ENV_KEY = Analysis::ShadowHarness::ENV_KEY
 
         class Divergence < StandardError; end
 
         module_function
 
-        # The same test `CheckRules` and the runner apply: set to anything, `0` included.
         def enabled?
-          !ENV[ENV_KEY].nil?
+          Analysis::ShadowHarness.enabled?
         end
 
         # `walk`, after checking it against the table the block builds when the harness is on. The block is

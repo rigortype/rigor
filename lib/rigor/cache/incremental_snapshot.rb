@@ -5,6 +5,7 @@ require "digest"
 require "zlib"
 
 require_relative "engine_source"
+require_relative "../analysis/shadow_harness"
 
 module Rigor
   module Cache
@@ -235,6 +236,10 @@ module Rigor
         ]
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
+        # ADR-116 WD5 — the snapshot's per-file rows and seed bundles are only as checked as the run that
+        # wrote them ({Inference::DeclarationWalk::Shadow}); nil with the harness off adds no part.
+        shadow = Analysis::ShadowHarness.cache_identity
+        parts << "shadow-harness:#{shadow}" if shadow
         Digest::SHA256.hexdigest(parts.join("\x00"))
       rescue StandardError
         # {EngineSource::Unavailable} lands here too, and nil is the answer it requires rather than one it

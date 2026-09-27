@@ -21,6 +21,7 @@ require_relative "../environment/default_libraries"
 # lockfile paths without loading `rigor/environment` or the RBS machinery.
 require_relative "../environment/lockfile_resolver"
 require_relative "../environment/rbs_collection_discovery"
+require_relative "shadow_harness"
 
 module Rigor
   module Analysis
@@ -93,7 +94,7 @@ module Rigor
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
           configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) +
-                   template_unit_entries(template_units_digest) + [
+                   template_unit_entries(template_units_digest) + shadow_harness_entries + [
                      config_entry("configuration", Marshal.dump(configuration.to_h)),
                      config_entry("engine",
                                   "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
@@ -114,6 +115,15 @@ module Rigor
       # the cache for the run: an engine we cannot identify must not be keyed by its version alone.
       def template_unit_entries(digest)
         digest.nil? ? [] : [config_entry("template-units", digest)]
+      end
+
+      # ADR-116 WD5 — a run under `RIGOR_SHADOW_RULE_WALK` compares every table and rule collector with its
+      # legacy oracle, and a divergence is a row of the result. Keying on it keeps a warm hit from answering
+      # for a run the harness never checked, and a divergence row from replaying into a run without it. No
+      # slot with the harness off, so no existing key moves.
+      def shadow_harness_entries
+        identity = ShadowHarness.cache_identity
+        identity.nil? ? [] : [config_entry("shadow-harness", identity)]
       end
 
       def engine_source_entries

@@ -26,6 +26,12 @@ module Rigor
       #   nothing else pushes. nil when the caller does not track it, and then no transition allocates one.
       # - `scope` — the census scope a collector types an rvalue under, carrying the chain
       #   {ScopeIndexer.scope_entering_declaration} stamps at each header. nil when the caller has none.
+      # - `source_path` — the path of the file being walked, which an anonymous class's synthetic name carries
+      #   ({AnonymousMetaClass.name_for}). nil when the caller has none. Read it through
+      #   {#anonymous_class_path}, which answers each variant of that rule.
+      # - `class_body` — whether a `class` / `module` body, a meta-new write's body or an eval-family block's
+      #   body encloses the node. A `class <<` body and a bare factory block do not set it. It exists for the
+      #   `anonymous_class_path` variant {#anonymous_class_path} documents, and nothing else reads it.
       #
       # Nameability is derived, not stored: {#unnameable_self?} answers it from the fields above.
       #
@@ -42,20 +48,22 @@ module Rigor
       class Context
         EMPTY_PREFIX = [].freeze
 
-        attr_reader :prefix, :self_owner, :singleton_cref, :nesting, :scope
+        attr_reader :prefix, :self_owner, :singleton_cref, :nesting, :scope, :source_path, :class_body
 
         # A file's top level: `self` is `main`, which the lexical-class convention (a nil `self_owner`)
         # already answers.
-        def self.root(scope: nil, nesting: nil)
-          new(EMPTY_PREFIX, nil, false, nesting, scope)
+        def self.root(scope: nil, nesting: nil, source_path: nil)
+          new(EMPTY_PREFIX, nil, false, nesting, scope, source_path, false)
         end
 
-        def initialize(prefix, self_owner, singleton_cref, nesting, scope)
+        def initialize(prefix, self_owner, singleton_cref, nesting, scope, source_path, class_body)
           @prefix = prefix
           @self_owner = self_owner
           @singleton_cref = singleton_cref
           @nesting = nesting
           @scope = scope
+          @source_path = source_path
+          @class_body = class_body
           freeze
         end
 
@@ -64,6 +72,22 @@ module Rigor
         # that no rebound self re-anchors.
         def unnameable_self?
           ScopeIndexer.unnameable_eval_self?(false, self_owner, prefix, singleton_cref)
+        end
+
+        # The file path an anonymous class created at this node carries in its synthetic name, under the
+        # variant of that rule the asking collector follows (see {DeclarationWalk::RULE_VARIANTS}):
+        #
+        # - `:whole_file` — the walk's rule: the path everywhere, as the evaluator, the dispatcher and the
+        #   methods walker name the class.
+        # - `:outside_class_bodies` — `walk_class_superclasses`' rule, kept so the superclass table stays
+        #   byte-identical: nil once {#class_body} is set, so `Class.new(P) { }` inside `class C` is keyed
+        #   `#<Class:L:C>` while the other tables name it `#<Class:path:L:C>` (#1521 item 11).
+        def anonymous_class_path(variant)
+          case variant
+          when :whole_file then source_path
+          when :outside_class_bodies then class_body ? nil : source_path
+          else raise ArgumentError, "no anonymous_class_path variant #{variant.inspect}"
+          end
         end
 
         # The context a `class` / `module` header gives its body, or nil when the header renders no prefix
@@ -76,20 +100,32 @@ module Rigor
 
           Context.new(child_cref ? EMPTY_PREFIX : child_prefix, nil, child_cref,
                       declaration_nesting(node, self_decl, child_cref),
-                      ScopeIndexer.scope_entering_declaration(scope, node.constant_path))
+                      ScopeIndexer.scope_entering_declaration(scope, node.constant_path), source_path, true)
         end
 
         # The context of a `class << expr` body. `self` is the singleton class, which no `self::` path names,
         # and the cref is unnameable until a nameable header re-anchors it. The rung Ruby pushes names nothing,
         # so neither chain moves.
         def singleton_class_body
-          Context.new(prefix, EMPTY_PREFIX, true, nesting, scope)
+          Context.new(prefix, EMPTY_PREFIX, true, nesting, scope, source_path, class_body)
         end
 
-        # The context of a block that rebinds only `self` — a meta-new write's, an anonymous factory's
-        # (`EMPTY_PREFIX`), an eval-family call's. The cref and both chains stay lexical.
-        def rebound(owner)
-          Context.new(prefix, owner, singleton_cref, nesting, scope)
+        # The body of a `K = Class.new { … }`-shaped write: `self` is the class the write names (`[]` when it
+        # names none). The cref and both chains stay lexical.
+        def meta_new_body(owner)
+          Context.new(prefix, owner, singleton_cref, nesting, scope, source_path, true)
+        end
+
+        # The body of an eval-family block: `self` is the receiver (`[]` when no name reaches it). The cref and
+        # both chains stay lexical.
+        def eval_body(owner)
+          Context.new(prefix, owner, singleton_cref, nesting, scope, source_path, true)
+        end
+
+        # The body of a bare factory block under the walk's rule: `self` is an anonymous class no name reaches.
+        # The cref and both chains stay lexical.
+        def factory_body
+          Context.new(prefix, EMPTY_PREFIX, singleton_cref, nesting, scope, source_path, class_body)
         end
 
         # `[enclosing_parts, body, body_self]` for a `K = Class.new { … }`-shaped write, or nil when its

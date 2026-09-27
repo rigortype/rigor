@@ -248,6 +248,14 @@ module Rigor
       # The policy is not consulted: the rows were recorded under it when the entry was written, and replay
       # reads no file. A {Cache::Descriptor::GlobEntry} keeps its `mode`, which is part of its slot key.
       #
+      # ADR-45 WD2 (#1507) — every replayed row is also handed to the {.attributing} sink, the ones a held row
+      # wins over included, exactly as the live recorders hand over what each read observed: a producer first
+      # asked while a file is analysed (rigor-actionpack's `:controller_index`, rigor-rails-i18n's
+      # `:locale_index`) serves that file its inputs, and the `--incremental` slot must credit them to it. On a
+      # miss the replayed descriptor is the whole boundary's ({Plugin::Base#producer_dependency_descriptor}), so
+      # the file is also credited with rows other reads recorded; that over-credits, which only ever makes the
+      # slot decline sooner.
+      #
       # @param descriptor — a dependency descriptor; only its `files`, `configs` and `globs` slots are read,
       #   the only slots a boundary records
       def replay(descriptor)
@@ -256,6 +264,7 @@ module Rigor
           descriptor.configs.each { |entry| @config_entries[entry.key] ||= entry }
           descriptor.globs.each { |entry| @glob_entries[entry.slot_key] ||= entry }
         end
+        (descriptor.files + descriptor.globs).each { |entry| self.class.attribute(entry) }
         nil
       end
 

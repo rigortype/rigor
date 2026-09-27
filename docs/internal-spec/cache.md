@@ -1219,7 +1219,10 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   entry); the chain's `baseline` (`Runner#baseline_dependency_rows`: the signature tree
   and an existence row per signature root, the discovered-not-analysed files and a
   listing row per discovery root, the `pre_eval:` files outside the analysed set); and
-  every file's `reads`.
+  every file's `reads`. A file's `reads` are what `Plugin::IoBoundary.attributing` collected
+  while it was analysed: every row a live recorder took and every row `IoBoundary#replay`
+  handed back for a producer served during that analysis (#1558), the rows a held row
+  wins over included.
 - **Carrying.** A full run starts the chain. A recheck takes the previous slot's `Entry` —
   read with `peek_unvalidated`, keyed by the path set of the snapshot it restored and the
   same roots — carries `baseline` unchanged, keeps the reads of the files it served from

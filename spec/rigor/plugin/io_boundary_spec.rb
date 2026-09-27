@@ -430,6 +430,26 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(boundary.cache_descriptor.files.size).to eq(1)
     end
 
+    # A producer served from its cache hands its rows back through `#replay` (#1558); the file whose analysis asked
+    # for it is credited with every one, the rows a held row wins over included, as a live read would be.
+    it "hands every replayed row to the sink, including one a row the boundary holds wins over" do
+      read = File.join(tmpdir, "read.txt")
+      File.write(read, "x")
+      boundary.read_file(read)
+      held = boundary.cache_descriptor.files.first
+      replayed = Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.present(path: read),
+                Rigor::Cache::Descriptor::FileEntry.absent(path: File.join(tmpdir, "gone.txt"))],
+        globs: [Rigor::Cache::Descriptor::GlobEntry.compute(root: tmpdir, pattern: "*.txt", mode: :names)]
+      )
+      sink = []
+
+      described_class.attributing(sink) { boundary.replay(replayed) }
+
+      expect(sink).to eq(replayed.files + replayed.globs)
+      expect(boundary.cache_descriptor.files).to include(held)
+    end
+
     it "reaches a read made from inside a Fiber, such as an external Enumerator's" do
       File.write(File.join(tmpdir, "read.txt"), "x")
       sink = []

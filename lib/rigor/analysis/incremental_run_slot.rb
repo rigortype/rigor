@@ -28,8 +28,7 @@ module Rigor
     #
     # A hit is at least as careful as the full incremental path — where that path would notice a change, a row
     # notices it first — but it is not a cold run: a stale answer that path serves for a read reaching a file
-    # through a plugin's memo (#1553) the probe may serve too. ADR-45 WD2 states the guarantee and its one open
-    # hole, #1558.
+    # through a plugin's memo (#1553) the probe may serve too. ADR-45 WD2 states the guarantee.
     #
     # Kept apart from the plain run's `analysis.run-diagnostics` by its own producer id and by the roots entry its
     # key adds, either enough alone, so neither probe can ever read the other's entry, and an incremental defect

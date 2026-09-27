@@ -309,9 +309,18 @@ Reads are credited to the file whose analysis made them, and only a read
 the boundary records is credited at all. A value a plugin memoised — in an
 ivar, through `producer_value`, or carried across files by the ADR-84
 return memo — reaches later files without a read of their own, so only the
-first file to trigger the read guards it. And a producer answered from its
-own record-and-validate entry reads nothing (#1558), so neither this slot
-nor the plain one records its inputs.
+first file to trigger the read guards it. A producer answered from its
+own record-and-validate entry reads nothing, but since #1558 it replays the
+rows its entry recorded into its boundary, and `IoBoundary#replay` hands
+each of them to the sink as a live read would, the ones a held row wins
+over included. A producer first asked while a file is analysed
+(rigor-actionpack's `:controller_index`, rigor-rails-i18n's
+`:locale_index`) then credits that file with its inputs; without the
+credit, the rows it replays during the per-file loop would make
+`Runner#incremental_slot_rows` decline and no slot would ever be written
+for such a project. On a miss the replayed descriptor is the whole
+boundary's, so the file is credited with more than the producer read,
+which only makes the slot decline sooner.
 
 **Written only for the tree the run read.** The key, the `run` rows and a
 full run's baseline rows are read off the tree when the run ENDS, and a
@@ -390,10 +399,11 @@ the analysed files, the configuration, roots and lockfiles in the key, the
 signature tree, and each plugin read the boundary records, which is where
 the ADR-88 fact surface comes from — so where the full path would notice a
 change and re-analyse, the probe declines first. That rests on ADR-45's own
-premise, that a plugin reads through its `IoBoundary`, and on #1558: until
-a producer's cache hit replays its rows, a producer input can change with
-the probe serving the pre-change answer while the full path recomputes the
-producer and rebuilds. #1552 does not land before #1558.
+premise, that a plugin reads through its `IoBoundary`, and on #1558's
+replay of a producer's rows on a hit; before it, a producer input could
+change with the probe serving the pre-change answer while the full path
+recomputed the producer and rebuilt. WD2 landed after #1558 for that
+reason.
 
 A hit is not guaranteed to equal a cold run. Where the full path misses a
 change, one of two things happens. For an input the chain carries (#1554's
@@ -411,8 +421,9 @@ numbers are for the `engine-warm.yml` dispatch to confirm.
 
 Gate: `spec/rigor/analysis/incremental_run_slot_spec.rb` (each input class,
 the roots, the carried read, the inputs that decline until a full run, the
-chain breaks, the separation of the two slots, and a pending #1558
-example), the subprocess examples in `spec/rigor/cli/run_cache_probe_spec.rb`
+chain breaks, the separation of the two slots, a producer's input
+through a cache hit, and a producer first asked from a node rule), the
+subprocess examples in `spec/rigor/cli/run_cache_probe_spec.rb`
 (no `rigor/inference` on a hit), `spec/rigor/cli/check_command_spec.rb` (the
 same output per format, baseline and `--fail-on`), and
 `tool/engine_warm_ab.rb`, which counts `--incremental` null probe hits and

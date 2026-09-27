@@ -401,9 +401,9 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
-  # A plugin producer served from its own record-and-validate entry reads nothing, so its inputs reach neither this
-  # slot nor the plain one; the full path revalidates the producer, recomputes it, and moves the ADR-88 fact
-  # surface. Pending until #1558 replays a producer hit's recorded rows into the plugin's boundary.
+  # A plugin producer served from its own record-and-validate entry reads nothing; since #1558 the hit replays the
+  # rows its entry recorded into the plugin's boundary, which is how its inputs reach this slot (and the plain
+  # one). The full path revalidates the producer, recomputes it, and moves the ADR-88 fact surface.
   describe "a plugin producer's input" do
     let(:table_plugin) do
       Class.new(Rigor::Plugin::Base) do
@@ -425,24 +425,69 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       end
     end
 
+    # The rigor-actionpack `:controller_index` shape: no `#prepare`, the producer first asked from a node rule, so
+    # its reads — and, since #1558, the rows a hit or a miss replays — land while a file is being analysed. The
+    # `watch:` glob is what a miss replays that the block did not read itself.
+    let(:node_rule_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "slot-index", version: "0.1.0")
+
+        producer :index, watch: [["index", "*.txt"]] do |_params|
+          io_boundary.read_file("index/entries.txt").strip
+        end
+
+        node_rule Prism::CallNode do |node, _scope, path|
+          next [] unless node.name == :lookup
+
+          [diagnostic(node, path: path, message: "index #{producer_value(:index)}", severity: :warning,
+                            rule: "index")]
+        end
+      end
+    end
+
     def table_config
       configuration("plugins" => ["rigor-slot-table"])
     end
 
+    def index_config
+      configuration("plugins" => ["rigor-slot-index"])
+    end
+
+    def index_messages(diagnostics)
+      rows(diagnostics).filter_map { |row| row["message"] if row["rule"].to_s.end_with?("index") }
+    end
+
     before do
       stub_const("SlotTablePlugin", table_plugin)
+      stub_const("SlotIndexPlugin", node_rule_plugin)
       write_project
       write("schema.txt", "v1\n")
+      write("index/entries.txt", "v1\n")
     end
 
     it "declines once the file a producer read changes, after a recheck the producer answered from its cache" do
-      pending "#1558: a producer cache hit replays none of the rows it recorded"
       incremental_run(table_config, plugin: table_plugin)
       write("lib/a.rb", "class Widget\n  def price\n    11\n  end\nend\n")
       _, warm = incremental_run(table_config, plugin: table_plugin)
       expect(warm).to be(true)
       write("schema.txt", "v2\n")
       expect(served(table_config)).to be_nil
+    end
+
+    it "writes a slot when the producer is first asked from a node rule, computed or served from its cache" do
+      write("lib/c.rb", "class Other\n  def go\n    lookup(1)\n  end\nend\n")
+      diagnostics, = incremental_run(index_config, plugin: node_rule_plugin)
+      expect(index_messages(diagnostics)).to eq(["index v1"])
+      expect(served(index_config)).not_to be_nil # the miss: the block's read and the replayed `watch:` row
+
+      write("lib/c.rb", "class Other\n  def go\n    lookup(2)\n  end\nend\n")
+      diagnostics, warm = incremental_run(index_config, plugin: node_rule_plugin)
+      expect(warm).to be(true)
+      expect(index_messages(diagnostics)).to eq(["index v1"])
+      expect(served(index_config)).not_to be_nil # the hit: the replayed rows alone
+
+      write("index/entries.txt", "v2\n")
+      expect(served(index_config)).to be_nil
     end
   end
 

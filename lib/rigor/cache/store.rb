@@ -60,6 +60,11 @@ module Rigor
 
       STALE_TEMP_FILE_AGE_SECONDS = 60 * 60
 
+      # #1507 — the zlib level for value payloads (ADR-54 WD2). The default level spent 131 ms deflating
+      # Mastodon's 22.8 MB `rbs.environment` blob; `BEST_SPEED` takes 49 ms for 27% more bytes. Inflate reads
+      # any level, so this changes no format: entries written at either level load unchanged.
+      DEFLATE_LEVEL = Zlib::BEST_SPEED
+
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte format version.
       HEADER = "RIGOR\x00#{FORMAT_VERSION.chr}".b.freeze
 
@@ -469,7 +474,7 @@ module Rigor
         FileUtils.mkdir_p(File.dirname(path))
 
         descriptor_bytes = descriptor.to_canonical_bytes
-        value_bytes = Zlib::Deflate.deflate(serialize_value(value, serialize))
+        value_bytes = Zlib::Deflate.deflate(serialize_value(value, serialize), DEFLATE_LEVEL)
 
         body = +"".b
         body << HEADER

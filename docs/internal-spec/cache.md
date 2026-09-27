@@ -674,7 +674,8 @@ format version invalidates entries on the read path (header
 mismatch → cache miss).
 
 Format v2 ([ADR-54](../adr/54-cache-slimming.md) WD2) deflates
-the value payload on write and inflates on read; the descriptor
+the value payload on write (at `Zlib::BEST_SPEED`; the level is not
+part of the format) and inflates on read; the descriptor
 payload and the SHA-256 trailer (computed over the stored,
 compressed bytes) are unchanged. Compression is invisible to
 producers: a custom `serialize:` / `deserialize:` pair still

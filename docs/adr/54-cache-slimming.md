@@ -94,6 +94,14 @@ incremental snapshot — the one cache artefact that bypasses `Store` —
 gets the same deflate treatment (its `SCHEMA` bumped 4 → 5; a raw pre-5
 blob fails the inflate and loads as nil, the usual cold-run path).
 
+*Addendum (2026-09-28, #1507):* both writers deflate at `Zlib::BEST_SPEED`
+rather than zlib's default level. The incremental snapshot is rewritten on
+every `--incremental` run that analyses anything, which put its deflate on
+the edit path: 122 ms for Mastodon's 9.5 MB snapshot at the default level,
+38 ms at `BEST_SPEED` for a blob 14% larger. The `rbs.environment` entry
+drops from 131 ms to 49 ms for 27% more bytes. Inflate reads any level, so
+no format version moves and existing entries load unchanged.
+
 **WD3 — default eviction cap.** `cache.max_bytes` defaults to nil
 (`configuration.rb:78`), making `Store#evict!` (already wired at
 `cli.rb:107`) a permanent no-op. Today entry counts stay at 1/producer only

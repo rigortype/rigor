@@ -269,6 +269,11 @@ module Rigor
       end
       private_class_method :digest_signature_paths
 
+      # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is on
+      # the edit path. At zlib's default level it cost 122 ms for Mastodon's 9.5 MB snapshot; `BEST_SPEED`
+      # takes 38 ms for a blob 14% larger, and inflate reads any level, so existing snapshots still load.
+      DEFLATE_LEVEL = Zlib::BEST_SPEED
+
       def initialize(root:)
         @path = File.join(root.to_s, "incremental", "snapshot.bin")
       end
@@ -356,7 +361,7 @@ module Rigor
           effects_identity: payload.effects_identity,
           run_level_rows: payload.run_level_rows
         )
-        blob = Zlib::Deflate.deflate(raw)
+        blob = Zlib::Deflate.deflate(raw, DEFLATE_LEVEL)
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)
         File.rename(tmp, @path)

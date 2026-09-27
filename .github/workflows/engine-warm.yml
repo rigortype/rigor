@@ -7,7 +7,8 @@ name: Engine warm journeys
 # `--incremental`. `tool/engine_warm_ab.rb` runs every step as a fresh process,
 # checks that each edit run was a miss and each incremental run warm, compares
 # the first warm answer of each scenario with a plain `--no-cache` run, and with
-# `base` set, alternates two engines in ABBA order on separate project copies.
+# `base` set, alternates two engines in ABBA order on separate project copies. With
+# `profile` set, each scenario also runs once, untimed, under vernier.
 #
 # Dispatch it from the Actions tab or with
 #   gh workflow run engine-warm.yml -f head=master

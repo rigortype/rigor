@@ -113,7 +113,9 @@ module EngineWarmAB
       Vernier.start_profile(mode: :wall, interval: 1000, allocation_interval: 0)
       at_exit do
         result = Vernier.stop_profile
-        window_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+        gc_ms = GC.stat(:time) - gc_before
+        stopped = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        require ENV.fetch("RIGOR_WARM_DESCENT")
         main = result.main_thread
         table = result.stack_table
         stacks = Hash.new(0)
@@ -121,22 +123,6 @@ module EngineWarmAB
         main[:samples].zip(main[:weights]) do |index, weight|
           stacks[root_first[index] ||= table.stack(index).frames.map(&:label).reverse] += weight
         end
-        total = [stacks.values.sum, 1].max
-        chain = []
-        level = 0
-        current = stacks
-        loop do
-          groups = Hash.new(0)
-          current.each { |stack, weight| groups[stack[level]] += weight if stack[level] }
-          label, weight = groups.max_by { |_, w| w }
-          break if label.nil? || weight < 0.9 * total
-
-          chain << [label, weight]
-          current = current.select { |stack, _| stack[level] == label }
-          level += 1
-        end
-        phases = Hash.new(0)
-        current.each { |stack, weight| phases[stack[level] || "(self)"] += weight }
         inclusive = Hash.new(0)
         leaf = Hash.new(0)
         stacks.each do |stack, weight|
@@ -145,11 +131,13 @@ module EngineWarmAB
         end
         top = ->(counts, n) { counts.sort_by { |_, v| -v }.first(n) }
         rigor = inclusive.select { |k, _| k.start_with?("Rigor::", "Rigor.") }
-        File.write(out, JSON.generate(
-          "sampled_ms" => stacks.values.sum, "window_ms" => window_ms, "gc_ms" => GC.stat(:time) - gc_before,
-          "chain" => chain, "phases" => top.(phases, 15), "inclusive_rigor" => top.(rigor, 40),
-          "self" => top.(leaf, 40)
-        ))
+        summary = WarmProfileDescent.call(stacks).merge(
+          "sampled_ms" => stacks.values.sum, "window_ms" => ((stopped - started) * 1000).round, "gc_ms" => gc_ms,
+          "inclusive_rigor" => top.(rigor, 40), "self" => top.(leaf, 40)
+        )
+        # The reduction above runs inside the child's wall time; the harness subtracts it.
+        summary["post_ms"] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - stopped) * 1000).round
+        File.write(out, JSON.generate(summary))
       end
     end
   PROFILER_RUBY
@@ -375,8 +363,12 @@ module EngineWarmAB
       FileUtils.rm_f(out)
       result = EngineWarmAB.check(arm[:engine], arm[:project], mode_args(mode), paths, scratch: @scratch,
                                   env_extra: { "RIGOR_WARM_PROFILE" => out,
-                                               "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib) })
+                                               "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib),
+                                               "RIGOR_WARM_DESCENT" => File.join(__dir__, "warm_profile_descent.rb") })
       assert_labelled(mode, scenario, "#{name} (profiled)", result)
+      timed_hit = @engine_loaded[[mode, scenario]][name] * 2 < @samples[[mode, scenario]][name].size
+      @notes << "#{key}: the profiled run #{result['engine_loaded'] ? 'loaded the engine' : 'was a probe hit'}, unlike " \
+                "most timed runs" if scenario == "null" && mode == "default" && result["engine_loaded"] == timed_hit
       timed_yjit = @yjit[[mode, scenario]][name] * 2 > @samples[[mode, scenario]][name].size
       @notes << "#{key}: the profiled run ended with YJIT #{result['yjit'] ? 'on' : 'off'}, unlike most timed runs" if
         result["yjit"] != timed_yjit
@@ -384,7 +376,9 @@ module EngineWarmAB
         @notes << "#{key}: no profile was written"
         return
       end
-      @profiles[key] = JSON.parse(File.read(out)).merge("wall_ms" => (result["wall_s"] * 1000).round)
+      profile = JSON.parse(File.read(out))
+      profile["wall_ms"] = (result["wall_s"] * 1000).round - profile.fetch("post_ms", 0)
+      @profiles[key] = profile
     end
 
     def with_edit(arm, file, rep)
@@ -436,8 +430,8 @@ module EngineWarmAB
       File.write(File.join(tmp, "profile.rb"), PROFILER)
       if options[:profile_dir]
         FileUtils.mkdir_p(options[:profile_dir])
-        abort("vernier does not load from #{options[:profile_lib]}") unless
-          system(RbConfig.ruby, "-I", options[:profile_lib], "-rvernier", "-e", "0", out: File::NULL, err: File::NULL)
+        _, err, status = Open3.capture3(RbConfig.ruby, "-I", options[:profile_lib], "-rvernier", "-e", "0")
+        abort("vernier does not load from #{options[:profile_lib]}:\n#{err}") unless status.success?
       end
       arms = arm_dirs(options, tmp)
       journey = Journey.new(arms, options, tmp)
@@ -524,10 +518,14 @@ module EngineWarmAB
     journey.profiles.each do |key, profile|
       wall = [profile.fetch("wall_ms"), 1].max
       share = ->(ms) { format("%.0f%%", 100.0 * ms / wall) }
-      chain = profile.fetch("chain").map(&:first).reject { |label| label.start_with?("<") }.last(3)
+      labels = profile.fetch("chain").map(&:first).reject { |label| label.start_with?("<") }
+      chain = labels.last(3)
+      prefix = (labels.size > chain.size ? "… › " : "") + chain.map { |label| "#{label} › " }.join
       phases = profile.fetch("phases").first(8).map { |label, ms| "#{label} #{share.(ms)}" }
+      heaviest, inner = profile.fetch("inner", [nil, []])
+      inside = inner.empty? ? "" : " (inside #{heaviest}: #{inner.first(5).map { |l, ms| "#{l} #{share.(ms)}" }.join('; ')})"
       lines << "- **#{key}** (#{wall} ms; sampled #{share.(profile.fetch('sampled_ms'))}, GC #{profile.fetch('gc_ms')} ms): " \
-               "…#{chain.join(' › ')} › #{phases.join('; ')}"
+               "#{prefix}#{phases.join('; ')}#{inside}"
     end
     lines << "" << "</details>"
   end

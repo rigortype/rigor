@@ -282,9 +282,7 @@ module Rigor
       # literal block are still read ({.operands_may_rebind?}, {.call_may_rebind?}).
       def bot_receiver?(call_node, scope)
         receiver = call_node.receiver
-        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode)
-
-        scope.type_of(receiver).is_a?(Type::Bot)
+        !receiver.nil? && !receiver.is_a?(Prism::SelfNode) && scope.type_of(receiver).is_a?(Type::Bot)
       end
 
       # The `[class_name, kind]` pairs the call dispatches on ({ProjectMethodOwnership.targets}); an implicit or

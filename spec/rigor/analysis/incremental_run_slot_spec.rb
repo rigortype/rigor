@@ -72,10 +72,10 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     described_class.serve(configuration: config, cache_root: cache_root, paths: paths || config.paths)
   end
 
-  def cold(config = configuration, plugin: nil)
+  def cold(config = configuration, plugin: nil, paths: nil)
     runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil,
                                          plugin_requirer: requirer_for(plugin))
-    guarded_run(runner).diagnostics
+    guarded_run(runner, paths).diagnostics
   end
 
   def rows(diagnostics)
@@ -203,39 +203,142 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
   # change, so the probe declines until the next full run: each arm checks it still declines after a full-path
   # run over the changed tree.
   describe "declining until the next full run, for an input a recheck does not re-derive" do
-    def expect_declined_through_a_recheck(config = configuration, paths: nil)
+    # `closure` makes the recheck also re-analyse an analysed file: an empty closure builds no environment and
+    # leaves the runner's baseline rows nil, so only a non-empty one would catch a recheck re-deriving them.
+    def expect_declined_through_a_recheck(config = configuration, paths: nil, closure: false)
       expect(served(config, paths: paths)).to be_nil
+      write("lib/c.rb", "class Other\n  def go\n    3\n  end\nend\n") if closure
       _, warm = incremental_run(config, paths: paths)
       expect(warm).to be(true)
       expect(served(config, paths: paths)).to be_nil
     end
 
-    it "a discovered-not-analysed file (a run over `lib` with `ext` among the configured paths)" do
-      write_project
-      write("ext/helper.rb", "class Helper\n  def go\n    1\n  end\nend\n")
-      config = configuration("paths" => %w[lib ext])
-      incremental_run(config, paths: %w[lib])
-      expect(served(config, paths: %w[lib])).not_to be_nil
-      write("ext/helper.rb", "class Helper\n  def go\n    2\n  end\nend\n")
-      expect_declined_through_a_recheck(config, paths: %w[lib])
+    [false, true].each do |closure|
+      context(closure ? "through a recheck that re-analyses a file" : "through a recheck with an empty closure") do
+        it "a discovered-not-analysed file (a run over `lib` with `ext` among the configured paths)" do
+          write_project
+          write("ext/helper.rb", "class Helper\n  def go\n    1\n  end\nend\n")
+          config = configuration("paths" => %w[lib ext])
+          incremental_run(config, paths: %w[lib])
+          expect(served(config, paths: %w[lib])).not_to be_nil
+          write("ext/helper.rb", "class Helper\n  def go\n    2\n  end\nend\n")
+          expect_declined_through_a_recheck(config, paths: %w[lib], closure: closure)
+        end
+
+        it "an auto-detected signature root that appears" do
+          write_project
+          incremental_run
+          expect(served).not_to be_nil
+          write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
+          expect_declined_through_a_recheck(closure: closure)
+        end
+
+        it "a `pre_eval:` file outside the analysed set" do
+          write_project
+          write("boot/constants.rb", "LIMIT = 3\n")
+          config = configuration("pre_eval" => ["boot/constants.rb"])
+          incremental_run(config)
+          expect(served(config)).not_to be_nil
+          write("boot/constants.rb", "LIMIT = \"three\"\n")
+          expect_declined_through_a_recheck(config, closure: closure)
+        end
+      end
+    end
+  end
+
+  # A save landing while the run reads: the slot is written when the run ends, so every row and the key must
+  # still describe the tree the run analysed, or the probe serves the pre-save answer against the post-save
+  # tree. The save is made just before the first file's analysis, after the environment is built.
+  describe "a save during the run" do
+    def during_first_analysis(&edit)
+      fired = false
+      allow_any_instance_of(Rigor::Analysis::Runner).to receive(:analyze_file).and_wrap_original do |original, *args| # rubocop:disable RSpec/AnyInstance
+        unless fired
+          fired = true
+          edit.call
+        end
+        original.call(*args)
+      end
     end
 
-    it "an auto-detected signature root that appears" do
-      write_project
-      incremental_run
-      expect(served).not_to be_nil
-      write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
-      expect_declined_through_a_recheck
+    def after_the_run
+      RSpec::Mocks.space.reset_all
     end
 
-    it "a `pre_eval:` file outside the analysed set" do
-      write_project
-      write("boot/constants.rb", "LIMIT = 3\n")
-      config = configuration("pre_eval" => ["boot/constants.rb"])
+    it "writes no slot when a configured signature file is saved while the run reads" do
+      config = configuration("signature_paths" => ["sig"])
+      write("sig/gadget.rbs", "class Gadget\n  def price: () -> Integer\nend\n")
+      write("lib/b.rb", "class Shop\n  def total\n    Gadget.new.price.upcase\n  end\nend\n")
+      during_first_analysis { write("sig/gadget.rbs", "class Gadget\n  def price: () -> String\nend\n") }
       incremental_run(config)
-      expect(served(config)).not_to be_nil
-      write("boot/constants.rb", "LIMIT = \"three\"\n")
-      expect_declined_through_a_recheck(config)
+      after_the_run
+
+      expect(served(config)).to be_nil
+      diagnostics, = incremental_run(config)
+      expect(rows(diagnostics)).to eq(rows(cold(config)))
+      expect(rows(served(config).result.diagnostics)).to eq(rows(diagnostics))
+    end
+
+    it "writes no slot when the lockfile is rewritten while the run reads" do
+      lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n\n" \
+             "BUNDLED WITH\n   2.6.0\n"
+      write("Gemfile", "source 'https://rubygems.org'\n")
+      write("Gemfile.lock", lock)
+      write("lib/a.rb", "class A\n  def x\n    1.nope\n  end\nend\n")
+      during_first_analysis { write("Gemfile.lock", lock.sub("   2.6.0", "   2.6.1")) }
+      incremental_run
+      after_the_run
+
+      expect(served).to be_nil
+    end
+
+    it "writes no slot when a served file is replaced while the run reads, its mtime kept" do
+      write("lib/a.rb", "class Widget\n  def price\n    10\n  end\nend\n")
+      write("lib/c.rb", "class Other\n  def go\n    1\n  end\nend\n")
+      incremental_run
+      FileUtils.touch("lib/c.rb", mtime: Time.now - 5) # the tuple moves, the bytes do not
+      kept = File.mtime("lib/c.rb")
+      write("lib/a.rb", "class Widget\n  def price\n    11\n  end\nend\n") # something to re-analyse
+      during_first_analysis do
+        File.write("lib/c.rb", "class Other\n  def go\n    1.nope_c\n  end\nend\n")
+        File.utime(kept, kept, "lib/c.rb") # as `cp -p` or `rsync -t` would
+      end
+      incremental_run
+      after_the_run
+
+      expect(served).to be_nil
+    end
+  end
+
+  # The key holds the roots as a set, so a run that reorders them still carries the previous chain; the entry
+  # keeps the order, because `a b` lists `a`'s files first and `b a` lists `b`'s.
+  describe "the order of the analysis roots" do
+    before do
+      write("a/a.rb", "class Aa\n  def go\n    1.nope_a\n  end\nend\n")
+      write("b/b.rb", "class Bb\n  def go\n    1.nope_b\n  end\nend\n")
+    end
+
+    def order_of(diagnostics)
+      rows(diagnostics).map { |row| row["path"] }
+    end
+
+    it "serves each order only its own answer, and keeps the chain across a reorder" do
+      forward, = incremental_run(paths: %w[a b])
+      expect(order_of(forward)).to eq(%w[a/a.rb b/b.rb])
+      expect(rows(served(paths: %w[a b]).result.diagnostics)).to eq(rows(forward))
+      expect(served(paths: %w[b a])).to be_nil
+
+      backward, warm = incremental_run(paths: %w[b a])
+      expect(warm).to be(true)
+      expect(order_of(backward)).to eq(%w[b/b.rb a/a.rb])
+      expect(rows(backward)).to eq(rows(cold(paths: %w[b a])))
+      expect(rows(served(paths: %w[b a]).result.diagnostics)).to eq(rows(backward))
+      expect(served(paths: %w[a b])).to be_nil
+    end
+
+    it "treats `a/` as the root `a`" do
+      incremental_run(paths: %w[a b])
+      expect(served(paths: %w[a/ b])).not_to be_nil
     end
   end
 

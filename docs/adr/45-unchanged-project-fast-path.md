@@ -246,13 +246,18 @@ full path prints for the same run.
 
 **Key.** The one WD4 reconstructs from configuration alone (`RunCacheKey`:
 the library list without `rbs.virtual_rbs`, no `template-units` slot,
-`--explain` false), plus the sorted analysis roots, under its own producer
-id, `analysis.incremental-run-diagnostics`. The roots are not implied by
-the files: `--incremental lib extra` with `extra` missing analyses what
+`--explain` false), plus the analysis roots, under its own producer id,
+`analysis.incremental-run-diagnostics`. The roots are not implied by the
+files: `--incremental lib extra` with `extra` missing analyses what
 `--incremental lib` analyses, and only the first reports `extra` missing
-(the plain key has the same gap, #1559). The producer id and the roots
-entry each keep the two slots apart on their own, so neither probe can
-read the other's entry. A synthesised RBS buffer is a function of an
+(the plain key has the same gap, #1559). They are normalised to absolute
+paths (`lib`, `./lib` and `lib/` are one root) and sorted in the key, so a
+run that reorders them still finds the previous slot's chain, as the
+snapshot fingerprint, which sorts them too, still restores; the entry keeps
+them in order, and is served only to a run that names them in the same
+order, because `--incremental a b` lists `a`'s files first and `b a`
+lists `b`'s. The producer id and the roots entry each keep the two slots
+apart on their own, so neither probe can read the other's entry. A synthesised RBS buffer is a function of an
 analysed file's bytes (a validated row) and of the synthesising plugin's
 identity and configuration (the key's `configuration`, lockfile and engine
 slots), so the key needs no `rbs.virtual_rbs` slot. A project whose plugins
@@ -265,8 +270,11 @@ answer was computed by earlier runs. The rows come from three sources:
    holds for it — for a file served from cache, the bytes its cached rows
    were computed from — and re-packed against the current stat when the
    bytes still match but the tuple moved (a `touch`, a checkout), so a
-   later probe stats rather than re-hashes it. A re-digest after the run
-   would vouch for bytes that changed while the run was reading them.
+   later probe stats rather than re-hashes it. The re-pack hashes the file
+   afresh, never from the per-run memo, whose digest describes the bytes
+   change detection read, and only when the stat taken before and after
+   that hash agree. A re-digest after the run would vouch for bytes that
+   changed while the run was reading them.
 2. What every run reads again and re-derives its answer from
    (`Runner#incremental_slot_rows`): every plugin `IoBoundary` row, the
    producer `watch:` globs, the template files and globs (re-analysed every
@@ -305,6 +313,22 @@ first file to trigger the read guards it. And a producer answered from its
 own record-and-validate entry reads nothing (#1558), so neither this slot
 nor the plain one records its inputs.
 
+**Written only for the tree the run read.** The key, the `run` rows and a
+full run's baseline rows are read off the tree when the run ENDS, and a
+save that lands while it reads — an editor's, a `bundle install`'s —
+would leave the slot vouching for bytes the analysis never saw: a
+signature file saved after the environment was built, a lockfile
+rewritten, a served file replaced with its mtime kept. So the session
+takes a mark before the run reads anything
+(`IncrementalRunSlot::WriteGuard`) and writes nothing unless, at write
+time, the key's non-file inputs digest as they did at the mark, the
+snapshot fingerprint the run was keyed by still matches, and no file a row
+names, no directory a glob row lists, and no file a stat-mode glob matches
+changed after the mark. The mark is the change time of a file written for
+the purpose, so it is read off the filesystem's own clock: a coarse
+filesystem's tick cannot hide an edit, and a change time, unlike a
+modification time, cannot be set back by `cp -p` or `touch -d`.
+
 **Why the chain holds together.** By induction from the full run that
 started it: that run's descriptor is the plain slot's, and each recheck's
 carries this run's reads for the files it re-analysed and the previous
@@ -319,11 +343,21 @@ ctime_ns, inode)`; a save renames a new file into place — and a recheck
 carries the chain only from a previous slot that exists and names the
 snapshot file it restored. Otherwise it writes nothing, and the fast path
 stays off until the next full run starts a fresh chain: after a pool or
-`--no-cache` edit run, a cache restored onto a new checkout (new inodes),
-a lockfile change the snapshot fingerprint does not see (#1532), or two
-runs racing. `Runner#incremental_slot_rows` also declines when a boundary
-row changed during the per-file loop without being credited to a file (a
-read from a thread the plugin started).
+`--no-cache` edit run, a save the write guard caught, a cache restored
+onto a new checkout (new inodes), a lockfile change the snapshot
+fingerprint does not see (#1532), or two runs racing.
+`Runner#incremental_slot_rows` also declines when a boundary row changed
+during the per-file loop without being credited to a file (a read from a
+thread the plugin started).
+
+"Until the next full run" can mean indefinitely: the full `--incremental`
+path starts one only when its fingerprint moves (the configuration, the
+lockfiles, a configured `signature_paths:`, the engine) or its snapshot is
+gone, and never because the probe stopped serving. The same holds after a
+chained input changed (below). A cheap follow-up would be for the session
+to run a baseline itself when the previous slot's chain no longer
+validates in its baseline part, or when no chain could be carried; it is
+not built here.
 
 **What is neither written nor served.** No slot is written for an editor
 buffer (never persisted), a pool run, effect collection (its `effects:`

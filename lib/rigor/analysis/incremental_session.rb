@@ -3,6 +3,7 @@
 require "digest"
 require_relative "incremental"
 require_relative "incremental_run_slot"
+require_relative "incremental_run_slot/write_guard"
 require_relative "plugin_fact_fingerprint"
 require_relative "source_rbs_gate"
 require_relative "../cache/file_digest"
@@ -618,6 +619,7 @@ module Rigor
       # the file was the same before and after the read, since a rewrite in between leaves no telling which one
       # the payload came from.
       def load_snapshot(snapshot, fingerprint)
+        @slot_guard = start_slot_guard(fingerprint)
         before = snapshot_identity(snapshot)
         restored = fingerprint && snapshot.load(fingerprint: fingerprint)
         @restored_snapshot_identity = restored && before == snapshot_identity(snapshot) ? before : nil
@@ -668,12 +670,16 @@ module Rigor
         return if analysed.nil?
 
         baseline, reads = chain
-        target = IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)
-        entry = IncrementalRunSlot::Entry.new(diagnostics: diagnostics, baseline: baseline, reads: reads,
-                                              snapshot: written_identity)
+        dependencies = run_slot_dependencies(analysed, rows.run, baseline, reads.values)
+        return unless @slot_guard&.admits?(dependencies)
+
+        entry = IncrementalRunSlot::Entry.new(
+          diagnostics: diagnostics, roots: IncrementalRunSlot.normalize_roots(roots),
+          baseline: baseline, reads: reads, snapshot: written_identity
+        )
         wrote = IncrementalRunSlot.write(
-          store: @cache_store, configuration: @configuration, target: target, entry: entry,
-          dependencies: run_slot_dependencies(analysed, rows.run, baseline, reads.values)
+          store: @cache_store, configuration: @configuration, entry: entry, dependencies: dependencies,
+          target: IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)
         )
         discard_previous_slot(roots) if wrote
       rescue StandardError
@@ -687,6 +693,17 @@ module Rigor
         IncrementalRunSlot.discard(
           store: @cache_store, configuration: @configuration,
           target: IncrementalRunSlot::Target.new(files: @slot_carried_from, roots: roots)
+        )
+      end
+
+      # ADR-45 WD2 — the mark {IncrementalRunSlot::WriteGuard#admits?} checks the slot's rows against, taken before
+      # the run reads anything. nil (no slot this run) for a store no slot is written to, or no fingerprint.
+      def start_slot_guard(fingerprint)
+        return nil if fingerprint.nil? || @cache_store.nil? || @cache_store.read_only? || !@buffer.nil?
+
+        IncrementalRunSlot::WriteGuard.start(
+          configuration: @configuration, roots: @paths || @configuration.paths, cache_root: @cache_store.root,
+          fingerprint: fingerprint
         )
       end
 

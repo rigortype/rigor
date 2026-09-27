@@ -1199,17 +1199,21 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
 - **Key.** `RunCacheKey.descriptor` exactly as the ADR-87 WD4 probe builds it —
   `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false` —
   over the session's analysed-path set, plus an `incremental.roots` config entry over the
-  sorted analysis roots (`IncrementalRunSlot::Target`). The producer id and the roots
-  entry each keep it apart from `analysis.run-diagnostics` on their own.
-- **Value.** `IncrementalRunSlot::Entry(diagnostics, baseline, reads, snapshot)`.
+  analysis roots, normalised to absolute paths and sorted (`IncrementalRunSlot::Target`,
+  `.normalize_roots`). The producer id and the roots entry each keep it apart from
+  `analysis.run-diagnostics` on their own.
+- **Value.** `IncrementalRunSlot::Entry(diagnostics, roots, baseline, reads, snapshot)`.
   `diagnostics` is what the run printed before the baseline filter; the CLI applies the
   filter, `--fail-on` and the output format to it exactly as the full incremental path
-  does (`CheckCommand#write_incremental_result`). `baseline` and `reads` (`{path =>
-  Descriptor}`) are the chain a later recheck carries forward; `snapshot` is the
-  `(size, mtime_ns, ctime_ns, inode)` of the snapshot file the writing run left behind.
+  does (`CheckCommand#write_incremental_result`). `roots` are the normalised roots in the
+  order the run was given them, and the probe serves the entry only to a run that names
+  them in that order. `baseline` and `reads` (`{path => Descriptor}`) are the chain a later
+  recheck carries forward; `snapshot` is the `(size, mtime_ns, ctime_ns, inode)` of the
+  snapshot file the writing run left behind.
 - **Dependency descriptor.** A `:stat` row per analysed file, from the session's own
   `digests` (the bytes each answer was computed from), re-packed by
-  `Cache::FileDigest.refresh_stat` when the bytes still match but the tuple moved;
+  `Cache::FileDigest.refresh_stat` when the bytes, hashed afresh rather than from the
+  per-run memo, still match and the stat held still across that hash;
   `Runner#incremental_slot_rows`' `run` rows (every plugin boundary row, the `watch:`
   globs, the template rows, and an existence row per analysis root and `pre_eval:`
   entry); the chain's `baseline` (`Runner#baseline_dependency_rows`: the signature tree
@@ -1223,6 +1227,13 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   writes NOTHING when the previous entry is missing, or names a snapshot file other than
   the one it restored; the fast path then stays off until the next full run starts a
   fresh chain. When the path set moved it discards the previous entry after writing its own.
+- **Write guard.** `IncrementalRunSlot::WriteGuard` takes a mark before the run reads
+  anything: the change time of a stamp file written under `<cache>/incremental/` (the
+  filesystem's own clock), the key's non-file part, and the snapshot fingerprint the run
+  was given. The slot is written only when, at write time, the key's non-file part and
+  the recomputed fingerprint match the mark's and no path a file row names, no directory
+  a glob row lists and no file a `:stat` glob matches has a change time at or after the
+  mark. A path that is gone passes; its row is stale already.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
   on, a run with an opaque plugin, a project whose plugins claim template globs, a run
   in which a boundary row changed during the per-file loop without being credited to a
@@ -1230,7 +1241,9 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   — the #1536 source-RBS gate forgets the digest of a file saved after the closure was
   decided (`forget_unbound_digests`), and no row could then say what that file's readers
   were computed from. A run under an untrusted gate is written: the gate decides the
-  closure, and an analysed file's row declines for any edit whatever it decided. **Not served** under `--no-cache`, `--verify-incremental`, `--explain`,
+  closure, and an analysed file's row declines for any edit whatever it decided. Nor
+  when the write guard sees an input that changed after its mark.
+  **Not served** under `--no-cache`, `--verify-incremental`, `--explain`,
   a worker pool, `--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or effect
   collection.
 

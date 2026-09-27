@@ -62,8 +62,10 @@ module Rigor
       # re-derive on a recheck (the signature tree, the discovered-not-analysed files, the `pre_eval:` files outside
       # the analysed set); `reads` the plugin reads credited to each analysed file. `snapshot` is the identity of
       # the incremental snapshot file the writing run left behind, which the next writer compares against the one
-      # it restored before trusting the chain.
-      Entry = Data.define(:diagnostics, :baseline, :reads, :snapshot)
+      # it restored before trusting the chain. `roots` are the analysis roots in the order the run was given them
+      # ({.normalize_roots}): the key holds them as a set, and the probe serves the entry only to a run that names
+      # them in the same order.
+      Entry = Data.define(:diagnostics, :roots, :baseline, :reads, :snapshot)
 
       # What a slot is keyed by: the analysed-path set and the analysis roots the run was given. The roots are
       # not implied by the files — `rigor check --incremental lib extra` with `extra` missing analyses the same
@@ -80,8 +82,16 @@ module Rigor
         )
         return nil if base.nil?
 
-        roots = RunCacheKey.config_entry("incremental.roots", Array(target.roots).map(&:to_s).sort.join("\n"))
+        roots = RunCacheKey.config_entry("incremental.roots", normalize_roots(target.roots).sort.join("\n"))
         Cache::Descriptor.new(gems: base.gems, configs: base.configs + [roots])
+      end
+
+      # The roots as absolute paths, in the order given: `lib`, `./lib` and `lib/` are one root, and `a b` is not
+      # `b a`, whose run lists `b`'s files first. The KEY sorts them, so a run that reorders its roots still finds
+      # the previous slot's chain (the snapshot fingerprint sorts them too); only {Entry#roots} keeps the order,
+      # and {.serve} compares it.
+      def normalize_roots(roots)
+        Array(roots).map { |root| File.expand_path(root.to_s) }
       end
 
       # The engine-free probe. Returns a {Hit} when the slot for this run's analysed-path set validates, or nil to
@@ -102,6 +112,7 @@ module Rigor
 
         entry = validated_entry(configuration, cache_root, slot_key)
         return nil unless entry.is_a?(Entry) && entry.diagnostics.is_a?(Array)
+        return nil unless entry.roots == normalize_roots(paths)
 
         Hit.new(result: Result.new(diagnostics: entry.diagnostics, stats: nil), file_count: files.size)
       rescue StandardError

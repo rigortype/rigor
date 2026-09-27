@@ -115,20 +115,37 @@ module Rigor
       # ADR-45 WD2 (#1507) — `packed` re-packed against `path`'s current stat, for a writer about to record it
       # again: when the tuple moved (a `touch`, a checkout) or the entry is racy, but the file still hashes to the
       # recorded digest, the new pack carries the current tuple and this run's recording instant, so the next
-      # validation is one `File::Stat` again rather than a re-hash every time. `packed` comes back unchanged when
-      # its tuple still matches and it is not racy, and when the bytes no longer match the digest — a row that
-      # must stay stale is never refreshed into a fresh one. nil when `packed` is not a stat pack. A stat failure
-      # (the file is gone) returns `packed` unchanged, which then validates as stale.
+      # validation is one `File::Stat` again rather than a re-hash every time.
+      #
+      # The hash is taken fresh, never from the per-run memo: a memoised digest describes the bytes as they were
+      # when change detection read them, and pairing it with a later stat would vouch for bytes written since. And
+      # the re-pack is made only when the stat taken before the hash, the one taken after it, and the one packed
+      # all agree — a write landing while the file is hashed leaves `packed` as it was.
+      #
+      # `packed` comes back unchanged when its tuple still matches and it is not racy, and whenever the bytes no
+      # longer match the digest: a row that must stay stale is never refreshed into a fresh one. nil when `packed`
+      # is not a stat pack. A stat failure (the file is gone) returns `packed` unchanged, which then validates as
+      # stale.
       def self.refresh_stat(path, packed)
         parsed = parse_stat(packed)
         return nil if parsed.nil?
-        return packed if !racy?(parsed) && tuple_matches?(File.stat(path), parsed)
-        return packed unless hexdigest(path) == parsed[0]
 
-        pack_stat(path, parsed[0]) || packed
+        before = File.stat(path)
+        return packed if !racy?(parsed) && tuple_matches?(before, parsed)
+        return packed unless Digest::SHA256.file(path).hexdigest == parsed[0]
+
+        repacked = pack_stat(path, parsed[0])
+        stable = repacked && same_tuple?(before, File.stat(path)) && tuple_matches?(before, parse_stat(repacked))
+        stable ? repacked : packed
       rescue SystemCallError
         packed
       end
+
+      def self.same_tuple?(one, other)
+        one.size == other.size && ns(one.mtime) == ns(other.mtime) && ns(one.ctime) == ns(other.ctime) &&
+          one.ino == other.ino
+      end
+      private_class_method :same_tuple?
 
       # The content-digest field of a packed `:stat` entry ({.pack_stat}); nil when the entry is absent or not
       # well-formed. Exposed for the caller that must compare the recorded digest against bytes it hashes

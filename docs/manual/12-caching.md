@@ -226,22 +226,33 @@ analyzer at all, just as an unchanged plain `rigor check` does.
 Rigor first checks the inputs that answer was computed from —
 your source files, your RBS, your configuration and the files
 your plugins read — and runs the ordinary incremental re-check
-the moment any of them differs. The shortcut is exactly as
-careful as that re-check: wherever the re-check would notice a
-change, the shortcut notices it first. On a Rails application the
-size of Mastodon, an unchanged `--incremental` run takes about as
-long as an unchanged plain one.
+the moment any of them differs. On a Rails application the size
+of Mastodon, an unchanged `--incremental` run takes about as long
+as an unchanged plain one.
 
 The shortcut stands aside under `--workers=N` (or
 `parallel.workers:`), `--explain`, `--cache-stats`, `--coverage`,
 an editor buffer, and an `effects:` block; those runs re-check as
-before. It also switches itself off, silently, when an
-`--incremental` run cannot record its answer safely: after a run
-with `--workers=N` or `--no-cache` that re-analysed files, after a
-CI cache is restored onto a fresh checkout, or when two runs race.
-It stays off — every run an ordinary re-check — until the next
-full analysis, which a configuration, `Gemfile.lock` or Rigor
-version change triggers, as does `--clear-cache`.
+before. It also switches itself off, silently:
+
+- when an input changes that the ordinary re-check does not look
+  at itself: an auto-detected `sig/` directory (one you did not
+  list under `signature_paths:`), a file a narrower
+  `rigor check --incremental DIR` only discovers from the rest of
+  your configured `paths:`, or a `pre_eval:` file outside the
+  analysed paths. The re-check may keep printing the answer from
+  before that change; the shortcut does not repeat it;
+- when an `--incremental` run cannot record its answer safely:
+  after a run with `--workers=N` or `--no-cache` that re-analysed
+  files, when a file changes while a run is reading it, after a CI
+  cache is restored onto a fresh checkout, or when two runs race.
+
+Either way it stays off, and every run is an ordinary re-check,
+until the next full analysis. The ordinary re-check never starts
+one by itself: only a configuration, `Gemfile.lock` or Rigor
+version change does, or `--clear-cache`. So the shortcut can stay
+off indefinitely; run `rigor check --incremental --clear-cache`
+once to turn it back on.
 
 `--incremental` is most useful for fast local re-checks and CI
 on a changed branch.

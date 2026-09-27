@@ -136,6 +136,23 @@ RSpec.describe Rigor::Cache::FileDigest do
       expect(described_class.stat_fresh?(path, refreshed)).to be(false)
     end
 
+    # The per-run memo holds the digest change detection took, before the run; a file rewritten since, with its
+    # size and mtime kept, must not have that old digest re-packed with its new stat.
+    it "does not trust the run's memoised digest for a file rewritten since it was taken" do
+      entry = described_class.with_run { described_class.pack_stat(path, expected) }
+      kept = Time.now - 10
+      File.utime(kept, kept, path)
+      refreshed = described_class.with_run do
+        described_class.hexdigest(path) # memoised: the bytes as change detection saw them
+        File.write(path, "x = 9\n")
+        File.utime(kept, kept, path)
+        described_class.refresh_stat(path, entry)
+      end
+
+      expect(refreshed).to eq(entry)
+      expect(described_class.stat_fresh?(path, refreshed)).to be(false)
+    end
+
     it "answers nil for an entry that is not a stat pack, and the entry itself for a vanished file" do
       entry = described_class.pack_stat(path, expected)
       expect(described_class.refresh_stat(path, "missing")).to be_nil

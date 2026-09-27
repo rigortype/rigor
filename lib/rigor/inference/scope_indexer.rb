@@ -20,6 +20,7 @@ require_relative "last_status"
 require_relative "error_info"
 require_relative "hash_lookup_mutation"
 require_relative "index_write_widening"
+require_relative "module_function_state"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
@@ -4179,7 +4180,7 @@ module Rigor
       end
 
       # Body-level entry for a class / module / `class <<` / meta-`new` / eval-block body: prescans
-      # the body's `module_function` state first ({#collect_module_function_state} — bare-call
+      # the body's `module_function` state first ({ModuleFunctionState.prescan_deferred} — bare-call
       # offsets plus the retro-install and `module_function def x` rows), then walks each statement
       # with the offsets in hand. The prescan looks through nested containers (`if` / `begin` /
       # `rescue` / blocks) because a `module_function` that RAN there still flips later defs —
@@ -4196,56 +4197,13 @@ module Rigor
           # `module_function` under an unnameable definee (`class <<` + `instance_eval`)
           # toggles the metaclass — its rows must not name the enclosing class.
           prescan_owner = defs_singleton == :unnameable ? EMPTY_PREFIX : owner_prefix
-          collect_module_function_state(body, prescan_owner, in_singleton_class, mf_offsets,
-                                        ranges)
+          ModuleFunctionState.prescan_deferred(body, prescan_owner, in_singleton_class, mf_offsets,
+                                               ranges)
         end
         statements_of(body).each do |stmt|
           walk_deferred_ranges(stmt, qualified_prefix, in_singleton_class, inside_deferred,
                                mf_offsets, ranges, def_owner_prefix, singleton_cref: singleton_cref,
                                                                      defs_singleton: defs_singleton)
-        end
-      end
-
-      # The `module_function` prescan over one body's subtree: bare-call offsets (defs starting after
-      # one are module functions), a `:singleton` row at each `module_function :name` call — the
-      # retro-install happens AT THE CALL, not the def — and a `:both` / `:singleton` row for a
-      # `module_function def x` argument. Nested class / module / `class <<` / def bodies are skipped:
-      # `module_function` there targets a different module. An `END` body is skipped too — it runs at
-      # interpreter exit, after every def — and so is a `*_eval` / `*_exec` block, whose `self`
-      # rebinds to the receiver's module. Blocks, lambdas and control-flow containers are entered —
-      # their `self` is still this module, so the call really can toggle.
-      def collect_module_function_state(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
-        return unless node.is_a?(Prism::Node)
-        return if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
-                  node.is_a?(Prism::SingletonClassNode) || node.is_a?(Prism::DefNode) ||
-                  node.is_a?(Prism::PostExecutionNode)
-
-        if node.is_a?(Prism::CallNode)
-          if module_function_toggle?(node)
-            return collect_module_function_call(node, qualified_prefix, in_singleton_class,
-                                                mf_offsets, ranges)
-          end
-          if receiver_eval_call?(node)
-            return collect_eval_call_state(node, qualified_prefix, in_singleton_class, mf_offsets,
-                                           ranges)
-          end
-        end
-
-        node.rigor_each_child do |child|
-          collect_module_function_state(child, qualified_prefix, in_singleton_class, mf_offsets, ranges)
-        end
-      end
-
-      # The prescan's eval arm: a `*_eval` / `*_exec` block's self rebinds to the receiver's module,
-      # so only the call's receiver and arguments keep this module's `module_function` context.
-      def collect_eval_call_state(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
-        if node.receiver
-          collect_module_function_state(node.receiver, qualified_prefix, in_singleton_class,
-                                        mf_offsets, ranges)
-        end
-        node.arguments&.arguments&.each do |arg|
-          collect_module_function_state(arg, qualified_prefix, in_singleton_class, mf_offsets,
-                                        ranges)
         end
       end
 
@@ -4255,29 +4213,6 @@ module Rigor
       # receiver's singleton rather than the receiver.
       def receiver_eval_call?(node)
         node.block.is_a?(Prism::BlockNode) && RECEIVER_EVAL_CALLS.include?(node.name)
-      end
-
-      def collect_module_function_call(node, qualified_prefix, in_singleton_class, mf_offsets, ranges)
-        if bare_module_function?(node)
-          mf_offsets << node.location.start_offset
-        else
-          owner = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
-          node.arguments&.arguments&.each do |arg|
-            if arg.is_a?(Prism::DefNode)
-              kind = def_singleton?(arg, qualified_prefix, in_singleton_class) ? :singleton : :both
-              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name, kind, owner]
-            elsif (name = symbol_argument_name(arg))
-              ranges << [node.location.start_offset, node.location.end_offset, name, :singleton, owner]
-            else
-              collect_module_function_state(arg, qualified_prefix, in_singleton_class, mf_offsets,
-                                            ranges)
-            end
-          end
-        end
-        return unless node.block
-
-        collect_module_function_state(node.block, qualified_prefix, in_singleton_class, mf_offsets,
-                                      ranges)
       end
 
       # A `class_eval` / `module_eval` / `class_exec` / `module_exec` block is NOT deferred: it runs
@@ -4643,7 +4578,7 @@ module Rigor
 
         kind = if def_singleton?(def_node, qualified_prefix, in_singleton_class)
                  :singleton
-               elsif mf_offsets.any? { |offset| offset < start }
+               elsif ModuleFunctionState.deferred_module_function?(mf_offsets, start)
                  :both
                else
                  :instance
@@ -4942,24 +4877,21 @@ module Rigor
       end
 
       # Walks a class/module/singleton-class body's direct statements in source order, threading the
-      # bare-`module_function` toggle: once a bare `module_function` is seen, every subsequent `def` in the body
-      # registers as a singleton method. Nested classes/modules/defs and `module_function :a, :b` named forms recurse /
-      # record through the general walker so the toggle stays scoped to its own body.
+      # bare-`module_function` toggle ({ModuleFunctionState.each_singleton_sibling}): once a bare
+      # `module_function` is seen, every subsequent `def` in the body registers as a singleton method. Nested
+      # classes/modules/defs recurse through the general walker so the toggle stays scoped to its own body, and a
+      # `module_function :a, :b` named form records through {#record_module_function_names}.
       def walk_singleton_body(body, qualified_prefix, in_singleton_class, accumulator,
                               def_owner_prefix = nil, singleton_cref: false,
                               defs_singleton: false)
         owner_prefix = def_owner_prefix || qualified_prefix
-        module_function_on = false
-        statements_of(body).each do |stmt|
-          if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
-            if bare_module_function?(stmt)
-              module_function_on = true
-            else
-              # `:unnameable` — the named defs the call copies live on the metaclass,
-              # which this table cannot name either.
-              record_module_function_names(stmt, owner_prefix, body, accumulator) unless
-                defs_singleton == :unnameable
-            end
+        statements = statements_of(body)
+        ModuleFunctionState.each_singleton_sibling(statements) do |stmt, module_function_on, named_call|
+          if named_call
+            # `:unnameable` — the named defs the call copies live on the metaclass,
+            # which this table cannot name either.
+            record_module_function_names(stmt, owner_prefix, statements, accumulator) unless
+              defs_singleton == :unnameable
             next
           end
           if stmt.is_a?(Prism::DefNode)
@@ -5013,37 +4945,16 @@ module Rigor
         (accumulator[class_name] ||= {})[def_node.name] = def_node
       end
 
-      # A bare `module_function` (no arguments) flips every following `def` in the module body to module-function
-      # (instance + singleton) mode.
-      def module_function_toggle?(node)
-        node.name == :module_function && node.receiver.nil?
-      end
-
-      def bare_module_function?(node)
-        node.arguments.nil? || node.arguments.arguments.empty?
-      end
-
-      # `module_function :a, :b` retro-marks named siblings (defined earlier OR later in the same body) as
-      # module-functions. Resolves each symbol-literal argument against the body's own `def`s and registers the matching
-      # `DefNode` on the module's singleton side. Non-symbol arguments and names with no matching `def` are skipped (a
-      # miss degrades to today's `Dynamic`, never a false resolution).
-      def record_module_function_names(node, qualified_prefix, body, accumulator)
+      # `module_function :a, :b` retro-marks named siblings as module-functions: registers on the module's singleton
+      # side each `DefNode` {ModuleFunctionState.each_singleton_copy} resolves among the body's direct `statements`.
+      # Non-symbol arguments and names with no matching `def` are skipped (a miss degrades to today's `Dynamic`).
+      def record_module_function_names(node, qualified_prefix, statements, accumulator)
         return if qualified_prefix.empty?
 
-        defs_by_name = statements_of(body).each_with_object({}) do |stmt, acc|
-          acc[stmt.name] = stmt if stmt.is_a?(Prism::DefNode) && stmt.receiver.nil?
-        end
         class_name = qualified_prefix.join("::")
-        node.arguments&.arguments&.each do |arg|
-          name = symbol_argument_name(arg)
-          def_node = name && defs_by_name[name]
-          (accumulator[class_name] ||= {})[name] = def_node if def_node
+        ModuleFunctionState.each_singleton_copy(node, statements) do |name, def_node|
+          (accumulator[class_name] ||= {})[name] = def_node
         end
-      end
-
-      # The Symbol value of a `:name` / `"name"` literal argument, or nil.
-      def symbol_argument_name(arg)
-        arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
       end
 
       # ADR-24 slice 2 — per-class table mapping a fully qualified user class to its superclass name AS WRITTEN at the
@@ -6193,7 +6104,7 @@ module Rigor
         case node.name
         when :extend then record_extend_targets(node, current_class, accumulator)
         when :module_function
-          (accumulator[current_class] ||= []) << current_class if bare_module_function?(node)
+          (accumulator[current_class] ||= []) << current_class if ModuleFunctionState.extends_self?(node)
         end
       end
 

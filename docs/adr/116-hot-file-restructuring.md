@@ -1,9 +1,10 @@
 # ADR-116 — Restructuring the engine's hot files: declare each growing kind once, walk each traversal once
 
-Status: **Accepted, 2026-09-23 — scheduled for after the v0.4.0 cut; no slice has landed.** This
-ADR fixes the direction, the three criteria, and the slice order (WD0–WD7). Each slice lands as its
-own PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve
-behaviour; WD6 changes it and carries its own corpus diff.
+Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5's
+first slice (#1517: the discovery-table shadow harness, the context model, `class_cvars` on the walk)
+is the first to land. This ADR fixes the direction, the three criteria, and the slice order
+(WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by #1192–#1199
+(WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus diff.
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -147,6 +148,25 @@ never chooses the cut.
     indexing still holds.
   - *Amendment rule.* If the event set needs a traversal contract beyond these, amend this ADR
     before porting further.
+  - *Variants (amendment, 2026-09-27; maintainer decision on #1197).* The walkers do not share one
+    set of context rules. Building #1517 found 12 categories of disagreement. Bare factory blocks
+    alone are handled five ways, and `walk_class_superclasses` walks one as an ordinary call where
+    `walk_class_cvars` rebinds `self` to an unnamed class. A port reproduces its walker byte for
+    byte, so where a walker departs from the walk's rule, the walk implements that departure once, as
+    a named **variant** of the rule, and the collector names the variant it follows.
+    - Each variant is documented where it is declared: the disagreement, which legacy walker it
+      reproduces, and the convergence item that retires it.
+    - Collectors that name different variants of one rule still share the traversal. The walk goes
+      through a subtree once per variant in use, and only where the variants give that subtree
+      different contexts.
+    - Converging the variants is separate, behaviour-changing work: one PR per category, each with a
+      corpus diff, tracked in #1521. It does not hold up the ports, and a port never converges a
+      variant.
+    - Not chosen: fixing every disagreement before porting. That would put 12 behaviour changes in
+      front of the walk merge, which is the wall lever.
+    - The first variant arrives with the `walk_class_superclasses` port. `class_cvars` follows the
+      walk's rules and names none. Carrying both nesting chains, the census scope's and the ancestry
+      one, is not a variant: both are fields of the context value above.
 - **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change;
   #1198).**
   - *Problem.* Block entry-scope construction exists three times: ET ~L3690–3726, SE ~L2984–3061,

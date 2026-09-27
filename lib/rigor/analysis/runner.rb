@@ -1832,7 +1832,7 @@ module Rigor
       end
 
       def shadow_rule_walk?
-        ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
+        ShadowHarness.enabled?
       end
 
       def collect_plugin_diagnostics(plugin, path, root, scope, node_result)

@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../source/constant_path"
 require_relative "../inference/singleton_object_constant"
+require_relative "shadow_harness"
 require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
@@ -216,7 +217,7 @@ module Rigor
       def run_node_collectors(path, root, scope_index)
         collectors = build_node_collectors(path, scope_index, root)
         RuleWalk.run(root, collectors.values)
-        shadow_verify_node_collectors(path, root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
+        shadow_verify_node_collectors(path, root, scope_index, collectors) if ShadowHarness.enabled?
         collectors
       end
 

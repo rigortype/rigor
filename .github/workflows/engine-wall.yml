@@ -31,7 +31,7 @@ on:
         required: false
         default: "lib"
       reps:
-        description: "Runs per engine (ABBA order; at least 4 for a separation verdict)"
+        description: "Runs per engine (ABBA order; at least 5 for a separation verdict)"
         required: false
         default: "5"
       yjit:

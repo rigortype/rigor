@@ -48,6 +48,11 @@ RSpec.describe "tool/engine_wall_ab.rb (#1507)" do
       expect(wall).to include("apart" => true, "separated" => false)
     end
 
+    it "divides the 5% bar by the number of rows, so four runs are not enough for three rows" do
+      wall = EngineWallAB.stats(base: runs(10.0, 11.0, 10.5, 10.8), head: runs(9.0, 9.5, 9.2, 9.4))["wall_s"]
+      expect(wall).to include("apart" => true, "null_probability" => 0.0286, "separated" => false)
+    end
+
     it "does not count touching ranges as apart" do
       wall = EngineWallAB.stats(base: runs(10.0, 11.0, 10.5, 10.8, 10.2),
                                 head: runs(9.0, 9.5, 9.2, 9.4, 10.0))["wall_s"]
@@ -64,10 +69,21 @@ RSpec.describe "tool/engine_wall_ab.rb (#1507)" do
     end
   end
 
+  describe ".runs_needed" do
+    it "is five runs per arm for three or four rows" do
+      expect([EngineWallAB.runs_needed(3), EngineWallAB.runs_needed(4)]).to eq([5, 5])
+    end
+  end
+
   describe ".consistency_notes" do
     it "warns when the arms ended in different YJIT states" do
       notes = EngineWallAB.consistency_notes(base: runs(1.0, 1.0, yjit: false), head: runs(1.0, 1.0, yjit: true))
       expect(notes.join("\n")).to include("YJIT ended in different states")
+    end
+
+    it "warns when a mode that fixes YJIT did not get the state it asked for" do
+      notes = EngineWallAB.consistency_notes({ base: runs(1.0, yjit: false), head: runs(1.0, yjit: false) }, "on")
+      expect(notes.join("\n")).to include("`--yjit on` was requested, but some runs ended with YJIT off")
     end
 
     it "does not warn when every run ended in the same state" do

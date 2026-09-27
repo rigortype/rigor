@@ -23,9 +23,9 @@
 # The verdict. Each metric row gives both arms' median, min and max, and the change in the median. It also says
 # whether the two arms' ranges separate (a tie does not). Separation alone is weak evidence at few runs: two arms
 # drawn from one distribution separate with probability 2 / C(n + m, n), a third of the time at two runs each. So
-# the row states that probability, and says "yes" only when it is at most {SEPARATION_ALPHA}. That takes at least
-# four runs per arm; five is the default. The rows are correlated, so one "yes" among them is still one piece of
-# evidence, not several.
+# the row states that probability, and says "yes" only when it is at most {SEPARATION_ALPHA} divided by the number
+# of rows, so that the chance of ANY row saying "yes" with no real difference stays within {SEPARATION_ALPHA}. With
+# three or four rows that takes five runs per arm, the default.
 #
 # Usage:
 #   ruby tool/engine_wall_ab.rb --base REV --head REV|WORKTREE [--corpus REV] [--target PATH] [--reps N]
@@ -39,11 +39,14 @@ require_relative "engine_alloc_ab"
 
 module EngineWallAB
   METRICS = %w[wall_s cpu_s gc_ms instructions].freeze
+  # Every mode sets both variables, so a value inherited from the caller's shell cannot override the mode.
   YJIT_ENV = {
-    "default" => {},
-    "on" => { "RUBY_YJIT_ENABLE" => "1" },
-    "off" => { "RIGOR_DISABLE_YJIT" => "1" }
+    "default" => { "RUBY_YJIT_ENABLE" => nil, "RIGOR_DISABLE_YJIT" => nil },
+    "on" => { "RUBY_YJIT_ENABLE" => "1", "RIGOR_DISABLE_YJIT" => nil },
+    "off" => { "RUBY_YJIT_ENABLE" => nil, "RIGOR_DISABLE_YJIT" => "1" }
   }.freeze
+  # The YJIT end state each mode must produce, where it fixes one.
+  YJIT_EXPECTED = { "on" => true, "off" => false }.freeze
   SEPARATION_ALPHA = 0.05
   DEFAULT_REPS = 5
 
@@ -69,20 +72,26 @@ module EngineWallAB
   # Per-metric statistics for two arms' samples. Pure, so the spec drives it without running an engine. A metric
   # no run recorded is left out, and one whose base median is zero is listed as unusable rather than dropped.
   def stats(samples_by_arm)
-    METRICS.filter_map do |metric|
+    recorded = METRICS.filter_map do |metric|
       values = samples_by_arm.transform_values { |samples| samples.filter_map { |s| s[metric] } }
-      next if values.values.any?(&:empty?)
-
-      [metric, metric_stats(values.fetch(:base), values.fetch(:head))]
-    end.to_h
+      [metric, values] unless values.values.any?(&:empty?)
+    end
+    bar = SEPARATION_ALPHA / [recorded.size, 1].max
+    recorded.to_h { |metric, values| [metric, metric_stats(values.fetch(:base), values.fetch(:head), bar)] }
   end
 
-  def metric_stats(base, head)
+  def metric_stats(base, head, bar)
     apart = base.max < head.min || head.max < base.min
     null = separation_null_probability(base.size, head.size)
     change = median(base).zero? ? nil : (100.0 * (median(head) - median(base)) / median(base)).round(2)
     { "base" => summarize(base), "head" => summarize(head), "median_pct" => change, "apart" => apart,
-      "null_probability" => null.round(4), "separated" => apart && null <= SEPARATION_ALPHA }
+      "null_probability" => null.round(4), "separated" => apart && null <= bar }
+  end
+
+  # The fewest runs per arm at which a row can say "yes" with `rows` rows.
+  def runs_needed(rows)
+    bar = SEPARATION_ALPHA / [rows, 1].max
+    (1..).find { |n| separation_null_probability(n, n) <= bar }
   end
 
   def summarize(values)
@@ -149,24 +158,38 @@ module EngineWallAB
   end
 
   def summary(revs, options, samples, stats)
-    lines = ["### Engine wall A/B (#1507)", "", intro(revs, options), "",
+    lines = ["### Engine wall A/B (#1507)", "", intro(revs, options, stats.size), "",
              "| metric | base median (min–max) | head median (min–max) | Δ median | ranges separate |",
              "| --- | ---: | ---: | ---: | --- |"]
     stats.each do |metric, s|
       lines << "| #{metric} | #{cell(s['base'])} | #{cell(s['head'])} | #{change_cell(s['median_pct'])} | " \
                "#{verdict_cell(s)} |"
     end
-    lines << "" << "`--perf` was requested, but this host does not expose `instructions:u`." if
-      options[:perf] && !options[:perf_used]
-    lines.concat(consistency_notes(samples))
+    lines.concat(perf_notes(options, stats))
+    lines.concat(consistency_notes(samples, options[:yjit]))
     lines.join("\n")
   end
 
-  def intro(revs, options)
+  def intro(revs, options, rows = METRICS.size)
     labels = options[:labels] ? " (#{options[:labels]})" : ""
-    "`rigor check --no-cache #{revs[:target]}` over the corpus at `#{revs[:corpus]}`: base `#{revs[:base]}`, " \
-      "head `#{revs[:head]}`#{labels}, #{options[:reps]} runs each in ABBA order after a discarded warm-up, " \
-      "YJIT `#{options[:yjit]}`."
+    text = "`rigor check --no-cache #{revs[:target]}` over the corpus at `#{revs[:corpus]}`: base `#{revs[:base]}`, " \
+           "head `#{revs[:head]}`#{labels}, #{options[:reps]} runs each in ABBA order after a discarded warm-up, " \
+           "YJIT `#{options[:yjit]}`."
+    needed = runs_needed(rows)
+    return text if options[:reps] >= needed
+
+    "#{text} **At #{options[:reps]} runs per arm no row can say the ranges separate (that takes #{needed}); " \
+      "a \"no\" here is not evidence of no difference.**"
+  end
+
+  def perf_notes(options, stats)
+    return [] unless options[:perf]
+    return ["", "`--perf` was requested, but `perf stat` is not installed or cannot count `instructions:u` here."] unless
+      options[:perf_used]
+    return ["", "`perf stat` ran, but reported no instruction count for some run, so that row is left out."] unless
+      stats.key?("instructions")
+
+    []
   end
 
   def cell(summary)
@@ -179,15 +202,15 @@ module EngineWallAB
 
   def verdict_cell(stats)
     chance = format("%.1f%%", 100 * stats["null_probability"])
-    return "yes (by chance #{chance})" if stats["separated"]
+    return "yes (#{chance} if no difference)" if stats["separated"]
     return "no" unless stats["apart"]
 
-    "undecided: apart, but #{chance} by chance at this run count"
+    "undecided: apart, but #{chance} likely with no difference at this run count"
   end
 
   # Each arm must do the same work every run, in the same YJIT state as the other arm; either failing makes the
   # rows measure something else.
-  def consistency_notes(samples)
+  def consistency_notes(samples, mode = "default")
     notes = samples.flat_map do |arm, runs|
       allocations = runs.map { |run| run["allocations"] }
       line = ["", "#{arm}: allocations #{EngineAllocAB.delimit(allocations.min)}–" \
@@ -197,7 +220,19 @@ module EngineWallAB
       line
     end
     notes.concat(["", yjit_warning]) if yjit_mixed?(samples)
+    notes.concat(["", yjit_mode_warning(mode)]) if yjit_mode_missed?(samples, mode)
     notes
+  end
+
+  # A mode that fixes the YJIT state and runs that ended in the other one: a Ruby built without YJIT under `on`.
+  def yjit_mode_missed?(samples, mode)
+    return false unless YJIT_EXPECTED.key?(mode)
+
+    samples.values.flatten.any? { |run| run["yjit"] != YJIT_EXPECTED.fetch(mode) }
+  end
+
+  def yjit_mode_warning(mode)
+    "**`--yjit #{mode}` was requested, but some runs ended with YJIT #{YJIT_EXPECTED.fetch(mode) ? 'off' : 'on'}.**"
   end
 
   def yjit_mixed?(samples)

@@ -126,7 +126,7 @@ for path in ${changed[@]+"${changed[@]}"}; do
     lib/* | spec/* | plugins/* | examples/* | apps/*) lint_files+="$path"$'\n' ;;
   esac
   case "$path" in
-    lib/* | sig/* | data/*)
+    lib/* | sig/* | data/* | .rigor.dist.yml)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
       ;;
   esac
@@ -182,6 +182,12 @@ for path in ${changed[@]+"${changed[@]}"}; do
   esac
 done
 for path in ${deleted[@]+"${deleted[@]}"}; do
+  # A deleted sig/ file drops rows provenance_spec pins, so a deletion runs the drift specs too.
+  case "$path" in
+    lib/* | sig/* | data/*)
+      for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
+  esac
   case "$path" in
     *.md) ;;
     *) uncovered+="$path (deleted: its dependents are not checked locally)"$'\n' ;;

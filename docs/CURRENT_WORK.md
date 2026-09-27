@@ -68,7 +68,6 @@ closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468
    violations of ADR-117 Decision point 3 (#1465, #1484, #1485); update that list as they land.
    Phase 3, the handbook chapter, waits for #1366, #1426 and #1427.
 4. **`ready-for-agent` in `v0.4.x`, cheapest first:**
-   - #1467: `verify-changed` misses `provenance_spec`. This bit two lanes this session.
    - #1447: the ErrorInfo `$!` decline.
    - #1446: ivar class guards.
    - #1437: the separators.
@@ -108,8 +107,6 @@ closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468
 - **Designs that leaked:** a type introduced only by a guard crossed joins into typed sinks
   (`Nominal[C]`, then `Dynamic[C]`). Most severe findings in later rounds sat in code the previous
   round's fixes had added, including a crash on invalid-UTF-8 literals in #1448's new census.
-- `make verify-changed` does not run `provenance_spec` (#1467). Run it yourself after touching
-  `sig/`, or after an engine change that alters `sig-gen` inference.
 - Selecting a `type_construction_spec` group by its `describe` line can run the previous group. Use
   `-e` or the `it` line when mutation-testing.
 - The corpus copy and base-engine arms lived in the session scratchpad (`g1429/`), which is gone.

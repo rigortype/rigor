@@ -40,7 +40,9 @@ waza quality <skill-path> --model <judge>
 
 `waza check` covers spec compliance and link health. `waza quality` is an LLM judge scoring clarity,
 completeness, trigger precision, scope coverage, and anti-patterns; pick the strongest judge
-`waza models` lists. Run it on the PR's head, and again after a fix round that rewrote the skill.
+`waza models` lists that answers. A named judge can fail on the Copilot side (`parsing judge response:
+no JSON found`, with `model.call_failure` under `--debug`) while `--model auto` works; record which
+judge ran. Run it on the PR's head, and again after a fix round that rewrote the skill.
 
 Triage the output with the adversarial review's findings, under the same rules. Adopt an advisory only
 when it identifies a real defect independent of the agentskills.io publication profile; Rigor's

@@ -53,7 +53,7 @@ module Rigor
           DeclarationWalk::DESCEND
         end
 
-        # `[superclasses, header_nestings]`, each frozen, as {ScopeIndexer.build_superclass_tables} returns
+        # `[superclasses, header_nestings]`, each frozen, as {ScopeIndexer.declaration_walk_tables} returns
         # them.
         def tables
           [@accumulator[:superclasses].freeze, @accumulator[:header_nestings].freeze]

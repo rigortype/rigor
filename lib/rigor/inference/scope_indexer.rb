@@ -4797,14 +4797,14 @@ module Rigor
       # CompactBase` calls it, and the bare `Post` inside `make` names `::Post` — the constant the compact
       # declaration that OWNS the body reaches, not the one the receiver's spelling would suggest.
       #
-      # A separate descent rather than a leaf of the fused methods/def-nodes walk: it needs the CHAIN
-      # threaded, which the fused walk does not carry (a singleton-class body and a `Class.new` block body
-      # both push a qualified prefix while pushing no `Module.nesting` entry), and threading a second value
-      # through that walk and its anonymous-block twin exceeds their parameter budget. It stops at every
-      # `Prism::DefNode`, so a def-dense file pays only the declaration spine.
+      # Not a leaf of the fused methods/def-nodes walk: it needs the CHAIN threaded, which the fused walk does
+      # not carry (a singleton-class body and a `Class.new` block body both push a qualified prefix while
+      # pushing no `Module.nesting` entry). {DefNestingsCollector} declines at every `Prism::DefNode`, so a
+      # def-dense file pays only the declaration spine.
       #
-      # ADR-116 WD5 — built by {DefNestingsCollector} on the shared {DeclarationWalk}; production builds it in
-      # {#declaration_walk_tables}' shared run. `RIGOR_SHADOW_RULE_WALK` checks it against {#legacy_def_nestings}.
+      # ADR-116 WD5 — production builds this table in {#declaration_walk_tables}' shared run, and nothing in
+      # `lib` calls this builder. It runs the collector alone and stays for the specs, which compare it with
+      # the shared run; `RIGOR_SHADOW_RULE_WALK` checks it against {#legacy_def_nestings}.
       def build_def_nestings(root)
         collector = DefNestingsCollector.new
         DeclarationWalk.run(root, [collector], superclass_walk_root(nil))
@@ -5062,7 +5062,9 @@ module Rigor
       #
       # ADR-116 WD5 — built by {SuperclassesCollector} on the shared {DeclarationWalk}, following the two
       # legacy variants it declares; `RIGOR_SHADOW_RULE_WALK` checks both tables against
-      # {#legacy_superclass_tables}.
+      # {#legacy_superclass_tables}. Production builds both in {#declaration_walk_tables}' shared run, and
+      # nothing in `lib` calls this builder: it runs the collector alone and stays for the specs, which
+      # compare it with the shared run.
       #
       # @return the `[superclasses, header_nestings]` pair
       def build_superclass_tables(root, source_path = nil)
@@ -5424,14 +5426,15 @@ module Rigor
       # Struct follow-up is deferred — see ADR-48 § "Struct follow-up"). Consumed by
       # {Inference::MethodDispatcher::DataFolding} via {Scope#data_member_layout}.
       #
-      # ADR-116 WD5 — built with its Struct sibling by {MemberLayoutsCollector} on the shared {DeclarationWalk};
-      # production builds both in {#declaration_walk_tables}' shared run.
+      # ADR-116 WD5 — built with its Struct sibling by {MemberLayoutsCollector}. Production builds both in
+      # {#declaration_walk_tables}' shared run, and nothing in `lib` calls this builder: it stays for the specs,
+      # and walks both layout tables to return this one.
       def build_data_member_layouts(root)
         member_layout_tables(root).first
       end
 
-      # `[data_member_layouts, struct_member_layouts]` from one {MemberLayoutsCollector} walk, checked by
-      # `RIGOR_SHADOW_RULE_WALK` against the two legacy walkers.
+      # `[data_member_layouts, struct_member_layouts]` from a {MemberLayoutsCollector} run of its own, checked by
+      # `RIGOR_SHADOW_RULE_WALK` against the two legacy walkers. Spec-only, like the two builders on it.
       def member_layout_tables(root)
         collector = MemberLayoutsCollector.new
         DeclarationWalk.run(root, [collector], superclass_walk_root(nil))
@@ -5549,6 +5552,9 @@ module Rigor
       # table so the existing `Data.define` value-shape contract (a bare `[Symbol]`) is untouched: a Struct entry
       # carries `{ members:, keyword_init: }` because the dispatcher needs the flag to fold the matching `.new` call
       # form (positional vs keyword) without manufacturing a wrong map.
+      #
+      # ADR-116 WD5 — production builds it in {#declaration_walk_tables}' shared run; this builder is spec-only,
+      # like {#build_data_member_layouts}.
       def build_struct_member_layouts(root)
         member_layout_tables(root).last
       end

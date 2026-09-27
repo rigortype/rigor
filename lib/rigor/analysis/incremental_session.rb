@@ -168,7 +168,9 @@ module Rigor
         # must never read as a file that VANISHED from the project on the next recheck (which is what
         # `previous - current` would say, `current_files` being a `.rb` expansion).
         @analyzed = runner.analyzed_files - runner.template_unit_paths
-        @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
+        # ADR-85 WD2 — the freshly built bundle set for the next run, each stamped with its file's source-RBS
+        # digest (issue #1536).
+        @seed_bundles = stamp_source_rbs_digests(runner.seed_bundles)
         absorb_dependency_graph(runner)
         @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
         # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
@@ -255,7 +257,20 @@ module Rigor
       # return exactly the way a body edit does, so it reuses the same audited dependents machinery. The
       # pairs join AFTER the ADR-89 WD2 behavioural-stability pruning: that gate re-evaluates returns under
       # the snapshot's OLD seeds, which is the wrong oracle for a pair whose seeds are the thing that moved.
+      #
+      # Issue #1536 (ADR-89 WD1 amendment) — every gate in {#gated_closure} reads the RUBY side of a file. What a
+      # source-RBS synthesizer derives from its comments reaches the environment as a `virtual:` buffer, and a
+      # reader of that RBS records no edge to the file it came from (an `attr_reader :name #: String` consumer
+      # records none at all), so no dependent set can bound who read it. An edit that moved it re-analyses the
+      # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
+        return whole_project_closure(changed, added) if source_rbs_moved?(changed, added, removed)
+
+        gated_closure(changed, added, removed, param_files, param_pairs)
+      end
+
+      # {#affected_closure} for an edit whose synthesized RBS is byte-identical in every file it touched.
+      def gated_closure(changed, added, removed, param_files, param_pairs)
         scan = changed + added
         # Parse the changed / added set ONCE for the per-symbol fingerprints, the class declarations, AND the
         # ADR-89 WD1 declaration signatures. They were separate `discovered_def_index_for_paths` passes over
@@ -398,13 +413,11 @@ module Rigor
       # dependents skippable) when its current {ScopeIndexer.declaration_signature} matches the one stored in
       # the snapshot's seed bundle — i.e. its edit changed no method signature, visibility, ancestry, member
       # layout, def line, or method existence, so every cross-file DECLARATION fact its dependents consume is
-      # unchanged. Falls back to treating EVERY changed file as unstable (today's full closure) when a
-      # comment-ingesting plugin is loaded — such a plugin reads the very comments the signature ignores, so a
-      # comment edit it treats as a no-op could change a cross-file type. Sorbet sigs / dry-types includes are
-      # CODE, captured by ADR-88's plugin-fact fingerprint (WD3), so only comment-as-input plugins escape here.
+      # unchanged. The signature reads code, not comments; the other half of stability — that no source-RBS
+      # synthesizer's output for the file moved — is settled before this runs ({#source_rbs_moved?}), so every
+      # file reaching here has a byte-identical synthesized contribution. Sorbet sigs / dry-types includes are
+      # CODE, captured by ADR-88's plugin-fact fingerprint (WD3).
       def declaration_unstable(changed, declaration_signatures)
-        return changed if comment_ingesting_plugin_loaded?
-
         changed.reject { |path| declaration_stable?(path, declaration_signatures[path]) }
       end
 
@@ -417,14 +430,68 @@ module Rigor
         bundle[:declaration_signature] == current_declaration_signature
       end
 
-      def comment_ingesting_plugin_loaded?
-        # Mirrors the plugin loader's gem-name resolution (`ProjectPrePasses#trusted_gem_name`): a String
-        # entry IS the gem name; a Hash entry names it under `"gem"` (or the manifest `"id"`).
-        @configuration.plugins.any? do |entry|
-          name = entry.is_a?(Hash) ? (entry["gem"] || entry["id"]) : entry
-          COMMENT_INGESTING_PLUGIN_IDS.include?(name.to_s)
-        end
+      # Issue #1536 (ADR-89 WD1 amendment) — whether this edit moved what any loaded source-RBS synthesizer
+      # contributes to the environment: a changed file whose digest differs from the one on its snapshot
+      # bundle (or either is unknown), an added file that contributes anything, or a removed file that did.
+      # Decided per file from the synthesizers' OUTPUT ({Environment::SourceRbsSynthesis.digest}), never from
+      # which plugins the configuration names, so a project whose files carry no annotation keeps every gate
+      # whether or not `rigor-rbs-inline` is loaded, and an `enabled: false` entry — which the loader skips —
+      # loads no synthesizer to digest. The digests computed here are kept for {#stamp_source_rbs_digests}.
+      def source_rbs_moved?(changed, added, removed)
+        @pending_source_rbs = (changed + added).to_h { |path| [path, source_rbs_digest(path)] }
+        none = Environment::SourceRbsSynthesis::NO_CONTRIBUTION
+        changed.any? { |path| !source_rbs_unmoved?(path) } ||
+          added.any? { |path| @pending_source_rbs[path] != none } ||
+          removed.any? { |path| stored_source_rbs_digest(path) != none }
       end
+
+      def source_rbs_unmoved?(path)
+        stored = stored_source_rbs_digest(path)
+        !stored.nil? && stored == @pending_source_rbs[path]
+      end
+
+      def stored_source_rbs_digest(path)
+        @seed_bundles[path]&.fetch(SOURCE_RBS_DIGEST, nil)
+      end
+
+      # Every file this recheck can analyse: the removed ones drop out at `affected & current`.
+      def whole_project_closure(changed, added)
+        (@analyzed.to_set | changed | added).freeze
+      end
+
+      def source_rbs_digest(path)
+        Environment::SourceRbsSynthesis.digest(source_rbs_synthesizers, path, @cache_store)
+      end
+
+      # The loaded plugins' `source_rbs_synthesizer` pairs, from a registry this session loads for itself: the
+      # recheck runner that will load one does not exist yet when the closure is decided. Memoised for the
+      # session, whose configuration — and so plugin set — is fixed for its life.
+      def source_rbs_synthesizers
+        @source_rbs_synthesizers ||= Runner::ProjectPrePasses.new(
+          configuration: @configuration, cache_store: @cache_store, buffer: nil,
+          plugin_requirer: @plugin_requirer, pool_mode: -> { false }
+        ).prepared_registry(prepare: false).source_rbs_synthesizers
+      end
+
+      # Issue #1536 — give every bundle the runner built this run (a baseline's all, a recheck's re-walked
+      # ones) its file's source-RBS digest; a bundle the runner reused keeps the one it carries, which is
+      # still exact because a bundle is reused only for byte-identical content. The digests
+      # {#source_rbs_moved?} already computed for this recheck are reused rather than recomputed.
+      def stamp_source_rbs_digests(bundles)
+        computed = @pending_source_rbs || {}
+        @pending_source_rbs = nil
+        unstamped = bundles.reject { |_path, bundle| bundle.key?(SOURCE_RBS_DIGEST) }
+        return bundles if unstamped.empty?
+
+        stamped = bundles.dup
+        unstamped.each do |path, bundle|
+          digest = computed.key?(path) ? computed[path] : source_rbs_digest(path)
+          stamped[path] = bundle.merge(SOURCE_RBS_DIGEST => digest)
+        end
+        stamped
+      end
+      private :gated_closure, :source_rbs_moved?, :source_rbs_unmoved?, :stored_source_rbs_digest,
+              :whole_project_closure, :source_rbs_digest, :source_rbs_synthesizers, :stamp_source_rbs_digests
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
       # removed since the last run. Also where an editor buffer's binding is re-spelled onto the set, since
@@ -725,8 +792,9 @@ module Rigor
         removed.each { |path| forget(path) }
         @analyzed = current
         # ADR-85 WD2 — the recheck's discovery folded the restored bundles and refreshed them (changed files
-        # re-walked, removed files dropped, added files built), so adopt the runner's current set wholesale.
-        @seed_bundles = runner.seed_bundles
+        # re-walked, removed files dropped, added files built), so adopt the runner's current set wholesale,
+        # stamping the re-walked ones with their source-RBS digest (issue #1536).
+        @seed_bundles = stamp_source_rbs_digests(runner.seed_bundles)
         fresh_by_file = per_file(runner.per_file_diagnostics)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
@@ -1019,11 +1087,11 @@ module Rigor
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       private_constant :TOP_LEVEL_KEY
 
-      # B1 — plugin require-names that ingest COMMENT content as semantic input (inline-RBS reads `# @rbs` /
-      # `#:` annotations). B1's code fingerprint ignores comments, so a project configuring one of these opts
-      # OUT of the bundle-equality skip (a comment edit could change a cross-file type it contributes).
-      COMMENT_INGESTING_PLUGIN_IDS = %w[rigor-rbs-inline].freeze
-      private_constant :COMMENT_INGESTING_PLUGIN_IDS
+      # Issue #1536 — the seed-bundle key holding the file's {Environment::SourceRbsSynthesis.digest}. The
+      # session writes it ({#stamp_source_rbs_digests}), not the scope indexer that builds the rest of the
+      # bundle: the digest needs the plugin registry, which discovery never sees.
+      SOURCE_RBS_DIGEST = :source_rbs_digest
+      private_constant :SOURCE_RBS_DIGEST
 
       def negative_key_for(symbol)
         class_name, method = symbol.split("#", 2)

@@ -15,6 +15,7 @@ require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/installed_gem_set"
 require_relative "environment/rbs_collection_discovery"
+require_relative "environment/source_rbs_synthesis"
 require_relative "plugin/isolation"
 require_relative "cache/engine_source"
 require_relative "environment/rbs_coverage_report"
@@ -496,11 +497,9 @@ module Rigor
       # empty and this method short-circuits to `[]` without walking the file list.
       #
       # WD5 — when `cache_store` is supplied, each (file, plugin) synthesizer call is memoised through
-      # `Cache::Store`. The cache key composes the file's content SHA with the plugin's `PluginEntry` (id +
-      # version + config_hash) so a config change or content change invalidates the entry automatically, and
-      # with the engine's source identity (issue #1009): a plugin's manifest version does not move when a
-      # checkout edits its synthesizer, and a stale string here also keeps the `rbs.virtual_rbs` env key warm,
-      # so the new build's rules would read the old build's RBS.
+      # `Cache::Store` ({SourceRbsSynthesis.output_for}, which owns the key). The incremental session's
+      # per-file digest (issue #1536) reads the same function, so the two can never disagree on what a file
+      # contributed.
       def collect_virtual_rbs(plugin_registry, source_files, cache_store, reporter)
         return [] if plugin_registry.nil?
 
@@ -511,7 +510,7 @@ module Rigor
         result = []
         source_files.each do |path|
           synthesizers.each do |plugin, callable|
-            outcome = synthesizer_output_for(plugin, callable, path, cache_store)
+            outcome = SourceRbsSynthesis.output_for(plugin, callable, path, cache_store)
             outcome = interpret_synthesizer_outcome(outcome, plugin, path, reporter)
             next if outcome.nil? || outcome.empty?
 
@@ -520,25 +519,6 @@ module Rigor
           end
         end
         result
-      end
-
-      # ADR-32 WD5 — cache wrapper around a single (plugin, file) invocation. The cache stores the empty
-      # string `""` as the "no contribution" sentinel because `Cache::Store` treats `nil` as a cache miss.
-      # Error tuples are stored as the canonical `[:error, message_string]` Array so the same wrapper
-      # short-circuits subsequent runs against unchanged broken input.
-      def synthesizer_output_for(plugin, callable, path, cache_store)
-        return invoke_synthesizer_safely(callable, path) if cache_store.nil?
-        return invoke_synthesizer_safely(callable, path) unless File.file?(path)
-
-        descriptor = build_synthesizer_cache_descriptor(plugin, path)
-        return invoke_synthesizer_safely(callable, path) if descriptor.nil?
-
-        cache_store.fetch_or_compute(
-          producer_id: SYNTHESIZER_CACHE_PRODUCER_ID,
-          params: {},
-          descriptor: descriptor,
-          generation_cap: synthesizer_generation_cap
-        ) { invoke_synthesizer_safely(callable, path) || "" }
       end
 
       # ADR-32 WD6 / WD12 — route a synthesizer return value through the per-run reporter. The
@@ -660,50 +640,6 @@ module Rigor
       def path_relative_to(path, root)
         prefix = "#{root}#{File::SEPARATOR}"
         path.to_s.start_with?(prefix) ? path.to_s.delete_prefix(prefix) : path.to_s
-      end
-
-      SYNTHESIZER_CACHE_PRODUCER_ID = "plugin.source_rbs_synthesizer"
-      private_constant :SYNTHESIZER_CACHE_PRODUCER_ID
-
-      # One entry per (plugin, source file), all of them live for as long as the file is in the project — a
-      # generation count says nothing about staleness here, so this producer declares itself out of
-      # `Cache::Store#evict!`'s compaction pass and is bounded only by the size-based LRU pass. A method
-      # rather than a constant: `Cache::Store` is not loaded yet when this class body runs.
-      def synthesizer_generation_cap
-        Cache::Store::UNBOUNDED_GENERATIONS
-      end
-
-      def build_synthesizer_cache_descriptor(plugin, path)
-        Cache::Descriptor.new(
-          files: [Cache::Descriptor::FileEntry.new(
-            path: path.to_s,
-            comparator: :digest,
-            value: synthesizer_input_digest(path)
-          )],
-          plugins: [plugin.plugin_entry],
-          configs: Cache::EngineSource.key_config_entries
-        )
-      rescue Cache::EngineSource::Unavailable
-        # An engine that cannot be identified must not be keyed by its inputs alone (issue #1009): nil runs the
-        # synthesizer uncached rather than serving an entry another build may have written.
-        nil
-      end
-
-      def synthesizer_input_digest(path)
-        Digest::SHA256.hexdigest(File.binread(path))
-      rescue ::SystemCallError
-        # Unreadable file → key on the path alone; the synthesizer's File.file?/File.read will see the same
-        # failure and return nil.
-        Digest::SHA256.hexdigest(path.to_s)
-      end
-
-      def invoke_synthesizer_safely(callable, path)
-        callable.call(path.to_s)
-      rescue StandardError
-        # WD6 fail-soft — a synthesizer that raises does NOT crash analysis. Unlike the `[:error, msg]`
-        # return path (which the runner surfaces as `source-rbs-synthesis-failed`), an unhandled raise is
-        # swallowed silently; the unexamined-raise channel is deliberately silent per WD6.
-        nil
       end
     end
 

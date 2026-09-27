@@ -891,7 +891,9 @@ comment on `IncrementalSnapshot::SCHEMA`; `22` added `run_level_rows`
 ([#796](https://github.com/rigortype/rigor/issues/796),
 [#794](https://github.com/rigortype/rigor/issues/794)); `23` gave each seed
 bundle a `parameter_envelopes` table
-([#992](https://github.com/rigortype/rigor/issues/992)). A blob
+([#992](https://github.com/rigortype/rigor/issues/992)); `30` gave each seed
+bundle a `source_rbs_digest`
+([#1536](https://github.com/rigortype/rigor/issues/1536), below). A blob
 from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
@@ -941,6 +943,32 @@ Two persisted summaries prove "nothing changed":
 Both gates are premised on a `plugin_fact_digest` match for the run (asserted
 in code, not assumed); `--verify-incremental` is the standing byte-identity
 backstop for the whole mechanism.
+
+Both summaries read a file's Ruby side. What a source-RBS synthesizer derives
+from its comments — every `#:` / `# @rbs` annotation under the auto-wired
+`rigor-rbs-inline` — is compared through the synthesizers' output instead
+([#1536](https://github.com/rigortype/rigor/issues/1536), ADR-89 Amendment
+2026-09-28):
+
+- Each seed bundle carries `source_rbs_digest`: a digest of what every loaded
+  `source_rbs_synthesizer` returns for the file (rendered RBS plus any notice),
+  `none` when nothing is contributed, or `nil` when an output could not be read.
+  `Environment::SourceRbsSynthesis.digest` reads the same function and
+  `Cache::Store` entries the loader is fed from. The session stamps the bundles
+  the runner built in a run. A reused bundle keeps its digest, which stays
+  exact because reuse requires byte-identical content.
+- A recheck whose edit moved any synthesized output re-analyses every analysed
+  file. The output has moved when a changed file's digest differs from its
+  bundle's (or either is unknown), when an added file contributes anything, or
+  when a removed file did. The fallback is the whole project because a read of
+  a `virtual:` buffer records no edge back to its `.rb` file, so no dependent
+  set bounds its readers
+  ([#1544](https://github.com/rigortype/rigor/issues/1544) tracks recording
+  those reads). Otherwise the declaration gate runs on the signature alone.
+- The gate is decided by the synthesizers the loader actually loaded, never by
+  which plugins `plugins:` names. A project without annotations keeps both
+  gates with `rigor-rbs-inline` loaded, and an `enabled: false` entry loads no
+  synthesizer.
 
 ### `effect_collections` / `effects_identity` — the effects sidecar ([ADR-103](../adr/103-effect-labels.md) WD13)
 

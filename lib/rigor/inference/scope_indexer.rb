@@ -27,6 +27,8 @@ require_relative "operand_effects"
 require_relative "statement_evaluator"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
+require_relative "declaration_walk"
+require_relative "scope_indexer/class_cvars_collector"
 
 module Rigor
   module Inference
@@ -1946,7 +1948,20 @@ module Rigor
       # `Prism::ClassVariableWriteNode` writes inside ANY def body (instance or singleton) of the enclosing class,
       # because Ruby cvars are shared across both facets. The resulting table is seeded into both instance and singleton
       # method bodies through `Scope#class_cvars_for`.
+      #
+      # ADR-116 WD5 — built by {ClassCvarsCollector} on the shared {DeclarationWalk}; `RIGOR_SHADOW_RULE_WALK`
+      # checks it against {#legacy_class_cvar_index}.
       def build_class_cvar_index(root, default_scope)
+        collector = ClassCvarsCollector.new
+        DeclarationWalk.run(root, [collector], DeclarationWalk::Context.root(scope: default_scope))
+        DeclarationWalk::Shadow.verified(:class_cvars, default_scope.source_path, collector.table) do
+          legacy_class_cvar_index(root, default_scope)
+        end
+      end
+
+      # The walker {ClassCvarsCollector} replaced, kept as the shadow harness's oracle until ADR-116 WD5 has
+      # ported every table walker onto {DeclarationWalk}.
+      def legacy_class_cvar_index(root, default_scope)
         accumulator = {}
         walk_class_cvars(root, [], default_scope, accumulator)
         accumulator.transform_values(&:freeze).freeze

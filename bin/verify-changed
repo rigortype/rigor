@@ -113,12 +113,21 @@ lines() { printf '%s' "$1" | sort -u; }
 # proves can each break a pin (#1449, #1453: CI-only both times). It adds its
 # generator pass at file load, about 10s on an idle host.
 provenance_spec=spec/rigor/sig_gen/provenance_spec.rb
+# The declaration-fact gates (#1507) read every file under lib/ and plugins/*/lib/,
+# so any change there can move them; together they take well under a second.
+declaration_fact_specs=(
+  spec/rigor/declaration_facts/admission_census_spec.rb
+  spec/rigor/declaration_facts/member_classes_spec.rb
+  spec/rigor/declaration_facts/producers_spec.rb
+  spec/rigor/declaration_facts/witness_spec.rb
+)
 engine_drift_specs=(
   spec/integration/precision_snapshot_spec.rb
   spec/integration/type_construction_spec.rb
   spec/rigor/public_api_drift_spec.rb
   spec/rigor/ractor_readiness_spec.rb
   "$provenance_spec"
+  "${declaration_fact_specs[@]}"
 )
 
 for path in ${changed[@]+"${changed[@]}"}; do
@@ -128,6 +137,9 @@ for path in ${changed[@]+"${changed[@]}"}; do
   case "$path" in
     lib/* | sig/* | data/* | .rigor.dist.yml)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
+    plugins/*/lib/*)
+      for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
       ;;
   esac
   case "$path" in
@@ -186,6 +198,9 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
   case "$path" in
     lib/* | sig/* | data/*)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
+    plugins/*/lib/*)
+      for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
       ;;
   esac
   case "$path" in

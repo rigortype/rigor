@@ -238,6 +238,34 @@ RSpec.describe Rigor::Type::Combinator do
       expect(a).to eq(b)
     end
 
+    # Issue #1505 — a pair is ordered by comparing the two memoised keys instead of through `sort_by`. It must
+    # give `sort_by`'s answer, including keeping a pair whose keys tie in the order it was given.
+    describe "member order (#1505)" do
+      def keyed(key)
+        instance_double(Rigor::Type::Top, describe: key, frozen?: true)
+      end
+
+      it "orders a pair by its members' short descriptions, either way round" do
+        z = described_class.constant_of(:z)
+        a = described_class.constant_of(:a)
+        expect(described_class.union(z, a).members).to eq([a, z])
+        expect(described_class.union(a, z).members).to eq([a, z])
+      end
+
+      it "keeps a tied pair in the order it was given, as sort_by does" do
+        first = keyed("same")
+        second = keyed("same")
+        expect(described_class.send(:sort_members, [first, second])).to eq([first, second])
+        expect([first, second].sort_by { |m| m.describe(:short) }).to eq([first, second])
+      end
+
+      it "orders three or more members as sort_by over the short descriptions does" do
+        members = %w[m b z a q].map { |key| keyed(key) }
+        expected = members.sort_by { |m| m.describe(:short) }
+        expect(described_class.send(:sort_members, members)).to eq(expected)
+      end
+    end
+
     # Issue #994 — the member absorption above, asked one level down. Every case below that keeps
     # both arms keeps them because the DIRECT union of the two differing elements keeps both, which
     # is the whole content of the rule: the element-wise clause grants no absorption of its own.

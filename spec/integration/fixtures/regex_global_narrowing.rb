@@ -2028,6 +2028,22 @@ def not_match_symbol_subject(raw)
   assert_type("Symbol", name)
 end
 
+# So does an untyped subject, which may be a Symbol, whichever side of `!~` it is on (Ruby: a Proc for
+# `not_match_untyped_subject(:"12")` and `not_match_untyped_argument(:"12")`).
+def not_match_untyped_subject(raw)
+  return if raw !~ /\A\d+\z/
+
+  assert_type("Dynamic[top]", raw)
+  raw.to_proc # NOT-MATCH-1379
+end
+
+def not_match_untyped_argument(raw)
+  return if /\A\d+\z/ !~ raw
+
+  assert_type("Dynamic[top]", raw)
+  raw.to_proc # NOT-MATCH-1379
+end
+
 # The no-match edge reads nil only when the receiver is a String or a Symbol: `String#=~` and `Symbol#=~` clear `$~` on
 # a failed match (Ruby: nil for `$1` and `$~` in the `if` arm with `raw = "x"`, and "ab" / nil in the `else` arm with
 # `raw = "ab=c"`).

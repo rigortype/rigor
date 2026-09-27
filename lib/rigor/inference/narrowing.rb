@@ -1570,9 +1570,10 @@ module Rigor
         #
         # Unlike `=~`'s, an edge here is narrowed only when the receiver proves what the frame holds on it
         # ({#not_match_receiver_edges}). An edge it cannot vouch for keeps the match globals forgotten, since the call
-        # may still have rebound them. The refinement is left out when the local it would narrow may be a Symbol.
+        # may still have rebound them. The refinement is kept only when the local it would narrow is known to be a
+        # String on the match edge ({#refinable_operand?}).
         def analyse_regex_not_match_predicate(node, scope)
-          edges = analyse_regex_match_predicate(node, scope, refine: !symbol_operand?(node, scope))
+          edges = analyse_regex_match_predicate(node, scope, refine: refinable_operand?(node, scope))
           return nil if edges.nil?
 
           match, no_match = edges
@@ -1608,21 +1609,26 @@ module Rigor
           :match if kinds.all? { |kind| %i[string symbol nil dynamic].include?(kind) }
         end
 
-        # Whether a local operand of `node`, the one {#apply_whole_receiver_refinement} would narrow, may be a Symbol.
-        def symbol_operand?(node, scope)
-          [node.receiver, *node.arguments&.arguments].any? do |operand|
-            type = operand.is_a?(Prism::LocalVariableReadNode) && scope.local(operand.name)
-            type && not_match_member_kinds(type, scope).include?(:symbol)
-          end
+        # Whether the local operand {#apply_whole_receiver_refinement} would narrow holds only Strings and nil, which
+        # the match edge excludes. The refinement names a String, so a member that may be a Symbol — a Symbol, or an
+        # untyped `Dynamic` that `Kernel#!~` accepts as the receiver or `Regexp#=~` as the argument — keeps it out:
+        # `return if raw !~ /\A\d+\z/` on an untyped `raw` must not make `raw.to_proc` an undefined method.
+        def refinable_operand?(node, scope)
+          operand = [node.receiver, *node.arguments&.arguments].find { |o| o.is_a?(Prism::LocalVariableReadNode) }
+          type = operand && scope.local(operand.name)
+          return true if type.nil?
+
+          not_match_member_kinds(type, scope).all? { |kind| %i[string nil].include?(kind) }
         end
 
         def not_match_member_kinds(type, scope)
           (type.is_a?(Type::Union) ? type.members : [type]).map { |member| not_match_member_kind(member, scope) }
         end
 
-        # `:string` or `:symbol` for a member that is a String or a Symbol (a subclass, value or refinement of
-        # either), `:nil`, `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil, or
-        # nil for anything else.
+        # `:string` or `:symbol` for a member {.narrow_not_class} proves a String or a Symbol (a value or refinement of
+        # either, or a class the environment orders below it; a project subclass it cannot order reads as neither),
+        # `:nil`, `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil, or nil for
+        # anything else.
         def not_match_member_kind(member, scope)
           return not_match_dynamic_kind(member, scope) if member.is_a?(Type::Dynamic)
           return :nil if narrow_nil(member) == member && !member.is_a?(Type::Bot)

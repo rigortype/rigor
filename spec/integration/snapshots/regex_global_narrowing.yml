@@ -221,19 +221,21 @@ assertions:
   '213': String?
   '214': decimal-int-string
   '215': Symbol
-  '216': nil
-  '217': nil
-  '218': String
-  '219': String?
-  '220': MatchData
-  '221': nil
-  '222': String
-  '223': String?
+  '216': Dynamic[top]
+  '217': Dynamic[top]
+  '218': nil
+  '219': nil
+  '220': String
+  '221': String?
+  '222': MatchData
+  '223': nil
   '224': String
   '225': String?
   '226': String
-  '227': String
-  '228': String?
+  '227': String?
+  '228': String
   '229': String
   '230': String?
-  '231': String?
+  '231': String
+  '232': String?
+  '233': String?

@@ -1156,11 +1156,12 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     # Issue #1379 — the falsey edge of `subject !~ pattern` is the match edge, so a copy of `$1` read past a
-    # `return if`, `unless`, `next if` or `||` guard is not flagged. The controls that keep the nil report are among
-    # the `# GENUINE-NIL` lines the example above reads.
+    # `return if`, `unless`, `next if` or `||` guard is not flagged, and an untyped subject, which may be a Symbol, is
+    # not refined to a String there. The controls that keep the nil report are among the `# GENUINE-NIL` lines the
+    # example above reads.
     it "reports nothing on a `$1` read past a `!~` guard" do
       reads = marked_lines(harness, "# NOT-MATCH-1379")
-      expect(reads.size).to eq(6)
+      expect(reads.size).to eq(8)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
   end

@@ -5,6 +5,7 @@ require "digest"
 require "zlib"
 
 require_relative "engine_source"
+require_relative "store"
 require_relative "../analysis/shadow_harness"
 
 module Rigor
@@ -356,7 +357,9 @@ module Rigor
           effects_identity: payload.effects_identity,
           run_level_rows: payload.run_level_rows
         )
-        blob = Zlib::Deflate.deflate(raw)
+        # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is
+        # on the edit path; see {Store::DEFLATE_LEVEL}.
+        blob = Zlib::Deflate.deflate(raw, Store::DEFLATE_LEVEL)
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)
         File.rename(tmp, @path)

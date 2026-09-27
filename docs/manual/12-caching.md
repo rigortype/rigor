@@ -146,7 +146,8 @@ habitually, point `cache.path` at a disposable directory.
 
 ## Size and eviction
 
-A project's active cache set is small (around 2 MB). Entries
+A project's active cache set is a few megabytes (about 10 MB
+for a Rails application the size of Mastodon). Entries
 are content-keyed, so events like a gem upgrade or an `.rbs`
 edit write fresh entries and leave the old ones *orphaned* —
 nothing references them, and no run would otherwise delete

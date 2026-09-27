@@ -674,7 +674,8 @@ format version invalidates entries on the read path (header
 mismatch → cache miss).
 
 Format v2 ([ADR-54](../adr/54-cache-slimming.md) WD2) deflates
-the value payload on write and inflates on read; the descriptor
+the value payload on write (at `Zlib::BEST_SPEED`; the level is not
+part of the format) and inflates on read; the descriptor
 payload and the SHA-256 trailer (computed over the stored,
 compressed bytes) are unchanged. Compression is invisible to
 producers: a custom `serialize:` / `deserialize:` pair still
@@ -752,9 +753,10 @@ is.
 ## `Rigor::Cache::IncrementalSnapshot` (ADR-46)
 
 The persistent artefact behind `rigor check --incremental`. Distinct from
-the entry store above: a single per-project blob (zlib-deflated `Marshal`,
-under the cache root) that records enough of the previous run to re-derive
-only the affected files' diagnostics on the next run. Every operation is
+the entry store above: a single per-project blob (`Marshal`, zlib-deflated
+at `Store::DEFLATE_LEVEL`, under the cache root) that records enough of the
+previous run to re-derive only the affected files' diagnostics on the next
+run. Every operation is
 fault-tolerant — a missing, unreadable, schema-mismatched,
 fingerprint-mismatched, or corrupt snapshot loads as `nil` and forces a
 full run, so the snapshot can never wedge or stale an analysis.

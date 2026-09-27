@@ -25,7 +25,8 @@ module Rigor
       # On-disk byte-layout version. Bumped on incompatible format changes (independent of
       # {Descriptor::SCHEMA_VERSION}, which covers the descriptor schema rather than the byte layout). v2
       # (ADR-54 WD2): the value payload is zlib-deflated on write and inflated on read — Marshal blobs
-      # compress to 13–16 % at an inflate cost an order of magnitude below their `Marshal.load`. v1 entries
+      # compressed to 13–16 % at zlib's default level (now {DEFLATE_LEVEL}) at an inflate cost an order of
+      # magnitude below their `Marshal.load`. v1 entries
       # fail the header check and read as silent misses; the `schema_version.txt` marker additionally carries
       # this version, so the first writable run after a bump clears the root and reclaims the unreadable
       # bytes.
@@ -59,6 +60,14 @@ module Rigor
       UNBOUNDED_GENERATIONS = :unbounded
 
       STALE_TEMP_FILE_AGE_SECONDS = 60 * 60
+
+      # #1507 — the zlib level for everything written under the cache root: these value payloads (ADR-54 WD2),
+      # the incremental snapshot, and `rigor unused`'s scan bundle. The snapshot and the scan bundle are
+      # rewritten whole whenever a run changed anything, so their deflate is on the edit path. On Mastodon the
+      # default level took 122 ms for the snapshot (9.5 MB raw) and 131 ms for `rbs.environment` (22.8 MB raw);
+      # `BEST_SPEED` takes 38 ms and 49 ms, for a cache about a quarter larger. Inflate reads any level, so the
+      # level is not part of the format.
+      DEFLATE_LEVEL = Zlib::BEST_SPEED
 
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte format version.
       HEADER = "RIGOR\x00#{FORMAT_VERSION.chr}".b.freeze
@@ -469,7 +478,7 @@ module Rigor
         FileUtils.mkdir_p(File.dirname(path))
 
         descriptor_bytes = descriptor.to_canonical_bytes
-        value_bytes = Zlib::Deflate.deflate(serialize_value(value, serialize))
+        value_bytes = Zlib::Deflate.deflate(serialize_value(value, serialize), DEFLATE_LEVEL)
 
         body = +"".b
         body << HEADER

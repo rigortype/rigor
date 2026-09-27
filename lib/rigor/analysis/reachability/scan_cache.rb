@@ -5,6 +5,7 @@ require "fileutils"
 require "zlib"
 
 require_relative "../../version"
+require_relative "../../cache/store"
 
 module Rigor
   module Analysis
@@ -94,7 +95,7 @@ module Rigor
           keep = @entries.merge(@live).select { |(_, path), _| File.exist?(path) }
           FileUtils.mkdir_p(File.dirname(@path))
           tmp = "#{@path}.#{Process.pid}.tmp"
-          File.binwrite(tmp, Zlib::Deflate.deflate(Marshal.dump([@header, keep])))
+          File.binwrite(tmp, Zlib::Deflate.deflate(Marshal.dump([@header, keep]), Cache::Store::DEFLATE_LEVEL))
           File.rename(tmp, @path)
           nil
         rescue StandardError

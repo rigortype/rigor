@@ -27,31 +27,44 @@ When a skill has multiple branches, route to the relevant reference instead of l
 
 ## The `waza` review
 
-A change to a skill — its `SKILL.md` or its `references/`, in either tree — ships only after a `waza`
-review, in addition to the adversarial review in
+A change to a skill ships only after a `waza` review, in addition to the adversarial review in
 [`contribution-flow.md`](contribution-flow.md) § "Landing a pull request". The agent reviewer reads the
-change against the repository; `waza` reads the skill as a routing and instruction surface, which is
-where a skill fails its users. Run both on each changed skill:
+change against the repository; `waza` reads the skill as the routing and instruction surface an agent
+follows. Any change to a skill therefore takes a PR; only a typo-class fix (spelling, a broken link
+target) may go straight to `master`.
 
-```sh
-waza check <skill-path>
-waza quality <skill-path> --model <judge>
-```
+Which commands run depends on what changed, in either skill tree:
 
-`waza check` covers spec compliance and link health. `waza quality` is an LLM judge scoring clarity,
-completeness, trigger precision, scope coverage, and anti-patterns; pick the strongest judge
-`waza models` lists that answers. A named judge can fail on the Copilot side (`parsing judge response:
-no JSON found`, with `model.call_failure` under `--debug`) while `--model auto` works; record which
-judge ran. Run it on the PR's head, and again after a fix round that rewrote the skill.
+| Changed | Run |
+| --- | --- |
+| `SKILL.md` | `waza check <skill-path>` and `waza quality <skill-path> --model <judge>` |
+| only `references/`, `scripts/`, or `evals/` | `waza check <skill-path>`. `waza quality` reads only `SKILL.md`, so it would score text the PR did not touch; the adversarial review carries the content. |
 
-Triage the output with the adversarial review's findings, under the same rules. Adopt an advisory only
-when it identifies a real defect independent of the agentskills.io publication profile; Rigor's
-comprehensive workflows do not need to be reshaped to satisfy its token budget or labels. See
-[ADR-81](../adr/81-skill-set-optimization.md) for the standing calibration. Post the scores and what
-you adopted or rejected, with reasons, as a PR comment.
+A mechanical sweep across many skills (a path rename, a link fix) runs `waza check` on each and
+`waza quality` on one representative skill, named in the PR comment.
 
-If `waza` cannot run — not installed, no judge model available, the judge call fails — say so in the
-PR and leave it Draft. The review is never skipped silently.
+`waza quality` needs waza 0.33.0 or later and a GitHub Copilot login; waza 0.31.0 returns `parsing
+judge response: no JSON found` for every judge. Pick the strongest judge `waza models` lists that
+answers. A named judge can fail on the Copilot side (`model.call_failure` under `--debug`) while
+`--model auto` works; record which judge ran. The judge is non-deterministic and scores the same text
+differently run to run, so read its feedback, not its number.
+
+Triage the output with the adversarial review's findings:
+
+- A `waza check` error — a spec failure or a broken link — is a defect; fix it.
+- `waza quality` output is advisory and never severe on its own. Adopt an item only when it identifies
+  a real defect independent of the agentskills.io publication profile; Rigor's comprehensive workflows
+  do not need to be reshaped for its token budget or labels, and a low completeness score for detail
+  kept in `references/` is the progressive disclosure this guide asks for. The adversarial reviewer
+  may promote an item to severe. See [ADR-81](../adr/81-skill-set-optimization.md) for the standing
+  calibration.
+- Re-running `waza` after a fix round is part of that round's delta review; it never opens a round by
+  itself and counts toward the three-round cap.
+
+Post the judge, the scores, and what you adopted or rejected, with reasons, as a PR comment. If `waza`
+cannot run — not installed, too old, no Copilot login, every judge fails — say so in the PR and leave
+it Draft. A session where `waza` runs clears it by running the review and posting the comment; the
+review is never skipped silently.
 
 Never run `waza dev --auto`: it injects boilerplate that is often false. The hand-written `name:` and
 `description:` pair is the binding surface.

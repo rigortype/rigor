@@ -4,6 +4,8 @@ Status: **Accepted — implemented 2026-07-05; routing-description audit 2026-09
 
 **Amendment (2026-09-16) — concise routing descriptions.** A review prompted by OpenAI's GPT-6 Astra guidance audited all 30 bundled contributor and user-facing skill descriptions. Each now states the owned action, a concrete trigger, and only a non-obvious routing boundary; implementation detail and example lists remain in the body or references. This applies WD4's per-skill judgment across the current set without introducing the blanket ≤60-word rule that WD4 rejects.
 
+**Amendment (2026-09-28) — `waza` review as a shipping gate.** A skill change now ships only after a `waza` review alongside the adversarial agent review ([`docs/agents/skill-authoring.md`](../agents/skill-authoring.md) § "The `waza` review"). WD3's filter extends to the LLM judge: `waza check` errors are defects; `waza quality` advisories are adopted only when independent of the publication profile, are never severe on their own, and a low completeness score for detail kept in `references/` is the progressive disclosure this ADR endorses, not a defect. Adopted at the maintainer's request while fixing the strict-mode recommendation in `rigor-project-init` (#1539).
+
 Grounding: the [ADR-73](73-skill-driven-user-experience.md) 2026-07-05 amendment; `CLAUDE.md` § "Evaluating skills with `waza`"; [ADR-74](74-offline-doc-access-and-llms-txt.md) (`rigor docs`); [ADR-50](50-release-engineering-and-stability-strategy.md) WD1 (v1.0 vocabulary freeze).
 
 ## Context

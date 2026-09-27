@@ -132,7 +132,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-115 | [Multi-model agent harness via pi (own-software first)](115-pi-multi-model-harness.md) | Proposed (thin `agents/pi-harness/` stubs; WD6 parallel path unproven) |
 | ADR-116 | [Restructuring the engine's hot files: declare each growing kind once, walk each traversal once](116-hot-file-restructuring.md) | Accepted (WD5 in progress: `class_cvars`, superclass, def-nesting and member-layout tables on the walk, the last three sharing one run; WD5 amended for context-rule variants) |
 | ADR-117 | [Standard streams: typed by idiom, checked by runtime contract](117-standard-streams-typed-by-idiom.md) | Accepted (`$_` explicit readers since #1405; open: #1362, #1366, #1367, #1415, #1423, #1426, #1427, #1429) |
-| ADR-119 | [Certainty on discovery facts, candidate-set reads over one Ruby-order chain](119-discovery-fact-certainty.md) | Proposed (2026-09-28; #1551 landed) |
+| ADR-119 | [Certainty on discovery facts, candidate-set reads over the resolution chain](119-discovery-fact-certainty.md) | Proposed (2026-09-28; #1551 landed) |
 | ADR-120 | [`--incremental` as the default local `check` route](120-incremental-by-default.md) | Proposed (awaiting the maintainer; the flip waits on WD7's gates) |
 
 ## Adding a New ADR

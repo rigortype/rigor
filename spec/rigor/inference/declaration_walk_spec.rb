@@ -1,0 +1,313 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+require "prism"
+require "rigor/inference/declaration_walk"
+
+# ADR-116 WD5 — the shared declaration-context walk. These examples pin the context each arm hands its
+# children and the collector protocol (events, per-collector decline); the equivalence of a ported table
+# with the walker it replaced is `scope_indexer_class_cvars_equivalence_spec`'s.
+RSpec.describe Rigor::Inference::DeclarationWalk do
+  # Records every event with the context it arrived under. `decline` names `[event, label]` pairs the
+  # collector answers DECLINE to.
+  let(:recorder_class) do
+    Class.new do
+      include Rigor::Inference::DeclarationWalk::Collector
+
+      attr_reader :events
+
+      def initialize(decline: [])
+        @events = []
+        @decline = decline
+      end
+
+      def on_declaration(node, context, body)
+        record(:declaration, node.constant_path.slice, context, body: body)
+      end
+
+      def on_def(node, context)
+        record(:def_node, node.name.to_s, context)
+      end
+
+      def on_call(node, context)
+        record(:call, node.name.to_s, context)
+      end
+
+      def on_constant_write(node, context)
+        label = node.respond_to?(:target) ? node.target.slice : node.name.to_s
+        record(:constant_write, label, context)
+      end
+
+      private
+
+      def record(event, label, context, body: nil)
+        @events << { event: event, label: label, context: context, body: body }
+        verdicts = Rigor::Inference::DeclarationWalk
+        @decline.include?([event, label]) ? verdicts::DECLINE : verdicts::DESCEND
+      end
+    end
+  end
+
+  def walk(source, collectors = [recorder_class.new], context = described_class::Context.root(nesting: []))
+    described_class.run(Prism.parse(source).value, collectors, context)
+  end
+
+  def events(source, **)
+    walk(source, [recorder_class.new(**)]).first.events
+  end
+
+  def context_of(source, event, label)
+    found = events(source).find { |entry| entry[:event] == event && entry[:label] == label }
+    raise "no #{event} #{label} event" unless found
+
+    found[:context]
+  end
+
+  def fields(context)
+    { prefix: context.prefix, self_owner: context.self_owner, singleton_cref: context.singleton_cref,
+      nesting: context.nesting }
+  end
+
+  describe "class and module bodies" do
+    it "qualifies nested, compact and rooted headers and resets a rebound self" do
+      source = <<~RUBY
+        module Outer
+          class Inner
+            def nested; end
+          end
+          class Admin::Widget
+            def compact; end
+          end
+          class ::Rooted
+            def rooted; end
+          end
+        end
+      RUBY
+      expect(fields(context_of(source, :def_node, "nested")))
+        .to eq(prefix: %w[Outer Inner], self_owner: nil, singleton_cref: false, nesting: %w[Outer::Inner Outer])
+      expect(fields(context_of(source, :def_node, "compact")))
+        .to eq(prefix: %w[Outer Admin::Widget], self_owner: nil, singleton_cref: false,
+               nesting: %w[Outer::Admin::Widget Outer])
+      expect(fields(context_of(source, :def_node, "rooted")))
+        .to eq(prefix: %w[Rooted], self_owner: nil, singleton_cref: false, nesting: %w[Rooted Outer])
+    end
+
+    it "hands on_declaration the enclosing context and the body's, even for a body-less header" do
+      declaration = events("module M\n  class Leaf < Base; end\nend\n").find { |e| e[:label] == "Leaf" }
+      expect(fields(declaration[:context])[:prefix]).to eq(%w[M])
+      expect(fields(declaration[:body])).to eq(prefix: %w[M Leaf], self_owner: nil, singleton_cref: false,
+                                               nesting: %w[M::Leaf M])
+    end
+
+    it "walks neither the header's constant path nor its superclass expression" do
+      labels = events("class Foo < Base.build(arg)\n  helper\nend\n").map { |e| e[:label] }
+      expect(labels).to eq(%w[Foo helper])
+    end
+
+    it "anchors a `self::` header on a rebound self and pushes that name on the nesting" do
+      source = <<~RUBY
+        module M
+          X.class_eval do
+            class self::D
+              def m; end
+            end
+          end
+        end
+      RUBY
+      expect(fields(context_of(source, :def_node, "m")))
+        .to eq(prefix: %w[X D], self_owner: nil, singleton_cref: false, nesting: %w[X::D M])
+    end
+  end
+
+  describe "`class <<` bodies" do
+    it "walks the expression in the enclosing context and the body with an unnameable self and cref" do
+      source = <<~RUBY
+        class C
+          class << Registry.lookup
+            def m; end
+          end
+        end
+      RUBY
+      expect(fields(context_of(source, :call, "lookup")))
+        .to eq(prefix: %w[C], self_owner: nil, singleton_cref: false, nesting: %w[C])
+      expect(fields(context_of(source, :def_node, "m")))
+        .to eq(prefix: %w[C], self_owner: [], singleton_cref: true, nesting: %w[C])
+      expect(context_of(source, :def_node, "m").unnameable_self?).to be(true)
+    end
+
+    it "keeps a bare header below it unnameable and re-anchors at a nameable one" do
+      source = <<~RUBY
+        class C
+          class << self
+            class D
+              def bare; end
+            end
+            class ::E
+              def rooted; end
+            end
+            class C::F
+              def pathed; end
+            end
+          end
+        end
+      RUBY
+      expect(fields(context_of(source, :def_node, "bare")))
+        .to eq(prefix: [], self_owner: nil, singleton_cref: true, nesting: %w[C])
+      expect(fields(context_of(source, :def_node, "rooted")))
+        .to eq(prefix: %w[E], self_owner: nil, singleton_cref: false, nesting: %w[E C])
+      expect(fields(context_of(source, :def_node, "pathed")))
+        .to eq(prefix: %w[C C::F], self_owner: nil, singleton_cref: false, nesting: %w[C::C::F C])
+    end
+  end
+
+  describe "meta-new writes" do
+    it "walks the factory's receiver and arguments in the enclosing context and rebinds the block's self" do
+      source = <<~RUBY
+        class C
+          K = Class.new(Base.pick) do
+            def m; end
+          end
+        end
+      RUBY
+      found = events(source)
+      expect(found.map { |e| [e[:event], e[:label]] })
+        .to eq([[:declaration, "C"], [:constant_write, "K"], [:call, "pick"], [:def_node, "m"]])
+      expect(fields(context_of(source, :call, "pick"))[:self_owner]).to be_nil
+      expect(fields(context_of(source, :def_node, "m")))
+        .to eq(prefix: %w[C], self_owner: %w[C K], singleton_cref: false, nesting: %w[C])
+    end
+
+    it "sees through a `.freeze` tail, an or-write and a `K = K || …` guard" do
+      source = <<~RUBY
+        Frozen = Struct.new(:a) do
+          def frozen; end
+        end.freeze
+        Memo ||= Module.new do
+          def memo; end
+        end
+        Guarded = Guarded || Data.define(:x) do
+          def guarded; end
+        end
+      RUBY
+      expect(fields(context_of(source, :def_node, "frozen"))[:self_owner]).to eq(%w[Frozen])
+      expect(fields(context_of(source, :def_node, "memo"))[:self_owner]).to eq(%w[Memo])
+      expect(fields(context_of(source, :def_node, "guarded"))[:self_owner]).to eq(%w[Guarded])
+    end
+
+    it "leaves a write whose rvalue is not the idiom to the ordinary descent" do
+      source = "K = build { def m; end }\n"
+      expect(fields(context_of(source, :def_node, "m"))[:self_owner]).to be_nil
+      expect(events(source).map { |e| e[:event] }).to eq(%i[constant_write call def_node])
+    end
+  end
+
+  describe "bare factory blocks" do
+    it "walks the arguments in the enclosing context and the body with an unnamed self, skipping the parameters" do
+      source = <<~RUBY
+        class C
+          Class.new(pick_parent) do |x = default_value|
+            def m; end
+          end
+        end
+      RUBY
+      labels = events(source).map { |e| e[:label] }
+      expect(labels).to eq(%w[C new pick_parent m])
+      expect(fields(context_of(source, :def_node, "m")))
+        .to eq(prefix: %w[C], self_owner: [], singleton_cref: false, nesting: %w[C])
+    end
+  end
+
+  describe "eval-family blocks" do
+    it "rebinds self to the receiver and keeps the cref lexical" do
+      source = <<~RUBY
+        module M
+          Target.class_eval do |x = default_value|
+            def m; end
+          end
+          Target.instance_exec(arg) { def n; end }
+        end
+      RUBY
+      expect(events(source).map { |e| e[:label] }).to eq(%w[M class_eval m instance_exec arg n])
+      expect(fields(context_of(source, :def_node, "m")))
+        .to eq(prefix: %w[M], self_owner: %w[Target], singleton_cref: false, nesting: %w[M])
+      expect(fields(context_of(source, :def_node, "n"))[:self_owner]).to eq(%w[Target])
+    end
+
+    it "leaves a receiver no name reaches unnamed" do
+      source = "class C\n  records.first.class_eval { def m; end }\nend\n"
+      expect(fields(context_of(source, :def_node, "m"))[:self_owner]).to eq([])
+    end
+  end
+
+  describe "the collector protocol" do
+    it "stops descending for a collector that declines, and only for that collector" do
+      source = <<~RUBY
+        class C
+          def m
+            inside
+          end
+        end
+      RUBY
+      declining = recorder_class.new(decline: [[:def_node, "m"]])
+      plain = recorder_class.new
+      walk(source, [declining, plain])
+      expect(declining.events.map { |e| e[:label] }).to eq(%w[C m])
+      expect(plain.events.map { |e| e[:label] }).to eq(%w[C m inside])
+    end
+
+    it "skips a declaration's body when the collector declines the declaration" do
+      found = events("class C\n  def m; end\nend\nhelper\n", decline: [[:declaration, "C"]])
+      expect(found.map { |e| e[:label] }).to eq(%w[C helper])
+    end
+
+    it "dispatches only the events a collector of the run overrides" do
+      defs_only = Class.new do
+        include Rigor::Inference::DeclarationWalk::Collector
+
+        attr_reader :seen
+
+        def initialize
+          @seen = []
+        end
+
+        def on_def(node, _context)
+          @seen << node.name
+          Rigor::Inference::DeclarationWalk::DESCEND
+        end
+      end.new
+      # A stub would override `on_call` itself, so the dispatch is observed from outside instead.
+      default_calls = 0
+      trace = TracePoint.new(:call) { |tp| default_calls += 1 if tp.method_id == :on_call }
+      trace.enable { walk("class C\n  def m = helper\nend\nhelper\n", [defs_only]) }
+      expect(defs_only.seen).to eq(%i[m])
+      expect(default_calls).to eq(0)
+    end
+  end
+
+  describe described_class::Context do
+    it "tracks no nesting when the root carries none" do
+      context = described_class.root
+      body = context.declaration_body(Prism.parse("class C; end").value.statements.body.first)
+      expect(body.nesting).to be_nil
+      expect(body.singleton_class_body.nesting).to be_nil
+    end
+
+    it "stamps the header chain on the scope it carries" do
+      declaration = Prism.parse("class Admin::Census; end").value.statements.body.first
+      body = described_class.root(scope: Rigor::Scope.empty).declaration_body(declaration)
+      expect(body.scope.lexical_nesting).to eq(%w[Admin::Census])
+    end
+
+    it "pushes the scope's chain at a header the ancestry nesting leaves alone" do
+      # The census scope's chain is pushed at every header, the unnameable one below `class <<` included;
+      # the ancestry chain is not. Both answers are kept (see the class comment).
+      source = "class C\n  class << self\n    class D\n    end\n  end\nend\n"
+      outer = Prism.parse(source).value.statements.body.first
+      inner = outer.body.body.first.body.body.first
+      c_body = described_class.root(scope: Rigor::Scope.empty, nesting: []).declaration_body(outer)
+      d_body = c_body.singleton_class_body.declaration_body(inner)
+      expect(d_body.nesting).to eq(%w[C])
+      expect(d_body.scope.lexical_nesting).to eq(%w[C::D C])
+    end
+  end
+end

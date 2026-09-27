@@ -86,9 +86,13 @@ module EngineAllocAB
     Dir.chdir(corpus_dir) do
       GC.start
       before = GC.stat(:total_allocated_objects)
+      gc_before = GC.stat(:time)
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      cpu0 = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
       status = run_check(target, out, err)
       wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
+      gc_ms = GC.stat(:time) - gc_before
       allocations = GC.stat(:total_allocated_objects) - before
       diagnostics = diagnostic_count(out.string)
       unless COMPLETED_EXITS.include?(status) && diagnostics
@@ -97,9 +101,13 @@ module EngineAllocAB
       end
       assert_engine_loads(engine_dir)
       { "allocations" => allocations, "wall_s" => wall.round(2), "diagnostics" => diagnostics,
-        "output_digest" => Digest::SHA256.hexdigest(out.string) }
+        "output_digest" => Digest::SHA256.hexdigest(out.string),
+        # For `tool/engine_wall_ab.rb`: process CPU (every thread), GC time, and whether YJIT ended up on.
+        "cpu_s" => cpu.round(3), "gc_ms" => gc_ms, "yjit" => yjit_enabled? }
     end
   end
+
+  def yjit_enabled? = defined?(RubyVM::YJIT) ? RubyVM::YJIT.enabled? : false
 
   def run_check(target, out, err)
     Rigor::CLI.new(["check", "--no-cache", "--no-stats", "--format", "json", target], out: out, err: err).run
@@ -185,9 +193,10 @@ module EngineAllocAB
     end
   end
 
-  def run_child(engine_dir, corpus_dir, target)
-    raw, status = Open3.capture2(RbConfig.ruby, File.expand_path(__FILE__), "--measure", engine_dir, corpus_dir,
-                                 target, chdir: ROOT)
+  # `env` and `prefix` are for `tool/engine_wall_ab.rb`: a YJIT setting, and a `perf stat` wrapper.
+  def run_child(engine_dir, corpus_dir, target, env: {}, prefix: [])
+    raw, status = Open3.capture2(env, *prefix, RbConfig.ruby, File.expand_path(__FILE__), "--measure", engine_dir,
+                                 corpus_dir, target, chdir: ROOT)
     abort("engine run for #{engine_dir} failed (#{status.inspect})") unless status.success?
     JSON.parse(raw.lines.last)
   end

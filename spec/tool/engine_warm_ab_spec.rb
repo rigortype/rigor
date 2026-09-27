@@ -117,4 +117,20 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
       expect { EngineWarmAB.report(options, %w[base head], journey) }.to output(/default \| null/).to_stdout
     end
   end
+
+  describe ".profile_notes" do
+    it "states each phase as a share of the profiled run's wall time, below the shared chain" do
+      journey = EngineWarmAB::Journey.new({ "head" => {} }, {}, "/nonexistent")
+      journey.profiles["default/null/head"] = {
+        "wall_ms" => 200, "sampled_ms" => 120, "gc_ms" => 10,
+        "chain" => [["<main>", 120], ["Rigor::CLI.start", 118]],
+        "phases" => [["Rigor::Analysis::RunCacheProbe#serve", 60], ["Kernel#require_relative", 40]]
+      }
+      text = EngineWarmAB.profile_notes(journey).join("\n")
+      expect(text).to include("(200 ms; sampled 60%, GC 10 ms)")
+      expect(text).to include("Rigor::CLI.start › Rigor::Analysis::RunCacheProbe#serve 30%; " \
+                              "Kernel#require_relative 20%")
+      expect(text).not_to include("<main>")
+    end
+  end
 end

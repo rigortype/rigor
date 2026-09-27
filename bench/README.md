@@ -181,6 +181,17 @@ Mastodon's defaults re-analyse 1 and 277 files. With `base` set, two engines
 alternate in ABBA order on separate project copies, and the table gives the
 same separation verdict as the wall A/B.
 
+With `profile` set, each scenario also runs once, untimed, under vernier. The
+summary gives, per scenario, the chain of frames nearly every sample shares and
+where the samples fan out below it, as shares of that run's wall time. The
+profiler starts after Ruby boot and `bundler/setup`, and GC is not sampled, so
+the shares do not add up to 100%. The artifact holds the top lists.
+
+Each engine is laid out as an installed gem (`gems/rigortype-<VERSION>`), so
+its result-cache key is the released one. A development checkout instead
+digests the engine's source on every run, about 20 ms on a null build, which a
+user of the released gem does not pay.
+
 ```sh
-gh workflow run engine-warm.yml -f head=master
+gh workflow run engine-warm.yml -f head=master -f profile=true
 ```

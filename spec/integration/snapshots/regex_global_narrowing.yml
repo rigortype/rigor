@@ -217,3 +217,23 @@ assertions:
   '209': String
   '210': String?
   '211': String
+  '212': String
+  '213': String?
+  '214': decimal-int-string
+  '215': Symbol
+  '216': nil
+  '217': nil
+  '218': String
+  '219': String?
+  '220': MatchData
+  '221': nil
+  '222': String
+  '223': String?
+  '224': String
+  '225': String?
+  '226': String
+  '227': String
+  '228': String?
+  '229': String
+  '230': String?
+  '231': String?

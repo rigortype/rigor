@@ -1960,4 +1960,181 @@ def quoted_named_group(line)
 
   assert_type("String", $2)
 end
+
+# Issue #1379 — `subject !~ pattern` is `Kernel#!~`, `!(subject =~ pattern)`: the same match with the result inverted,
+# so its falsey edge is the match edge and its truthy edge the no-match edge. The guard forms read `$1` as the match
+# edge's `String` (Ruby: "AB" for each with `line = "ab=c"`, and `["AB"]` for `not_match_next(["ab=c"])`).
+def not_match_guard(line)
+  return if line !~ /\A(\w+)=/
+
+  key = $1
+  key.upcase # NOT-MATCH-1379
+end
+
+def not_match_unless(line)
+  unless line !~ /\A(\w+)=/
+    key = $1
+    key.upcase # NOT-MATCH-1379
+  end
+end
+
+def not_match_next(lines)
+  lines.map do |l|
+    next if l !~ /\A(\w+)=/
+
+    key = $1
+    key.upcase # NOT-MATCH-1379
+  end
+end
+
+def not_match_or(line)
+  return if line !~ /\A(\w+)=/ || (key = $1).empty?
+
+  key.upcase # NOT-MATCH-1379
+end
+
+def not_match_regexp_receiver(line)
+  return if /\A(\w+)=/ !~ line
+
+  key = $1
+  key.upcase # NOT-MATCH-1379
+end
+
+NOT_MATCH_KEY = /\A(\w+)=(\d+)?/
+
+def not_match_constant(line)
+  return if line !~ NOT_MATCH_KEY
+
+  assert_type("String", $1)
+  assert_type("String?", $2)
+  key = $1
+  key.upcase # NOT-MATCH-1379
+end
+
+# The match edge also narrows a local subject to the refinement a whole-string anchored pattern names, as `=~`'s
+# does (Ruby: "12" for `not_match_whole_receiver("12")`).
+def not_match_whole_receiver(raw)
+  digits = String(raw)
+  return if digits !~ /\A\d+\z/
+
+  assert_type("decimal-int-string", digits)
+end
+
+# The refinement names a String, so a Symbol subject keeps its type (Ruby: `:"12"` for `not_match_symbol_subject("12")`).
+def not_match_symbol_subject(raw)
+  name = String(raw).to_sym
+  return if name !~ /\A\d+\z/
+
+  assert_type("Symbol", name)
+end
+
+# The no-match edge reads nil only when the receiver is a String or a Symbol: `String#=~` and `Symbol#=~` clear `$~` on
+# a failed match (Ruby: nil for `$1` and `$~` in the `if` arm with `raw = "x"`, and "ab" / nil in the `else` arm with
+# `raw = "ab=c"`).
+def not_match_string_edges(raw)
+  line = String(raw)
+  if line !~ /\A(\w+)=(\d+)?/
+    assert_type("nil", $1)
+    assert_type("nil", $~)
+  else
+    assert_type("String", $1)
+    assert_type("String?", $2)
+    assert_type("MatchData", $~)
+  end
+end
+
+def not_match_symbol_edges(raw)
+  name = String(raw).to_sym
+  if name !~ /\A(\w+)=/
+    assert_type("nil", $1)
+  else
+    assert_type("String", $1)
+  end
+end
+
+# `NilClass#=~` answers nil and leaves `$~` alone, so a receiver that may be nil — an untyped one included — keeps the
+# no-match edge unnarrowed; nil never reaches the match edge (Ruby: "a" in the `if` arm for `not_match_untyped_edges(nil)`
+# and `not_match_nilable_edges(nil)`).
+def not_match_untyped_edges(line)
+  "ab" =~ /(a)/
+  if line !~ /\A(\w+)=/
+    assert_type("String?", $1)
+  else
+    assert_type("String", $1)
+  end
+end
+
+def not_match_nilable_edges(raw)
+  line = raw ? String(raw) : nil
+  "ab" =~ /(a)/
+  if line !~ /\A(\w+)=/
+    assert_type("String?", $1)
+  else
+    assert_type("String", $1)
+  end
+end
+
+# A match rebinds every match global, the one a `!~` runs included (#1385): after `/(x)(y)/`, `$2` reads unnarrowed
+# (Ruby: "ab" and nil for `not_match_in_when("ab=c", "xy")`, and "x" and nil for `not_match_after_match("abc", "x")`).
+def not_match_in_when(line, t)
+  case t
+  when /(x)(y)/
+    return if line !~ /\A(\w+)=/
+
+    assert_type("String", $1)
+    assert_type("String?", $2)
+  end
+end
+
+def not_match_after_match(line, t)
+  return if line !~ /(a)(b)(c)/ || t !~ /(x)/
+
+  assert_type("String", $1)
+  assert_type("String?", $3)
+end
+
+# Controls. An extended-mode pattern declines as it does for `=~`; the read stays `String?`.
+def not_match_extended(line)
+  return if line !~ /(a) # (b)
+                    /x
+
+  assert_type("String?", $1)
+end
+
+# A receiver whose `=~` is defined in Ruby binds `$~` in its own frame, so `!~`'s match edge proves nothing here, nor
+# does a safe-navigation `!~` that skipped a nil receiver; an optional group is nil on a successful match, and a match
+# between the guard and the read rebinds it (Ruby: NoMethodError on nil for `not_match_custom_receiver`,
+# `not_match_safe_navigation(nil)`, `not_match_optional_group("=")` and `not_match_rebound("ab=c", "q")`).
+class NotMatchMatcher
+  def =~(_other) = 0
+end
+
+def not_match_custom_receiver
+  return if NotMatchMatcher.new !~ /(z)/
+
+  key = $1
+  key.upcase # GENUINE-NIL
+end
+
+def not_match_safe_navigation(line)
+  return if line&.!~(/\A(\w+)=/)
+
+  key = $1
+  key.upcase # GENUINE-NIL
+end
+
+def not_match_optional_group(line)
+  return if line !~ /\A(\w+)?=/
+
+  key = $1
+  key.upcase # GENUINE-NIL
+end
+
+def not_match_rebound(line, u)
+  return if line !~ /\A(\w+)=/
+
+  u !~ /(z)/
+  key = $1
+  key.upcase # GENUINE-NIL
+end
 # rubocop:enable Style/PerlBackrefs

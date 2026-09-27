@@ -1154,6 +1154,15 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(reads.size).to eq(2)
       expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
     end
+
+    # Issue #1379 — the falsey edge of `subject !~ pattern` is the match edge, so a copy of `$1` read past a
+    # `return if`, `unless`, `next if` or `||` guard is not flagged. The controls that keep the nil report are among
+    # the `# GENUINE-NIL` lines the example above reads.
+    it "reports nothing on a `$1` read past a `!~` guard" do
+      reads = marked_lines(harness, "# NOT-MATCH-1379")
+      expect(reads.size).to eq(6)
+      expect(harness.diagnostics.select { |d| reads.include?(d.line) }).to be_empty
+    end
   end
 
   describe "fixtures/regex_global_field_separator.rb — a `split` on a `$;` the file sets to a Regexp (#1365)" do

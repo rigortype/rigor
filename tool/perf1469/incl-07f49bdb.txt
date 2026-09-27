@@ -1,0 +1,4 @@
+{sort_members: 1419145, sort_calls: 163939, members: 617243}
+{2 => 120198, 3 => 20443, 4 => 5883, 5 => 2066, 6 => 15349}
+{"Rigor::Type::Nominal" => 382981, "Rigor::Type::Constant" => 125204, "Rigor::Type::Dynamic" => 70220, "Rigor::Type::Tuple" => 16551, "Rigor::Type::Singleton" => 7726, "Rigor::Type::DataInstance" => 7178, "Rigor::Type::HashShape" => 5289, "Rigor::Type::Difference" => 872, "Rigor::Type::IntegerRange" => 857, "Rigor::Type::App" => 177, "Rigor::Type::FloatRange" => 109, "Rigor::Type::Refined" => 53}
+{"Rigor::Inference::ScopeIndexer.walk_mixin_call_children" => [523300, 143880], "Rigor::Inference::ScopeIndexer.walk_constant_write_census" => [19222, 562796], "Rigor::Inference::ScopeIndexer.walk_constant_write_children" => [0, 264351], "Rigor::Inference::ScopeIndexer.walk_typed_declaration?" => [0, 1503]}

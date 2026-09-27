@@ -114,6 +114,16 @@ RSpec.describe Rigor::Cache::Store do
       expect(File.read(marker).strip).to eq(described_class.schema_marker_value)
     end
 
+    it "deflates the value payload at DEFLATE_LEVEL (#1507: the level is on the edit path)" do
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
+      bytes = File.binread(File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry"))
+      descriptor_size, offset = store.send(:read_varint, bytes, described_class::HEADER.bytesize)
+      _value_size, offset = store.send(:read_varint, bytes, offset + descriptor_size)
+      # A zlib stream's second byte carries the level: 0x01 is BEST_SPEED, 0x9c the default.
+      expect(bytes.byteslice(offset, 2)).to eq("\x78\x01".b)
+    end
+
     it "leaves no .tmp files behind on a successful write" do
       store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
       stragglers = Dir.glob(File.join(cache_root, "**", "*.tmp.*"))

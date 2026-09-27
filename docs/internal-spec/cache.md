@@ -753,9 +753,10 @@ is.
 ## `Rigor::Cache::IncrementalSnapshot` (ADR-46)
 
 The persistent artefact behind `rigor check --incremental`. Distinct from
-the entry store above: a single per-project blob (zlib-deflated `Marshal`,
-under the cache root) that records enough of the previous run to re-derive
-only the affected files' diagnostics on the next run. Every operation is
+the entry store above: a single per-project blob (`Marshal`, zlib-deflated
+at `Store::DEFLATE_LEVEL`, under the cache root) that records enough of the
+previous run to re-derive only the affected files' diagnostics on the next
+run. Every operation is
 fault-tolerant — a missing, unreadable, schema-mismatched,
 fingerprint-mismatched, or corrupt snapshot loads as `nil` and forces a
 full run, so the snapshot can never wedge or stale an analysis.

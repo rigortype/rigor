@@ -52,6 +52,16 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
     end
   end
 
+  it "deflates the blob at Store::DEFLATE_LEVEL (#1507: every incremental edit rewrites it)" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+
+      # A zlib stream's second byte carries the level: 0x01 is BEST_SPEED, 0x9c the default.
+      expect(File.binread(snapshot.path).byteslice(0, 2)).to eq("\x78\x01".b)
+    end
+  end
+
   it "round-trips the ADR-85 WD2 seed_bundles section" do
     Dir.mktmpdir do |dir|
       snapshot = described_class.new(root: dir)

@@ -828,6 +828,11 @@ module Rigor
         # then hit — the stats it would otherwise suppress were all gathered.
         @run_served_from_cache = !computed && analysis.nil?
         diagnostics
+      rescue Inference::DeclarationWalk::Shadow::Divergence
+        # A shadow-harness finding in the project pre-pass is not a cache failure: the fallback below would
+        # re-run the analysis with the pre-pass marked done and no project index, and report the resulting
+        # false positives instead of the finding.
+        raise
       rescue StandardError
         # The result cache must never break a run. If anything in the cache path fails, fall back to a
         # direct, uncached analysis.

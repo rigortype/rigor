@@ -20,10 +20,17 @@ module Rigor
       # ## Running it
       #
       # Set the variable for the whole `rigor check` process, pool workers included: `RIGOR_SHADOW_RULE_WALK=1
-      # rigor check …`. Under `rigor check` a raise lands in the per-file rescue and reports as an error
-      # diagnostic on the file, carrying the message, the same way a rule-walk divergence does; a run with no
-      # such row found no divergence. The rule-walk harness reads the same variable
-      # ({Analysis::ShadowHarness}).
+      # rigor check …`. Where a divergence surfaces depends on which pass built the table:
+      #
+      # - in a file's own index ({ScopeIndexer.index}), the raise lands in the per-file rescue and reports
+      #   as an error diagnostic on the file, carrying the message, the same way a rule-walk divergence does;
+      # - in the cross-file project pre-pass (the superclass tables are built there too), the raise aborts
+      #   the run with the message. The pre-pass skips a file it cannot read or parse, and the run-result
+      #   cache path falls back to an uncached run on an error; both let {Divergence} through, because
+      #   skipping would pass the check that failed and drop the file from the project index.
+      #
+      # A run that completes with no such row found no divergence. The rule-walk harness reads the same
+      # variable ({Analysis::ShadowHarness}).
       #
       # A warm cache cannot answer for a run the harness did not check. The ADR-45 run-result cache (and the
       # ADR-87 boot-slim probe and the effects sidecar, which share its key) and the ADR-46 incremental

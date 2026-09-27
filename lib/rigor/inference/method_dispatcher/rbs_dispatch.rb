@@ -564,11 +564,11 @@ module Rigor
 
             memo = core_stdlib_memo(environment, scope)
             key = [class_name.to_s, method_name.to_sym]
-            return memo[key] if memo&.key?(key)
+            return memo[key] if memo.key?(key)
 
-            answer = compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
-            memo[key] = answer if memo
-            answer
+            store_unless_recorded(memo, key) do
+              compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+            end
           end
 
           # Issue #1173 — the include-edge sibling of {#core_stdlib_ancestor_method}: a discovered
@@ -596,11 +596,11 @@ module Rigor
 
             memo = mixin_ancestor_memo(environment, scope)
             key = [class_name.to_s, method_name.to_sym]
-            return memo[key] if memo&.key?(key)
+            return memo[key] if memo.key?(key)
 
-            answer = compute_included_module_method(environment, class_name, method_name, scope)
-            memo[key] = answer if memo
-            answer
+            store_unless_recorded(memo, key) do
+              compute_included_module_method(environment, class_name, method_name, scope)
+            end
           end
 
           # The declines are conjunctive and ordered as {compute_core_stdlib_ancestor_method}'s are:
@@ -626,20 +626,12 @@ module Rigor
           end
 
           # The same one-slot memo shape as {#core_stdlib_memo}; see there for why it is one slot keyed
-          # on the discovery index's identity, and why a recording run bypasses it.
+          # on the discovery index's identity, and what a recording run may store in it.
           MIXIN_ANCESTOR_MEMO_KEY = :__rigor_mixin_ancestor_dispatch__
           private_constant :MIXIN_ANCESTOR_MEMO_KEY
 
           def mixin_ancestor_memo(environment, scope)
-            return nil if Rigor::Analysis::DependencyRecorder.active?
-
-            discovery = scope.discovery
-            slot = Thread.current[MIXIN_ANCESTOR_MEMO_KEY]
-            unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-              slot = [discovery, environment, {}]
-              Thread.current[MIXIN_ANCESTOR_MEMO_KEY] = slot
-            end
-            slot[2]
+            ancestor_memo_slot(MIXIN_ANCESTOR_MEMO_KEY, environment, scope)
           end
 
           # The declines are conjunctive, so their ORDER is free — and it is chosen so the two that walk
@@ -800,8 +792,10 @@ module Rigor
           # Memo for the whole decision. Every call site of a class asks the same `(class, method)`
           # question, and the answer is a pure function of the frozen discovery index and the
           # environment, so it is cacheable on their identity. A run that is RECORDING ADR-46
-          # dependency edges bypasses it: the shadow probes above read the project's method tables, and
-          # a memo would swallow that edge for every file after the first.
+          # dependency edges stores only the answers whose computation recorded nothing
+          # ({#store_unless_recorded}): the shadow probes above read the project's method tables, and
+          # serving an answer that read them from the memo would swallow those edges for every later
+          # caller.
           #
           # ONE slot, replaced rather than accumulated — see {ExternalAncestorResolution}'s twin for
           # the measurement. A `Scope` hands each analysed file its own discovery index, so an
@@ -811,15 +805,38 @@ module Rigor
           private_constant :CORE_STDLIB_ANCESTOR_MEMO_KEY
 
           def core_stdlib_memo(environment, scope)
-            return nil if Rigor::Analysis::DependencyRecorder.active?
+            ancestor_memo_slot(CORE_STDLIB_ANCESTOR_MEMO_KEY, environment, scope)
+          end
 
+          # The slot behind both memos. Whether this thread is recording is part of its key, so a slot
+          # filled with every answer is never read by a recording caller, which may only reuse the
+          # answers {#store_unless_recorded} lets through.
+          def ancestor_memo_slot(memo_key, environment, scope)
             discovery = scope.discovery
-            slot = Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY]
-            unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-              slot = [discovery, environment, {}]
-              Thread.current[CORE_STDLIB_ANCESTOR_MEMO_KEY] = slot
+            recording = Rigor::Analysis::DependencyRecorder.recording?
+            slot = Thread.current[memo_key]
+            unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment) && slot[2] == recording
+              slot = [discovery, environment, recording, {}]
+              Thread.current[memo_key] = slot
             end
-            slot[2]
+            slot[3]
+          end
+
+          # Computes an answer, stores it under `key` when it may be served again, and returns it.
+          # Outside recording every answer is stored. Under ADR-46 recording the block runs in an
+          # ADR-84 WD2 capture window, which sees every edge the block files for the current consumer
+          # (the reads it withholds are not among them). An answer whose window stayed empty is stored:
+          # computing it again would read the same frozen tables and file nothing again, so serving it
+          # from the memo records exactly what recomputing does. That is most of them, since both
+          # computations withhold their ancestry walk and return before any recorded probe unless an
+          # RBS declaration answered. Any other answer is recomputed on every call, which files its
+          # edges each time, as a recording run always did.
+          def store_unless_recorded(memo, key, &)
+            return memo[key] = yield unless Rigor::Analysis::DependencyRecorder.recording?
+
+            answer, read_set = Rigor::Analysis::DependencyRecorder.capture(&)
+            memo[key] = answer if read_set.reads.empty? && read_set.missing.empty?
+            answer
           end
 
           # BFS over the scope's as-written ancestry tables — include edges first, then the

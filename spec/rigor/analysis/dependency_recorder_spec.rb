@@ -358,5 +358,142 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       expect(outer_set.reads).to include(["/app/deep.rb", "Deep#leaf"], ["/app/stored.rb", "Stored#edge"])
       expect(outer_set.missing).to include("method:Stored#missing")
     end
+
+    it "keeps each window's insertion order when an inner window re-reads what the outer one holds" do
+      inner_set = nil
+      outer_set = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, outer_set = recorder.capture do
+          recorder.read_site("/app/a.rb:1", "A#a")
+          _, inner_set = recorder.capture do
+            recorder.read_site("/app/b.rb:1", "B#b")
+            recorder.read_site("/app/a.rb:9", "A#a")
+            recorder.read_missing(:method, "Ghost#gone")
+          end
+          recorder.read_site("/app/d.rb:1")
+        end
+      end
+
+      expect(inner_set.reads.to_a).to eq([["/app/b.rb", "B#b"], ["/app/a.rb", "A#a"]])
+      expect(outer_set.reads.to_a).to eq([["/app/a.rb", "A#a"], ["/app/b.rb", "B#b"], ["/app/d.rb", nil]])
+      expect(outer_set.missing.to_a).to eq(["method:Ghost#gone"])
+    end
+
+    it "fills a window opened after the same read set was already replayed into an outer one" do
+      stored = recorder::ReadSet.new(reads: Set[["/app/stored.rb", "Stored#edge"], ["/app/base.rb", nil]].freeze,
+                                     missing: Set["method:Stored#missing"].freeze)
+      inner_set = nil
+      outer_set = nil
+      record = recorder.record_for("/app/consumer.rb") do
+        _, outer_set = recorder.capture do
+          recorder.replay(stored)
+          _, inner_set = recorder.capture { recorder.replay(stored) }
+          recorder.replay(stored)
+        end
+      end
+
+      [inner_set, outer_set].each do |set|
+        expect(set.reads).to eq(stored.reads)
+        expect(set.missing).to eq(stored.missing)
+      end
+      once = recorder.record_for("/app/consumer.rb") { recorder.replay(stored) }
+      expect(record).to eq(once)
+    end
+
+    it "finishes a replay that raised part-way when the same read set is replayed again" do
+      stored = recorder::ReadSet.new(reads: Set[["/app/one.rb", "One#a"], ["/app/two.rb", "Two#b"]].freeze,
+                                     missing: Set.new.freeze)
+      calls = 0
+      %i[accumulate_read tee_read].each do |name|
+        allow(recorder).to receive(name).and_wrap_original do |original, *args|
+          calls += 1
+          raise "interrupted" if calls == 2
+
+          original.call(*args)
+        end
+      end
+      # The window's tee raises on its second pair...
+      window = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, window = recorder.capture do
+          expect { recorder.replay(stored) }.to raise_error("interrupted")
+          recorder.replay(stored)
+        end
+      end
+      # ...and, in a fresh consumer with no window open, the accumulator's pass does.
+      calls = 0
+      record = recorder.record_for("/app/consumer.rb") do
+        expect { recorder.replay(stored) }.to raise_error("interrupted")
+        recorder.replay(stored)
+      end
+
+      expect(window.reads).to eq(stored.reads)
+      expect(record.sources).to contain_exactly("/app/one.rb", "/app/two.rb")
+    end
+
+    it "closes a window that saw nothing into the shared empty read set" do
+      empty = nil
+      withheld = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, empty = recorder.capture { :nothing }
+        _, withheld = recorder.withhold { :nothing }
+      end
+
+      expect(empty).to be(recorder::EMPTY_READ_SET)
+      expect(withheld).to be(recorder::EMPTY_READ_SET)
+      expect(Ractor.shareable?(empty)).to be(true)
+    end
+
+    it "replays a window that saw another consumer's reads into the consumer outside it" do
+      window = nil
+      record = recorder.record_for("/app/outer.rb") do
+        _, window = recorder.capture do
+          recorder.record_for("/app/inner.rb") { recorder.read_site("/app/dep.rb:1", "Dep#x") }
+        end
+        recorder.replay(window)
+      end
+
+      expect(window.reads).to eq(Set[["/app/dep.rb", "Dep#x"]])
+      expect(record.symbol_sources["/app/dep.rb"]).to contain_exactly("Dep#x")
+    end
+
+    it "replays into a withheld window a read set the consumer already holds" do
+      stored = recorder::ReadSet.new(reads: Set[["/app/stored.rb", "Stored#edge"]].freeze,
+                                     missing: Set["class:Ghost"].freeze)
+      withheld = nil
+      recorder.record_for("/app/consumer.rb") do
+        recorder.capture do
+          recorder.replay(stored)
+          _, withheld = recorder.withhold { recorder.replay(stored) }
+        end
+      end
+
+      expect(withheld.reads).to eq(stored.reads)
+      expect(withheld.missing).to eq(stored.missing)
+    end
+  end
+
+  describe ".read_site" do
+    it "reads the path up to the site's first colon" do
+      record = described_class.record_for("/app/consumer.rb") do
+        described_class.read_site("/app/lined.rb:3:7")
+        described_class.read_site("/app/unlined.rb")
+        described_class.read_site("")
+      end
+
+      expect(record.sources.to_a).to eq(["/app/lined.rb", "/app/unlined.rb"])
+    end
+  end
+
+  describe ".read_last_segment" do
+    it "keys the edge on the segment `split(\"::\").last` answers" do
+      names = ["Foo", "::Foo", "A::B::C", "::A::B", "A:B", "A::B:C", "", "::", "A::", "A:::B", "::::A",
+               "Ünï::Näme", "Ünï"]
+      names.each do |name|
+        segment = name.delete_prefix("::").split("::").last
+        record = described_class.record_for("/app/consumer.rb") { described_class.read_last_segment(:class, name) }
+        expect(record.missing.to_a).to eq(segment ? ["class:#{segment}"] : []), name.inspect
+      end
+    end
   end
 end

@@ -1785,8 +1785,7 @@ module Rigor
     # so a bare referent is re-checked when the class appears or disappears and at no other time. A file edge
     # would have re-checked every bare referent of every class the file declares on any edit to it.
     def record_class_existence(class_name)
-      segment = class_name.to_s.delete_prefix("::").split("::").last
-      Analysis::DependencyRecorder.read_name(:class, segment) if segment
+      Analysis::DependencyRecorder.read_last_segment(:class, class_name.to_s)
     end
 
     # Issue #644 — the positive ADR-46 edge for a cross-file VALUE constant. `Reflection.constant_type_at`

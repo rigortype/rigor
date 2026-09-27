@@ -6,38 +6,44 @@ require "open3"
 require "prism"
 require "rbconfig"
 
-# #1507 — the declaration-fact witness. It runs a fixture in a child process under the Ruby running the suite (the
-# Flake's locally, CI's on CI), with the bundle stripped, records what Ruby itself says about the modules the fixture
-# declares, and compares that with the discovery tables Rigor builds for the same file. `violations` returns one line
-# per disagreement; an empty list means the tables agree with Ruby.
+# #1507 — the declaration-fact witness (ADR-119 WD5, proposed). It runs a fixture in a child process under the Ruby
+# running the suite (the Flake's locally, CI's on CI), with the bundle stripped and a time limit, records what Ruby
+# itself says about the modules the fixture declares, and compares that with the discovery index `rigor check`
+# analyses the file under. `violations` returns one line per disagreement; an empty list means the tables agree.
 #
 # What Ruby is asked, per module the fixture opens or creates:
 #
-# - `Module.nesting` at every line the fixture runs. A `def` is a statement, so its line carries the nesting its body
-#   is compiled under, `class << self` bodies included (a `:class` TracePoint does not report those);
+# - `Module.nesting` at every line the fixture runs, with the `self` of that line, so two statements on one line are
+#   told apart. A `def` is a statement, so its line carries the nesting its body is compiled under, `class << self`
+#   bodies included (a `:class` TracePoint does not report those). Each anonymous entry (`#<Class:C>`) records
+#   whether it owns constants;
 # - its own instance methods by visibility, and its own singleton methods plus those its singleton mixins (`extend`)
 #   give it, each with `Method#source_location`;
 # - its ancestors, split into its own instance mixins and its own singleton mixins, and its superclass;
-# - the class of each class variable's value, for the fixtures that call the method that assigns one.
+# - the class of each class variable's value, for the fixtures that assign one.
 #
 # The relations:
 #
 # - A set-valued table must satisfy `certain ⊆ runtime ⊆ certain ∪ possible`. Rigor keeps no `possible` table yet, so
 #   every entry reads as `certain` and the relation is equality, with one exception. A self-extend edge that Ruby
 #   does not show, which is how the tables model a bare `module_function` (#526's deliberate over-approximation),
-#   reads as `possible`, and so do the singleton names the extends fold derives from it.
+#   reads as `possible`, and so do the singleton names and def nodes the extends fold derives from it.
 # - A single-valued table must agree with Ruby wherever it answers. No entry is a decline, which is always allowed.
 # - Def identity is compared through `source_location` lines.
 # - A typed table must admit the class of the value Ruby holds.
+# - A def nesting must equal Ruby's once anonymous entries are dropped, and an anonymous entry that owns constants
+#   cannot be dropped: a recorded chain without it resolves those constants somewhere else, so Rigor must record
+#   no chain for that def.
 #
-# Ruby renders a module nested in an anonymous one as `#<Class:…>::Name`, which no constant path reaches. Rigor cannot
-# name it, so it is left out of the runtime sets, and an anonymous entry is dropped from a runtime nesting before the
-# chains are compared. A runtime method counts only when its `source_location` is in the fixture, so a reopened core
-# class brings only the fixture's own methods.
+# A module under an anonymous one (`#<Class:…>::D`) is left out of the runtime sets, because no constant path reaches
+# it. A runtime method counts only when its `source_location` is in the fixture, so a reopened core class brings only
+# the fixture's own methods.
 module DeclarationWitness
   RELATIONS = %i[
     classes methods visibilities def_nodes singleton_def_nodes superclasses includes extends def_nestings class_cvars
   ].freeze
+  # Seconds a fixture may run before the child is killed.
+  TIME_LIMIT = 20
 
   # Runs in the child: `ruby -e RECORDER fixture.rb`, printing one JSON document.
   RECORDER = <<~'RUBY'
@@ -45,9 +51,10 @@ module DeclarationWitness
 
     path = File.expand_path(ARGV.fetch(0))
     name_of = ->(mod) { mod.name || mod.inspect }
+    entry_of = ->(mod) { [name_of.(mod), mod.name.nil? && !mod.constants(false).empty?] }
     in_fixture = ->(location) { location && File.expand_path(location[0]) == path ? location[1] : nil }
 
-    nestings = {}
+    nestings = Hash.new { |table, line| table[line] = [] }
     opened = []
     trace = TracePoint.new(:class, :line) do |tp|
       next unless File.expand_path(tp.path) == path
@@ -55,7 +62,9 @@ module DeclarationWitness
       if tp.event == :class
         opened << tp.self
       else
-        nestings[tp.lineno] ||= tp.binding.eval("Module.nesting").map(&name_of)
+        self_label = tp.self.is_a?(Module) ? name_of.(tp.self) : "(#{tp.self.class})"
+        seen = [self_label, tp.binding.eval("Module.nesting").map(&entry_of)]
+        nestings[tp.lineno] << seen unless nestings[tp.lineno].include?(seen)
       end
     end
 
@@ -68,25 +77,39 @@ module DeclarationWitness
     end
     modules = (opened + (ObjectSpace.each_object(Module).to_a - before)).uniq.reject(&:singleton_class?)
 
+    # The definition `owner` itself holds for `name`, past any prepended module's.
+    own_definition = lambda do |owner, name|
+      method = owner.instance_method(name)
+      method = method.super_method while method && method.owner != owner
+      method
+    end
+    # Where `name` is defined for `mod`'s side `meta_or_mod`, among the owners that side answers through.
+    location_in = lambda do |side, owners, name|
+      method = side.instance_method(name)
+      method = method.super_method while method && !owners.include?(method.owner)
+      method && in_fixture.(method.source_location)
+    end
+
     record = modules.to_h do |mod|
       meta = mod.singleton_class
       superclass = mod.is_a?(Class) ? mod.superclass : nil
-      stop = superclass ? superclass.singleton_class : Module
-      singleton_mixins = meta.ancestors.drop(1).take_while { |a| a != stop && a != Class }
+      # A module's own mixins: its ancestors less the superclass's, which also drops a prepend on the superclass.
+      inherited = superclass ? superclass.ancestors : []
+      meta_inherited = superclass ? superclass.singleton_class.ancestors : Module.ancestors
+      singleton_mixins = meta.ancestors - meta_inherited - [meta]
       singleton_names = (meta.instance_methods + meta.private_instance_methods).select do |n|
         [meta, *singleton_mixins].include?(meta.instance_method(n).owner)
       end
       instance_names = mod.instance_methods(false) + mod.private_instance_methods(false)
-      chain = superclass ? mod.ancestors.take_while { |a| a != superclass } : mod.ancestors
       [name_of.(mod), {
         "superclass" => superclass && name_of.(superclass),
-        "instance_mixins" => (chain - [mod]).map(&name_of),
+        "instance_mixins" => (mod.ancestors - inherited - [mod]).map(&name_of),
         "singleton_mixins" => singleton_mixins.map(&name_of),
         "public" => mod.public_instance_methods(false).map(&:to_s),
         "private" => mod.private_instance_methods(false).map(&:to_s),
         "protected" => mod.protected_instance_methods(false).map(&:to_s),
-        "instance_locations" => instance_names.to_h { |n| [n.to_s, in_fixture.(mod.instance_method(n).source_location)] },
-        "singleton_locations" => singleton_names.to_h { |n| [n.to_s, in_fixture.(meta.instance_method(n).source_location)] },
+        "instance_locations" => instance_names.to_h { |n| [n.to_s, in_fixture.(own_definition.(mod, n)&.source_location)] },
+        "singleton_locations" => singleton_names.to_h { |n| [n.to_s, location_in.(meta, [meta, *singleton_mixins], n)] },
         "class_variables" => mod.class_variables(false).to_h do |cv|
           [cv.to_s, mod.class_variable_get(cv).class.ancestors.map(&name_of)]
         end
@@ -105,33 +128,44 @@ module DeclarationWitness
     relations.flat_map { |relation| Relations.public_send(:"#{relation}_violations", runtime, tables, root) }
   end
 
-  # What Ruby says about the fixture. A fixture that raises is a broken fixture, not a finding.
+  # What Ruby says about the fixture. A fixture that raises, exits early or runs past {TIME_LIMIT} is a broken
+  # fixture, not a finding, and raises here.
   def record(path)
-    out, err, status = Bundler.with_unbundled_env { Open3.capture3(RbConfig.ruby, "-e", RECORDER, path) }
-    raise "witness recorder failed for #{path}: #{err}" unless status.success?
+    out, err, status = run_child(path)
+    raise "witness recorder failed for #{path} (#{status}): #{err}" unless status&.success?
 
     runtime = JSON.parse(out)
     raise "witness fixture #{path} raised #{runtime['error']}" if runtime["error"]
 
     runtime
+  rescue JSON::ParserError => e
+    raise "witness recorder for #{path} printed no record (#{e.message}): #{err}"
   end
 
-  # The discovery index `rigor check` analyses the fixture under: the project pre-pass over the one file, seeded
-  # the way `Analysis::Runner#project_scope_seed_tables` seeds it, then the file's own `ScopeIndexer.index` merge.
+  def run_child(path)
+    Bundler.with_unbundled_env do
+      Open3.popen3(RbConfig.ruby, "-e", RECORDER, path) do |stdin, stdout, stderr, waiter|
+        stdin.close
+        readers = [stdout, stderr].map { |io| Thread.new { io.read } }
+        unless waiter.join(TIME_LIMIT)
+          Process.kill(:KILL, waiter.pid)
+          raise "witness fixture #{path} ran past #{TIME_LIMIT}s"
+        end
+        [readers[0].value, readers[1].value, waiter.value]
+      end
+    end
+  end
+
+  # The discovery index `rigor check` analyses the fixture under: the runner's own project pre-pass and seed
+  # (`Runner#ensure_project_discovery`, `#seed_project_scope`), then the file's `ScopeIndexer.index` merge.
   def rigor_tables(path)
-    project = Rigor::Inference::ScopeIndexer.discovered_project_index_for_paths([path])
-    index = project.fetch(:def_index)
-    seed = {
-      discovered_classes: project.fetch(:classes), discovered_def_nodes: index[:def_nodes],
-      discovered_def_nestings: index[:def_nestings], discovered_singleton_def_nodes: index[:singleton_def_nodes],
-      discovered_superclasses: index[:superclasses], discovered_header_nestings: index[:header_nestings],
-      discovered_includes: index[:includes], discovered_prepends: index[:prepends], discovered_extends: index[:extends],
-      discovered_method_visibilities: index[:method_visibilities], discovered_methods: index[:methods]
-    }
-    base = Rigor::Scope.empty(source_path: path)
+    runner = Rigor::Analysis::Runner.new(
+      configuration: Rigor::Configuration.new("paths" => [path]), cache_store: nil, collect_stats: false
+    )
+    runner.send(:ensure_project_discovery, { files: [path] })
+    base = runner.send(:seed_project_scope, Rigor::Scope.empty(source_path: path))
     root = Prism.parse(File.read(path), filepath: path).value
-    seeded = base.with_discovery(base.discovery.with(**seed))
-    [Rigor::Inference::ScopeIndexer.index(root, default_scope: seeded).default.discovery, root]
+    [Rigor::Inference::ScopeIndexer.index(root, default_scope: base).default.discovery, root]
   end
 end
 
@@ -280,11 +314,43 @@ module DeclarationWitness
     def def_nestings_violations(runtime, tables, root)
       def_nodes(root).filter_map do |def_node|
         recorded = tables.discovered_def_nestings[def_node]
-        line = def_node.location.start_line
-        actual = runtime.dig("nestings", line.to_s)
-        next if recorded.nil? || actual.nil? || recorded == actual.select { |name| nameable?(name) }
+        actual = ruby_nesting(runtime, def_node)
+        next if recorded.nil? || actual.nil?
 
-        "def_nestings: Rigor records #{recorded.inspect} for the def at line #{line}; Ruby's is #{actual.inspect}"
+        nesting_violation(recorded, actual, def_node.location.start_line)
+      end
+    end
+
+    def nesting_violation(recorded, actual, line)
+      owners = actual.select { |_, owns_constants| owns_constants }.map(&:first)
+      unless owners.empty?
+        return "def_nestings: Rigor records #{recorded.inspect} for the def at line #{line}; Ruby's nesting holds " \
+               "#{owners.join(', ')}, which owns constants the recorded chain cannot reach"
+      end
+      names = actual.map(&:first)
+      return if recorded == names.select { |name| nameable?(name) }
+
+      "def_nestings: Rigor records #{recorded.inspect} for the def at line #{line}; Ruby's is #{names.inspect}"
+    end
+
+    # Ruby's nesting for a def: the one its line ran under with the def's own definee as `self`. Without a runtime
+    # owner (the def never ran), the line's nesting when only one was seen there.
+    def ruby_nesting(runtime, def_node)
+      seen = runtime.dig("nestings", def_node.location.start_line.to_s) || []
+      selves = definee_selves(runtime, def_node.name.to_s, def_node.location.start_line)
+      matching = selves.empty? ? seen : seen.select { |entry| selves.include?(entry.first) }
+      chains = matching.map(&:last).uniq
+      chains.first if chains.size == 1
+    end
+
+    # The `self` values a def statement at `line` naming `name` ran under: each module Ruby filed it in, and that
+    # module's singleton class for a singleton method.
+    def definee_selves(runtime, name, line)
+      runtime["modules"].flat_map do |owner, record|
+        selves = []
+        selves << owner if record["instance_locations"][name] == line
+        selves.push(owner, "#<Class:#{owner}>") if record["singleton_locations"][name] == line
+        selves
       end
     end
 

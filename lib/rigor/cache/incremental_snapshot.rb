@@ -140,7 +140,12 @@ module Rigor
       # the `write` / `to_str` / `to_int` / hatch definitions and top-level mixins it holds, which the `global.*`
       # write rules decline on project-wide. A pre-29 bundle would fold as "none of those", and a warm run would
       # report a write a cold run exempts.
-      SCHEMA = 29
+      # 30: issue #1536 gives each seed bundle a `source_rbs_digest` — the digest of what every loaded source-RBS
+      # synthesizer contributes for the file — which ADR-89 WD1 now compares beside `declaration_signature`
+      # in place of switching the gate off whenever `rigor-rbs-inline` is configured. A pre-30 bundle
+      # carries none, which the session reads as "unknown" and so as moved: sound, but every first edit to
+      # each file would re-analyse the whole project, so the gate rejects the blob and the next run is cold.
+      SCHEMA = 30
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

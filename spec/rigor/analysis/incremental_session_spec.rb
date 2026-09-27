@@ -80,6 +80,45 @@ module Rigor
           "static-widget-gate"
         end
       end
+
+      # Issue #1536 fixture — a source-RBS synthesizer that is NOT rigor-rbs-inline, so the declaration gate is
+      # shown to digest whatever synthesizer is loaded rather than one plugin it knows by name. Each
+      # `# fake-rbs: <member>` comment line becomes a member of the file's first class.
+      class FakeRbsSynthesizerProbe < Base
+        SYNTHESIZER = lambda do |path|
+          source = File.read(path)
+          members = source.scan(/^\s*# fake-rbs: (.+)$/).flatten
+          class_name = source[/^class (\w+)/, 1]
+          next nil if members.empty? || class_name.nil?
+
+          "class #{class_name}\n#{members.map { |member| "  #{member}\n" }.join}end\n"
+        end
+
+        manifest(id: "fake-rbs-synth", version: "0.1.0", source_rbs_synthesizer: SYNTHESIZER)
+      end
+
+      # Issue #1536 fixture — the same synthesizer, but built in `#prepare`: the shape the source-RBS gate cannot
+      # see from the unprepared registry it digests with. `.building` toggles whether `#prepare` builds it,
+      # standing in for a synthesizer that first appears in a later run.
+      class PrepareBuiltSynthesizerProbe < Base
+        @building = true
+        class << self
+          attr_accessor :building
+        end
+
+        manifest(id: "prepare-built-synth", version: "0.1.0")
+
+        def prepare(_services)
+          return unless PrepareBuiltSynthesizerProbe.building
+
+          @prepared_manifest = Manifest.new(id: "prepare-built-synth", version: "0.1.0",
+                                            source_rbs_synthesizer: FakeRbsSynthesizerProbe::SYNTHESIZER)
+        end
+
+        def manifest
+          @prepared_manifest || self.class.manifest
+        end
+      end
     end
   end
 end
@@ -1471,28 +1510,604 @@ end
         end
       end
     end
+  end
 
-    it "disables the gate when a comment-ingesting plugin (inline-RBS) is configured" do
-      # inline-RBS reads comments as types, so a comment edit could change a cross-file signature the code
-      # fingerprint ignores — the gate must fall back to today's full closure. Tested at the gate logic so it
-      # does not depend on the plugin gem being on the load path.
-      inline = Rigor::Configuration.new("paths" => ["x"], "plugins" => [{ "gem" => "rigor-rbs-inline" }])
-      ordinary = Rigor::Configuration.new("paths" => ["x"], "plugins" => ["rigor-sorbet"])
+  # Issue #1536 (ADR-89 WD1 amendment) — the gates read a file's Ruby side; what a source-RBS synthesizer derives
+  # from its comments is compared through the synthesizers' OUTPUT, never through which plugins the
+  # configuration names. A project without annotations keeps every gate with `rigor-rbs-inline` loaded, and an
+  # edit that moves what a synthesizer contributes re-analyses the whole project, because a reader of that RBS
+  # may hold no edge to the file it came from. Each example runs the real plugin, listed exactly as
+  # `Configuration.autowire_default_plugins` lists it, with no shared environment (a shared one would carry no
+  # synthesized RBS at all), and compares the merged result with a full `--no-cache` run.
+  describe "source-RBS synthesizer output gate (#1536)" do
+    let(:rbs_inline_entry) do
+      { "gem" => "rigor-rbs-inline", "id" => "rbs-inline", "config" => { "require_magic_comment" => false } }
+    end
 
-      expect(described_class.new(configuration: inline).send(:comment_ingesting_plugin_loaded?)).to be(true)
-      expect(described_class.new(configuration: ordinary).send(:comment_ingesting_plugin_loaded?)).to be(false)
+    # `Configuration.new` never auto-wires the plugin (spec_helper pins the probe off), so it is listed here and
+    # its class registered from source, as `spec/integration/arity_declared_source_method_spec.rb` does.
+    let(:rbs_inline_requirer) do
+      plugin_lib = File.expand_path("../../../plugins/rigor-rbs-inline/lib", __dir__)
+      $LOAD_PATH.unshift(plugin_lib) unless $LOAD_PATH.include?(plugin_lib)
+      require "rigor-rbs-inline"
+      Rigor::Plugin.unregister!
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::RbsInline)
+        true
+      end
+    end
 
-      # Issue #135 self-mutation sweep — the `"gem"` case above never reaches the `|| entry["id"]` fallback
-      # (a Hash `||` short-circuits on the first truthy operand), so a manifest-`"id"`-only entry (no `"gem"`
-      # key) is the only fixture that proves the fallback read, not just the primary one.
-      id_only = Rigor::Configuration.new("paths" => ["x"], "plugins" => [{ "id" => "rigor-rbs-inline" }])
-      expect(described_class.new(configuration: id_only).send(:comment_ingesting_plugin_loaded?)).to be(true)
+    after { Rigor::Plugin.unregister! }
 
-      # With the gate disabled, EVERY changed file is unstable (dependents never skipped), even one whose
-      # declaration signature matched.
-      session = described_class.new(configuration: inline)
-      session.instance_variable_set(:@seed_bundles, { "a.rb" => { declaration_signature: "sig" } })
-      expect(session.send(:declaration_unstable, ["a.rb"], { "a.rb" => "sig" })).to eq(["a.rb"])
+    def inline_config(paths, entry: rbs_inline_entry, extra: {})
+      Rigor::Configuration.new({ "paths" => paths, "plugins" => [entry] }.merge(extra))
+    end
+
+    def inline_session(config, paths, requirer: rbs_inline_requirer)
+      described_class.new(configuration: config, paths: paths, plugin_requirer: requirer)
+    end
+
+    def inline_full_run(config, paths, requirer: rbs_inline_requirer)
+      runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil, plugin_requirer: requirer)
+      guarded_run(runner, paths).diagnostics
+    end
+
+    def messages_for(diagnostics, basename)
+      diagnostics.select { |diagnostic| File.basename(diagnostic.path) == basename }.map(&:message)
+    end
+
+    def loaded_synthesizer_ids(session)
+      session.instance_variable_get(:@last_runner).plugin_registry.source_rbs_synthesizers
+             .map { |plugin, _| plugin.manifest.id }
+    end
+
+    # What pins an example to the synthesizer channel: the edit left the file's declaration signature
+    # byte-identical, so only the synthesized output can tell the recheck anything moved.
+    def expect_declaration_signature_unmoved(session, path)
+      stored = session.instance_variable_get(:@seed_bundles).fetch(path).fetch(:declaration_signature)
+      current = Rigor::Inference::ScopeIndexer.scan_summary_for_paths([path])[:declaration_signatures][path]
+      expect(current).to eq(stored)
+    end
+
+    # The recheck re-analysed every file named in `files`, the `reader` file now answers `message` (the
+    # positive control: the harness can see the new type), and the merged result equals a full run's.
+    def expect_rechecked(recheck, config, paths, files, reader, message, requirer: rbs_inline_requirer)
+      expect(recheck.affected.map { |path| File.basename(path) }).to include(*files)
+      expect(messages_for(recheck.diagnostics, reader)).to eq([message])
+      expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, paths, requirer: requirer)))
+    end
+
+    # A hub with no annotation and an ANCESTRY dependent: Sub resolves the inherited `common` through Hub's
+    # ancestry. Nothing calls `build`, so a body edit to it has no symbol dependent either.
+    def write_hub(dir, build_body: '"b"', trailer: "")
+      hub = File.join(dir, "hub.rb")
+      File.write(hub, <<~RUBY + trailer)
+        class Hub
+          def common
+            "c"
+          end
+
+          def build
+            #{build_body}
+          end
+        end
+      RUBY
+      write_once(File.join(dir, "sub.rb"), "class Sub < Hub\n  def name\n    Rigor.dump_type(common)\n  end\nend\n")
+      hub
+    end
+
+    def expect_hub_collapse(config, dir, requirer: rbs_inline_requirer)
+      hub = write_hub(dir)
+      session = inline_session(config, [dir], requirer: requirer)
+      guarded_baseline(session)
+      expect(session.instance_variable_get(:@ancestry_dependents)[hub]).to include(File.join(dir, "sub.rb"))
+      yield session
+
+      recheck = guarded_recheck(session)
+
+      expect(recheck.changed).to eq(Set[hub])
+      expect(recheck.affected).to eq(Set[hub])
+      expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir], requirer: requirer)))
+    end
+
+    it "collapses a comment appended to an annotation-free hub to the hub, with rbs-inline loaded" do
+      Dir.mktmpdir do |dir|
+        config = inline_config([dir])
+        expect_hub_collapse(config, dir) do |session|
+          expect(loaded_synthesizer_ids(session)).to eq(["rbs-inline"])
+          write_hub(dir, trailer: "# appended\n")
+        end
+      end
+    end
+
+    it "collapses a same-line body edit to an annotation-free hub to the hub, with rbs-inline loaded" do
+      Dir.mktmpdir do |dir|
+        config = inline_config([dir])
+        expect_hub_collapse(config, dir) do |session|
+          expect(loaded_synthesizer_ids(session)).to eq(["rbs-inline"])
+          write_hub(dir, build_body: '"changed"')
+        end
+      end
+    end
+
+    it "honours `enabled: false`: the plugin does not load and the gate still collapses" do
+      Dir.mktmpdir do |dir|
+        config = inline_config([dir], entry: { "gem" => "rigor-rbs-inline", "enabled" => false })
+        expect_hub_collapse(config, dir) do |session|
+          expect(session.instance_variable_get(:@last_runner).plugin_registry.plugins).to be_empty
+          write_hub(dir, trailer: "# appended\n")
+        end
+      end
+    end
+
+    it "digests nothing for an `enabled: false` entry, so an annotation edit keeps the gated closure" do
+      # The hub above carries no annotation, so it cannot tell a session that loaded the disabled plugin anyway
+      # from one that did not. Here an annotation edit would move a loaded rbs-inline's output and send the
+      # recheck to the whole project; with the plugin disabled it moves nothing, and only the edited file runs.
+      Dir.mktmpdir do |dir|
+        greeter = write_greeter(dir, "  #: () -> String\n")
+        config = inline_config([dir], entry: { "gem" => "rigor-rbs-inline", "enabled" => false })
+        session = inline_session(config, [dir])
+        guarded_baseline(session)
+
+        write_greeter(dir, "  #: () -> Integer\n")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to eq(Set[greeter])
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir])))
+      end
+    end
+
+    # An annotated class with both kinds of dependent: Caller reads `greet` (a symbol edge) and Sub its
+    # ancestry. The ancestry dependent is what hid the stale Caller before this gate existed: with one present
+    # the closure takes the symbol-granular route, and an annotation edit changes no method body, so no symbol
+    # pair moved and Caller kept serving the old return type.
+    def write_greeter(dir, annotation_lines, body: '"hi"')
+      greeter = File.join(dir, "greeter.rb")
+      File.write(greeter, "class Greeter\n#{annotation_lines}  def greet\n    #{body}\n  end\nend\n")
+      write_once(File.join(dir, "caller.rb"),
+                 "class Caller\n  def go\n    Rigor.dump_type(Greeter.new.greet)\n  end\nend\n")
+      write_once(File.join(dir, "sub.rb"), "class Sub < Greeter\n  def other\n    Rigor.dump_type(1)\n  end\nend\n")
+      greeter
+    end
+
+    def expect_greeter_recheck(before:, after:, before_type:)
+      Dir.mktmpdir do |dir|
+        greeter = write_greeter(dir, before)
+        config = inline_config([dir])
+        session = inline_session(config, [dir])
+        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: #{before_type}"])
+
+        write_greeter(dir, after)
+        expect_declaration_signature_unmoved(session, greeter)
+
+        expect_rechecked(guarded_recheck(session), config, [dir], %w[greeter.rb caller.rb sub.rb], "caller.rb",
+                         "dump_type: Integer")
+      end
+    end
+
+    it "re-checks the dependents of a `#:` annotation edit that changes a return type" do
+      expect_greeter_recheck(before: "  #: () -> String\n", after: "  #: () -> Integer\n", before_type: "String")
+    end
+
+    it "re-checks the dependents when a plain comment rebinds an annotation to a declaration" do
+      # A blank line becomes a comment: no code, no def line and no annotation text moves. But rbs-inline binds a
+      # comment block by adjacency — the blank line left `# @rbs return: Integer` bound to nothing, and the
+      # comment joins it to `greet` — so only the synthesized output can see the edit.
+      expect_greeter_recheck(before: "  # @rbs return: Integer\n\n",
+                             after: "  # @rbs return: Integer\n  # a plain comment\n", before_type: '"hi"')
+    end
+
+    it "keeps the gate for a body edit to an annotated file, with the digests read through a cache store" do
+      # The bundle's digest is taken at baseline through a `Cache::Store` HIT (the environment build wrote the
+      # entry first) and the edited file's through a MISS, so the two must agree byte for byte; if they did not,
+      # every edit to an annotated file would take the whole-project path.
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        greeter = write_greeter(project, "  #: () -> String\n")
+        config = inline_config([project])
+        store = Rigor::Cache::Store.new(root: File.join(dir, "cache"))
+        session = described_class.new(configuration: config, paths: [project], plugin_requirer: rbs_inline_requirer,
+                                      cache_store: store)
+        guarded_baseline(session)
+        # One hit per project file: the stamps really were read back through the store.
+        expect(store.stats.fetch(:by_producer).fetch("plugin.source_rbs_synthesizer")).to include(hits: 3)
+
+        write_greeter(project, "  #: () -> String\n", body: '"hello"')
+        recheck = guarded_recheck(session)
+
+        expect(recheck.changed).to eq(Set[greeter])
+        expect(recheck.affected).not_to include(File.join(project, "sub.rb"))
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [project])))
+      end
+    end
+
+    it "re-checks the readers when a leading magic comment changes how the synthesized RBS resolves" do
+      # rbs-inline copies the file's first comment line to the top of its RBS, and RBS reads a
+      # `# resolve-type-names:` magic comment there: flipping it turns `Baz` into an unresolvable name. The
+      # synthesized text moves only in a comment line, which is why the digest keeps comments (#1549).
+      Dir.mktmpdir do |dir|
+        ns = File.join(dir, "ns.rb")
+        source = lambda do |first|
+          "#{first}\nmodule Foo\n  class Baz\n  end\n\n  " \
+            "class Bar\n    #: () -> Baz\n    def x\n      nil\n    end\n  end\nend\n"
+        end
+        File.write(ns, source.call("# resolve-type-names: true"))
+        File.write(File.join(dir, "caller.rb"),
+                   "class Caller\n  def go\n    Rigor.dump_type(Foo::Bar.new.x)\n  end\nend\n")
+        config = inline_config([dir])
+        session = inline_session(config, [dir])
+        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: Foo::Baz"])
+
+        File.write(ns, source.call("# resolve-type-names: false"))
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to include(File.join(dir, "caller.rb"))
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir])))
+      end
+    end
+
+    it "re-checks a reader that holds no edge at all to the annotated file" do
+      # `Holder.new.name` resolves through the synthesized `attr_reader` alone, and that read records nothing:
+      # User has no edge of any kind to holder.rb, so no dependent set can reach it. This is why a moved
+      # synthesized output re-analyses the project rather than the file's dependents.
+      Dir.mktmpdir do |dir|
+        holder = File.join(dir, "holder.rb")
+        write_holder = lambda do |type|
+          File.write(holder, "class Holder\n  attr_reader :name #: #{type}\n\n  " \
+                             "def initialize\n    @name = \"x\"\n  end\nend\n")
+        end
+        write_holder.call("String")
+        user = File.join(dir, "user.rb")
+        File.write(user, "class User\n  def go\n    Rigor.dump_type(Holder.new.name)\n  end\nend\n")
+        config = inline_config([dir])
+        session = inline_session(config, [dir])
+        expect(messages_for(guarded_baseline(session), "user.rb")).to eq(["dump_type: String"])
+        expect(session.instance_variable_get(:@dependents)[holder].to_a).not_to include(user)
+
+        write_holder.call("Integer")
+
+        expect_rechecked(guarded_recheck(session), config, [dir], %w[holder.rb user.rb], "user.rb",
+                         "dump_type: Integer")
+      end
+    end
+
+    # A file whose whole contribution is an `@rbs!` block for a class declared elsewhere. Nothing reaches it
+    # through an edge: User meets `Holder` only through `sig/`'s `Factory.make`, never by name, and holder.rb —
+    # judged against the declared return — does not read another file to be judged.
+    def write_label_project(dir)
+      app = File.join(dir, "app")
+      sig = File.join(dir, "sig")
+      FileUtils.mkdir_p([app, sig])
+      File.write(File.join(sig, "factory.rbs"), "class Factory\n  def self.make: () -> Holder\nend\n")
+      File.write(File.join(app, "holder.rb"), "class Holder\n  def label\n    \"x\"\n  end\nend\n")
+      File.write(File.join(app, "factory.rb"), "class Factory\n  def self.make\n    Holder.new\n  end\nend\n")
+      File.write(File.join(app, "user.rb"),
+                 "class User\n  def go\n    Rigor.dump_type(Factory.make.label)\n  end\nend\n")
+      [app, File.join(app, "holder_types.rb")]
+    end
+
+    def label_types
+      "class Holder\n  # @rbs!\n  #   def label: () -> Integer\nend\n"
+    end
+
+    def expect_label_recheck(dir, app, before_type:, after_type:)
+      config = inline_config([app], extra: { "signature_paths" => [File.join(dir, "sig")] })
+      session = inline_session(config, [app])
+      expect(messages_for(guarded_baseline(session), "user.rb")).to eq(["dump_type: #{before_type}"])
+      yield
+
+      expect_rechecked(guarded_recheck(session), config, [app], %w[holder.rb user.rb], "user.rb",
+                       "dump_type: #{after_type}")
+    end
+
+    it "re-analyses the project when a file contributing synthesized RBS is added" do
+      Dir.mktmpdir do |dir|
+        app, types = write_label_project(dir)
+        expect_label_recheck(dir, app, before_type: '"x"', after_type: "Integer") { File.write(types, label_types) }
+      end
+    end
+
+    it "re-analyses the project when a file that contributed synthesized RBS is removed" do
+      Dir.mktmpdir do |dir|
+        app, types = write_label_project(dir)
+        File.write(types, label_types)
+        expect_label_recheck(dir, app, before_type: "Integer", after_type: '"x"') { File.delete(types) }
+      end
+    end
+
+    it "digests every loaded synthesizer, not only rbs-inline" do
+      Dir.mktmpdir do |dir|
+        requirer = lambda do |_name|
+          Rigor::Plugin.register(Rigor::Plugin::FakeRbsSynthesizerProbe)
+          true
+        end
+        config = inline_config([dir], entry: "fake-rbs-synth")
+        write_greeter(dir, "  # fake-rbs: def greet: () -> String\n")
+        session = inline_session(config, [dir], requirer: requirer)
+        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: String"])
+        expect(loaded_synthesizer_ids(session)).to eq(["fake-rbs-synth"])
+
+        write_greeter(dir, "  # fake-rbs: def greet: () -> Integer\n")
+
+        expect_rechecked(guarded_recheck(session), config, [dir], %w[greeter.rb caller.rb], "caller.rb",
+                         "dump_type: Integer", requirer: requirer)
+      end
+    end
+
+    # A synthesizer built in `#prepare` is invisible to the unprepared registry the gate digests with, so
+    # these run through `#run_incremental`, which compares the two sets after each run. Each process is a
+    # fresh session over one snapshot, as the CLI's are.
+    def prepare_built_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::PrepareBuiltSynthesizerProbe)
+        true
+      end
+    end
+
+    def prepare_built_run(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: prepare_built_requirer)
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+    end
+
+    def expect_prepare_built_answer(diagnostics, config, project, message)
+      expect(messages_for(diagnostics, "caller.rb")).to eq([message])
+      expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project], requirer: prepare_built_requirer)))
+    end
+
+    it "stays trusted across processes with rbs-inline, whose synthesizer exists before `#prepare`" do
+      # The comparison after each run must not misfire on the plugin every bundle carries: a false mismatch
+      # would stamp every digest unknown and send every edit to the whole project.
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project])
+        write_greeter(project, "  #: () -> String\n")
+        run = lambda do
+          session = described_class.new(configuration: config, paths: [project], plugin_requirer: rbs_inline_requirer)
+          guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+        end
+        run.call
+        write_greeter(project, "  #: () -> String\n", body: '"hello"')
+        _, warm = run.call
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(warm).to be(true)
+        expect(stamps).to all(be_a(String))
+      end
+    end
+
+    it "re-analyses the project when a synthesizer exists only after `#prepare`" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project], entry: "prepare-built-synth")
+        write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+        diagnostics, = prepare_built_run(config, project, snapshot)
+        expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: String"])
+
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        diagnostics, warm = prepare_built_run(config, project, snapshot)
+
+        expect(warm).to be(true)
+        expect_prepare_built_answer(diagnostics, config, project, "dump_type: Integer")
+      end
+    end
+
+    it "re-analyses the edit that first exposes a synthesizer built in `#prepare`" do
+      # The first run builds no synthesizer, so its digests are honest and it stamps them. The second builds
+      # one only in `#prepare`: the gate, digesting without it, sees nothing move and takes a narrow closure,
+      # and only the comparison after the run can send the edit to a whole-project re-analysis.
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project], entry: "prepare-built-synth")
+        write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = false
+        diagnostics, = prepare_built_run(config, project, snapshot)
+        expect(messages_for(diagnostics, "caller.rb")).to eq(['dump_type: "hi"'])
+
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        diagnostics, warm = prepare_built_run(config, project, snapshot)
+
+        expect(warm).to be(false)
+        expect_prepare_built_answer(diagnostics, config, project, "dump_type: Integer")
+      ensure
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+      end
+    end
+
+    # A long-lived session (the language server's) primes with `run_incremental` and then calls `recheck`
+    # directly, so the check after its priming is the only one it gets. A priming that changed nothing digests
+    # nothing, and must still compare the two synthesizer sets.
+    def primed_session(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: prepare_built_requirer)
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project), persist: false)
+      session
+    end
+
+    def prepare_built_project(dir)
+      project = File.join(dir, "project")
+      FileUtils.mkdir_p(project)
+      write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+      [project, Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache")),
+       inline_config([project], entry: "prepare-built-synth")]
+    end
+
+    it "verifies even a priming that changed nothing, so later direct rechecks stay whole-project" do
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        session = primed_session(config, project, snapshot)
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        guarded_recheck(session)
+
+        write_greeter(project, "  # fake-rbs: def greet: () -> Float\n")
+        recheck = guarded_recheck(session)
+
+        expect_prepare_built_answer(recheck.diagnostics, config, project, "dump_type: Float")
+      end
+    end
+
+    it "re-analyses the project when a file is added under an untrusted gate" do
+      # Under an untrusted gate the unprepared registry says nothing about what an added file contributes, so
+      # an edit that only adds a file must not take the gated closure either.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        session = primed_session(config, project, snapshot)
+        File.write(File.join(project, "extra.rb"),
+                   "class Extra\n  # fake-rbs: def extra: () -> Integer\n  def extra\n    1\n  end\nend\n")
+
+        recheck = guarded_recheck(session)
+
+        expect(recheck.reused).to be_empty
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [project],
+                                                                         requirer: prepare_built_requirer)))
+      end
+    end
+
+    # One `--incremental` process over `snapshot`; the block sees the session before it runs.
+    def rbs_inline_process(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: rbs_inline_requirer)
+      yield session if block_given?
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+    end
+
+    # Saves the block's rewrite of `path` right after `session` decides its closure, keeping the older mtime.
+    def save_after_closure(session, path)
+      allow(session.send(:source_rbs_gate)).to receive(:moved?).and_wrap_original do |original, *args|
+        original.call(*args).tap do
+          before = File.stat(path)
+          File.write(path, yield(File.read(path)))
+          File.utime(before.atime, before.mtime, path)
+        end
+      end
+    end
+
+    it "re-analyses, on the next run, a file saved between the closure decision and the runner's discovery" do
+      # Process B decides its closure on the pre-save bytes, where nothing moved, and its runner then reads the
+      # saved annotation edit. Its readers' cached answers predate that save, so the file must not be stamped
+      # with the post-save digest: process C, with no further edit, would read it as unmoved and serve them.
+      # The save keeps the file's older mtime, as a sync tool or `cp -p` does, so C's stat check cannot see
+      # it either (ADR-87's racy-entry rule re-hashes only a file whose mtime falls inside B's run).
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project])
+        greeter = write_greeter(project, "  #: () -> String\n")
+        rbs_inline_process(config, project, snapshot)
+        sleep 0.05
+        File.write(greeter, "#{File.read(greeter)}# touch\n")
+        rbs_inline_process(config, project, snapshot) do |session|
+          save_after_closure(session, greeter) { |text| text.sub("#: () -> String", "#: () -> Integer") }
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: Integer"])
+        expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project])))
+      end
+    end
+
+    # The rbs-inline twin of {#prepare_built_project}: the greeter tree plus a snapshot and a configuration.
+    def rbs_inline_project(dir)
+      project = File.join(dir, "project")
+      FileUtils.mkdir_p(project)
+      write_greeter(project, "  #: () -> String\n")
+      [project, Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache")), inline_config([project])]
+    end
+
+    def expect_integer_caller(diagnostics, config, project)
+      expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: Integer"])
+      expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project])))
+    end
+
+    it "re-analyses, on the next run, an annotated file saved outside the closure while a recheck ran" do
+      # Process B's closure is `other.rb`. greeter.rb, outside it, is saved (keeping its mtime) just after the
+      # closure is decided, so B's runner rebuilds its bundle from bytes no reading vouches for. Only a run that
+      # re-analysed every file may stamp such a bundle from a reading taken afterwards; here greeter.rb's readers
+      # were served from cache, so it is stamped unknown and process C re-detects it.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = rbs_inline_project(dir)
+        greeter = File.join(project, "greeter.rb")
+        other = File.join(project, "other.rb")
+        File.write(other, "class Other\n  def run\n    1\n  end\nend\n")
+        rbs_inline_process(config, project, snapshot)
+        sleep 0.05
+        File.write(other, "class Other\n  def run\n    2\n  end\nend\n")
+        rbs_inline_process(config, project, snapshot) do |session|
+          save_after_closure(session, greeter) { |text| text.sub("#: () -> String", "#: () -> Integer") }
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect_integer_caller(diagnostics, config, project)
+      end
+    end
+
+    it "re-analyses, on the next run, a file saved while a baseline was stamping it" do
+      # The baseline's reading, taken after the run, no longer matches the bytes discovery built the bundle
+      # from; the file's readers were analysed before the save, so it is stamped unknown and its recorded
+      # content digest (taken after the save, with the older mtime kept) is dropped.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = rbs_inline_project(dir)
+        greeter = File.join(project, "greeter.rb")
+        rbs_inline_process(config, project, snapshot) do |session|
+          allow(session.send(:source_rbs_gate)).to receive(:stamp).and_wrap_original do |original, *args, **kwargs|
+            before = File.stat(greeter)
+            File.write(greeter, File.read(greeter).sub("#: () -> String", "#: () -> Integer"))
+            File.utime(before.atime, before.mtime, greeter)
+            original.call(*args, **kwargs)
+          end
+        end
+
+        diagnostics, = rbs_inline_process(config, project, snapshot)
+
+        expect_integer_caller(diagnostics, config, project)
+      end
+    end
+
+    it "re-stamps unknown digests on the next whole-project run once the gate is trusted again" do
+      # A distrust episode leaves every stamp unknown. Once the synthesizer sets agree again, the next edit
+      # re-analyses every file, which vouches for every stamp; left unknown, each untouched file's first edit
+      # would re-analyse the project once more.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = false
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        prepare_built_run(config, project, snapshot)
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(stamps).to all(be_a(String))
+      ensure
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+      end
+    end
+
+    it "keeps a run that changed nothing a null run under an untrusted gate" do
+      # Under an untrusted gate every edit re-analyses the whole project, so the snapshot a later null run
+      # serves is whole; re-analysing it would turn every null run into a baseline.
+      Dir.mktmpdir do |dir|
+        project, snapshot, config = prepare_built_project(dir)
+        prepare_built_run(config, project, snapshot)
+
+        warm = Array.new(2) { prepare_built_run(config, project, snapshot).last }
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(stamps).to all(be_nil) # the gate really was untrusted
+        expect(warm).to eq([true, true])
+      end
     end
   end
 

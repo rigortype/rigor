@@ -233,13 +233,19 @@ module Rigor
         # {Rigor::Plugin::Registry} WITHOUT the synthetic-method / dependency-source / pre-eval scanners. The
         # incremental fact-surface fingerprint probe ({Analysis::PluginFactFingerprint}) uses this to read the
         # ADR-9 fact store + drive the ADR-60 producers without paying for the full pre-pass or building the RBS
-        # environment. `prepare` runs unconditionally here — the probe is always sequential (its `pool_mode?`
+        # environment. `prepare` runs whatever the pool mode — the probe is always sequential (its `pool_mode?`
         # reader returns false), so the pool-mode skip in {#run} does not apply. Prepare diagnostics are
         # discarded: a plugin that raises in `#prepare` publishes no facts, so its surface is simply absent from
         # the fingerprint, exactly as it would be absent from analysis.
-        def prepared_registry
+        #
+        # Issue #1536 — `prepare: false` loads the plugins without running `#prepare`, for a caller that reads
+        # only what a manifest declares: the incremental session reads each plugin's `source_rbs_synthesizer`
+        # before its recheck runner exists. A synthesizer's output is a function of the file, the plugin's
+        # config and the engine — the key its `Cache::Store` entry already rests on — so `#prepare` has
+        # nothing to add to it, and skipping it keeps that read off every plugin's prepare-time scans.
+        def prepared_registry(prepare: true)
           registry = load_plugins
-          plugin_prepare_diagnostics(registry) unless registry.empty?
+          plugin_prepare_diagnostics(registry) if prepare && !registry.empty?
           registry
         end
 

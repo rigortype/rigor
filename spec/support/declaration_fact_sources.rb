@@ -82,10 +82,10 @@ end
 # - (iii) references a constant, in this file or another covered one, whose assignment contains (i), (ii) or (iv);
 # - (iv) names a visibility or mixin keyword as a symbol (`:private`, `:include`, …), except as a Hash key or among
 #   Array/String mutator names (`%i[<< push prepend unshift]` names methods, not the keyword);
-# - (v) in `scope_indexer.rb`, is reachable through same-file calls from one of `DeclarationWriterScan::ROOTS` and
-#   writes into one of its parameters, a `*rest` or `**rest` included: an indexed assignment or a `<<` /
-#   `merge!` / `add?`-style call into it, or passing it (by position, keyword or splat) to a same-file method that
-#   does.
+# - (v) in `scope_indexer.rb`, is reachable through same-file calls (in its body or default arguments) from one of
+#   `DeclarationWriterScan::ROOTS` or a method another covered file calls as `ScopeIndexer.x`, and writes into one
+#   of its parameters, a `*rest` or `**rest` included: an indexed assignment or a `<<` / `merge!` / `add?`-style
+#   call into it, or passing it (by position, keyword or splat) to a same-file method that does.
 #
 # A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement, and
 # so is a class in a covered file whose superclass is one (`class X < SuperclassesCollector`).
@@ -110,7 +110,8 @@ module DeclarationProducerScan
       scan(root, [], nil, tainted, skipped) { |scope, reason| found["#{path}##{scope}"] << reason }
     end
     collectors(parsed) { |path, scope, why| found["#{path}##{scope}"] << why }
-    DeclarationWriterScan.rule_v(parsed.fetch(RULE_V_FILE, nil)) do |scope|
+    roots = DeclarationWriterScan.external_roots(parsed, RULE_V_FILE)
+    DeclarationWriterScan.rule_v(parsed.fetch(RULE_V_FILE, nil), roots) do |scope|
       found["#{RULE_V_FILE}##{scope}"] << "writes a table (rule v)"
     end
     found.transform_values(&:uniq)
@@ -286,24 +287,36 @@ module DeclarationProducerScan
   end
 end
 
-# ADR-119 WD6's rule (v): the methods of `scope_indexer.rb` that are reachable from `ROOTS` through same-file calls
-# and write into one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing
-# it to a same-file method that does.
+# ADR-119 WD6's rule (v): the methods of `scope_indexer.rb` that are reachable, through same-file calls (a default
+# argument's included), from `ROOTS` or from a method another covered file calls as `ScopeIndexer.x`, and write into
+# one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing it to a
+# same-file method that does.
 module DeclarationWriterScan
   WRITE_CALLS = %i[[]= << push unshift concat merge! store add add? update].freeze
   # ADR-119's three roots, then the multi-file entry points: their folds (`finalize_project_index`,
-  # `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root.
+  # `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root. A method another file calls is a
+  # root as well, so a new entry point needs no edit here.
   ROOTS = %i[
     index accumulate_project_index finalize_def_index
     discovered_classes_for_paths discovered_def_index_for_paths discovered_project_index_for_paths
-    discovered_project_index_incremental
+    discovered_project_index_incremental scan_summary_for_paths
   ].freeze
 
   module_function
 
+  # The `ScopeIndexer` methods the covered files other than `rule_v_file` call (`ScopeIndexer.x(…)`).
+  def external_roots(parsed, rule_v_file)
+    parsed.except(rule_v_file).flat_map do |_, root|
+      DeclarationFactSources.each_node(root).select do |node|
+        node.is_a?(Prism::CallNode) &&
+          DeclarationFactSources.constant_name(node.receiver).to_s.end_with?("ScopeIndexer")
+      end.map(&:name)
+    end.uniq
+  end
+
   # Rule (v): yields the keys of `scope_indexer.rb`'s methods that are reachable from its entry points and write
   # into a parameter.
-  def rule_v(root)
+  def rule_v(root, extra_roots = [])
     return unless root
 
     # Every definition of a name counts: a reopening or a `def self.x` beside a `module_function` copy.
@@ -313,7 +326,7 @@ module DeclarationWriterScan
     end
     calls = defs.transform_values { |sites| sites.flat_map { |node, _| same_file_calls(node, defs) } }
     writers = parameter_writers(defs, calls)
-    reachable(calls).each do |name|
+    reachable(calls, ROOTS | extra_roots).each do |name|
       next if writers.fetch(name).empty?
 
       defs.fetch(name).each { |node, owners| yield DeclarationProducerScan.def_key(owners, node, node.receiver) }
@@ -321,9 +334,14 @@ module DeclarationWriterScan
   end
 
   def same_file_calls(def_node, defs)
-    DeclarationFactSources.each_node(def_node.body || def_node).select do |node|
+    def_code(def_node).select do |node|
       node.is_a?(Prism::CallNode) && defs.key?(node.name) && self_receiver?(node.receiver)
     end
+  end
+
+  # Every node a def runs: its default arguments and its body.
+  def def_code(def_node)
+    [def_node.parameters, def_node.body].compact.flat_map { |part| DeclarationFactSources.each_node(part).to_a }
   end
 
   def self_receiver?(receiver)
@@ -331,9 +349,9 @@ module DeclarationWriterScan
       DeclarationFactSources.constant_name(receiver).to_s.end_with?("ScopeIndexer")
   end
 
-  def reachable(calls)
+  def reachable(calls, roots)
     seen = Set.new
-    pending = ROOTS.select { |root| calls.key?(root) }
+    pending = roots.select { |root| calls.key?(root) }
     until pending.empty?
       name = pending.pop
       next unless seen.add?(name)
@@ -391,7 +409,7 @@ module DeclarationWriterScan
   # The parameters `def_node` writes into itself.
   def direct_writes(def_node, params)
     written = Set.new
-    DeclarationFactSources.each_node(def_node.body || def_node) do |node|
+    def_code(def_node).each do |node|
       target = case node
                when Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode then node.receiver
                when Prism::CallNode then node.receiver if WRITE_CALLS.include?(node.name)
@@ -462,7 +480,8 @@ end
 #   `store`), on any receiver. `:methods` and `:classes` are ordinary words, so they count only on a receiver named
 #   like an index (`index`, `def_index`, `seed`, `tables`, `bundle`, `summary`). A Symbol list naming two or more
 #   slots is an alias list and counts as a copy of each, and so does a slot name assigned to a constant or variable
-#   (`SLOT = :def_nodes`), which stands for the slot wherever it is read.
+#   of any kind, by `=`, `||=` or a multi-write, alone, frozen or in a list (`SLOT = :def_nodes`,
+#   `@@slots ||= %i[def_nodes]`), which stands for the slot wherever it is read.
 # - Whole-index reads and copies are recorded apart: `with(**x)`, `new(**x)`, `new(*x)`, `to_h`, `deconstruct` and
 #   `deconstruct_keys` on a discovery index, iterating `DiscoveryIndex.members`, a `send` with a computed name on
 #   one, and a `discovered_`-prefixed interpolated Symbol or String.
@@ -479,6 +498,13 @@ module DiscoveryReadScan
   SEND_CALLS = %i[public_send send __send__].freeze
   AMBIGUOUS_SLOTS = %i[methods classes].freeze
   WHOLE_INDEX_CALLS = %i[to_h deconstruct deconstruct_keys dup clone].freeze
+  # The assignments whose value can hold a slot name: every constant and variable form, `||=` and multi-write too.
+  SLOT_HOLDERS = [
+    Prism::ConstantWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantPathOrWriteNode,
+    Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::InstanceVariableWriteNode,
+    Prism::InstanceVariableOrWriteNode, Prism::ClassVariableWriteNode, Prism::ClassVariableOrWriteNode,
+    Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::MultiWriteNode
+  ].freeze
 
   module_function
 
@@ -517,8 +543,7 @@ module DiscoveryReadScan
       case node
       when Prism::CallNode then scan_call(node, table, claimed, &report)
       when Prism::ArrayNode then scan_alias_list(node, table, claimed, &report)
-      when Prism::ConstantWriteNode, Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode
-        scan_slot_holder(node, table, &report)
+      when *SLOT_HOLDERS then scan_slot_holder(node, table, &report)
       when Prism::InterpolatedSymbolNode, Prism::InterpolatedStringNode
         report.call(:whole, nil) if computed_member_name?(node)
       when Prism::SymbolNode
@@ -570,11 +595,21 @@ module DiscoveryReadScan
 
   # A slot name held in a constant or variable (`SLOT = :def_nodes`) stands for the slot wherever it is read.
   def scan_slot_holder(node, table)
-    return unless node.value.is_a?(Prism::SymbolNode)
+    held_symbols(node.value).each do |symbol|
+      name = symbol.unescaped.to_sym
+      member, full = table[name]
+      yield :copy, member if member && !full && !AMBIGUOUS_SLOTS.include?(name)
+    end
+  end
 
-    name = node.value.unescaped.to_sym
-    member, full = table[name]
-    yield :copy, member if member && !full && !AMBIGUOUS_SLOTS.include?(name)
+  # The Symbols a held value names: the value itself, a `.freeze` of it, or a list's elements.
+  def held_symbols(value)
+    case value
+    when Prism::SymbolNode then [value]
+    when Prism::ArrayNode then value.elements.flat_map { |element| held_symbols(element) }
+    when Prism::CallNode then value.name == :freeze && value.receiver ? held_symbols(value.receiver) : []
+    else []
+    end
   end
 
   def computed_member_name?(node)

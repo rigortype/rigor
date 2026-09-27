@@ -128,8 +128,9 @@ RSpec.describe "Declaration-fact witness" do
       )
     end
 
-    # #1305's family: a def whose innermost or enclosing cref is a singleton class through which a constant the def
-    # names resolves, directly or through its ancestors, where no recorded chain of names reaches it.
+    # #1305's family: a def whose innermost or enclosing cref is a singleton class, and a constant the def names
+    # resolves elsewhere once the recorded chain of names drops it: through the singleton class or its ancestors, or
+    # through the ancestors of the class that becomes innermost without it.
     {
       "anonymous_cref_constant" => ["a class opened below class << self", '["E", "C"]', 15, "X"],
       "anonymous_cref_late_constant" => ["the same, with the constant written after the class", '["E", "C"]', 11, "X"],
@@ -137,7 +138,9 @@ RSpec.describe "Declaration-fact witness" do
       "singleton_private_constant" => ["a def in class << self, the constant private", '["C"]', 13, "X"],
       "singleton_extend_constant" => ["a def in class << self of a class that extends M", '["C"]', 16, "Y"],
       "singleton_extend_private_constant" => ["the same, M's constant private", '["C"]', 17, "Y"],
-      "singleton_superclass_constant" => ["a def in class << self, the constant in the superclass's", '["C"]', 16, "Z"]
+      "singleton_superclass_constant" => ["a def in class << self, the constant in the superclass's", '["C"]', 16, "Z"],
+      "singleton_include_top_constant" => ["a def in class << self of a class that includes M", '["C"]', 16, "X"],
+      "singleton_superclass_top_constant" => ["a def in class << self, the superclass shadowing X", '["C"]', 15, "X"]
     }.each do |fixture_name, (shape, recorded, line, constant)|
       it "#1305: resolves constants through the singleton cref — #{shape}" do
         pending "https://github.com/rigortype/rigor/issues/1305 — the recorded nesting drops #<Class:C>"
@@ -148,8 +151,8 @@ RSpec.describe "Declaration-fact witness" do
       # Flip this when #1305 is fixed.
       it "#1305 today — #{shape}" do
         expect(violations(fixture_name)).to eq(
-          ["def_nestings: Rigor records #{recorded} for the def at line #{line}; Ruby resolves #{constant} through " \
-           "#<Class:C>, which the recorded chain cannot reach"]
+          ["def_nestings: Rigor records #{recorded} for the def at line #{line}; dropping #<Class:C> from Ruby's " \
+           "nesting makes #{constant} resolve elsewhere"]
         )
       end
     end
@@ -244,9 +247,17 @@ RSpec.describe "Declaration-fact witness" do
       end
       with_fixture("#{agreeing.values.last}\n  class << self\n    def foo = VERSION\n  end\nend\n") do |probe|
         expect(DeclarationWitness.violations(probe, relations: %i[def_nestings]))
-          .to eq(['def_nestings: Rigor records ["C"] for the def at line 7; Ruby resolves VERSION through ' \
-                  "#<Class:C>, which the recorded chain cannot reach"])
+          .to eq(['def_nestings: Rigor records ["C"] for the def at line 7; dropping #<Class:C> from Ruby\'s ' \
+                  "nesting makes VERSION resolve elsewhere"])
       end
+    end
+
+    it "keeps its const_added hook private and elides per-run addresses from a violation" do
+      with_fixture("class Probe; end\nraise \"public hook\" if Probe.respond_to?(:const_added)\n") do |probe|
+        expect { DeclarationWitness.record(probe) }.not_to raise_error
+      end
+      expect(DeclarationWitness::Relations.nesting_violation(["D"], [["#<Class:0x000123abc>::D", []]], 3, []))
+        .to eq('def_nestings: Rigor records ["D"] for the def at line 3; Ruby\'s is ["#<Class:0x...>::D"]')
     end
 
     it "tells two statements on one line apart by their self" do

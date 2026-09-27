@@ -21,8 +21,9 @@ require "yaml"
 # `Prism.const_get(:ClassNode)`, duck typing (`respond_to?(:superclass)`), a keyword spelled as a String, a constant
 # reached through a variable or `const_get`, a collector subclassed through a variable or `Class.new`, or rule (v)'s
 # writes outside `scope_indexer.rb`, through a local alias of a parameter, through `...` forwarding, or from a method
-# no entry in `DeclarationWriterScan::ROOTS` reaches. Plugin specs and demo apps are not scanned. The list freezes the
-# set and certifies nothing about how an entry computes its context.
+# reached only through `send`, a block handed to another file, or an entry point neither in
+# `DeclarationWriterScan::ROOTS` nor called as `ScopeIndexer.x` from another covered file. Plugin specs and demo apps
+# are not scanned. The list freezes the set and certifies nothing about how an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   let(:header) do
@@ -206,6 +207,24 @@ RSpec.describe "Declaration producers" do
       expect(producers_of(source, DeclarationProducerScan::RULE_V_FILE).keys)
         .to contain_exactly("Rigor::ScopeIndexer#index", "Rigor::ScopeIndexer#spread", "Rigor::ScopeIndexer#mark",
                             "Rigor::ScopeIndexer#accumulate_project_index", "Rigor::ScopeIndexer#keep")
+    end
+
+    it "follows rule (v) from a method another file calls, and through a default argument" do
+      parsed = {
+        DeclarationProducerScan::RULE_V_FILE => Prism.parse(<<~RUBY).value,
+          module Rigor
+            module ScopeIndexer
+              def summary_for(root, acc) = walk(root, acc)
+              def walk(root, acc, _done = record(acc, root)) = root
+              def record(table, root) = table << root
+            end
+          end
+        RUBY
+        "lib/rigor/caller.rb" => Prism.parse("Rigor::ScopeIndexer.summary_for(root, {})").value
+      }
+
+      expect(DeclarationProducerScan.producers(parsed).keys.map { |key| key.split("#", 2).last })
+        .to contain_exactly("Rigor::ScopeIndexer#summary_for", "Rigor::ScopeIndexer#walk", "Rigor::ScopeIndexer#record")
     end
 
     it "marks a subclass of a collector, from another file and transitively" do

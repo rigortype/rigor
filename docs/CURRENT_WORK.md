@@ -47,12 +47,14 @@ Maintainer decisions recorded on the issues:
    `stdlib/uri/0/generic.rbs`. Ruby has had it since 2018 (ruby/ruby `0164ce893f`), and rbs master
    still lacks it. It is an outward publication, so wait for a yes. It causes no Rigor report today.
 2. **ADR-117 order:** #1426, then #1427, then #1366's stream part, which also carries the `$>` →
-   `$stdout` alias. #1429 and #1415 are done, so #1366's `$_` part is unblocked. WD6 still holds:
+   `$stdout` alias. #1484 (a value-position `case` arm checked against the unnarrowed subject) must
+   land before that stream part, because WD1 requires `case $stdout when StringIO` to stay quiet. #1429 and #1415 are done, so #1366's `$_` part is unblocked. WD6 still holds:
    a declined or forgotten `$_` stays `Dynamic`. #1366 is still `ready-for-human`, because the
    go/no-go rests on its corpus result.
-3. **#1454, phase 2** is unblocked now. It adds `docs/type-specification/global-variables.md`, an
-   internal-spec "Special variables" map and `CONTEXT.md` terms. Phase 3, the handbook chapter,
-   waits for #1366, #1426 and #1427.
+3. **#1454:** phase 2 landed in #1478. It added `docs/type-specification/global-variables.md`, the
+   internal-spec "Special variables" map, and the `CONTEXT.md` terms. The doc lists the known
+   violations of ADR-117 Decision point 3 (#1465, #1484, #1485); update that list as they land.
+   Phase 3, the handbook chapter, waits for #1366, #1426 and #1427.
 4. **`ready-for-agent` in `v0.4.x`, cheapest first:**
    - #1467: `verify-changed` misses `provenance_spec`. This bit two lanes this session.
    - #1447: the ErrorInfo `$!` decline.
@@ -73,6 +75,9 @@ Maintainer decisions recorded on the issues:
    - Perf: #1466.
    - Other: #1455 (misses of the `global.*` rules) and #1456 (OpenStruct fields report
      `call.undefined-method`, a real false positive on master).
+   - From #1478's review, false positives on master: #1477 (a `$1` guard), #1481 (a write binding
+     that survives a call), #1482 (a named-capture `=~`), #1484, #1485. Precision or soundness
+     gaps: #1472, #1473, #1486.
    - Still waiting from before: #1376, #1377, #1380, #1445. Ready for a human: #1400, #1417.
 6. Sibling Draft #1397 (another session's) restructures `eval_ensure`. It must keep #1449's ensure
    rule for `$_`; a PR comment explains how.

@@ -41,14 +41,16 @@ define *behaviour*.
   `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark". Its opposite is
   **flow-live**. _Avoid_: "declared type" alone, which also names a signature a report may rest on.
 - **idiomatic expectation** — the type a value holds by the language's idioms where the runtime
-  guarantees less: `$stdout` holds an `IO`, though its setter requires only `write`. Rigor reads a
-  value by it; the runtime's guarantee is what a write is checked against.
-  [ADR-117](docs/adr/117-standard-streams-typed-by-idiom.md) Decision point 2 defines it, and
-  `docs/type-specification/global-variables.md` applies it to globals. Not a claim about the runtime
-  class.
+  guarantees less: `$stdout` holds an `IO`, though its setter requires only `write`. It is decided
+  as the type Rigor reads an unbound stream by, which is not implemented as of this writing
+  ([#1366](https://github.com/rigortype/rigor/issues/1366)); the runtime's guarantee is what a write
+  is checked against. [ADR-117](docs/adr/117-standard-streams-typed-by-idiom.md) Decision point 2
+  defines it, and `docs/type-specification/global-variables.md` applies it to globals. Not a claim
+  about the runtime class.
 - **frame-local special** — a special variable Ruby keeps in the special-variable slot of the
   method, class, module or file body that runs the code: `$~`, the match globals derived from it, and
-  `$_`. A block shares its body's slot; a called method and a thread's root block have their own.
+  `$_`. A block shares its body's slot; a method defined in Ruby, and the root block of a thread,
+  fiber or ractor, have their own.
   `$!` / `$@` (the rescue frame) and `$?` (the thread) are specials but not frame-local. The slot
   table is `docs/type-specification/global-variables.md` § "Special-variable slots".
 - **type-shaped comment** — a type written where Rigor never checks it: a YARD `[Type]` slot or a

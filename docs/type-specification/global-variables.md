@@ -19,30 +19,27 @@ Three terms recur here and in the documents that link to it ([`CONTEXT.md`](../.
 
 ## Where a global's type comes from
 
-A read of a global variable takes its type from the first of these sources that holds at the read:
+A read of a global variable takes its value's type from the first of these sources that holds at the read:
 
-1. a flow binding, made by a write in the body being read or by a special variable's own binding point;
-2. a narrowing of that binding by a guard;
-3. the program-global seed the body started from;
-4. the idiomatic expectation, which is decided for the streams but not implemented as of this writing;
-5. `Dynamic[top]`.
+1. a flow binding: a write in the flow of the body being read, or a special variable's own binding point;
+2. otherwise, the program-global seed the body started from;
+3. otherwise, a fixed read: `String?` for a match reference (§ [Match references](#match-references));
+4. otherwise, `Dynamic[top]`.
 
-A narrowing refines whichever of the other sources the read would have taken, and a write replaces all of them. The numbered and back-reference match globals are the exception to the last step (§ [Match references](#match-references)).
+A guard's narrowing applies on top of whichever source holds (§ [A narrowing](#a-narrowing)), and a write replaces all of them. The idiomatic expectation is decided to come before `Dynamic[top]` for the streams, but is not implemented as of this writing (§ [The idiomatic expectation](#the-idiomatic-expectation)).
 
 ### A flow binding
 
 A write to a global in the flow that reaches the read (`$g = v`, `$g ||= v`, `$g += v`) binds it to the type the write computes, as a local write does. A later write replaces the binding. Where two paths join, a global both paths bind reads the union of the two bindings, and a global only one path binds is unbound past the join.
 
-A special variable also has binding points of its own, which the [slot table](#special-variable-slots) lists: a `=~` predicate binds the match globals on its edges, a reader condition binds `$_`, a `rescue` clause binds `$!` and `$@`, and a statement that certainly ran a subprocess binds `$?`.
+A special variable also has binding points of its own, which the [slot table](#special-variable-slots) lists: a `=~` predicate binds the match globals on its edges, and a `when` clause whose condition is a regex literal binds them in its body; a reader condition binds `$_`; a `rescue` clause binds `$!` and `$@`; and a statement that certainly ran a subprocess binds `$?`.
 
-A direct write inside a loop body or a `begin` body is not joined into the next pass or into a rescue clause ([#1464](https://github.com/rigortype/rigor/issues/1464)), and a write to `$~` leaves the other match globals narrowed from the earlier match ([#1472](https://github.com/rigortype/rigor/issues/1472)).
+The gaps:
 
-### A narrowing
-
-A guard narrows a global read as it narrows a local read: truthiness, `nil?`, `!`, safe navigation, the class guards and `respond_to?` ([Guards on globals and constants](control-flow-analysis.md#guards-on-globals-and-constants), [#1429](https://github.com/rigortype/rigor/issues/1429)). It narrows whatever type the read would otherwise have: a flow binding, the seed, or the type an unbound read has. A guard does not narrow a match reference (`$1`, `$&`, …), which only a `=~` predicate binds ([#1477](https://github.com/rigortype/rigor/issues/1477)). Where the narrowing stops holding depends on the variable:
-
-- **A process-wide global, and `$?`.** Ruby code the analysis cannot see may assign the global between the guard and a read. So wherever code may run that rebinds it, the read reverts to the union of the narrowed type and the binding the guard narrowed. The code that counts, and the gaps, are listed in the section linked above. `$stdout` and `$>` are one variable there: a write to either ends a guard's narrowing of the other.
-- **A frame-local special, and `$!` and `$@`.** A called method cannot reach the first two, and a call that returns leaves the last two as they were, so a guard's narrowing of them is not reverted by that rule. Each is forgotten where its own rules in the [slot table](#special-variable-slots) forget it.
+- A call that may reassign a process-wide global does not end a write's binding of it: after `$flag = false; enable`, `$flag` still reads `false` ([#1481](https://github.com/rigortype/rigor/issues/1481)). Only a guard's narrowing reverts there.
+- A direct write inside a loop body or a `begin` body is not joined into the next pass or into a rescue clause ([#1464](https://github.com/rigortype/rigor/issues/1464)).
+- A write to `$~` leaves the other match globals narrowed from the earlier match ([#1472](https://github.com/rigortype/rigor/issues/1472)).
+- A `=~` whose left operand is a regex literal with named groups (`/(?<num>\d+)/ =~ s`) binds the named locals but no match global ([#1482](https://github.com/rigortype/rigor/issues/1482)).
 
 ### The program-global seed
 
@@ -57,33 +54,40 @@ A method body the analysis enters, and the file's top level, start with each glo
 
 > **Decided, not implemented as of this writing ([#1437](https://github.com/rigortype/rigor/issues/1437)).** The declared `nil` is not joined (`$VERBOSE: bool?` joins `bool`), and the nil-bearing separators `$/`, `$,`, `$;`, `$\`, `$-0`, `$-F` and `$-i` are seeded with the file's writes alone, so `$, = "-"` seeds `"-"`. A declared `nil` would reach a nil-receiver or argument report through a value that mixes the global with something else (`sep = c ? $/ : ";"`), which the declaration-sourced mark does not follow. Joining them waits for a nil-only provenance record.
 
-### The idiomatic expectation
-
-> **Decided for the streams, not implemented as of this writing ([#1366](https://github.com/rigortype/rigor/issues/1366)).** [ADR-117](../adr/117-standard-streams-typed-by-idiom.md) WD1: an unbound `$stdin`, `$stdout` or `$stderr` reads as `IO`, and `$>` reads and joins as `$stdout` does. #1366 proposes the same fallback to the RBS declaration for every other special, and to a project `sig/` declaration for any global, with its corpus result as the go/no-go. `$_` is excluded: a declined or forgotten `$_` MUST keep reading `Dynamic[top]`, never its declared `String?` (WD6). Today no unbound global reads its declaration, and `$>` and `$stdout` keep separate seeds, as do the other names Ruby gives one global twice (`$-v` and `$VERBOSE`, `$-d` and `$DEBUG`, `$-0` and `$/`, `$-F` and `$;`, `$PROGRAM_NAME` and `$0`).
-
-The expectation is the type Rigor reads, not a claim about the runtime class: application code may run with a `StringIO` behind `$stdout` and has no business knowing it. Rigor never warns that a value might deviate from the expectation. Only the evidence in § [The evidence boundary](#the-evidence-boundary) changes it.
-
-The `English` aliases (`$LAST_MATCH_INFO`, `$ERROR_INFO`, `$CHILD_STATUS`, …) are ordinary globals as of this writing: none reads, narrows or binds as the special it aliases ([#1443](https://github.com/rigortype/rigor/issues/1443)).
-
-### `Dynamic[top]`
-
-Every other read is `Dynamic[top]`: an unbound special, and any global neither the flow nor the seed binds.
-
 ### Match references
 
 `$1`, `$2`, … and the back-references `$&`, `` $` ``, `$'` and `$+` are not global-variable reads in Prism's tree, and they read a fixed `String?` wherever the scope does not bind them. `$~` is an ordinary global read, so it reads `Dynamic[top]` unbound.
 
+### `Dynamic[top]`
+
+Every other read is `Dynamic[top]`: an unbound special other than a match reference, and any global neither the flow nor the seed binds.
+
+### A narrowing
+
+A guard narrows a global read as it narrows a local read: truthiness, `nil?`, `!`, safe navigation, the class guards and `respond_to?` ([Guards on globals and constants](control-flow-analysis.md#guards-on-globals-and-constants), [#1429](https://github.com/rigortype/rigor/issues/1429)). It narrows whichever source holds: a flow binding, the seed, or the type an unbound read has. A guard does not narrow a match reference (`$1`, `$&`, …), which only the match rules above bind ([#1477](https://github.com/rigortype/rigor/issues/1477)). Where the narrowing stops holding depends on the variable:
+
+- **A process-wide global, and `$?`.** Ruby code the analysis cannot see may assign the global between the guard and a read. So wherever code may run that rebinds it, the read reverts to the union of the narrowed type and the binding the guard narrowed. The code that counts, and the gaps, are listed in the section linked above. `$stdout` and `$>` are one variable there: a write to either ends a guard's narrowing of the other.
+- **`$~` and `$_`, and `$!` and `$@`.** A method defined in Ruby runs on a slot of its own, so calling it cannot rebind `$~` or `$_`; a C method that sets them in its caller's slot (`sub` sets `$~`, `gets` sets `$_`) is among the code their own rules forget them at. A call that returns leaves `$!` and `$@` as they were. So the rule above does not revert a guard's narrowing of these four; each is forgotten where its own rules in the [slot table](#special-variable-slots) forget it.
+
+### The idiomatic expectation
+
+> **Decided for the streams, not implemented as of this writing ([#1366](https://github.com/rigortype/rigor/issues/1366)).** [ADR-117](../adr/117-standard-streams-typed-by-idiom.md) WD1: an unbound `$stdin`, `$stdout` or `$stderr` reads as `IO`, and `$>` reads and joins as `$stdout` does. #1366 proposes the same fallback to the RBS declaration for every other special, and to a project `sig/` declaration for any global, with its corpus result as the go/no-go. `$_` is excluded: a declined or forgotten `$_` MUST keep reading `Dynamic[top]`, never its declared `String?` (WD6). Today no unbound global reads its declaration, and `$>` and `$stdout` keep separate seeds, as do the other names Ruby gives one global twice (`$-v`, `$-w` and `$VERBOSE`, `$-d` and `$DEBUG`, `$-0` and `$/`, `$-F` and `$;`, `$PROGRAM_NAME` and `$0`).
+
+Once implemented, the expectation is the type Rigor reads, not a claim about the runtime class: application code may run with a `StringIO` behind `$stdout` and has no business knowing it. Rigor never warns that a value might deviate from the expectation, and only the evidence in § [The evidence boundary](#the-evidence-boundary) may change it.
+
+The `English` aliases (`$LAST_MATCH_INFO`, `$ERROR_INFO`, `$CHILD_STATUS`, …) are ordinary globals as of this writing: none reads, narrows or binds as the special it aliases ([#1443](https://github.com/rigortype/rigor/issues/1443)).
+
 ## Special-variable slots
 
-Ruby keeps a special variable in one of four kinds of place, and the place decides which code can change the value between a binding and a read. Rigor binds a special only where the code shows its value, and forgets the binding wherever code that may change it runs.
+Ruby keeps a special variable in one of four kinds of place, and the place decides which code can change the value between a binding and a read. Rigor binds `$~`, the match globals, `$_`, `$!`, `$@` and `$?` only where the code shows their value, and forgets each binding where code that may change it runs, by the rules the table links. A process-wide global is different: a call that may reassign it reverts a guard's narrowing, but not a write's binding ([#1481](https://github.com/rigortype/rigor/issues/1481)).
 
 | Variables | Where Ruby keeps it | Bound by | Forgotten by | Other bodies | Unbound read |
 | --- | --- | --- | --- | --- | --- |
-| `$~` and the match globals `$&`, `` $` ``, `$'`, `$+`, `$1`, `$2`, … | The method frame: the special-variable slot of the method, class, module or file body that runs the match ([#1358](https://github.com/rigortype/rigor/issues/1358)). | The edges of a `=~` predicate ([Regexp match-predicate narrowing](control-flow-analysis.md#regexp-match-predicate-narrowing)), and a write to `$~`. | Code that may rebind the slot, per the same section. `$10` and later groups are not forgotten yet ([#1384](https://github.com/rigortype/rigor/issues/1384)). | See below. | `$~`: `Dynamic[top]`. The others: `String?`. |
+| `$~` and the match globals `$&`, `` $` ``, `$'`, `$+`, `$1`, `$2`, … | The method frame: the special-variable slot of the method, class, module or file body that runs the match ([#1358](https://github.com/rigortype/rigor/issues/1358)). | The edges of a `=~` predicate and the body of a `when` clause whose condition is a regex literal ([Regexp match-predicate narrowing](control-flow-analysis.md#regexp-match-predicate-narrowing)), and a write to `$~`. A named-capture `=~` binds none of them ([#1482](https://github.com/rigortype/rigor/issues/1482)). | Code that may rebind the slot, per the same section. `$10` and later groups are not forgotten yet ([#1384](https://github.com/rigortype/rigor/issues/1384)). | See below. | `$~`: `Dynamic[top]`. The others: `String?`. |
 | `$_` | The method frame, beside `$~` ([#1359](https://github.com/rigortype/rigor/issues/1359)). | The edges of a reader condition ([Last-line (`$_`) narrowing](control-flow-analysis.md#last-line-_-narrowing)), including an implicit-self `gets` ([#1415](https://github.com/rigortype/rigor/issues/1415)) but not yet an implicit-self `readline` ([#1458](https://github.com/rigortype/rigor/issues/1458)), and a write. | Code that may set the slot, per the same section. Two arms that bind it apart join with it unbound. | See below. An `ensure` clause reads a bound `$_` as `Dynamic[top]`. | `Dynamic[top]`, never its declared `String?` (ADR-117 WD6). |
-| `$!`, `$@` | The nearest rescue frame of the running execution context, so a method a `rescue` clause calls reads the exception too ([#1360](https://github.com/rigortype/rigor/issues/1360)). | Entering a `rescue` clause or a rescue modifier's fallback ([Rescue and subprocess globals](control-flow-analysis.md#rescue-and-subprocess-globals)). A clause that guards `$!`, or its `=> e` local, by class binds neither ([#1447](https://github.com/rigortype/rigor/issues/1447)). | Restored past the `begin` or the modifier to what they were where it started. An `ensure` clause reads them unbound. | See below. A method body starts unbound. | `Dynamic[top]` |
-| `$?` | The thread: a subprocess a called method runs sets its caller's `$?`, and a fiber shares its thread's ([#1360](https://github.com/rigortype/rigor/issues/1360)). | A statement that certainly ran a subprocess, in a file that holds no call that may reset it to `nil` (same section). | Entry to a rescue clause, a statement that may fall through a rescue, a retried body, a join with a path that did not set it. A guard's narrowing reverts as a process-wide global's does. | See below. A method body starts unbound. | `Dynamic[top]` |
-| Every other global: the streams, the separators, `$VERBOSE`, `$0`, the program's own globals | The process. | A write in the flow, and the program-global seed at a body's entry. | A guard's narrowing reverts where code may rebind the global ([Guards on globals and constants](control-flow-analysis.md#guards-on-globals-and-constants)). | A block reads the flow's binding. | The seed, else `Dynamic[top]`. |
+| `$!`, `$@` | The nearest rescue frame of the running execution context, so a method a `rescue` clause calls reads the exception too ([#1360](https://github.com/rigortype/rigor/issues/1360)). | Entering a `rescue` clause ([Rescue and subprocess globals](control-flow-analysis.md#rescue-and-subprocess-globals)). A rescue modifier's value is typed with them bound (`x = (Integer(s) rescue $!)` reads `Integer | StandardError`), but a read inside the fallback reads them unbound. A clause that guards `$!`, or its `=> e` local, by class binds neither ([#1447](https://github.com/rigortype/rigor/issues/1447)). | Restored past the `begin` or the modifier to what they were where it started. An `ensure` clause reads them unbound. | See below. A method body starts unbound. | `Dynamic[top]` |
+| `$?` | The thread: a subprocess a called method runs sets its caller's `$?`, and a fiber shares its thread's ([#1360](https://github.com/rigortype/rigor/issues/1360)). | A statement that certainly ran a subprocess, in a file that holds no call that may reset it to `nil` (same section). | Entry to a rescue clause, a statement that may fall through a rescue, a retried body, a join with a path where `$?` is unbound. A guard's narrowing reverts as a process-wide global's does. | See below. A method body starts unbound. | `Dynamic[top]` |
+| Every other global: the streams, the separators, `$VERBOSE`, `$0`, the program's own globals | The process. | A write in the flow, and the program-global seed at a body's entry where the file writes the global ([#1362](https://github.com/rigortype/rigor/issues/1362)). | A guard's narrowing reverts where code may rebind the global ([Guards on globals and constants](control-flow-analysis.md#guards-on-globals-and-constants), [#1429](https://github.com/rigortype/rigor/issues/1429)); a write's binding does not ([#1481](https://github.com/rigortype/rigor/issues/1481)). | A block reads the flow's binding. | `Dynamic[top]`; the streams' `IO` is [#1366](https://github.com/rigortype/rigor/issues/1366)'s. |
 
 What a block, a closure or a new execution context reads:
 
@@ -97,16 +101,16 @@ What a block, a closure or a new execution context reads:
 
 ## The evidence boundary
 
-The idiomatic expectation holds without configuration. Only what the analysed code and its configuration literally show changes it, never a file's name, its directory or a framework's convention ([ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 3). No report and no certainty verdict (a dropped arm, an unreachable clause) MUST rest on the idiomatic type against such evidence.
+[ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 3 makes the idiomatic expectation a default that holds without configuration; the default itself is [#1366](https://github.com/rigortype/rigor/issues/1366)'s and not implemented as of this writing. Only what the analysed code and its configuration literally show may change a type Rigor reads by idiom, never a file's name, its directory or a framework's convention. No report and no certainty verdict (a dropped arm, an unreachable clause) MUST rest on such a type against such evidence. The boundary already applies to every `Nominal` Rigor holds, such as `STDOUT`'s `IO`, a seed's declared members, or a local copied from either, and one known verdict violates it (the value bullet below).
 
 **A class guard** is such evidence: `is_a?`, `kind_of?`, `instance_of?`, `C === $g`, `case $g when C` and `case $g in C` say that the global may hold a `C` ([#1429](https://github.com/rigortype/rigor/issues/1429)). The rules are in [Class guards](control-flow-analysis.md#class-guards) and [Guards on globals and constants](control-flow-analysis.md#guards-on-globals-and-constants). In summary:
 
-- **The arm.** When the guard's class is disjoint from a `Nominal` member of the receiver's type (`$stdout` typed `IO`, guarded by `is_a?(StringIO)`), the arm reads the receiver as `bot`, so no call on it is checked: `$stdout.is_a?(StringIO) ? $stdout.string : nil` is quiet. A call on that `bot` receiver may run any code, so past it the guard's narrowing reverts.
-- **No verdict.** A `when C` or `in C` clause whose subject holds such a member does not report `flow.unreachable-clause`. That rule reads a `case` on a local only, so it never reports a `case $stdout`; `io = $stdout; case io when StringIO` is the shape the decline covers.
+- **The arm.** On the guard's truthy edge the receiver narrows to the members of its type that can satisfy the guard, so under `is_a?(StringIO)` a `$stdout` typed `IO | StringIO` (after `$stdout = StringIO.new`) reads `StringIO`. When no member can, the edge is `bot`, including when a member is a `Nominal` whose class is disjoint from the guard's (`$stdout` typed `File | IO` after `$stdout = File.open(path)`): no call on the receiver in the arm is checked, so `$stdout.is_a?(StringIO) ? $stdout.string : nil` is quiet. A call on that `bot` receiver may run any code, so past it the guard's narrowing reverts.
+- **No verdict.** A `when C` or `in C` clause that is dead because `C` is disjoint from its subject does not report `flow.unreachable-clause` when any member of the subject, entering the clause, is a `Nominal` other than `NilClass`, `TrueClass` or `FalseClass` whose class is disjoint from `C`. A clause an earlier clause exhausted still reports. That rule reads a `case` on a local only, so it never reports a `case $stdout`; `io = $stdout; case io when StringIO` is the shape the decline covers. A `case` used as a condition still reports: see the next bullet.
 - **`respond_to?`** narrows as [Class guards](control-flow-analysis.md#class-guards) states: its truthy edge drops the members known to lack the method, and reads the receiver as `Dynamic[top]` when no member may respond and one of them is a `Nominal` other than `NilClass`, `TrueClass` or `FalseClass`.
-- **The value.** An `if`, `unless` or ternary keeps the arm's value, and so does a `case` run as a statement or as the value of a write. A `case` the analysis types as an expression, such as an argument or a collection element, drops the arm from its value. That drop is a verdict the rule above forbids.
+- **The value.** An `if`, `unless` or ternary keeps the arm's value in every position, and a `case … in` never drops its arm. A `case … when` keeps the arm where the evaluator unions its arms: as the value a write binds, or as a method's return value. Where the analysis types the `case … when` node itself, its value drops the arm: a call argument, an array element or hash value, a call receiver or operator operand, the operand of `!`, a block's value, and a condition. [#1465](https://github.com/rigortype/rigor/issues/1465) lists the positions.
 
-> **Not implemented as of this writing ([#1465](https://github.com/rigortype/rigor/issues/1465)).** Keeping the arm of such a `case` wherever it is typed, without leaking the guarded class past the guard.
+> **Known violation, not fixed as of this writing ([#1465](https://github.com/rigortype/rigor/issues/1465)).** The drop is a certainty verdict the rule above forbids, and in a condition it reports on correct code: after `$stdout = File.open(path)`, `if (case $stdout when StringIO then true else false end)` reports `flow.always-truthy-condition` ("condition is always falsey").
 
 **Configuration** is the other source of evidence. A test helper that swaps a stream (`config.before { $stdout = StringIO.new }`) is a monkey patch in [ADR-17](../adr/17-monkey-patch-pre-evaluation.md)'s sense, and it is meant to reach the engine as a `pre_eval:` entry scoped to the paths it serves.
 
@@ -118,10 +122,10 @@ The reader assumption behind `$_` applies the same boundary to readers: counter-
 
 ## The write side
 
-Two rules check a write to a special variable. The envelope is the interpreter's setter, not the global's RBS declaration: where the two differ, the setter wins ([ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 1 and WD2, [#1367](https://github.com/rigortype/rigor/issues/1367)). The catalogue row is the `global.*` family in [diagnostic-policy.md § Identifier taxonomy](diagnostic-policy.md#identifier-taxonomy), and each rule's full list of setters is in the manual ([`global.write-type-mismatch`](../manual/04-diagnostics.md#rule-global-write-type-mismatch), [`global.readonly-write`](../manual/04-diagnostics.md#rule-global-readonly-write)).
+The `global.*` rules check a write to a special variable. The envelope is the interpreter's setter, not the global's RBS declaration: where the two differ, the setter wins ([ADR-117](../adr/117-standard-streams-typed-by-idiom.md) Decision point 1 and WD2, [#1367](https://github.com/rigortype/rigor/issues/1367)). The catalogue row is the `global.*` family in [diagnostic-policy.md § Identifier taxonomy](diagnostic-policy.md#identifier-taxonomy), and each rule's full list of setters is in the manual ([`global.write-type-mismatch`](../manual/04-diagnostics.md#rule-global-write-type-mismatch), [`global.readonly-write`](../manual/04-diagnostics.md#rule-global-readonly-write)).
 
 - **`global.readonly-write`** reports a write in a form that always writes (`$g = v`, `$g op= v`, a target of a multiple assignment) to a special Ruby defines read-only (`$!`, `$?`, `$$`, `$LOAD_PATH`, …), which raises `NameError` whatever the value.
-- **`global.write-type-mismatch`** reports `$g = v` only when `v` is a literal node whose class the setter rejects: `$stdout = 1` reports, and `$stdout = buf` never does, whatever `buf`'s type. Among the declines the manual lists, the literal stays quiet when the program may define the method the setter asks for (`write`, `to_str`, `to_int`) or an escape hatch (`method_missing`, `respond_to_missing?`, `respond_to?`) in any file, in any spelling and on any receiver. That program-wide definition census declines rather than guessing which objects such a definition reaches.
+- **`global.write-type-mismatch`** reports `$g = v` only when `v` is a literal node whose class the setter rejects: `$stdout = 1` reports, and `$stdout = buf` never does, whatever `buf`'s type. For a setter that converts the value or asks it for `write` (`$;`, `$-F`, `$0`, `$PROGRAM_NAME`, `$.`, `$-i`, `$stdout`, `$>`, `$stderr`), the literal stays quiet, among the declines the manual lists, when the program may define the method the setter asks for (`write`, `to_str`, `to_int`) or an escape hatch (`method_missing`, `respond_to_missing?`, `respond_to?`) in any file, in any spelling and on any receiver. That program-wide definition census declines rather than guessing which objects such a definition reaches. `$/`, `$-0`, `$,`, `$\` and `$~` accept only their classes, so none of those definitions silences them: `$/ = 1` reports whatever the program defines.
 - A special any file aliases (`alias $out $stdout`, either side) is exempt from both rules. A write to `$stdin`, whose setter accepts every value, is never checked.
 
 Neither rule reads an inferred type, and neither changes how a later read is typed. The writes the rules leave unreported are [#1455](https://github.com/rigortype/rigor/issues/1455).

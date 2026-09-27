@@ -370,8 +370,9 @@ module Rigor
       private
 
       # The unit `path` names, or nil. A run with no units answers before reducing the path: the reduction
-      # realpaths the root on every call, and every analysed file is looked up at least twice, which cost a
-      # template-free `rigor check lib` about 1.5% of its CPU ([#1507](https://github.com/rigortype/rigor/issues/1507)).
+      # realpaths the root on every call, and every analysed file is looked up at least twice, which made 922
+      # `File.realpath` calls on a template-free `rigor check` of the v0.3.9 `lib`
+      # ([#1507](https://github.com/rigortype/rigor/issues/1507)).
       def entry_for(path)
         return nil if @entries.empty?
 

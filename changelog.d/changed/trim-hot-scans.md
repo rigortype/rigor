@@ -1,1 +1,0 @@
-- **[rigor check]** A run without template-claiming plugins no longer resolves the project root through the filesystem for every analysed file, and the deferred-range pre-pass tests node kinds without a scan per node; diagnostics are unchanged. ([#1509](https://github.com/rigortype/rigor/pull/1509))

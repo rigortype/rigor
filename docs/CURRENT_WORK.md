@@ -18,8 +18,8 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 ## Special-variable semantics, second pass (2026-09-26/27)
 
 This continues the audit of the special variables against dak2's talk 「特殊変数大全」, governed by
-[ADR-117](adr/117-standard-streams-typed-by-idiom.md). v0.4.0 release prep is under way, so file
-every newly found defect to milestone `v0.4.x`, never `v0.4.0`.
+[ADR-117](adr/117-standard-streams-typed-by-idiom.md). v0.4.0 shipped on 2026-09-27; file new defects to
+milestone `v0.4.x`.
 
 Landed on master, each with CI green on the merge commit:
 
@@ -40,6 +40,18 @@ Maintainer decisions recorded on the issues:
   `{path:, scope:}` applies to its scope roots only.
 - #1367: rule ids, severities and tier `high`; the literal-only amendment.
 - #1429: three amendments. The last one is the conservative reading above.
+
+## v0.4.0 shipped (2026-09-27)
+
+Released through #1490: RubyGems `0.4.0`, tag `v0.4.0`, GitHub Release. The `v0.4.0` milestone is
+closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468), #1483 (#1436).
+
+- **Perf baseline** was recalibrated at +80.5% allocations by maintainer ruling (#1046). The engine
+  share, +19.1% on a frozen v0.3.9 `lib`, is unattributed: #1469 is the per-merge sweep.
+- **Filed to `v0.4.x` during the cut**, each checked against v0.3.9 and judged non-blocking: #1474,
+  #1475, #1476 (regex group counting), #1480 (`y&.concat` result not reported), #1487 (sig-gen
+  observed `initialize` rewrite), #1488 (sig-gen duplicate inserts), #1489 (literal return for a
+  declared `-> untyped`). #1376 stays open; the #1381 slice fold documents its gap.
 
 ## What the next session should do
 

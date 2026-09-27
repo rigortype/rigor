@@ -65,6 +65,7 @@ Per-plugin helper service constructed by
 | `#list_directory(path)` | The **directory-listing fingerprint** (ADR-45 WD1c / #629). Returns the absolute paths directly under `path` (`[]` when it is not a directory), for every path in scope or out and never raising, and records ONE {Cache::Descriptor::GlobEntry} over `path/*` — the whole listing, so any file added to or removed from the directory, and any content edit under it, reads stale. It is the row for a caller that asks "which of these N candidate files exists here?": rigor-actionpack's template lookup tries nine extensions per view root per `render`, so per-path `#file?` rows would scale with (renders × extensions × roots) while one listing row per consulted `app/views/<controller>` directory covers strictly more names for a warm-run validation count equal to the number of directories consulted. As with `#file?`, the policy gates RECORDING and not the answer. Re-listing a directory REPLACES its row (the last reader's view of the directory is the one the run was shaped on), unlike the first-row-wins `||=` the file rows use. |
 | `#open_url(url)` | Under `:disabled` raises {Rigor::Plugin::AccessDeniedError} (`reason: :network_disabled`). Under `:allowlist` (v0.1.2) performs a GET over HTTPS when the parsed host is in `allowed_url_hosts`, enforcing a request timeout (10 s) and a response-body size cap (10 MB); raises `AccessDeniedError` with `reason:` one of `:invalid_url_scheme`, `:host_not_allowed`, `:http_error`, `:request_timeout`, `:body_too_large` on failure. |
 | `#cache_descriptor` | Returns a fresh frozen {Cache::Descriptor} with the boundary's accumulated `FileEntry`, `GlobEntry` (`#list_directory`) and `ConfigEntry` (`#open_url`) rows. Subsequent reads expand the underlying record table; each call returns a new descriptor reflecting the read history at that moment. |
+| `#replay(descriptor)` | Records the `files`, `configs` and `globs` rows of `descriptor` as though the boundary had observed them, reading no file and consulting no policy ([#1558](https://github.com/rigortype/rigor/issues/1558)). `Plugin::Base#cache_for` calls it with a served producer entry's stored dependency descriptor, which a fresh hit has just validated, so the producer's inputs reach the run-result descriptor and the entry of any producer computed around it although no block ran (see [`plugin-cache-producers.md`](plugin-cache-producers.md) § `cache_for`). It merges by the ordering below; a replayed row never displaces one already held except a content row over an existence row. |
 
 Per-path reads are deduplicated by absolute path; re-reading a
 file with changed content updates the entry's digest in place. A
@@ -79,6 +80,16 @@ first recorded stands — whichever it is, it describes the world the
 earlier decision was shaped on and reads stale the moment the world
 stops matching it, so a mid-run mutation costs a recompute rather
 than a wrong hit.
+
+`#replay` follows the same ordering, with one difference: a
+replayed content row replaces an existence row, but never a content
+row the boundary already holds, and a replayed glob row never
+replaces a held row for the same `(root, pattern, mode)` slot. A
+hit's rows validated against the current filesystem moments before,
+so the two rows agree on the bytes; the held one carries the newer
+stat tuple, which keeps the next warm run on the ADR-87 stat fast
+path. Every table is keyed by path, glob slot or URL key, so
+replaying a descriptor twice adds nothing.
 
 ### `Rigor::Plugin::AccessDeniedError`
 
@@ -171,3 +182,6 @@ The descriptor a boundary accumulates is no longer unconsumed:
 boundary's `#cache_descriptor` files into the run's dependency
 descriptor, so a file a plugin read through the boundary participates
 in run-result cache invalidation like any analyzed file or `sig` file.
+Since #1558 that includes the files behind every producer value the
+plugin was served from its own cache, which `cache_for` replays into
+the boundary.

@@ -294,7 +294,7 @@ probe half.
 Returns the cached value (loaded from disk on hit; produced by
 the block on miss).
 
-### `store.fetch_or_validate(producer_id:, key_descriptor:, generation_cap:, params: {}, serialize: nil, deserialize: nil) { ... } -> Object`
+### `store.fetch_or_validate(producer_id:, key_descriptor:, generation_cap:, params: {}, serialize: nil, deserialize: nil, on_hit: nil) { ... } -> Object`
 
 The record-and-validate variant ([ADR-45](../adr/45-unchanged-project-fast-path.md)).
 Unlike `fetch_or_compute` — which keys the entry on the descriptor of
@@ -324,6 +324,18 @@ stale when a plugin reads files Rigor cannot see up front.
 `gems` / `plugins` / `configs` / `dependencies` slots are all empty
 (those non-file inputs belong in the cache *key*, not the validated
 set); a descriptor carrying any of them is never fresh.
+
+`on_hit:`, when given, is called with the entry's stored dependency
+descriptor on a fresh hit, before the value is returned, and never on
+a miss. A hit runs no block, so this is the only way a caller learns
+what a served value was computed from.
+`Plugin::Base#cache_for` passes a callable that replays the rows into
+the plugin's `IoBoundary`
+([#1558](https://github.com/rigortype/rigor/issues/1558), see
+[`plugin-cache-producers.md`](plugin-cache-producers.md) §
+`cache_for`), so a served producer's inputs reach the run-result
+descriptor below and the entry of any producer computed around it.
+The run-result slot itself passes nothing: nothing encloses a run.
 
 ### `store.peek_validated(producer_id:, key_descriptor:, params: {}, deserialize: nil) -> Object?`
 
@@ -1475,6 +1487,7 @@ ADR-45 `analysis.run-diagnostics` slot:
 | names glob, per signature root (`**/*.rbs`) | `RunDescriptor#globs` (#979) | a `.rbs` APPEARING under or vanishing from a signature root |
 | `:stat` / `:exists` file, per plugin `IoBoundary` read | `IoBoundary#cache_descriptor` ([#577](https://github.com/rigortype/rigor/issues/577)) | an edit to — or the appearance of — a file a plugin read or probed |
 | glob, per plugin-listed directory | `IoBoundary#cache_descriptor` ([#954](https://github.com/rigortype/rigor/issues/954)) | a file appearing in a directory a plugin listed |
+| every row of a producer entry the plugin was served from | `IoBoundary#cache_descriptor`, replayed by `Plugin::Base#cache_for` ([#1558](https://github.com/rigortype/rigor/issues/1558)) | an edit to a served producer's input, which this run never read |
 | glob, per producer `watch:` pattern | `Plugin::Base#watch_glob_entries` (ADR-60 WD3) | an edit under a producer's declared watch |
 
 The two template rows are the validation half of a pair. The KEY carries a
@@ -1524,6 +1537,17 @@ it would validate FRESH across exactly the file-appearance edit the row
 exists to catch, and would keep replaying pre-fix diagnostics until it
 missed for some unrelated reason. The bump makes every pre-fix entry read
 as a miss once and rebuild carrying the rows.
+
+The served-producer rows (#1558) are the rows the producer's entry
+recorded when it was computed: its own reads, the rows its plugin's
+boundary already held then, and its `watch:` globs, all validated by
+the hit. A replayed `watch:` row equals the one the last table row
+recomputes, and the descriptor's glob `uniq` drops the duplicate. They
+needed no `SCHEMA_VERSION` bump, although an entry written before the
+fix would validate fresh across exactly the edit they exist to catch:
+the engine's identity (the released version, or a checkout's source
+digest) is part of this slot's key and of every producer key, so the
+build carrying the fix misses every such entry once.
 
 ## Constant-lookup path under `cache_store`
 

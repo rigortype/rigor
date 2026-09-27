@@ -940,6 +940,17 @@ module Rigor
       # changed. The producer id is auto-prefixed `plugin.<manifest.id>.` per ADR-7 § "Slice 6-C" so plugin
       # caches stay sandboxed from built-in producers.
       #
+      # #1558 — whichever way the value arrives, the boundary ends up holding every row of the producer's
+      # dependency descriptor. A hit ran no block and read nothing, so the served entry's stored rows are
+      # replayed into it ({IoBoundary#replay}); a miss read its inputs itself, and replaying the descriptor it
+      # just recorded adds the evaluated `watch:` rows, the only rows the block did not record. The boundary
+      # is per plugin and accumulates for the run, so the rows reach the ADR-45 run-result descriptor
+      # (`Runner#build_run_dependency_descriptor`) and the descriptor of every producer of this plugin
+      # computed after it, whether its block asked this one or it composes a value this one returned
+      # earlier. Without the replay a producer recomputed after a served one stored no row for the served
+      # value's inputs, and neither did the run: rigor-activerecord's `:model_index`, recomputed after a
+      # model edit while `:schema_table` hit, kept its stale columns after `db/schema.rb` changed.
+      #
       # When `services.cache_store` is `nil` (e.g. CLI `--no-cache`), the callable bypasses the cache and
       # runs the producer block every time — same semantics as the v0.0.9 cache surface for built-in
       # producers.
@@ -974,11 +985,9 @@ module Rigor
             generation_cap: producer[:generation_cap],
             params: params,
             serialize: pair_serializer(producer[:serialize]),
-            deserialize: pair_deserializer(producer[:deserialize])
-          ) do
-            value = compute.call
-            [value, producer_dependency_descriptor(producer)]
-          end
+            deserialize: pair_deserializer(producer[:deserialize]),
+            on_hit: ->(dependencies) { io_boundary.replay(dependencies) }
+          ) { computed_producer_pair(producer, compute) }
         end
       end
 
@@ -1194,6 +1203,17 @@ module Rigor
         return auto_built if extra.nil?
 
         Cache::Descriptor.compose(auto_built, extra)
+      end
+
+      # #1558 — the miss half of {#cache_for}. The block's own reads are in the boundary already, so replaying
+      # the descriptor it just recorded adds the evaluated `watch:` rows, as a hit's replay of the stored
+      # descriptor does; a producer computing around this one then records one row set whichever way this
+      # value arrived.
+      def computed_producer_pair(producer, compute)
+        value = compute.call
+        dependencies = producer_dependency_descriptor(producer)
+        io_boundary.replay(dependencies)
+        [value, dependencies]
       end
 
       # ADR-60 WD3 — the dependency descriptor stored beside the producer's value, built AFTER the block ran

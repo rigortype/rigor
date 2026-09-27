@@ -135,6 +135,42 @@ returns the cached value when the recorded dependencies are
 still fresh, or runs the producer block and records a fresh
 entry otherwise.
 
+Whichever way the value arrives, the plugin's `io_boundary` then
+holds every row of the producer's dependency descriptor
+([#1558](https://github.com/rigortype/rigor/issues/1558)). A hit
+runs no block, so the served entry's stored rows are replayed into
+the boundary (`IoBoundary#replay`, handed the rows by
+`fetch_or_validate`'s `on_hit:`). A miss read its inputs itself,
+and replaying the descriptor it just recorded adds the evaluated
+`watch:` rows, the only rows its block did not record. The
+boundary is per plugin instance and accumulates for the run, so
+the rows reach:
+
+- the ADR-45 run-result descriptor, which folds in every plugin
+  boundary after the run (see [`cache.md`](cache.md) § "The
+  run-descriptor row inventory"); and
+- the dependency descriptor of every producer on the same instance
+  computed afterwards: one whose block asked this producer, and one
+  that composes a value this producer returned earlier in the run.
+
+Without the replay a served producer's inputs dropped out of both,
+and each validated fresh after those inputs changed.
+rigor-activerecord's `:model_index`, recomputed after a model edit
+while `:schema_table` was served, kept its old columns across a
+later `db/schema.rb` edit in the run slot, under `--workers` and
+under `--incremental`, until `--no-cache`.
+
+The replayed rows are the ones the hit just validated against the
+filesystem, and they merge by the boundary's own precedence (see
+[`plugin-trust.md`](plugin-trust.md) § `IoBoundary`): no row is
+duplicated, and none the boundary already holds is weakened. No
+cache key moves, because a boundary descriptor is validation-only
+and the replay does not change what a producer's key is built from.
+An entry written before #1558 lacks the replayed rows; no build
+carrying the fix reads one, because the engine's identity (the
+released version, or the source digest of a checkout) is part of
+every producer key and every run-result key.
+
 When `services.cache_store` is `nil` (e.g. CLI `--no-cache`),
 the callable bypasses the cache and runs the producer block
 every time — same semantics as the v0.0.9 cache surface for
@@ -171,8 +207,12 @@ inputs and records the read dependencies separately:
 - **Dependency descriptor** (recorded after the block runs, then
   re-validated by re-digest on the next run via
   `Descriptor#fresh?`) — the `IoBoundary`'s post-compute
-  `FileEntry` / `ConfigEntry` reads plus the evaluated `watch:`
-  `GlobEntry` rows.
+  `FileEntry` / `ConfigEntry` / `GlobEntry` rows plus the evaluated
+  `watch:` `GlobEntry` rows. The boundary holds everything the
+  plugin instance observed so far in the run, so this includes the
+  rows of any producer asked earlier, whether computed or served
+  (#1558, above). ADR-60 WD3 accepts that over-approximation: it
+  can cost a spurious recompute, never a stale hit.
 
 Plugin authors do not construct descriptors manually: in-block
 reads are captured automatically, and `watch:` declares glob
@@ -221,6 +261,14 @@ runs the round-trip with a nil-inclusive memo and a
 `StandardError` rescue (`producer_error(id)` surfaces the failure);
 a plugin that needs distinct per-failure messages keeps a bespoke
 `rescue` ladder around `cache_for(id).call`.
+
+A producer that consumes another producer of the same plugin
+declares nothing extra. Asked inside its block, or earlier in the
+run, the consumed producer leaves its rows in the boundary whether
+it was computed or served (#1558), so the consumer's entry goes
+stale when the consumed producer's inputs change. A value from
+another plugin, read through `read_fact`, carries no such row: the
+fact's inputs were read through the publishing plugin's boundary.
 
 Identity inputs (gem versions, sibling-plugin config, external
 state the boundary can't read) compose into the **key** via the

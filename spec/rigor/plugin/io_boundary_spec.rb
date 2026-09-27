@@ -322,6 +322,80 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
+  # #1558 — the rows a producer's cache hit hands back to the boundary. They merge by the live recorders'
+  # precedence, so a replay never weakens a row the boundary already holds and never duplicates one.
+  describe "#replay" do
+    let(:path) { File.join(tmpdir, "schema.txt") }
+
+    def rows(descriptor)
+      descriptor.files.map { |e| [e.path, e.comparator] }
+    end
+
+    def recorded_by_another_boundary
+      other = described_class.new(policy: policy, plugin_id: "demo")
+      yield other
+      other.cache_descriptor
+    end
+
+    it "records a descriptor's file and glob rows as though it had observed them" do
+      File.write(path, "v1")
+      FileUtils.mkdir_p(File.join(tmpdir, "models"))
+      stored = recorded_by_another_boundary do |other|
+        other.read_file(path)
+        other.list_directory(File.join(tmpdir, "models"))
+      end
+
+      boundary.replay(stored)
+
+      expect(boundary.cache_descriptor).to eq(stored)
+      File.write(path, "v2")
+      expect(boundary.cache_descriptor.fresh?).to be(false)
+    end
+
+    it "adds nothing when the same descriptor is replayed twice" do
+      File.write(path, "v1")
+      stored = recorded_by_another_boundary { |other| other.read_file(path) }
+
+      2.times { boundary.replay(stored) }
+
+      expect(boundary.cache_descriptor.files.size).to eq(1)
+    end
+
+    it "lets a replayed content row replace an existence row for the same path" do
+      File.write(path, "v1")
+      boundary.file?(path)
+      stored = recorded_by_another_boundary { |other| other.read_file(path) }
+
+      boundary.replay(stored)
+
+      expect(rows(boundary.cache_descriptor)).to eq([[File.expand_path(path), :stat]])
+    end
+
+    it "keeps a content row the boundary recorded over a replayed existence row" do
+      File.write(path, "v1")
+      boundary.read_file(path)
+      stored = recorded_by_another_boundary { |other| other.file?(path) }
+
+      boundary.replay(stored)
+
+      expect(rows(boundary.cache_descriptor)).to eq([[File.expand_path(path), :stat]])
+    end
+
+    it "keeps the content row the boundary recorded over a replayed one for the same path" do
+      File.write(path, "v1")
+      stored = recorded_by_another_boundary { |other| other.read_file(path) }
+      # A touch that keeps the bytes: both rows validate, and only the live one carries the current stat tuple.
+      File.utime(Time.now + 60, Time.now + 60, path)
+      boundary.read_file(path)
+      live = boundary.cache_descriptor.files.first
+      expect(stored.files).not_to eq([live])
+
+      boundary.replay(stored)
+
+      expect(boundary.cache_descriptor.files).to eq([live])
+    end
+  end
+
   # The real-`Net::HTTP` wrapper the boundary injects-over in every other test (a fake `#get`); exercised here with
   # stubbed transport so the success / non-success / oversize-body branches and their reason codes have a unit safety
   # net without touching the network.

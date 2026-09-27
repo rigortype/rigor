@@ -25,12 +25,31 @@ long examples, and branch-specific steps in the body or a conditional `reference
 be the stable workflow spine: goal, phases, decision points, and an observable completion criterion.
 When a skill has multiple branches, route to the relevant reference instead of loading every branch.
 
-## The `waza` checker
+## The `waza` review
 
-After changing a `SKILL.md`, run `waza check <skill-path>` once for spec compliance. Apply advisories
-only when they identify a real defect independent of the agentskills.io publication profile; Rigor's
+A change to a skill — its `SKILL.md` or its `references/`, in either tree — ships only after a `waza`
+review, in addition to the adversarial review in
+[`contribution-flow.md`](contribution-flow.md) § "Landing a pull request". The agent reviewer reads the
+change against the repository; `waza` reads the skill as a routing and instruction surface, which is
+where a skill fails its users. Run both on each changed skill:
+
+```sh
+waza check <skill-path>
+waza quality <skill-path> --model <judge>
+```
+
+`waza check` covers spec compliance and link health. `waza quality` is an LLM judge scoring clarity,
+completeness, trigger precision, scope coverage, and anti-patterns; pick the strongest judge
+`waza models` lists. Run it on the PR's head, and again after a fix round that rewrote the skill.
+
+Triage the output with the adversarial review's findings, under the same rules. Adopt an advisory only
+when it identifies a real defect independent of the agentskills.io publication profile; Rigor's
 comprehensive workflows do not need to be reshaped to satisfy its token budget or labels. See
-[ADR-81](../adr/81-skill-set-optimization.md) for the standing calibration.
+[ADR-81](../adr/81-skill-set-optimization.md) for the standing calibration. Post the scores and what
+you adopted or rejected, with reasons, as a PR comment.
+
+If `waza` cannot run — not installed, no judge model available, the judge call fails — say so in the
+PR and leave it Draft. The review is never skipped silently.
 
 Never run `waza dev --auto`: it injects boilerplate that is often false. The hand-written `name:` and
 `description:` pair is the binding surface.

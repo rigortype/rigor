@@ -38,8 +38,36 @@ RSpec.describe Rigor::Environment::SourceRbsSynthesis do
     expect([string, integer, other_plugin].uniq.size).to eq(3)
   end
 
-  it "counts a notice-only outcome as a contribution" do
-    expect(digest(synthesizer("a") { [:error, "RBS::ParsingError: boom"] })).not_to eq(none)
+  it "reads a failed synthesis as one stable value, whatever its message says" do
+    failed_on_line3 = digest(synthesizer("a") { [:error, "RBS::ParsingError: boom on line 3"] })
+
+    expect(failed_on_line3).not_to eq(none)
+    expect(digest(synthesizer("a") { [:error, "RBS::ParsingError: boom on line 4"] })).to eq(failed_on_line3)
+  end
+
+  it "leaves notices out, digesting a WD12 outcome as the RBS the loader reads from it" do
+    rbs = "class A\n  def x: () -> String\nend\n"
+    plain = digest(synthesizer("a") { rbs })
+
+    expect(digest(synthesizer("a") { [:ok, rbs, ["`#: x` on line 3 was not honoured"]] })).to eq(plain)
+    expect(digest(synthesizer("a") { [:ok, rbs, ["`#: x` on line 4 was not honoured"]] })).to eq(plain)
+    expect(digest(synthesizer("a") { [:ok, "", ["nothing bound"]] })).to eq(none)
+  end
+
+  it "ignores the full-line comments rbs-inline copies from the source, and nothing else" do
+    rbs = "# frozen_string_literal: true\n# Says hi.\nclass A\n  def x: () -> void\nend\n"
+    commented = digest(synthesizer("a") { rbs })
+
+    expect(digest(synthesizer("a") { "# Says hello.\nclass A\n  # A reworded doc.\n  def x: () -> void\nend\n" }))
+      .to eq(commented)
+    expect(digest(synthesizer("a") { "# Says hi.\nclass A\n  def x: () -> bool\nend\n" })).not_to eq(commented)
+  end
+
+  it "keeps every line of a multi-line annotation, even one that starts with `#`" do
+    annotated = ->(tail) { "%a{rigor:v1:effect io\n#{tail}}\nclass A\nend\n" }
+
+    expect(digest(synthesizer("a") { annotated.call("# net") }))
+      .not_to eq(digest(synthesizer("a") { annotated.call("# fs") }))
   end
 
   it "moves when any one of several synthesizers' output moves" do

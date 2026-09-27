@@ -96,6 +96,29 @@ module Rigor
 
         manifest(id: "fake-rbs-synth", version: "0.1.0", source_rbs_synthesizer: SYNTHESIZER)
       end
+
+      # Issue #1536 fixture — the same synthesizer, but built in `#prepare`: the shape the source-RBS gate cannot
+      # see from the unprepared registry it digests with. `.building` toggles whether `#prepare` builds it,
+      # standing in for a synthesizer that first appears in a later run.
+      class PrepareBuiltSynthesizerProbe < Base
+        @building = true
+        class << self
+          attr_accessor :building
+        end
+
+        manifest(id: "prepare-built-synth", version: "0.1.0")
+
+        def prepare(_services)
+          return unless PrepareBuiltSynthesizerProbe.building
+
+          @prepared_manifest = Manifest.new(id: "prepare-built-synth", version: "0.1.0",
+                                            source_rbs_synthesizer: FakeRbsSynthesizerProbe::SYNTHESIZER)
+        end
+
+        def manifest
+          @prepared_manifest || self.class.manifest
+        end
+      end
     end
   end
 end
@@ -1617,6 +1640,24 @@ end
       end
     end
 
+    it "digests nothing for an `enabled: false` entry, so an annotation edit keeps the gated closure" do
+      # The hub above carries no annotation, so it cannot tell a session that loaded the disabled plugin anyway
+      # from one that did not. Here an annotation edit would move a loaded rbs-inline's output and send the
+      # recheck to the whole project; with the plugin disabled it moves nothing, and only the edited file runs.
+      Dir.mktmpdir do |dir|
+        greeter = write_greeter(dir, "  #: () -> String\n")
+        config = inline_config([dir], entry: { "gem" => "rigor-rbs-inline", "enabled" => false })
+        session = inline_session(config, [dir])
+        guarded_baseline(session)
+
+        write_greeter(dir, "  #: () -> Integer\n")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to eq(Set[greeter])
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir])))
+      end
+    end
+
     # An annotated class with both kinds of dependent: Caller reads `greet` (a symbol edge) and Sub its
     # ancestry. The ancestry dependent is what hid the stale Caller before this gate existed: with one present
     # the closure takes the symbol-granular route, and an annotation edit changes no method body, so no symbol
@@ -1679,6 +1720,24 @@ end
         expect(recheck.changed).to eq(Set[greeter])
         expect(recheck.affected).not_to include(File.join(project, "sub.rb"))
         expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [project])))
+      end
+    end
+
+    it "keeps the gate when a doc comment in an annotated file is reworded" do
+      # rbs-inline copies the comment block above a member into the RBS it writes, so the rendered text moves
+      # with every reworded doc comment. The digest leaves full-line comments out: no per-file cache reads an
+      # RBS comment or an RBS position, and the annotation itself is not a comment line.
+      Dir.mktmpdir do |dir|
+        greeter = write_greeter(dir, "  # Says hi.\n  #: () -> String\n")
+        config = inline_config([dir])
+        session = inline_session(config, [dir])
+        expect(messages_for(guarded_baseline(session), "caller.rb")).to eq(["dump_type: String"])
+
+        write_greeter(dir, "  # Greets whoever asks.\n  #: () -> String\n")
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to eq(Set[greeter])
+        expect(sorted(recheck.diagnostics)).to eq(sorted(inline_full_run(config, [dir])))
       end
     end
 
@@ -1767,6 +1826,93 @@ end
 
         expect_rechecked(guarded_recheck(session), config, [dir], %w[greeter.rb caller.rb], "caller.rb",
                          "dump_type: Integer", requirer: requirer)
+      end
+    end
+
+    # A synthesizer built in `#prepare` is invisible to the unprepared registry the gate digests with, so
+    # these run through `#run_incremental`, which compares the two sets after each run. Each process is a
+    # fresh session over one snapshot, as the CLI's are.
+    def prepare_built_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::PrepareBuiltSynthesizerProbe)
+        true
+      end
+    end
+
+    def prepare_built_run(config, project, snapshot)
+      session = described_class.new(configuration: config, paths: [project], plugin_requirer: prepare_built_requirer)
+      guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+    end
+
+    def expect_prepare_built_answer(diagnostics, config, project, message)
+      expect(messages_for(diagnostics, "caller.rb")).to eq([message])
+      expect(sorted(diagnostics)).to eq(sorted(inline_full_run(config, [project], requirer: prepare_built_requirer)))
+    end
+
+    it "stays trusted across processes with rbs-inline, whose synthesizer exists before `#prepare`" do
+      # The comparison after each run must not misfire on the plugin every bundle carries: a false mismatch
+      # would stamp every digest unknown and send every edit to the whole project.
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project])
+        write_greeter(project, "  #: () -> String\n")
+        run = lambda do
+          session = described_class.new(configuration: config, paths: [project], plugin_requirer: rbs_inline_requirer)
+          guarded_run_incremental(session, snapshot: snapshot, fingerprint: fingerprint(config, project))
+        end
+        run.call
+        write_greeter(project, "  #: () -> String\n", body: '"hello"')
+        _, warm = run.call
+
+        stamps = snapshot.load(fingerprint: fingerprint(config, project)).seed_bundles.values
+                         .map { |bundle| bundle[:source_rbs_digest] }
+        expect(warm).to be(true)
+        expect(stamps).to all(be_a(String))
+      end
+    end
+
+    it "re-analyses the project when a synthesizer exists only after `#prepare`" do
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project], entry: "prepare-built-synth")
+        write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+        diagnostics, = prepare_built_run(config, project, snapshot)
+        expect(messages_for(diagnostics, "caller.rb")).to eq(["dump_type: String"])
+
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        diagnostics, warm = prepare_built_run(config, project, snapshot)
+
+        expect(warm).to be(true)
+        expect_prepare_built_answer(diagnostics, config, project, "dump_type: Integer")
+      end
+    end
+
+    it "re-analyses the edit that first exposes a synthesizer built in `#prepare`" do
+      # The first run builds no synthesizer, so its digests are honest and it stamps them. The second builds
+      # one only in `#prepare`: the gate, digesting without it, sees nothing move and takes a narrow closure,
+      # and only the comparison after the run can send the edit to a whole-project re-analysis.
+      Dir.mktmpdir do |dir|
+        project = File.join(dir, "project")
+        FileUtils.mkdir_p(project)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, "cache"))
+        config = inline_config([project], entry: "prepare-built-synth")
+        write_greeter(project, "  # fake-rbs: def greet: () -> String\n")
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = false
+        diagnostics, = prepare_built_run(config, project, snapshot)
+        expect(messages_for(diagnostics, "caller.rb")).to eq(['dump_type: "hi"'])
+
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
+        write_greeter(project, "  # fake-rbs: def greet: () -> Integer\n")
+        diagnostics, warm = prepare_built_run(config, project, snapshot)
+
+        expect(warm).to be(false)
+        expect_prepare_built_answer(diagnostics, config, project, "dump_type: Integer")
+      ensure
+        Rigor::Plugin::PrepareBuiltSynthesizerProbe.building = true
       end
     end
   end

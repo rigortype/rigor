@@ -950,13 +950,25 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
 ([#1536](https://github.com/rigortype/rigor/issues/1536), ADR-89 Amendment
 2026-09-28):
 
-- Each seed bundle carries `source_rbs_digest`: a digest of what every loaded
-  `source_rbs_synthesizer` returns for the file (rendered RBS plus any notice),
-  `none` when nothing is contributed, or `nil` when an output could not be read.
+- Each seed bundle carries `source_rbs_digest`: a digest of the RBS every
+  loaded `source_rbs_synthesizer` contributes for the file, `none` when nothing
+  is contributed, or `nil` when an output could not be read.
   `Environment::SourceRbsSynthesis.digest` reads the same function and
-  `Cache::Store` entries the loader is fed from. The session stamps the bundles
-  the runner built in a run. A reused bundle keeps its digest, which stays
-  exact because reuse requires byte-identical content.
+  `Cache::Store` entries the loader is fed from. Three things are left out of
+  the digest input, never out of the loaded buffer or its environment-cache
+  key:
+  - WD6 / WD12 notices, which feed only run-level `source-rbs-*` rows. A failed
+    synthesis still counts as one stable value.
+  - The RBS text's full-line comments, which rbs-inline copies from the `.rb`
+    and which no per-file cache reads. The text is kept whole when an `%a`
+    annotation spans lines.
+  - Positions, which the text does not carry.
+- `Analysis::SourceRbsGate` stamps the bundles the runner built in a run. A
+  reused bundle keeps its digest, which stays exact because reuse requires
+  byte-identical content. A stamp is bound to its bundle's bytes: a reading is
+  kept only when the file's SHA-256, read before and after it, equals the
+  bundle's content digest. Otherwise the file is read again, and the digest is
+  stored as `nil` if it still does not match.
 - A recheck whose edit moved any synthesized output re-analyses every analysed
   file. The output has moved when a changed file's digest differs from its
   bundle's (or either is unknown), when an added file contributes anything, or
@@ -965,10 +977,21 @@ from its comments — every `#:` / `# @rbs` annotation under the auto-wired
   set bounds its readers
   ([#1544](https://github.com/rigortype/rigor/issues/1544) tracks recording
   those reads). Otherwise the declaration gate runs on the signature alone.
-- The gate is decided by the synthesizers the loader actually loaded, never by
-  which plugins `plugins:` names. A project without annotations keeps both
-  gates with `rigor-rbs-inline` loaded, and an `enabled: false` entry loads no
-  synthesizer.
+- The gate never decides by which plugins `plugins:` names. It digests with the
+  synthesizers of a registry it loads itself from the same configuration,
+  without `#prepare`, before the recheck runner exists. A project without
+  annotations keeps both gates with `rigor-rbs-inline` loaded, and an
+  `enabled: false` entry, which the loader skips, contributes no synthesizer.
+- After every `--incremental` run, the gate's set is reconciled with the set of
+  the registry the run's environment was built from, after `#prepare`, compared
+  by plugin id and order. That registry is the one ADR-88's `plugin_fact_digest`
+  reads: the runner's on a sequential run, the sequential probe's on a pooled
+  one. A mismatch means a synthesizer built in `#prepare`, which the gate could
+  not see. The gate then turns untrusted for the session, every bundle's digest
+  is saved as `nil`, and every later edit re-analyses the whole project.
+  `run_incremental` re-analyses the project for a recheck that had left files
+  out, and `run_buffer_recheck` declines. The contract a synthesizer must keep
+  is in [`plugin.md`](plugin.md).
 
 ### `effect_collections` / `effects_identity` — the effects sidecar ([ADR-103](../adr/103-effect-labels.md) WD13)
 

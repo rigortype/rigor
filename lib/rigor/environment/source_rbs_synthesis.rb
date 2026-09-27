@@ -47,25 +47,79 @@ module Rigor
       end
 
       # Issue #1536 — every synthesizer's output for `path`, reduced to one value: {NO_CONTRIBUTION} when none
-      # of them contributes anything, a SHA-256 hex digest of each plugin's id and raw output otherwise, and
-      # nil when an output could not be read at all. The raw output is digested as the synthesizer returned
-      # it, so the rendered RBS and any WD6 / WD12 notice both count; only `nil` and `""` read as nothing.
+      # of them contributes anything, a SHA-256 hex digest of each plugin's id and {.contribution} otherwise,
+      # and nil when an output could not be read at all.
       #
       # nil means "unknown", and a caller must treat it as moved. Every failure is per file: one plugin that
       # cannot answer for one file leaves every other file's digest intact.
       #
       # @param synthesizers — `Plugin::Registry#source_rbs_synthesizers` pairs.
       def digest(synthesizers, path, cache_store)
-        outputs = synthesizers.filter_map do |plugin, callable|
-          output = output_for(plugin, callable, path, cache_store)
-          next nil if output.nil? || output == ""
+        sha = Digest::SHA256.new
+        contributed = false
+        synthesizers.each do |plugin, callable|
+          tag, text = contribution(output_for(plugin, callable, path, cache_store))
+          next if tag.nil?
 
-          "#{plugin.manifest.id}\x00#{Marshal.dump(output)}"
+          contributed = true
+          sha << plugin.manifest.id.to_s.b << "\x00" << tag << "\x00" << text.to_s.b << "\x01"
         end
-        outputs.empty? ? NO_CONTRIBUTION : Digest::SHA256.hexdigest(outputs.join("\x01"))
+        contributed ? sha.hexdigest : NO_CONTRIBUTION
       rescue StandardError
         nil
       end
+
+      # What one output puts into the environment, as a `[tag, text]` pair, or nil for nothing: exactly the
+      # RBS {Environment.interpret_synthesizer_outcome} hands the loader. The ADR-32 WD6 / WD12 notices are left
+      # out. They reach only the run-level `source-rbs-*` rows, which every run regenerates and the per-file
+      # cache never serves, and they quote line numbers, so a line shift in a file carrying a malformed `#:`
+      # would otherwise read as a moved contribution. A failed synthesis contributes nothing to the loader but
+      # is kept as one stable value of its own, so a file flipping between "no annotation" and "broken
+      # annotation" still reads as moved. Any shape the contract does not name is digested whole.
+      def contribution(output)
+        return nil if output.nil? || output == ""
+        return ["rbs", without_comment_lines(output)] if output.is_a?(String)
+        return ["raw", Marshal.dump(output)] unless output.is_a?(Array)
+
+        case output[0]
+        when :error then ["error", nil]
+        when :ok then contribution(output[1])
+        else ["raw", Marshal.dump(output)]
+        end
+      end
+
+      # The RBS text without its full-line comments: the doc comments and file-leading magic comments
+      # rbs-inline copies from the `.rb`, so rewording one in an annotated file does not read as a moved
+      # contribution. Sound for the digest alone. Nothing a per-file cache holds reads an RBS comment or an RBS
+      # position, and the loaded buffer and its environment-cache key keep the full text (ADR-89 Amendment
+      # 2026-09-28). Kept whole when an `%a` annotation spans lines, because a line inside one is annotation
+      # text even when it starts with `#`, and when the text is not valid in its encoding.
+      def without_comment_lines(rbs)
+        return rbs unless rbs.valid_encoding?
+
+        lines = rbs.each_line.to_a
+        return rbs if lines.any? { |line| open_annotation?(line) }
+
+        lines.grep_v(COMMENT_LINE).join
+      end
+
+      # Whether `line` opens an `%a` annotation it does not close. RBS lexes `%a` with each of the pairs in
+      # {ANNOTATION_CLOSERS} up to the first matching closer, with no escape.
+      def open_annotation?(line)
+        offset = 0
+        while (start = line.index(ANNOTATION_OPENER, offset))
+          stop = line.index(ANNOTATION_CLOSERS.fetch(line[start + 2]), start + 3)
+          return true if stop.nil?
+
+          offset = stop + 1
+        end
+        false
+      end
+
+      COMMENT_LINE = /\A\s*#/
+      ANNOTATION_OPENER = /%a[{(\[<|]/
+      ANNOTATION_CLOSERS = { "{" => "}", "(" => ")", "[" => "]", "<" => ">", "|" => "|" }.freeze
+      private_constant :COMMENT_LINE, :ANNOTATION_OPENER, :ANNOTATION_CLOSERS
 
       # One entry per (plugin, source file), all of them live for as long as the file is in the project — a
       # generation count says nothing about staleness here, so this producer declares itself out of
@@ -113,7 +167,8 @@ module Rigor
         nil
       end
 
-      private_class_method :generation_cap, :cache_descriptor, :input_digest, :invoke_safely
+      private_class_method :contribution, :without_comment_lines, :open_annotation?, :generation_cap,
+                           :cache_descriptor, :input_digest, :invoke_safely
     end
   end
 end

@@ -189,31 +189,56 @@ had three defects.
 **Decision.**
 
 1. Each ADR-85 seed bundle carries `source_rbs_digest` (`IncrementalSnapshot::SCHEMA` 29→30): a digest of
-   what every loaded `source_rbs_synthesizer` returns for the file. The digest covers the rendered RBS and
-   any ADR-32 WD6 / WD12 notice. It is the `none` sentinel when nothing is contributed, and nil when an
-   output cannot be read. `Environment::SourceRbsSynthesis.digest` computes it through the same function
-   and `Cache::Store` entries `Environment.collect_virtual_rbs` feeds the loader from, so an unmoved digest
-   means the loader read the same bytes. The session writes it onto the bundles the runner built this run.
-   A reused bundle keeps its digest, which stays exact because a bundle is reused only for byte-identical
-   content.
-2. The session reads the synthesizers from a plugin registry it loads for itself, without `#prepare`, before
+   the RBS every loaded `source_rbs_synthesizer` contributes for the file, as the loader reads it. It is
+   the `none` sentinel when nothing is contributed, and nil when an output cannot be read.
+   `Environment::SourceRbsSynthesis.digest` computes it through the same function and `Cache::Store`
+   entries `Environment.collect_virtual_rbs` feeds the loader from, so an unmoved digest means the loader
+   read the same bytes. The ADR-32 WD6 / WD12 notices are left out. They reach only the run-level
+   `source-rbs-*` rows, which every run regenerates and the per-file cache never serves, and they quote line
+   numbers, so digesting them would turn a line shift in a file carrying a malformed `#:` into a
+   whole-project re-analysis. A failed synthesis contributes nothing to the loader but counts as one stable
+   value, so a file that flips between "no annotation" and "broken annotation" still reads as moved.
+2. `Analysis::SourceRbsGate` writes the digest onto the bundles the runner built this run. A reused bundle
+   keeps its digest, which stays exact because a bundle is reused only for byte-identical content. Each
+   digest is bound to its bundle's bytes: a reading is kept only when the file's SHA-256, taken before and
+   after the reading, equals the content digest the runner built the bundle from. A file saved between the
+   closure decision and the runner's discovery is read again, and stored as unknown if it still does not
+   match.
+3. The gate reads the synthesizers from a plugin registry it loads for itself, without `#prepare`, before
    the recheck runner exists. Every loaded synthesizer counts, not one plugin known by name. An
-   `enabled: false` entry, which the loader skips, contributes none.
-3. Before WD1 and WD2 run, the recheck asks whether the edit moved any synthesized output. It has moved
+   `enabled: false` entry, which the loader skips, contributes none. A registry without `#prepare` is exact
+   only for a synthesizer the manifest declares before `#prepare` runs, so after every `--incremental` run
+   the session compares, by plugin id and order, the gate's set with the prepared registry's. The prepared
+   registry is the one ADR-88 WD1 already reads: the runner's on a sequential run, and the sequential
+   probe's on a pooled one. On a mismatch the gate turns untrusted for the session. Every bundle's digest is
+   stamped unknown before the snapshot is saved, every later edit re-analyses the whole project, and a
+   recheck that already left files out re-analyses the project at once (`run_buffer_recheck` declines
+   instead). [`plugin.md`](../internal-spec/plugin.md) states the contract a synthesizer must keep.
+4. Before WD1 and WD2 run, the recheck asks whether the edit moved any synthesized output. It has moved
    when a changed file's digest differs from its bundle's or either is unknown, when an added file
    contributes anything, or when a removed file contributed anything. If so, the closure is every analysed
    file. Otherwise WD1 runs on the declaration signature alone, which is sound because every changed file's
-   synthesized contribution is then byte-identical. A digest that cannot be read affects only an edit to
-   that file. It never switches the gate off for the project.
-4. The fallback is the whole project, not the file's dependents, because ADR-46 records Ruby-side reads, and
+   synthesized contribution is then byte-identical. A digest that cannot be read affects only an edit that
+   changes or removes that file. It never switches the gate off for the project.
+5. The fallback is the whole project, not the file's dependents, because ADR-46 records Ruby-side reads, and
    a read of a `virtual:` buffer records no edge back to its `.rb` file (the shapes above). This is what a
    `sig/` edit already costs through the snapshot fingerprint. Narrowing it needs those reads recorded:
    [#1544](https://github.com/rigortype/rigor/issues/1544).
-5. The digest comes from the output, not from the comment lines. rbs-inline binds an annotation by
+6. The digest comes from the output, not from the comment lines. rbs-inline binds an annotation by
    adjacency, so a plain comment or a blank line can bind or unbind one without touching its text. In an
    annotated file upstream emits a skeleton for every `def`, `attr`, constant and mixin, and the plugin
-   rewrites `#:nodoc:`-style directives before parsing.
-6. `Effects::InlineAnchor` maps an effect envelope's location onto the `.rb` line of its annotation, which
+   rewrites `#:nodoc:`-style directives before parsing. The output's own full-line comments are left out of
+   the digest, though. Upstream copies each member's comment block, and the file's leading magic comments,
+   into the RBS it writes, so otherwise rewording any comment in an annotated file would re-analyse the
+   project. That is sound because no per-file cache reads an RBS comment or an RBS position. An audit found
+   none: every position a check rule embeds is a Prism position, and nothing outside `sig_gen/` and the
+   language server reads a declaration's comment. The run-level `definition-build-failed` rows that
+   replay a `virtual:` buffer position and a hint drawn from its echoed comments are dropped for every file
+   in the closure (`PoolCoordinator#stale_replayed_failure?`), and the edited file always is. Only the
+   digest input is stripped; the loaded buffer and its environment-cache key keep the full text. The text is
+   kept whole when an `%a` annotation spans lines, since a line inside one is annotation text even when it
+   starts with `#`.
+7. `Effects::InlineAnchor` maps an effect envelope's location onto the `.rb` line of its annotation, which
    the RBS text does not carry, so a line shift can move that position without moving the digest. This
    needs no handling. The mapped location reaches only `EffectEnvelopePass` and
    `EffectAnnotationResidualPass`, which are run-level passes, recomputed on every run from the current
@@ -232,9 +257,14 @@ dependents; one run per edit on a shared host, so the walls are indicative):
 Every answer from this amendment matched a cold `--no-cache` run. On a project without annotations,
 nothing else changes. In an annotated project, every edit that moves the synthesized RBS re-analyses the
 whole project. Such edits include an annotation edit, and adding, removing or renaming a `def` in an
-annotated file. Master re-analysed the file's ancestry closure for these edits, which can serve a stale
-answer. A baseline computes one digest per file: a `Cache::Store` hit after the environment build, or a
-second synthesizer run under `--no-cache`.
+annotated file. Rewording a comment does not. Master re-analysed the file's ancestry closure for these
+edits, which can serve a stale answer. A baseline computes one digest per file: a `Cache::Store` hit after
+the environment build, or a second synthesizer run under `--no-cache`, plus two content SHA-256 reads that
+bind each digest to its bundle. A plugin that builds its synthesizer in `#prepare` costs its project a
+whole-project re-analysis on every `--incremental` edit. The language server re-seeds its session from the
+on-disk snapshot on every watched-file change, and editor mode never saves. In both, the whole-project
+fallback therefore repeats until a terminal `--incremental` run refreshes the snapshot, as master's
+ancestry closure already did ([#1547](https://github.com/rigortype/rigor/issues/1547)).
 
 ## Relationship
 

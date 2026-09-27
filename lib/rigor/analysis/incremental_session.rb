@@ -3,6 +3,7 @@
 require "digest"
 require_relative "incremental"
 require_relative "plugin_fact_fingerprint"
+require_relative "source_rbs_gate"
 require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
 require_relative "../effects/file_collection"
@@ -170,7 +171,7 @@ module Rigor
         @analyzed = runner.analyzed_files - runner.template_unit_paths
         # ADR-85 WD2 — the freshly built bundle set for the next run, each stamped with its file's source-RBS
         # digest (issue #1536).
-        @seed_bundles = stamp_source_rbs_digests(runner.seed_bundles)
+        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles)
         absorb_dependency_graph(runner)
         @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
         # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
@@ -239,6 +240,7 @@ module Rigor
           # stale. A full baseline is the sound answer for `--incremental`, but in editor mode it is also the
           # latency this mode exists to avoid, so decline and let the caller drop to single-file scope.
           break nil unless @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
+          break nil if source_rbs_unverified?(result)
 
           result
         end
@@ -264,7 +266,7 @@ module Rigor
       # records none at all), so no dependent set can bound who read it. An edit that moved it re-analyses the
       # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
-        return whole_project_closure(changed, added) if source_rbs_moved?(changed, added, removed)
+        return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
         gated_closure(changed, added, removed, param_files, param_pairs)
       end
@@ -414,7 +416,7 @@ module Rigor
       # the snapshot's seed bundle — i.e. its edit changed no method signature, visibility, ancestry, member
       # layout, def line, or method existence, so every cross-file DECLARATION fact its dependents consume is
       # unchanged. The signature reads code, not comments; the other half of stability — that no source-RBS
-      # synthesizer's output for the file moved — is settled before this runs ({#source_rbs_moved?}), so every
+      # synthesizer's output for the file moved — is settled before this runs ({SourceRbsGate#moved?}), so every
       # file reaching here has a byte-identical synthesized contribution. Sorbet sigs / dry-types includes are
       # CODE, captured by ADR-88's plugin-fact fingerprint (WD3).
       def declaration_unstable(changed, declaration_signatures)
@@ -430,68 +432,11 @@ module Rigor
         bundle[:declaration_signature] == current_declaration_signature
       end
 
-      # Issue #1536 (ADR-89 WD1 amendment) — whether this edit moved what any loaded source-RBS synthesizer
-      # contributes to the environment: a changed file whose digest differs from the one on its snapshot
-      # bundle (or either is unknown), an added file that contributes anything, or a removed file that did.
-      # Decided per file from the synthesizers' OUTPUT ({Environment::SourceRbsSynthesis.digest}), never from
-      # which plugins the configuration names, so a project whose files carry no annotation keeps every gate
-      # whether or not `rigor-rbs-inline` is loaded, and an `enabled: false` entry — which the loader skips —
-      # loads no synthesizer to digest. The digests computed here are kept for {#stamp_source_rbs_digests}.
-      def source_rbs_moved?(changed, added, removed)
-        @pending_source_rbs = (changed + added).to_h { |path| [path, source_rbs_digest(path)] }
-        none = Environment::SourceRbsSynthesis::NO_CONTRIBUTION
-        changed.any? { |path| !source_rbs_unmoved?(path) } ||
-          added.any? { |path| @pending_source_rbs[path] != none } ||
-          removed.any? { |path| stored_source_rbs_digest(path) != none }
-      end
-
-      def source_rbs_unmoved?(path)
-        stored = stored_source_rbs_digest(path)
-        !stored.nil? && stored == @pending_source_rbs[path]
-      end
-
-      def stored_source_rbs_digest(path)
-        @seed_bundles[path]&.fetch(SOURCE_RBS_DIGEST, nil)
-      end
-
       # Every file this recheck can analyse: the removed ones drop out at `affected & current`.
       def whole_project_closure(changed, added)
         (@analyzed.to_set | changed | added).freeze
       end
-
-      def source_rbs_digest(path)
-        Environment::SourceRbsSynthesis.digest(source_rbs_synthesizers, path, @cache_store)
-      end
-
-      # The loaded plugins' `source_rbs_synthesizer` pairs, from a registry this session loads for itself: the
-      # recheck runner that will load one does not exist yet when the closure is decided. Memoised for the
-      # session, whose configuration — and so plugin set — is fixed for its life.
-      def source_rbs_synthesizers
-        @source_rbs_synthesizers ||= Runner::ProjectPrePasses.new(
-          configuration: @configuration, cache_store: @cache_store, buffer: nil,
-          plugin_requirer: @plugin_requirer, pool_mode: -> { false }
-        ).prepared_registry(prepare: false).source_rbs_synthesizers
-      end
-
-      # Issue #1536 — give every bundle the runner built this run (a baseline's all, a recheck's re-walked
-      # ones) its file's source-RBS digest; a bundle the runner reused keeps the one it carries, which is
-      # still exact because a bundle is reused only for byte-identical content. The digests
-      # {#source_rbs_moved?} already computed for this recheck are reused rather than recomputed.
-      def stamp_source_rbs_digests(bundles)
-        computed = @pending_source_rbs || {}
-        @pending_source_rbs = nil
-        unstamped = bundles.reject { |_path, bundle| bundle.key?(SOURCE_RBS_DIGEST) }
-        return bundles if unstamped.empty?
-
-        stamped = bundles.dup
-        unstamped.each do |path, bundle|
-          digest = computed.key?(path) ? computed[path] : source_rbs_digest(path)
-          stamped[path] = bundle.merge(SOURCE_RBS_DIGEST => digest)
-        end
-        stamped
-      end
-      private :gated_closure, :source_rbs_moved?, :source_rbs_unmoved?, :stored_source_rbs_digest,
-              :whole_project_closure, :source_rbs_digest, :source_rbs_synthesizers, :stamp_source_rbs_digests
+      private :gated_closure, :whole_project_closure
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
       # removed since the last run. Also where an editor buffer's binding is re-spelled onto the set, since
@@ -558,7 +503,7 @@ module Rigor
             result = recheck
             adopt_plugin_fact_fingerprint
             fact_reusable = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
-            if fact_reusable && effects_reusable
+            if fact_reusable && effects_reusable && !source_rbs_unverified?(result)
               diagnostics = result.diagnostics
               warm = true
               # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
@@ -566,9 +511,10 @@ module Rigor
               # A cold baseline always persists — there was no valid snapshot to reuse.
               skip_save = result.no_change?
             else
-              # The fact surface moved (a plugin sig/catalog edit), a plugin is opaque, or the effects
-              # identity moved: the cached-served files the recheck merged may be stale (or, for effects, a
-              # partial collection cannot be closed), so re-analyze the whole tree. The current fact-surface
+              # The fact surface moved (a plugin sig/catalog edit), a plugin is opaque, the effects identity
+              # moved, or a synthesizer the source-RBS gate could not see was loaded (#1536): the cached-served
+              # files the recheck merged may be stale (or, for effects, a partial collection cannot be closed),
+              # so re-analyze the whole tree. The current fact-surface
               # digest (from the recheck runner) is unchanged by the re-analysis, so it is kept for the save.
               # Only a genuine fact-surface reason sets the reporting flag the CLI banner reads.
               @fact_surface_invalidated = true unless fact_reusable
@@ -607,11 +553,32 @@ module Rigor
 
       # ADR-88 WD1 — capture this invocation's fact-surface fingerprint (from the last analysis runner) onto the
       # reporting ivars + the `@plugin_fact_reusable` decision object.
+      #
+      # Issue #1536 — the same prepared registry settles whether the synthesizers the session digested with
+      # are the ones the run's environment was built from ({SourceRbsGate#verify}). A plugin that builds its
+      # synthesizer in `#prepare` leaves the gate untrusted, and every stored digest is stamped unknown before
+      # the snapshot is saved.
       def adopt_plugin_fact_fingerprint
-        fact = compute_plugin_fact_fingerprint
+        registry = prepared_plugin_registry
+        fact = compute_plugin_fact_fingerprint(registry)
         @plugin_fact_digest = fact.digest
         @opaque_plugin_ids = fact.opaque_plugin_ids
         @plugin_fact_reusable = fact
+        @seed_bundles = source_rbs_gate.verify(registry, @seed_bundles)
+      end
+
+      # Issue #1536 — a recheck whose closure left some file out may have under-read a synthesizer the gate
+      # could not see. {#run_incremental} re-analyses the project and {#run_buffer_recheck} declines, the way
+      # each treats a moved plugin fact surface.
+      def source_rbs_unverified?(result)
+        source_rbs_gate.untrusted? && !result.reused.empty?
+      end
+
+      # Issue #1536 — decides whether an edit moved synthesized RBS, and stamps each seed bundle's digest. One
+      # per session: its untrusted state must outlive every run the session makes.
+      def source_rbs_gate
+        @source_rbs_gate ||= SourceRbsGate.new(configuration: @configuration, cache_store: @cache_store,
+                                               plugin_requirer: @plugin_requirer)
       end
 
       # ADR-88 WD1 — the plugin fact-surface fingerprint for this invocation. For a SEQUENTIAL run it is read
@@ -620,15 +587,19 @@ module Rigor
       # published facts — there it falls back to the always-sequential probe. Both paths compute the identical
       # digest for a given fact surface, so the reuse decision is worker-count-independent (the parity spec
       # asserts this).
-      def compute_plugin_fact_fingerprint
+      def compute_plugin_fact_fingerprint(registry = prepared_plugin_registry)
+        PluginFactFingerprint.from_registry(registry)
+      end
+
+      # The registry the run's environment was built from, after `#prepare`: the analysis runner's own on a
+      # sequential run, the always-sequential probe's on a pooled one (nil when the probe fails).
+      def prepared_plugin_registry
         registry = @last_runner&.plugin_registry
-        if @workers.zero? && registry && !registry.empty?
-          PluginFactFingerprint.from_registry(registry)
-        else
-          PluginFactFingerprint.compute(
-            configuration: @configuration, cache_store: @cache_store, plugin_requirer: @plugin_requirer
-          )
-        end
+        return registry if @workers.zero? && registry && !registry.empty?
+
+        PluginFactFingerprint.prepared_registry(
+          configuration: @configuration, cache_store: @cache_store, plugin_requirer: @plugin_requirer
+        )
       end
 
       # Adopt a persisted snapshot's per-file state as this session's baseline (the warm-start path).
@@ -794,7 +765,7 @@ module Rigor
         # ADR-85 WD2 — the recheck's discovery folded the restored bundles and refreshed them (changed files
         # re-walked, removed files dropped, added files built), so adopt the runner's current set wholesale,
         # stamping the re-walked ones with their source-RBS digest (issue #1536).
-        @seed_bundles = stamp_source_rbs_digests(runner.seed_bundles)
+        @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles)
         fresh_by_file = per_file(runner.per_file_diagnostics)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
@@ -1086,12 +1057,6 @@ module Rigor
 
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       private_constant :TOP_LEVEL_KEY
-
-      # Issue #1536 — the seed-bundle key holding the file's {Environment::SourceRbsSynthesis.digest}. The
-      # session writes it ({#stamp_source_rbs_digests}), not the scope indexer that builds the rest of the
-      # bundle: the digest needs the plugin registry, which discovery never sees.
-      SOURCE_RBS_DIGEST = :source_rbs_digest
-      private_constant :SOURCE_RBS_DIGEST
 
       def negative_key_for(symbol)
         class_name, method = symbol.split("#", 2)

@@ -1219,7 +1219,9 @@ module Rigor
         pending = known.sort_by { |path| rank.fetch(path) }
         merged = []
         raw.each do |diagnostic|
-          position = analysed.include?(diagnostic.path) ? rank.fetch(diagnostic.path) : -1
+          # `order` lists every target, so an analysed path always has a rank; one that did not would only
+          # mark no place, since a misplaced row must never abort the run (ADR-5).
+          position = analysed.include?(diagnostic.path) ? rank.fetch(diagnostic.path, -1) : -1
           merged.concat(served.fetch(pending.shift)) while pending.any? && rank.fetch(pending.first) < position
           merged << diagnostic
         end

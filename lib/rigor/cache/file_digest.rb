@@ -119,8 +119,8 @@ module Rigor
       #
       # The hash is taken fresh, never from the per-run memo: a memoised digest describes the bytes as they were
       # when change detection read them, and pairing it with a later stat would vouch for bytes written since. And
-      # the re-pack is made only when the stat taken before the hash, the one taken after it, and the one packed
-      # all agree — a write landing while the file is hashed leaves `packed` as it was.
+      # the re-pack is kept only when the tuple it packed, taken after the hash, is the one taken before it: a
+      # write landing while the file is hashed moves the change time, and leaves `packed` as it was.
       #
       # `packed` comes back unchanged when its tuple still matches and it is not racy, and whenever the bytes no
       # longer match the digest: a row that must stay stale is never refreshed into a fresh one. nil when `packed`
@@ -135,17 +135,10 @@ module Rigor
         return packed unless Digest::SHA256.file(path).hexdigest == parsed[0]
 
         repacked = pack_stat(path, parsed[0])
-        stable = repacked && same_tuple?(before, File.stat(path)) && tuple_matches?(before, parse_stat(repacked))
-        stable ? repacked : packed
+        repacked && tuple_matches?(before, parse_stat(repacked)) ? repacked : packed
       rescue SystemCallError
         packed
       end
-
-      def self.same_tuple?(one, other)
-        one.size == other.size && ns(one.mtime) == ns(other.mtime) && ns(one.ctime) == ns(other.ctime) &&
-          one.ino == other.ino
-      end
-      private_class_method :same_tuple?
 
       # The content-digest field of a packed `:stat` entry ({.pack_stat}); nil when the entry is absent or not
       # well-formed. Exposed for the caller that must compare the recorded digest against bytes it hashes

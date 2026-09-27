@@ -21,7 +21,7 @@ module Rigor
     #
     # - one `:stat` row per analysed file, carrying the digest the SESSION holds for it — the bytes its cached rows
     #   were computed from — rather than a re-digest taken after the run;
-    # - the rows the run re-read itself ({Runner#incremental_slot_rows}' `run` half);
+    # - the rows the run re-read itself ({Runner#incremental_slot_rows}' `observed` and `derived` rows);
     # - the chain the {Entry} carries forward: the rows the last full run recorded for the inputs the incremental
     #   path does not re-derive on a recheck, and the plugin reads credited to each file's analysis
     #   ({IncrementalSession#write_run_slot}).
@@ -35,12 +35,12 @@ module Rigor
     # cannot leak into a default run.
     #
     # The key is the one {RunCacheProbe} reconstructs from configuration alone — the library list without a
-    # `rbs.virtual_rbs` slot, and no `template-units` slot — plus the analysis roots ({Target}). The session
-    # writes no slot for a project whose plugins
-    # claim template globs, whose `template-units` slot this key leaves out; the ADR-87 probe misses on such a
-    # project for the same reason. A virtual RBS buffer is a function of an analysed file's bytes (a row) and of
-    # the synthesising plugin's identity and configuration (the key's `configuration`, lockfile and engine slots),
-    # so it needs no slot of its own here.
+    # `rbs.virtual_rbs` slot, and no `template-units` slot — plus the analysis roots ({Target}). Neither left-out
+    # slot is needed. A virtual RBS buffer is a function of an analysed file's bytes (a row) and of the
+    # synthesising plugin's identity and configuration (the key's `configuration`, lockfile and engine slots). A
+    # template unit is a function of its template's bytes and of what its transform read (rows) and of the
+    # plugin's identity and the engine's (key slots), so a project whose plugins claim template globs is served
+    # too. The ADR-87 probe misses on one: the plain slot's key carries the `template-units` slot.
     #
     # `explain:` is always false: the session's runners never set it (#1533), and the CLI declines the probe under
     # `--explain`.
@@ -54,17 +54,19 @@ module Rigor
       # a compaction pass — the incremental path never runs one.
       GENERATION_CAP = RunCacheKey::GENERATION_CAP
 
-      # The stored value. `baseline` (a {Cache::Descriptor}) and `reads` (`{path => Cache::Descriptor}`) are the
-      # chain the next writer carries forward, kept apart from the rest of the dependency descriptor so it knows
-      # which rows are which; their entries are the same objects the descriptor holds, so `Marshal` writes them
-      # once. `baseline` holds the rows the last full run recorded for inputs the incremental path does not
-      # re-derive on a recheck (the signature tree, the discovered-not-analysed files, the `pre_eval:` files outside
-      # the analysed set); `reads` the plugin reads credited to each analysed file. `snapshot` is the identity of
+      # The stored value. `baseline` and `pinned` (each a {Cache::Descriptor}) and `reads` (`{path =>
+      # Cache::Descriptor}`) are the chain the next writer carries forward, kept apart from the rest of the
+      # dependency descriptor so it knows which rows are which; their entries are the same objects the descriptor
+      # holds, so `Marshal` writes them once. `baseline` and `pinned` hold the rows the last full run recorded for
+      # inputs the incremental path does not re-derive on a recheck (the signature tree, the
+      # discovered-not-analysed files, the `pre_eval:` files outside the analysed set), `pinned` the signature
+      # files the key identifies already ({Runner::BaselineRows}); `reads` the plugin reads credited to each
+      # analysed file. `snapshot` is the identity of
       # the incremental snapshot file the writing run left behind, which the next writer compares against the one
-      # it restored before trusting the chain. `roots` are the analysis roots in the order the run was given them
-      # ({.normalize_roots}): the key holds them as a set, and the probe serves the entry only to a run that names
-      # them in the same order.
-      Entry = Data.define(:diagnostics, :roots, :baseline, :reads, :snapshot)
+      # it restored before trusting the chain. `roots` are the analysis roots as the run was given them
+      # ({.as_written}): the key holds them as a set of paths, and the probe serves the entry only to a run that
+      # names them the same way, in the same order.
+      Entry = Data.define(:diagnostics, :roots, :baseline, :pinned, :reads, :snapshot)
 
       # What a slot is keyed by: the analysed-path set and the analysis roots the run was given. The roots are
       # not implied by the files — `rigor check --incremental lib extra` with `extra` missing analyses the same
@@ -85,12 +87,18 @@ module Rigor
         Cache::Descriptor.new(gems: base.gems, configs: base.configs + [roots])
       end
 
-      # The roots as absolute paths, in the order given: `lib`, `./lib` and `lib/` are one root, and `a b` is not
-      # `b a`, whose run lists `b`'s files first. The KEY sorts them, so a run that reorders its roots still finds
-      # the previous slot's chain (the snapshot fingerprint sorts them too); only {Entry#roots} keeps the order,
-      # and {.serve} compares it.
+      # The roots as absolute paths, which the KEY holds sorted: `lib`, `./lib` and `lib/` are one root there. A
+      # run that reorders its roots still finds the previous slot's chain (the snapshot fingerprint sorts them
+      # too), and one that respells them replaces the slot rather than adding one beside it.
       def normalize_roots(roots)
         Array(roots).map { |root| File.expand_path(root.to_s) }
+      end
+
+      # The roots as the run was given them, which {Entry#roots} holds and {.serve} compares. A missing root is
+      # reported as written (`./extra: no such file or directory`), and `a b` lists `a`'s files before `b`'s, so
+      # neither a respelling nor a reordering may be served another's answer.
+      def as_written(roots)
+        Array(roots).map(&:to_s)
       end
 
       # The engine-free probe. Returns a {Hit} when the slot for this run's analysed-path set validates, or nil to
@@ -111,7 +119,7 @@ module Rigor
 
         entry = validated_entry(configuration, cache_root, slot_key)
         return nil unless entry.is_a?(Entry) && entry.diagnostics.is_a?(Array)
-        return nil unless entry.roots == normalize_roots(paths)
+        return nil unless entry.roots == as_written(paths)
 
         Hit.new(result: Result.new(diagnostics: entry.diagnostics, stats: nil), file_count: files.size)
       rescue StandardError
@@ -126,7 +134,8 @@ module Rigor
         return nil if slot_key.nil?
 
         entry = store.peek_unvalidated(producer_id: PRODUCER_ID, key_descriptor: slot_key)
-        return nil unless entry.is_a?(Entry) && entry.baseline.is_a?(Cache::Descriptor) && entry.reads.is_a?(Hash)
+        return nil unless entry.is_a?(Entry) && entry.reads.is_a?(Hash)
+        return nil unless entry.baseline.is_a?(Cache::Descriptor) && entry.pinned.is_a?(Cache::Descriptor)
 
         entry
       end

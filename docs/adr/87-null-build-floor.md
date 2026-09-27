@@ -149,8 +149,8 @@ prepass): gitlab null 1.68s → **0.34s** on the measurement host.
   > `--incremental` still declines this probe, and has a twin of its own since
   > [ADR-45](45-unchanged-project-fast-path.md) WD2 (#1507): the incremental
   > session writes a run-result slot under a separate producer id, keyed as this
-  > probe keys, and `rigor check --incremental` serves a null run from it the same
-  > engine-free way.
+  > probe keys plus the analysis roots, and `rigor check --incremental` serves a
+  > null run from it the same engine-free way.
 - **WD5 — staleness spec battery (the WD1/WD2 gate).** Manufactured cases, each
   asserting the diagnostic outcome: touch-only (stat moved, digest same → FRESH,
   no false invalidation); ordinary edit (stale); same-size edit (stale via

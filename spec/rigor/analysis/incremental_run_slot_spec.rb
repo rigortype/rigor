@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "delegate"
 require "fileutils"
 require "tmpdir"
 require "rigor/analysis/incremental_session"
 require "rigor/analysis/incremental_run_slot"
 require "rigor/analysis/run_cache_probe"
+require_relative "../../fixtures/template_units/view_demo_plugin"
 
 # ADR-45 WD2 (#1507) — the run-result slot `rigor check --incremental` writes after each run, and the engine-free
 # probe that serves a later null run from it. Each example drives the real session over a real on-disk store
@@ -196,6 +198,18 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect(missing_root_rows(diagnostics)).not_to be_empty
       expect(rows(served(paths: %w[lib extra]).result.diagnostics)).to eq(rows(diagnostics))
     end
+
+    # A missing root is reported as the run was given it, so `./extra` and `extra/` print a different row.
+    it "does not serve a run over `lib ./extra` or `lib extra/` the answer of a run over `lib extra`" do
+      incremental_run(paths: %w[lib extra])
+      expect(served(paths: %w[lib ./extra])).to be_nil
+      expect(served(paths: %w[lib extra/])).to be_nil
+
+      diagnostics, = incremental_run(paths: %w[lib ./extra])
+      expect(rows(diagnostics).map { |row| row["path"] }).to include("./extra")
+      expect(rows(served(paths: %w[lib ./extra]).result.diagnostics)).to eq(rows(diagnostics))
+      expect(served(paths: %w[lib extra])).to be_nil
+    end
   end
 
   # Inputs a recheck does not re-derive ride the chain from the full run that recorded them. Recomputing them on a
@@ -289,6 +303,7 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       incremental_run
       after_the_run
 
+      expect(slot_entries).to be_empty
       expect(served).to be_nil
     end
 
@@ -307,6 +322,318 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       after_the_run
 
       expect(served).to be_nil
+    end
+
+    # An existence row is taken when the run ends: the root's creation or removal must not be recorded over an
+    # answer that reported the other state. The root is nested, so the project directory the absent lockfiles'
+    # rows watch does not change with it.
+    it "writes no slot when a missing analysis root is created while the run reads" do
+      write_project
+      FileUtils.mkdir_p("pkg")
+      during_first_analysis { FileUtils.mkdir_p("pkg/extra") }
+      diagnostics, = incremental_run(paths: %w[lib pkg/extra])
+      after_the_run
+
+      expect(rows(diagnostics).map { |row| row["path"] }).to include("pkg/extra")
+      expect(served(paths: %w[lib pkg/extra])).to be_nil
+    end
+
+    it "writes no slot when an analysis root is removed while the run reads" do
+      write_project
+      FileUtils.mkdir_p("pkg/extra")
+      during_first_analysis { FileUtils.rm_rf("pkg/extra") }
+      diagnostics, = incremental_run(paths: %w[lib pkg/extra])
+      after_the_run
+
+      expect(rows(diagnostics).map { |row| row["path"] }).not_to include("pkg/extra")
+      expect(served(paths: %w[lib pkg/extra])).to be_nil
+    end
+
+    # The snapshot fingerprint reads only `./Gemfile.lock`; a configured lockfile is the key's alone.
+    it "writes no slot when a configured lockfile is rewritten while the run reads" do
+      lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n\n" \
+             "BUNDLED WITH\n   2.6.0\n"
+      write("locks/Gemfile.lock", lock)
+      config = configuration("bundler" => { "lockfile" => "locks/Gemfile.lock" })
+      write("lib/a.rb", "class A\n  def x\n    1.nope\n  end\nend\n")
+      during_first_analysis { write("locks/Gemfile.lock", lock.sub("   2.6.0", "   2.6.1")) }
+      incremental_run(config)
+      after_the_run
+
+      expect(slot_entries).to be_empty
+      expect(served(config)).to be_nil
+    end
+
+    # The signature rows are listed when the run ends, so the removed file has no row, and its directory's
+    # listing row is the only one that moved: the root `sig` itself did not.
+    it "writes no slot when a signature file is removed from a nested directory while the run reads" do
+      write_project
+      write("sig/shop/widget.rbs", "class Widget\n  def price: () -> Integer\nend\n")
+      write("sig/shop/gadget.rbs", "class Gadget\nend\n")
+      during_first_analysis { FileUtils.rm_f("sig/shop/gadget.rbs") }
+      incremental_run
+      after_the_run
+
+      expect(served).to be_nil
+    end
+
+    # A recheck with a non-empty closure rebuilds its environment from the signature tree it carries rows for. A
+    # save reverted before the run ends leaves every carried row fresh.
+    it "writes no slot when a carried signature file is saved and reverted while a recheck reads" do
+      write_project
+      original = "class Widget\n  def price: () -> Integer\nend\n"
+      write("sig/widget.rbs", original)
+      incremental_run
+      expect(served).not_to be_nil
+      write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+      during_first_analysis do
+        write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
+        write("sig/widget.rbs", original)
+      end
+      _, warm = incremental_run
+      after_the_run
+
+      expect(warm).to be(true)
+      expect(served).to be_nil
+    end
+
+    # An editor's lock file is created and removed beside the file it edits. Neither an absent lockfile nor an
+    # analysis root is read for its directory's entries, so neither may refuse the write for one: a recheck that
+    # writes no slot leaves the chain broken until the next full run.
+    it "writes the slot when an unrelated file comes and goes in the project root while a recheck reads" do
+      write_project
+      incremental_run
+      write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+      during_first_analysis do
+        File.write(".#editor-lock", "")
+        FileUtils.rm_f(".#editor-lock")
+      end
+      diagnostics, warm = incremental_run
+      after_the_run
+
+      expect(warm).to be(true)
+      expect(rows(served.result.diagnostics)).to eq(rows(diagnostics))
+    end
+
+    it "writes the slot when an unrelated file comes and goes in an analysis root while a recheck reads" do
+      write_project
+      incremental_run
+      write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+      during_first_analysis do
+        File.write("lib/.#c.rb", "")
+        FileUtils.rm_f("lib/.#c.rb")
+      end
+      diagnostics, warm = incremental_run
+      after_the_run
+
+      expect(warm).to be(true)
+      expect(rows(served.result.diagnostics)).to eq(rows(diagnostics))
+    end
+
+    it "writes no slot when the lockfile is rewritten and restored while the run reads" do
+      lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n\n" \
+             "BUNDLED WITH\n   2.6.0\n"
+      write("Gemfile", "source 'https://rubygems.org'\n")
+      write("Gemfile.lock", lock)
+      write("lib/a.rb", "class A\n  def x\n    1.nope\n  end\nend\n")
+      during_first_analysis do
+        write("Gemfile.lock", lock.sub("   2.6.0", "   2.6.1"))
+        write("Gemfile.lock", lock)
+      end
+      incremental_run
+      after_the_run
+
+      expect(served).to be_nil
+    end
+
+    it "writes no slot when a template is saved while the run reads" do
+      write_project
+      write("app/views/users/show.rbx", "\"x\".upcasee\n")
+      config = configuration("plugins" => ["rigor-view-demo"])
+      during_first_analysis { write("app/views/users/show.rbx", "\"x\".downcasee\n") }
+      incremental_run(config, plugin: RigorViewDemoPlugin)
+      after_the_run
+
+      expect(served(config)).to be_nil
+    end
+  end
+
+  # The write guard's clock is the filesystem's own, read off a stamp in the store. A change time on another
+  # filesystem comes from another clock, or another granularity, and cannot be compared with it.
+  describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
+    def start
+      described_class.start(
+        configuration: configuration, roots: ["lib"], cache_root: cache_root,
+        fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"])
+      )
+    end
+
+    def rows_for(path)
+      Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.stat(path: path, digest: Rigor::Cache::FileDigest.hexdigest(path))]
+      )
+    end
+
+    # `File.stat` answering for `path` with a device other than its own.
+    def on_another_device(path)
+      allow(File).to receive(:stat).and_wrap_original do |original, asked|
+        stat = original.call(asked)
+        next stat unless File.expand_path(asked.to_s) == File.expand_path(path)
+
+        instance_double(File::Stat, dev: stat.dev + 1, ctime: stat.ctime, mtime: stat.mtime)
+      end
+    end
+
+    before { write_project }
+
+    it "admits a row whose file did not change since the mark" do
+      expect(start.admits?(rows_for("lib/a.rb"))).to be(true)
+    end
+
+    it "refuses a row whose file is on another filesystem than the mark" do
+      guard = start
+      here = rows_for("lib/a.rb")
+      there = rows_for("lib/c.rb")
+      on_another_device("lib/c.rb")
+      expect(guard.admits?(here)).to be(true)
+      expect(guard.admits?(there)).to be(false)
+    end
+
+    it "passes over a row the key pins on another filesystem, and checks one on the mark's" do
+      guard = start
+      pinned = rows_for("lib/c.rb")
+      on_another_device("lib/c.rb")
+      expect(guard.admits?(rows_for("lib/a.rb"), pinned: pinned)).to be(true)
+
+      RSpec::Mocks.space.reset_all
+      write("lib/c.rb", "class Other\n  def go\n    2\n  end\nend\n")
+      expect(guard.admits?(rows_for("lib/a.rb"), pinned: pinned)).to be(false)
+    end
+
+    it "takes no mark when the store is on another filesystem than the project" do
+      on_another_device(Dir.pwd)
+      expect(start).to be_nil
+    end
+
+    # The caller computes the fingerprint before the run starts; a lockfile rewritten in between leaves the snapshot
+    # the run restores keyed by one tree while the run reads another.
+    it "takes no mark when the fingerprint the run was given no longer describes the tree" do
+      write("Gemfile.lock", "GEM\n  specs:\n")
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"])
+      write("Gemfile.lock", "GEM\n  specs:\n\n")
+      expect(described_class.start(configuration: configuration, roots: ["lib"], cache_root: cache_root,
+                                   fingerprint: fingerprint)).to be_nil
+    end
+
+    it "refuses the write once a lockfile appears" do
+      guard = start
+      write("Gemfile.lock", "GEM\n  specs:\n")
+      expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+    end
+
+    it "refuses the write once a lockfile is removed" do
+      write("Gemfile.lock", "GEM\n  specs:\n")
+      guard = start
+      FileUtils.rm_f("Gemfile.lock")
+      expect(guard.admits?(rows_for("lib/a.rb"))).to be(false)
+    end
+  end
+
+  # The signature files the key pins live wherever the engine and the gems are installed, which a container or a
+  # Nix store puts on another filesystem than the project; the project's own signatures do not.
+  describe "signature files on another filesystem" do
+    let(:engine_root) { File.expand_path("../../..", __dir__) }
+
+    # `File.stat` answering with another device for every path under one of `prefixes`, for the run only.
+    def elsewhere(*prefixes)
+      allow(File).to receive(:stat).and_wrap_original do |original, asked|
+        stat = original.call(asked)
+        next stat unless prefixes.any? { |prefix| File.join(File.expand_path(asked.to_s), "").start_with?(prefix) }
+
+        moved = SimpleDelegator.new(stat)
+        moved.define_singleton_method(:dev) { stat.dev + 1 }
+        moved
+      end
+    end
+
+    def bundle_config
+      configuration("bundler" => { "bundle_path" => "bundle", "auto_detect" => false })
+    end
+
+    def previous_entry(config)
+      described_class.previous_entry(
+        store: Rigor::Cache::Store.new(root: cache_root), configuration: config,
+        target: described_class::Target.new(files: %w[lib/a.rb lib/b.rb lib/c.rb], roots: config.paths)
+      )
+    end
+
+    before do
+      write_project
+      write("bundle/ruby/4.0.0/gems/gadget-1.0/sig/gadget.rbs", "class Gadget\nend\n")
+    end
+
+    it "writes the slot when the engine's and a gem's signature files are elsewhere" do
+      elsewhere(File.join(engine_root, "data", ""), File.join(Dir.pwd, "bundle", ""))
+      incremental_run(bundle_config)
+      RSpec::Mocks.space.reset_all
+
+      expect(served(bundle_config)).not_to be_nil
+      pinned = previous_entry(bundle_config).pinned.files.map(&:path)
+      expect(pinned).to include(a_string_starting_with(File.join(engine_root, "data", "")))
+      expect(pinned).to include(a_string_ending_with("gadget-1.0/sig/gadget.rbs"))
+    end
+
+    it "writes no slot when the project's own signature files are elsewhere" do
+      write("sig/widget.rbs", "class Widget\n  def price: () -> Integer\nend\n")
+      elsewhere(File.join(Dir.pwd, "sig", "widget.rbs", "")) # the file, not the root its existence row names
+      incremental_run(bundle_config)
+      RSpec::Mocks.space.reset_all
+
+      expect(served(bundle_config)).to be_nil
+    end
+  end
+
+  # rigor-actionpack's shape: a plugin that claims template globs and compiles each template into a unit the run
+  # analyses. The key carries no `template-units` slot, which only a run can compute; the template files and one
+  # listing row per claimed glob validate what it would have keyed.
+  describe "a project whose plugin claims template globs" do
+    def view_config
+      configuration("plugins" => ["rigor-view-demo"])
+    end
+
+    def run_views
+      incremental_run(view_config, plugin: RigorViewDemoPlugin)
+    end
+
+    def paths_of(diagnostics)
+      rows(diagnostics).map { |row| row["path"] }
+    end
+
+    before do
+      write_project
+      write("app/views/users/show.rbx", "\"x\".upcasee\n")
+    end
+
+    it "serves its answer, and declines once a template changes, appears or goes" do
+      diagnostics, = run_views
+      expect(paths_of(diagnostics)).to include("app/views/users/show.rbx")
+      expect(rows(served(view_config).result.diagnostics)).to eq(rows(diagnostics))
+
+      write("app/views/users/show.rbx", "\"x\".downcasee\n")
+      expect(served(view_config)).to be_nil
+      diagnostics, warm = run_views
+      expect(warm).to be(true)
+      expect(rows(diagnostics)).to eq(rows(cold(view_config, plugin: RigorViewDemoPlugin)))
+      expect(rows(served(view_config).result.diagnostics)).to eq(rows(diagnostics))
+
+      write("app/views/users/edit.rbx", "1.nope\n")
+      expect(served(view_config)).to be_nil
+      diagnostics, = run_views
+      expect(paths_of(diagnostics)).to include("app/views/users/edit.rbx")
+      expect(served(view_config)).not_to be_nil
+
+      FileUtils.rm_f("app/views/users/edit.rbx")
+      expect(served(view_config)).to be_nil
     end
   end
 
@@ -336,9 +663,11 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect(served(paths: %w[a b])).to be_nil
     end
 
-    it "treats `a/` as the root `a`" do
+    it "serves a root only under the spelling the run was given" do
       incremental_run(paths: %w[a b])
-      expect(served(paths: %w[a/ b])).not_to be_nil
+      expect(served(paths: %w[a b])).not_to be_nil
+      expect(served(paths: %w[a/ b])).to be_nil
+      expect(served(paths: %w[./a b])).to be_nil
     end
   end
 

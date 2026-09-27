@@ -10,94 +10,171 @@ require_relative "../../cache/incremental_snapshot"
 module Rigor
   module Analysis
     module IncrementalRunSlot
-      # ADR-45 WD2 (#1507) — whether a run may record its answer at all. A slot's rows and key are built when the
-      # run ENDS, and every one of them must still describe the tree the run analysed: a save that lands while the
-      # run reads — an editor's, a `bundle install`'s — would otherwise leave the slot vouching for bytes the
-      # analysis never saw, and the probe would serve the pre-save answer against the post-save tree.
+      # ADR-45 WD2 (#1507) — whether a run may record its answer at all. Some of a slot's rows are built when the
+      # run ENDS rather than when it reads, and each of those must still describe the tree the run analysed: a
+      # save that lands while the run reads — an editor's, a `bundle install`'s, a `mkdir` — would otherwise leave
+      # the slot vouching for a tree the analysis never saw, and the probe would serve the pre-save answer against
+      # the post-save tree.
       #
-      # So the session takes a mark before the run reads anything ({.start}) and asks {#admits?} before it
-      # writes. The mark is the filesystem's own clock, read off the change time of a file written for the
-      # purpose: a timestamp compared across clocks misses an edit that lands inside a coarse filesystem's tick,
-      # and change times (unlike modification times) cannot be set back by `cp -p` or `touch -d`. Declining to
-      # write is always safe; it leaves the next null run on the full path.
+      # So the session takes a mark before the run reads anything ({.start}) and asks {#admits?} about those rows
+      # before it writes. A row recorded as the run read (a plugin's read, a listing it took) needs no guard: a
+      # later save leaves it stale, and validation says so.
+      #
+      # The mark is the filesystem's own clock, read off the change time of a file written for the purpose: a
+      # timestamp compared across clocks misses an edit that lands inside a coarse filesystem's tick, and change
+      # times (unlike modification times) cannot be set back by `cp -p` or `touch -d`. One clock means one
+      # filesystem, so the mark is taken only when the store is on the project's filesystem, and a row the key
+      # does not pin refuses the write when it is on any other. Declining to write is always safe; it leaves the
+      # next null run on the full path.
       class WriteGuard
         STAMP_DIR = "incremental"
         private_constant :STAMP_DIR
 
-        # Takes the mark, or nil when no stamp can be written (the store is then not one a slot is written to).
+        # Takes the mark, or nil when the slot must not be written: no stamp can be written, it is not on the
+        # project's filesystem, or the snapshot fingerprint the run was given no longer describes the tree.
+        #
+        # The fingerprint is recomputed AFTER the stamp: the caller computed it earlier, and a lockfile or a
+        # configured signature file changed in between would leave the snapshot the run restores keyed by one tree
+        # and the run reading another. From the stamp on, the lockfiles are the guard's to watch ({#admits?}), which
+        # is also what lets the slot's key, whose only file inputs they are, be computed when the run ends.
+        #
+        # The mark also records which of the paths an existence row can name are present: the lockfiles, the
+        # analysis roots, the `pre_eval:` entries and the signature roots.
         def self.start(configuration:, roots:, cache_root:, fingerprint:)
-          started_ns = stamp_ctime_ns(cache_root)
-          key = IncrementalRunSlot.key(configuration: configuration, target: Target.new(files: [], roots: roots))
-          return nil if started_ns.nil? || key.nil?
+          started_ns, device = stamp(cache_root)
+          return nil if started_ns.nil? || device_of(Dir.pwd) != device
+          return nil unless Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: roots) ==
+                            fingerprint
 
-          new(configuration: configuration, roots: roots, fingerprint: fingerprint,
-              key_bytes: key.to_canonical_bytes, started_ns: started_ns)
+          lockfiles = lockfile_paths(configuration)
+          named = Array(roots) + configuration.pre_eval + (configuration.signature_paths || ["sig"])
+          presence = (lockfiles + named.map { |path| File.expand_path(path.to_s) }).to_h do |path|
+            [path, File.exist?(path)]
+          end
+          new(started_ns: started_ns, device: device, lockfiles: lockfiles, presence: presence)
         end
 
-        def self.stamp_ctime_ns(cache_root)
+        # The stamp's change time and device.
+        def self.stamp(cache_root)
           dir = File.join(cache_root.to_s, STAMP_DIR)
           FileUtils.mkdir_p(dir)
           path = File.join(dir, "run-#{Process.pid}-#{SecureRandom.hex(4)}.stamp")
           File.write(path, "")
-          Cache::FileDigest.ns_of(File.stat(path).ctime)
+          stat = File.stat(path)
+          [Cache::FileDigest.ns_of(stat.ctime), stat.dev]
         rescue SystemCallError, IOError
           nil
         ensure
           FileUtils.rm_f(path) if path
         end
-        private_class_method :stamp_ctime_ns
+        private_class_method :stamp
 
-        def initialize(configuration:, roots:, fingerprint:, key_bytes:, started_ns:)
-          @configuration = configuration
-          @roots = roots
-          @fingerprint = fingerprint
-          @key_bytes = key_bytes
+        def self.device_of(path)
+          File.stat(path).dev
+        rescue SystemCallError
+          nil
+        end
+        private_class_method :device_of
+
+        # Every lockfile the key or the snapshot fingerprint may digest, present or not: a lockfile that appears
+        # while the run reads moves the key as surely as one rewritten, and one rewritten and restored digests as it
+        # did while the run may have read the other bytes.
+        def self.lockfile_paths(configuration)
+          [configuration.bundler_lockfile, configuration.rbs_collection_lockfile, "Gemfile.lock",
+           "rbs_collection.lock.yaml"].compact.map { |path| File.expand_path(path.to_s) }.uniq
+        end
+        private_class_method :lockfile_paths
+
+        def initialize(started_ns:, device:, lockfiles:, presence: {})
           @started_ns = started_ns
+          @device = device
+          @lockfiles = lockfiles
+          @presence = presence
         end
 
-        # True when nothing the slot would vouch for moved since the mark:
+        # True when nothing the guard watches moved since the mark:
         #
-        # - the key's non-file inputs, the lockfiles above all, digest as they did (the key is otherwise read
-        #   at write time, off the tree as it is then);
-        # - the snapshot fingerprint the run was keyed by still matches (its `sig:` and lockfile parts);
-        # - no file a row names changed after the mark, and no directory a glob row lists gained or lost an
-        #   entry after it, nor, for a stat-mode glob, did any file it matches change.
+        # - no lockfile the key or the fingerprint digests was written, created or removed;
+        # - no file `rows` or `pinned` names changed. A content row's file changed if its change time moved. An
+        #   existence row asks only whether its path is there, so a path the mark recorded changed if it came or
+        #   went, and an editor's lock file created and removed beside it, which moves its directory's change
+        #   time, does not count. That needs no clock, so it holds on any filesystem; it cannot see a path that
+        #   comes and goes again within the run. Any other existence row falls back to change times: its own when
+        #   present, its nearest existing ancestor's when absent;
+        # - no directory a glob row lists gained or lost an entry, nor, for a stat-mode glob, did any file it
+        #   matches change.
         #
-        # A file that is gone passes: its row is stale already, and validation says so.
-        def admits?(dependencies)
-          key = IncrementalRunSlot.key(configuration: @configuration, target: Target.new(files: [], roots: @roots))
-          return false unless key && key.to_canonical_bytes == @key_bytes
-          return false unless Cache::IncrementalSnapshot.fingerprint(configuration: @configuration,
-                                                                     roots: @roots) == @fingerprint
-
-          files_unchanged?(dependencies.files) && globs_unchanged?(dependencies.globs)
+        # A path on another filesystem than the mark refuses the write when it is one of `rows`, and is passed
+        # over when it is one of `pinned`: the rows the key pins (the engine's own signature files, a gem's
+        # signatures, which the engine slot and the lockfiles identify) live wherever the engine and the gems are
+        # installed — a container image's layer, a Nix store — and refusing them would turn the fast path off for
+        # every such installation. On the mark's filesystem they are checked like any other row.
+        #
+        # A content row whose file is gone passes: the row is stale already, and validation says so.
+        #
+        # @param rows — a {Cache::Descriptor} of the rows the key does not pin
+        # @param pinned — a {Cache::Descriptor} of the rows it does
+        def admits?(rows, pinned: Cache::Descriptor.new)
+          @lockfiles.none? { |path| lockfile_changed?(path) } &&
+            files_unchanged?(rows.files, strict: true) && globs_unchanged?(rows.globs, strict: true) &&
+            files_unchanged?(pinned.files, strict: false) && globs_unchanged?(pinned.globs, strict: false)
         rescue StandardError
           false
         end
 
         private
 
-        def files_unchanged?(entries)
+        def files_unchanged?(entries, strict:)
           seen = Set.new
           entries.none? do |entry|
-            next false if entry.comparator == :exists || !seen.add?(entry.path)
+            next false unless seen.add?(entry.path)
 
-            changed?(entry.path)
+            if entry.comparator == :exists
+              existence_changed?(entry.path, strict: strict)
+            else
+              changed?(entry.path, strict: strict)
+            end
           end
         end
 
-        def globs_unchanged?(entries)
+        def globs_unchanged?(entries, strict:)
           entries.none? do |entry|
             listed = Dir.glob(File.join(entry.root, File.dirname(entry.pattern), ""))
             matched = entry.mode == :stat ? Dir.glob(File.join(entry.root, entry.pattern)) : []
-            (listed + matched).any? { |path| changed?(path) }
+            (listed + matched).any? { |path| changed?(path, strict: strict) }
           end
         end
 
-        def changed?(path)
-          Cache::FileDigest.ns_of(File.stat(path).ctime) >= @started_ns
+        # A lockfile is read for its bytes: one absent at the mark must still be absent, one present must still be
+        # there with its change time before the mark.
+        def lockfile_changed?(path)
+          return File.exist?(path) unless @presence[path]
+
+          changed?(path, strict: true, missing: true)
+        end
+
+        def existence_changed?(path, strict:)
+          absolute = File.expand_path(path)
+          return File.exist?(absolute) != @presence[absolute] if @presence.key?(absolute)
+
+          nearest = absolute
+          nearest = File.dirname(nearest) until File.exist?(nearest) || File.dirname(nearest) == nearest
+          moved?(File.stat(nearest), strict: strict)
         rescue SystemCallError
-          false
+          true
+        end
+
+        def changed?(path, strict:, missing: false)
+          moved?(File.stat(path), strict: strict)
+        rescue SystemCallError
+          missing
+        end
+
+        # A change time is comparable with the mark only on the stamp's filesystem.
+        def moved?(stat, strict:)
+          return strict if stat.dev != @device
+
+          Cache::FileDigest.ns_of(stat.ctime) >= @started_ns
         end
       end
     end

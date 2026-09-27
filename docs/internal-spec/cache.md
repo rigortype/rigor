@@ -1201,24 +1201,30 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   over the session's analysed-path set, plus an `incremental.roots` config entry over the
   analysis roots, normalised to absolute paths and sorted (`IncrementalRunSlot::Target`,
   `.normalize_roots`). The producer id and the roots entry each keep it apart from
-  `analysis.run-diagnostics` on their own.
-- **Value.** `IncrementalRunSlot::Entry(diagnostics, roots, baseline, reads, snapshot)`.
+  `analysis.run-diagnostics` on their own. A project whose plugins claim template globs is
+  written and served: the template rows below validate what the plain key's
+  `template-units` slot would key.
+- **Value.** `IncrementalRunSlot::Entry(diagnostics, roots, baseline, pinned, reads, snapshot)`.
   `diagnostics` is what the run printed before the baseline filter; the CLI applies the
   filter, `--fail-on` and the output format to it exactly as the full incremental path
-  does (`CheckCommand#write_incremental_result`). `roots` are the normalised roots in the
-  order the run was given them, and the probe serves the entry only to a run that names
-  them in that order. `baseline` and `reads` (`{path => Descriptor}`) are the chain a later
-  recheck carries forward; `snapshot` is the `(size, mtime_ns, ctime_ns, inode)` of the
+  does (`CheckCommand#write_incremental_result`). `roots` are the roots as the run was
+  given them (`.as_written`), and the probe serves the entry only to a run that names them
+  the same way in the same order. `baseline`, `pinned` and `reads` (`{path => Descriptor}`) are
+  the chain a later recheck carries forward; `snapshot` is the `(size, mtime_ns, ctime_ns, inode)` of the
   snapshot file the writing run left behind.
 - **Dependency descriptor.** A `:stat` row per analysed file, from the session's own
   `digests` (the bytes each answer was computed from), re-packed by
   `Cache::FileDigest.refresh_stat` when the bytes, hashed afresh rather than from the
-  per-run memo, still match and the stat held still across that hash;
-  `Runner#incremental_slot_rows`' `run` rows (every plugin boundary row, the `watch:`
-  globs, the template rows, and an existence row per analysis root and `pre_eval:`
-  entry); the chain's `baseline` (`Runner#baseline_dependency_rows`: the signature tree
-  and an existence row per signature root, the discovered-not-analysed files and a
-  listing row per discovery root, the `pre_eval:` files outside the analysed set); and
+  per-run memo, still match and the tuple packed after that hash is the one taken before
+  it; `Runner#incremental_slot_rows`' `observed` rows (every plugin boundary row, each
+  producer's `watch:` globs among them, recorded as the plugin read) and `derived` rows
+  (taken when the run ends: the template files and one `:names` row per claimed glob, and
+  an existence row per analysis root and `pre_eval:` entry); the chain's `baseline` and
+  `pinned` (`Runner#baseline_dependency_rows`: the signature tree and an existence row per
+  signature root, the discovered-not-analysed files and a listing row per discovery root,
+  the `pre_eval:` files outside the analysed set; `pinned` holds the signature files
+  outside the project's own signature roots, which the key's engine slot or lockfiles
+  identify, and `baseline` the rest); and
   every file's `reads`. A file's `reads` are what `Plugin::IoBoundary.attributing` collected
   while it was analysed: every row a live recorder took and every row `IoBoundary#replay`
   handed back for a producer served during that analysis (#1558), the rows a held row
@@ -1231,16 +1237,30 @@ guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is th
   the one it restored; the fast path then stays off until the next full run starts a
   fresh chain. When the path set moved it discards the previous entry after writing its own.
 - **Write guard.** `IncrementalRunSlot::WriteGuard` takes a mark before the run reads
-  anything: the change time of a stamp file written under `<cache>/incremental/` (the
-  filesystem's own clock), the key's non-file part, and the snapshot fingerprint the run
-  was given. The slot is written only when, at write time, the key's non-file part and
-  the recomputed fingerprint match the mark's and no path a file row names, no directory
-  a glob row lists and no file a `:stat` glob matches has a change time at or after the
-  mark. A path that is gone passes; its row is stale already.
+  anything: the change time and device of a stamp file written under
+  `<cache>/incremental/` (the filesystem's own clock). No mark is taken, and no slot
+  written, when the stamp is not on the device of the working directory, or when the
+  snapshot fingerprint the run was given, recomputed after the stamp, has moved. The slot is
+  written only when, at write time, nothing the guard watches moved: every lockfile the
+  key or the fingerprint may read (`bundler.lockfile`, `rbs_collection.lockfile`,
+  `Gemfile.lock`, `rbs_collection.lock.yaml`), one present at the mark still there with
+  its change time before it and one absent still absent; the analysed files' rows, the
+  `derived` rows and the chain's `baseline`, carried or taken; and the chain's `pinned`.
+  No path a content row names, no directory a glob row lists and no file a `:stat` glob
+  matches may have a change time at or after the mark. An existence row for a path the
+  mark recorded (the analysis roots, the `pre_eval:` entries, the signature roots) moved if
+  the path's presence differs from the mark's; its directory's change time is not asked,
+  so an editor's lock file beside it does not refuse the write, and a path that comes and
+  goes again within the run is not seen. Any other existence row is judged by its own
+  change time, or its nearest existing ancestor's when absent. A path whose change time is
+  asked refuses the write when it is on another device, except a `pinned` row's, which is
+  passed over. A content row whose file is gone passes; the row is stale already. The `observed` rows and
+  the carried `reads` are not asked about: a later save leaves a row taken as it was read
+  stale. The bound is the clock: a filesystem clock stepped backwards during the run can
+  date a save before the mark.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
-  on, a run with an opaque plugin, a project whose plugins claim template globs, a run
-  in which a boundary row changed during the per-file loop without being credited to a
-  file, or a run after which the session holds no content digest for some analysed file
+  on, a run with an opaque plugin, a run in which a boundary row changed during the
+  per-file loop without being credited to a file, or a run after which the session holds no content digest for some analysed file
   — the #1536 source-RBS gate forgets the digest of a file saved after the closure was
   decided (`forget_unbound_digests`), and no row could then say what that file's readers
   were computed from. A run under an untrusted gate is written: the gate decides the

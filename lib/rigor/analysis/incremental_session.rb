@@ -647,7 +647,8 @@ module Rigor
       #
       # - the analysed files, at the digest this session holds for each: the bytes its cached or fresh rows were
       #   computed from, never a re-digest taken after the fact;
-      # - what this run read and re-derives every run ({Runner#incremental_slot_rows}' `run` rows);
+      # - what this run read and re-derives every run ({Runner#incremental_slot_rows}' `observed` and `derived`
+      #   rows);
       # - the CHAIN: the rows the last full run recorded for inputs a recheck does not re-derive
       #   ({Runner#baseline_dependency_rows}), and the plugin reads credited to each file's analysis. A full run
       #   starts a chain; a recheck takes the previous slot's, replaces the reads of every file it re-analysed with
@@ -659,6 +660,10 @@ module Rigor
       # full run starts a fresh chain. Declining to write is always safe; it only leaves the next null run on the
       # full path.
       #
+      # Every row not recorded as a plugin read it must still describe the tree the run read
+      # ({IncrementalRunSlot::WriteGuard}): the analysed files' (whose session digest a full run takes after its
+      # analysis), the `derived` rows, and the chain's baseline, taken now or carried ({#guarded_rows}).
+      #
       # @param written_identity — the snapshot file as this run leaves it, recorded for the next writer's check.
       def write_run_slot(diagnostics, written_identity:)
         return unless run_slot_writable?
@@ -669,14 +674,14 @@ module Rigor
         analysed = chain && analysed_file_rows
         return if analysed.nil?
 
-        baseline, reads = chain
-        dependencies = run_slot_dependencies(analysed, rows.run, baseline, reads.values)
-        return unless @slot_guard&.admits?(dependencies)
+        baseline, pinned, reads = chain
+        return unless @slot_guard&.admits?(guarded_rows(analysed, rows.derived, baseline), pinned: pinned)
 
         entry = IncrementalRunSlot::Entry.new(
-          diagnostics: diagnostics, roots: IncrementalRunSlot.normalize_roots(roots),
-          baseline: baseline, reads: reads, snapshot: written_identity
+          diagnostics: diagnostics, roots: IncrementalRunSlot.as_written(roots),
+          baseline: baseline, pinned: pinned, reads: reads, snapshot: written_identity
         )
+        dependencies = run_slot_dependencies(analysed, rows, [baseline, pinned], reads.values)
         wrote = IncrementalRunSlot.write(
           store: @cache_store, configuration: @configuration, entry: entry, dependencies: dependencies,
           target: IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)
@@ -718,7 +723,7 @@ module Rigor
 
       def start_chain(rows)
         baseline = @last_runner.baseline_dependency_rows(files: @analyzed)
-        baseline && [baseline, rows.by_file.slice(*@analyzed)]
+        baseline && [baseline.owned, baseline.pinned, rows.by_file.slice(*@analyzed)]
       end
 
       def carry_chain(rows, roots)
@@ -731,7 +736,7 @@ module Rigor
         return nil if previous.nil? || previous.snapshot != @restored_snapshot_identity
 
         served = previous.reads.except(*@last_runner.analyzed_files)
-        [previous.baseline, served.merge(rows.by_file).slice(*@analyzed)]
+        [previous.baseline, previous.pinned, served.merge(rows.by_file).slice(*@analyzed)]
       end
 
       # One `:stat` row per analysed file, from the entry this session recorded for it (`#pack_digest`), re-packed
@@ -748,11 +753,22 @@ module Rigor
         end
       end
 
-      def run_slot_dependencies(analysed, run, baseline, reads)
+      # @param chained — the chain's baseline descriptors, owned and pinned
+      def run_slot_dependencies(analysed, rows, chained, reads)
+        carried = chained + reads
         Cache::Descriptor.new(
-          files: analysed + run.files + baseline.files + reads.flat_map(&:files),
-          globs: (run.globs + baseline.globs + reads.flat_map(&:globs)).uniq
+          files: analysed + rows.derived.files + rows.observed.files + carried.flat_map(&:files),
+          globs: (rows.derived.globs + rows.observed.globs + carried.flat_map(&:globs)).uniq
         )
+      end
+
+      # What the write guard asks about besides the pinned baseline: every row the key does not pin that was not
+      # recorded as a plugin read it. A recheck's carried baseline is among them. The run that took it vouched for
+      # the tree it saw, but this run reads those inputs again (a recheck with a non-empty closure rebuilds its
+      # environment from the signature tree), and a save it read that is reverted before the run ends leaves every
+      # carried row fresh while the answer came from the saved bytes.
+      def guarded_rows(analysed, derived, baseline)
+        Cache::Descriptor.new(files: analysed + derived.files + baseline.files, globs: derived.globs + baseline.globs)
       end
 
       # The snapshot file's `(size, mtime_ns, ctime_ns, inode)`: which write of it a run restored, or left behind.

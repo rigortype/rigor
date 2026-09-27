@@ -153,6 +153,25 @@ RSpec.describe Rigor::Cache::FileDigest do
       expect(described_class.stat_fresh?(path, refreshed)).to be(false)
     end
 
+    # A save landing while the file is hashed, its mtime kept as `cp -p` keeps it: the digest is the old bytes,
+    # and re-packing it with the new stat would vouch for bytes the hash never read.
+    it "leaves the entry as it was when the file is rewritten while it is hashed" do
+      digest = expected
+      entry = described_class.with_run { described_class.pack_stat(path, digest) }
+      kept = Time.now - 10
+      File.utime(kept, kept, path)
+      allow(Digest::SHA256).to receive(:file).and_wrap_original do |original, hashed|
+        hashing = original.call(hashed)
+        File.write(hashed, "x = 9\n")
+        File.utime(kept, kept, hashed)
+        hashing
+      end
+      refreshed = described_class.with_run { described_class.refresh_stat(path, entry) }
+
+      expect(refreshed).to eq(entry)
+      expect(described_class.with_run { described_class.stat_fresh?(path, refreshed) }).to be(false)
+    end
+
     it "answers nil for an entry that is not a stat pack, and the entry itself for a vanished file" do
       entry = described_class.pack_stat(path, expected)
       expect(described_class.refresh_stat(path, "missing")).to be_nil

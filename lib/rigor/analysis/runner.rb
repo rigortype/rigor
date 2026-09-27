@@ -1401,50 +1401,52 @@ module Rigor
       end
 
       # ADR-45 WD2 (#1507) — the rows `rigor check --incremental`'s run-result slot records beside the analysed
-      # files (whose digests {IncrementalSession} holds itself), split by what the next narrowed run does with them:
+      # files (whose digests {IncrementalSession} holds itself). Every run reads these inputs again and re-derives
+      # its answer from them; they are split by when the row was taken, which decides whether the session's
+      # {IncrementalRunSlot::WriteGuard} must vouch for it:
       #
-      # - `run` — what every run reads again and re-derives its answer from: every plugin row (`#prepare`,
-      #   producers, template synthesis, and this run's per-file reads too), the producer `watch:` globs, the
-      #   template files and their claimed globs (#392, re-analysed every run), and one existence row per analysis
-      #   root and per `pre_eval:` entry. A run's path errors (`no such file or directory`,
-      #   `pre-eval.file-not-found`) answer to those last rows; the plain slot records neither, and the incremental
-      #   path regenerates the errors every run, so a slot that served one past the edit that retracts it would
-      #   print what no run of that tree prints. Existence rows carry ADR-45 WD1b's bound: a directory replaced by
-      #   a file of the same name stays fresh.
+      # - `observed` — every plugin row (`#prepare`, producers, template synthesis, and this run's per-file reads
+      #   too), recorded by the {Plugin::IoBoundary} as the plugin read. It includes each producer's `watch:`
+      #   globs, which a producer replays into its boundary whether it computed or was served (#1558). A save
+      #   after the read leaves the row stale, so no guard is needed.
+      # - `derived` — rows taken when the run ENDS: the template files and their claimed globs (#392, re-analysed
+      #   every run), and one existence row per analysis root and per `pre_eval:` entry. A run's path errors (`no
+      #   such file or directory`, `pre-eval.file-not-found`) answer to those last rows; the plain slot records
+      #   neither, and the incremental path regenerates the errors every run, so a slot that served one past the
+      #   edit that retracts it would print what no run of that tree prints. Existence rows carry ADR-45 WD1b's
+      #   bound: a directory replaced by a file of the same name stays fresh.
       # - `by_file` — `{path => Descriptor}`, the plugin reads each file's analysis made
       #   ({Plugin::IoBoundary.attributing}). A narrowed run analyses only its closure, so the session carries the
       #   other files' reads forward from the previous slot.
       #
+      # The template rows stand in for the `template-units` slot the plain key carries, which only a run can
+      # compute. That digest is a function of each unit's compiled Ruby (the template's bytes, and whatever else
+      # the transform read, through its boundary), its transform (the plugin, whose identity and configuration
+      # the key carries) and the synthesis version (the engine's): each of those has a row or a key slot.
+      #
       # The inputs a recheck does NOT re-derive are {#baseline_dependency_rows}. nil when this run cannot vouch for
       # its rows — a pool run, whose workers' reads never reach this process; a run that recorded no dependencies,
-      # whose analysis no session owns; a project whose plugins claim template globs, whose `template-units` key
-      # slot the slot's key (like the ADR-87 probe's) does not carry; or a run in which a boundary row changed
-      # during the per-file loop that no file's analysis was credited with, such as a read from a thread the
-      # plugin started.
-      IncrementalSlotRows = Data.define(:run, :by_file)
+      # whose analysis no session owns; or a run in which a boundary row changed during the per-file loop that no
+      # file's analysis was credited with, such as a read from a thread the plugin started.
+      IncrementalSlotRows = Data.define(:observed, :derived, :by_file)
 
       # @param roots — the analysis roots the run was given.
       def incremental_slot_rows(roots:)
-        return nil if pool_mode? || !@record_dependencies || !template_units.digest.nil?
+        return nil if pool_mode? || !@record_dependencies
         return nil unless analysis_reads_attributed?
 
         IncrementalSlotRows.new(
-          run: incremental_run_rows(roots),
+          observed: plugin_boundary_rows,
+          derived: Cache::Descriptor.new(
+            files: template_unit_file_entries + existence_entries(Array(roots) + @configuration.pre_eval),
+            globs: template_unit_glob_entries
+          ),
           by_file: @analysis_reads.transform_values do |reads|
             Cache::Descriptor.new(
               files: reads.grep(Cache::Descriptor::FileEntry).uniq,
               globs: reads.grep(Cache::Descriptor::GlobEntry).uniq
             )
           end
-        )
-      end
-
-      def incremental_run_rows(roots)
-        boundary = plugin_boundary_rows
-        Cache::Descriptor.new(
-          files: template_unit_file_entries + existence_entries(Array(roots) + @configuration.pre_eval) +
-                 boundary.files,
-          globs: (template_unit_glob_entries + boundary.globs + producer_watch_glob_entries).uniq
         )
       end
 
@@ -1474,6 +1476,14 @@ module Rigor
       # Recomputing any of these on a recheck would vouch for the tree the recheck saw while its answer still
       # carries rows computed before the change, so a change to one keeps the probe declining until the next full
       # run. nil when this process analysed no file itself — a pool run, or a run with no files.
+      #
+      # Split by what identifies the input. `pinned` holds the signature files outside the project's own signature
+      # roots, which the slot's key identifies already: the engine's own (`data/`, a bundled plugin's `sig/`, a
+      # gem overlay) by the engine slot, a gem's `sig/` and an `rbs collection` directory by the lockfiles. `owned`
+      # holds the rest, which only their rows identify. The session's write guard refuses an `owned` row whose
+      # change time it cannot read, and passes over a `pinned` one.
+      BaselineRows = Data.define(:owned, :pinned)
+
       SignatureRoots = Struct.new(:signature_paths)
       private_constant :SignatureRoots
 
@@ -1481,13 +1491,31 @@ module Rigor
       def baseline_dependency_rows(files:)
         return nil if pool_mode? || !@collect_stats || @analyzed_files.empty?
 
-        roots = SignatureRoots.new(@snapshots.signature_paths)
-        Cache::Descriptor.new(
-          files: Cache::RbsDescriptor.file_entries(roots, comparator: :stat) +
-                 existence_entries(signature_root_candidates) + discovery_file_entries({ files: files }) +
-                 unanalysed_pre_eval_entries(files),
-          globs: (Cache::RbsDescriptor.glob_entries(roots) + discovery_glob_entries).uniq
+        own, pinned = signature_rows
+        BaselineRows.new(
+          owned: Cache::Descriptor.new(
+            files: own.files + existence_entries(signature_root_candidates) +
+                   discovery_file_entries({ files: files }) + unanalysed_pre_eval_entries(files),
+            globs: (own.globs + discovery_glob_entries).uniq
+          ),
+          pinned: pinned
         )
+      end
+
+      # The signature tree's rows, the project's own and the rest.
+      def signature_rows
+        roots = SignatureRoots.new(@snapshots.signature_paths)
+        own = signature_root_candidates.map { |root| File.join(File.expand_path(root.to_s), "") }
+        own_files, other_files = Cache::RbsDescriptor.file_entries(roots, comparator: :stat)
+                                                     .partition { |row| within?(row.path, own) }
+        own_globs, other_globs = Cache::RbsDescriptor.glob_entries(roots).partition { |row| within?(row.root, own) }
+        [Cache::Descriptor.new(files: own_files, globs: own_globs.uniq),
+         Cache::Descriptor.new(files: other_files, globs: other_globs.uniq)]
+      end
+
+      def within?(path, roots)
+        directory = File.join(File.expand_path(path.to_s), "")
+        roots.any? { |root| directory.start_with?(root) }
       end
 
       # The project's own signature roots, whether or not they exist: the configured `signature_paths:`, or the
@@ -1531,8 +1559,8 @@ module Rigor
         end
       end
       private :plugin_boundary_rows, :producer_watch_glob_entries, :existence_entries,
-              :analysis_reads_attributed?, :incremental_run_rows, :signature_root_candidates,
-              :discovery_glob_entries, :unanalysed_pre_eval_entries
+              :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
+              :unanalysed_pre_eval_entries, :signature_rows, :within?
 
       # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics
       # are a function of them (that is the entire point: the method whose absence would have been reported

@@ -100,14 +100,6 @@ module Rigor
         # The statement-sequence events: a collector overriding any of them is handed all three.
         SEQUENCE_EVENTS = %i[on_sequence on_statement on_sequence_end].freeze
 
-        # PROTOTYPE: one bit per event family, so a subset of a run answers "does anyone here take this event"
-        # with one Integer test ({Traversal#handled?}).
-        DECLARATION_BIT = 1
-        DEF_BIT = 2
-        CALL_BIT = 4
-        CONSTANT_WRITE_BIT = 8
-        SEQUENCE_BIT = 16
-
         # The legacy variants of {RULE_VARIANTS} this collector follows, `rule => variant`. A collector
         # overrides the constant, documenting each entry where it declares it.
         VARIANTS = {}.freeze
@@ -162,25 +154,6 @@ module Rigor
         end
         @events_by_class = {}.compare_by_identity
 
-        # The event bits `klass` overrides, memoised per class like {.events_of}.
-        def self.bits_of(klass)
-          return event_bits(klass) unless Ractor.main?
-
-          @bits_by_class[klass] ||= event_bits(klass)
-        end
-        @bits_by_class = {}.compare_by_identity
-
-        def self.event_bits(klass)
-          events = events_of(klass)
-          bits = 0
-          bits |= DECLARATION_BIT if events.include?(:on_declaration)
-          bits |= DEF_BIT if events.include?(:on_def)
-          bits |= CALL_BIT if events.include?(:on_call)
-          bits |= CONSTANT_WRITE_BIT if events.include?(:on_constant_write)
-          bits |= SEQUENCE_BIT if SEQUENCE_EVENTS.any? { |event| events.include?(event) }
-          bits
-        end
-
         def self.overridden_events(klass)
           EVENTS.reject { |event| klass.instance_method(event).owner.equal?(self) }.freeze
         end
@@ -205,313 +178,236 @@ module Rigor
         private_constant :EMPTY
       end
 
-      NO_COLLECTORS = [].freeze
-      private_constant :NO_COLLECTORS
-
       module_function
 
       # Walks `root` once for every collector, from `context` (a file's top level by default).
       def run(root, collectors, context = Context.root)
-        Traversal.for(collectors).walk(root, collectors, context)
+        traversal = Traversal.for(collectors)
+        traversal.walk(root, collectors, traversal.all, context)
         collectors
       end
 
-      # One run's dispatch: which events any collector overrides, so an event none of them handles costs no
-      # call per node.
-      #
-      # PROTOTYPE: the sequence arm takes the class past `ClassLength`. The amendment draft records the split
-      # a real port takes (the rule arms apart from the dispatch), so the prototype does not make it.
-      class Traversal # rubocop:disable Metrics/ClassLength
-        # The traversal for `collectors`. A single-collector run's depends on the collector's class alone, so
-        # the main Ractor builds it once per class (the #1055 pattern in `FactStore::Target.local`); every
-        # other run builds its own.
+      # One run shape's dispatch. PROTOTYPE (ADR-116 WD5 amendment draft): the collectors live at a node are a
+      # bitmask over the run's positions, not an Array. Asking, declining and forking are Integer operations,
+      # so no descent allocates; an event is dispatched only where a collector that takes it is still live, so
+      # a collector that declines a subtree costs nothing inside it; and the traversal depends on the run's
+      # collector CLASSES alone, so the main Ractor builds it once per run shape and every file reuses it.
+      class Traversal
+        # Positions a mask can name. A run shape is a handful of collectors; the bound only keeps every mask a
+        # fixnum.
+        MAX_COLLECTORS = 60
+
+        # The traversal for `collectors`' classes, in order. The main Ractor keeps one per run shape, found
+        # through one identity table per position so that looking it up allocates nothing; a pool worker on
+        # the Ractor backend builds its own (the #1055 pattern in `FactStore::Target.local`).
         def self.for(collectors)
-          return new(collectors) unless collectors.size == 1 && Ractor.main?
+          return new(collectors.map(&:class)) unless Ractor.main?
 
-          @single_runs[collectors.first.class] ||= new(collectors)
-        end
-        @single_runs = {}.compare_by_identity
-
-        def initialize(collectors)
-          @declarations = handles?(collectors, :on_declaration)
-          @defs = handles?(collectors, :on_def)
-          @calls = handles?(collectors, :on_call)
-          @constant_writes = handles?(collectors, :on_constant_write)
-          @sequences = Collector::SEQUENCE_EVENTS.any? { |event| handles?(collectors, event) }
-          collectors.each { |collector| Collector.check_variants!(collector.class) }
-          @ordinary_factories = collectors.any? { |collector| ordinary_factory?(collector) }
-          @unnamed_factories = !collectors.all? { |collector| ordinary_factory?(collector) }
-          @unrendered_variants = collectors.any? { |collector| variant(collector, :unrendered_header) != :children }
-          @nesting_heads = collectors.any? { |collector| variant(collector, :lexical_prefix) == :nesting_head }
-          # Only a multi-collector run keeps its collectors, which a cached single-collector traversal must
-          # not hold on to, and the subsets it builds from them as it first needs each ({#subset}).
-          if collectors.size > 1
-            @run = collectors
-            @subsets = {}
+          table = @shapes
+          index = 0
+          while index < collectors.size
+            table = (table[collectors[index].class] ||= {}.compare_by_identity)
+            index += 1
           end
+          table[:traversal] ||= new(collectors.map(&:class))
+        end
+        @shapes = {}.compare_by_identity
+
+        # Every position of the run.
+        attr_reader :all
+
+        def initialize(classes)
+          raise ArgumentError, "a run holds at most #{MAX_COLLECTORS} collectors" if classes.size > MAX_COLLECTORS
+
+          classes.each { |klass| Collector.check_variants!(klass) }
+          @all = (1 << classes.size) - 1
+          take_events(classes)
+          take_variants(classes)
           freeze
         end
 
-        def walk(node, collectors, context) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def walk(node, run, live, context) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return unless node.is_a?(Prism::Node)
 
           # The arms are disjoint node classes, so their order is only a cost: the commonest kind is tried first.
           case node
           when Prism::CallNode
-            collectors = descending(collectors) { |c| c.on_call(node, context) } if @calls && handled?(collectors, Collector::CALL_BIT)
-            return if collectors.empty?
+            live = descending(run, live, @calls) { |c| c.on_call(node, context) }
+            return if live.zero?
             # Both block arms need a literal block, which most calls lack.
             return if node.block.is_a?(Prism::BlockNode) &&
-                      (walk_factory_call?(node, collectors, context) || walk_eval_call?(node, collectors, context))
+                      (walk_factory_call?(node, run, live, context) || walk_eval_call?(node, run, live, context))
           when Prism::DefNode
-            collectors = descending(collectors) { |c| c.on_def(node, context) } if @defs && handled?(collectors, Collector::DEF_BIT)
-            return if collectors.empty?
+            live = descending(run, live, @defs) { |c| c.on_def(node, context) }
+            return if live.zero?
           when Prism::ClassNode, Prism::ModuleNode
-            return if walk_declaration?(node, collectors, context)
+            return if walk_declaration?(node, run, live, context)
           when Prism::SingletonClassNode
-            return walk_singleton_class(node, collectors, context)
+            return walk_singleton_class(node, run, live, context)
           when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
                Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode
-            if @constant_writes && handled?(collectors, Collector::CONSTANT_WRITE_BIT)
-              collectors = descending(collectors) { |c| c.on_constant_write(node, context) }
-            end
-            return if collectors.empty? || walk_meta_new_write?(node, collectors, context)
+            live = descending(run, live, @constant_writes) { |c| c.on_constant_write(node, context) }
+            return if live.zero? || walk_meta_new_write?(node, run, live, context)
+          end
+          if live.anybits?(@sequences) && node.is_a?(Prism::StatementsNode)
+            return walk_sequence(node, run, live, context, nil)
           end
 
-          if @sequences && node.is_a?(Prism::StatementsNode) && handled?(collectors, Collector::SEQUENCE_BIT)
-            return walk_sequence(node, collectors, context, nil)
-          end
-
-          node.rigor_each_child { |child| walk(child, collectors, context) }
+          node.rigor_each_child { |child| walk(child, run, live, context) }
         end
 
         private
 
-        # A declaration-like body. Only a run with a sequence collector walks it differently, and then only in
-        # which events it adds: the children are walked in the order `rigor_each_child` gives them.
-        def walk_body(body, collectors, context)
-          return walk(body, collectors, context) unless @sequences && handled?(collectors, Collector::SEQUENCE_BIT)
+        # The positions that take each event.
+        def take_events(classes)
+          @declarations = positions(classes) { |klass| handles?(klass, :on_declaration) }
+          @defs = positions(classes) { |klass| handles?(klass, :on_def) }
+          @calls = positions(classes) { |klass| handles?(klass, :on_call) }
+          @constant_writes = positions(classes) { |klass| handles?(klass, :on_constant_write) }
+          @sequences = positions(classes) { |klass| Collector::SEQUENCE_EVENTS.any? { |event| handles?(klass, event) } }
+        end
+
+        # The positions that follow each variant a fork depends on.
+        def take_variants(classes)
+          @ordinary_factories = positions(classes) { |klass| variant(klass, :factory_block) == :ordinary_call }
+          @unrendered_children = positions(classes) { |klass| variant(klass, :unrendered_header) == :children }
+          @unrendered_lost = positions(classes) do |klass|
+            variant(klass, :unrendered_header) == :body_with_lost_nesting
+          end
+          @nesting_heads = positions(classes) { |klass| variant(klass, :lexical_prefix) == :nesting_head }
+        end
+
+        def positions(classes)
+          mask = 0
+          classes.each_with_index { |klass, index| mask |= (1 << index) if yield(klass) }
+          mask
+        end
+
+        def handles?(klass, event)
+          Collector.events_of(klass).include?(event)
+        end
+
+        def variant(klass, rule)
+          Collector.variant_of(klass, rule)
+        end
+
+        # `live` without the collectors the block declines for. Only the live collectors that take the event
+        # (`takers`) are asked, in run order: a collector that does not override it would answer {DESCEND}.
+        # Every operation is on fixnums, so asking allocates nothing whatever the answers.
+        def descending(run, live, takers)
+          asked = live & takers
+          until asked.zero?
+            lowest = asked & -asked
+            live &= ~lowest if yield(run[lowest.bit_length - 1]) == DECLINE
+            asked ^= lowest
+          end
+          live
+        end
+
+        # A declaration-like body. Only where a sequence collector is live is it walked differently, and then
+        # only in the events it adds: the children are walked in the order `rigor_each_child` gives them.
+        def walk_body(body, run, live, context)
+          return walk(body, run, live, context) unless live.anybits?(@sequences)
 
           case body
-          when Prism::StatementsNode then walk_sequence(body, collectors, context, body)
-          when Prism::BeginNode then walk_begin_body(body, collectors, context)
-          else walk(body, collectors, context)
+          when Prism::StatementsNode then walk_sequence(body, run, live, context, body)
+          when Prism::BeginNode then walk_begin_body(body, run, live, context)
+          else walk(body, run, live, context)
           end
         end
 
         # A body-level `begin`: its statements, rescue clauses, `else` and `ensure`, in child order, with each
         # clause's statement list handed to the sequence events as part of the body.
-        def walk_begin_body(body, collectors, context)
-          walk_sequence(body.statements, collectors, context, body) if body.statements
+        def walk_begin_body(body, run, live, context)
+          walk_sequence(body.statements, run, live, context, body) if body.statements
           clause = body.rescue_clause
           while clause
             exceptions = clause.exceptions
             index = 0
             while index < exceptions.size
-              walk(exceptions[index], collectors, context)
+              walk(exceptions[index], run, live, context)
               index += 1
             end
-            walk(clause.reference, collectors, context) if clause.reference
-            walk_sequence(clause.statements, collectors, context, body) if clause.statements
+            walk(clause.reference, run, live, context) if clause.reference
+            walk_sequence(clause.statements, run, live, context, body) if clause.statements
             clause = clause.subsequent
           end
-          walk_sequence(body.else_clause.statements, collectors, context, body) if body.else_clause&.statements
-          walk_sequence(body.ensure_clause.statements, collectors, context, body) if body.ensure_clause&.statements
+          walk_sequence(body.else_clause.statements, run, live, context, body) if body.else_clause&.statements
+          walk_sequence(body.ensure_clause.statements, run, live, context, body) if body.ensure_clause&.statements
         end
 
-        # PROTOTYPE: whether some collector of `collectors` takes the event `bit` names. The run-wide flags
-        # (`@calls`, …) answer for the whole run; a subset a decline or a variant fork left (a `def` body a
-        # spine-only collector declined) may hold none of the event's collectors, and then the event is not
-        # dispatched there at all. A memoised (frozen) subset's answer is memoised with it.
-        def handled?(collectors, bit)
-          return true if @run.nil? || collectors.equal?(@run)
-
-          (collectors.frozen? ? subset_bits(collectors) : bits_of(collectors)).anybits?(bit)
-        end
-
-        def subset_bits(collectors)
-          table = (@subsets[:bits] ||= {}.compare_by_identity)
-          table.fetch(collectors) { table[collectors] = bits_of(collectors) }
-        end
-
-        def bits_of(collectors)
-          bits = 0
-          index = 0
-          while index < collectors.size
-            bits |= Collector.bits_of(collectors[index].class)
-            index += 1
-          end
-          bits
-        end
-
-        def walk_sequence(node, collectors, context, body)
-          collectors = descending(collectors) { |c| c.on_sequence(node, context, body) }
-          return if collectors.empty?
+        def walk_sequence(node, run, live, context, body)
+          live = descending(run, live, @sequences) { |c| c.on_sequence(node, context, body) }
+          return if live.zero?
 
           statements = node.body
           index = 0
           while index < statements.size
             statement = statements[index]
-            walk(statement, descending(collectors) { |c| c.on_statement(statement, context) }, context)
+            walk(statement, run, descending(run, live, @sequences) { |c| c.on_statement(statement, context) }, context)
             index += 1
           end
-          index = 0
-          while index < collectors.size
-            collectors[index].on_sequence_end(node, context)
-            index += 1
+          ending = live & @sequences
+          until ending.zero?
+            lowest = ending & -ending
+            run[lowest.bit_length - 1].on_sequence_end(node, context)
+            ending ^= lowest
           end
         end
 
-        def handles?(collectors, event)
-          collectors.any? { |collector| Collector.events_of(collector.class).include?(event) }
-        end
-
-        # A subset of a multi-collector run that its nodes keep asking for, built the first time and reused:
-        # each collector alone (a pair in which one declines), the run without each collector (a larger run in
-        # which one declines), and the run split by `factory_block` and `lexical_prefix` variant where it mixes
-        # them. `key` is a Symbol for a split, or `[kind, collector]` for the other two.
-        def subset(kind, collector = nil)
-          table = (@subsets[kind] ||= {}.compare_by_identity)
-          key = collector || kind
-          table.fetch(key) { table[key] = yield.freeze }
-        end
-
-        def alone(collector)
-          subset(:alone, collector) { [collector] }
-        end
-
-        def variant_split(rule, &)
-          subset(rule) do
-            second, first = @run.partition(&)
-            [first.freeze, second.freeze]
-          end
-        end
-
-        def variant(collector, rule)
-          Collector.variant_of(collector.class, rule)
-        end
-
-        def ordinary_factory?(collector)
-          variant(collector, :factory_block) == :ordinary_call
-        end
-
-        # The collectors that let the walk into the node the block asks each of them about. Every collector is
-        # asked, in order, whatever the others answer.
-        #
-        # Asking allocates nothing, so a node where no collector declines costs no object. Where exactly one
-        # declines, the answer is a {#subset} memoised for the run (the one survivor of a pair, or the whole run
-        # without the decliner), built the first time and free after that. Two cases copy instead: a decline
-        # inside a group of three or more that is not the whole run (a variant fork's group, or what is left of
-        # a run of four or more after an earlier decline), and two or more declines at one node of a group of
-        # three or more. Each allocates one Array.
-        def descending(collectors, &)
-          case collectors.size
-          when 0 then collectors
-          when 1 then yield(collectors.first) == DECLINE ? NO_COLLECTORS : collectors
-          when 2 then descending_pair(collectors, yield(collectors.first), yield(collectors.last))
-          else descending_many(collectors, &)
-          end
-        end
-
-        # An index loop rather than `each_with_index`, which allocates a block frame object (a T_IMEMO) per
-        # call: this runs at every node a run of three or more dispatches an event for.
-        #
-        # PROTOTYPE: the decliners are a bitmask of positions, and the remainder is memoised per (group, mask)
-        # whenever the group itself is memoised (the run, or a frozen subset), so any number of declines at a
-        # node costs no object after the first time, and every group the walk carries stays frozen.
-        def descending_many(collectors)
-          declined = 0
-          index = 0
-          while index < collectors.size
-            declined |= (1 << index) if yield(collectors[index]) == DECLINE
-            index += 1
-          end
-          return collectors if declined.zero?
-          return NO_COLLECTORS if declined == (1 << collectors.size) - 1
-
-          remainder(collectors, declined)
-        end
-
-        def remainder(collectors, declined)
-          return kept(collectors, declined) unless collectors.equal?(@run) || collectors.frozen?
-
-          by_group = (@subsets[:remainder] ||= {}.compare_by_identity)
-          table = (by_group[collectors] ||= {})
-          table.fetch(declined) { table[declined] = kept(collectors, declined).freeze }
-        end
-
-        def kept(collectors, declined)
-          list = []
-          index = 0
-          while index < collectors.size
-            list << collectors[index] if declined.nobits?(1 << index)
-            index += 1
-          end
-          list
-        end
-
-        def descending_pair(collectors, first, last)
-          if first == DECLINE
-            last == DECLINE ? NO_COLLECTORS : alone(collectors.last)
-          else
-            last == DECLINE ? alone(collectors.first) : collectors
-          end
-        end
-
-        # False only for a header that renders no prefix while every collector here follows the walk's
+        # False only for a header that renders no prefix while every live collector follows the walk's
         # `unrendered_header` rule, which then walks the node's children like any node's.
-        def walk_declaration?(node, collectors, context)
+        def walk_declaration?(node, run, live, context)
           body_context = context.declaration_body(node)
-          return walk_unrendered_header?(node, collectors, context) if body_context.nil?
+          return walk_unrendered_header?(node, run, live, context) if body_context.nil?
 
-          if @declarations && handled?(collectors, Collector::DECLARATION_BIT)
-            collectors = descending(collectors) { |c| c.on_declaration(node, context, body_context) }
-          end
+          live = descending(run, live, @declarations) { |c| c.on_declaration(node, context, body_context) }
           body = node.body
-          walk_body(body, collectors, body_context) if body && !collectors.empty?
+          walk_body(body, run, live, body_context) if body && !live.zero?
           true
         end
 
         # The `unrendered_header` rule: `:children` collectors walk every child under the enclosing context,
         # `:body_with_lost_nesting` ones the body alone under {Context#lost_header_body}, `:skip` ones nothing.
-        def walk_unrendered_header?(node, collectors, context)
-          return false unless @unrendered_variants
+        def walk_unrendered_header?(node, run, live, context)
+          children = live & @unrendered_children
+          return false if children == live
 
-          children = collectors.select { |collector| variant(collector, :unrendered_header) == :children }
-          node.rigor_each_child { |child| walk(child, children, context) } unless children.empty?
-          lost = collectors.select { |collector| variant(collector, :unrendered_header) == :body_with_lost_nesting }
-          walk_body(node.body, lost, context.lost_header_body) if node.body && !lost.empty?
+          node.rigor_each_child { |child| walk(child, run, children, context) } unless children.zero?
+          lost = live & @unrendered_lost
+          walk_body(node.body, run, lost, context.lost_header_body) if node.body && !lost.zero?
           true
         end
 
-        def walk_singleton_class(node, collectors, context)
-          walk(node.expression, collectors, context)
+        def walk_singleton_class(node, run, live, context)
+          walk(node.expression, run, live, context)
           body = node.body
-          walk_body(body, collectors, context.singleton_class_body) if body
+          walk_body(body, run, live, context.singleton_class_body) if body
         end
 
-        def walk_meta_new_write?(node, collectors, context)
+        def walk_meta_new_write?(node, run, live, context)
           enclosing, body, body_self = context.meta_new_split(node)
           return false if enclosing.nil?
 
-          enclosing.each { |part| walk(part, collectors, context) }
-          walk_rebound_body(node, body, collectors, context, body_self, :meta_new) if body
+          enclosing.each { |part| walk(part, run, live, context) }
+          walk_rebound_body(node, body, run, live, context, body_self, :meta_new) if body
           true
         end
 
         # A meta-new or eval-family body, with `self` rebound to `owner`. The `lexical_prefix` rule decides
-        # `owner`, so where the run mixes its variants the `:nesting_head` collectors take the owner their
+        # `owner`, so where the live collectors mix its variants the `:nesting_head` ones take the owner their
         # prefix gives, and the body is walked once per distinct owner — once in all where the two agree.
-        def walk_rebound_body(node, body, collectors, context, owner, kind)
-          return walk_body(body, collectors, rebound(context, owner, kind)) unless @nesting_heads
+        def walk_rebound_body(node, body, run, live, context, owner, kind)
+          heads = live & @nesting_heads
+          return walk_body(body, run, live, rebound(context, owner, kind)) if heads.zero?
 
-          prefixes, heads = prefix_groups(collectors)
-          head_owner = heads.empty? ? owner : split(node, context, kind, :nesting_head)[2]
+          head_owner = split(node, context, kind, :nesting_head)[2]
           if head_owner == owner
-            walk_body(body, collectors, rebound(context, owner, kind))
+            walk_body(body, run, live, rebound(context, owner, kind))
           else
-            walk_body(body, prefixes, rebound(context, owner, kind)) unless prefixes.empty?
-            walk_body(body, heads, rebound(context, head_owner, kind))
+            prefixes = live & ~@nesting_heads
+            walk_body(body, run, prefixes, rebound(context, owner, kind)) unless prefixes.zero?
+            walk_body(body, run, heads, rebound(context, head_owner, kind))
           end
         end
 
@@ -523,60 +419,31 @@ module Rigor
           kind == :eval ? context.eval_split(node, lexical_variant) : context.meta_new_split(node, lexical_variant)
         end
 
-        # `[prefix, nesting_head]` collectors of a run that mixes the `lexical_prefix` variants.
-        def prefix_groups(collectors)
-          if collectors.equal?(@run)
-            return variant_split(:lexical_prefix) { |collector| variant(collector, :lexical_prefix) == :nesting_head }
-          end
-
-          heads, prefixes = collectors.partition { |collector| variant(collector, :lexical_prefix) == :nesting_head }
-          [prefixes, heads]
-        end
-
-        # The `factory_block` rule, for a call with a literal block. False when every collector here follows
+        # The `factory_block` rule, for a call with a literal block. False when every live collector follows
         # `:ordinary_call`, so the call walks its children like any call. Otherwise the receiver and arguments
-        # are walked once, for every collector, since both variants walk them under the enclosing context;
+        # are walked once, for every live collector, since both variants walk them under the enclosing context;
         # the variants part only at the block: the `:unnamed_self` collectors walk its body with an unnamed
         # `self`, the `:ordinary_call` ones the whole block, parameters included, under the enclosing context.
         # Each collector sees the same events in the same order as in a run of its own.
-        def walk_factory_call?(node, collectors, context)
-          return false unless @unnamed_factories && ScopeIndexer.meta_new_constant_rvalue?(node)
+        def walk_factory_call?(node, run, live, context)
+          unnamed = live & ~@ordinary_factories
+          return false if unnamed.zero? || !ScopeIndexer.meta_new_constant_rvalue?(node)
 
-          unnamed = unnamed_factory_group(collectors)
-          return false if unnamed.empty?
-
-          walk(node.receiver, collectors, context)
-          node.arguments&.arguments&.each { |argument| walk(argument, collectors, context) }
+          walk(node.receiver, run, live, context)
+          node.arguments&.arguments&.each { |argument| walk(argument, run, live, context) }
           block = node.block
-          walk_body(block.body, unnamed, context.factory_body) if block.body
-          walk(block, ordinary_factory_group(collectors), context) if unnamed.size < collectors.size
+          walk_body(block.body, run, unnamed, context.factory_body) if block.body
+          ordinary = live & @ordinary_factories
+          walk(block, run, ordinary, context) unless ordinary.zero?
           true
         end
 
-        def unnamed_factory_group(collectors)
-          return collectors unless @ordinary_factories
-          return factory_split.first if collectors.equal?(@run)
-
-          collectors.reject { |collector| ordinary_factory?(collector) }
-        end
-
-        def ordinary_factory_group(collectors)
-          return factory_split.last if collectors.equal?(@run)
-
-          collectors.select { |collector| ordinary_factory?(collector) }
-        end
-
-        # `[unnamed_self, ordinary_call]` collectors of the whole run.
-        def factory_split
-          variant_split(:factory_block) { |collector| ordinary_factory?(collector) }
-        end
-
-        def walk_eval_call?(node, collectors, context)
+        def walk_eval_call?(node, run, live, context)
           enclosing, body, eval_self = context.eval_split(node)
           return false if enclosing.nil?
 
-          enclosing.each { |part| walk(part, collectors, context) }
-          walk_rebound_body(node, body, collectors, context, eval_self, :eval) if body
+          enclosing.each { |part| walk(part, run, live, context) }
+          walk_rebound_body(node, body, run, live, context, eval_self, :eval) if body
           true
         end
       end

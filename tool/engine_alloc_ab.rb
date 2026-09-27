@@ -90,6 +90,7 @@ module EngineAllocAB
       status = run_check(target, out, err)
       wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
       cpu = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - cpu0
+      gc_ms = GC.stat(:time) - gc_before
       allocations = GC.stat(:total_allocated_objects) - before
       diagnostics = diagnostic_count(out.string)
       unless COMPLETED_EXITS.include?(status) && diagnostics
@@ -100,7 +101,7 @@ module EngineAllocAB
       { "allocations" => allocations, "wall_s" => wall.round(2), "diagnostics" => diagnostics,
         "output_digest" => Digest::SHA256.hexdigest(out.string),
         # For `tool/engine_wall_ab.rb`: process CPU (every thread), GC time, and whether YJIT ended up on.
-        "cpu_s" => cpu.round(3), "gc_ms" => GC.stat(:time) - gc_before, "yjit" => yjit_enabled? }
+        "cpu_s" => cpu.round(3), "gc_ms" => gc_ms, "yjit" => yjit_enabled? }
     end
   end
 

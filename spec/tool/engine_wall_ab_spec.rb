@@ -4,14 +4,14 @@
 #
 # Wall is the noisy axis, so what the tool must not get wrong is the arithmetic that decides whether a difference
 # is evidence: the run order that keeps host drift off one arm, the median, and whether the two arms' ranges
-# separate. Unit test only; requiring the script runs no engine.
+# separate beyond chance. Unit test only; requiring the script runs no engine.
 require "spec_helper"
 
 require_relative "../../tool/engine_wall_ab"
 
 RSpec.describe "tool/engine_wall_ab.rb (#1507)" do
-  def runs(*walls)
-    walls.map { |wall| { "wall_s" => wall, "cpu_s" => wall, "gc_ms" => 10, "allocations" => 1 } }
+  def runs(*walls, yjit: false)
+    walls.map { |wall| { "wall_s" => wall, "cpu_s" => wall, "gc_ms" => 10, "allocations" => 1, "yjit" => yjit } }
   end
 
   describe ".schedule" do
@@ -27,20 +27,52 @@ RSpec.describe "tool/engine_wall_ab.rb (#1507)" do
     end
   end
 
+  describe ".separation_null_probability" do
+    it "is the chance that one distribution's samples land with their ranges apart, 2 / C(n + m, n)" do
+      expect(EngineWallAB.separation_null_probability(2, 2)).to be_within(1e-9).of(1 / 3.0)
+      expect(EngineWallAB.separation_null_probability(4, 4)).to be_within(1e-9).of(2 / 70.0)
+      expect(EngineWallAB.separation_null_probability(5, 5)).to be_within(1e-9).of(2 / 252.0)
+    end
+  end
+
   describe ".stats" do
-    it "reports the change in the median and that separated ranges separate" do
-      wall = EngineWallAB.stats(base: runs(10.0, 11.0, 10.5), head: runs(9.0, 9.5, 9.2))["wall_s"]
-      expect(wall).to include("median_pct" => -12.38, "separated" => true)
+    it "calls apart ranges separated when that is unlikely by chance" do
+      wall = EngineWallAB.stats(base: runs(10.0, 11.0, 10.5, 10.8, 10.2),
+                                head: runs(9.0, 9.5, 9.2, 9.4, 9.1))["wall_s"]
+      expect(wall).to include("median_pct" => -12.38, "apart" => true, "separated" => true)
       expect(wall["base"]).to eq("median" => 10.5, "min" => 10.0, "max" => 11.0)
     end
 
+    it "does not call apart ranges separated at two runs, where they part a third of the time by chance" do
+      wall = EngineWallAB.stats(base: runs(10.0, 11.0), head: runs(9.0, 9.5))["wall_s"]
+      expect(wall).to include("apart" => true, "separated" => false)
+    end
+
+    it "does not count touching ranges as apart" do
+      wall = EngineWallAB.stats(base: runs(10.0, 11.0, 10.5, 10.8, 10.2),
+                                head: runs(9.0, 9.5, 9.2, 9.4, 10.0))["wall_s"]
+      expect(wall).to include("apart" => false, "separated" => false)
+    end
+
     it "does not call overlapping ranges separated, whatever the medians say" do
-      wall = EngineWallAB.stats(base: runs(10.0, 12.0, 10.5), head: runs(9.0, 10.2, 11.0))["wall_s"]
+      wall = EngineWallAB.stats(base: runs(10.0, 12.0, 10.5, 10.6), head: runs(9.0, 10.2, 11.0, 9.1))["wall_s"]
       expect(wall["separated"]).to be(false)
     end
 
     it "leaves out a metric no run recorded" do
       expect(EngineWallAB.stats(base: runs(1.0, 2.0), head: runs(1.0, 2.0))).not_to have_key("instructions")
+    end
+  end
+
+  describe ".consistency_notes" do
+    it "warns when the arms ended in different YJIT states" do
+      notes = EngineWallAB.consistency_notes(base: runs(1.0, 1.0, yjit: false), head: runs(1.0, 1.0, yjit: true))
+      expect(notes.join("\n")).to include("YJIT ended in different states")
+    end
+
+    it "does not warn when every run ended in the same state" do
+      notes = EngineWallAB.consistency_notes(base: runs(1.0, 1.0, yjit: true), head: runs(1.0, 1.0, yjit: true))
+      expect(notes.join("\n")).not_to include("YJIT ended in different states")
     end
   end
 

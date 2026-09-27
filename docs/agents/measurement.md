@@ -136,7 +136,8 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   bundle resolves.
 - **Wall is decided on CI Linux, not here.** The "Engine wall A/B" workflow (`engine-wall.yml`,
   `tool/engine_wall_ab.rb`) alternates two engines in ABBA order off this host and reports whether their
-  ranges separate; `bench/README.md` has the dispatch line. A local wall A/B is a smoke test at best.
+  ranges separate beyond chance: two runs per arm separate a third of the time with no difference at all, so
+  the verdict needs four or more. `bench/README.md` has the dispatch line. A local wall A/B is a smoke test.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and
   `File.realpath` as ~200 ms of a run; timed directly, reading every file took 11 ms and the 922 realpath calls

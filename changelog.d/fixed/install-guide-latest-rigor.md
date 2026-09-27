@@ -1,0 +1,1 @@
+- **[docs]** The agent install guide (`docs/install.md`) now looks up the latest release on RubyGems and installs that version explicitly, so an agent on a machine where mise's `minimum_release_age` hides a new release, or an older `rigor` is already on PATH, no longer carries on with a stale Rigor. ([#1534](https://github.com/rigortype/rigor/pull/1534))

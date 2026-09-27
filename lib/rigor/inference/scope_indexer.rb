@@ -4007,12 +4007,14 @@ module Rigor
                                defs_singleton: false)
         return unless node.is_a?(Prism::Node)
 
-        if CLASS_BODY_NODES.any? { |kind| node.is_a?(kind) }
+        # Tested by exact class (Prism's node classes have no subclasses): the three `any?` scans this
+        # replaced ran a block per list member at every node ([#1507](https://github.com/rigortype/rigor/issues/1507)).
+        if CLASS_BODY_NODES.include?(node.class)
           return walk_deferred_lexical_body(node, qualified_prefix, in_singleton_class,
                                             inside_deferred, mf_offsets, ranges, def_owner_prefix,
                                             singleton_cref: singleton_cref)
         end
-        if META_WRITE_NODES.any? { |kind| node.is_a?(kind) }
+        if META_WRITE_NODES.include?(node.class)
           return walk_deferred_meta_new(node, qualified_prefix, in_singleton_class, inside_deferred,
                                         mf_offsets, ranges, def_owner_prefix,
                                         singleton_cref: singleton_cref)
@@ -4022,7 +4024,7 @@ module Rigor
                                         mf_offsets, ranges, def_owner_prefix, singleton_cref,
                                         defs_singleton)
         end
-        if DEFERRED_RANGE_NODES.any? { |kind| node.is_a?(kind) }
+        if DEFERRED_RANGE_NODES.include?(node.class)
           # Deferred: a call inside runs at invocation / interpreter-exit time. `BEGIN`
           # (PreExecutionNode) is the opposite — eager, before the class body — and stays unlisted.
           ranges << [node.location.start_offset, node.location.end_offset, nil, nil, nil]
@@ -4055,10 +4057,10 @@ module Rigor
                                                          defs_singleton: defs_singleton)
       end
 
-      DEFERRED_RANGE_NODES = [Prism::BlockNode, Prism::LambdaNode, Prism::PostExecutionNode].freeze
-      META_WRITE_NODES = [Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
-                          Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode].freeze
-      CLASS_BODY_NODES = [Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      DEFERRED_RANGE_NODES = Set[Prism::BlockNode, Prism::LambdaNode, Prism::PostExecutionNode].freeze
+      META_WRITE_NODES = Set[Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
+                             Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode].freeze
+      CLASS_BODY_NODES = Set[Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :DEFERRED_RANGE_NODES, :META_WRITE_NODES, :CLASS_BODY_NODES
 
       def walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred, # rubocop:disable Metrics/ParameterLists

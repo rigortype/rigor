@@ -134,6 +134,17 @@ RSpec.describe Rigor::Source::NodeChildren do
       expect(described_class::LEAF_CLASSES.size).to be_between(30, 60)
     end
 
+    # The walkers that test a node's kind by `node.class` membership (`ScopeIndexer.walk_deferred_ranges`,
+    # `OperandEffects`, `CapturedLocals`) give the answer `is_a?` gives only while no class subclasses a concrete
+    # node class (#1507).
+    it "leaves every concrete node class without a subclass" do
+      node_classes = described_class::NODE_CLASSES.to_set
+      subclassed = ObjectSpace.each_object(Class).select do |klass|
+        klass.superclass && node_classes.include?(klass.superclass)
+      end
+      expect(subclassed).to be_empty
+    end
+
     it "compiles #rigor_each_child onto every concrete node class" do
       described_class::NODE_CLASSES.each do |klass|
         expect(klass.method_defined?(:rigor_each_child)).to be(true), "#{klass} lacks #rigor_each_child"

@@ -190,11 +190,11 @@ module Rigor
       end
 
       def [](path)
-        @entries[normalize(path)]
+        entry_for(path)
       end
 
       def key?(path)
-        @entries.key?(normalize(path))
+        !entry_for(path).nil?
       end
 
       # `{ path => ruby_source }` — what {Runner#parse_source} and {WorkerSession#parse_source} read
@@ -287,7 +287,7 @@ module Rigor
       # it compiles a partial's locals into the method's parameters, and it is what makes `locals:` mean
       # anything.
       def parse_scopes(path)
-        entry = @entries[normalize(path)]
+        entry = entry_for(path)
         return nil if entry.nil? || entry.locals.empty?
 
         [entry.locals.keys.map(&:to_sym)]
@@ -301,7 +301,7 @@ module Rigor
       end
 
       def unit_key_for(path)
-        @entries[normalize(path)]&.unit_key
+        entry_for(path)&.unit_key
       end
 
       # Binds the declared `self`, locals and ivar seeds onto the per-file scope, so the unit's body types
@@ -315,7 +315,7 @@ module Rigor
       # the honest reading of "a receiver is declared and the analyzer cannot see it" (ADR-5), and it is
       # silent.
       def seed(scope, path)
-        entry = @entries[normalize(path)]
+        entry = entry_for(path)
         return scope if entry.nil?
 
         scope = bind_self(scope, entry)
@@ -368,6 +368,16 @@ module Rigor
       end
 
       private
+
+      # The unit `path` names, or nil. A run with no units answers before reducing the path: the reduction
+      # realpaths the root on every call, and every analysed file is looked up at least twice, which made 922
+      # `File.realpath` calls on a template-free `rigor check` of the v0.3.9 `lib`
+      # ([#1507](https://github.com/rigortype/rigor/issues/1507)).
+      def entry_for(path)
+        return nil if @entries.empty?
+
+        @entries[normalize(path)]
+      end
 
       def normalize(path)
         TemplateUnitPaths.relative(path, @root)

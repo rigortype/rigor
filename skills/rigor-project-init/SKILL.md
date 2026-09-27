@@ -105,8 +105,11 @@ needs a `sig/` fix, an RBS workaround, or a reasoned
 knowledge, users rewrite correct code for the tool or scatter
 suppressions. Acknowledge mode keeps the same regression guard with an
 exit: a new diagnostic still fails the check, and once it is confirmed
-as an inference gap, `rigor baseline regenerate` absorbs it (report
-the false positive upstream).
+as an inference gap, the baseline can absorb it (report the false
+positive upstream). `rigor baseline regenerate` rewrites the baseline
+from every live diagnostic, so run it only when `rigor check` shows
+nothing but confirmed false positives; otherwise it silences a real
+bug alongside them.
 
 Present strict mode as an opt-in for users who know type theory and
 RBS, want the zero-diagnostic gate, and accept resolving inference

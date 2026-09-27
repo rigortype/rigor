@@ -294,7 +294,9 @@ first, then large clusters to record in a baseline.
 
 ### Step 6 — Generate a baseline (acknowledge mode)
 
-*Skip this step if you chose strict mode.*
+*Skip this step if you chose strict mode.* Settle `severity_profile:`
+first: changing it afterwards changes which rules fire and leaves the
+baseline out of step.
 
 ```sh
 rigor baseline generate

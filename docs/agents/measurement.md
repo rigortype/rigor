@@ -139,9 +139,10 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   ranges separate beyond chance: two runs per arm separate a third of the time with no difference at all, so
   the verdict needs five per arm. `bench/README.md` has the dispatch line. A local wall A/B is a smoke test.
 - **Warm and incremental latency has its own harness.** `tool/engine_warm_ab.rb`, dispatched on Mastodon by
-  `engine-warm.yml`, times null, leaf-edit and hub-edit runs for the default cache and `--incremental`, and checks
-  each warm answer against a `--no-cache` run. The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
-  say nothing about a warm run.
+  `engine-warm.yml`, times null, leaf-edit and hub-edit runs for the default cache and `--incremental`. It checks
+  that each was the hit or miss it claims to be, and compares each warm answer with a plain `--no-cache` run. Note
+  that `--incremental --no-cache` is not a cold run: it still replays the incremental snapshot. The cold tools
+  (`bench-perf`, the A/Bs) all pass `--no-cache` and say nothing about a warm run.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and
   `File.realpath` as ~200 ms of a run; timed directly, reading every file took 11 ms and the 922 realpath calls

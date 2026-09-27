@@ -5,8 +5,10 @@ name: Engine warm journeys
 # after editing a file nothing depends on (leaf), and after editing one many
 # files depend on (hub), for the default run-result cache and for
 # `--incremental`. `tool/engine_warm_ab.rb` runs every step as a fresh process,
-# checks each warm answer against a `--no-cache` run of the same tree, and with
-# `base` set, alternates two engines in ABBA order on separate project copies.
+# checks that each timed run was the hit or miss its row is about, compares the
+# first warm answer of each scenario with a plain `--no-cache` run, records the
+# incremental recheck size, and with `base` set, alternates two engines in ABBA
+# order on separate project copies.
 #
 # Dispatch it from the Actions tab or with
 #   gh workflow run engine-warm.yml -f head=master
@@ -32,7 +34,7 @@ on:
         required: false
         default: "app/models/account.rb"
       edit:
-        description: "method (a new empty method in the class) or comment (bytes only)"
+        description: "method (an empty method in the file's last class/module) or comment (a comment line)"
         type: choice
         options: [method, comment]
         default: method
@@ -41,9 +43,9 @@ on:
         required: false
         default: "default,incremental"
       reps:
-        description: "Timed runs per step"
+        description: "Timed runs per step (5 for an A/B separation verdict)"
         required: false
-        default: "3"
+        default: "5"
 
 permissions:
   contents: read

@@ -59,10 +59,9 @@ Released through #1490; the `v0.4.0` milestone is closed. Blockers: #1470, #1479
    ADR-116 (#1193–#1199).
 0. **In flight: #1499 (#1446, ivar class guards).** Round 1 of the adversarial review found one
    severe item (`for @ivar in …` kept the narrowing) plus a moderate (a call on a `bot` receiver was
-   a restore point). The fixes are committed locally as `881fb03c2` in
-   `../rigor-wt/ivar-class-guard-1446` (rebased onto master), **not pushed** when the #1469 session
-   ended; the lane was re-running `make verify-changed`. Next: run that gate in the foreground,
-   push with `--force-with-lease`, run a round-2 delta review of the fix commit, merge on green CI.
+   a restore point). Both are fixed and pushed as `9b8bc0c86` (rebased onto `3aae74259`; `for $g in`
+   fixed too), with `make verify-changed` green. Next: a round-2 delta review of `881fb03c2` and
+   `9b8bc0c86`, then merge on green CI.
    #1500 (maintainer decision: a disjoint class guard reads the guarded class for ivar / global /
    constant receivers, `bot` for locals; `ready-for-agent`) builds on #1499.
 1. **Pending user decision:** a one-line ruby/rbs PR adding `alias to_str to_s` to

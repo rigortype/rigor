@@ -373,6 +373,33 @@ RSpec.describe Rigor::Cache::Store do
       expect(result).to eq("v2")
     end
 
+    # #1558 — a hit runs no block, so `on_hit:` is how the caller learns what the served value was computed
+    # from: `Plugin::Base#cache_for` replays it into the plugin's IoBoundary. A miss recorded its own reads.
+    it "hands a fresh hit's stored dependency descriptor to on_hit:, and never calls it on a miss" do
+      file = File.join(tmpdir, "dep.txt")
+      File.write(file, "v1")
+      seen = []
+      fetch = lambda do
+        described_class.new(root: cache_root).fetch_or_validate(
+          producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {},
+          on_hit: ->(dependencies) { seen << dependencies }
+        ) do
+          content = File.read(file)
+          [content, fresh_descriptor(file, content)]
+        end
+      end
+
+      expect(fetch.call).to eq("v1")
+      expect(seen).to be_empty
+
+      expect(fetch.call).to eq("v1")
+      expect(seen).to eq([fresh_descriptor(file, "v1")])
+
+      File.write(file, "v2")
+      expect(fetch.call).to eq("v2")
+      expect(seen.size).to eq(1)
+    end
+
     # ADR-45 WD1 (#577) — the negative half of the dependency set: a value computed on a file's ABSENCE
     # records an absence row, stays a hit while the file is still missing, and recomputes once it appears.
     it "serves a hit while a recorded-absent dependency stays missing, and recomputes once it appears" do

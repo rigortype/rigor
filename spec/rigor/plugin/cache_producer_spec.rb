@@ -468,6 +468,100 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(klass.new(services: services_with_fresh_store).cache_for(:routes, params: {}).call).to eq("get '/b'")
     end
 
+    # #1558 — a hit runs no block, so the served entry's stored rows are replayed into the boundary. Without
+    # them the run-result descriptor built from the boundary carried no row for the value's inputs.
+    it "replays a served entry's dependency rows into the plugin's io_boundary (#1558)" do
+      file = File.join(tmpdir, "schema.txt")
+      File.write(file, "v1")
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      target = file
+      klass.producer(:contents) do |_params|
+        calls += 1
+        io_boundary.read_file(target)
+      end
+
+      klass.new(services: services_with_fresh_store).cache_for(:contents, params: {}).call
+      served = klass.new(services: services_with_fresh_store)
+      expect(served.cache_for(:contents, params: {}).call).to eq("v1")
+      expect(calls).to eq(1)
+
+      expect(served.io_boundary.cache_descriptor.files.map(&:path)).to eq([file])
+    end
+
+    # The chained half of #1558. `:index` composes `:table`'s value with an input of its own; a session that
+    # recomputes `:index` while `:table` is served must still record `:table`'s input in `:index`'s entry,
+    # or that entry validates fresh across the next edit to it. Both call shapes: `:table` asked inside
+    # `:index`'s block, and asked earlier in the session (rigor-activerecord's `model_index` asks
+    # `schema_table` before its own `cache_for`). Either way `:table` is asked before `models.txt` is read:
+    # an entry records every row the boundary holds when its block returns, so a `:table` computed after
+    # that read would carry the `models.txt` row and recompute beside `:index` instead of being served.
+    def table_and_index_plugin(table_path, models_path, calls)
+      klass = Class.new(described_class) { manifest(id: "alpha", version: "0.1.0") }
+      klass.producer(:table) do |_params|
+        calls[:table] += 1
+        io_boundary.read_file(table_path)
+      end
+      klass.producer(:index) do |_params|
+        table = cache_for(:table, params: {}).call
+        "#{io_boundary.read_file(models_path)}:#{table}"
+      end
+      klass
+    end
+
+    {
+      "inside the block" => :inside,
+      "earlier in the session" => :earlier
+    }.each do |label, shape|
+      it "records a served producer's input in the entry of a producer recomputed after it, asked #{label}" do
+        table_file = File.join(tmpdir, "schema.txt")
+        models_file = File.join(tmpdir, "models.txt")
+        File.write(table_file, "v1")
+        File.write(models_file, "post")
+        calls = Hash.new(0)
+        klass = table_and_index_plugin(table_file, models_file, calls)
+        session = lambda do
+          plugin = klass.new(services: services_with_fresh_store)
+          plugin.cache_for(:table, params: {}).call if shape == :earlier
+          plugin.cache_for(:index, params: {}).call
+        end
+
+        expect(session.call).to eq("post:v1")
+        File.write(models_file, "posts")
+        expect(session.call).to eq("posts:v1")
+        # The session under test: `:index` recomputed while `:table` was served.
+        expect(calls[:table]).to eq(1)
+
+        File.write(table_file, "v2")
+        expect(session.call).to eq("posts:v2")
+      end
+    end
+
+    # A computed producer's `watch:` rows join the boundary as well, so the producer computed around it
+    # records the same rows whether the inner value was computed or served (a hit replays them already).
+    it "records a computed producer's watch: rows in the entry of the producer computed around it (#1558)" do
+      models = File.join(tmpdir, "models")
+      FileUtils.mkdir_p(models)
+      File.write(File.join(models, "a.rb"), "")
+      other = File.join(tmpdir, "other.txt")
+      File.write(other, "x")
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      root = models
+      klass.producer(:count, watch: [[root, "*.rb"]]) { |_params| Dir.glob(File.join(root, "*.rb")).size }
+      klass.producer(:summary) do |_params|
+        "#{io_boundary.read_file(other)}:#{cache_for(:count, params: {}).call}"
+      end
+      session = -> { klass.new(services: services_with_fresh_store).cache_for(:summary, params: {}).call }
+
+      expect(session.call).to eq("x:1")
+      File.write(File.join(models, "b.rb"), "")
+      expect(session.call).to eq("x:2")
+    end
+
     it "round-trips a custom serialize/deserialize pair over the producer's value" do
       ser = ->(value) { value.to_s.b }
       des = ->(bytes) { bytes.to_s } # rubocop:disable Style/SymbolProc

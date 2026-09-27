@@ -43,6 +43,10 @@ module Rigor
     # - `#cache_descriptor` — flushes the accumulated entries into a fresh {Cache::Descriptor} for the
     #   contribution that built it. URL fetches contribute `ConfigEntry` rows keyed `"url:#{url}"` with the
     #   response body's SHA-256 so contributions invalidate when the remote document changes.
+    # - `#replay(descriptor)` — records a {Cache::Descriptor}'s rows as though this boundary had observed
+    #   them (#1558). A producer served from its own cache ran no block and read nothing, so
+    #   {Plugin::Base#cache_for} replays the served entry's stored dependency rows here; the run-result
+    #   descriptor and any enclosing producer's descriptor then carry the served value's inputs.
     class IoBoundary
       URL_TIMEOUT_SECONDS = 10
       URL_MAX_BYTES = 10 * 1024 * 1024
@@ -202,7 +206,43 @@ module Rigor
         Cache::Descriptor.new(files: files, configs: configs, globs: globs)
       end
 
+      # #1558 — records every row of `descriptor` as though this boundary had observed it. The caller is
+      # {Plugin::Base#cache_for}: a producer served from its own cache ran no block, so without the replay
+      # the value's inputs reached neither the ADR-45 run-result descriptor nor the dependency descriptor of
+      # a producer computing around it, and both went on validating fresh after those inputs changed.
+      #
+      # The rows are the ones a fresh hit just validated, so they describe the current filesystem, and they
+      # are merged by the precedence the live recorders use. A content row (`:stat` / `:digest` / `:mtime`)
+      # replaces an existence row for its path, as {#read_file} does after a probe. Any other collision
+      # keeps the row already here: an existence row never displaces one, as in {#probe}, and between two
+      # content rows or two glob rows for one slot the live row carries the newer stat tuple, which keeps
+      # the next warm run on its stat fast path. The tables are keyed by path, glob slot and URL key, so
+      # replaying the same descriptor twice adds nothing. Row order reaches no cache key, because
+      # {Cache::Descriptor#to_canonical_hash} sorts every slot.
+      #
+      # The policy is not consulted: the rows were recorded under it when the entry was written, and replay
+      # reads no file. A {Cache::Descriptor::GlobEntry} keeps its `mode`, which is part of its slot key.
+      #
+      # @param descriptor — a dependency descriptor; only its `files`, `configs` and `globs` slots are read,
+      #   the only slots a boundary records
+      def replay(descriptor)
+        @mutex.synchronize do
+          descriptor.files.each { |entry| replay_file_entry(entry) }
+          descriptor.configs.each { |entry| @config_entries[entry.key] ||= entry }
+          descriptor.globs.each { |entry| @glob_entries[entry.slot_key] ||= entry }
+        end
+        nil
+      end
+
       private
+
+      # The {#replay} precedence for one file row; the caller holds `@mutex`.
+      def replay_file_entry(entry)
+        current = @file_entries[entry.path]
+        return if current && !(current.comparator == :exists && entry.comparator != :exists)
+
+        @file_entries[entry.path] = entry
+      end
 
       # ADR-45 WD1b (#613) — the shared body of {#file?} / {#directory?}.
       #

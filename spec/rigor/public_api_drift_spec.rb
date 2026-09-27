@@ -546,6 +546,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     policy()
     read_file(req:path)
     refusal_summary()
+    replay(req:descriptor)
   ].freeze
 
   FLOW_CONTRIBUTION_INSTANCE = %w[

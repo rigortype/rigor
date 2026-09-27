@@ -8,6 +8,7 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "rigor/analysis/incremental_session"
 
 # `ACTIVERECORD_PLUGIN_LIB` is also defined by `factorybot_plugin_spec.rb` (which consumes the activerecord
 # plugin's `:model_index` facts). Guard against the double definition so running both specs in the same
@@ -3120,6 +3121,76 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(counters).to eq(hits: 0, misses: 1)
         expect(unknown_column(warm)).to be_nil
         expect(schema_disclosure(warm)&.message).to include("not found")
+      end
+    end
+  end
+
+  # Issue #1558 — the chained-producer staleness in the plugin that exposed it. A model-only edit recomputes
+  # `:model_index` while `:schema_table` is served from its entry, and the index composes the schema's
+  # columns, so its entry must record `db/schema.rb` although that run never read it. It recorded no such
+  # row, and a column added to the schema afterwards stayed unknown in every cached mode — the ADR-45 run
+  # slot, `--workers 1` and `--incremental` — until `--no-cache`. Each mode runs in its own project and
+  # cache, with a fresh Store per run so a hit comes off disk.
+  describe "a schema edit after a model-only edit (#1558)" do
+    let(:nick_schema) do
+      DEFAULT_SCHEMA.sub('t.string  "email", null: false', %(t.string  "email", null: false\n    t.string  "nick"))
+    end
+
+    def check(dir, store, mode)
+      Rigor::Plugin.unregister!
+      configuration = Rigor::Configuration.new("paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"])
+      Dir.chdir(dir) do
+        next incremental_check(configuration, store) if mode == :incremental
+
+        runner = Rigor::Analysis::Runner.new(
+          configuration: configuration, cache_store: store, collect_stats: false,
+          plugin_requirer: build_plugin_requirer, workers: mode == :pooled ? 1 : 0
+        )
+        guarded_run(runner).diagnostics
+      end
+    end
+
+    def incremental_check(configuration, store)
+      session = Rigor::Analysis::IncrementalSession.new(
+        configuration: configuration, cache_store: store, plugin_requirer: build_plugin_requirer
+      )
+      fingerprint = Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration,
+                                                                  roots: configuration.paths)
+      diagnostics, = guarded_run_incremental(
+        session, snapshot: Rigor::Cache::IncrementalSnapshot.new(root: store.root), fingerprint: fingerprint
+      )
+      diagnostics
+    end
+
+    def schema_table_hits(store)
+      store.stats.fetch(:by_producer).fetch("plugin.activerecord.schema_table", {}).fetch(:hits, 0)
+    end
+
+    def rows(diagnostics)
+      diagnostics.map { |d| [d.path, d.line, d.rule, d.message] }.sort
+    end
+
+    it "clears unknown-column for the added column in every cached mode", :aggregate_failures do
+      %i[plain pooled incremental].each do |mode|
+        Dir.mktmpdir do |dir|
+          cache_root = File.join(dir, ".rigor", "cache")
+          materialize_files(dir, DEFAULT_MODELS.merge("db/schema.rb" => DEFAULT_SCHEMA,
+                                                      "demo.rb" => "User.where(nick: 'a')\n"))
+          primed = check(dir, Rigor::Cache::Store.new(root: cache_root), mode)
+          expect(primed.map(&:rule)).to include("unknown-column")
+
+          materialize_files(dir, "app/models/user.rb" => "class User < ApplicationRecord\n  # edited\nend\n")
+          edit_store = Rigor::Cache::Store.new(root: cache_root)
+          check(dir, edit_store, mode)
+          # The edit run served `:schema_table` (a pooled run's producers run in its workers, out of sight).
+          expect(schema_table_hits(edit_store)).to be_positive unless mode == :pooled
+
+          materialize_files(dir, "db/schema.rb" => nick_schema)
+          final = check(dir, Rigor::Cache::Store.new(root: cache_root), mode)
+          cold = check(dir, nil, :plain)
+          expect(cold.map(&:rule)).not_to include("unknown-column")
+          expect(rows(final)).to eq(rows(cold)), "#{mode} diverged from --no-cache"
+        end
       end
     end
   end

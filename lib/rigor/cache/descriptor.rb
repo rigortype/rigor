@@ -58,7 +58,14 @@ module Rigor
       # searches ahead of a class's own `def`s. A pre-10 bundle would silently contribute no prepends for an
       # unchanged file, so that file's consumers would keep answering with the pre-fix MRO — cached bundles
       # must read as misses once and rebuild carrying the slot.
-      SCHEMA_VERSION = 10
+      # v11: #1558 — a plugin producer served from its own cache now replays its entry's dependency rows into
+      # the plugin's IoBoundary, so the run-result entry and the entry of any producer computed after it carry
+      # the served value's inputs. A pre-11 entry written while a producer hit lacks those rows and would
+      # validate fresh across exactly the edit they exist to catch. A checkout's source digest already moved
+      # every such key, and a release clears the root through `Store::PAYLOAD_ABI_VERSION`; the bump closes
+      # the remaining window, a same-`VERSION` build installed as `gems/rigortype-<VERSION>`, which
+      # {EngineSource} treats as version-pinned (#285) and so keys on the version alone.
+      SCHEMA_VERSION = 11
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

@@ -250,8 +250,13 @@ module Rigor
       # validation always re-checks the filesystem — but a single run only looks up once.
       #
       # `generation_cap:` carries the same producer-declared compaction budget as {#fetch_or_compute}.
+      #
+      # `on_hit:` is called with the entry's stored dependency descriptor on a fresh hit, before the value
+      # is returned, and never on a miss. A caller whose own dependency record must carry a served value's
+      # inputs replays them from it (#1558, {Plugin::Base#cache_for}): a hit runs no block, so nothing else
+      # reports what the value was computed from.
       def fetch_or_validate(producer_id:, key_descriptor:, generation_cap:, params: {},
-                            serialize: nil, deserialize: nil)
+                            serialize: nil, deserialize: nil, on_hit: nil)
         validate_producer_id!(producer_id)
         declare_generation_cap(producer_id, generation_cap)
         disk = ensure_schema_version!
@@ -261,6 +266,7 @@ module Rigor
         cached = path && read_entry(path, deserialize: deserialize)
         if (validated = fresh_pair_value(cached))
           @monitor.synchronize { record(:hits, producer_id) }
+          on_hit&.call(validated[1])
           return validated[0]
         end
 

@@ -140,7 +140,10 @@ RSpec.describe "plugins/rigor-actionpack missing-template under the run cache (#
 
       expect(boundaries.size).to eq(1)
       descriptor = boundaries.first.cache_descriptor
-      expect(descriptor.globs.map { |g| [File.basename(g.root), g.pattern] }).to eq([["posts", "*"]])
+      # The one listing row, beside `:controller_index`'s `watch:` row, which a producer call leaves in the
+      # boundary whether the value was computed or served (#1558).
+      expect(descriptor.globs.map { |g| [File.basename(g.root), g.pattern] })
+        .to contain_exactly(["posts", "*"], ["controllers", "**/*.rb"])
       expect(descriptor.files.map(&:path).grep(/show\.html\.erb/)).to be_empty
     end
   end

@@ -4811,8 +4811,8 @@ module Rigor
         verified_def_nestings(root, collector.table)
       end
 
-      def verified_def_nestings(root, table)
-        DeclarationWalk::Shadow.verified(:def_nestings, nil, table) { legacy_def_nestings(root) }
+      def verified_def_nestings(root, table, source_path = nil)
+        DeclarationWalk::Shadow.verified(:def_nestings, source_path, table) { legacy_def_nestings(root) }
       end
 
       # The walker {DefNestingsCollector} replaced, kept as the shadow harness's oracle until ADR-116 WD5 has
@@ -5103,9 +5103,9 @@ module Rigor
         def_nestings = DefNestingsCollector.new
         DeclarationWalk.run(root, [superclasses, layouts, def_nestings], superclass_walk_root(source_path))
         supers, header_nestings = verified_superclass_tables(root, source_path, superclasses.tables)
-        data, struct = verified_member_layouts(root, layouts.tables)
+        data, struct = verified_member_layouts(root, layouts.tables, source_path)
         { superclasses: supers, header_nestings: header_nestings,
-          def_nestings: verified_def_nestings(root, def_nestings.table),
+          def_nestings: verified_def_nestings(root, def_nestings.table, source_path),
           data_member_layouts: data, struct_member_layouts: struct }
       end
 
@@ -5438,8 +5438,8 @@ module Rigor
         verified_member_layouts(root, collector.tables)
       end
 
-      def verified_member_layouts(root, tables)
-        DeclarationWalk::Shadow.verified(:member_layouts, nil, tables) do
+      def verified_member_layouts(root, tables, source_path = nil)
+        DeclarationWalk::Shadow.verified(:member_layouts, source_path, tables) do
           [legacy_data_member_layouts(root), legacy_struct_member_layouts(root)]
         end
       end

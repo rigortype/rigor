@@ -228,8 +228,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
       instance = forgetful.new
       allow(described_class::DefNestingsCollector).to receive(:new).and_return(instance)
+      # The file is named, and the node key is rendered by its class, name and start, not its subtree.
       expect { described_class.declaration_walk_tables(parse("class C\n  def m; end\nend\n"), "app/c.rb") }
-        .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence, /discovery table `def_nestings`/)
+        .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
+                        "RIGOR_SHADOW_RULE_WALK divergence: discovery table `def_nestings` for app/c.rb: " \
+                        "the table: key #<DefNode m at 2:2> only in legacy")
     end
 
     it "names the member-layout tables when they diverge" do
@@ -239,7 +242,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       instance = forgetful.new
       allow(described_class::MemberLayoutsCollector).to receive(:new).and_return(instance)
       expect { described_class.declaration_walk_tables(parse("Point = Data.define(:x)\n"), "app/c.rb") }
-        .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence, /discovery table `member_layouts`/)
+        .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
+                        /discovery table `member_layouts` for app\/c\.rb: \[0\]: key "Point" only in legacy\z/)
     end
   end
 

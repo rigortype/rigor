@@ -1462,7 +1462,7 @@ RSpec.describe "Rigor type construction (integration)" do
   # is restored where code may run that rebinds it. Each entry runs as `rigor check` runs a project.
   describe "fixtures/ivar_class_guards/ — class guards on instance-variable receivers (#1446)", type: :runner do
     # The number of `# QUIET-1446` lines each entry carries.
-    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 0 }.freeze
+    quiet_counts = { "guards.rb" => 7, "invalidation.rb" => 0, "bot_receivers.rb" => 5, "writes.rb" => 2 }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
 

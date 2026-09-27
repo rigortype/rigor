@@ -266,12 +266,25 @@ module Rigor
         return true if BLOCK_OR_CODE_NAMES.include?(call_node.name) &&
                        !(call_node.block.is_a?(Prism::BlockNode) && call_node.arguments.nil?)
 
+        return false if bot_receiver?(call_node, scope)
+
         targets = receiver_targets(call_node, scope)
         return true if targets.nil? || targets.empty?
 
         targets.any? { |class_name, kind| foreign_target?(class_name, call_node.name, kind, scope) }
       rescue StandardError
         true
+      end
+
+      # Issue #1446 — a receiver typed `bot` holds no value the analysis admits: a class guard disjoint from its
+      # `Nominal` (`return unless @io.is_a?(StringIO); @io.rewind`), or code no value reaches. Its method is read as
+      # running nothing, so a call on the guarded receiver does not restore the guard it runs under. Its arguments and
+      # literal block are still read ({.operands_may_rebind?}, {.call_may_rebind?}).
+      def bot_receiver?(call_node, scope)
+        receiver = call_node.receiver
+        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+        scope.type_of(receiver).is_a?(Type::Bot)
       end
 
       # The `[class_name, kind]` pairs the call dispatches on ({ProjectMethodOwnership.targets}); an implicit or
@@ -321,7 +334,7 @@ module Rigor
         owner = definition.respond_to?(:defined_in) ? definition.defined_in : nil
         owner&.to_s&.delete_prefix("::")
       end
-      private_class_method :scan, :guarded_ivar_write?, :scan_call, :receiver_targets, :foreign_target?,
+      private_class_method :scan, :guarded_ivar_write?, :bot_receiver?, :scan_call, :receiver_targets, :foreign_target?,
                            :universal_delegate_foreign?, :method_owner, :deferred_block_call?,
                            :compound_write_foreign?,
                            :compound_receiver_type, :compound_accessors, :compound_read_type, :variable_type,
@@ -387,7 +400,7 @@ module Rigor
           bindings = names.to_h { |name| [name, Type::Combinator.untyped] }
           requireds = parameters.parameters&.requireds || []
           unless requireds.none?(Prism::RequiredParameterNode)
-            yielded = yielded_types(call_node, scope)
+            yielded = yielded_types(call_node, scope, requireds.size)
             requireds.each_with_index do |parameter, index|
               next unless parameter.is_a?(Prism::RequiredParameterNode)
 
@@ -397,9 +410,13 @@ module Rigor
           bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
         end
 
-        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read.
-        def yielded_types(call_node, scope)
+        # What the method `call_node` calls yields its block, by position, or `[]` when that cannot be read. A `bot`
+        # receiver yields `bot` at each of the `count` positions (#1446): a call on it runs nothing the scan counts
+        # ({GuardRebinding.bot_receiver?}), and neither does one on what it yields.
+        def yielded_types(call_node, scope, count)
           receiver = call_node.receiver ? scope.type_of(call_node.receiver) : scope.self_type
+          return Array.new(count, receiver) if receiver.is_a?(Type::Bot)
+
           arguments = call_node.arguments&.arguments || []
           MethodDispatcher.expected_block_param_types(
             receiver_type: receiver, method_name: call_node.name, environment: scope.environment, scope: scope,

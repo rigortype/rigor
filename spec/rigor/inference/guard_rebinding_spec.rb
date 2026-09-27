@@ -82,6 +82,17 @@ RSpec.describe Rigor::Inference::GuardRebinding do
         expect(described_class.call_may_rebind?(call(source), scope)).to be(true), source
       end
     end
+
+    # Issue #1446 — a call on a receiver typed `bot` (a disjoint class guard's arm) runs nothing the scan counts, nor
+    # does a call on what it yields; its arguments still do.
+    it "reads a call on a bot receiver as running no foreign code, but still reads its arguments" do
+      guarded = scope.with_guarded_ivar(:@io, Rigor::Type::Combinator.bot, string_t)
+      ["@io.rewind", "@io.each_line { |l| l.chomp }"].each do |source|
+        expect(described_class.call_may_rebind?(call(source), guarded)).to be(false), source
+      end
+      expect(described_class.operands_may_rebind?(call("@io.write(helper)"), guarded)).to be(true)
+      expect(described_class.call_may_rebind?(call("@io.each_line { helper }"), guarded)).to be(true)
+    end
   end
 
   describe "ScanScope.block_parameter_scope" do

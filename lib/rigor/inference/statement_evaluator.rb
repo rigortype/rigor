@@ -2433,6 +2433,12 @@ module Rigor
         case index_node
         when Prism::LocalVariableTargetNode
           scope.with_local(index_node.name, element_type)
+        when Prism::InstanceVariableTargetNode
+          # Issue #1446 — `for @io in xs` writes the ivar each iteration, which ends a class guard's narrowing of it,
+          # and `for $out in xs` the global, which ends any guard's narrowing of it.
+          scope.with_ivar(index_node.name, element_type).without_ivar_guard(index_node.name)
+        when Prism::GlobalVariableTargetNode
+          scope.with_global(index_node.name, element_type)
         when Prism::IndexTargetNode
           widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::MultiTargetNode

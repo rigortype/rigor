@@ -59,7 +59,10 @@ Diagnostics held at 1 on every arm: the corpus's only finding is the `rbs.covera
 info. So no step in this range is explained by a diagnostic change, and the byte-identity check on
 the prototypes is weak (see Limitations). Arms whose engines differ only off the check path land within a few
 dozen objects of each other (`4c48106c`, `79ef2ae2` and `02bc9467` read 28,316,964–28,316,977), which
-bounds the noise floor. Re-running the prototype arms reproduced them to within 802 objects.
+bounds the noise floor. Re-running the prototype arms moved them by 43–802 objects. The
+`call_arg_types`, block-entry and `mutated_receiver` levers (pB, pC and pE in the harness) moved by
+405–486, more than that floor. The union-order lever's 802 (pD) comes from its `WeakMap` memo,
+whose hit rate depends on GC timing. Every such move is under 0.003%, and none of them changes a conclusion.
 Wall was one sample per arm, taken while other lanes ran on the host, and is recorded only.
 
 ## Where the +4.53M went
@@ -81,7 +84,7 @@ eleven largest positive steps carry a cost that the feature does not need.
 
 | merge | PR | Δ | where the objects are (exclusive, traced) | verdict |
 | --- | --- | ---: | --- | --- |
-| `b5af5cf7` | [#1135] Sorbet annotation DSL | +720,553 | `ScopeIndexer.rebound_self_base` is a new method taking 542,519 allocations over 972,530 calls. Three walks call it for every AST node they visit, and it splits a String self owner on `::`, but the result is read only under a `class_eval`-style call with a block. A per-caller probe puts 523,300 of the allocations under `walk_mixin_call_children` (143,880 calls; `scope_indexer.rb` ~:5755), 19,222 under the publication census (562,796 calls), and none under `walk_constant_write_children`, whose owner there is never a String. The other ~178K is the deferred-range and def-shadow pre-pass (`record_deferred_def`, `Scope#def_shadows_call?`, `nesting_lexical_prefix`). | **542K accidental** ([#1502]); the rest inherent |
+| `b5af5cf7` | [#1135] Sorbet annotation DSL | +720,553 | `ScopeIndexer.rebound_self_base` is a new method taking 542,519 allocations over 972,530 calls. Three walks call it for every AST node they visit, and it splits a String self owner on `::`, but the result is read only under a `class_eval`-style call with a block. A per-caller probe puts 523,300 of the allocations under `walk_mixin_call_children` (143,880 calls; `scope_indexer.rb` ~:5755), 19,222 under the publication census (562,796 calls), and none under `walk_constant_write_children`, whose owner there is never a String on this corpus. It is a String inside a `class_eval` body. The other ~178K is diffuse. The largest rows are `RbsDispatch.allowed_rbs_complete_extended_module` +32,096, `record_deferred_def` +25,626, `meta_new_child_prefix` +18,080, `nesting_lexical_prefix` +16,029, `fold_per_file_extends` +13,728, `Prism::Node#location` +13,275, `Scope#def_shadows_call?` +12,502, `decl_body_context` +12,025 and `record_collected_method_def` +11,626. | **542K accidental** ([#1502]); the rest inherent |
 | `b587a70e` | [#1096] `-> self` keeps receiver type args | +507,162 | Rendering: `DataInstance#describe` +66.6K, `Constant#describe` +60.6K (+60.9K calls), `HashShape#render_entry` +60.2K, `Tuple#describe` +20.2K, `nominal_of` +39.2K, `sort_members` +36.1K, `unique_members` +26.1K. More precise receivers make more and wider unions. `Combinator.sort_members` orders each one by re-rendering every member's `describe` string, which is one path into these methods (not measured separately per step). | inherent volume at a **systemic cost** ([#1505]) |
 | `66177b9c` | [#1166] `**h` shapes and `...` at the call site | +402,739 | With YJIT on, `ExpressionTyper#call_arg_types` +262K and `Array#each` +193K, less `Array#map` −127K. With `RIGOR_DISABLE_YJIT=1`, `call_arg_types` alone is +321,006 on unchanged call counts (292,850 → 293,796), so its allocations per call roughly double; the other ~82K is spread thin. The `map` became a `flat_map` that wraps each argument's type in a one-element Array, for the sake of `...` alone. | **accidental** ([#1503]) |
 | `11455d5c` | [#1103] destructure `Array[T]` block params | +294,385 | `BlockParameterBinder#reset_per_bind_state` +133K, which runs twice per bind, `MultiTargetBinder::Result#apply_to` +132K, and `bind_onto` +97K. The old entry path saves −76K. | **accidental plumbing** ([#1504]) |
@@ -106,7 +109,9 @@ shape, and it is folded into [#1502].
 
 ## What is recoverable
 
-Prototype levers on the v0.4.0 engine, frozen v0.3.9 `lib` (28,238,280 unpatched):
+Prototype levers on the v0.4.0 engine, frozen v0.3.9 `lib` (28,238,280 unpatched). The figures are
+from each lever's first run. The re-run result lines are in the harness's
+`tool/perf1469/prototypes/results.jsonl`, and they differ by at most 802 objects (see Method):
 
 | lever | issue | allocations | Δ |
 | --- | --- | ---: | ---: |
@@ -121,7 +126,7 @@ On the v0.4.0 tree's own `lib`, the corpus the release gate measures, all five t
 v0.4.0 engine from 42,940,599 to 39,120,227 (−3.82M, −8.9%). The output is byte-identical on both
 corpora. That base is +0.40% over the 42.77M in #1469, because the two measure different trees. The
 42.77M was a local measurement of the release branch at `665440d8`, the first version-bump commit,
-before #1479 and #1483 landed on it. The committed baseline, 42,721,526, is the Linux release-gate
+before #1470, #1478, #1479 and #1483 landed on it. The committed baseline, 42,721,526, is the Linux release-gate
 run 36278383180 on that same commit. The release head `6503cd49` measured 42,895,332 on Linux
 (release-gate run 36286123530). The arm here, `07f49bdb`, merges that head, and 42,940,599 is
 +0.10% over it.

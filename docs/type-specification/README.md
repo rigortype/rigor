@@ -49,6 +49,7 @@ The documents are organized so foundational definitions come first and specific 
 | [type-operators.md](type-operators.md) | `~T`, `T - U`, `key_of[T]`, indexed access, and the diagnostic display contract. |
 | [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md) | RBS interfaces, inferred object shapes, capability roles, method-shape entries. |
 | [control-flow-analysis.md](control-flow-analysis.md) | Edge-aware narrowing, equality semantics, fact stability, mutation effects, pre-plugin surface. |
+| [global-variables.md](global-variables.md) | Where a global's type comes from, the special variables' slots, the evidence that changes an idiomatic type, and the checked writes. |
 | [rbs-extended.md](rbs-extended.md) | `%a{rigor:v1:…}` annotations, predicate/assertion grammar, explicit conformance, flow-effect bundles. |
 | [effect-labels.md](effect-labels.md) | Effect-label grammar and subsumption, the shared registry and its vocabulary-evolution rules, effect summaries and taint causes, effect-envelope syntax. |
 | [normalization.md](normalization.md) | Deterministic normalization rules. |

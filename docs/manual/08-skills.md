@@ -60,9 +60,10 @@ is not repeated here.)
 - **`rigor-project-init`** — onboards a project from a cold start. It
   detects the stack (Rails, RSpec, dry-rb, …), proposes the matching
   [plugins](07-plugins.md), picks an adoption mode — a
-  [baseline](06-baseline.md) snapshot for an existing codebase or a
-  zero-diagnostic gate for a clean one — writes a `.rigor.dist.yml`, and
-  generates the first baseline. Reach for it when setting Rigor up for
+  [baseline](06-baseline.md) snapshot by default, new projects
+  included, or an opt-in zero-diagnostic gate for users fluent in type
+  theory and RBS — writes a `.rigor.dist.yml`, and generates the first
+  baseline. Reach for it when setting Rigor up for
   the first time.
 - **`rigor-rbs-setup`** — installs community RBS for your gems
   (`rbs collection install`) so RBS-less dependencies stop typing as

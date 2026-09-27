@@ -88,7 +88,7 @@ diagnostics.
 | Today's diagnostics | Snapshotted into `.rigor-baseline.yml`; suppressed as long as the count does not grow. | All surfaced; every one is fixed or consciously suppressed. |
 | Hard-to-fix diagnostics | Left in the baseline. The project **trusts its test / spec suite** to cover runtime correctness for those sites — the static `T | nil` reading is worst-case-sound, the suite proves the worst case is not hit. | Fixed, or annotated `# rigor:disable <rule>` with an author-intent reason at the specific line. No blanket suppression. |
 | `severity_profile` | `lenient` (or `balanced` for a small project). | `strict`. |
-| Best for | Mature codebases; incremental adoption; teams that want the regression guard without a big upfront fix. | New / small projects; libraries; teams that want the maximum guarantee and have the budget to reach zero. |
+| Best for | **Every project by default** — mature or brand-new, large or small. | Users fluent in both type theory and RBS who opt in and will resolve Rigor's inference gaps themselves. |
 | New diagnostics later | Surface immediately — anything beyond the baseline envelope is a regression. | Surface immediately — there is no envelope; every diagnostic is live. |
 
 Both modes give the same core guarantee: **a change that introduces
@@ -97,12 +97,35 @@ diagnostics that exist *today*. Acknowledge mode parenthesises them
 behind a baseline and leans on the test suite; strict mode refuses to
 parenthesise anything.
 
-If the project's first `rigor check` reports more than ~100 errors,
-recommend acknowledge mode as the default and let the user override.
-Below that, either mode is reasonable — ask.
+**Recommend acknowledge mode for every project, including new and
+small ones.** Rigor's inference still has gaps, so even a fresh
+project meets diagnostics on correct code. Under strict mode each one
+needs a `sig/` fix, an RBS workaround, or a reasoned
+`# rigor:disable` — work that takes type theory and RBS. Without that
+knowledge, users rewrite correct code for the tool or scatter
+suppressions. Acknowledge mode keeps the same regression guard with an
+exit: a new diagnostic still fails the check, and once it is confirmed
+as an inference gap, the baseline can absorb it (report the false
+positive upstream). `rigor baseline regenerate` rewrites the baseline
+from every live diagnostic, so run it only when a whole-project
+`rigor check` (no path arguments) shows nothing but confirmed false
+positives; otherwise it silences a real
+bug alongside them.
 
-Note the ordering: the error count that feeds this recommendation (and
-the `severity_profile` choice in Phase 4) is only *measured* in
+Present strict mode as an opt-in for users who know type theory and
+RBS, want the zero-diagnostic gate, and accept resolving inference
+gaps themselves — never as the recommendation, and never because the
+project is new, small, or a library. If the user picks it, tell them
+how to move to acknowledge mode later: optionally relax
+`severity_profile`, re-run triage, then run Phase 7 (generate a
+baseline and wire `baseline:`). The profile change comes first because
+it changes which rules fire.
+
+For a large first run (more than ~100 errors), acknowledge mode also
+suggests `severity_profile: lenient`; see Phase 4.
+
+Note the ordering: the error count that feeds the `severity_profile`
+choice in Phase 4 is only *measured* in
 Phase 6's triage run. Any profile written in Phase 4 is therefore
 **provisional** — Phase 6 revisits it against the measured count (see
 [`references/02-configure.md`](references/02-configure.md)
@@ -111,12 +134,15 @@ Phase 6's triage run. Any profile written in Phase 4 is therefore
 ## Non-interactive / agent-driven runs
 
 This skill has several ask-the-user points (the mode choice, the RBS
-collection install, the final gitignore-and-commit confirmation). When
-the user delegated the onboarding up front — including the adoption
-mode — those points resolve without blocking:
+collection install, the final gitignore-and-commit confirmation). A
+*delegation* is the user asking, before the run, for the onboarding to
+proceed without these questions ("set it up, don't ask me"). An
+ordinary request to set Rigor up is not one: ask as usual. Under a
+delegation those points resolve without blocking:
 
 - The **mode** the user pre-declared is settled; record it and skip the
-  Phase 2 presentation.
+  Phase 2 presentation. If the delegation names no mode, choose
+  acknowledge mode and say so in the report — never strict.
 - Low-risk, reversible, in-repo confirmations (`rbs collection
   install`, the `.gitignore` addition) are covered by the delegation —
   act, and note each self-answer in your report.

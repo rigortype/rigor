@@ -138,14 +138,19 @@ entirely — including a `sig/` that `rigor sig-gen --write` created.
 List only directories that contain `.rbs` files or subdirectories of
 them. Rigor walks each path recursively.
 
-A strict-mode plain-Ruby gem is shorter:
+A plain-Ruby gem is shorter. The `balanced` default needs no
+`severity_profile:` key:
 
 ```yaml
 paths:
   - lib
 test_paths:
   - test
-severity_profile: strict
+
+# Phase 7 (acknowledge mode) appends this line after generating the
+# baseline. Strict mode (opt-in) sets `severity_profile: strict` and
+# leaves it out.
+# baseline: .rigor-baseline.yml
 ```
 
 ### Test roots — write `test_paths:` explicitly

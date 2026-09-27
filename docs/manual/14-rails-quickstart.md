@@ -90,8 +90,9 @@ It runs eight phases in order:
 2. **Choose an adoption mode** — proposes either *acknowledge*
    (snapshot today's diagnostics into a baseline; catch
    regressions going forward) or *strict* (drive the project to
-   zero and keep it there). It recommends acknowledge for
-   codebases with more than ~100 initial diagnostics.
+   zero and keep it there). It recommends acknowledge for every
+   project, new ones included; strict is an opt-in for users
+   fluent in type theory and RBS.
 3. **Select plugins** — proposes the plugin set matching your
    detected stack; you confirm or trim the list.
 4. **Write `.rigor.dist.yml`** — the committed shared config,
@@ -151,14 +152,19 @@ source-of-truth copy is
 
 | Mode | When | What happens |
 | --- | --- | --- |
-| **Acknowledge** | Existing codebase with many diagnostics | Record today's diagnostics in a baseline; surface only new ones on each PR. |
-| **Strict** | New or small project | Zero outstanding diagnostics; no baseline. |
+| **Acknowledge** | Recommended for every project, new ones included | Record today's diagnostics in a baseline; surface only new ones on each PR. |
+| **Strict** | Opt-in, for users fluent in type theory and RBS | Zero outstanding diagnostics; no baseline. |
 
-If your first `rigor check` reports more than ~100 diagnostics,
-acknowledge mode is the natural starting point. You can tighten
-it later. In `.rigor.dist.yml` (Step 3) the mode maps to a
-`severity_profile:` — acknowledge → `lenient`, strict → `strict`
-(omit the key for the default `balanced`).
+Start with acknowledge mode even on a brand-new project. Rigor's
+inference still has gaps, so a zero-diagnostic gate meets
+diagnostics on correct code, and clearing those means fixing
+signatures or RBS rather than your code. Choose strict only if
+you are comfortable doing that yourself. You can tighten later.
+
+In `.rigor.dist.yml` (Step 3) the mode maps to a
+`severity_profile:`. Acknowledge mode uses the default `balanced`
+(omit the key), or `lenient` when the first `rigor check` reports
+more than ~100 diagnostics; strict mode uses `strict`.
 
 ### Step 3 — Write .rigor.dist.yml
 
@@ -198,7 +204,7 @@ plugins:
   - rigor-rspec
   - rigor-factorybot
 
-severity_profile: lenient   # "strict" for strict mode; omit for "balanced"
+# severity_profile: lenient   # only for >100 initial diagnostics; "strict" for strict mode
 
 # baseline: .rigor-baseline.yml   # uncomment after Step 6 (acknowledge mode only)
 ```
@@ -288,7 +294,9 @@ first, then large clusters to record in a baseline.
 
 ### Step 6 — Generate a baseline (acknowledge mode)
 
-*Skip this step if you chose strict mode.*
+*Skip this step if you chose strict mode.* Settle `severity_profile:`
+first: changing it afterwards changes which rules fire and leaves the
+baseline out of step.
 
 ```sh
 rigor baseline generate

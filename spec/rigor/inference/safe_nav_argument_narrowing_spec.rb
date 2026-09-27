@@ -92,6 +92,16 @@ RSpec.describe "safe-navigation argument narrowing (#1468)" do
       RUBY
     end
 
+    # A `return` or `yield` operand is not threaded by the evaluator, so only the scope index reads these.
+    it "reports the receiver an earlier argument rebound under `return` and `yield`" do
+      expect(nil_receiver_lines(<<~RUBY)).to eq([2, 3])
+        s = c ? "s" : nil
+        t = c ? "t" : nil
+        yield s&.concat((s = nil).to_s, s.upcase)
+        return t&.concat((t = nil).to_s, t.upcase)
+      RUBY
+    end
+
     it "reports the receiver a chain link's arguments rebound" do
       expect(nil_receiver_lines(<<~RUBY)).to eq([1])
         s = c ? "s" : nil

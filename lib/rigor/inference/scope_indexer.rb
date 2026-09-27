@@ -23,6 +23,7 @@ require_relative "index_write_widening"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "operand_effects"
 require_relative "statement_evaluator"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
@@ -8801,10 +8802,14 @@ module Rigor
       #
       # Issue #1468 — the arguments and block of a safe-navigation call run only once its receiver is non-nil, so
       # they inherit the scope with the receiver narrowed ({Narrowing.safe_navigation_scope},
-      # {Narrowing.safe_navigation_block_scope}); the receiver itself keeps the call's own.
+      # {Narrowing.safe_navigation_block_scope}); the receiver itself keeps the call's own. This walk hands every
+      # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
+      # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
+      # operand).
       def propagate_call(node, table, current_scope)
         block = node.block
-        operands = Narrowing.safe_navigation_scope(node, current_scope)
+        operands =
+          OperandEffects.any?(node.arguments) ? current_scope : Narrowing.safe_navigation_scope(node, current_scope)
         entry = unentered_block_entry(node, block, table, current_scope)
         if entry.equal?(current_scope) && operands.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }

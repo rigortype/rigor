@@ -10,19 +10,37 @@ skill (`rigor-project-init` for a project that has never run Rigor).
 **Do not add Rigor to the project's `Gemfile`** — Rigor is a
 standalone tool, not a library.
 
+**Install the latest release, not whatever is already on the
+machine.** A `rigor` already on PATH, or a version manager that
+resolves to an older release, is not a reason to stop early: Rigor
+changes quickly, and the skills this guide hands off to are written
+for the current release. Step 1 records the latest version; every
+later step compares against it.
+
 ---
 
 ## Step 1 — Detect the environment
 
-Run these four checks and note which tools are available:
+Run these checks and note which tools are available:
 
 ```sh
 which mise    # preferred — see Step 2A
 which asdf    # fallback — see Step 2B
 ruby --version 2>/dev/null | head -1   # is Ruby 4.0 already on PATH?
 which docker  # last resort — see Step 2D
+rigor --version 2>/dev/null            # an existing install, if any
 ```
 
+Then look up the latest Rigor release on RubyGems and note it as
+`LATEST`:
+
+```sh
+curl -s https://rubygems.org/api/v1/versions/rigortype/latest.json
+# => {"version":"0.4.0"}
+```
+
+An existing `rigor` older than `LATEST` still goes through Step 2;
+tell the user which version they have and which you are installing.
 Then proceed to the **first** matching case below.
 
 ---
@@ -44,13 +62,22 @@ Run in the project root:
 
 ```sh
 mise use ruby@4.0
-mise use --pin gem:rigortype
+mise use --pin gem:rigortype@LATEST   # substitute the version from Step 1
 ```
 
 `mise use` installs the tools and writes their versions to `mise.toml`
 in one step. Commit `mise.toml` so the version is shared.
 
-`--pin` records the exact Rigor version (`"gem:rigortype" = "0.2.9"`).
+Name the version explicitly. A bare `mise use gem:rigortype` does not
+reliably mean the newest release: mise's `minimum_release_age` setting
+hides releases younger than a set age (it prints `newer gem:rigortype
+release hidden by minimum_release_age` as a warning, not an error), so
+you get an older Rigor that looks like a clean install. If mise
+refuses the explicit version because of a release-age policy, that
+policy is the user's supply-chain choice: report both versions and ask
+before overriding it.
+
+`--pin` records the exact Rigor version (`"gem:rigortype" = "0.4.0"`).
 Without it mise writes `"gem:rigortype" = "latest"`, which every
 machine re-resolves to whatever is newest when it first installs — so
 a committed `latest` does not give the team one shared version. The
@@ -88,7 +115,7 @@ gem is installed with `gem install` after setting the Ruby version.
 ```sh
 asdf install ruby latest:4.0
 asdf local ruby latest:4.0
-gem install rigortype
+gem install rigortype -v LATEST   # substitute the version from Step 1
 ```
 
 Verify:
@@ -108,7 +135,7 @@ pinning; see <https://mise.jdx.dev/getting-started.html>.
 If `ruby --version` reports `ruby 4.0.*`, install the gem directly:
 
 ```sh
-gem install rigortype
+gem install rigortype -v LATEST   # substitute the version from Step 1
 ```
 
 Verify:
@@ -160,8 +187,12 @@ without WSL). For all other environments, prefer Case A–D above.
 rigor --version
 ```
 
-A version string like `rigor 0.2.x` confirms a successful install.
-If the command is not found, revisit Step 2 for your case.
+The reported version must equal `LATEST` from Step 1. If it is
+older, another `rigor` earlier on PATH (a global mise tool, an older
+gem) is shadowing the one you just installed: run `which -a rigor`,
+and with mise check `mise ls gem:rigortype`. Do not continue on the
+older version without telling the user. If the command is not found,
+revisit Step 2 for your case.
 
 ---
 

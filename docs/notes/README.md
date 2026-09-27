@@ -143,6 +143,7 @@ comparison) appears nowhere else in this index.
 | 2026-07-30 | [Referenced-type stub pass 1 — static detection agrees with the builder (−32.8% of a cold run), and two live stub-synthesis defects](20260730-stub-pass1-static-detection-evaluation.md) |
 | 2026-09-09 | [CI wall time 371s → 220s — the shard spread was never the partition; work pinned to one matrix arm, one file over the per-worker budget, and three traps a spec split springs](20260909-ci-wall-time-shard-rebalance.md) |
 | 2026-09-12 | [v0.3.9 release-gate `lib peak_rss_kb` attribution — +10.5% is transient peak, not retention, and diffuse across ~95 merges](20260912-v039-rss-attribution.md) |
+| 2026-09-27 | [v0.3.9 → v0.4.0 engine allocations per merge on a frozen corpus — +19.1% is mostly feature volume, a third is four accidental hot-path costs](20260927-v040-engine-allocation-attribution.md) |
 
 ## Process & meta
 

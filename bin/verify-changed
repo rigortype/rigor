@@ -14,8 +14,8 @@
 #      the specs that name a changed fixture; for a changed plugin or example,
 #      the integration specs that load it plus the two all-plugin conformance
 #      specs — the opt-in files in their own processes, as in `verify`; and
-#      for any engine change (lib/, sig/, data/) the four whole-engine drift
-#      specs that CI failures most often came from on untouched files (~30s);
+#      for any engine change (lib/, sig/, data/) the whole-engine drift specs
+#      that CI failures most often came from on untouched files (~45s);
 #   4. `spec/docs/` always — seconds, and it is where the Markdown gates live;
 #   5. `rigor check --fail-on=warning` on the changed lib files and the lib
 #      mirrors of changed sig/ files — the CI self-check caught a
@@ -104,12 +104,21 @@ add_specs_matching() {
 lines() { printf '%s' "$1" | sort -u; }
 # Specs that read the whole engine rather than one file: a lib change anywhere
 # can move them. They were most of the CI failures (Sept 2026) that a
-# changed-files-only gate would have missed, and cost about 30s together.
+# changed-files-only gate would have missed.
+#
+# provenance_spec (ADR-107 G3) is the mirror of no file, yet all three engine
+# trees move it: it pins each sig/ file's unmarked hand-written residue, and it
+# runs `sig-gen` over lib/ to decide which rows are earned, so a sig/ row, an
+# inference change in lib/, or a data/ catalogue that changes what sig-gen
+# proves can each break a pin (#1449, #1453: CI-only both times). It adds its
+# generator pass at file load, about 10s on an idle host.
+provenance_spec=spec/rigor/sig_gen/provenance_spec.rb
 engine_drift_specs=(
   spec/integration/precision_snapshot_spec.rb
   spec/integration/type_construction_spec.rb
   spec/rigor/public_api_drift_spec.rb
   spec/rigor/ractor_readiness_spec.rb
+  "$provenance_spec"
 )
 
 for path in ${changed[@]+"${changed[@]}"}; do
@@ -117,13 +126,15 @@ for path in ${changed[@]+"${changed[@]}"}; do
     lib/* | spec/* | plugins/* | examples/* | apps/*) lint_files+="$path"$'\n' ;;
   esac
   case "$path" in
-    lib/* | sig/* | data/*)
+    lib/* | sig/* | data/* | .rigor.dist.yml)
       for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
       ;;
   esac
   case "$path" in
     spec/spec_helper.rb | spec/support/* | spec/*/support/*)
       uncovered+="$path (shared spec setup: the suite depends on it)"$'\n'
+      # The G3 classifier and its helpers: provenance_spec is their only user.
+      [[ "$path" == spec/support/sig_* ]] && add_spec "$provenance_spec"
       ;;
     spec/*_spec.rb) add_spec "$path" ;;
     spec/*)
@@ -171,6 +182,12 @@ for path in ${changed[@]+"${changed[@]}"}; do
   esac
 done
 for path in ${deleted[@]+"${deleted[@]}"}; do
+  # A deleted sig/ file drops rows provenance_spec pins, so a deletion runs the drift specs too.
+  case "$path" in
+    lib/* | sig/* | data/*)
+      for spec in "${engine_drift_specs[@]}"; do add_spec "$spec"; done
+      ;;
+  esac
   case "$path" in
     *.md) ;;
     *) uncovered+="$path (deleted: its dependents are not checked locally)"$'\n' ;;

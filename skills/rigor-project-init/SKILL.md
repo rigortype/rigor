@@ -98,18 +98,15 @@ behind a baseline and leans on the test suite; strict mode refuses to
 parenthesise anything.
 
 **Recommend acknowledge mode for every project, including new and
-small ones.** A clean start does not make a zero-diagnostic gate
-cheap: Rigor's inference still has gaps, so a strict project meets
-diagnostics on correct code, where the fix is a better `sig/` entry,
-an RBS workaround, or a `# rigor:disable` with a reason rather than a
-code change. Resolving those takes working knowledge of type theory and
-RBS, and without it strict mode pushes the user into rewriting correct
-code for the tool or scattering suppressions. Acknowledge mode keeps
-the same regression guard with an exit: the baseline starts small or
-empty, a new diagnostic still fails the check, and once one is
-confirmed as an inference gap on correct code, `rigor baseline
-regenerate` absorbs it (report it upstream as a false positive)
-instead of forcing a signature fix or a suppression.
+small ones.** Rigor's inference still has gaps, so even a fresh
+project meets diagnostics on correct code. Under strict mode each one
+needs a `sig/` fix, an RBS workaround, or a reasoned
+`# rigor:disable` — work that takes type theory and RBS. Without that
+knowledge, users rewrite correct code for the tool or scatter
+suppressions. Acknowledge mode keeps the same regression guard with an
+exit: a new diagnostic still fails the check, and once it is confirmed
+as an inference gap, `rigor baseline regenerate` absorbs it (report
+the false positive upstream).
 
 Present strict mode as an opt-in for users who know type theory and
 RBS, want the zero-diagnostic gate, and accept resolving inference
@@ -133,9 +130,11 @@ Phase 6's triage run. Any profile written in Phase 4 is therefore
 ## Non-interactive / agent-driven runs
 
 This skill has several ask-the-user points (the mode choice, the RBS
-collection install, the final gitignore-and-commit confirmation). When
-the user delegated the onboarding up front — including the adoption
-mode — those points resolve without blocking:
+collection install, the final gitignore-and-commit confirmation). A
+*delegation* is the user asking, before the run, for the onboarding to
+proceed without these questions ("set it up, don't ask me"). An
+ordinary request to set Rigor up is not one: ask as usual. Under a
+delegation those points resolve without blocking:
 
 - The **mode** the user pre-declared is settled; record it and skip the
   Phase 2 presentation. If the delegation names no mode, choose

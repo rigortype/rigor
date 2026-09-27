@@ -1,6 +1,7 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-06-16T15:15:00Z",
-  "max_diagnostics": 468,
-  "min_precision_ratio": 0.4284
+  "calibrated_at": "2026-09-27T00:00:00Z",
+  "max_diagnostics": 23,
+  "min_precision_ratio": 0.5239,
+  "note": "Tightened after the v0.4.0 cut from release-gate run 36286123530 (release/0.4.0 @ 6503cd49a): 23 diagnostics, precise ratio 77,768 / 148,431 = 52.39%. The previous 468 / 42.84% dated from 2026-06-16 and had gone stale: v0.4.0 reports each plugin's project-wide disclosure once per run instead of once per file, so the count fell from about 1,089 rows (1,073 of them rule-less disclosures) to 23, and a regression of hundreds of rows would have passed. The count includes info-level rows (rbs.coverage.missing-gem). A rise is a signal to diff the new rows for false positives before re-blessing, never to raise the number blindly."
 }

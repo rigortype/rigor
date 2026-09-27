@@ -53,23 +53,23 @@
           # Distributed as static Go binaries; no `go install` because of
           # embedded Git LFS copilot artefacts, so we ship the upstream
           # release binary directly per platform. License: MIT.
-          wazaVersion = "0.31.0";
+          wazaVersion = "0.38.7";
           wazaAssets = {
             "aarch64-darwin" = {
               asset = "waza-darwin-arm64";
-              hash = "sha256-gMMK9rUdePY5UMhGhFvFJeeHixzfaJV7r91Jh0/6FfE=";
+              hash = "sha256-gqT0TH2VsT5UYHqwu52mGLsTTFHJSmS+c77b97zU53g=";
             };
             "x86_64-darwin" = {
               asset = "waza-darwin-amd64";
-              hash = "sha256-1bixv2g1gULHOBeXgbRKhecJ5KHOzPNKt8E+ykQn3S4=";
+              hash = "sha256-4oKubML4GRJejlqvI1HK+OBmx0qFPHzfFZHNT7Rleho=";
             };
             "aarch64-linux" = {
               asset = "waza-linux-arm64";
-              hash = "sha256-oooOfWSh1IK9PMdAX42phZv83o279skUT/BRpcSFlfE=";
+              hash = "sha256-FC6oNrvIMkFU9S0yeMt8mp+k4b50gLRNOEEwm1b3sDk=";
             };
             "x86_64-linux" = {
               asset = "waza-linux-amd64";
-              hash = "sha256-vD2wYJcE0WPpDPexF/MbIUgsATciAGaiCHFNwxKV594=";
+              hash = "sha256-4ifNiEFz3nlrwoxssYKEmPJQKX4OYGpORQTRRGX/h58=";
             };
           };
           waza = pkgs.stdenv.mkDerivation {

@@ -713,11 +713,14 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       expect(lost.eval_body(%w[X]).declaration_body(plain).nesting).to be_nil
     end
 
-    it "tracks no nesting when the root carries none" do
+    it "tracks no nesting when the root carries none, not even at a `self::` header or below a lost one" do
       context = described_class.root
       body = context.declaration_body(Prism.parse("class C; end").value.statements.body.first)
       expect(body.nesting).to be_nil
       expect(body.singleton_class_body.nesting).to be_nil
+      self_header = Prism.parse("class self::G; end").value.statements.body.first
+      expect(context.eval_body(%w[X]).declaration_body(self_header).nesting).to be_nil
+      expect(context.lost_header_body.eval_body(%w[X]).declaration_body(self_header).nesting).to be_nil
     end
 
     it "stamps the header chain on the scope it carries" do

@@ -243,7 +243,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       allow(described_class::MemberLayoutsCollector).to receive(:new).and_return(instance)
       expect { described_class.declaration_walk_tables(parse("Point = Data.define(:x)\n"), "app/c.rb") }
         .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
-                        /discovery table `member_layouts` for app\/c\.rb: \[0\]: key "Point" only in legacy\z/)
+                        %r{discovery table `member_layouts` for app/c\.rb: \[0\]: key "Point" only in legacy\z})
     end
   end
 

@@ -33,10 +33,11 @@
 # another order are a note. Every run passes `--no-baseline`, so a project baseline does not hide findings from the
 # comparison.
 #
-# An edit is `method` (an empty method inserted before the `end` of the file's main class, the multi-line class with
-# the widest span as Prism parses it, or its main module when it has no class) or `comment` (a comment line
-# appended). Both edits are checked to parse before any run. Under rbs-inline comment ingestion, which is on whenever
-# the gem resolves, a comment edit widens an incremental closure as far as a method edit does. How far an edit
+# An edit is `method` (an empty method inserted into the file's main declaration: the one named after the file, else
+# the widest multi-line class, else the widest module; see {edited}) or `comment` (a comment line appended). Both
+# edits are checked to parse before any run. Under rbs-inline comment ingestion, which is on whenever
+# the gem resolves, a comment edit widens an incremental closure at least as far as a method edit does (a hub whose
+# dependents only call it re-analyses them for a comment and not for a new method). How far an edit
 # spread is not reported yet: the `--incremental` banner does not carry the recheck size (#1526), and
 # `--verify-incremental`'s count is a fixed half of the tree, not an edit's closure. So whether the chosen leaf and
 # hub are a leaf and a hub rests on the files chosen; Mastodon's defaults were checked with an instrumented engine
@@ -57,6 +58,7 @@ require "json"
 require "open3"
 require "optparse"
 require "rbconfig"
+require "date"
 require "prism"
 require "tmpdir"
 require "yaml"
@@ -122,34 +124,48 @@ module EngineWarmAB
     Digest::SHA256.hexdigest(JSON.generate(parsed))
   end
 
-  # The file's text with the probe edit `n` applied. A `method` edit goes before the `end` of the file's main
-  # declaration as Prism parses it (so nothing inside a heredoc): the multi-line class with the widest span, or the
-  # widest module when the file has no class, skipping any namespace wrapper whose body is a single class or module
-  # (`module App; class User … end; end` puts it in `User`, `module App; module Commands …` in `Commands`). A
-  # one-line `class E < S; end` and a class nested in the main one are never chosen.
-  def edited(text, kind, n)
-    return "#{text.chomp}\n# rigor-warm-probe #{n}\n" if kind == "comment"
+  # The file's text with the probe edit `n` applied. A `method` edit goes into the file's main declaration as Prism
+  # parses it (so nothing inside a heredoc): the one named after the file (`migration_helpers.rb` →
+  # `MigrationHelpers`) when there is one, else the multi-line class with the widest span, else the widest module.
+  # Namespace wrappers whose body is a single class or module are skipped, and so are one-line declarations. The
+  # probe goes before the declaration's `end`, or before its first `rescue`/`else`/`ensure` clause when the body has
+  # one, in the file's own line endings.
+  def edited(text, kind, n, file = nil)
+    eol = text.include?("\r\n") ? "\r\n" : "\n"
+    return "#{text.chomp}#{eol}# rigor-warm-probe #{n}#{eol}" if kind == "comment"
 
-    target = probe_target(text)
-    abort("no multi-line class or module whose `end` stands on its own line") unless target
+    target = probe_target(text, file)
+    abort("no multi-line class or module whose `end` starts its line#{" in #{file}" if file}") unless target
     lines = text.lines
-    indent = lines[target.location.start_line - 1][/\A\s*/]
-    lines.insert(target.end_keyword_loc.start_line - 1, "#{indent}  def __rigor_warm_probe_#{n}; end\n")
+    indent = lines[target.location.start_line - 1][/\A[ \t]*/]
+    lines.insert(insertion_line(target) - 1, "#{indent}  def __rigor_warm_probe_#{n}; end#{eol}")
     lines.join
   end
 
-  def probe_target(text)
+  def insertion_line(node)
+    body = node.body
+    clause = body.is_a?(Prism::BeginNode) && (body.rescue_clause || body.else_clause || body.ensure_clause)
+    clause ? clause.location.start_line : node.end_keyword_loc.start_line
+  end
+
+  def probe_target(text, file = nil)
     result = Prism.parse(text)
     return nil unless result.success?
 
     lines = text.lines
     candidates = declarations(result.value).select do |node|
-      end_line = node.end_keyword_loc.start_line
-      end_line > node.location.start_line && lines[end_line - 1].strip == "end" && !wrapper?(node)
+      loc = node.end_keyword_loc
+      loc.start_line > node.location.start_line && lines[loc.start_line - 1][0...loc.start_column].strip.empty? &&
+        !wrapper?(node)
     end
-    pool = candidates.grep(Prism::ClassNode)
+    named = file && candidates.select { |node| node.constant_path.slice.split("::").last == camelize(file) }
+    pool = named.nil? || named.empty? ? candidates.grep(Prism::ClassNode) : named
     pool = candidates if pool.empty?
     pool.max_by { |node| node.location.end_line - node.location.start_line }
+  end
+
+  def camelize(file)
+    File.basename(file, ".rb").split("_").map(&:capitalize).join
   end
 
   def wrapper?(node)
@@ -167,7 +183,18 @@ module EngineWarmAB
   def assert_probe_editable(project, file, kind)
     text = File.read(File.join(project, file))
     [1, 2].each do |n|
-      abort("the #{kind} probe does not parse in #{file}") unless Prism.parse(edited(text, kind, n)).success?
+      abort("the #{kind} probe does not parse in #{file}") unless Prism.parse(edited(text, kind, n, file)).success?
+    end
+  end
+
+  # Whether `file` lies under one of `paths` (directories or files, relative to the project).
+  def within_paths?(project, file, paths)
+    return true if paths.empty?
+
+    target = File.expand_path(file, project)
+    paths.any? do |path|
+      root = File.expand_path(path, project)
+      target == root || target.start_with?("#{root.chomp('/')}/")
     end
   end
 
@@ -178,7 +205,12 @@ module EngineWarmAB
       path = File.join(project, name)
       next unless File.file?(path)
 
-      cache = YAML.safe_load_file(path, aliases: true)&.dig("cache")
+      config = begin
+        YAML.safe_load_file(path, aliases: true, permitted_classes: [Date, Time, Symbol])
+      rescue Psych::Exception
+        nil
+      end
+      cache = config.is_a?(Hash) ? config["cache"] : nil
       next unless cache.is_a?(Hash) && cache.key?("path")
 
       abort("#{name} sets `cache.path`; the harness clears only the default .rigor/cache")
@@ -256,7 +288,7 @@ module EngineWarmAB
     def with_edit(arm, file, rep)
       path = File.join(arm[:project], file)
       original = File.read(path)
-      File.write(path, EngineWarmAB.edited(original, @options.fetch(:edit), rep))
+      File.write(path, EngineWarmAB.edited(original, @options.fetch(:edit), rep, file))
       yield
     ensure
       File.write(path, original) if original
@@ -304,7 +336,7 @@ module EngineWarmAB
       begin
         journey.run
       rescue SystemExit => e
-        journey.failures << "aborted: #{e.message}"
+        journey.failures << "aborted: #{e.message.to_s.split.join(' ')[0, 300]}"
         raise
       ensure
         report(options, arms.keys, journey)
@@ -439,7 +471,7 @@ if $PROGRAM_NAME == __FILE__
   EngineWarmAB.assert_default_cache(options[:project])
   %i[leaf hub].each do |key|
     file = options[key]
-    unless options[:paths].empty? || options[:paths].any? { |dir| file.start_with?("#{dir.chomp('/')}/") }
+    unless EngineWarmAB.within_paths?(options[:project], file, options[:paths])
       abort("#{key} #{file} is outside --paths, so editing it changes nothing the run analyses")
     end
     EngineWarmAB.assert_probe_editable(options[:project], file, options[:edit])

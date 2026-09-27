@@ -46,6 +46,26 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
         .to eq("class A\n  X = <<~RUBY\n    class Fake\n    end\n  RUBY\n  def __rigor_warm_probe_1; end\nend\n")
     end
 
+    it "prefers the declaration named after the file over a wider sibling or an error class" do
+      source = "module MigrationHelpers\n  class CorruptionError < StandardError\n    def x; end\n  end\n\n  " \
+               "def a; end\nend\n"
+      expect(EngineWarmAB.edited(source, "method", 1, "lib/mastodon/migration_helpers.rb"))
+        .to end_with("  def a; end\n  def __rigor_warm_probe_1; end\nend\n")
+    end
+
+    it "accepts an end followed by a comment, and goes before a class-level rescue clause" do
+      commented = "class A\n  class B\n  end\n  def a; end\nend # A\n"
+      expect(EngineWarmAB.edited(commented, "method", 1)).to end_with("  def __rigor_warm_probe_1; end\nend # A\n")
+      rescuing = "class A\n  def a; end\nrescue StandardError\n  nil\nend\n"
+      expect(EngineWarmAB.edited(rescuing, "method", 1))
+        .to eq("class A\n  def a; end\n  def __rigor_warm_probe_1; end\nrescue StandardError\n  nil\nend\n")
+    end
+
+    it "keeps a CRLF file's line endings" do
+      expect(EngineWarmAB.edited("class A\r\n  def a; end\r\nend\r\n", "method", 1))
+        .to include("  def __rigor_warm_probe_1; end\r\n")
+    end
+
     it "appends a comment line for a bytes-only edit" do
       expect(EngineWarmAB.edited(source, "comment", 1)).to eq("#{source}# rigor-warm-probe 1\n")
     end
@@ -67,6 +87,16 @@ RSpec.describe "tool/engine_warm_ab.rb (#1507)" do
     it "disagrees for different diagnostics, including a repeated one" do
       expect(EngineWarmAB.set_digest(output("a", "b"))).not_to eq(EngineWarmAB.set_digest(output("a", "c")))
       expect(EngineWarmAB.set_digest(output("a", "a"))).not_to eq(EngineWarmAB.set_digest(output("a")))
+    end
+  end
+
+  describe ".within_paths?" do
+    it "accepts the spellings a user gives --paths, and rejects a file outside them" do
+      expect(EngineWarmAB.within_paths?("/p", "app/a.rb", ["."])).to be(true)
+      expect(EngineWarmAB.within_paths?("/p", "app/a.rb", ["./app/"])).to be(true)
+      expect(EngineWarmAB.within_paths?("/p", "app/a.rb", ["app/a.rb"])).to be(true)
+      expect(EngineWarmAB.within_paths?("/p", "lib/a.rb", ["app"])).to be(false)
+      expect(EngineWarmAB.within_paths?("/p", "application/a.rb", ["app"])).to be(false)
     end
   end
 

@@ -33,7 +33,7 @@ on:
         required: false
         default: "app/models/account.rb"
       edit:
-        description: "method (an empty method in the file's last class/module) or comment (a comment line)"
+        description: "method (an empty method in the file's main class or module) or comment (a comment line)"
         type: choice
         options: [method, comment]
         default: method

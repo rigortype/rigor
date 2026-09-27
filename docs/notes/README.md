@@ -166,6 +166,7 @@ comparison) appears nowhere else in this index.
 | --- | --- |
 | 2026-06-04 | [Structural code repetition audit (non-catalog, non-plugin)](20260604-structural-repetition-audit.md) |
 | 2026-09-23 | [Hot-file churn audit — where the engine's change pressure lands (grounds ADR-116)](20260923-hot-file-churn-audit.md) |
+| 2026-09-28 | [The remaining declaration-walk ports paused, and the contract explored for four of them (ADR-116 WD5)](20260928-declaration-walk-remaining-walkers.md) |
 
 ## Adding a note
 

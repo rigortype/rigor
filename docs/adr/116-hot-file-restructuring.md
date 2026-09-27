@@ -1,13 +1,13 @@
 # ADR-116 — Restructuring the engine's hot files: declare each growing kind once, walk each traversal once
 
-Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5 is in
-progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
-`class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
-on the walk. Its third (#1527: the def-nesting and member-layout tables) makes the walk shared: it
-builds five tables in one run per file. This ADR fixes the direction, the three criteria, and the
-slice order (WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by
-#1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus
-diff.
+Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5's
+first slice (#1517: the discovery-table shadow harness, the context model, `class_cvars`) and its
+second (#1522: the superclass tables, with the first variants) put two tables on the walk. Its
+third (#1527: the def-nesting and member-layout tables) makes the walk shared: it builds five tables
+in one run per file. The remaining WD5 ports are paused as of 2026-09-28 (WD5, below). This ADR
+fixes the direction, the three criteria, and the slice order (WD0–WD7). Each slice lands as its own
+PR in the `v0.4.x` milestone, tracked by #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve
+behaviour; WD6 changes it and carries its own corpus diff.
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -143,7 +143,8 @@ never chooses the cut.
     descent.
   - *Order.* Extract the context model first. Next, port two walkers, `walk_class_cvars` (~L1973)
     and `walk_class_superclasses` (~L5079), behind a shadow mode that asserts table equality on
-    the self-check tree and the corpus. Then port the rest.
+    the self-check tree and the corpus. Then port the rest. *(The rest is paused as of 2026-09-28; see
+    "Paused" at the end of WD5.)*
   - *Precondition.* The `RIGOR_SHADOW_RULE_WALK` harness is extended from rule collectors to
     discovery tables. *Harness contract (amended with #1522):* a divergence in a file's own index
     reports as an error row on the file. A divergence in the cross-file project pre-pass aborts the
@@ -229,8 +230,10 @@ never chooses the cut.
         walker builds. At landing this held for 67,137 files (this repo, the survey corpora and gitlab)
         and 12,000 fuzzed programs, and `RIGOR_SHADOW_RULE_WALK` keeps checking it.
       - The other walkers that `merge_project_method_indexes` and the pre-pass call stay on their
-        legacy walkers for now. Each needs a traversal contract beyond these events, so porting one
-        requires amending this ADR first (the amendment rule above).
+        legacy walkers: the methods/def-nodes walk, deferred ranges, the constant census, declared
+        names, and the four below. Porting any of them requires amending this ADR first (the amendment
+        rule above). This slice read the four below as needing a traversal contract beyond these events.
+        That reading, and the list of what each needs, are disputed: see the note, H1/H2.
         - `walk_class_includes` (includes and prepends) rebinds the owner at every block through
           `rebound_block_self`, including `define_method` and non-constant receivers as opaque. It
           resolves eval receivers as written and walks block parameters.
@@ -239,7 +242,18 @@ never chooses the cut.
           at all: receiver, arguments and block are all skipped.
         - `walk_method_visibilities` and `walk_singleton_def_nodes` thread state from one sibling
           statement to the next: the default visibility, and the `module_function` toggle. A
-          per-node event cannot carry that state.
+          per-node event cannot carry that state. *(Disputed, see the note, H1/H2: `module_function`
+          decides where a `def` installs, which is context, and three walkers compute it in three
+          ways.)*
+      - *Paused (2026-09-28).* Every remaining WD5 port is paused, not only the four above: the
+        methods/def-nodes walk, deferred ranges, the constant census and declared names too. Once
+        measured, speed was no reason to port any of them. The four above are worth about 0.2% of a
+        cold `rigor check lib`, and a null warm run reaches none of them.
+        - [`docs/notes/20260928-declaration-walk-remaining-walkers.md`](../notes/20260928-declaration-walk-remaining-walkers.md)
+          records the traversal contract explored for the four (#1531), its prototype, and the
+          review's open problems.
+        - Resuming any remaining port requires the amendment the rule above demands. That amendment
+          must be justified by C2, one implementation of the context rules, and not by speed.
 - **WD6 — One block-entry model for `ExpressionTyper` and `StatementEvaluator` (behaviour change;
   #1198).**
   - *Problem.* Block entry-scope construction exists three times: ET ~L3690–3726, SE ~L2984–3061,

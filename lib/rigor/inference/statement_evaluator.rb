@@ -2805,15 +2805,20 @@ module Rigor
 
       # The scope Ruby runs `node`'s method from: the receiver, then the arguments, then a block-pass argument, each
       # threaded in turn ({#thread_operand}). A safe-navigation call skips its arguments when the receiver is nil,
-      # so their scope joins with the receiver's.
+      # so their scope joins with the receiver's. Issue #1468 — and runs them only when it is not, so they are
+      # entered with the receiver narrowed to its non-nil fragment ({Narrowing.safe_navigation_scope}). That entry
+      # is not the scope the call is typed from, so {OperandWalk} records and types each of them from it. The
+      # narrowing ends with the operands: when they wrote nothing the scope after them is the receiver's.
       def call_operand_scope(node, walk, typed_from)
         after_receiver = thread_operand(node.receiver, scope, walk, typed_from)
-        after_arguments = thread_operand(node.arguments, after_receiver, walk, typed_from)
+        entered = Narrowing.safe_navigation_scope(node, after_receiver)
+        after_arguments = thread_operand(node.arguments, entered, walk, typed_from)
         block_pass = node.block
         if block_pass.is_a?(Prism::BlockArgumentNode)
           after_arguments = thread_operand(block_pass, after_arguments, walk, typed_from)
         end
         return after_arguments if after_arguments.equal?(after_receiver) || !node.safe_navigation?
+        return after_receiver if after_arguments.equal?(entered)
 
         join_with_nil_injection(after_receiver, after_arguments)
       end
@@ -3475,10 +3480,22 @@ module Rigor
         nil
       end
 
+      # Issue #1468 — the block of `recv&.m { … }` runs only once `recv` is non-nil, so it is entered from the scope
+      # with the receiver narrowed ({Narrowing.safe_navigation_block_scope}), and every entry rule
+      # {#enter_call_block} applies reads that scope as any other. The receiver's own type, which the block's
+      # parameters and the repetition rules are read from, stays where the call's operands were typed.
       def evaluate_block_if_present(node)
         block = node.block
         return unless block.is_a?(Prism::BlockNode)
 
+        narrowed = Narrowing.safe_navigation_block_scope(node, scope)
+        return enter_call_block(node, block) if narrowed.equal?(scope)
+
+        evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
+          .send(:enter_call_block, node, block)
+      end
+
+      def enter_call_block(node, block)
         block_entry = narrow_define_method_block_self(node, repeating_block_entry(node, block))
         # #319 — `Class.new do ... end` and friends evaluate their block as a CLASS BODY (`class_eval`
         # semantics): `self` is the freshly created class, so a `def` inside defines an instance method on it

@@ -11,6 +11,7 @@ require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
 require_relative "last_line"
+require_relative "operand_effects"
 require_relative "optimistic_origin"
 require_relative "project_method_ownership"
 require_relative "receiver_alias"
@@ -446,6 +447,37 @@ module Rigor
 
         result = analyse(node, scope)
         result || [scope, scope]
+      end
+
+      # Issue #1468 — the scope the arguments and block of a safe-navigation call `recv&.m(…)` run under. Ruby
+      # evaluates them only once `recv` is known non-nil, so `klass&.new(klass.flag?)` reads `klass` without its
+      # `nil`, as `if klass then klass.new(klass.flag?) end` does. Only `nil` is removed: `false&.m(x)` still calls
+      # `m`. The call's own value keeps its skipped-call `nil` (`ExpressionTyper#safe_navigation_call_type`).
+      #
+      # The receiver is one a guard narrows ({.receiver_slot}: a local, instance variable, global or constant), or a
+      # safe-navigation call on such a receiver whose own arguments and block hold no write or jump
+      # ({OperandEffects}): `a&.b(a.c)&.d(a.e)` runs `d` only when `a&.b(…)` answered non-nil, which it cannot on a
+      # nil `a`, and nothing between the two reads rebinds `a`. `scope` itself when nothing narrows, and for a call
+      # that is not `&.`.
+      def safe_navigation_scope(call_node, scope)
+        return scope unless call_node.safe_navigation?
+
+        non_nil_receiver_scope(call_node.receiver, scope) || scope
+      end
+
+      # The scope the block of a safe-navigation call is entered from: {.safe_navigation_scope}, unless the narrowing
+      # may not hold for the whole body. An argument that writes may rebind the receiver before the block runs
+      # (`f&.two(f = nil) { f.run }`), and a block that writes the receiver hands the next iteration what it wrote
+      # (`a&.each { a.size; a = nil }`); either keeps `scope`.
+      def safe_navigation_block_scope(call_node, scope)
+        return scope unless call_node.safe_navigation?
+        return scope if OperandEffects.any?(call_node.arguments)
+
+        root = call_node.receiver
+        root = root.receiver while root.is_a?(Prism::CallNode) && root.safe_navigation?
+        return scope if root.respond_to?(:name) && OperandEffects.written_variables(call_node.block).include?(root.name)
+
+        safe_navigation_scope(call_node, scope)
       end
 
       # Slice 7 phase 5 — `case`/`when` narrowing.
@@ -1624,13 +1656,17 @@ module Rigor
         # `String`; every other numbered group present in the pattern stays `String | nil` on
         # both edges (a truthy match leaves an optional group nil at runtime), so we do not
         # narrow it on the truthy edge.
+        #
+        # Both edges start from `scope` with the match globals forgotten (#1385): the match rebinds every one of them,
+        # so a `$N` an earlier match narrowed says nothing here. Without that, a `when /(x)/` arm, or the right operand
+        # of `s =~ /(a)(b)(c)/ && t =~ /(x)/`, kept `$2` and `$3` narrowed to `String` where Ruby reads nil.
         def regex_match_predicate_scopes(scope, unconditional)
           string_t = Type::Combinator.nominal_of("String")
           match_data_t = Type::Combinator.nominal_of("MatchData")
           nil_t = Type::Combinator.constant_of(nil)
 
-          truthy = scope
-          falsey = scope
+          truthy = scope.forget_match_globals
+          falsey = truthy
           truthy = truthy.with_global(:$~, match_data_t)
           falsey = falsey.with_global(:$~, nil_t)
           REGEX_MATCH_GLOBALS.each do |name|
@@ -1664,8 +1700,10 @@ module Rigor
         # them to non-nil `String` would be unsound. The walker is intentionally light (char
         # scan, not a regex-AST parse): backslash escapes are skipped; `(?:…)`, lookahead
         # `(?=…)`/`(?!…)`, and lookbehind `(?<=…)`/`(?<!…)` do not capture; named groups
-        # `(?<name>…)` do. Conservatism is one-directional — when in doubt a group is treated
-        # as conditional (dropped from the Set), never the reverse.
+        # `(?<name>…)` / `(?'name'…)` do. Once the pattern has a named group, Ruby numbers only
+        # the named groups and a plain `(…)` does not capture (#1471): `/(?<x>a)(b)/` has one
+        # group, so `$2` is nil. Conservatism is one-directional — when in doubt a group is
+        # treated as conditional (dropped from the Set), never the reverse.
         def unconditional_capture_groups(source)
           # `unconditional` collects every capturing index; a group is later removed (with its
           # whole subtree) when it is optionally quantified, nested under an optional ancestor,
@@ -1675,7 +1713,15 @@ module Rigor
           # mutually exclusive, so its descendant captures may be absent on a successful match;
           # the group itself still participates. Closing a frame rolls its subtree up to the
           # parent so an optional / alternated ancestor disqualifies it.
-          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0 }
+          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0, named: named_groups?(source) }
+          each_structural_char(source) { |pos, chr| scan_group_char(source, pos, chr, state) }
+          # Drain the virtual root: a top-level `|` disqualifies all.
+          finalize_frame(state, state[:stack].pop, optional: false)
+          state[:unconditional]
+        end
+
+        # Yields each position of `source` outside a backslash escape and a character class, with its char.
+        def each_structural_char(source)
           pos = 0
           length = source.length
           while pos < length
@@ -1688,12 +1734,13 @@ module Rigor
               pos = skip_char_class(source, pos) + 1
               next
             end
-            scan_group_char(source, pos, chr, state)
+            yield pos, chr
             pos += 1
           end
-          # Drain the virtual root: a top-level `|` disqualifies all.
-          finalize_frame(state, state[:stack].pop, optional: false)
-          state[:unconditional]
+        end
+
+        def named_groups?(source)
+          each_structural_char(source) { |pos, chr| break true if chr == "(" && named_group?(source, pos) } == true
         end
 
         # Updates the walk `state` at a group-relevant char during
@@ -1703,7 +1750,7 @@ module Rigor
           case chr
           when "("
             idx = nil
-            if capturing_group?(source, pos)
+            if capturing_group?(source, pos, named: state[:named])
               idx = (state[:group_index] += 1)
               state[:unconditional] << idx
             end
@@ -1742,11 +1789,20 @@ module Rigor
           end
         end
 
-        def capturing_group?(source, pos)
-          return true unless source[pos + 1] == "?"
+        # A plain `(…)` captures unless the pattern has a named group (`named:`); of the `(?…)` forms only a named
+        # group does.
+        def capturing_group?(source, pos, named:)
+          return !named unless source[pos + 1] == "?"
 
-          # `(?<name>…)` captures; `(?<=…)`/`(?<!…)` (lookbehind) and
-          # `(?:…)`/`(?=…)`/`(?!…)` do not.
+          named_group?(source, pos)
+        end
+
+        # `(?<name>…)` and `(?'name'…)` are named groups; `(?<=…)`/`(?<!…)` (lookbehind) and
+        # `(?:…)`/`(?=…)`/`(?!…)` are not.
+        def named_group?(source, pos)
+          return false unless source[pos + 1] == "?"
+          return true if source[pos + 2] == "'"
+
           source[pos + 2] == "<" && source[pos + 3] != "=" && source[pos + 3] != "!"
         end
 
@@ -3208,6 +3264,25 @@ module Rigor
           return nil if non_nil.equal?(slot.current)
 
           narrow_slot(scope, slot, non_nil)
+        end
+
+        # The scope {.safe_navigation_scope} answers for a receiver, seen through the `&.` links of a chain whose
+        # operands leave the root's binding alone, or nil. Unlike {.non_nil_slot_scope} it compares the fragment
+        # structurally: `narrow_non_nil` rebuilds a union it removed nothing from, and a receiver that cannot be nil
+        # must leave the call's operands on the scope they are typed from.
+        def non_nil_receiver_scope(node, scope)
+          if node.is_a?(Prism::CallNode)
+            return nil unless node.safe_navigation?
+            return nil if OperandEffects.any?(node.arguments) || OperandEffects.any?(node.block)
+
+            return non_nil_receiver_scope(node.receiver, scope)
+          end
+
+          slot = receiver_slot(node, scope)
+          return nil if slot.nil?
+
+          non_nil = narrow_non_nil(slot.current)
+          non_nil == slot.current ? nil : narrow_slot(scope, slot, non_nil)
         end
 
         # Issue #606 slice 1 — the SAFE-NAV CHAIN forms. {.analyse_safe_nav_receiver} above proves

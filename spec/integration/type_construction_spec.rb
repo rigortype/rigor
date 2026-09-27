@@ -1165,6 +1165,29 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/match_data_slices.rb — a constant slice of the proven `$~` reads a Tuple (#1381)" do
+    let(:harness) { harness_for("match_data_slices") }
+
+    it "types each slot by its group and keeps RBS's answer where the slice declines" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The repro destructures the slice and calls a method on every slot; only the optional group's slot, read
+    # through the Tuple into a local, is flagged.
+    it "reports a nil receiver only on the optional group's slot" do
+      nil_receivers = harness.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+      expect(nil_receivers.map(&:line)).to eq(marked_lines(harness, "# GENUINE-NIL"))
+    end
+
+    # A slice after a later match with fewer groups must not fold to the earlier match's length, or the size checks
+    # the fixture makes on it fold to a constant (#1385).
+    it "folds no size check on a slice" do
+      flow = harness.diagnostics.select { |d| d.rule.to_s.start_with?("flow.") }
+      expect(flow).to be_empty
+    end
+  end
+
   describe "fixtures/regex_global_file_frame.rb — the file's top level is a frame of its own (#1358)" do
     let(:harness) { harness_for("regex_global_file_frame") }
 

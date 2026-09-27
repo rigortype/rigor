@@ -378,6 +378,40 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       expect(declined_first.map { |collector| labels(collector) }).to eq([%w[C m], %w[C m], %w[C m inside]])
     end
 
+    # Objects a run of three allocates over two sources that differ only in how many nodes it dispatches
+    # events for: the extra nodes must cost nothing, whether no collector declines or one declines every
+    # `def`. The best of three runs is taken, and the tolerance is far below one object per extra node.
+    it "allocates nothing per node in a run of three, with no decline and with one collector declining each def" do
+      counting = Class.new do
+        include Rigor::Inference::DeclarationWalk::Collector
+
+        def initialize(decline) = (@decline = decline)
+
+        # Named parameters: a rest parameter would allocate its own Array per event.
+        def on_def(_node, _context)
+          @decline ? Rigor::Inference::DeclarationWalk::DECLINE : Rigor::Inference::DeclarationWalk::DESCEND
+        end
+
+        def on_call(_node, _context) = Rigor::Inference::DeclarationWalk::DESCEND
+      end
+      roots = [20, 200].map do |defs|
+        Prism.parse("class C\n#{Array.new(defs) { |i| "  def m#{i}\n    helper(#{i})\n  end\n" }.join}end\n").value
+      end
+      [false, true].each do |decline|
+        run = -> { [counting.new(false), counting.new(decline), counting.new(false)] }
+        small, large = roots.map do |root|
+          described_class.run(root, run.call)
+          Array.new(3) do
+            collectors = run.call
+            before = GC.stat(:total_allocated_objects)
+            described_class.run(root, collectors)
+            GC.stat(:total_allocated_objects) - before
+          end.min
+        end
+        expect(large - small).to be <= 4, "#{large - small} more objects for 180 more defs (decline: #{decline})"
+      end
+    end
+
     it "hands each decliner of a larger run its own remainder, however often each declines" do
       source = "def a\n  x\nend\ndef b\n  y\nend\ndef a\n  z\nend\n"
       trio = [recorder_class.new(decline: [[:def_node, "a"]]), recorder_class.new(decline: [[:def_node, "b"]]),

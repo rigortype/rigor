@@ -262,8 +262,14 @@ module Rigor
         end
 
         # The collectors that let the walk into the node the block asks each of them about. Every collector is
-        # asked, in order, whatever the others answer. A run allocates nothing where at most one collector
-        # declines; where two or more of a run of three or more decline, one Array.
+        # asked, in order, whatever the others answer.
+        #
+        # Asking allocates nothing, so a node where no collector declines costs no object. Where exactly one
+        # declines, the answer is a {#subset} memoised for the run (the one survivor of a pair, or the whole run
+        # without the decliner), built the first time and free after that. Two cases copy instead: a decline
+        # inside a group of three or more that is not the whole run (a variant fork's group, or what is left of
+        # a run of four or more after an earlier decline), and two or more declines at one node of a group of
+        # three or more. Each allocates one Array.
         def descending(collectors, &)
           case collectors.size
           when 0 then collectors
@@ -273,10 +279,14 @@ module Rigor
           end
         end
 
+        # An index loop rather than `each_with_index`, which allocates a block frame object (a T_IMEMO) per
+        # call: this runs at every node a run of three or more dispatches an event for.
         def descending_many(collectors)
           declined = nil
           kept = nil
-          collectors.each_with_index do |collector, index|
+          index = 0
+          while index < collectors.size
+            collector = collectors[index]
             if yield(collector) != DECLINE
               kept&.push(collector)
             elsif declined.nil? && kept.nil?
@@ -284,6 +294,7 @@ module Rigor
             else
               kept ||= collectors.take(index).tap { |list| list.delete_at(declined) }
             end
+            index += 1
           end
           kept || (declined.nil? ? collectors : without(collectors, declined))
         end

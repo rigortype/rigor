@@ -300,6 +300,51 @@ module Rigor
         validated[0]
       end
 
+      # ADR-45 WD2 (#1507) — a record-and-validate entry's value WITHOUT validating its dependencies. The
+      # `--incremental` session reads the previous run-result slot to carry forward the rows a narrowed run
+      # cannot re-derive, and that slot is expected to be stale: the edit that started this run is in it. So
+      # the answer here is never served — only rows are taken from it, and they are validated again, with
+      # everything else, the next time the slot is read. nil on a miss, a malformed entry or an unavailable
+      # disk tier. Records neither a hit nor a miss, since nothing was looked up to be served.
+      def peek_unvalidated(producer_id:, key_descriptor:, params: {})
+        validate_producer_id!(producer_id)
+        return nil unless ensure_schema_version!
+
+        key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
+        pair = read_entry(entry_path(producer_id, key))&.value
+        return nil unless pair.is_a?(Array) && pair.size == 2 && pair[1].is_a?(Descriptor)
+
+        pair[0]
+      end
+
+      # ADR-45 WD2 (#1507) — the write half of {#fetch_or_validate} on its own, and unconditional. That method
+      # writes only after it failed to validate what is there; a writer that has just computed an answer of its
+      # own must store THAT answer even when the entry already on disk still validates, because it is the one
+      # the run printed. Same entry format and the same failure contract as {#fetch_or_validate}'s write: a
+      # disk-side failure is swallowed, a value `Marshal` cannot dump raises. Returns whether it wrote.
+      def store_validated(producer_id:, key_descriptor:, generation_cap:, value:, dependencies:, params: {})
+        validate_producer_id!(producer_id)
+        declare_generation_cap(producer_id, generation_cap)
+        return false unless ensure_schema_version!
+
+        key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
+        wrote = try_write_entry(entry_path(producer_id, key), key_descriptor, [value, dependencies])
+        @monitor.synchronize { record(:writes, producer_id) } if wrote
+        wrote
+      end
+
+      # ADR-45 WD2 (#1507) — removes one entry, for a writer that has just superseded it under another key and
+      # knows nothing will ask for it again. Best-effort like every other unlink here; a no-op on a read-only
+      # store.
+      def discard(producer_id:, key_descriptor:, params: {})
+        validate_producer_id!(producer_id)
+        return if @read_only || !ensure_schema_version!
+
+        path = entry_path(producer_id, key_descriptor.cache_key_for(producer_id: producer_id, params: params))
+        unlink_entry_and_shard?(path) if File.file?(path)
+        nil
+      end
+
       # ADR-6 § "Eviction" — compaction pass over the on-disk cache. No-op when the store is read-only.
       #
       # The generation cap of pass 2 comes from what the producers themselves declared through this Store's

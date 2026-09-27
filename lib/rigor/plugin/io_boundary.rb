@@ -51,6 +51,30 @@ module Rigor
       URL_TIMEOUT_SECONDS = 10
       URL_MAX_BYTES = 10 * 1024 * 1024
 
+      ATTRIBUTION_KEY = :rigor_io_boundary_attribution
+      private_constant :ATTRIBUTION_KEY
+
+      # ADR-45 WD2 (#1507) — runs the block with `sink` (an Array) receiving every file and listing row ANY
+      # boundary records on this thread meanwhile, in addition to the boundary's own table, and returns the
+      # block's value. `Analysis::Runner` wraps each file's analysis in one when it records dependencies, so the
+      # `--incremental` session can keep the reads one file's analysis made beside that file's cached answer: a
+      # later run that serves the answer without re-analysing the file still has to validate what it read.
+      #
+      # A thread variable rather than a fiber-local, so a read a plugin makes from inside an `Enumerator` still
+      # lands in the sink. The boundary's own table is unchanged by it, including its first-existence-row-stands
+      # rule: the sink records what each read observed.
+      def self.attributing(sink)
+        previous = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
+        Thread.current.thread_variable_set(ATTRIBUTION_KEY, sink)
+        yield
+      ensure
+        Thread.current.thread_variable_set(ATTRIBUTION_KEY, previous)
+      end
+
+      def self.attribute(entry)
+        Thread.current.thread_variable_get(ATTRIBUTION_KEY)&.push(entry)
+      end
+
       attr_reader :policy, :plugin_id
 
       def initialize(policy:, plugin_id:, http_client: DefaultHttpClient.new)
@@ -287,6 +311,7 @@ module Rigor
         # A content row replaces an earlier existence row for the same path outright: the file appeared and
         # its bytes were consumed, and a content row validates existence as well as content.
         @mutex.synchronize { @file_entries[path] = entry }
+        self.class.attribute(entry)
       end
 
       # ADR-45 WD1 (#577) — the absence row for a probed-but-missing path. A content row already recorded
@@ -303,6 +328,7 @@ module Rigor
       def record_absence_entry(path)
         entry = Cache::Descriptor::FileEntry.absent(path: path)
         @mutex.synchronize { @file_entries[path] ||= entry }
+        self.class.attribute(entry)
       end
 
       # ADR-45 WD1b (#613) — the presence row: fresh while the probed path exists, stale once it is gone.
@@ -313,6 +339,7 @@ module Rigor
       def record_presence_entry(path)
         entry = Cache::Descriptor::FileEntry.present(path: path)
         @mutex.synchronize { @file_entries[path] ||= entry }
+        self.class.attribute(entry)
       end
 
       # ADR-45 WD1c (#629) — the listing row for {#list_directory}, deduplicated per (root, pattern) slot.
@@ -321,6 +348,7 @@ module Rigor
       def record_glob_entry(root, pattern)
         entry = Cache::Descriptor::GlobEntry.compute(root: root, pattern: pattern)
         @mutex.synchronize { @glob_entries[entry.slot_key] = entry }
+        self.class.attribute(entry)
       end
 
       # Issue #959 — records that `path` fell outside every {TrustPolicy} read root, for {#refusal_summary}.

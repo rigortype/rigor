@@ -488,6 +488,64 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  # ADR-45 WD2 (#1507) — the pieces the `--incremental` session's run-result slot is written and carried with.
+  describe "#store_validated / #peek_unvalidated / #discard" do
+    let(:dependency) { File.join(tmpdir, "dep.txt") }
+
+    def dependencies(content)
+      Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.new(path: dependency, comparator: :digest,
+                                                        value: Digest::SHA256.hexdigest(content))]
+      )
+    end
+
+    def write(value, content)
+      store.store_validated(producer_id: "p", key_descriptor: descriptor, generation_cap: 1, value: value,
+                            dependencies: dependencies(content))
+    end
+
+    it "writes in the record-and-validate format, so the entry validates like any other" do
+      File.write(dependency, "v1")
+      expect(write("answer", "v1")).to be(true)
+
+      fresh = described_class.new(root: cache_root)
+      expect(fresh.peek_validated(producer_id: "p", key_descriptor: descriptor)).to eq("answer")
+      File.write(dependency, "v2")
+      expect(fresh.peek_validated(producer_id: "p", key_descriptor: descriptor)).to be_nil
+    end
+
+    it "overwrites an entry that still validates, which fetch_or_validate would have served instead" do
+      File.write(dependency, "v1")
+      write("first", "v1")
+      write("second", "v1")
+      expect(described_class.new(root: cache_root).peek_validated(producer_id: "p", key_descriptor: descriptor))
+        .to eq("second")
+    end
+
+    it "reads a stale entry's value without validating it, and nil where there is no entry" do
+      File.write(dependency, "v1")
+      write("answer", "v1")
+      File.write(dependency, "v2")
+
+      fresh = described_class.new(root: cache_root)
+      expect(fresh.peek_validated(producer_id: "p", key_descriptor: descriptor)).to be_nil
+      expect(fresh.peek_unvalidated(producer_id: "p", key_descriptor: descriptor)).to eq("answer")
+      expect(fresh.peek_unvalidated(producer_id: "other", key_descriptor: descriptor)).to be_nil
+      expect(fresh.stats).to include(hits: 0, misses: 0)
+    end
+
+    it "removes one entry, and leaves a read-only store's alone" do
+      File.write(dependency, "v1")
+      write("answer", "v1")
+      described_class.new(root: cache_root, read_only: true).discard(producer_id: "p", key_descriptor: descriptor)
+      expect(store.peek_unvalidated(producer_id: "p", key_descriptor: descriptor)).to eq("answer")
+
+      store.discard(producer_id: "p", key_descriptor: descriptor)
+      expect(store.peek_unvalidated(producer_id: "p", key_descriptor: descriptor)).to be_nil
+      expect(Dir.glob(File.join(cache_root, "p", "**", "*.entry"))).to be_empty
+    end
+  end
+
   describe "#stats (v0.0.9 group A slice 3)" do
     it "starts at zero hits / misses / writes" do
       expect(store.stats).to include(hits: 0, misses: 0, writes: 0)

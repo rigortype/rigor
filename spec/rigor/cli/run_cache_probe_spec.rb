@@ -23,8 +23,8 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
   attr_reader :dir
 
   # Runs `rigor check` in a child process with a preload that records, at exit, how many engine features the
-  # process loaded. Returns `[exitstatus, engine_feature_count, stdout]`. Pass `baseline: true` to run without
-  # `--no-baseline`, letting the config's `baseline:` key apply.
+  # process loaded. Returns `[exitstatus, engine_feature_count, stdout, stderr]`. Pass `baseline: true` to run
+  # without `--no-baseline`, letting the config's `baseline:` key apply.
   def check_run(*extra_args, baseline: false)
     preload = File.join(dir, "loaded_features_probe.rb")
     marker = File.join(dir, "engine_features.txt")
@@ -39,8 +39,8 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
     baseline_args = baseline ? [] : ["--no-baseline"]
     cmd = ["bundle", "exec", "ruby", "-r", preload, exe,
            "check", "--no-ci-detect", "--no-stats", *baseline_args, *extra_args, "lib"]
-    stdout, _stderr, status = Open3.capture3(*cmd, chdir: dir)
-    [status.exitstatus, File.read(marker).to_i, stdout]
+    stdout, stderr, status = Open3.capture3(*cmd, chdir: dir)
+    [status.exitstatus, File.read(marker).to_i, stdout, stderr]
   end
 
   def write_project
@@ -132,6 +132,64 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
     expect(hit_status).to eq(0)
     expect(hit_engine).to eq(0)
     expect(hit_stdout).to include("effect collection never runs")
+  end
+
+  # ADR-45 WD2 (#1507) — the `--incremental` twin. The session writes its own run-result slot after each run, and
+  # a null `rigor check --incremental` is served from it before the engine loads, with the banner the full path
+  # prints for a warm run.
+  describe "--incremental" do
+    def write_failing_project
+      write_project
+      File.write(File.join(dir, "lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price.upcase\n  end\nend\n")
+    end
+
+    it "serves a null run without loading the engine, byte-identical, with the warm banner" do
+      write_failing_project
+
+      cold_status, cold_engine, cold_out, cold_err = check_run("--incremental")
+      expect(cold_engine).to be > 0
+      expect(cold_err).to include("--incremental cold")
+
+      status, engine, out, err = check_run("--incremental")
+      expect(engine).to eq(0)
+      expect([status, out]).to eq([cold_status, cold_out])
+      expect(out).to include("lib/b.rb")
+      expect(err).to include("rigor: --incremental warm — reused cached diagnostics (2 files)")
+    end
+
+    it "after an edit recheck, serves the next null run engine-free with a --no-cache run's output" do
+      write_project
+      check_run("--incremental", "--format", "json")
+      File.write(File.join(dir, "lib", "a.rb"), "class Widget\n  def price\n    :ten\n  end\nend\n")
+      File.write(File.join(dir, "lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price.upcase\n  end\nend\n")
+
+      _, edit_engine, edit_out = check_run("--incremental", "--format", "json")
+      expect(edit_engine).to be > 0
+      status, engine, out = check_run("--incremental", "--format", "json")
+      expect(engine).to eq(0)
+      expect(out).to eq(edit_out)
+      cold_status, _, cold_out = check_run("--no-cache", "--format", "json")
+      expect([status, out]).to eq([cold_status, cold_out])
+    end
+
+    it "never serves a plain run from the incremental slot, nor an incremental run from the plain one" do
+      write_project
+      check_run("--incremental")
+      expect(check_run[1]).to be > 0 # plain: no plain slot yet
+      expect(check_run[1]).to eq(0)
+      FileUtils.rm_rf(File.join(dir, ".rigor"))
+
+      check_run
+      expect(check_run[1]).to eq(0)
+      expect(check_run("--incremental")[1]).to be > 0 # incremental: no incremental slot yet
+      expect(check_run("--incremental")[1]).to eq(0)
+    end
+
+    it "declines under --explain, which the session does not honour (#1533)" do
+      write_project
+      check_run("--incremental")
+      expect(check_run("--incremental", "--explain")[1]).to be > 0
+    end
   end
 
   it "declines the probe (loads the engine) for --no-cache" do

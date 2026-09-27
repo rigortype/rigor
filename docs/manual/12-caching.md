@@ -220,9 +220,21 @@ dependents of removed ones.) As with the rest of the cache, a
 missing or corrupt snapshot is simply a full run; it can never
 wedge analysis.
 
+When nothing has changed since the last `--incremental` run, the
+answer comes straight from the cache, without starting the
+analyzer at all, just as an unchanged plain `rigor check` does.
+Rigor first checks every input that answer was computed from —
+your source files, your RBS, and every file a plugin read while
+analysing them — and runs the ordinary incremental re-check the
+moment any of them differs. On a Rails application the size of
+Mastodon, an unchanged `--incremental` run takes about as long as
+an unchanged plain one. The shortcut stands aside under
+`--workers=N` (or `parallel.workers:`), `--explain`,
+`--cache-stats`, `--coverage`, an editor buffer, and an `effects:`
+block; those runs re-check as before.
+
 `--incremental` is most useful for fast local re-checks and CI
-on a changed branch. For a one-shot run on an unchanged project,
-the ordinary cache already serves the whole result in one step.
+on a changed branch.
 
 ## Concurrency
 

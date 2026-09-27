@@ -59,8 +59,8 @@ module Rigor
         # ADR-87 WD4 — try to serve the whole run from the ADR-45 cache before booting the engine. A hit boots
         # only CLI + config + cache + digest code (no `rigor/inference`), skipping the plugin prepass + env
         # build entirely.
-        probed = try_run_cache_hit(configuration, options, buffer, cache_root)
-        return finalize_cache_hit(probed, configuration, options, config_warnings) unless probed.nil?
+        served = serve_from_run_cache(configuration, options, buffer, cache_root, config_warnings)
+        return served unless served.nil?
 
         load_check_dependencies
         special = dispatch_special_check_mode(configuration, options, cache_root, buffer)
@@ -113,6 +113,16 @@ module Rigor
         false
       end
 
+      # The exit code of a run served whole from a run-result slot, engine-free, or nil to run the engine: the
+      # plain slot for an ordinary check (ADR-87 WD4), the incremental session's for `--incremental` (ADR-45 WD2).
+      def serve_from_run_cache(configuration, options, buffer, cache_root, config_warnings)
+        probed = try_run_cache_hit(configuration, options, buffer, cache_root)
+        return finalize_cache_hit(probed, configuration, options, config_warnings) unless probed.nil?
+
+        hit = try_incremental_run_hit(configuration, options, buffer, cache_root)
+        hit && finalize_incremental_hit(hit, configuration, options)
+      end
+
       # ADR-87 WD4 — attempt the boot-slimming run-cache hit. Returns the cached {Analysis::Result} (severity
       # profile applied, no stats — matching a cache-served `Runner#run`) on a hit, or nil to fall through to
       # the full engine path. Only an ordinary sequential check whose result IS cache-served the same way is
@@ -141,8 +151,9 @@ module Rigor
 
       # Any signal that per-file analysis would run in a worker pool (CLI `--workers`, the env override, or the
       # config default). Deliberately over-declines (a false positive only forgoes the fast lane); mirrors
-      # {CheckRunnerFactory.resolve_workers} without requiring it (that pulls in the engine).
-      def pool_workers_configured?(options, configuration)
+      # {CheckRunnerFactory.resolve_workers} without requiring it (that pulls in the engine). `unreadable` is the
+      # answer for a count that does not parse, which the full path's resolver raises on.
+      def pool_workers_configured?(options, configuration, unreadable: false)
         cli = options[:workers]
         return Integer(cli).positive? if cli
 
@@ -151,7 +162,41 @@ module Rigor
 
         configuration.parallel_workers.positive?
       rescue ArgumentError
-        false
+        unreadable
+      end
+
+      # ADR-45 WD2 (#1507) — `rigor check --incremental`'s engine-free null run: serve the run-result slot the
+      # incremental session wrote after its last run, when every row of it still validates. Returns an
+      # {Analysis::IncrementalRunSlot::Hit}, or nil to run the full incremental path.
+      def try_incremental_run_hit(configuration, options, buffer, cache_root)
+        return nil unless incremental_run_hit_eligible?(configuration, options, buffer)
+
+        require_relative "../analysis/incremental_run_slot"
+        Analysis::IncrementalRunSlot.serve(
+          configuration: configuration, cache_root: cache_root, paths: @argv.empty? ? configuration.paths : @argv
+        )
+      end
+
+      # A plain `--incremental` run the session would answer as a warm recheck and write a slot for. Every other
+      # shape declines, and the full path handles it exactly as before: an editor buffer (never saved), `--no-cache`
+      # (no store to hold a slot), `--verify-incremental`, a worker pool (the session writes no slot for one: a
+      # worker's plugin reads never reach the process that records them), and `--explain`, which the session
+      # ignores today (#1533) — the slot is keyed without it, so the probe declines rather than answer for a flag
+      # its writer never saw. The rest mirror the plain probe: `--coverage`, `--cache-stats` and the
+      # `RIGOR_*_TRACE` probes each want the full path's own output.
+      def incremental_run_hit_eligible?(configuration, options, buffer)
+        options.fetch(:incremental) && buffer.nil? &&
+          !options.fetch(:no_cache) && !options.fetch(:explain) && !options.fetch(:coverage) &&
+          !options.fetch(:cache_stats) && !options.fetch(:verify_incremental) &&
+          !pool_workers_configured?(options, configuration, unreadable: true) &&
+          ENV["RIGOR_BUDGET_TRACE"].to_s.empty? && ENV["RIGOR_HEAP_TRACE"].to_s.empty?
+      end
+
+      # The tail {#run_incremental_check} gives a warm run, from the slot's answer: the same banner, baseline
+      # filter, output and exit code. No fact-surface note, since a warm run never has one.
+      def finalize_incremental_hit(hit, configuration, options)
+        report_incremental_run(true, hit.file_count)
+        write_incremental_result(hit.result.diagnostics, configuration, options)
       end
 
       # ADR-87 WD4 — the engine-free tail for a cache-served hit: baseline filter + output + exit code,
@@ -258,12 +303,23 @@ module Rigor
         # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
         # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
         # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
-        @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
-                  "(#{session.analyzed_files.size} files)")
+        report_incremental_run(warm, session.analyzed_files.size)
         emit_incremental_fact_surface_notes(session)
         write_incremental_cache_stats(session, cache_root, store, options.fetch(:format)) if
           options.fetch(:cache_stats)
 
+        write_incremental_result(diagnostics, configuration, options)
+      end
+
+      def report_incremental_run(warm, file_count)
+        @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
+                  "(#{file_count} files)")
+      end
+
+      # The incremental tail, shared by the full path and the ADR-45 WD2 slot hit so a served run prints exactly
+      # what the full path would. It is not the ordinary check's tail — no `config_warnings` block in the JSON,
+      # no CI-detected annotations, no `--baseline-strict` verdict — which is why the hit cannot reuse that one.
+      def write_incremental_result(diagnostics, configuration, options)
         result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration,
                                        options)
         write_result(result, options.fetch(:format), fail_on: options.fetch(:fail_on))

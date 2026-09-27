@@ -353,10 +353,25 @@ run's diagnostics without loading the inference engine at all. It records
 a hit (so `--cache-stats` still balances) but never a miss — a probe miss
 hands off to the full path, which records its own.
 
+### `store.store_validated`, `store.peek_unvalidated` and `store.discard`
+
+The pieces the `--incremental` run-result slot
+([ADR-45](../adr/45-unchanged-project-fast-path.md) WD2, below) is written
+and carried with. `store_validated(producer_id:, key_descriptor:,
+generation_cap:, value:, dependencies:)` is `fetch_or_validate`'s write
+half on its own, and unconditional: a writer that has just computed an
+answer stores that answer even when the entry on disk still validates,
+because it is the one the run printed. Same entry format, same failure
+contract. `peek_unvalidated(producer_id:, key_descriptor:)` returns an
+entry's value WITHOUT validating its dependency descriptor, for a writer
+that takes rows from a slot it knows to be stale; it records neither a
+hit nor a miss, and its answer is never served. `discard(producer_id:,
+key_descriptor:)` removes one entry, a no-op on a read-only store.
+
 ### Engine identity in a computed-value key
 
 A cache whose value is a function of what the analyzer *computes* —
-`analysis.run-diagnostics`, `analysis.run-effects`,
+`analysis.run-diagnostics`, `analysis.incremental-run-diagnostics`, `analysis.run-effects`,
 `protection.mutation-file-result`, the per-file
 `plugin.source_rbs_synthesizer` slot, every plugin producer
 (`plugin.<id>.<producer>`), the five `rbs.*` producers
@@ -729,7 +744,10 @@ passes, in order:
    judgement: `RbsCacheProducer.generation_cap` (2, inherited by every
    `rbs.*` subclass), `Analysis::RunCacheKey::GENERATION_CAP` (16 for
    `analysis.run-diagnostics`, one live generation per analyzed-path
-   SET) and its `EFFECTS_GENERATION_CAP` twin (`analysis.run-effects`,
+   SET, and for its `--incremental` twin `analysis.incremental-run-diagnostics`,
+   whose writer also discards the generation it supersedes when the path set
+   moves, since the incremental path runs no compaction pass) and its
+   `EFFECTS_GENERATION_CAP` twin (`analysis.run-effects`,
    the ADR-103 effects sidecar — one generation per analyzed-path SET ×
    effects identity), and `Plugin::Base.producer generation_cap:`
    (defaulting to `:unbounded`) for plugin-side producers. The per-file
@@ -1170,6 +1188,48 @@ union logic and never the persisted snapshot. The cross-process oracle that does
 is `spec/rigor/analysis/incremental_session_spec.rb` — two `Cache::Store`s over one
 snapshot directory, a `.rb` edit between them, compared against a `--no-cache` full run.
 
+### The run-result slot (ADR-45 WD2)
+
+After every run whose snapshot it persists, `IncrementalSession#run_incremental`
+also writes an ADR-45 record-and-validate entry, `analysis.incremental-run-diagnostics`,
+and `rigor check --incremental` serves a null run from it before loading the engine
+(`Analysis::IncrementalRunSlot.serve`). The decision, and why the slot is sound, is
+[ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is the contract.
+
+- **Key.** `RunCacheKey.descriptor` exactly as the ADR-87 WD4 probe builds it —
+  `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false` —
+  over the session's analysed-path set. The producer id, not the key, is what keeps it
+  apart from `analysis.run-diagnostics`: the two keys coincide on a project with no
+  synthesised RBS and no template units.
+- **Value.** `IncrementalRunSlot::Entry(diagnostics, signature, reads, snapshot)`.
+  `diagnostics` is what the run printed before the baseline filter; the CLI applies the
+  filter, `--fail-on` and the output format to it exactly as the full incremental path
+  does (`CheckCommand#write_incremental_result`). `signature` and `reads` (`{path =>
+  Descriptor}`) are the chain a later recheck carries forward; `snapshot` is the
+  `(size, mtime_ns, ctime_ns, inode)` of the snapshot file the writing run left behind.
+- **Dependency descriptor.** A `:stat` row per analysed file, from the session's own
+  `digests` (the bytes each answer was computed from); `Runner#incremental_slot_rows`'
+  `run` rows, which extend the row inventory below with an existence row per analysis
+  root, per `pre_eval:` entry and per signature root; the chain's signature rows; and
+  every file's reads.
+- **Carrying.** A full run starts the chain from its own signature rows
+  (`Runner#signature_dependency_rows`) and reads. A recheck takes the previous slot's
+  `Entry` — read with `peek_unvalidated`, keyed by the path set of the snapshot it
+  restored — keeps the reads of the files it served from cache, replaces those of the
+  files it re-analysed, and drops the removed files'. It writes NOTHING when the
+  previous entry is missing, or names a snapshot file other than the one it restored;
+  the next full run starts a fresh chain. When the path set moved it discards the
+  previous entry after writing its own.
+- **Not written** for an editor buffer, a pool run, a project with effect collection
+  on, a run with an opaque plugin, a project whose plugins claim template globs, or a
+  run in which a boundary row changed during the per-file loop without being credited
+  to a file. **Not served** under `--no-cache`, `--verify-incremental`, `--explain`,
+  a worker pool, `--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or effect
+  collection.
+
+A hit reads and writes nothing of the snapshot, as a null recheck already writes
+nothing (ADR-87 WD3).
+
 ## Bundled RBS producer contract
 
 Every bundled RBS-derived producer documented below (`RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`) satisfies one shape — a class object responding to `fetch(loader:, store:)` and returning the cached or freshly computed value. This is codified as the structural interface `_CacheProducer` in [`sig/rigor/cache.rbs`](../../sig/rigor/cache.rbs): a structural interface (the RBS/Go sense), not an ADR-28 protocol contract, and distinct from the plugin-side producer surface in [`plugin-cache-producers.md`](plugin-cache-producers.md).
@@ -1549,6 +1609,11 @@ The ADR-87 boot-slim probe loads no plugin and therefore reconstructs no
 `template-units` slot: on a project whose plugins claim any glob the probe
 simply misses and the full path takes over, the same forgone-fast-lane trade
 `rbs.virtual_rbs` already makes, and never a wrong hit.
+
+The `--incremental` slot records the same rows, with the analysed files'
+digests taken from the session rather than re-read, an existence row per
+analysis root, `pre_eval:` entry and signature root, and the plugin reads kept
+per analysed file; see § "The run-result slot (ADR-45 WD2)".
 
 Non-file inputs (the engine source, the lockfiles, the resolved
 configuration, the RBS library list) belong to the cache KEY

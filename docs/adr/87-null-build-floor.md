@@ -145,6 +145,12 @@ prepass): gitlab null 1.68s → **0.34s** on the measurement host.
   DOES load them. A project whose plugins synthesise virtual RBS produces a probe
   key that omits the `rbs.virtual_rbs` slot, so it simply misses and the full
   path takes over — never a wrong hit.
+
+  > `--incremental` still declines this probe, and has a twin of its own since
+  > [ADR-45](45-unchanged-project-fast-path.md) WD2 (#1507): the incremental
+  > session writes a run-result slot under a separate producer id, keyed as this
+  > probe keys, and `rigor check --incremental` serves a null run from it the same
+  > engine-free way.
 - **WD5 — staleness spec battery (the WD1/WD2 gate).** Manufactured cases, each
   asserting the diagnostic outcome: touch-only (stat moved, digest same → FRESH,
   no false invalidation); ordinary edit (stale); same-size edit (stale via
@@ -211,7 +217,8 @@ RIGOR_DISABLE_YJIT=1; digest census = SHA-256 over file CONTENT):
 
 [ADR-45](45-unchanged-project-fast-path.md) owns record-and-validate — its
 digest authority is preserved, its validation cost is what WD1 removes and its
-hit verdict is what WD4 serves engine-free;
+hit verdict is what WD4 serves engine-free, and its WD2 gives `--incremental` the
+same engine-free null run from a slot the incremental session writes;
 [ADR-54](54-cache-slimming.md)'s rejection row is superseded (its premise is
 re-measured and the design keeps digest authority); [ADR-60](60-pre-freeze-plugin-contract-consolidation.md)'s
 `watch:` machinery hosts WD2; [ADR-46](46-incremental-dependency-graph.md)/[ADR-85](85-seed-bundles-and-lazy-def-node-handles.md)

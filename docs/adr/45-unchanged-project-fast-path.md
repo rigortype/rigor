@@ -223,6 +223,137 @@ each driven cold → add → warm through the real Runner against a real
 on-disk Store, plus the nothing-changed control and the remove-after-hit
 inverse.
 
+### WD2 (landed, #1507) — a second writer: the `--incremental` session
+
+The slot above is written by a run that analysed every file. A warm
+`rigor check --incremental` never is one, so [ADR-87](87-null-build-floor.md)
+WD4's engine-free probe declined it, and an unchanged project paid the
+incremental path's whole fixed cost to learn that nothing changed: on CI
+against Mastodon (~1,400 files), 1.43 s for an `--incremental` null run
+against 0.29 s for a default one — 343 ms loading the engine, 273 ms
+reading the snapshot, 123 ms rebuilding its dependents indexes, 160 ms
+building an environment for an empty closure, ~190 ms of discovery and
+digests.
+
+WD2 makes the incremental session a second writer. After every run whose
+snapshot it persists, `IncrementalSession#run_incremental` records the
+run's diagnostics — the list the CLI prints before its baseline filter,
+which #1524 made a full run's list in a full run's order — in a
+record-and-validate slot of its own, and `rigor check --incremental`
+serves a null run from it before loading the engine
+(`Analysis::IncrementalRunSlot`), with the `--incremental warm` banner the
+full path prints for the same run.
+
+**Key.** The one WD4 reconstructs from configuration alone (`RunCacheKey`:
+the library list without `rbs.virtual_rbs`, no `template-units` slot,
+`--explain` false), under its own producer id,
+`analysis.incremental-run-diagnostics`. The two slots' keys coincide for a
+project with no synthesised RBS and no template units, so the producer id
+is what keeps them apart: neither probe can read the other's entry, and an
+incremental defect cannot reach a default run. A synthesised RBS buffer is
+a function of an analysed file's bytes (a validated row) and of the
+synthesising plugin's identity and configuration (the key's
+`configuration`, lockfile and engine slots), so the key needs no
+`rbs.virtual_rbs` slot. A project whose plugins claim template globs gets
+no slot, as it gets no WD4 hit.
+
+**Descriptor.** A narrowed recheck read only its closure; the rest of its
+answer was computed by earlier runs. Every row carries the value the
+answer was computed from, from three sources:
+
+1. One `:stat` row per analysed file, packed from the digest the session
+   holds for it — for a file served from cache, the bytes its cached rows
+   were computed from. A re-digest after the run would vouch for bytes
+   that changed while the run was reading them.
+2. What the run read itself (`Runner#incremental_slot_rows`): every plugin
+   `IoBoundary` row, the producer `watch:` globs, the discovered files
+   (#684), the `pre_eval:` and template files and their globs, and an
+   existence row per analysis root, per `pre_eval:` entry and per
+   signature root (the configured `signature_paths:`, or the auto-detected
+   `sig`). The plain slot records no existence rows, but the incremental
+   path regenerates every path-error row on every run, so a slot that
+   served one past the edit that retracts it would print what no run of
+   the tree prints. They carry WD1b's bound.
+3. The **chain** the slot's value carries forward: the signature-tree rows
+   (`RbsDescriptor.file_entries` / `.glob_entries`) the last full run
+   recorded, and the plugin reads each file's analysis made, kept per file.
+   `Runner#analyze_file` wraps each file's analysis in
+   `Plugin::IoBoundary.attributing` when it records dependencies. A full
+   run starts a chain; a recheck takes the previous slot's, replaces the
+   reads of every file it re-analysed with this run's, and drops the
+   removed files'.
+
+Reads are kept per file, not per path, so a file served from cache keeps
+validating what its own analysis read, even after another file's
+re-analysis read the same path at a newer value. That is the case the
+design review marked most likely to be missed: the Pundit shape above,
+with the reading file served from cache by the last recheck.
+
+**Why the chain is sound.** By induction from the full run that started
+it. That run's descriptor is the plain slot's and its answer a full run's.
+A recheck's answer merges this run's re-analysed files with the served
+files' cached rows, and its descriptor carries this run's reads for the
+first and the previous slot's for the second — by induction, the reads
+those rows were computed from. That holds only if the previous slot
+describes the snapshot the recheck restored. It does not when the slot is
+missing (evicted, deleted, never written), or when another run rewrote the
+snapshot without writing a slot: a pool run, whose workers' reads never
+reach the process that would record them; `--incremental --no-cache`,
+which has no store; a slot write that failed. So the slot records the
+identity of the snapshot file its run left behind — `(size, mtime_ns,
+ctime_ns, inode)`; a rewrite renames a new file into place — and a recheck
+carries the chain only from a previous slot that exists and names the
+snapshot file it restored. Otherwise it writes nothing, and the next full
+run starts a fresh chain; declining costs the fast path until then and
+nothing else. `Runner#incremental_slot_rows` also declines when a boundary
+row changed during the per-file loop without being credited to a file (a
+read from a thread the plugin started), since the next narrowed run would
+drop that row.
+
+**What is neither written nor served.** No slot is written for an editor
+buffer (never persisted), a pool run, effect collection (its `effects:`
+block is outside the key, and its envelope rows are #428's decline), or an
+opaque plugin, whose next full-path run is cold rather than the warm run
+the probe stands in for. The CLI asks the probe only for a plain
+`--incremental`: not `--no-cache`, `--verify-incremental`, a worker pool,
+`--coverage`, `--cache-stats`, a `RIGOR_*_TRACE` probe, or `--explain`,
+which the session does not honour yet (#1533) and so writes no slot keyed
+by. A hit prints the incremental tail
+(`CheckCommand#write_incremental_result`), not the ordinary check's.
+
+`Runner#run_result_cacheable?` still excludes recording and subset runs,
+for reasons that do not reach this slot: a recording run must analyse to
+record the graph, and a subset run's partial answer would share the full
+run's key. The session writes after recording, the merged and complete
+answer, under its own producer id. A hit neither reads nor writes the
+snapshot: it stands in for a null recheck, which already leaves the
+snapshot as it was (ADR-87 WD3), so the next edit run restores what it
+would have restored.
+
+**Bounds.** A hit answers what the full incremental path answered for a
+tree identical in every recorded input, so where that path is stale a hit
+is too, never more. Two such gaps sit outside this WD. The session does
+not re-analyse a served file whose analysis read a file a plugin read: the
+chain's rows make the probe decline, and the full path then serves the
+stale rows. And the snapshot fingerprint digests a configured
+`signature_paths:` only, so an edit under an auto-detected `sig/` is
+rechecked rather than rebuilt. #1541's pool-mode row loss is unreachable
+here, since a pool run neither writes nor serves the slot.
+
+Measured locally on Mastodon (1,404 files, macOS, engines laid out as
+installed gems by `tool/engine_warm_ab.rb`): an `--incremental` null run
+0.94 s → 0.18 s, level with the default null run's 0.17 s for the same
+engine; writing the slot costs about 10 ms per run, cold or edit. CI
+numbers are for the `engine-warm.yml` dispatch to confirm.
+
+Gate: `spec/rigor/analysis/incremental_run_slot_spec.rb` (each input class,
+the carried row, the chain breaks, the separation of the two slots), the
+subprocess examples in `spec/rigor/cli/run_cache_probe_spec.rb` (no
+`rigor/inference` on a hit), `spec/rigor/cli/check_command_spec.rb` (the
+same output per format, baseline and `--fail-on`), and
+`tool/engine_warm_ab.rb`, which counts `--incremental` null probe hits and
+fails an edit run that did not load the engine.
+
 ## Consequences
 
 - **Soundness is the whole game.** The naive design under-invalidates on

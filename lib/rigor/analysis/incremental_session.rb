@@ -2,6 +2,7 @@
 
 require "digest"
 require_relative "incremental"
+require_relative "incremental_run_slot"
 require_relative "plugin_fact_fingerprint"
 require_relative "source_rbs_gate"
 require_relative "../cache/file_digest"
@@ -161,6 +162,7 @@ module Rigor
       # Full baseline analysis with recording. Returns the run's diagnostics; populates the in-process cache
       # + dependency state.
       def baseline
+        @slot_carried_from = nil # ADR-45 WD2 — see {#load_snapshot}
         runner = build_runner(record_dependencies: true)
         diagnostics = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
@@ -483,7 +485,7 @@ module Rigor
         # shares one digest memo across change detection and the baseline/absorb re-pack. The inner
         # `Runner#run` nests its own `with_run` for the analysis descriptors; nesting is safe (each restores).
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+          restored = load_snapshot(snapshot, fingerprint)
           # ADR-88 WD1 — the plugin fact-surface fingerprint gates snapshot reuse the same way the global
           # fingerprint gates the load: a plugin sig/catalog edit outside `signature_paths:` (a Sorbet `.rbi`)
           # changes the types unchanged call sites resolve, without moving any analyzed file, so the global
@@ -529,7 +531,7 @@ module Rigor
             warm = false
             skip_save = false
           end
-          snapshot.save(fingerprint: fingerprint, payload: to_payload) if persist && fingerprint && !skip_save
+          persist_run(snapshot, fingerprint, diagnostics, skip_save: skip_save) if persist && fingerprint
           [diagnostics, warm]
         end
       end
@@ -610,6 +612,128 @@ module Rigor
         PluginFactFingerprint.prepared_registry(
           configuration: @configuration, cache_store: @cache_store, plugin_requirer: @plugin_requirer
         )
+      end
+
+      # Loads the snapshot, noting (ADR-45 WD2) which write of the file it read: the identity is kept only when
+      # the file was the same before and after the read, since a rewrite in between leaves no telling which one
+      # the payload came from.
+      def load_snapshot(snapshot, fingerprint)
+        before = snapshot_identity(snapshot)
+        restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+        @restored_snapshot_identity = restored && before == snapshot_identity(snapshot) ? before : nil
+        # The path set the previous run-result slot is keyed by, for a recheck to carry its chain from; a
+        # {#baseline} clears it, since a full run starts a chain of its own.
+        @slot_carried_from = restored&.analyzed
+        restored
+      end
+
+      # ADR-87 WD3 — a warm recheck that changed nothing skips the snapshot rewrite: the file it restored is still
+      # the one on disk, which is what the run-result slot records as its snapshot.
+      def persist_run(snapshot, fingerprint, diagnostics, skip_save:)
+        written = if skip_save
+                    @restored_snapshot_identity
+                  elsif snapshot.save(fingerprint: fingerprint, payload: to_payload)
+                    snapshot_identity(snapshot)
+                  end
+        write_run_slot(diagnostics, written_identity: written)
+      end
+
+      # ADR-45 WD2 (#1507) — records this run's answer as the run-result slot a later `rigor check --incremental`
+      # serves without loading the engine ({IncrementalRunSlot}). The slot's dependency descriptor must validate
+      # everything the answer was computed from, and after a narrowed recheck most of the answer was computed by
+      # earlier runs, so it is assembled from three sources:
+      #
+      # - the analysed files, at the digest this session holds for each: the bytes its cached or fresh rows were
+      #   computed from, never a re-digest taken after the fact;
+      # - what this run read itself ({Runner#incremental_slot_rows}' `run` rows);
+      # - the CHAIN: the signature-tree rows the last full run recorded, and the plugin reads each file's
+      #   analysis made, kept per file. A full run starts a chain; a recheck takes the previous slot's chain,
+      #   replaces the reads of every file it re-analysed with this run's, and drops the removed files'.
+      #
+      # A recheck writes only when the previous slot exists and was written against the very snapshot file it
+      # restored: otherwise some run in between — a pool run, `--no-cache`, a write that failed — analysed files
+      # without recording their reads, and the chain cannot vouch for them. It then writes nothing, and the next
+      # full run starts a fresh chain. Declining to write is always safe; it only leaves the next null run on the
+      # full path.
+      #
+      # @param written_identity — the snapshot file as this run leaves it, recorded for the next writer's check.
+      def write_run_slot(diagnostics, written_identity:)
+        return unless run_slot_writable?
+
+        carried_from = @slot_carried_from
+        rows = @last_runner.incremental_slot_rows(files: @analyzed, roots: @paths || @configuration.paths)
+        chain = rows && (carried_from ? carry_chain(rows, carried_from) : start_chain(rows))
+        analysed = chain && analysed_file_rows
+        return if analysed.nil?
+
+        signature, reads = chain
+        wrote = IncrementalRunSlot.write(
+          store: @cache_store, configuration: @configuration, files: @analyzed, diagnostics: diagnostics,
+          dependencies: run_slot_dependencies(analysed, rows.run, signature, reads.values),
+          signature: signature, reads: reads, snapshot: written_identity
+        )
+        # The previous slot is keyed by the previous path set; once this one stands, nothing asks for it again.
+        return unless wrote && carried_from && carried_from.sort != @analyzed.sort
+
+        IncrementalRunSlot.discard(store: @cache_store, configuration: @configuration, files: carried_from)
+      rescue StandardError
+        nil
+      end
+
+      # The runs whose answer the slot may hold: a writable store, no editor buffer (whose bytes exist only in
+      # the editor), a sequential run (a pool worker's plugin reads never reach this process), effect collection
+      # off ({IncrementalRunSlot.serve} declines it), and no opaque plugin — the next full-path run would then be
+      # cold, not the warm run the probe stands in for.
+      def run_slot_writable?
+        !@cache_store.nil? && !@cache_store.read_only? && @buffer.nil? && @workers.zero? &&
+          !@configuration.effects_enabled? && @opaque_plugin_ids.empty? && !@last_runner.nil?
+      end
+
+      def start_chain(rows)
+        signature = @last_runner.signature_dependency_rows
+        signature && [signature, rows.by_file.slice(*@analyzed)]
+      end
+
+      def carry_chain(rows, carried_from)
+        return nil if @restored_snapshot_identity.nil?
+
+        previous = IncrementalRunSlot.previous_entry(
+          store: @cache_store, configuration: @configuration, files: carried_from
+        )
+        return nil if previous.nil? || previous.snapshot != @restored_snapshot_identity
+
+        served = previous.reads.except(*@last_runner.analyzed_files)
+        [previous.signature, served.merge(rows.by_file).slice(*@analyzed)]
+      end
+
+      # One `:stat` row per analysed file, packed as this session recorded it (`#pack_digest`). nil when any
+      # file has no usable entry (it could not be read): no row could say what its answer was computed from.
+      def analysed_file_rows
+        @analyzed.map do |path|
+          packed = @digests[path]
+          return nil if Cache::FileDigest.content_digest(packed).nil?
+
+          Cache::Descriptor::FileEntry.new(path: path, comparator: :stat, value: packed)
+        end
+      end
+
+      def run_slot_dependencies(analysed, run, signature, reads)
+        Cache::Descriptor.new(
+          files: analysed + run.files + signature.files + reads.flat_map(&:files),
+          globs: (run.globs + signature.globs + reads.flat_map(&:globs)).uniq
+        )
+      end
+
+      # The snapshot file's `(size, mtime_ns, ctime_ns, inode)`: which write of it a run restored, or left behind.
+      # A rewrite renames a new file into place, so any write moves it. nil when there is no file to stat.
+      def snapshot_identity(snapshot)
+        path = snapshot.respond_to?(:path) ? snapshot.path : nil
+        return nil if path.nil?
+
+        stat = File.stat(path)
+        [stat.size, Cache::FileDigest.ns_of(stat.mtime), Cache::FileDigest.ns_of(stat.ctime), stat.ino]
+      rescue SystemCallError
+        nil
       end
 
       # Adopt a persisted snapshot's per-file state as this session's baseline (the warm-start path).

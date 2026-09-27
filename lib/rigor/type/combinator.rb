@@ -991,13 +991,34 @@ module Rigor
           end
         end
 
+        # The order a new union or intersection keeps: by each member's `describe(:short)`, which is
+        # observable in messages and in cache fingerprints, so it must not move. Two members, the common
+        # case, compare directly instead of paying `sort_by`'s work arrays; `sort_by` keeps an equal pair in
+        # place as well ([#1505](https://github.com/rigortype/rigor/issues/1505)).
         def sort_members(members)
-          members.sort_by { |m| m.describe(:short) }
+          if members.size == 2
+            first, second = members
+            return sort_key(second) < sort_key(first) ? [second, first] : members
+          end
+
+          members.sort_by { |member| sort_key(member) }
+        end
+
+        # A member's `describe(:short)`, rendered once per type instance. Every type is frozen once built, so
+        # an instance's rendering cannot change under the memo. The memo is identity-keyed and weak, so it
+        # keeps neither the type nor the string alive. A non-main Ractor may not read the module's ivar, so a
+        # pool worker renders the key every time, as every run did before.
+        def sort_key(member)
+          return member.describe(:short) unless Ractor.main?
+
+          @sort_keys[member] ||= member.describe(:short).freeze
         end
       end
 
       # Eager-allocated at load time; see `untyped` method comment above.
       @untyped = Dynamic.new(Top.instance)
+      # The main Ractor's {sort_key} memo, allocated here for the same reason.
+      @sort_keys = ObjectSpace::WeakMap.new
 
       NIL_CONSTANT = Constant.new(nil)
       TRUE_CONSTANT = Constant.new(true)

@@ -99,6 +99,14 @@ RSpec.describe Rigor::Inference::CapturedLocals do
       expect(site_classes(source, :h)).to eq(h: [Prism::IndexTargetNode])
     end
 
+    # `mutated_receiver` spells the index-store classes out instead of splatting the list (#1502), so a class
+    # added to `IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES` must be added to its arm too.
+    it "collects every index-store node class the write-back list names" do
+      source = "h = {}\n[1].each { |k| h[k] ||= 1; h[k] &&= 2; h[k] += 3; h[k], x = 4, 5 }\n"
+      expect(site_classes(source, :h).fetch(:h))
+        .to match_array(Rigor::Inference::IndexWriteWidening::CONTENT_WRITE_NODE_CLASSES)
+    end
+
     it "excludes a name a block parameter shadows" do
       source = "h = {}\n[{}].each { |h| h[:a] = 1 }\n"
       expect(site_classes(source, :h)).to be_empty

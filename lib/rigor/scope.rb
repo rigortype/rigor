@@ -85,9 +85,12 @@ module Rigor
     # Issue #1290 — the census names sharing `name`'s last segment that some write other than a memo `||=`
     # assigns: the ones that shadow an outer constant of the name, so the lexical ladder stops at them
     # (`Reflection.resolve_constant_type`). That asks once per constant reference, so a bare name is looked up
-    # as it stands rather than split.
+    # as it stands rather than split, and a qualified one is sliced after its last `::` rather than split into
+    # an Array of every segment ([#1502](https://github.com/rigortype/rigor/issues/1502)). The two agree on any
+    # name a constant path spells, whose segments are never empty.
     def shadowing_constant_names(name)
-      segment = name.include?("::") ? name.split("::").last : name
+      separator = name.rindex("::")
+      segment = separator ? name[(separator + 2)..] : name
       @discovery.constant_shadowers[segment] || EMPTY_BOUND_CONSTANT_NAMES
     end
 

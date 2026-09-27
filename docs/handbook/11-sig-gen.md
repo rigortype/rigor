@@ -128,9 +128,9 @@ states:
 | --- | --- |
 | `new-file` | No RBS file declares the receiver class at all. |
 | `new-method` | RBS file declares the class but not this method. |
-| `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. |
+| `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. The proposal is the declared line with only its return replaced; see [Tighter returns keep the declared parameters](#tighter-returns-keep-the-declared-parameters). |
 | `inline-overwrite` | Only under `--overwrite`: a method declared inline with `# @rbs` / `#:` whose `sig/` declaration disagrees with it; the whole `sig/` member is replaced by the inline one. See [Methods declared inline](#methods-declared-inline). |
-| `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void`). Silently skipped. |
+| `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void` or an overloaded declaration), or the method is an `initialize` the class already declares. Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
 The `sig.skipped.*` reasons are:
@@ -169,6 +169,45 @@ The `sig.skipped.*` reasons are:
   down with it. The rest of the signatures are unaffected;
   the skipped method is reported on stderr, and it is worth
   reporting to us.
+
+### Tighter returns keep the declared parameters
+
+A `tighter-return` changes the return and nothing else. The
+parameter list, the block and any method type parameters are
+copied from the declaration as written, so applying the
+proposal never changes which calls the signature accepts:
+
+```
+$ rigor sig-gen --diff lib/c.rb
+--- lib/c.rb: C#m
+- def m: (Integer x) -> untyped
++ def m: (Integer x) -> nil
+
+--- lib/c.rb: C#n
+- def n: (?) -> untyped
++ def n: (?) -> nil
+```
+
+The `-` line is the declaration the proposal replaces. A method
+declared only on an ancestor is proposed as an override on its
+own class, with the ancestor's parameters spelled with fully
+qualified names (`::NS::Foo`), which mean the same thing in
+either class.
+
+A declaration with more than one overload
+(`def m: (Integer) -> untyped | (String) -> untyped`) gets no
+proposal. The body is typed once for all of its overloads, so
+the inferred return does not say which overload returns what.
+Merging the overloads into one line would drop them, and giving
+every overload the same return would widen the ones you wrote
+narrower.
+
+An `initialize` your `sig/` already declares is `equivalent`
+too. sig-gen writes a constructor stub only for a class that
+does not declare one. The exception is `--params=observed`:
+when the observed argument types would replace an `untyped` the
+declaration still has, the stub is proposed so that
+`--overwrite` can apply it.
 
 ## Methods declared inline
 
@@ -695,9 +734,10 @@ by side without coordination.
   tree.
 - **Will not** replace an existing method declaration
   unless `--overwrite` is set AND the candidate is a
-  `tighter-return`. Without `--overwrite`, existing
-  declarations are user-authored and the new method is
-  silently skipped.
+  `tighter-return`, and then only its return changes: the
+  declared parameters are kept. Without `--overwrite`,
+  existing declarations are user-authored and the new method
+  is silently skipped.
 - **Will not** change an existing method declaration that
   disagrees with the method's inline declaration unless
   `--overwrite` is set; it reports the method as `REFUSED`

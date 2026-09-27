@@ -23,6 +23,7 @@ require_relative "declaration_equivalence"
 require_relative "inline_declarations"
 require_relative "layout_index"
 require_relative "method_candidate"
+require_relative "writer"
 
 module Rigor
   module SigGen
@@ -56,6 +57,10 @@ module Rigor
     #   word about it — the opposite of `void`. It is treated like no declaration at all: the inferred return
     #   is proposed as `tighter-return`, carrying `untyped` as the declared spelling so `--diff` still shows a
     #   declaration existed (#995; see {#declared_untyped?}).
+    # - A `tighter-return` proposal replaces the return and nothing else: the parameter list is the
+    #   declaration's, spelled as written, so `--overwrite` never changes which calls the signature accepts. A
+    #   declaration with more than one overload is left alone, since one inferred return says nothing about
+    #   which overload produced it (#1436; see {#tighter_return_line}).
     # - A proposal that erases to an RBS literal never tightens an existing declaration: the declared type is
     #   the author's abstraction over the body and the literal is what it hides (#837; see
     #   {#pins_literal_over_declaration?}). A method with no declaration is unaffected — clause 1 still emits
@@ -784,10 +789,22 @@ module Rigor
       # `ObservationCollector`'s `.new` → `:initialize` routing), positional and keyword arg types come from the
       # per-position / per-keyword union of observed types; otherwise every position keeps `untyped` per ADR-5
       # clause 2.
-      def initialize_stub_candidate(path, def_node, class_name)
+      #
+      # Issue #1436 — a constructor the class's own `sig/` already declares is `equivalent`, like any other
+      # declared member, unless the stub clears an `untyped` the declaration still carries: that is the
+      # `--params=observed` upgrade `--overwrite` applies ({Writer.fewer_untyped?}, the writer's own test).
+      # Without observations the stub is all `untyped` and never qualifies, so it is never listed as new.
+      def initialize_stub_candidate(path, def_node, class_name, scope)
         params = def_node.parameters
         rbs = "def initialize: (#{render_param_list(params, class_name, :initialize)})" \
               "#{block_signature_suffix(params)} -> void"
+        method_def = lookup_existing_method(class_name, :initialize, :instance, scope&.environment, scope)
+        member = signature_member(method_def, class_name)
+        if member && !Writer.fewer_untyped?(rbs, member.location&.source.to_s)
+          declared = declares_void?(method_def) ? VOID_RETURN_RBS : build_declared_return(method_def)&.erase_to_rbs
+          return equivalent(path, def_node, class_name, :instance, Type::Combinator.untyped, declared)
+        end
+
         build_candidate(
           path: path, class_name: class_name, method_name: :initialize,
           kind: :instance, classification: Classification::NEW_METHOD,
@@ -901,7 +918,9 @@ module Rigor
           return skipped(path, def_node, class_name, kind, :inline_declared) if skip_inline_declared?
           return inline_def_candidate(path, def_node, class_name, kind, scope_index, inline) if inline.declared?
         end
-        return initialize_stub_candidate(path, def_node, class_name) if non_trivial_initialize?(def_node, kind)
+        if non_trivial_initialize?(def_node, kind)
+          return initialize_stub_candidate(path, def_node, class_name, scope_index[def_node])
+        end
 
         inferred = infer_return_type(def_node, scope_index)
         return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil? || dynamic_top?(inferred)
@@ -1018,13 +1037,15 @@ module Rigor
       # Each overload whose return rbs-inline defaulted to `untyped` takes `returned` (already spelled for a
       # return position); the rest stay as written.
       def with_defaulted_return(method_types, returned)
-        placeholder = ::RBS::Parser.parse_type(INFERRED_RETURN_PLACEHOLDER)
         method_types.map do |method_type|
-          next method_type.to_s unless defaulted_return?(method_type)
-
-          with_return_type(method_type, placeholder).to_s
-                                                    .sub(/-> #{INFERRED_RETURN_PLACEHOLDER}\z/o, "-> #{returned}")
+          defaulted_return?(method_type) ? spell_with_return(method_type, returned) : method_type.to_s
         end
+      end
+
+      # One overload spelled with `returned` (already spelled for a return position) as its return.
+      def spell_with_return(method_type, returned)
+        placeholder = ::RBS::Parser.parse_type(INFERRED_RETURN_PLACEHOLDER)
+        with_return_type(method_type, placeholder).to_s.sub(/-> #{INFERRED_RETURN_PLACEHOLDER}\z/o, "-> #{returned}")
       end
 
       # Classifies an inline-declared member's `rbs` line against what `sig/` already says for it (ADR-112 WD4, as
@@ -1207,7 +1228,7 @@ module Rigor
 
         declared = build_declared_return(method_def)
         if declared_untyped?(declared)
-          return declared_untyped_candidate(path, def_node, class_name, kind, inferred, rendered: rendered)
+          return declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: rendered)
         end
 
         declared_rbs = declared&.erase_to_rbs
@@ -1221,6 +1242,17 @@ module Rigor
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
+        tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, declared_rbs, rendered)
+      end
+
+      # Both tightening branches end here. The proposal is the declaration with its return replaced
+      # ({#tighter_return_line}); when there is no single declared overload to replace it in, the method is
+      # `equivalent` — the declaration stands, as it does for any narrowing the generator declines. `declared_rbs`
+      # carries the declaration's own line so `--diff` and `--check` show what the proposal replaces.
+      def tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, declared_return, rendered) # rubocop:disable Metrics/ParameterLists
+        line = rendered || tighter_return_line(method_def, class_name, def_node.name, kind, inferred)
+        return equivalent(path, def_node, class_name, kind, inferred, declared_return) if line.nil?
+
         build_candidate(
           path: path,
           class_name: class_name,
@@ -1228,9 +1260,49 @@ module Rigor
           kind: kind,
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
-          declared_return_rbs: declared_rbs,
-          rbs: rendered || render_rbs_line(def_node, inferred, class_name, kind)
+          declared_return_rbs: declared_return,
+          declared_rbs: declared_line(method_def, class_name, def_node.name, kind),
+          rbs: line
         )
+      end
+
+      # Issue #1436 — a `tighter-return` changes the return and only the return. It used to be rendered like a
+      # new method, from the `def`'s runtime shape: every parameter `untyped`, `(?)` spelled out as
+      # `(*untyped)`, names and block types dropped. Under `--overwrite` that replaced a declared `(Integer x)`
+      # with `(untyped)` — a change to which calls the signature accepts, made by a proposal that claims to be
+      # about the return. The parameters, type parameters and block stay as the declaration writes them.
+      #
+      # A declaration with several overloads is declined (`nil`). The body is typed once, so the inferred
+      # return covers every overload together and says nothing about which overload returns what: collapsing
+      # them into one line would drop the overloads, and giving each the joint return would widen the overloads
+      # the author wrote narrower.
+      def tighter_return_line(method_def, class_name, method_name, kind, inferred)
+        overload = sole_declared_overload(method_def, class_name, method_name)
+        return nil if overload.nil?
+
+        returned = paren_wrap_union(elaborated_rbs(inferred, owner: class_name))
+        "#{method_def_prefix(class_name, method_name, kind)}#{method_name}: #{spell_with_return(overload, returned)}"
+      end
+
+      # The one overload declared for the method, parsed from the class's own `sig/` member so it keeps the
+      # spelling the author wrote (`Integer`, not the resolved `::Integer`). A declaration only an ancestor
+      # carries — the proposal then overrides it on this class — is read from the definition, whose resolved
+      # names mean the same thing wherever the line lands.
+      def sole_declared_overload(method_def, class_name, method_name)
+        return nil unless method_def.method_types.size == 1
+
+        member = signature_member(method_def, class_name)
+        written = member && existing_types(member, method_name)
+        written&.size == 1 ? written.first : method_def.method_types.first
+      end
+
+      # The declaration a proposal replaces, as `--diff` shows it: the class's own member, or, for one only an
+      # ancestor declares, the definition's overloads.
+      def declared_line(method_def, class_name, method_name, kind)
+        member = signature_member(method_def, class_name)
+        return squish(member.location.source) if member&.location
+
+        "#{method_def_prefix(class_name, method_name, kind)}#{method_name}: #{method_def.method_types.join(' | ')}"
       end
 
       # Issue #836 — a declared `void` is return INTENT, never a wide value type waiting to be narrowed, so it
@@ -1268,21 +1340,12 @@ module Rigor
         declared.is_a?(Type::Dynamic)
       end
 
-      # Built like {#new_method_candidate}, not {#compare_against_declared}'s tightening branch: a declared
-      # `untyped` return carries no information to weigh {#tighter?} or {#literal_decline?} against, the same
-      # position a method with no declaration at all is in. `declared_return_rbs` still carries `"untyped"` so
-      # `--diff` and the `[tighter, was: untyped]` print tag tell the reader a declaration existed.
-      def declared_untyped_candidate(path, def_node, class_name, kind, inferred, rendered: nil)
-        build_candidate(
-          path: path,
-          class_name: class_name,
-          method_name: def_node.name,
-          kind: kind,
-          classification: Classification::TIGHTER_RETURN,
-          inferred_return: inferred,
-          declared_return_rbs: "untyped",
-          rbs: rendered || render_rbs_line(def_node, inferred, class_name, kind)
-        )
+      # Proposed without {#compare_against_declared}'s tightening guards: a declared `untyped` return carries no
+      # information to weigh {#tighter?} or {#literal_decline?} against, the same position a method with no
+      # declaration at all is in. The line is still the declaration's with its return replaced (#1436), and
+      # `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag says one existed.
+      def declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: nil)
+        tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, "untyped", rendered)
       end
 
       def build_declared_return(method_def)

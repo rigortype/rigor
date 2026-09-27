@@ -78,6 +78,14 @@ module Rigor
         write_target(target, emittable, source_path: source_path)
       end
 
+      # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing` — i.e. at least one `untyped`
+      # slot becomes a concrete type AND no concrete slot becomes `untyped`. Word-boundary matching ensures we
+      # count `untyped` only as a type token, not as a substring inside identifiers. Public because the generator
+      # asks the same question before it lists a declared `initialize` at all (#1436).
+      def self.fewer_untyped?(proposed, existing)
+        proposed.scan(/\buntyped\b/).size < existing.scan(/\buntyped\b/).size
+      end
+
       private
 
       # Shared per-target write path used by both `#write` and `#write_all`. Picks a representative
@@ -710,20 +718,13 @@ module Rigor
         declared_void && !candidate.rbs.to_s.end_with?(" -> void")
       end
 
-      # Compares the existing member's source-side RBS text against the candidate's proposed RBS text. Returns
-      # true when the new spelling has STRICTLY FEWER bare `untyped` tokens than the existing one — i.e. at
-      # least one `untyped` slot becomes a concrete type AND no concrete slot becomes `untyped`. Word-boundary
-      # matching ensures we count `untyped` only as a type token, not as a substring inside identifiers.
+      # Compares the existing member's source-side RBS text against the candidate's proposed RBS text
+      # ({.fewer_untyped?}).
       def tightens_untyped?(candidate, decl, source)
         member = find_method_member(decl, candidate.method_name, candidate.kind)
         return false if member.nil?
 
-        existing_rbs = source[member.location.start_pos...member.location.end_pos]
-        count_untyped(candidate.rbs) < count_untyped(existing_rbs)
-      end
-
-      def count_untyped(rbs)
-        rbs.scan(/\buntyped\b/).size
+        self.class.fewer_untyped?(candidate.rbs, source[member.location.start_pos...member.location.end_pos])
       end
 
       def member_position(decl, candidate)

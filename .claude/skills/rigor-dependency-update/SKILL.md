@@ -131,6 +131,19 @@ the **new** toolchain and **freshly-compiled** gems — it is the proof both
 layers are healthy together. Only `Gemfile.lock` and `flake.lock` should be
 in `git status` (`vendor/bundle` stays untracked).
 
+## Record the perf-gate shift
+
+A `Gemfile.lock` bump can move the release gate's allocation number with no
+engine change: the `rbs` gem supplies the core RBS the engine loads, and the
+per-PR "Engine allocations" job cannot see it, because both of its arms run on
+one bundle. Measure before and after the update, on the base commit and on the
+branch, with `nix develop --command make bench-perf` or by dispatching the
+release gate on each (`gh workflow run release-gate.yml --ref <branch>`). Put
+both allocation numbers and the delta in the PR body: a release cut attributes
+its rise from these records (`bench/README.md`, "Over a release cycle"). A
+Flake-only update moves the local Ruby but not CI's, so a local pair is enough
+for it.
+
 ## Push and open the PR
 
 ```sh
@@ -166,5 +179,6 @@ APPROVE cannot exist on a one-developer repository, so it is not the trigger).
   pins untouched.
 - `rm -rf vendor/bundle && bundle install` **after** the Flake update.
 - `make verify` green under the new toolchain; `git diff --check` clean.
+- Perf-gate allocations before and after the update are in the PR body.
 - Two commits: `Update bundled gems to their latest in-range versions` and
   `Update the Nix Flake dev environment to the latest nixpkgs`.

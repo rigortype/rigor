@@ -766,9 +766,8 @@ jobs:
   # The PR's engine and its merge base's engine each run `rigor check
   # --no-cache lib` over the MERGE BASE's tree, so corpus growth drops
   # out and the delta is the engine's own cost. The release gate's
-  # `make bench-perf` runs only at a cut, over a `lib` that grows with
-  # every PR, so it could not tell v0.4.0's +19.1% engine cost (#1469)
-  # from corpus growth; this job charges each step to its PR. It warns
+  # `make bench-perf` measures the same way over the previous release's
+  # tree, but only at a cut; this job charges each step to its PR. It warns
   # past `pr_allocations_pct` in bench/thresholds.yml and never fails a
   # PR for a regression, so it is deliberately NOT in the `required`
   # fan-in below. It measures only what `rigor check lib` executes: the

@@ -110,6 +110,10 @@ nix develop --command make verify
 
 `make verify` chains test + lint + the `rigor check lib` self-check. It must stay clean on the new Ruby. `bundle exec` reads the `Gemfile` `ruby` directive — because that directive is a range, the new patch satisfies it without a `Gemfile` edit.
 
+### Record the perf-gate shift
+
+A Ruby change can move the release gate's allocation number with no engine change, and the per-PR "Engine allocations" job cannot see it, because both of its arms run on one Ruby. The gate runs on CI's Ruby, the `ruby-version: "4.0"` series `ruby/setup-ruby` floats to the latest patch in `release-gate.yml` (the same series as `ci.yml`), so a patch bump here moves only the Flake's Ruby: run `nix develop --command make bench-perf` before and after it. A minor bump moves CI's series too: dispatch the release gate on the base and on the branch (`gh workflow run release-gate.yml --ref <branch>`). Put both allocation numbers and the delta in the PR body; a release cut attributes its rise from these records (`bench/README.md`, "Over a release cycle").
+
 ## Step 5 — Commit
 
 One commit covering every marker that moved. Subject (plain imperative, no prefix):
@@ -161,6 +165,7 @@ Bundler writes the `RUBY VERSION` block from the *running* Ruby whenever `bundle
 - `Gemfile`, `Gemfile.lock`, `rigortype.gemspec`, `ci.yml` — NOT modified.
 - `flake.lock` — NOT modified.
 - `make verify` clean on the new Ruby.
+- Perf-gate allocations before and after the bump are in the PR body.
 - Single commit, `Bump development Ruby to x.y.z`.
 
 ### Minor bump — additionally

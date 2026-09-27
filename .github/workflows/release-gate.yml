@@ -8,11 +8,17 @@ name: Release gate
 # addition away).
 #
 # ADR-50 WD6 hardening status:
-#   perf-bench   — HARD gate: bench/baseline.json is now calibrated
-#                  (Linux CI, run 27444722315). A regression past the
-#                  tolerance band in bench/thresholds.yml fails the job.
-#                  An uncalibrated baseline always passes (future resets /
-#                  first-time forks remain green without extra config).
+#   perf-bench   — HARD gate: bench/baseline.json is calibrated on Linux
+#                  CI. A regression past the tolerance band in
+#                  bench/thresholds.yml fails the job. It measures this
+#                  checkout's engine over the frozen corpus the baseline
+#                  names (the previous release's tag, #1507), not over
+#                  this checkout's growing `lib`. A red allocations band
+#                  clears one way only: attribute the rise, and on the
+#                  user's ruling recalibrate on the same corpus
+#                  (bench/README.md, "Over a release cycle").
+#                  An uncalibrated baseline passes, provided its corpus
+#                  tag is in the clone (a missing tag fails the job).
 #   gem-build    — advisory (continue-on-error); not yet required check.
 #   oss-sweep    — advisory; not yet required check.
 # Wire perf-bench into branch protection as a required check once the
@@ -40,10 +46,13 @@ jobs:
     name: Perf benchmark
     runs-on: ubuntu-latest
     steps:
+      # Full history, for its tags: tool/bench.rb `git archive`s the corpus
+      # revision bench/baseline.json names, and a shallow clone has none.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           submodules: false
+          fetch-depth: 0
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -52,8 +61,9 @@ jobs:
           bundler-cache: true
 
       # Hard gate when bench/baseline.json is calibrated (exits 1 on
-      # regression). An uncalibrated baseline always exits 0 and emits a
-      # suggestion — future resets or first-time forks stay green.
+      # regression). An uncalibrated baseline exits 0 and emits a
+      # suggestion; either way the corpus tag must resolve, or the step
+      # fails before measuring.
       #
       # One command, two reps per target since #987: `tool/bench.rb` spawns a
       # fresh process per rep itself and gates on the LOWER wall_s /

@@ -3,18 +3,38 @@
 
 # ADR-50 WD4 — perf-regression benchmark for `make bench-perf` / the release gate.
 #
-# Runs `rigor check` in-process over one or more targets, measures wall time, total allocated objects, and peak RSS
-# (Linux only), then gates against a committed baseline within a tunable tolerance band (bench/thresholds.yml).
+# Runs THIS checkout's `rigor check` in-process over one or more targets of a frozen corpus, measures wall time, total
+# allocated objects, and peak RSS (Linux only), then gates against a committed baseline within a tunable tolerance
+# band (bench/thresholds.yml).
 #
 # First run (baseline uncalibrated): writes a SUGGESTED baseline to a `.updated.json` sibling and passes — the same
 # calibrate-on-first-run pattern as tool/oss_sweep_compare.rb. The committed baseline is never overwritten implicitly;
 # commit a CI-measured baseline to activate the gate.
 #
+# ## Corpus: the previous release's tree (#1507)
+#
+# The analysed tree is not this checkout but the revision `bench/baseline.json` names as `corpus`, a release tag.
+# Rigor's own `lib` grows with every pull request (ADR-50 WD4 records by how much), so a band on this checkout's `lib`
+# mixes corpus growth with engine cost at any width. On a frozen tree the delta is the engine's alone, which is what
+# makes a tight band and a refresh after every improvement meaningful. At a cut the gate measures the release
+# candidate's engine over the previous release's tree; after tagging, the corpus advances to the new tag and the
+# baseline is recalibrated on it.
+#
+# The method is `tool/engine_alloc_ab.rb`'s, and so is the code that unpacks the tree: `git archive` the revision into
+# a scratch directory, start each child in the repository root so Bundler resolves this checkout's bundle, then
+# change into the corpus (config discovery is cwd-based) and run the engine there. The fidelity limits are in
+# `bench/README.md` ("The corpus"): no gem-shipped `sig/` loads, the core RBS comes from the running bundle and Ruby,
+# and a user-global `BUNDLE_PATH` can still reach the run. A revision this clone lacks, a target the corpus lacks, a
+# `rigor check` exit other than 0 or 1, unparseable output, and a Rigor file loaded from anywhere but this checkout's
+# `lib` all abort: a gate that measured a partial run, or the corpus's own old engine, would read as an improvement.
+#
 # ## Sampling: every rep is a FRESH PROCESS (#987)
 #
-# `make bench-perf` is still ONE command. This process spawns itself — `ruby tool/bench.rb --measure TARGET` — once
-# per rep, and each child does exactly what the whole script used to do: one in-process `Rigor::CLI` run over one
-# target, printing its metrics as a single JSON object on stdout. The parent reduces the reps and gates.
+# `make bench-perf` is still ONE command. This process spawns itself — `ruby tool/bench.rb --measure TARGET
+# --corpus-dir DIR` — once per rep, and each child does exactly what the whole script used to do: one in-process
+# `Rigor::CLI` run over one target, printing its metrics as a single JSON object on stdout. The parent unpacks the
+# corpus once, reduces the reps and gates. `--no-cache` writes nothing into the corpus, so every rep reads the same
+# tree.
 #
 # A rep cannot be a second loop inside one process, for two independent reasons:
 #
@@ -35,19 +55,26 @@
 # time and resident pages, so the minimum is the sample least contaminated by the runner — and #987 measured ±7%
 # spread on `peak_rss_kb` against a +10% band, i.e. noise nearly as wide as the gate itself.
 #
-# `allocations` and `diagnostics` stay SINGLE-SAMPLE (the first rep). Allocations are deterministic to ~±20
+# `allocations` and `diagnostics` stay SINGLE-SAMPLE (the first rep). Allocations are deterministic to a few hundred
 # objects and diagnostics are a count of a deterministic analysis; reducing them would buy nothing and would hide
 # a real nondeterminism behind a min().
 #
 # Usage:
 #   ruby tool/bench.rb [--target PATH ...] [--reps N] \
 #     [--baseline PATH] [--thresholds PATH] [--write-baseline PATH]
-#   ruby tool/bench.rb --measure PATH      # internal: one rep, JSON on stdout
+#   ruby tool/bench.rb --measure PATH --corpus-dir DIR   # internal: one rep, JSON on stdout
 
 require "json"
+require "open3"
 require "optparse"
 require "rbconfig"
 require "stringio"
+require "tmpdir"
+require "yaml"
+
+# The A/B's tree unpacking and completed-run checks. Requiring it defines {EngineAllocAB} without running anything
+# (the `$PROGRAM_NAME` guard at its bottom).
+require_relative "engine_alloc_ab"
 
 # Namespaced so the reducer can be unit-tested (`spec/tool/bench_sampling_spec.rb` requires this file; the
 # `$PROGRAM_NAME` guard at the bottom is what keeps requiring it from running a benchmark).
@@ -77,6 +104,14 @@ module Bench
   # false-positive cost the analyzer's own rules are held to.
   STALENESS_METRIC = "allocations"
 
+  # The band when `thresholds.yml` or one of its keys is missing. It mirrors the committed values, so a deleted key
+  # cannot silently loosen the gate.
+  DEFAULT_BAND = { "wall_pct" => 20.0, "allocations_pct" => 2.0, "rss_pct" => 10.0, "stale_pct" => 1.0 }.freeze
+
+  # The engine under measurement. The corpus holds a complete older `lib/rigor`, so a load that resolved there would
+  # measure the old engine and still print plausible numbers.
+  CHECKOUT_CLI = File.join(ROOT, "lib", "rigor", "cli.rb")
+
   module_function
 
   # Peak RSS is read from /proc on Linux (the CI runner, which is the authoritative measurement host). On macOS /
@@ -90,38 +125,56 @@ module Bench
   end
 
   # ONE rep, in THIS process. Only ever called in a `--measure` child, so the process it measures has done nothing
-  # else first.
-  def measure(target)
+  # else first. The child starts in the repository root (Bundler has resolved by now) and runs inside the corpus.
+  def measure(target, corpus_dir)
     $LOAD_PATH.unshift(File.join(ROOT, "lib")) unless $LOAD_PATH.include?(File.join(ROOT, "lib"))
     require "rigor/cli"
 
     out = StringIO.new
     err = StringIO.new
-    GC.start
-    before = GC.stat(:total_allocated_objects)
-    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    begin
-      Rigor::CLI.new(
-        ["check", "--no-cache", "--no-stats", "--format", "json", target],
-        out: out, err: err
-      ).run
-    rescue SystemExit
-      # A subcommand that calls `exit`/`abort` — measure regardless.
+    Dir.chdir(corpus_dir) do
+      GC.start
+      before = GC.stat(:total_allocated_objects)
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      status = EngineAllocAB.run_check(target, out, err)
+      wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      allocated = GC.stat(:total_allocated_objects) - before
+      diagnostics = EngineAllocAB.diagnostic_count(out.string)
+      assert_completed(status, diagnostics, err.string)
+      assert_engine_loads(corpus_dir)
+      {
+        "wall_s" => wall.round(3),
+        "allocations" => allocated,
+        "peak_rss_kb" => peak_rss_kb,
+        "diagnostics" => diagnostics
+      }
     end
-    wall = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
-    allocated = GC.stat(:total_allocated_objects) - before
-    diagnostics =
-      begin
-        JSON.parse(out.string).fetch("diagnostics", []).size
-      rescue StandardError
-        nil
-      end
-    {
-      "wall_s" => wall.round(3),
-      "allocations" => allocated,
-      "peak_rss_kb" => peak_rss_kb,
-      "diagnostics" => diagnostics
-    }
+  end
+
+  # A run that did not complete (a usage error is 64, an internal error 70) or whose output does not parse measured
+  # something other than the corpus's analysis, and its smaller numbers would pass the gate.
+  def assert_completed(status, diagnostics, stderr)
+    return if EngineAllocAB::COMPLETED_EXITS.include?(status) && diagnostics
+
+    abort("rigor check exited #{status.inspect} with #{diagnostics.nil? ? 'unparseable' : 'parseable'} " \
+          "output:\n#{stderr}")
+  end
+
+  # Every Rigor file the run loaded came from this checkout: `rigor/cli` from `ROOT/lib`, and nothing from the corpus.
+  def assert_engine_loads(corpus_dir, features = $LOADED_FEATURES)
+    from_corpus = features.select { |feature| feature.start_with?(File.join(corpus_dir, "")) }
+    unless from_corpus.empty?
+      abort("loaded from the corpus instead of this checkout:\n#{from_corpus.first(5).join("\n")}")
+    end
+
+    cli = features.grep(%r{/rigor/cli\.rb\z}).first
+    abort("rigor/cli loaded from #{cli.inspect}, not #{CHECKOUT_CLI}") unless cli && same_file?(cli, CHECKOUT_CLI)
+  end
+
+  def same_file?(path, other)
+    File.realpath(path) == File.realpath(other)
+  rescue SystemCallError
+    false
   end
 
   # Collapse the reps into the single metric hash the gate and the suggested baseline both consume — the shape is
@@ -141,9 +194,9 @@ module Bench
   end
 
   # The child's output and exit status. Its own method so the failure paths below are reachable from a spec without
-  # spawning anything.
+  # spawning anything. The child starts in the repository root so Bundler resolves this checkout's bundle.
   def popen_rep(cmd)
-    raw = IO.popen(cmd, &:read)
+    raw = IO.popen(cmd, chdir: ROOT, &:read)
     [raw, $?]
   end
 
@@ -152,8 +205,8 @@ module Bench
   #
   # `status.inspect` rather than `exitstatus`, because a child killed by a signal (the OOM killer is the realistic
   # case for a benchmark) has a nil exit status and would otherwise print "exited nil".
-  def measure_in_fresh_process(target)
-    cmd = [RbConfig.ruby, File.expand_path(__FILE__), "--measure", target]
+  def measure_in_fresh_process(target, corpus_dir)
+    cmd = [RbConfig.ruby, File.expand_path(__FILE__), "--measure", target, "--corpus-dir", corpus_dir]
     raw, status = popen_rep(cmd)
     abort("bench rep for #{target} failed (#{status.inspect}) — no sample to reduce") unless status&.success?
 
@@ -166,31 +219,84 @@ module Bench
 
   # Each rep's own numbers go to stderr before they are reduced. Without them a reader sees only the reduced value
   # and cannot tell a quiet host from a wide spread — which is the exact question #987 was opened to answer.
-  def run_reps(target, reps)
+  def run_reps(target, reps, corpus_dir)
+    files = ruby_files(corpus_dir, target)
+    abort("the corpus has no Ruby files under #{target}; nothing to measure") if files.zero?
+
+    warn "Target #{target}: #{files} Ruby files in the corpus"
     (1..reps).map do |rep|
       warn "Benchmarking: rigor check #{target} (rep #{rep}/#{reps}, fresh process)"
-      sample = measure_in_fresh_process(target)
-      warn format("  rep %d: wall_s=%s allocations=%s peak_rss_kb=%s",
-                  rep, sample["wall_s"], sample["allocations"], sample["peak_rss_kb"].inspect)
+      sample = measure_in_fresh_process(target, corpus_dir)
+      warn format("  rep %d: wall_s=%s allocations=%s peak_rss_kb=%s diagnostics=%s",
+                  rep, sample["wall_s"], sample["allocations"], sample["peak_rss_kb"].inspect, sample["diagnostics"])
       sample
     end
   end
 
-  # Tiny `key: int` reader so the gate stays dependency-free. Lines that are
-  # blank or start with `#` are ignored; only the known band keys are honoured.
+  # The zero-work guard (`docs/agents/measurement.md`): a target the corpus lacks, or one with no Ruby in it, would
+  # finish fast and read as a large improvement.
+  def ruby_files(corpus_dir, target)
+    path = File.join(corpus_dir, target)
+    File.file?(path) ? 1 : Dir.glob("**/*.rb", base: path).size
+  end
+
+  # The committed baseline, read BEFORE measuring: it names the corpus. Unreadable used to mean "uncalibrated, pass";
+  # now it would mean "measure some other tree", so it stops instead.
+  def load_baseline(path)
+    JSON.parse(File.read(path, encoding: "UTF-8"))
+  rescue SystemCallError, JSON::ParserError => e
+    abort("cannot read the perf baseline #{path}: #{e.message}")
+  end
+
+  # The corpus revision the baseline was measured on. There is no fallback to this checkout's tree: that is the
+  # growing corpus the gate moved away from, and a silent fallback would compare two different trees.
+  def corpus_revision(baseline, path)
+    revision = baseline["corpus"]
+    return revision if revision.is_a?(String) && !revision.strip.empty?
+
+    abort("#{path} names no corpus revision; set \"corpus\" to the release tag the baseline was measured on")
+  end
+
+  # The commit the revision names, or an abort that says why. A tag missing from a shallow CI checkout is the
+  # realistic failure, so the message names the fix.
+  def resolve_corpus(revision)
+    out, status = Open3.capture2("git", "-C", ROOT, "rev-parse", "--verify", "--quiet", "#{revision}^{commit}")
+    return out.strip if status.success?
+
+    abort("corpus revision #{revision.inspect} is not a commit in this clone; fetch it " \
+          "(a CI checkout needs `fetch-depth: 0` to see tags)")
+  end
+
+  # The corpus unpacked into a scratch directory for the duration of the block. The directory is realpath'd so the
+  # engine sees one spelling of it (macOS `/tmp` is `/private/tmp`).
+  def with_corpus(revision)
+    commit = resolve_corpus(revision)
+    Dir.mktmpdir("rigor-bench-corpus") do |scratch|
+      corpus_dir = File.join(File.realpath(scratch), "corpus")
+      EngineAllocAB.materialise(commit, corpus_dir)
+      warn "Corpus: #{revision} (#{commit[0, 12]}), unpacked to #{corpus_dir}"
+      yield corpus_dir
+    end
+  end
+
+  # The band keys of `thresholds.yml`, as Floats so a `1.5` is not truncated. Other keys (the per-PR A/B's) are
+  # ignored; a band key that is not a number stops the run.
   def load_thresholds(path)
-    band = { "wall_pct" => 10, "allocations_pct" => 5, "rss_pct" => 10, "stale_pct" => 15 }
+    band = DEFAULT_BAND.dup
     return band unless File.readable?(path)
 
-    File.foreach(path, encoding: "UTF-8") do |line|
-      stripped = line.strip
-      next if stripped.empty? || stripped.start_with?("#")
+    (YAML.safe_load_file(path) || {}).each do |key, value|
+      next unless band.key?(key)
 
-      key, value = stripped.split(":", 2)
-      band[key.strip] = value.to_i if key && value && band.key?(key.strip)
+      band[key] = Float(value)
+    rescue ArgumentError, TypeError
+      abort("#{path}: #{key} is not a number (#{value.inspect})")
     end
     band
   end
+
+  # `2.0` prints as `2`, `1.5` as `1.5`.
+  def pct_label(pct) = format("%g", pct)
 
   # The notice text, or nil when the metric is not the deterministic one or the drop is inside `stale_pct`.
   # `headroom` is what actually matters to a reader: how far the current cost could grow before the unrefreshed
@@ -202,7 +308,7 @@ module Bench
     drop = ((1 - (now_value.to_f / base_value)) * 100).round(1)
     headroom = (((limit / now_value.to_f) - 1) * 100).round
     "STALE #{target} #{metric}: #{now_value} is #{drop}% below baseline #{base_value}; " \
-      "the +#{pct}% band still permits #{limit.round} (+#{headroom}% over the real cost)"
+      "the +#{pct_label(pct)}% band still permits #{limit.round} (+#{headroom}% over the real cost)"
   end
 
   def parse_options(argv)
@@ -212,7 +318,8 @@ module Bench
       thresholds: File.join(ROOT, "bench", "thresholds.yml"),
       write: nil,
       reps: DEFAULT_REPS,
-      measure: nil
+      measure: nil,
+      corpus_dir: nil
     }
     OptionParser.new do |o|
       o.on("--target PATH") { |v| options[:targets] << v }
@@ -221,9 +328,12 @@ module Bench
       o.on("--write-baseline PATH") { |v| options[:write] = v }
       o.on("--reps N", Integer) { |v| options[:reps] = v }
       o.on("--measure PATH") { |v| options[:measure] = v }
+      o.on("--corpus-dir DIR") { |v| options[:corpus_dir] = v }
     end.parse!(argv)
     options[:targets] = ["lib"] if options[:targets].empty?
     raise ArgumentError, "--reps must be >= 1" if options[:reps] < 1
+    raise ArgumentError, "--measure needs --corpus-dir" if options[:measure] && !options[:corpus_dir]
+
     options
   end
 
@@ -237,23 +347,20 @@ module Bench
 
     # Child mode: one rep, one JSON object on stdout, no gating. Nothing else may be printed to stdout here.
     if options[:measure]
-      puts JSON.generate(measure(options[:measure]))
+      puts JSON.generate(measure(options[:measure], options[:corpus_dir]))
       exit 0
     end
 
-    results = {}
-    options[:targets].each { |target| results[target] = reduce_samples(run_reps(target, options[:reps])) }
+    baseline = load_baseline(options[:baseline])
+    corpus = corpus_revision(baseline, options[:baseline])
+    results = with_corpus(corpus) do |corpus_dir|
+      options[:targets].to_h { |target| [target, reduce_samples(run_reps(target, options[:reps], corpus_dir))] }
+    end
 
-    gate(results, options)
+    gate(results, baseline, corpus, options)
   end
 
-  def gate(results, options)
-    baseline =
-      begin
-        JSON.parse(File.read(options[:baseline], encoding: "UTF-8"))
-      rescue StandardError
-        { "calibrated" => false }
-      end
+  def gate(results, baseline, corpus, options)
     band = load_thresholds(options[:thresholds])
 
     # The suggestion sibling is written on EVERY run, not only an uncalibrated one. `bench/baseline.json`'s own
@@ -261,9 +368,11 @@ module Bench
     # produced nothing whenever the baseline was calibrated, i.e. in the only state a refresh is ever wanted, with
     # the workflow's `if-no-files-found: ignore` swallowing the gap. Writing it unconditionally is what makes the
     # documented procedure work; the file is gitignored, so a local run still never touches the committed baseline.
+    # It names the corpus it measured, so committing it cannot pair one tree's numbers with another tree's name.
     suggested = {
       "calibrated" => true,
       "calibrated_at" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+      "corpus" => corpus,
       "reps" => options[:reps],
       "targets" => results
     }
@@ -271,7 +380,7 @@ module Bench
     File.write(out_path, "#{JSON.pretty_generate(suggested)}\n")
 
     unless baseline["calibrated"]
-      puts "First run — baseline uncalibrated; suggested baseline written to #{out_path}:"
+      puts "First run — baseline uncalibrated; suggested baseline for corpus #{corpus} written to #{out_path}:"
       puts JSON.pretty_generate(results)
       puts "(Commit a CI-measured baseline as bench/baseline.json to activate the gate.)"
       exit 0
@@ -299,7 +408,7 @@ module Bench
         if n > limit
           delta = (((n.to_f / b) - 1) * 100).round(1)
           regressions << "FAIL #{target} #{metric}: #{n} > #{limit.round} " \
-                         "(+#{delta}% vs baseline #{b}, band +#{pct}%)"
+                         "(+#{delta}% vs baseline #{b}, band +#{pct_label(pct)}%)"
         else
           puts "OK   #{target} #{metric}: #{n} ≤ #{limit.round} (baseline #{b})"
           notice = staleness_notice(target, metric, n, b, pct, limit, band["stale_pct"])
@@ -315,10 +424,10 @@ module Bench
     end
 
     if regressions.empty?
-      puts "All perf-benchmark checks passed."
+      puts "All perf-benchmark checks passed (corpus #{corpus})."
       exit 0
     else
-      warn "Perf-benchmark regressions detected:"
+      warn "Perf-benchmark regressions detected (corpus #{corpus}):"
       regressions.each { |r| warn "  #{r}" }
       exit 1
     end

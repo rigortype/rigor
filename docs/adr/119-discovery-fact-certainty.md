@@ -102,10 +102,14 @@ by a later reopening** — `C < Base; include M` and then `class Base; include M
 where a module is reopened to include another, and `supposs_type2`, a `possible` superclass include).
 `SourceArity` declines on the first three today; the fourth is silent on master only because the
 breadth-first walk happens to reach `M` first, and the shape fires when it does not (`chain_equiv`).
-**(e) Some edges are not recorded at all**: `send(:include, M)`, the receiver form `C.include(M)` and
-`prepend_mod_with` add nothing to the mixin tables (`MIXIN_CALL_NAMES` holds `include` and `prepend`,
-SI:5600); `send` only stamps `ENVELOPE_DYNAMIC_MARK` on the class (SI:6448–6472), which is why
-`SourceArity` stays silent there (`send_inc`, `recv_inc`). **(f) The chain sees only project classes**, so
+**(e) Some edges are not recorded, only marked**: `send(:include, M)`, the receiver form `C.include(M)`
+and GitLab's `prepend_mod_with` add nothing to the mixin tables (`MIXIN_CALL_NAMES` holds `include` and
+`prepend`, SI:5600); each stamps `ENVELOPE_DYNAMIC_MARK` on the class (the constant-receiver branch at
+SI:6457–6463 marks any surface-rewriting call, `SURFACE_MIXIN_HELPER` at SI:6437–6439 names the helpers,
+and `spec/rigor/inference/included_module_dispatch_spec.rb:261` pins the mark for `Klass.include(M)`).
+`SourceArity` declines on a marked class (`dynamic_surface?`), which is why `send_inc`, `recv_inc` and
+`pmw_on` are silent; every other read types through the mark today (`pmw_type` fires
+`undefined method 'upcase' for 1`). **(f) The chain sees only project classes**, so
 "absent means `NoMethodError`" is false: with `include M if X` and `M#to_s(fmt)`, `Object#to_s` answers
 when `X` is unset, yet `call.wrong-arity` fires (`absent_arity`); `include M; include Enumerable` fires an
 error-level `undefined method 'first' for 1` although `Enumerable#to_a` answers (`gemmod3`, #1572).
@@ -118,8 +122,9 @@ value (`runner.rb:590–616`).
 predecessor: a fact is *certain* (it holds whenever the file's top level executes) or *possible*. A read
 answers only when its answer is the same under every world it must consider — every assignment of the
 `possible` facts it depends on, both sides of a skipped include — and depends on no edge whose position
-is unknown and no entry that carries the dynamic mark; otherwise it answers *unknown*, and every consumer
-already treats unknown as silence (ADR-5). All reads are defined over one resolution chain. A behaviour
+is unknown and, for an arity question, no entry that carries the dynamic mark; otherwise it answers
+*unknown*, which every consumer treats as silence (ADR-5) and which no migrated reader may collapse into
+*absent*. All reads are defined over one resolution chain. A behaviour
 change lands under WD7's second lane; a behaviour-preserving change under its first.
 
 ### The chain this ADR builds on (ADR-24 amendment, landed by the chain PR)
@@ -149,12 +154,28 @@ amendment, which WD1 of that ADR (`docs/adr/24-self-method-call-resolution.md:12
   superclass boundary the insertion point moves to it. The singleton side is the metaclass, then the
   superclass metaclass chain, with `extend` and `class << self; include` under the include rule.
 - **Skipped includes are two worlds.** An include the chain skips because the module is already present
-  is recorded as a fork: the read evaluates the chain with the include skipped and with it not skipped,
-  and answers only when both first definers agree. This covers `retro_super2`, `retro_mod3` and
-  `supposs_type2`, still silences #1570 (both worlds put `Base#foo` first), and needs no new data.
-- **Marked entries.** A chain entry whose class carries `ENVELOPE_DYNAMIC_MARK` (set by `send`,
-  SI:6448–6472) makes every read through it unknown; `C.include(M)` and `prepend_mod_with` record no
-  edge and no mark, and reads there answer as they do on master until an edge is recorded.
+  is recorded as a fork **when the skipped module's closure defines the queried name**, whether the skip
+  happens in the class's own body or inside an included module's closure (`retro_mod3`): the read
+  evaluates the chain with the include skipped and with it not skipped, and answers only when both first
+  definers agree. This covers `retro_super2`, `retro_mod3` and `supposs_type2`, and #1570 is silenced
+  because the two worlds *disagree* (the not-skipped world puts `M#foo(x)` first), so `C.new.foo` types
+  `Dynamic` there — 14 (class, name) pairs on GitLab, none on Mastodon or Redmine. Relevant skips count
+  toward WD2's cap of four together with the relevant `possible` edges; the measured maximum is 5, and 3
+  GitLab classes exceed four. No new data is needed.
+- **Marked entries.** A chain entry whose class carries `ENVELOPE_DYNAMIC_MARK` — set by `send`, by the
+  receiver form `C.include(M)` and by helpers such as `prepend_mod_with` (SI:6437–6439, 6457–6463) — makes
+  an **arity** read through it unknown, which is what `SourceArity`'s `dynamic_surface?` does today. Every
+  other read answers through the mark as on master. Typing through marked entries is a known remainder
+  (WD2), not a rule: on GitLab 1,730 entities carry the mark, among them ApplicationController, Project,
+  Group, User, Issue, MergeRequest and Ci::Build, so 4,041 of 18,164 classes and 41–51 % of
+  (class, name) pairs resolve at or beyond a marked entry; on Mastodon 4.7–7.6 % (RoutingHelper, Setting).
+  Making those reads unknown would turn that share of the project's types `Dynamic`.
+- **Unknown is not absent.** A migrated reader keeps *unknown* distinct from *absent*: an existence probe
+  built on it must never turn unknown into "not defined". The probes that negate the walk today —
+  `!scope.user_def_through_ancestors(…).first.nil?` at `check_rules.rb:931`, `rbs_dispatch.rb:758` and
+  `lib/rigor/inference/struct_materialization.rb:147`, and `return true if
+  resolve_user_def_through_ancestors(…)` at `expression_typer.rb:1638, 2127` — treat unknown as "may be
+  defined", or they add firings.
 - **Three name-resolution flavours**: `:methods` via `known_user_class?`, `:constants` via
   `Reflection.known_project_namespace?`, `:arity` via `SourceArity`'s `project_class?`, which expands
   #986's ambiguous names.
@@ -226,23 +247,28 @@ is defined over `resolution_chain`:
 
 - **Worlds.** The **relevant** `possible` edges of a read are those whose closure defines the queried
   name or shares a module with the chain. The read computes the chain under every assignment of the
-  relevant edges (held or not), and under both sides of every skipped include on the path, takes each
-  chain's first definer, and collects the **candidate set**, with *absent* as a member when some world
-  has none. It answers when every candidate gives the same answer to the question asked, and *unknown*
-  (`nil`, empty, `Dynamic`) otherwise. More than four relevant edges answers unknown. On GitLab, Project
+  relevant edges (held or not), and under both sides of every relevant skipped include on the path (§ The
+  chain), takes each chain's first definer, and collects the **candidate set**, with *absent* as a member
+  when some world has none. It answers when every candidate gives the same answer to the question asked,
+  and *unknown* (`nil`, empty, `Dynamic`) otherwise. More than four relevant edges and skips together
+  answers unknown. On GitLab, Project
   and Group reach 8 and 10 `possible` edges (Avatarable's and CacheMarkdownField's hooks); with the
   shares-a-module clause (Avatarable's hook `include Gitlab::Utils::StrongMemoize` duplicates
   `project.rb:29` and `group.rb:16`, so it is relevant to every name) Project reaches at most 3 relevant
   edges for any name, with 82 names at two or more, and Group 105 names at two — the cap of four holds,
   and Mastodon and Redmine have no owner above four even before relevance.
 - **Position-unknown edges.** A `possible` edge produced **outside a class body** — inside a method
-  (`methinc`), inside a block including `included do` and `class_eval` (`hookpre`) —, a
-  `class << self; prepend`, and **the mixin edges of a class declared in two or more files** (`xfile`:
-  the merge drops the file, `(mods + …).uniq` at SI:7308, 7316, 7325, and `class_sources` is a set of
-  paths) have no position in the chain. A read answers unknown when the closure of a position-unknown
-  edge defines the queried name, and, for a class declared in several files, when two or more of those
-  files' closures define it — which also declines where `require` fixes the order, safely.
-- **Marked entries.** A chain entry carrying the dynamic mark (§ The chain) makes the read unknown.
+  (`methinc`), inside a block including `included do` and `class_eval` (`hookpre`) — and a
+  `class << self; prepend` have no position in the chain. A read answers unknown when the closure of a
+  position-unknown edge defines the queried name.
+- **Multi-file classes.** A class declared in two or more files (`class_sources` holds two or more
+  paths) has **unordered mixin edges**: the merge keeps the edges and drops the file (`(mods + …).uniq`
+  at SI:7308, 7316, 7325), so their relative order is load order. A read declines only when **two or more
+  of those edges' closures define the queried name** (`xfile`) — which also declines where `require` fixes
+  the order, safely — and answers otherwise. Measured: 169 GitLab pairs (0.04 %); Mastodon has two
+  multi-file classes, neither with mixin edges. No file-per-edge record is needed.
+- **Marked entries.** For an arity question, a chain entry carrying the dynamic mark (§ The chain) makes
+  the read unknown; other questions answer through it as on master, the remainder § The chain measures.
 - **The absent candidate.** *Absent* is dropped only when **no RBS Rigor loads — the project `sig/`,
   plugin-synthesised RBS, and the RBS of every external entry in the chain — declares a method of that
   name for the receiver's RBS ancestors, `Object` included, and none of them declares `method_missing` or
@@ -263,19 +289,23 @@ is defined over `resolution_chain`:
   immediately-evaluated meta-new blocks Rigor already treats as class bodies** — the constant-write forms
   `K = Class.new`/`Module.new`/`Struct.new`/`Data.define do … end` (`meta_new_block_split`, SI:3764;
   `meta_new_constant_rvalue?`, SI:8390) and the bare-factory blocks the walk recognises
-  (`AnonymousMetaClass.block_form_receiver`, SI:5316), whose bodies run once at the write — is a
+  (`AnonymousMetaClass.block_form_receiver`, `lib/rigor/inference/anonymous_meta_class.rb:42`), whose
+  bodies Ruby evaluates as a class body whenever the factory call runs, so their certainty is that of the
+  enclosing statement (`K ||= Class.new { … }` runs only while `K` is unset and is `possible`) — is a
   `possible` definer: its slot in `discovered_def_nodes`/`singleton_def_nodes`, its visibility and its
   **parameter envelope** (`discovered_parameter_envelopes`, read by `SourceArity` at
   `source_arity.rb:123–126, 224–225` through `Scope#parameter_envelopes_of`, `scope.rb:1810`) are
   contested (`conddefm`: master fires, Ruby returns `"b1"` when `X` is unset). `class_methods`,
-  `included`, `helpers` and `class_eval` blocks stay `possible` until the follow-up ADR positions them.
+  `included`, `prepended`, `helpers` and `class_eval` blocks stay `possible` until the follow-up ADR
+  positions them.
 - **Existence reads.** A read used positively (`discovered_method?` at `check_rules.rb:952`,
   `known_user_class?`, `published_constant?`) answers over the union, withholding by construction; a
   negated or compared one (`singleton_context_def?`, `check_rules.rb:3633–3636`) is a candidate-set read.
 - **ADR-46 recording.** A candidate-set read records class edges as the chain does in **every** world it
   evaluates — each assignment, both sides of a skipped include — and for every class whose closure it
-  tests for a position-unknown or multi-file edge, so a warm run re-checks the consumer when a def is
-  added to a hook-included module or a reopened body. This is a superset of today's recording.
+  tests for a position-unknown edge, a multi-file class or a relevant skip, so a warm run re-checks the
+  consumer when a def is added to a hook-included module or a reopened body. This is a superset of
+  today's recording.
 - Cost: with no relevant `possible` edge and no skipped include the set is a singleton and the read costs
   one memoised chain plus one membership test per edge; the constant tables admit no `possible` facts in
   this ADR.
@@ -381,7 +411,9 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
   the false-positive rule (`visibility_excludes?` hides visibility changes from diagnostics,
   `generator.rb:732–741, 906–907`); (c) neither byte-identity to a predecessor nor a variant is claimed;
   (d) the per-merge allocation sweep runs and its answer is in the PR; (e) for any change that can add a
-  `call.wrong-arity` firing, the `SourceArity` differential. **The chain PR lands under this lane**, before
+  `call.wrong-arity` firing, the `SourceArity` differential; (f) a change that can widen a read to
+  `Dynamic` reports the count of corpus reads whose answer changed to `Dynamic`, because the diagnostics
+  diff cannot show a precision loss that only removes firings. **The chain PR lands under this lane**, before
   this ADR's acceptance, as ADR-24's amendment.
 
 ### What each part removes, and what remains
@@ -391,7 +423,7 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
 | 1 Prose enumeration | WD4 (members `Data.define`-derived, shape-checked); WD6 (producers parsed); WD1 (copy paths paired and round-trip-tested; slot readers censused); the chain's detection spec (ancestry walkers parsed, one chain the reference) | Grandfathered producers, walkers and slot readers converge as bugs are filed; the patterns are themselves stated lists |
 | 2 Variants by reading; vacuous sweeps | WD1 + WD7(c): no variants; a disagreement is a fixture or nothing; WD5 at both levels | Unknown constructs are found by users; one run witnesses one execution |
 | 3 Several implementations of one question | `module_function`: one helper (#1563, landed); resolution order: one chain (ADR-24 amendment) | The helper preserves four semantics until PRs B–C; concern hooks wait for the follow-up ADR |
-| 4 Byte-identity to wrong legacy | WD1 + WD2 + WD7: over-approximation is legal only as `possible`; no read answers from it, from an edge without a position, from a marked entry or from one side of a skipped include | A fabricated `certain` fact no fixture covers stays until reported; an unrecorded edge (`C.include(M)`) stays as on master |
+| 4 Byte-identity to wrong legacy | WD1 + WD2 + WD7: over-approximation is legal only as `possible`; no read answers from it, from an edge without a position, or from one side of a relevant skipped include; arity declines on a marked entry | A fabricated `certain` fact no fixture covers stays until reported; typing through marked entries (`C.include(M)`, `prepend_mod_with`, `send`) stays as on master, 41–51 % of GitLab's pairs |
 | 5 Shifting justification | WD7: two lanes with fixed, necessary gates | Triage decides what counts as reproduced |
 
 ## Migration
@@ -410,8 +442,10 @@ applies to every PR, and no listed gate may be skipped or replaced by a claim.
 5. **Declaration-driven copy paths (lane 1).** Pairs, dropped only when both are empty.
 6. **The chain PR (lane 2, ADR-24 amendment).** § The chain, the skip-worlds rule and the dynamic mark
    included; fixes #1567, #1568, #1570 and the constant analog; read-level fixtures including
-   `retro_super2`, `retro_mod3`, `supposs_type2` and `chain_equiv`; corpus and sig-gen diffs; allocation
-   sweep; the `SourceArity` differential. Every entry is `certain` until PR C admits the mixin members.
+   `retro_super2`, `retro_mod3`, `supposs_type2`, `chain_equiv`, `pmw_on`, `pmw_type` and `xfile`; corpus
+   and sig-gen diffs; the count of reads changed to `Dynamic` (WD7(f)); allocation sweep; the `SourceArity`
+   differential; a spec that the five existence probes answer "may be defined" on unknown. Every entry is
+   `certain` until PR C admits the mixin members.
 
 **After acceptance — under WD7 lane 2.**
 
@@ -462,11 +496,12 @@ methods. Precision does not collapse, and the relevance rule keeps GitLab's core
 | Candidate sets over the breadth-first walks (draft 3) | Rejected | Not Ruby's order (`bfsvis`, `idemvis2`, #1567, #1568). |
 | Candidate sets over a chain, counting only edges with a position (draft 4) | Rejected | In-method includes, hook edges and cross-file load order have no position; `SourceArity` declines there and draft 4 fired (`methinc`, `hookpre`, `xfile`). Position-unknown edges decline (WD2). |
 | A single linearisation for a skipped include (draft 5) | Rejected | A body reopened after a subclass linearised, or a `possible` superclass include, positions the module differently (`retro_super2`, `retro_mod3`, `supposs_type2`); the fuzz never reopened a body. Two worlds per skipped include. |
-| "Through `send`" as a position-unknown edge (draft 5) | Rejected | `send(:include, …)` records no edge (`MIXIN_CALL_NAMES`, SI:5600), only the dynamic mark (SI:6448–6472); there is no closure to test. Marked entries decline. |
+| "Through `send`" as a position-unknown edge (draft 5); every read unknown through a marked entry (draft 6) | Rejected | `send(:include, …)`, `C.include(M)` and `prepend_mod_with` record no edge, only the dynamic mark (SI:6437–6439, 6457–6463), so there is no closure to test; and declining every read through a mark would turn 41–51 % of GitLab's pairs `Dynamic` where master types them. The mark declines arity only, as today. |
 | "Absent means `NoMethodError`" (draft 4) | Rejected | The chain sees only project classes (`scope.rb:1586–1600`); `Object#to_s` and `Enumerable#to_a` answer (`absent_arity`, `gemmod3`). |
 | A cap on reachable `possible` edges (draft 4) | Rejected | GitLab's Project reaches 8 and Group 10 through hooks; 146 of 25,865 owners exceed four. Relevance leaves at most three per name there. |
-| A discovery-data change for the chain (separating tables, recording statement order, recording the file of an edge) | Rejected | The tables already separate prepends and keep order (`scope.rb:1287–1288`; SI:5829, 7354); the fuzz diverges in 0.2 % of cases only under same-module interleaving, which the census finds nowhere; reopened bodies and multi-file classes are declined under WD2. |
-| Two-world agreement; `certain_*` siblings; copying `class_methods` as `def self.` rows; hook instantiation in this ADR; a separate ADR for the chain; the overlay; the fuzzer as a CI gate; PHPStan-style per-includer re-analysis; continuing the piecewise ports | Rejected or deferred as in drafts 3–5 | Reasons unchanged: compensating definers; table copies; `M::ClassMethods` is an edge; fold-level facts need their own probes and witness; ADR-24 owns the order (ADR-49 economy, ADR-97 budget); not byte-identical; 2–7 % load rate; multiplies work by includer count; 0.2 % of a cold run. |
+| A discovery-data change for the chain (separating tables, recording statement order, recording the file of an edge) | Rejected | The tables already separate prepends and keep order (`scope.rb:1287–1288`; SI:5829, 7354); the fuzz diverges in 0.2 % of cases only under same-module interleaving, which the census finds nowhere; reopened bodies fork (skip worlds) and a multi-file class declines at the edge level (WD2), neither needing the file of an edge. |
+| Every mixin edge of a multi-file class position-unknown (draft 6) | Rejected | It declines on a single defining closure: 107 GitLab classes and 0.8 % of pairs, Namespace losing 89 of 198 names through the nested `class Namespace; class TraversalHierarchy` style; and "two or more files' closures" needs the file of an edge, which the merge drops. The edge-level rule costs 169 pairs (0.04 %). |
+| Agreement between the certain-only world and the union world; `certain_*` siblings; copying `class_methods` as `def self.` rows; hook instantiation in this ADR; a separate ADR for the chain; the overlay; the fuzzer as a CI gate; PHPStan-style per-includer re-analysis; continuing the piecewise ports | Rejected or deferred as in drafts 3–5 | Reasons unchanged: compensating definers; table copies; `M::ClassMethods` is an edge; fold-level facts need their own probes and witness; ADR-24 owns the order (ADR-49 economy, ADR-97 budget); not byte-identical; 2–7 % load rate; multiplies work by includer count; 0.2 % of a cold run. |
 
 ## Consequences
 
@@ -488,11 +523,15 @@ Negative:
   below a position-unknown edge, through a marked entry or on one side of a skipped include answers
   `Dynamic`; relationship lints are silent where some world has no super method. On GitLab, `avatar_url`
   and `strong_memoize` read as unknown through Avatarable's hook (correct for the prepended
-  `ShadowMethods`, a precision loss for `strong_memoize`). **Defs inside blocks** become `possible`
-  definers: the review counted 74 of 7,181 defs in Mastodon, 1,855 of 61,112 in GitLab and 162 of 9,657
-  in Rigor's `lib`, of which 132 sit in `Data.define` blocks that WD2 exempts as immediately evaluated;
-  the rest (`class_methods`, `included`, `helpers`, `class_eval`) type `Dynamic` until the follow-up ADR
-  positions them. About 1–7 % of mixin edges on Mastodon are `possible`.
+  `ShadowMethods`, a precision loss for `strong_memoize`); #1570's shape types `Dynamic` (14 pairs).
+  **Defs inside blocks** become `possible` definers: the review counted 74 of 7,181 defs in Mastodon,
+  3,772 of GitLab's including `ee/` (about 142 exempt as meta-new blocks; `prepended do` alone holds 354)
+  and 162 of 9,657 in Rigor's `lib` (132 in `Data.define` blocks, exempt); the rest (`class_methods`,
+  `included`, `prepended`, `helpers`, `class_eval`) type `Dynamic` until the follow-up ADR positions them.
+  About 1–7 % of mixin edges on Mastodon are `possible`.
+- **Typing through marked entries is unchanged**, deliberately: 41–51 % of GitLab's pairs and 4.7–7.6 %
+  of Mastodon's resolve at or beyond a marked class, and only arity declines there. A later decision may
+  widen the mark's effect under WD7(f), with the count.
 - **User-visible sig-gen changes** (PR B), each with a changelog entry.
 - **Grandfathered sets**: 171 producer methods in 65 files plus rule (v)'s, the chain's allowlist, and
   the slot readers the census reports converge only as bugs are filed.
@@ -504,8 +543,8 @@ Negative:
 1. **Scope of `possible`.** As stated, or restrict to direct-body control flow? *Default: as stated.*
 2. **Typing through a possible-only definer** answers `Dynamic`. *Default: accept.*
 3. **The relevance cap.** Four relevant edges. *Default: four; GitLab's core models reach at most three.*
-4. **Multi-file classes.** A read declines when two or more declaring files' closures define the name;
-   no load-order table is proposed. *Default: as stated.*
+4. **Multi-file classes.** A read declines only when two or more of the class's mixin edges' closures
+   define the name; no file-per-edge record or load-order table is proposed. *Default: as stated.*
 5. **#1572**: the chain's external-definer read for typing. *Default: a follow-up of the chain PR,
    before PR C.*
 6. **Block-def exemption.** Exempt the meta-new blocks Rigor already recognises; everything else waits

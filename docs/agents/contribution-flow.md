@@ -14,7 +14,9 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 ## Branches and pull requests
 
 - **Small, uncontroversial docs** — a typo, a one-line fix, a `docs/CURRENT_WORK.md` update — commit
-  straight to `master`; CI skips an all-`.md` push, so a PR here buys nothing but a redundant run.
+  straight to `master` (a skill takes this path only for a typo-class fix; see
+  [`skill-authoring.md`](skill-authoring.md) § "The `waza` review"); CI skips an all-`.md` push, so a
+  PR here buys nothing but a redundant run.
   **Anything larger** — a multi-point revision, a new document, a reorganization — is a change worth
   reviewing like any other: branch + PR. Touching even one non-`.md` file makes it code regardless of
   size: branch + PR. When unsure which side a change is on, default to a branch — the direct-push
@@ -54,7 +56,9 @@ Once the change is implemented and `make verify-changed` passes:
    it Draft — the review is never skipped silently. Give the reviewer the base commit, the PR and its
    issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the
    release gate — a subagent does not inherit them). Ask for findings ranked by severity, each with
-   a concrete failure scenario, and scope expansion labelled separately.
+   a concrete failure scenario, and scope expansion labelled separately. A PR that changes a skill
+   also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md) at the same time; its
+   findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
    too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a finding, fixed
    or answered with the reason in a PR comment like any other. Fix correctness defects and test gaps.
@@ -74,7 +78,8 @@ Once the change is implemented and `make verify-changed` passes:
    stop and ask the user whether to take a conservative reading, split the PR, or file the rest.
 6. **Merge** (`gh pr ready`, then `gh pr merge --merge`) once CI is green on the head commit and the
    review has stopped — when the landing point was settled before the work began: a
-   `ready-for-agent` issue, or a user request that states the expected outcome. When the PR instead
+   `ready-for-agent` issue, or a user request that states the expected outcome. A PR that changes a
+   skill also needs its `waza` review comment; until one is posted it stays Draft. When the PR instead
    embodies a decision nobody has made, leave it Draft and put the decision to the user: a
    `ready-for-human` issue, a trade-off between designs, an ADR, a spec edit that picks what the
    issue left open (writing down behaviour the issue already stated is settled), or a severe finding

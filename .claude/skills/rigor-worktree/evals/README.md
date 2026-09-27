@@ -49,7 +49,7 @@ worktree gotchas" clause in the description is what routed the two
 gotcha-reference queries (empty `references/`, shared-`.git` stash bleed); it
 stays for that reason despite being flushable on token grounds.
 
-Spec-compliance (`waza check .claude/skills/rigor-worktree`) is a separate gate
-and was 9/9 at the same date. Per `docs/agents/skill-authoring.md`, `waza`'s
-other advisories (token budget, `USE FOR:` markers) target agentskills.io
-publication and do not bind a contributor skill.
+Spec-compliance (`waza check .claude/skills/rigor-worktree`) was 9/9 at the
+same date. The `waza` review a skill change must pass before it ships, and which
+of its advisories bind, are in `docs/agents/skill-authoring.md` § "The `waza`
+review".

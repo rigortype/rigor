@@ -27,7 +27,7 @@ Run these checks and note which tools are available:
 which mise    # preferred — see Step 2A
 which asdf    # fallback — see Step 2B
 ruby --version 2>/dev/null | head -1   # is Ruby 4.0 already on PATH?
-which docker  # last resort — see Step 2D
+which docker  # last resort — see "Last resort — Docker"
 rigor --version 2>/dev/null            # an existing install, if any
 ```
 
@@ -72,13 +72,16 @@ mise latest gem:rigortype
 If that is older than `<LATEST>`, mise is holding the newer release
 back — usually its `minimum_release_age` quarantine, which hides
 releases for a while after they are published (`mise ls-remote
-gem:rigortype` then ends with `newer gem:rigortype release hidden by
-minimum_release_age`). A bare `mise use gem:rigortype` would install
-the older version with no error, so this is the step where agents
+gem:rigortype` then warns `1 newer gem:rigortype release hidden by
+minimum_release_age` on stderr). A bare `mise use gem:rigortype`
+would install the older version with no error, so this is the step where agents
 silently end up on a stale Rigor. The quarantine is a supply-chain
 safeguard, so do not bypass it on your own: tell the user both
-versions and ask which to install. Recommend `<LATEST>` unless the
-user has deliberately configured the quarantine.
+versions and ask which to install. `mise settings get
+minimum_release_age` tells you whose choice it is: an error ("not
+set") means mise's built-in default is in effect and you can recommend
+`<LATEST>`; a value means the user configured it, so recommend
+respecting it.
 
 Then run in the project root, with the version the user agreed to:
 

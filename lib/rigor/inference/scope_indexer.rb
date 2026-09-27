@@ -31,6 +31,7 @@ require_relative "declaration_walk/traversal"
 require_relative "scope_indexer/class_cvars_collector"
 require_relative "scope_indexer/superclasses_collector"
 require_relative "scope_indexer/def_nestings_collector"
+require_relative "scope_indexer/layered_def_nestings"
 require_relative "scope_indexer/member_layouts_collector"
 
 module Rigor
@@ -340,18 +341,16 @@ module Rigor
       end
 
       # Issue #681 — the per-file nesting table over the cross-file seed. Both are keyed by node identity, so
-      # a same-file declaration and its cross-file twin are distinct keys and the merge order is immaterial;
-      # the copy exists only so the seed stays frozen. Skipped when the file declares no `def` at all — since
-      # issue #716 a top-level `def` records its empty chain, so a file of plain top-level helpers no longer
-      # takes that path and pays one copy of the seed, the same as any file that declares a method.
+      # a same-file declaration and its cross-file twin are distinct keys and the layering order is immaterial.
+      # Issue #1507 — layered by lookup ({LayeredDefNestings}) instead of copied: the copy was one insert per
+      # `def` in the project for every analysed file. Either table alone is returned as it is when the other is
+      # empty — since issue #716 a top-level `def` records its empty chain, so only a file declaring no `def` at
+      # all hands back the seed itself.
       def merge_def_nestings(seed, file_nestings)
         return seed if file_nestings.empty?
         return file_nestings if seed.empty?
 
-        merged = {}.compare_by_identity
-        merged.merge!(seed)
-        merged.merge!(file_nestings)
-        merged.freeze
+        LayeredDefNestings.new(file_nestings, seed)
       end
 
       # Issue #898 — one walk, two consumers: the raw per-file table the #526 method fold reads, and the

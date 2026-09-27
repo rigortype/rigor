@@ -69,6 +69,18 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       nesting: context.nesting }
   end
 
+  # Every node the traversal visits, whichever collectors (if any) it still carries there.
+  def walked_nodes(source, collectors)
+    visited = []
+    trace = TracePoint.new(:call) do |tp|
+      next unless tp.method_id == :walk && tp.defined_class == described_class::Traversal
+
+      visited << tp.binding.local_variable_get(:node)
+    end
+    trace.enable { walk(source, collectors) }
+    visited
+  end
+
   describe "class and module bodies" do
     it "qualifies nested, compact and rooted headers and resets a rebound self" do
       source = <<~RUBY
@@ -271,18 +283,6 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       end
     end
 
-    # Every node the traversal visits, whichever collectors (if any) it still carries there.
-    def walked_nodes(source, collectors)
-      visited = []
-      trace = TracePoint.new(:call) do |tp|
-        next unless tp.method_id == :walk && tp.defined_class == described_class::Traversal
-
-        visited << tp.binding.local_variable_get(:node)
-      end
-      trace.enable { walk(source, collectors) }
-      visited
-    end
-
     def labels(collector)
       collector.events.map { |e| e[:label] }
     end
@@ -387,6 +387,17 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
         const_set(:VARIANTS, { factory_block: :ordinary_call }.freeze)
       end
     end
+    # Sources whose factory blocks the two variants walk differently, nested in each other and in the other
+    # arms: parameters with calls in them, a factory inside a factory, inside an eval block and inside a
+    # meta-new body, and one whose receiver and arguments are calls.
+    let(:fork_sources) do
+      [
+        factory_source,
+        "Class.new(a.b(c)) do |x = d(Class.new(e) { f })|\n  Class.new(g) { |y = h| i }\n  j\nend\n",
+        "class C\n  X.class_eval { Class.new(k) { |z = l| m } }\n  K = Class.new { Class.new(n) { o } }\nend\n",
+        "module M\n  class << self\n    Struct.new(:a) { |w = p| q }\n  end\nend\n"
+      ]
+    end
 
     def labelled(collector)
       collector.events.map { |e| [e[:event], e[:label]] }
@@ -416,11 +427,54 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       end
     end
 
-    it "refuses a variant no rule has" do
+    # Every event a collector saw, with the context fields a collector reads, in order.
+    def trace(collector)
+      collector.events.map do |e|
+        context = e[:context]
+        [e[:event], e[:label], context.prefix, context.self_owner, context.singleton_cref, context.nesting]
+      end
+    end
+
+    it "gives every collector of a mixed run exactly the events, in order, of a run of its own" do
+      fork_sources.each do |source|
+        solo = [recorder_class.new, ordinary_class.new].each { |collector| walk(source, [collector]) }
+        [[recorder_class.new, ordinary_class.new], [ordinary_class.new, recorder_class.new, recorder_class.new]]
+          .each do |run|
+            walk(source, run)
+            run.each do |collector|
+              alone = solo.find { |candidate| candidate.instance_of?(collector.class) }
+              expect(trace(collector)).to eq(trace(alone))
+            end
+          end
+      end
+    end
+
+    it "walks a factory's receiver and arguments once in a mixed run, and only the block per variant" do
+      visited = walked_nodes(factory_source, [recorder_class.new, ordinary_class.new])
+      calls = visited.grep(Prism::CallNode).map(&:name)
+      expect(calls.tally).to include(pick: 1, new: 1, default_value: 1)
+      expect(visited.grep(Prism::ConstantReadNode).map(&:name).tally).to include(Class: 1)
+      expect(visited.grep(Prism::ClassNode).map { |node| node.constant_path.slice }.tally)
+        .to eq("C" => 1, "self::E" => 2)
+    end
+
+    it "walks a factory call without a literal block like any call, under either variant" do
+      source = "class C\n  Class.new(Base).new(arg)\n  Module.new(&blk)\n  Class.new(pick) { body }\nend\n"
+      [[recorder_class.new], [ordinary_class.new], [recorder_class.new, ordinary_class.new]].each do |run|
+        walk(source, run)
+        run.each do |collector|
+          expect(collector.events.map { |e| e[:label] }).to eq(%w[C new new arg new blk new pick body])
+        end
+      end
+    end
+
+    it "refuses a variant no rule has, as a broken walk contract" do
       misspelt = Class.new(recorder_class) { const_set(:VARIANTS, { factory_block: :ordinary }.freeze) }
       unknown = Class.new(recorder_class) { const_set(:VARIANTS, { nesting: :ordinary_call }.freeze) }
-      expect { walk("1", [misspelt.new]) }.to raise_error(ArgumentError, /no :factory_block variant :ordinary/)
-      expect { walk("1", [unknown.new]) }.to raise_error(ArgumentError, /no :nesting variant/)
+      unknown_variant = described_class::UnknownVariant
+      expect(unknown_variant.ancestors).to include(described_class::ContractError)
+      expect { walk("1", [misspelt.new]) }.to raise_error(unknown_variant, /no :factory_block variant :ordinary/)
+      expect { walk("1", [unknown.new]) }.to raise_error(unknown_variant, /no :nesting variant/)
     end
 
     it "answers the walk's own rule for a collector that names no variant" do

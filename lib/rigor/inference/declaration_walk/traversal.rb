@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../source/node_children"
 require_relative "context"
+require_relative "errors"
 require_relative "shadow"
 
 module Rigor
@@ -130,13 +131,14 @@ module Rigor
           klass::VARIANTS.fetch(rule) { RULE_VARIANTS.fetch(rule).first }
         end
 
-        # Raises unless every `VARIANTS` entry of `klass` names a rule and one of its variants, so a
-        # misspelt variant fails the run instead of silently following the walk's rule.
+        # Raises {UnknownVariant} unless every `VARIANTS` entry of `klass` names a rule and one of its
+        # variants, so a misspelt variant is a {ContractError} rather than the walk's rule followed silently:
+        # an error row on the file in a file's own index, and an aborted run in the project pre-pass.
         def self.check_variants!(klass)
           klass::VARIANTS.each do |rule, variant|
             next if RULE_VARIANTS.fetch(rule, EMPTY).include?(variant)
 
-            raise ArgumentError, "#{klass}: no #{rule.inspect} variant #{variant.inspect} (ADR-116 WD5)"
+            raise UnknownVariant, "#{klass}: no #{rule.inspect} variant #{variant.inspect} (ADR-116 WD5)"
           end
         end
         EMPTY = [].freeze
@@ -150,21 +152,37 @@ module Rigor
 
       # Walks `root` once for every collector, from `context` (a file's top level by default).
       def run(root, collectors, context = Context.root)
-        Traversal.new(collectors).walk(root, collectors, context)
+        Traversal.for(collectors).walk(root, collectors, context)
         collectors
       end
 
       # One run's dispatch: which events any collector overrides, so an event none of them handles costs no
       # call per node.
       class Traversal
+        # The traversal for `collectors`. A single-collector run's depends on the collector's class alone, so
+        # the main Ractor builds it once per class (the #1055 pattern in `FactStore::Target.local`); every
+        # other run builds its own.
+        def self.for(collectors)
+          return new(collectors) unless collectors.size == 1 && Ractor.main?
+
+          @single_runs[collectors.first.class] ||= new(collectors)
+        end
+        @single_runs = {}.compare_by_identity
+
         def initialize(collectors)
-          handled = collectors.map { |collector| Collector.events_of(collector.class) }
-          @declarations = handled.any? { |events| events.include?(:on_declaration) }
-          @defs = handled.any? { |events| events.include?(:on_def) }
-          @calls = handled.any? { |events| events.include?(:on_call) }
-          @constant_writes = handled.any? { |events| events.include?(:on_constant_write) }
+          @declarations = handles?(collectors, :on_declaration)
+          @defs = handles?(collectors, :on_def)
+          @calls = handles?(collectors, :on_call)
+          @constant_writes = handles?(collectors, :on_constant_write)
           collectors.each { |collector| Collector.check_variants!(collector.class) }
           @ordinary_factories = collectors.any? { |collector| ordinary_factory?(collector) }
+          @unnamed_factories = !collectors.all? { |collector| ordinary_factory?(collector) }
+          # Only a run that mixes the variants keeps its collectors, which a cached single-collector
+          # traversal must not hold on to.
+          if @ordinary_factories && @unnamed_factories
+            @run = collectors
+            @factory_groups = factory_groups(collectors)
+          end
           @alone = alone_table(collectors)
           freeze
         end
@@ -172,7 +190,17 @@ module Rigor
         def walk(node, collectors, context) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return unless node.is_a?(Prism::Node)
 
+          # The arms are disjoint node classes, so their order is only a cost: the commonest kind is tried first.
           case node
+          when Prism::CallNode
+            collectors = descending(collectors) { |c| c.on_call(node, context) } if @calls
+            return if collectors.empty?
+            # Both block arms need a literal block, which most calls lack.
+            return if node.block.is_a?(Prism::BlockNode) &&
+                      (walk_factory_call?(node, collectors, context) || walk_eval_call?(node, collectors, context))
+          when Prism::DefNode
+            collectors = descending(collectors) { |c| c.on_def(node, context) } if @defs
+            return if collectors.empty?
           when Prism::ClassNode, Prism::ModuleNode
             return if walk_declaration?(node, collectors, context)
           when Prism::SingletonClassNode
@@ -181,19 +209,23 @@ module Rigor
                Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode
             collectors = descending(collectors) { |c| c.on_constant_write(node, context) } if @constant_writes
             return if collectors.empty? || walk_meta_new_write?(node, collectors, context)
-          when Prism::DefNode
-            collectors = descending(collectors) { |c| c.on_def(node, context) } if @defs
-            return if collectors.empty?
-          when Prism::CallNode
-            collectors = descending(collectors) { |c| c.on_call(node, context) } if @calls
-            return if collectors.empty? || walk_factory_call?(node, collectors, context) ||
-                      walk_eval_call?(node, collectors, context)
           end
 
           node.rigor_each_child { |child| walk(child, collectors, context) }
         end
 
         private
+
+        def handles?(collectors, event)
+          collectors.any? { |collector| Collector.events_of(collector.class).include?(event) }
+        end
+
+        # The run's collectors split by `factory_block` variant, `[unnamed_self, ordinary_call]`, built once
+        # for a run that mixes them; a subset left by a decline is split on demand.
+        def factory_groups(collectors)
+          ordinary, unnamed = collectors.partition { |collector| ordinary_factory?(collector) }
+          [unnamed.freeze, ordinary.freeze].freeze
+        end
 
         # Each collector alone, for a pair of collectors in which one declines a node — the whole run, or what
         # is left of a larger one. nil for a single-collector run, which never needs it.
@@ -262,25 +294,37 @@ module Rigor
           true
         end
 
-        # The `factory_block` rule. False when every collector here follows `:ordinary_call`, so the call
-        # walks its children like any call; otherwise the `:unnamed_self` collectors take the factory arm and
-        # any `:ordinary_call` ones then walk the children on their own.
+        # The `factory_block` rule, for a call with a literal block. False when every collector here follows
+        # `:ordinary_call`, so the call walks its children like any call. Otherwise the receiver and arguments
+        # are walked once, for every collector, since both variants walk them under the enclosing context;
+        # the variants part only at the block: the `:unnamed_self` collectors walk its body with an unnamed
+        # `self`, the `:ordinary_call` ones the whole block, parameters included, under the enclosing context.
+        # Each collector sees the same events in the same order as in a run of its own.
         def walk_factory_call?(node, collectors, context)
-          block = node.block
-          return false unless block.is_a?(Prism::BlockNode) && ScopeIndexer.meta_new_constant_rvalue?(node)
+          return false unless @unnamed_factories && ScopeIndexer.meta_new_constant_rvalue?(node)
 
-          unnamed = @ordinary_factories ? collectors.reject { |c| ordinary_factory?(c) } : collectors
+          unnamed = unnamed_factory_group(collectors)
           return false if unnamed.empty?
 
-          walk(node.receiver, unnamed, context)
-          node.arguments&.arguments&.each { |argument| walk(argument, unnamed, context) }
-          body = block.body
-          walk(body, unnamed, context.factory_body) if body
-          if unnamed.size < collectors.size
-            ordinary = collectors.select { |c| ordinary_factory?(c) }
-            node.rigor_each_child { |child| walk(child, ordinary, context) }
-          end
+          walk(node.receiver, collectors, context)
+          node.arguments&.arguments&.each { |argument| walk(argument, collectors, context) }
+          block = node.block
+          walk(block.body, unnamed, context.factory_body) if block.body
+          walk(block, ordinary_factory_group(collectors), context) if unnamed.size < collectors.size
           true
+        end
+
+        def unnamed_factory_group(collectors)
+          return collectors unless @ordinary_factories
+          return @factory_groups.first if collectors.equal?(@run)
+
+          collectors.reject { |collector| ordinary_factory?(collector) }
+        end
+
+        def ordinary_factory_group(collectors)
+          return @factory_groups.last if collectors.equal?(@run)
+
+          collectors.select { |collector| ordinary_factory?(collector) }
         end
 
         def walk_eval_call?(node, collectors, context)

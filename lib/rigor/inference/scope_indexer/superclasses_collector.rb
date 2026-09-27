@@ -28,6 +28,9 @@ module Rigor
 
         def initialize
           @accumulator = { superclasses: {}, header_nestings: {} }
+          # Read through the class, as the walk reads `factory_block`, so a subclass that overrides `VARIANTS`
+          # gets one answer from both.
+          @path_variant = DeclarationWalk::Collector.variant_of(self.class, :anonymous_class_path)
         end
 
         # A header that still names its class records its ancestry: an unnameable one (`class D` below
@@ -40,9 +43,13 @@ module Rigor
           DeclarationWalk::DESCEND
         end
 
+        # Only a `Class.new(Parent) { … }` with a literal block records anything, so a call without one is
+        # passed over before the path is looked up.
         def on_call(node, context)
-          path = context.anonymous_class_path(VARIANTS.fetch(:anonymous_class_path))
-          ScopeIndexer.record_anonymous_meta_superclass(node, @accumulator[:superclasses], path)
+          if node.block.is_a?(Prism::BlockNode)
+            path = context.anonymous_class_path(@path_variant)
+            ScopeIndexer.record_anonymous_meta_superclass(node, @accumulator[:superclasses], path)
+          end
           DeclarationWalk::DESCEND
         end
 

@@ -3860,13 +3860,26 @@ module Rigor
       # Both are precision-only. A `...` outside a forwarding frame (unreachable in valid Ruby) and a double
       # splat of anything but a Symbol-keyed closed `HashShape` — a shapeless `Hash[Symbol, V]`, an opaque
       # value, a mixed hash — fall back to exactly the pre-#1125 answer.
+      #
+      # Only a list holding a `...` takes the flat_map. Every call is typed through here, and the flat_map's
+      # one-element Array per argument cost `rigor check lib` about 315K allocations
+      # ([#1503](https://github.com/rigortype/rigor/issues/1503)).
       def call_arg_types(node)
         arguments_node = node.arguments
         return [] if arguments_node.nil?
 
-        arguments_node.arguments.flat_map do |argument|
+        arguments = arguments_node.arguments
+        return arguments.map { |argument| call_arg_type(argument) } unless forwards_arguments?(arguments)
+
+        arguments.flat_map do |argument|
           forwarded_argument_types(argument) || [call_arg_type(argument)]
         end
+      end
+
+      # Whether a call's argument list holds `...`. Ruby accepts it only last, but the scan does not rely on
+      # that, so a list Prism recovered from a syntax error expands the way it always has.
+      def forwards_arguments?(arguments)
+        arguments.any?(Prism::ForwardingArgumentsNode)
       end
 
       # The frame's argument list when `argument` is `...`, else nil so the caller types it normally.

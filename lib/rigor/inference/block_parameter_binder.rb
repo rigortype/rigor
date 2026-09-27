@@ -5,7 +5,6 @@ require "prism"
 require_relative "../type"
 require_relative "block_auto_splat"
 require_relative "multi_target_binder"
-require_relative "optimistic_origin"
 
 module Rigor
   module Inference
@@ -55,20 +54,16 @@ module Rigor
         reset_per_bind_state
       end
 
-      # The names the last {#bind} bound optimistically nil-free (see the class comment).
+      # The names the last {#bind} bound optimistically nil-free (see the class comment). Read-only: it is a
+      # shared frozen empty when the bind marked nothing.
       attr_reader :optimistic
 
       # Binds the block's parameters into `scope`: {#bind}'s types through `Scope#with_local`, then the
-      # optimistic mark for every name in {#optimistic}, after the binding for the reason
-      # {MultiTargetBinder::Result#apply_to} gives. It applies them itself rather than through a `Result`,
-      # which every block entry built only to apply at once ([#1504](https://github.com/rigortype/rigor/issues/1504)).
+      # optimistic mark for every name in {#optimistic}. It applies them through
+      # {MultiTargetBinder.apply_bindings} directly rather than through a `Result`, which every block entry
+      # built only to apply at once ([#1504](https://github.com/rigortype/rigor/issues/1504)).
       def bind_onto(block_node, scope)
-        bound = scope
-        bind(block_node, scope: scope).each { |name, type| bound = bound.with_local(name, type) }
-        @optimistic.each do |name|
-          bound = bound.with_optimistic_local(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: nil)
-        end
-        bound
+        MultiTargetBinder.apply_bindings(scope, bind(block_node, scope: scope), @optimistic)
       end
 
       # @return ordered map from parameter name to bound type. Anonymous

@@ -3862,7 +3862,7 @@ module Rigor
       # value, a mixed hash — fall back to exactly the pre-#1125 answer.
       #
       # Only a list holding a `...` takes the flat_map. Every call is typed through here, and the flat_map's
-      # one-element Array per argument cost `rigor check lib` about 315K allocations
+      # one-element Array per argument cost `rigor check` about 315K allocations over the v0.3.9 `lib`
       # ([#1503](https://github.com/rigortype/rigor/issues/1503)).
       def call_arg_types(node)
         arguments_node = node.arguments
@@ -3876,8 +3876,8 @@ module Rigor
         end
       end
 
-      # Whether a call's argument list holds `...`. Ruby accepts it only last, but the scan does not rely on
-      # that, so a list Prism recovered from a syntax error expands the way it always has.
+      # Whether a call's argument list holds `...`. Ruby accepts it only last; the scan checks every argument
+      # rather than rely on that.
       def forwards_arguments?(arguments)
         arguments.any?(Prism::ForwardingArgumentsNode)
       end

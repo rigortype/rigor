@@ -108,30 +108,35 @@ module Rigor
       # `index_targets` maps each `Prism::IndexTargetNode` to the value it stores; {#apply_to}
       # binds nothing for it.
       Result = Data.define(:types, :optimistic, :ivars, :optimistic_ivars, :index_targets) do
-        def initialize(types:, optimistic:, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES,
-                       index_targets: NO_BINDINGS)
+        def initialize(types:, optimistic:, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES, index_targets: NO_BINDINGS)
           super
         end
 
-        # Binds every name into `scope` and records the optimistic mark after the binding, since
-        # `Scope#with_local` / `Scope#with_ivar` drop any mark the name carried before. `miss` is what
-        # each marked slot answers on a miss (issue #1302): `nil` for every mark the binder makes itself —
-        # a short array pads with `nil`, and a `nil` destructures to `nil` — so only a caller whose
-        # right-hand side a miss can make something else passes another answer
-        # ({OptimisticOrigin.destructuring_miss}). It loops with `each`, since `reduce` allocates even over
-        # the empty collections most of the four are ([#1504](https://github.com/rigortype/rigor/issues/1504)).
+        # Binds every name into `scope` with its mark ({MultiTargetBinder.apply_bindings}).
         def apply_to(scope, miss: nil)
-          bound = scope
-          types.each { |name, type| bound = bound.with_local(name, type) }
-          ivars.each { |name, type| bound = bound.with_ivar(name, type) }
-          origin = OptimisticOrigin::IMPLICITLY_RETURNS_NIL
-          optimistic.each { |name| bound = bound.with_optimistic_local(name, origin, miss: miss) }
-          optimistic_ivars.each { |name| bound = bound.with_optimistic_ivar(name, origin, miss: miss) }
-          bound
+          MultiTargetBinder.apply_bindings(scope, types, optimistic, ivars:, optimistic_ivars:, miss:)
         end
       end
 
       module_function
+
+      # The one place bindings and their optimistic marks are applied, shared by {Result#apply_to} and
+      # `BlockParameterBinder#bind_onto`. Every name is bound into the scope `bound` and the mark recorded
+      # after the binding, since `Scope#with_local` / `Scope#with_ivar` drop any mark the name carried
+      # before; the answer is the bound scope. `miss` is what each marked slot answers on a miss (issue
+      # #1302): `nil` for every mark the binder makes itself — a short array pads with `nil`, and a `nil`
+      # destructures to `nil` — so only a caller whose right-hand side a miss can make something else passes
+      # another answer ({OptimisticOrigin.destructuring_miss}). It loops with `each`, since `reduce`
+      # allocates even over the empty collections most of the four are
+      # ([#1504](https://github.com/rigortype/rigor/issues/1504)).
+      def apply_bindings(bound, types, optimistic, ivars: NO_BINDINGS, optimistic_ivars: NO_NAMES, miss: nil)
+        types.each { |name, type| bound = bound.with_local(name, type) }
+        ivars.each { |name, type| bound = bound.with_ivar(name, type) }
+        origin = OptimisticOrigin::IMPLICITLY_RETURNS_NIL
+        optimistic.each { |name| bound = bound.with_optimistic_local(name, origin, miss: miss) }
+        optimistic_ivars.each { |name| bound = bound.with_optimistic_ivar(name, origin, miss: miss) }
+        bound
+      end
 
       # @param rhs_type — type of the right-hand side
       # @param scope — the scope the destructure is evaluated in, which answers the `to_ary`

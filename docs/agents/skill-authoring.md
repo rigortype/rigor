@@ -31,7 +31,7 @@ A change to a skill ships only after a `waza` review, in addition to the adversa
 [`contribution-flow.md`](contribution-flow.md) § "Landing a pull request". The agent reviewer reads the
 change against the repository; `waza` reads the skill as the routing and instruction surface an agent
 follows. Any change to a skill therefore takes a PR; only a typo-class fix (spelling, a broken link
-target) may go straight to `master`.
+target) may go straight to `master`, after a local `waza check`. Deleting a skill needs no `waza` run.
 
 Which commands run depends on what changed, in either skill tree:
 
@@ -40,10 +40,12 @@ Which commands run depends on what changed, in either skill tree:
 | `SKILL.md` | `waza check <skill-path>` and `waza quality <skill-path> --model <judge>` |
 | only `references/`, `scripts/`, or `evals/` | `waza check <skill-path>`. `waza quality` reads only `SKILL.md`, so it would score text the PR did not touch; the adversarial review carries the content. |
 
-A mechanical sweep across many skills (a path rename, a link fix) runs `waza check` on each and
-`waza quality` on one representative skill, named in the PR comment.
+A mechanical sweep across many skills runs `waza check` on each and `waza quality` on one
+representative skill, named in the PR comment. A sweep is mechanical only when it changes no
+`description:` and no instruction wording — paths, links, formatting. A sweep that rewrites
+descriptions or instructions runs `waza quality` on every changed `SKILL.md`.
 
-`waza quality` needs a GitHub Copilot login and the Flake's waza (0.38.7 since #1543); waza 0.31.0
+`waza quality` needs a GitHub Copilot login and the Flake's waza at 0.38.7 or later; waza 0.31.0
 returns `parsing judge response: no JSON found` for every judge. Pick the strongest judge `waza models`
 lists that answers. If a named judge fails on the Copilot side (`model.call_failure` under `--debug`),
 fall back to `--model auto`; record which judge ran. The judge is non-deterministic and scores the same text
@@ -51,17 +53,21 @@ differently run to run, so read its feedback, not its number.
 
 Triage the output with the adversarial review's findings:
 
-- A `waza check` error — a spec failure or a broken link — is a defect; fix it.
+- Only two sections of `waza check` bind: "Spec Compliance" and "Links". A failure there is a
+  defect; fix it. The ❌ lines under Compliance Score, Token Budget, Advisory Checks, and the overall
+  verdict are publication-profile advisories and follow the next rule. A link check that fails for
+  lack of network is "`waza` cannot run", not a defect.
 - `waza quality` output is advisory and never severe on its own. Adopt an item only when it identifies
   a real defect independent of the agentskills.io publication profile; Rigor's comprehensive workflows
   do not need to be reshaped for its token budget or labels, and a low completeness score for detail
   kept in `references/` is the progressive disclosure this guide asks for. The adversarial reviewer
   may promote an item to severe. See [ADR-81](../adr/81-skill-set-optimization.md) for the standing
   calibration.
-- Re-running `waza` after a fix round is part of that round's delta review; it never opens a round by
-  itself and counts toward the three-round cap.
+- Re-running `waza` after a fix round is part of that round's delta review, not a separate round, and
+  never opens one by itself.
 
-Post the judge, the scores, and what you adopted or rejected, with reasons, as a PR comment. If `waza`
+Post the commit scored, the judge, the scores, and what you adopted or rejected, with reasons, as a
+PR comment. If `waza`
 cannot run — not installed, too old, no Copilot login, every judge fails — say so in the PR and leave
 it Draft. A session where `waza` runs clears it by running the review and posting the comment; the
 review is never skipped silently.

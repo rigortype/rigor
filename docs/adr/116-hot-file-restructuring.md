@@ -3,7 +3,7 @@
 Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5 is in
 progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
 `class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
-on the walk. Its third (slice 3: the def-nesting and member-layout tables) makes the walk shared: it
+on the walk. Its third (#1527: the def-nesting and member-layout tables) makes the walk shared: it
 builds five tables in one run per file. This ADR fixes the direction, the three criteria, and the
 slice order (WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by
 #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus
@@ -190,7 +190,7 @@ never chooses the cut.
         `:whole_file` is the walk's rule; `:outside_class_bodies` drops the path inside class/module,
         meta-new and eval-family bodies but not in `class <<` (#1521 item 11). It needed two context
         fields, `source_path` and a `class_body` latch. No event was added.
-    - *The first shared walk (slice 3).*
+    - *The first shared walk (slice 3, #1527).*
       - `ScopeIndexer.declaration_walk_tables` runs three collectors in one walk of a file:
         `SuperclassesCollector`, `DefNestingsCollector` (for `walk_def_nestings`) and
         `MemberLayoutsCollector` (for `walk_data_member_layouts` and `walk_struct_member_layouts`,

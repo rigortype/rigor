@@ -31,5 +31,6 @@ stale_pct: 15
 # the PR's engine may allocate over the base's engine, both reading the base's `lib`, before the job warns. It
 # never fails the build. Unlike the bands above it compares two engines on ONE corpus, so corpus growth drops
 # out and a band this tight is meaningful: allocations repeat to a few hundred objects, and each of the largest
-# steps in v0.4.0's +19.1% engine cost (#1469: #1135, #1096, #1166) was above 1% and inside the +5% band above.
+# steps in v0.4.0's +19.1% engine cost (#1469: #1135, #1096, #1166) was above 1%. The release gate saw none of
+# them: it runs only at a cut, over a `lib` that grows with every PR.
 pr_allocations_pct: 1

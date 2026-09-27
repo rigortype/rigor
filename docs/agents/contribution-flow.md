@@ -55,14 +55,16 @@ Once the change is implemented and `make verify-changed` passes:
    issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the
    release gate — a subagent does not inherit them). Ask for findings ranked by severity, each with
    a concrete failure scenario, and scope expansion labelled separately.
-3. **Triage.** Fix correctness defects and test gaps. Fix text and nits without calling for another
-   round. File scope expansion as issues rather than growing the PR. Answer a finding you reject
-   with the reason in a PR comment; rejecting a *severe* finding is a decision for the user, so the
-   PR stays Draft. Severity is the reviewer's ranking, not the implementer's. Severe means what
-   AGENTS.md's false-positive rule weighs: a diagnostic on correct code, a wrong inferred type, a
-   crash, a gate that passes without checking, or guidance that would lead an agent into a wrong
-   irreversible or gate-skipping action (a merge, a push, a publish, a skipped gate). Imprecise or
-   unclear wording is not severe.
+3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
+   too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a finding, fixed
+   or answered with the reason in a PR comment like any other. Fix correctness defects and test gaps.
+   Fix text and nits without calling for another round. File scope expansion as issues rather than
+   growing the PR. Answer a finding you reject with the reason in a PR comment; rejecting a *severe*
+   finding is a decision for the user, so the PR stays Draft. Severity is the reviewer's ranking, not
+   the implementer's. Severe means what AGENTS.md's false-positive rule weighs: a diagnostic on correct
+   code, a wrong inferred type, a crash, a gate that passes without checking, or guidance that would
+   lead an agent into a wrong irreversible or gate-skipping action (a merge, a push, a publish, a
+   skipped gate). Imprecise or unclear wording is not severe.
 4. **Another round only if this round's fixes addressed a severe defect.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in

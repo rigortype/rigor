@@ -2,8 +2,8 @@
 
 Files that drive the `make bench-perf` perf-regression gate
 ([ADR-50](../docs/adr/50-release-engineering-and-stability-strategy.md) WD4),
-run as an advisory job in the release gate
-(`.github/workflows/release-gate.yml`).
+run as a job in the release gate (`.github/workflows/release-gate.yml`),
+where it is a hard gate once the baseline is calibrated.
 
 | File | Purpose |
 |---|---|
@@ -46,16 +46,23 @@ baseline. Treat it as a request for a reviewed refresh, not a failure.
 
 ## The per-PR engine A/B
 
-The release gate above measures a `lib` that grows with every pull request, so
-its band cannot tell corpus growth from engine cost. The advisory
-"Engine allocations" CI job (`tool/engine_alloc_ab.rb`, #1507) answers the
-engine half on every PR that touches `lib/`, `data/` or `plugins/`: the merge
-base's engine and the PR's engine each run `rigor check --no-cache lib` over the
-merge base's tree, in fresh processes, and the job summary reports the delta.
-It warns past `pr_allocations_pct` in `thresholds.yml` and never fails the PR.
+The release gate above runs only at a cut, over a `lib` that grows with every
+pull request, so its band cannot tell corpus growth from engine cost. The
+advisory "Engine allocations" CI job (`tool/engine_alloc_ab.rb`, #1507) answers
+the engine half on each PR: the merge base's engine and the PR's engine each
+run `rigor check --no-cache lib` over the merge base's tree, in fresh
+processes, and the job summary reports the delta. It warns past
+`pr_allocations_pct` in `thresholds.yml` and never fails the PR.
 
-The same comparison runs locally, including against uncommitted work:
+It measures only what that run executes. Rigor's own configuration loads no
+plugin, so of `plugins/` only the rbs-inline ingestion the engine runs by
+default is measured; a PR that touches none of `lib/`, `data/` and
+`plugins/rigor-rbs-inline/` is skipped rather than reported as a zero.
+
+The same comparison runs locally, including against uncommitted work. Measure
+from the merge base, not `origin/master`: a base the branch did not start from
+charges the work with every engine change merged since.
 
 ```sh
-bundle exec ruby tool/engine_alloc_ab.rb --base origin/master --head WORKTREE
+nix develop --command bash -c 'bundle exec ruby tool/engine_alloc_ab.rb --base "$(git merge-base origin/master HEAD)" --head WORKTREE'
 ```

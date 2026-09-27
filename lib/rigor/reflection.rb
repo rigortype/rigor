@@ -322,8 +322,7 @@ module Rigor
     # ({Analysis::Incremental.changed_constant_publications}). Gated by the caller on the recorder being
     # active, so an ordinary run pays one integer read.
     def record_constant_reference(name)
-      segment = name.delete_prefix("::").split("::").last
-      Analysis::DependencyRecorder.read_name(:constant, segment) if segment
+      Analysis::DependencyRecorder.read_last_segment(:constant, name)
     end
     private_class_method :record_constant_reference
 

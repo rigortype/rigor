@@ -22,12 +22,33 @@ module Rigor
       # It is a STACK because captures nest (a memoised callee body evaluating another memo-miss callee): an
       # outer capture must also see the inner window's reads, or its read-set would be non-transitive and a
       # later replay would drop the nested callee's edges.
+      #
+      # Every event reaches every capture open at the time, so an inner capture's sets are always a subset of
+      # each outer one's: the inner capture was pushed after the outer, and everything added since reached both.
+      # {withhold} swaps in a fresh stack and restores this one untouched, so it keeps the property too.
+      # {tee_read} and {tee_missing} rely on it to stop at the first capture that already holds an event.
       CAPTURE_KEY = :__rigor_dependency_capture_stack__
       private_constant :CAPTURE_KEY
 
+      # The read sets an {Accumulator} or {Capture} already holds in full, by identity: replayed into it, or
+      # captured by a window it saw every event of ({capture}). Both only ever grow and a {ReadSet} is frozen,
+      # so replaying such a set into the same target again adds nothing. Recording replays the same stored
+      # read set many times over: on Rigor's own `lib`, 71% of the replays into a consumer repeated one
+      # already made into it, carrying 65% of the replayed events.
+      module ReplayMemory
+        def first_replay?(read_set)
+          replayed = (@replayed ||= {}.compare_by_identity)
+          return false if replayed.key?(read_set)
+
+          replayed[read_set] = true
+        end
+      end
+
       # Mutable per-consumer accumulator. Frozen into a {Record} snapshot when `record_for` returns.
       class Accumulator
-        attr_reader :consumer, :sources, :missing, :symbol_sources, :ancestry_sources
+        include ReplayMemory
+
+        attr_reader :consumer, :sources, :missing, :symbol_sources, :ancestry_sources, :suspensions
 
         def initialize(consumer)
           @consumer = consumer
@@ -39,6 +60,14 @@ module Rigor
           # file-granularity by nature (a superclass edge touches the whole class).
           @symbol_sources = Hash.new { |h, k| h[k] = Set.new }
           @ancestry_sources = Set.new
+          @replayed = nil
+          @suspensions = 0
+        end
+
+        # Counts the {record_for} windows of another consumer opened while this one was recording, which is
+        # when a capture window stops seeing only this consumer's events.
+        def suspend!
+          @suspensions += 1
         end
 
         def snapshot
@@ -67,11 +96,14 @@ module Rigor
 
       # Mutable capture accumulator; snapshot into a frozen {ReadSet} when the capture window closes.
       class Capture
+        include ReplayMemory
+
         attr_reader :reads, :missing
 
         def initialize
           @reads = Set.new
           @missing = Set.new
+          @replayed = nil
         end
 
         def snapshot
@@ -94,6 +126,7 @@ module Rigor
       # the previous recorder on exit.
       def record_for(consumer)
         previous = Thread.current[KEY]
+        previous&.suspend!
         accumulator = Accumulator.new(consumer.to_s)
         Thread.current[KEY] = accumulator
         @mutex.synchronize { @active_count += 1 }
@@ -109,6 +142,13 @@ module Rigor
         @active_count.positive?
       end
 
+      # Whether THIS thread's reads reach an accumulator: inside {record_for}, including a {withhold}
+      # window. {active?} answers for the process and is the cheap gate; this is the exact one, for a caller
+      # that must know whether an empty {capture} means "nothing to record" or "nothing was watching".
+      def recording?
+        !Thread.current[KEY].nil?
+      end
+
       # ADR-84 WD2 — runs the block under an observe-and-forward capture window and returns
       # `[block_result, read_set]`. Reads recorded during the window reach the current consumer's accumulator
       # unchanged (forwarding) and are additionally collected into the returned frozen {ReadSet} (observing),
@@ -116,6 +156,8 @@ module Rigor
       # {active?}; opening a capture with no accumulator active would collect reads no run is recording.
       def capture
         captures = (Thread.current[CAPTURE_KEY] ||= [])
+        accumulator = Thread.current[KEY]
+        suspensions = accumulator&.suspensions
         capture = Capture.new
         captures.push(capture)
         begin
@@ -123,8 +165,25 @@ module Rigor
         ensure
           captures.pop
         end
-        [result, capture.snapshot]
+        read_set = capture.snapshot
+        note_captured(read_set, captures, accumulator, suspensions)
+        [result, read_set]
       end
+
+      # Every event a window saw also reached the window outside it, and was filed for the consumer that was
+      # recording at the time, except the consumer's own self-reads, which a replay into that consumer drops
+      # anyway. So the enclosing window holds the closed window's read set in full, and so does the consumer's
+      # accumulator when no other consumer recorded in between. Noting that lets a later replay of the set
+      # there skip a pass that could add nothing: on Rigor's own `lib`, two thirds of the first replays into a
+      # consumer were of a set captured while that consumer was recording.
+      def note_captured(read_set, captures, accumulator, suspensions)
+        captures.last&.first_replay?(read_set)
+        return unless accumulator && Thread.current[KEY].equal?(accumulator)
+        return unless accumulator.suspensions == suspensions
+
+        accumulator.first_replay?(read_set)
+      end
+      private_class_method :note_captured
 
       # Issue #992 — runs the block with its reads DETACHED from the current consumer (and from any enclosing
       # capture) and returns `[block_result, read_set]`, so a caller that learns only afterwards whether its
@@ -157,18 +216,45 @@ module Rigor
         return if accumulator.nil? || read_set.nil?
 
         captures = Thread.current[CAPTURE_KEY]
-        read_set.reads.each do |pair|
-          captures&.each { |c| c.reads.add(pair) }
-          path, symbol = pair
-          next if path == accumulator.consumer
+        tee_read_set(captures, read_set) if captures && !captures.empty?
+        # Each set keeps its own insertion order whichever target is filled first, and a skipped replay is one
+        # that could only have re-added what the target already holds.
+        return unless accumulator.first_replay?(read_set)
 
-          accumulate_read(accumulator, path, symbol)
+        consumer = accumulator.consumer
+        read_set.reads.each do |pair|
+          path, symbol = pair
+          accumulate_read(accumulator, path, symbol) unless path == consumer
         end
-        read_set.missing.each do |entry|
-          captures&.each { |c| c.missing.add(entry) }
-          accumulator.missing << entry
-        end
+        missing = accumulator.missing
+        read_set.missing.each { |entry| missing << entry }
       end
+
+      # {replay}'s share for the open captures. The innermost capture having seen `read_set` already means every
+      # open capture holds all of it (see CAPTURE_KEY).
+      def tee_read_set(captures, read_set)
+        return unless captures.last.first_replay?(read_set)
+
+        read_set.reads.each { |pair| tee_read(captures, pair) }
+        read_set.missing.each { |entry| tee_missing(captures, entry) }
+      end
+      private_class_method :tee_read_set
+
+      # Adds a read pair to the open captures, innermost first, and stops at the first capture that already holds
+      # it: every capture outside that one holds it too (see CAPTURE_KEY). The capture sets end up exactly as
+      # adding it to every capture would leave them, in the same insertion order.
+      def tee_read(captures, pair)
+        index = captures.size - 1
+        index -= 1 while index >= 0 && captures[index].reads.add?(pair)
+      end
+      private_class_method :tee_read
+
+      # {tee_read} for a name-keyed `missing` entry.
+      def tee_missing(captures, entry)
+        index = captures.size - 1
+        index -= 1 while index >= 0 && captures[index].missing.add?(entry)
+      end
+      private_class_method :tee_missing
 
       # Records that the current consumer read a declaration / body whose definition site is `path_line` (a
       # `"path:line"` String, or nil). When `symbol` is given (a `"ClassName#method"` String), the read is a
@@ -181,15 +267,25 @@ module Rigor
         accumulator = Thread.current[KEY]
         return if accumulator.nil? || path_line.nil?
 
-        path = path_line.split(":", 2).first
+        path = site_path(path_line)
         return unless path
 
         captures = Thread.current[CAPTURE_KEY]
-        captures&.each { |c| c.reads.add([path, symbol].freeze) }
+        tee_read(captures, [path, symbol].freeze) if captures && !captures.empty?
         return if path == accumulator.consumer
 
         accumulate_read(accumulator, path, symbol)
       end
+
+      # The path part of a `"path:line"` site: what `path_line.split(":", 2).first` answers, without the Array
+      # and the discarded line String.
+      def site_path(path_line)
+        colon = path_line.byteindex(":")
+        return path_line.byteslice(0, colon) if colon
+
+        path_line.empty? ? nil : path_line.dup
+      end
+      private_class_method :site_path
 
       # Records a NAME-KEYED cross-file dependency: this consumer's answer depends on what the project makes
       # of `name` under `kind`, so a recheck must re-analyze it when that changes. The recorded key is
@@ -206,9 +302,37 @@ module Rigor
         return if accumulator.nil?
 
         entry = "#{kind}:#{name}"
-        Thread.current[CAPTURE_KEY]&.each { |c| c.missing.add(entry) }
+        captures = Thread.current[CAPTURE_KEY]
+        tee_missing(captures, entry) if captures && !captures.empty?
         accumulator.missing.add(entry)
       end
+
+      # {read_name} keyed on the LAST SEGMENT of a constant path, `name.delete_prefix("::").split("::").last`,
+      # which is the key the `class:` and `constant:` name edges use. The segment is found by scanning for the
+      # last separator rather than by building every segment: on Rigor's own `lib` that split cost about seven
+      # objects a call over half a million calls. A name the scan could read differently from `split` (one
+      # that is not ASCII, or carries a run of colons or a trailing one) takes `split`'s answer.
+      def read_last_segment(kind, name)
+        return if Thread.current[KEY].nil?
+
+        segment = last_segment(name)
+        read_name(kind, segment) if segment
+      end
+
+      def last_segment(name)
+        return name.delete_prefix("::").split("::").last unless plain_constant_path?(name)
+
+        start = name.start_with?("::") ? 2 : 0
+        separator = name.rindex("::")
+        cut = separator && separator >= start ? separator + 2 : start
+        cut == name.bytesize ? nil : name.byteslice(cut, name.bytesize - cut)
+      end
+      private_class_method :last_segment
+
+      def plain_constant_path?(name)
+        name.ascii_only? && !name.end_with?(":") && !name.include?(":::")
+      end
+      private_class_method :plain_constant_path?
 
       # The miss-only spelling of {read_name}: a cross-file lookup of `name` (kind `:method` / `:class` /
       # `:toplevel` / …) that resolved to nothing. Kept as the name the internal spec's negative-edge
@@ -217,13 +341,14 @@ module Rigor
         read_name(kind, name)
       end
 
-      # The positive-edge aggregation shared by {read_site} and {replay}.
+      # The positive-edge aggregation shared by {read_site} and {replay}. `sources` is the union of the other
+      # two tables' paths, and this is the only writer of all three, so a read the finer table already holds is
+      # already in `sources` and costs one Set probe instead of two.
       def accumulate_read(accumulator, path, symbol)
-        accumulator.sources << path
         if symbol
-          accumulator.symbol_sources[path] << symbol
-        else
-          accumulator.ancestry_sources << path
+          accumulator.sources << path if accumulator.symbol_sources[path].add?(symbol)
+        elsif accumulator.ancestry_sources.add?(path)
+          accumulator.sources << path
         end
       end
       private_class_method :accumulate_read

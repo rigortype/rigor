@@ -11,6 +11,10 @@ module Rigor
     ANCESTOR_SCOPES_KEY = :__rigor_ancestor_constant_scopes__
     private_constant :ANCESTOR_SCOPES_KEY
 
+    # The recording run's slot. See {.recorded_ancestor_constant_scopes}.
+    RECORDED_ANCESTOR_SCOPES_KEY = :__rigor_recorded_ancestor_constant_scopes__
+    private_constant :RECORDED_ANCESTOR_SCOPES_KEY
+
     module_function
 
     # #354 — the project classes and modules whose own constants `class_name` inherits, in Ruby's
@@ -32,9 +36,9 @@ module Rigor
     def ancestor_constant_scopes(class_name, scope)
       # ADR-46: `superclass_of` / `includes_of` record a cross-file class dependency per consumer
       # file, and the memo is run-scoped rather than file-scoped — a hit would skip the recording and
-      # under-record the edge for every later file. Recording runs are rare (incremental only), so
-      # they simply bypass the memo rather than complicate its key.
-      return compute_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
+      # under-record the edge for every later file. A recording run uses its own memo, which replays
+      # the edges on a hit.
+      return recorded_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
 
       generation = scope.run_generation || scope.discovered_superclasses
       slot = Thread.current[ANCESTOR_SCOPES_KEY]
@@ -46,6 +50,30 @@ module Rigor
       bucket.fetch(class_name) { bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) }
     end
     private_class_method :ancestor_constant_scopes
+
+    # The recording run's memo. The walk files one class edge per class it visits, through
+    # `Scope#includes_of` and again through `#superclass_of`, which adds nothing the first did not, and
+    # it visits `class_name` and then each ancestor it answers, in answer order. A hit therefore files
+    # the edges of exactly those classes in that order, the read sequence a recomputation would make, and
+    # skips only the name resolution, which records nothing. One slot keyed on the discovery index:
+    # the answer and the edges are both read from it, so the key is exact, and the slot never pins more
+    # than the index it serves.
+    def recorded_ancestor_constant_scopes(class_name, scope)
+      discovery = scope.discovery
+      slot = Thread.current[RECORDED_ANCESTOR_SCOPES_KEY]
+      unless slot && slot[0].equal?(discovery)
+        slot = [discovery, {}]
+        Thread.current[RECORDED_ANCESTOR_SCOPES_KEY] = slot
+      end
+      bucket = slot[1]
+      scopes = bucket[class_name]
+      return bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) if scopes.nil?
+
+      scope.superclass_of(class_name)
+      scopes.each { |ancestor| scope.superclass_of(ancestor) }
+      scopes
+    end
+    private_class_method :recorded_ancestor_constant_scopes
 
     def compute_ancestor_constant_scopes(class_name, scope)
       queue = [class_name]

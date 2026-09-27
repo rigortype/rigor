@@ -43,10 +43,10 @@ Which commands run depends on what changed, in either skill tree:
 A mechanical sweep across many skills (a path rename, a link fix) runs `waza check` on each and
 `waza quality` on one representative skill, named in the PR comment.
 
-`waza quality` needs waza 0.33.0 or later and a GitHub Copilot login; waza 0.31.0 returns `parsing
-judge response: no JSON found` for every judge. Pick the strongest judge `waza models` lists that
-answers. A named judge can fail on the Copilot side (`model.call_failure` under `--debug`) while
-`--model auto` works; record which judge ran. The judge is non-deterministic and scores the same text
+`waza quality` needs a GitHub Copilot login and the Flake's waza (0.38.7 since #1543); waza 0.31.0
+returns `parsing judge response: no JSON found` for every judge. Pick the strongest judge `waza models`
+lists that answers. If a named judge fails on the Copilot side (`model.call_failure` under `--debug`),
+fall back to `--model auto`; record which judge ran. The judge is non-deterministic and scores the same text
 differently run to run, so read its feedback, not its number.
 
 Triage the output with the adversarial review's findings:

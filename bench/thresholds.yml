@@ -26,3 +26,10 @@ rss_pct: 10
 # saying so. Allocations only; wall and RSS drift with runner noise and would
 # make this fire spuriously.
 stale_pct: 15
+
+# The per-PR engine A/B (`tool/engine_alloc_ab.rb`, the advisory "Engine allocations" CI job, #1507): how far
+# the PR's engine may allocate over the base's engine, both reading the base's `lib`, before the job warns. It
+# never fails the build. Unlike the bands above it compares two engines on ONE corpus, so corpus growth drops
+# out and a band this tight is meaningful: allocations repeat to a few hundred objects, and each of the largest
+# steps in v0.4.0's +19.1% engine cost (#1469: #1135, #1096, #1166) was above 1% and inside the +5% band above.
+pr_allocations_pct: 1

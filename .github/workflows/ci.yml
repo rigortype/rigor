@@ -762,6 +762,49 @@ jobs:
       - name: Run rigor self-check under the bleeding-edge overlay
         run: bundle exec exe/rigor check --bleeding-edge --fail-on=warning lib
 
+  # ── Engine allocation A/B (advisory, #1507) ─────────────────────
+  # The PR's engine and its merge base's engine each run `rigor check
+  # --no-cache lib` over the MERGE BASE's tree, so corpus growth drops
+  # out and the delta is the engine's own cost. The release gate's
+  # `make bench-perf` measures a `lib` that grows with every PR and
+  # gates it at +5%; v0.4.0's +19.1% engine cost (#1469) accumulated
+  # inside that band one step at a time. This job warns past
+  # `pr_allocations_pct` in bench/thresholds.yml and never fails a PR
+  # for a regression, so it is deliberately NOT in the `required`
+  # fan-in below. The tool skips itself when the PR does not touch
+  # `lib/`, `data/` or `plugins/`, and exits non-zero only when an
+  # engine run itself fails.
+  engine-allocations:
+    name: Engine allocations (advisory)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Compare the merge base's engine with the PR's
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # The merge base, not the base branch's tip: a PR branched from
+          # an older master would otherwise be charged with every engine
+          # change merged since.
+          merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          bundle exec ruby tool/engine_alloc_ab.rb --base "$merge_base" --head "$HEAD_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather
   # than each individual job. New jobs added above are automatically

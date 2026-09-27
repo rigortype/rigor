@@ -127,6 +127,14 @@ cannot distinguish "correctly declined" from "never analysed" — both read as s
   answers stay correct and only the residue differs, so no diagnostic assertion can fail. Pin the
   storage shape (`spec/rigor/inference/class_graph_memo_slot_spec.rb`) and check the spec fails
   against the unbounded arm before trusting it.
+- **An engine A/B already exists.** `tool/engine_alloc_ab.rb --base REV --head REV|WORKTREE` runs two engines
+  over one frozen corpus (the base's tree by default), each in a fresh process with a load-path proof, and prints
+  the allocation delta; CI runs it on every engine PR as the advisory "Engine allocations" job. Reach for it
+  before building arms by hand. For a question it cannot answer (another corpus, a CPU profile), build arms as
+  it does: `git archive` each engine's `lib data plugins`, and run from the repository root so the bundle
+  resolves. In a CPU profile, prefer vernier to stackprof: stackprof's `:cpu` mode charges samples taken inside
+  a long C call (Prism's parse) to the next interrupt check, which made `IO.read` and `File.realpath` look hot
+  during #1507 when a direct count put them at a tenth of that.
 - **Keep the instrument.** A note in `docs/notes/` records the numbers, not the harness that produced
   them — the positive control, the trap-clearing flags, the classifier. Push the instrumented build
   as its own branch and name it in the note's limitations section; a follow-up question against the

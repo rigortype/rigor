@@ -43,3 +43,19 @@ the +5% band still permitted +44% over the true number. The gate only fails
 on regressions — an improvement is not one — so `make bench-perf` prints a
 `STALE` notice when allocations fall more than `stale_pct` below the
 baseline. Treat it as a request for a reviewed refresh, not a failure.
+
+## The per-PR engine A/B
+
+The release gate above measures a `lib` that grows with every pull request, so
+its band cannot tell corpus growth from engine cost. The advisory
+"Engine allocations" CI job (`tool/engine_alloc_ab.rb`, #1507) answers the
+engine half on every PR that touches `lib/`, `data/` or `plugins/`: the merge
+base's engine and the PR's engine each run `rigor check --no-cache lib` over the
+merge base's tree, in fresh processes, and the job summary reports the delta.
+It warns past `pr_allocations_pct` in `thresholds.yml` and never fails the PR.
+
+The same comparison runs locally, including against uncommitted work:
+
+```sh
+bundle exec ruby tool/engine_alloc_ab.rb --base origin/master --head WORKTREE
+```

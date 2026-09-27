@@ -1004,14 +1004,17 @@ module Rigor
           members.sort_by { |member| sort_key(member) }
         end
 
-        # A member's `describe(:short)`, rendered once per type instance. Every type is frozen once built, so
-        # an instance's rendering cannot change under the memo. The memo is identity-keyed and weak, so it
-        # keeps neither the type nor the string alive. A non-main Ractor may not read the module's ivar, so a
-        # pool worker renders the key every time, as every run did before.
+        # A member's `describe(:short)`, rendered at most once per type instance between garbage collections.
+        # No type carrier has a method that changes it once built (a built type is frozen; one `Marshal.load`
+        # restores is not, but nothing mutates it either), so a memoised key cannot go stale. The memo is weak
+        # in both key and value: it keeps neither the type nor the string alive, and an entry whose string
+        # nothing else holds is dropped at the next GC. It is keyed by identity on purpose: `Constant[0.0]` and
+        # `Constant[-0.0]` are equal and hash alike, but render differently. A non-main Ractor may not read the
+        # module's ivar, so a pool worker renders the key every time, as every run did before.
         def sort_key(member)
           return member.describe(:short) unless Ractor.main?
 
-          @sort_keys[member] ||= member.describe(:short).freeze
+          @sort_keys[member] ||= member.describe(:short)
         end
       end
 

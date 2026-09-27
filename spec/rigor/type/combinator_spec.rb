@@ -242,7 +242,7 @@ RSpec.describe Rigor::Type::Combinator do
     # give `sort_by`'s answer, including keeping a pair whose keys tie in the order it was given.
     describe "member order (#1505)" do
       def keyed(key)
-        instance_double(Rigor::Type::Top, describe: key, frozen?: true)
+        instance_double(Rigor::Type::Top, describe: key)
       end
 
       it "orders a pair by its members' short descriptions, either way round" do

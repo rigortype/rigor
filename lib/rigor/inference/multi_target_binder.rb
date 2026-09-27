@@ -118,16 +118,16 @@ module Rigor
         # each marked slot answers on a miss (issue #1302): `nil` for every mark the binder makes itself —
         # a short array pads with `nil`, and a `nil` destructures to `nil` — so only a caller whose
         # right-hand side a miss can make something else passes another answer
-        # ({OptimisticOrigin.destructuring_miss}).
+        # ({OptimisticOrigin.destructuring_miss}). It loops with `each`, since `reduce` allocates even over
+        # the empty collections most of the four are ([#1504](https://github.com/rigortype/rigor/issues/1504)).
         def apply_to(scope, miss: nil)
-          bound = types.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
-          bound = ivars.reduce(bound) { |acc, (name, type)| acc.with_ivar(name, type) }
-          bound = optimistic.reduce(bound) do |acc, name|
-            acc.with_optimistic_local(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: miss)
-          end
-          optimistic_ivars.reduce(bound) do |acc, name|
-            acc.with_optimistic_ivar(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: miss)
-          end
+          bound = scope
+          types.each { |name, type| bound = bound.with_local(name, type) }
+          ivars.each { |name, type| bound = bound.with_ivar(name, type) }
+          origin = OptimisticOrigin::IMPLICITLY_RETURNS_NIL
+          optimistic.each { |name| bound = bound.with_optimistic_local(name, origin, miss: miss) }
+          optimistic_ivars.each { |name| bound = bound.with_optimistic_ivar(name, origin, miss: miss) }
+          bound
         end
       end
 

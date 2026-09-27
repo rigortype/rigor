@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "block_auto_splat"
 require_relative "multi_target_binder"
+require_relative "optimistic_origin"
 
 module Rigor
   module Inference
@@ -58,10 +59,16 @@ module Rigor
       attr_reader :optimistic
 
       # Binds the block's parameters into `scope`: {#bind}'s types through `Scope#with_local`, then the
-      # optimistic mark for every name in {#optimistic}.
+      # optimistic mark for every name in {#optimistic}, after the binding for the reason
+      # {MultiTargetBinder::Result#apply_to} gives. It applies them itself rather than through a `Result`,
+      # which every block entry built only to apply at once ([#1504](https://github.com/rigortype/rigor/issues/1504)).
       def bind_onto(block_node, scope)
-        types = bind(block_node, scope: scope)
-        MultiTargetBinder::Result.new(types: types, optimistic: @optimistic.dup.freeze).apply_to(scope)
+        bound = scope
+        bind(block_node, scope: scope).each { |name, type| bound = bound.with_local(name, type) }
+        @optimistic.each do |name|
+          bound = bound.with_optimistic_local(name, OptimisticOrigin::IMPLICITLY_RETURNS_NIL, miss: nil)
+        end
+        bound
       end
 
       # @return ordered map from parameter name to bound type. Anonymous
@@ -90,14 +97,25 @@ module Rigor
 
       private
 
+      NO_POSITIONS = [].freeze
+      NO_NAMES = [].freeze
+      private_constant :NO_POSITIONS, :NO_NAMES
+
       # {#apply_auto_splat} rewrites the positional table for the block it is binding, so every {#bind} starts
       # from the declared types again; a binder reused across blocks must not see the previous block's splat.
+      # The two lists start as shared frozen empties, since most blocks mark nothing ({#mark_optimistic}).
       def reset_per_bind_state
         @expected_param_types = @declared_param_types
         @splat_rest_type = nil
-        @optimistic_positions = []
-        @optimistic = []
+        @optimistic_positions = NO_POSITIONS
+        @optimistic = NO_NAMES
         @scope = nil
+      end
+
+      # Records `name` as bound optimistically, allocating {#optimistic} on the first mark of a {#bind}.
+      def mark_optimistic(name)
+        @optimistic = [] if @optimistic.equal?(NO_NAMES)
+        @optimistic << name
       end
 
       # `|_1, _2|` numbered-parameter form. Prism exposes the implicit count through
@@ -106,13 +124,13 @@ module Rigor
       # positionals would, so the body's `LocalVariableReadNode` lookups see the same types and marks.
       def bind_numbered_parameters(numbered_node)
         arity = numbered_node.maximum
-        apply_auto_splat(BlockAutoSplat::ParameterShape.of_arity(arity))
+        apply_auto_splat { BlockAutoSplat::ParameterShape.of_arity(arity) }
 
         bindings = {}
         arity.times do |i|
           name = :"_#{i + 1}"
           bindings[name] = positional_type_at(i)
-          @optimistic << name if @optimistic_positions.include?(i)
+          mark_optimistic(name) if @optimistic_positions.include?(i)
         end
         bindings
       end
@@ -127,7 +145,7 @@ module Rigor
         params_node = params_root.parameters
         return {} if params_node.nil?
 
-        apply_auto_splat(BlockAutoSplat::ParameterShape.of(params_node))
+        apply_auto_splat { BlockAutoSplat::ParameterShape.of(params_node) }
 
         bindings = {}
         bind_positionals(params_node, bindings, 0)
@@ -152,9 +170,12 @@ module Rigor
       # and {BlockAutoSplat} answers a table for that value and `shape`. A multi-arg yield (e.g.
       # `each_with_index`'s `(element, index)` pair) is NOT auto-splatted — matching Ruby semantics where a
       # multi-arg yield to a `|a, b, c|` block fills the extra slot with nil rather than splatting any
-      # element.
-      def apply_auto_splat(shape)
+      # element. The block answers the parameter list's shape, built only past that test
+      # ([#1504](https://github.com/rigortype/rigor/issues/1504)).
+      def apply_auto_splat
         return unless @expected_param_types.size == 1
+
+        shape = yield
         return unless shape.splats?
 
         table = BlockAutoSplat.for(shape, @expected_param_types[0])
@@ -242,12 +263,12 @@ module Rigor
         case param
         when Prism::RequiredParameterNode
           bindings[param.name] = positional_type_at(cursor)
-          @optimistic << param.name if @optimistic_positions.include?(cursor)
+          mark_optimistic(param.name) if @optimistic_positions.include?(cursor)
         when Prism::MultiTargetNode
           nested = MultiTargetBinder.bind_marked(param, positional_type_at(cursor),
                                                  optimistic: @optimistic_positions.include?(cursor), scope: @scope)
           bindings.merge!(nested.types)
-          @optimistic.concat(nested.optimistic)
+          nested.optimistic.each { |name| mark_optimistic(name) }
         end
       end
 

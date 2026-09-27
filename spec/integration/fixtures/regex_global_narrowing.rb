@@ -2020,6 +2020,22 @@ def not_match_whole_receiver(raw)
   assert_type("decimal-int-string", digits)
 end
 
+# A subject that may be nil is refined too: nil never reaches the match edge (Ruby: "12" for
+# `not_match_nilable_subject("12")` and `not_match_nilable_argument("12")`).
+def not_match_nilable_subject(raw)
+  digits = raw ? String(raw) : nil
+  return if digits !~ /\A\d+\z/
+
+  assert_type("decimal-int-string", digits)
+end
+
+def not_match_nilable_argument(raw)
+  digits = raw ? String(raw) : nil
+  return if /\A\d+\z/ !~ digits
+
+  assert_type("decimal-int-string", digits)
+end
+
 # The refinement names a String, so a Symbol subject keeps its type (Ruby: `:"12"` for `not_match_symbol_subject("12")`).
 def not_match_symbol_subject(raw)
   name = String(raw).to_sym

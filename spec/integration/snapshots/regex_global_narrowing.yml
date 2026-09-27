@@ -220,22 +220,24 @@ assertions:
   '212': String
   '213': String?
   '214': decimal-int-string
-  '215': Symbol
-  '216': Dynamic[top]
-  '217': Dynamic[top]
-  '218': nil
-  '219': nil
-  '220': String
-  '221': String?
-  '222': MatchData
-  '223': nil
-  '224': String
-  '225': String?
+  '215': decimal-int-string
+  '216': decimal-int-string
+  '217': Symbol
+  '218': Dynamic[top]
+  '219': Dynamic[top]
+  '220': nil
+  '221': nil
+  '222': String
+  '223': String?
+  '224': MatchData
+  '225': nil
   '226': String
   '227': String?
   '228': String
-  '229': String
-  '230': String?
+  '229': String?
+  '230': String
   '231': String
   '232': String?
-  '233': String?
+  '233': String
+  '234': String?
+  '235': String?

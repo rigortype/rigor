@@ -937,6 +937,27 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:x)).to eq(integer_nominal)
     end
 
+    # Issue #1446 — the class guards narrow an instance variable as they narrow a local, and record the binding they
+    # narrowed so code that may rebind it restores it. The truthiness and `nil?` guards record nothing.
+    it "narrows an instance-variable receiver under is_a?, === and case/when, recording the pre-guard binding" do
+      bound = scope.with_ivar(:@x, union_int_str)
+      ["@x.is_a?(Integer)", "Integer === @x"].each do |source|
+        truthy, falsey = described_class.predicate_scopes(parse_predicate(source), bound)
+        expect([truthy.ivar(:@x), falsey.ivar(:@x)]).to eq([integer_nominal, string_nominal]), source
+        expect([truthy.guard_narrowed_ivar?(:@x), falsey.guard_narrowed_ivar?(:@x)]).to eq([true, true]), source
+        expect(truthy.forget_guard_narrowings.ivar(:@x)).to eq(union_int_str), source
+      end
+
+      case_node = parse_program("case @x\nwhen Integer then @x\nend").statements.body.first
+      body, rest = described_class.case_when_scopes(case_node.predicate, case_node.conditions.first.conditions, bound)
+      expect([body.ivar(:@x), rest.ivar(:@x)]).to eq([integer_nominal, string_nominal])
+      expect(body.guard_narrowed_ivar?(:@x)).to be(true)
+
+      nilable = scope.with_ivar(:@x, Rigor::Type::Combinator.union(integer_nominal, constant_nil))
+      nil_guarded, = described_class.predicate_scopes(parse_predicate("@x.nil?"), nilable)
+      expect(nil_guarded.guard_narrowed?).to be(false)
+    end
+
     describe "case-equality (===) narrowing (Slice 7 phase 4)" do
       it "Class === local narrows like is_a?" do
         bound = scope.with_local(:x, union_int_str)

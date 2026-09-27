@@ -749,7 +749,7 @@ RSpec.describe Rigor::Scope do
         repeated_or_writes: { node => true }.compare_by_identity.freeze,
         match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
         constant_narrowings: { "C" => type }.freeze,
-        guard_records: { %i[global $g] => type, [:constant, "C"] => type }.freeze
+        guard_records: { %i[global $g] => type, [:constant, "C"] => type, %i[ivar @i] => type }.freeze
       )
     end
 
@@ -941,6 +941,37 @@ RSpec.describe Rigor::Scope do
       constant = described_class.empty.with_constant_narrowing("STDOUT", string_io, io)
       expect(constant.join(described_class.empty).guard_narrowed?).to be(false)
       expect(constant.join(described_class.empty).constant_narrowing("STDOUT")).to be_nil
+    end
+  end
+
+  # Issue #1446 — a class guard's narrowing of an instance variable is recorded and restored as a global's is. A
+  # narrowing through `with_ivar` keeps the record, and a write drops it.
+  describe "class guard narrowings of instance variables" do
+    let(:io) { Rigor::Type::Combinator.nominal_of("IO") }
+    let(:string_io) { Rigor::Type::Combinator.nominal_of("StringIO") }
+    let(:io_or_string_io) { Rigor::Type::Combinator.union(io, string_io) }
+    let(:guarded) { described_class.empty.with_ivar(:@io, io).with_guarded_ivar(:@io, string_io, io) }
+
+    it "restores a guarded instance variable to the union of its pre-guard and narrowed types" do
+      expect(guarded.ivar(:@io)).to eq(string_io)
+      expect(guarded.guard_narrowed_ivar?(:@io)).to be(true)
+
+      restored = guarded.forget_guard_narrowings
+      expect(restored.ivar(:@io)).to eq(io_or_string_io)
+      expect(restored.guard_narrowed?).to be(false)
+    end
+
+    it "keeps the record through a narrowing and drops it on a write" do
+      expect(guarded.with_ivar(:@io, string_io).guard_narrowed_ivar?(:@io)).to be(true)
+      expect(guarded.without_ivar_guard(:@io).guard_narrowed?).to be(false)
+      expect(guarded.without_ivar_guard(:@other)).to equal(guarded)
+    end
+
+    it "keeps a record through a join only while both arms bind the instance variable" do
+      joined = guarded.join(described_class.empty.with_ivar(:@io, io))
+      expect(joined.guard_narrowed_ivar?(:@io)).to be(true)
+      expect(joined.forget_guard_narrowings.ivar(:@io)).to eq(io_or_string_io)
+      expect(guarded.join(described_class.empty).guard_narrowed?).to be(false)
     end
   end
 end

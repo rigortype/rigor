@@ -284,7 +284,7 @@ The falsey edge is unchanged.
 
 ### Guards on globals and constants
 
-Truthiness, `nil?`, `!`, safe navigation (`$g&.m`, and a safe-navigation chain), the class guards, `C === x`, `case … when` and `respond_to?` narrow a global read (`$stdout`) and a constant reference (`STDOUT`, `Foo::BAR`, `::Foo`) as they narrow a local read ([#1429](https://github.com/rigortype/rigor/issues/1429)). Truthiness, `nil?`, safe navigation and `respond_to?` narrow an instance variable as well; the class guards do not narrow one yet ([#1446](https://github.com/rigortype/rigor/issues/1446)). A guard's narrowing applies on top of whichever source of a global's type holds ([global-variables.md](global-variables.md#where-a-globals-type-comes-from)).
+Truthiness, `nil?`, `!`, safe navigation (`$g&.m`, and a safe-navigation chain), the class guards, `C === x`, `case … when` and `respond_to?` narrow a global read (`$stdout`) and a constant reference (`STDOUT`, `Foo::BAR`, `::Foo`) as they narrow a local read ([#1429](https://github.com/rigortype/rigor/issues/1429)). Truthiness, `nil?`, safe navigation, `respond_to?` and the class guards narrow an instance variable as well; its class guards are restored as the section [Class guards on instance variables](#class-guards-on-instance-variables) states. A guard's narrowing applies on top of whichever source of a global's type holds ([global-variables.md](global-variables.md#where-a-globals-type-comes-from)).
 - **An unbound global** is narrowed from the type its read has. An edge that learns nothing leaves a global or constant alone.
 - **Constants.** A constant's narrowing is keyed by how the reference is spelled, so `::STDOUT` and `STDOUT` narrow apart. A write to a constant ends the narrowing of every spelling whose last segment is the written name, since `Foo::BAR = nil` inside `module Foo` writes the constant `BAR` reads.
 - **`$stdout` and `$>`** are one variable: a write to either ends a guard's narrowing of the other.
@@ -298,7 +298,7 @@ Code that may rebind a global or constant is:
   - a core method on a project or gem receiver, since a core module's method may call back (`Enumerable#map` runs the class's `each`);
   - a method `Kernel`, `Object` or `BasicObject` owns that calls a method the project defines on the receiver (`r != 1` runs `r == 1`; likewise `===`, `!~` and `respond_to?`);
   - an unresolved callee (a `Dynamic` receiver, or a name no signature declares);
-  - `send`, `__send__`, `public_send`, `eval`, `require`, `require_relative`, `load`, `const_set` and `remove_const`, and `instance_eval`, `instance_exec`, `class_eval`, `class_exec`, `module_eval` and `module_exec` given anything but a literal block;
+  - `send`, `__send__`, `public_send`, `eval`, `require`, `require_relative`, `load`, `const_set`, `remove_const`, `instance_variable_set` and `remove_instance_variable`, and `instance_eval`, `instance_exec`, `class_eval`, `class_exec`, `module_eval` and `module_exec` given anything but a literal block;
   - any call on a `Proc`, `Method`, `UnboundMethod`, `Binding`, `Enumerator`, `Fiber`, `Thread` or delegator;
   - a call that passes a `&expr` block argument;
 - a method a compound write or a `for` loop calls without spelling it: the operator of `r += 1`, the reader and writer of `r.val ||= 1` and `r[0] += 1` (and the operator on what the reader returns), and the `each` of `for x in r`;
@@ -326,6 +326,14 @@ The gaps, where Ruby code can run that the rule does not read:
 - **Implicit conversion.** A core method that calls back into a method the program does not spell is read as the core method alone: `puts obj` runs `obj.to_s`, `"#{obj}"` runs it too, `hash[obj]` runs `obj.hash`, `list.sort` runs `<=>`, `1 + obj` runs `obj.coerce`, `[*obj]` runs `obj.to_a`, and `case obj when 1` runs `1 === obj`. A project `to_s` that assigns a global does not end the narrowing.
 - **Another thread** may assign a global between any two reads; the rule reads the code of the current flow only.
 - **A write the flow does not join.** A direct write to a global is not joined across a loop's back edge or into a rescue clause ([#1464](https://github.com/rigortype/rigor/issues/1464)); the rule restores a guard's narrowing there, but a global the loop body only writes keeps its first iteration's value.
+
+### Class guards on instance variables
+
+The class guards, `C === @x`, `case @x when C` and `case @x in C` narrow an instance-variable read as they narrow a local read ([#1446](https://github.com/rigortype/rigor/issues/1446)): `@io.is_a?(StringIO) ? @io.string : nil`, `StringIO === @io` and `case @io when StringIO then @io.string end` are correct code on an `@io` typed `IO`.
+
+Code that may rebind a global may reach `self` and rebind the instance variable too, so such a narrowing MUST be restored where the rule for globals and constants above restores one, to the union of the binding the guard narrowed and the narrowed type, with the same gaps. That rule counts `instance_variable_set` and `remove_instance_variable` on any receiver because the receiver may be `self` (`holder = self; holder.instance_variable_set(:@io, STDOUT)`). The narrowing MUST also be restored at a write to the narrowed variable in code the rule reads: a literal block's body (after the call, and at the block's entry, since a later run reads what an earlier one wrote), a loop's body at the loop's entry, and a `begin` body at a rescue clause's entry.
+
+A write to the variable ends the narrowing and binds the written value. An implicit-self or `self.` call widens every narrowed instance variable to its union with the class's seed for it, whatever guard narrowed it, so `puts` between the guard and the read ends a class guard's narrowing to a disjoint class. Truthiness, `nil?`, safe navigation and `respond_to?` narrow an instance variable without this restore: only a write and that implicit-self rule end their narrowing.
 
 ## Fact stability and mutation
 

@@ -625,7 +625,8 @@ module Rigor
       # lands.
       def eval_ivar_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        bound = post_rhs.with_ivar(node.name, rhs_type)
+        # Issue #1446 — a write ends a class guard's narrowing of the variable, as it does a global's.
+        bound = post_rhs.with_ivar(node.name, rhs_type).without_ivar_guard(node.name)
         bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
         cause = optimistic_rhs_origin(node.value, post_rhs)
         bound = bound.with_optimistic_ivar(node.name, cause, miss: optimistic_rhs_miss(node.value, post_rhs)) if cause
@@ -806,7 +807,8 @@ module Rigor
       end
 
       def rebind_variable(target_scope, kind, name, type)
-        target_scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, type)
+        bound = target_scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, type)
+        kind == :ivar ? bound.without_ivar_guard(name) : bound
       end
 
       def compound_result_type(current, rhs, operator)

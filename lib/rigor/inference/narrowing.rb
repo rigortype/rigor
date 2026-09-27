@@ -504,15 +504,16 @@ module Rigor
         # a different regex. Applied even when the subject is not a narrowable local read.
         body_scope = apply_when_regex_globals(conditions, scope)
 
-        # Issue #1429 — a global or constant subject (`case $stdout when StringIO`) narrows as a local does.
+        # Issue #1429 — a global or constant subject (`case $stdout when StringIO`) narrows as a local does, and so
+        # does an instance variable (#1446).
         slot = receiver_slot(subject, scope, kinds: CASE_SUBJECT_KINDS)
         return [body_scope, scope] if slot.nil?
 
         truthy_type, falsey_type = case_when_types(scope, slot.current, conditions)
-        [narrow_slot(body_scope, slot, truthy_type), narrow_slot(scope, slot, falsey_type)]
+        [narrow_guarded_slot(body_scope, slot, truthy_type), narrow_guarded_slot(scope, slot, falsey_type)]
       end
 
-      CASE_SUBJECT_KINDS = %i[local global constant].freeze
+      CASE_SUBJECT_KINDS = %i[local ivar global constant].freeze
       private_constant :CASE_SUBJECT_KINDS
 
       # When the clause has exactly one `RegularExpressionNode` literal condition, narrow the
@@ -979,8 +980,9 @@ module Rigor
         end
 
         GLOBAL_AND_CONSTANT = %i[global constant].freeze
+        CLASS_GUARD_SLOT_KINDS = %i[ivar global constant].freeze
         ALL_SLOT_KINDS = %i[local ivar global constant].freeze
-        private_constant :GLOBAL_AND_CONSTANT, :ALL_SLOT_KINDS
+        private_constant :GLOBAL_AND_CONSTANT, :CLASS_GUARD_SLOT_KINDS, :ALL_SLOT_KINDS
 
         # The {ReceiverSlot} `node` reads, among `kinds`, or nil. A local or instance variable needs a binding. A
         # global the scope does not bind is read as it reads unbound, and a constant reference as it resolves
@@ -1027,6 +1029,16 @@ module Rigor
           else
             type == slot.current ? scope : scope.with_constant_narrowing(slot.name, type, slot.current)
           end
+        end
+
+        # Issue #1446 — {#narrow_slot} for a class guard: an instance variable narrows with its pre-guard type
+        # recorded, as a global does, since code that may reach `self` may rebind it. The other guards on an instance
+        # variable keep {#narrow_slot}'s unrecorded binding.
+        def narrow_guarded_slot(scope, slot, type)
+          return narrow_slot(scope, slot, type) unless slot.kind == :ivar
+          return scope if type == slot.current
+
+          scope.with_guarded_ivar(slot.name, type, slot.current)
         end
 
         def narrow_global_slot(scope, slot, type)
@@ -2331,9 +2343,10 @@ module Rigor
         end
 
         # Issue #1429 — `$stdout.is_a?(StringIO)`, `STDOUT.kind_of?(StringIO)`: a global or constant receiver
-        # narrows as a local does ({#class_predicate_scopes}), with the pre-guard type recorded ({#narrow_slot}).
+        # narrows as a local does ({#class_predicate_scopes}), with the pre-guard type recorded ({#narrow_slot}). So
+        # does an instance variable (#1446, {#narrow_guarded_slot}).
         def analyse_class_predicate_on_slot(receiver, scope, class_name, exact)
-          slot = receiver_slot(receiver, scope, kinds: GLOBAL_AND_CONSTANT)
+          slot = receiver_slot(receiver, scope, kinds: CLASS_GUARD_SLOT_KINDS)
           return nil if slot.nil?
 
           class_slot_scopes(scope, slot, class_name, exact: exact)
@@ -2342,11 +2355,8 @@ module Rigor
         def class_slot_scopes(scope, slot, class_name, exact:)
           environment = scope.environment
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
-          [
-            narrow_slot(scope, slot, truthy),
-            narrow_slot(scope, slot, narrow_not_class(slot.current, class_name, exact: exact,
-                                                                                environment: environment, scope: scope))
-          ]
+          falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
+          [narrow_guarded_slot(scope, slot, truthy), narrow_guarded_slot(scope, slot, falsey)]
         end
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level
@@ -2521,12 +2531,12 @@ module Rigor
         end
 
         # Issue #1429 — `StringIO === $stdout`, `StringIO === STDOUT`: the class-constant receiver form on a global or
-        # constant argument. The Range / Regexp receivers stay local-only.
+        # constant argument, and on an instance variable (#1446). The Range / Regexp receivers stay local-only.
         def analyse_case_equality_on_slot(receiver, arg, scope)
           class_name = lexical_class_name(receiver, scope)
           return nil if class_name.nil?
 
-          slot = receiver_slot(arg, scope, kinds: GLOBAL_AND_CONSTANT)
+          slot = receiver_slot(arg, scope, kinds: CLASS_GUARD_SLOT_KINDS)
           return nil if slot.nil?
 
           class_slot_scopes(scope, slot, class_name, exact: false)

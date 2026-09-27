@@ -69,6 +69,19 @@ RSpec.describe Rigor::Inference::GuardRebinding do
       expect(described_class.may_rebind?(call("unknown.val += 1"), scope)).to be(true)
       expect(described_class.may_rebind?(call("Object.const_set(:A, 1)"), scope)).to be(true)
     end
+
+    # Issue #1446 — a write to an instance variable counts only when a class guard narrowed that variable, and
+    # `instance_variable_set` / `remove_instance_variable` count on any receiver, which may be `self`.
+    it "counts a write to an instance variable a class guard narrowed, and the reflective ivar writers" do
+      guarded = scope.with_guarded_ivar(:@io, string_t, Rigor::Type::Combinator.union(string_t, nil_t))
+      expect(described_class.may_rebind?(call("list.each { @io = nil }"), guarded)).to be(true)
+      expect(described_class.may_rebind?(call("@io ||= s"), guarded)).to be(true)
+      expect(described_class.may_rebind?(call("@other = nil"), guarded)).to be(false)
+      expect(described_class.may_rebind?(call("list.each { @io = nil }"), scope)).to be(false)
+      ["s.instance_variable_set(:@io, nil)", "s.remove_instance_variable(:@io)"].each do |source|
+        expect(described_class.call_may_rebind?(call(source), scope)).to be(true), source
+      end
+    end
   end
 
   describe "ScanScope.block_parameter_scope" do

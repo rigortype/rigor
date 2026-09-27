@@ -1193,33 +1193,36 @@ snapshot directory, a `.rb` edit between them, compared against a `--no-cache` f
 After every run whose snapshot it persists, `IncrementalSession#run_incremental`
 also writes an ADR-45 record-and-validate entry, `analysis.incremental-run-diagnostics`,
 and `rigor check --incremental` serves a null run from it before loading the engine
-(`Analysis::IncrementalRunSlot.serve`). The decision, and why the slot is sound, is
-[ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is the contract.
+(`Analysis::IncrementalRunSlot.serve`). The decision, and what a hit does and does not
+guarantee, is [ADR-45](../adr/45-unchanged-project-fast-path.md) WD2; this is the contract.
 
 - **Key.** `RunCacheKey.descriptor` exactly as the ADR-87 WD4 probe builds it —
   `RunCacheKey.libraries_config_entries`, no `template-units` slot, `explain: false` —
-  over the session's analysed-path set. The producer id, not the key, is what keeps it
-  apart from `analysis.run-diagnostics`: the two keys coincide on a project with no
-  synthesised RBS and no template units.
-- **Value.** `IncrementalRunSlot::Entry(diagnostics, signature, reads, snapshot)`.
+  over the session's analysed-path set, plus an `incremental.roots` config entry over the
+  sorted analysis roots (`IncrementalRunSlot::Target`). The producer id and the roots
+  entry each keep it apart from `analysis.run-diagnostics` on their own.
+- **Value.** `IncrementalRunSlot::Entry(diagnostics, baseline, reads, snapshot)`.
   `diagnostics` is what the run printed before the baseline filter; the CLI applies the
   filter, `--fail-on` and the output format to it exactly as the full incremental path
-  does (`CheckCommand#write_incremental_result`). `signature` and `reads` (`{path =>
+  does (`CheckCommand#write_incremental_result`). `baseline` and `reads` (`{path =>
   Descriptor}`) are the chain a later recheck carries forward; `snapshot` is the
   `(size, mtime_ns, ctime_ns, inode)` of the snapshot file the writing run left behind.
 - **Dependency descriptor.** A `:stat` row per analysed file, from the session's own
-  `digests` (the bytes each answer was computed from); `Runner#incremental_slot_rows`'
-  `run` rows, which extend the row inventory below with an existence row per analysis
-  root, per `pre_eval:` entry and per signature root; the chain's signature rows; and
-  every file's reads.
-- **Carrying.** A full run starts the chain from its own signature rows
-  (`Runner#signature_dependency_rows`) and reads. A recheck takes the previous slot's
-  `Entry` — read with `peek_unvalidated`, keyed by the path set of the snapshot it
-  restored — keeps the reads of the files it served from cache, replaces those of the
-  files it re-analysed, and drops the removed files'. It writes NOTHING when the
-  previous entry is missing, or names a snapshot file other than the one it restored;
-  the next full run starts a fresh chain. When the path set moved it discards the
-  previous entry after writing its own.
+  `digests` (the bytes each answer was computed from), re-packed by
+  `Cache::FileDigest.refresh_stat` when the bytes still match but the tuple moved;
+  `Runner#incremental_slot_rows`' `run` rows (every plugin boundary row, the `watch:`
+  globs, the template rows, and an existence row per analysis root and `pre_eval:`
+  entry); the chain's `baseline` (`Runner#baseline_dependency_rows`: the signature tree
+  and an existence row per signature root, the discovered-not-analysed files and a
+  listing row per discovery root, the `pre_eval:` files outside the analysed set); and
+  every file's `reads`.
+- **Carrying.** A full run starts the chain. A recheck takes the previous slot's `Entry` —
+  read with `peek_unvalidated`, keyed by the path set of the snapshot it restored and the
+  same roots — carries `baseline` unchanged, keeps the reads of the files it served from
+  cache, replaces those of the files it re-analysed, and drops the removed files'. It
+  writes NOTHING when the previous entry is missing, or names a snapshot file other than
+  the one it restored; the fast path then stays off until the next full run starts a
+  fresh chain. When the path set moved it discards the previous entry after writing its own.
 - **Not written** for an editor buffer, a pool run, a project with effect collection
   on, a run with an opaque plugin, a project whose plugins claim template globs, or a
   run in which a boundary row changed during the per-file loop without being credited
@@ -1612,8 +1615,9 @@ simply misses and the full path takes over, the same forgone-fast-lane trade
 
 The `--incremental` slot records the same rows, with the analysed files'
 digests taken from the session rather than re-read, an existence row per
-analysis root, `pre_eval:` entry and signature root, and the plugin reads kept
-per analysed file; see § "The run-result slot (ADR-45 WD2)".
+analysis root, `pre_eval:` entry and signature root, the rows a recheck does
+not re-derive carried from the last full run, and the plugin reads kept per
+analysed file; see § "The run-result slot (ADR-45 WD2)".
 
 Non-file inputs (the engine source, the lockfiles, the resolved
 configuration, the RBS library list) belong to the cache KEY

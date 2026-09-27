@@ -22,15 +22,22 @@ module Rigor
     # - one `:stat` row per analysed file, carrying the digest the SESSION holds for it — the bytes its cached rows
     #   were computed from — rather than a re-digest taken after the run;
     # - the rows the run re-read itself ({Runner#incremental_slot_rows}' `run` half);
-    # - the chain the {Entry} carries forward: the signature tree the last full run recorded, and the plugin reads
-    #   each file's analysis made, kept per file so a recheck that serves a file from cache still validates what
-    #   that file's analysis read ({IncrementalSession#write_run_slot}).
+    # - the chain the {Entry} carries forward: the rows the last full run recorded for the inputs the incremental
+    #   path does not re-derive on a recheck, and the plugin reads credited to each file's analysis
+    #   ({IncrementalSession#write_run_slot}).
     #
-    # Keyed apart from the plain run's `analysis.run-diagnostics` by its own producer id, so neither probe can ever
-    # read the other's entry, and an incremental defect cannot leak into a default run.
+    # A hit is at least as careful as the full incremental path — where that path would notice a change, a row
+    # notices it first — but it is not a cold run: a stale answer that path serves for a read reaching a file
+    # through a plugin's memo (#1553) the probe may serve too. ADR-45 WD2 states the guarantee and its one open
+    # hole, #1558.
+    #
+    # Kept apart from the plain run's `analysis.run-diagnostics` by its own producer id and by the roots entry its
+    # key adds, either enough alone, so neither probe can ever read the other's entry, and an incremental defect
+    # cannot leak into a default run.
     #
     # The key is the one {RunCacheProbe} reconstructs from configuration alone — the library list without a
-    # `rbs.virtual_rbs` slot, and no `template-units` slot. The session writes no slot for a project whose plugins
+    # `rbs.virtual_rbs` slot, and no `template-units` slot — plus the analysis roots ({Target}). The session
+    # writes no slot for a project whose plugins
     # claim template globs, whose `template-units` slot this key leaves out; the ADR-87 probe misses on such a
     # project for the same reason. A virtual RBS buffer is a function of an analysed file's bytes (a row) and of
     # the synthesising plugin's identity and configuration (the key's `configuration`, lockfile and engine slots),
@@ -48,21 +55,33 @@ module Rigor
       # a compaction pass — the incremental path never runs one.
       GENERATION_CAP = RunCacheKey::GENERATION_CAP
 
-      # The stored value. `signature` (a {Cache::Descriptor}) and `reads` (`{path => Cache::Descriptor}`) are the
+      # The stored value. `baseline` (a {Cache::Descriptor}) and `reads` (`{path => Cache::Descriptor}`) are the
       # chain the next writer carries forward, kept apart from the rest of the dependency descriptor so it knows
       # which rows are which; their entries are the same objects the descriptor holds, so `Marshal` writes them
-      # once. `snapshot` is the identity of the incremental snapshot file the writing run left behind, which the
-      # next writer compares against the one it restored before trusting the chain.
-      Entry = Data.define(:diagnostics, :signature, :reads, :snapshot)
+      # once. `baseline` holds the rows the last full run recorded for inputs the incremental path does not
+      # re-derive on a recheck (the signature tree, the discovered-not-analysed files, the `pre_eval:` files outside
+      # the analysed set); `reads` the plugin reads credited to each analysed file. `snapshot` is the identity of
+      # the incremental snapshot file the writing run left behind, which the next writer compares against the one
+      # it restored before trusting the chain.
+      Entry = Data.define(:diagnostics, :baseline, :reads, :snapshot)
+
+      # What a slot is keyed by: the analysed-path set and the analysis roots the run was given. The roots are
+      # not implied by the files — `rigor check --incremental lib extra` with `extra` missing analyses the same
+      # files as `rigor check --incremental lib`, and only the first reports `extra` as missing.
+      Target = Data.define(:files, :roots)
 
       # What a probe hit hands the CLI: the answer, and the analysed-file count its banner reports.
       Hit = Data.define(:result, :file_count)
 
-      def key(configuration:, files:)
-        RunCacheKey.descriptor(
-          configuration: configuration, files: files, explain: false,
+      def key(configuration:, target:)
+        base = RunCacheKey.descriptor(
+          configuration: configuration, files: target.files, explain: false,
           rbs_config_entries: RunCacheKey.libraries_config_entries(configuration)
         )
+        return nil if base.nil?
+
+        roots = RunCacheKey.config_entry("incremental.roots", Array(target.roots).map(&:to_s).sort.join("\n"))
+        Cache::Descriptor.new(gems: base.gems, configs: base.configs + [roots])
       end
 
       # The engine-free probe. Returns a {Hit} when the slot for this run's analysed-path set validates, or nil to
@@ -78,7 +97,7 @@ module Rigor
         return nil if configuration.effects_enabled?
 
         files = PathExpansion.ruby_files(paths, configuration.exclude_patterns)
-        slot_key = key(configuration: configuration, files: files)
+        slot_key = key(configuration: configuration, target: Target.new(files: files, roots: paths))
         return nil if slot_key.nil?
 
         entry = validated_entry(configuration, cache_root, slot_key)
@@ -92,31 +111,30 @@ module Rigor
       # The previous slot's {Entry}, read WITHOUT validating it: it is stale by construction, since the run that
       # is asking changed something. nil when there is no such slot, or it is not an {Entry} — the writer then
       # skips its own write rather than guess what the files it served from cache depended on.
-      def previous_entry(store:, configuration:, files:)
-        slot_key = key(configuration: configuration, files: files)
+      def previous_entry(store:, configuration:, target:)
+        slot_key = key(configuration: configuration, target: target)
         return nil if slot_key.nil?
 
         entry = store.peek_unvalidated(producer_id: PRODUCER_ID, key_descriptor: slot_key)
-        return nil unless entry.is_a?(Entry) && entry.signature.is_a?(Cache::Descriptor) && entry.reads.is_a?(Hash)
+        return nil unless entry.is_a?(Entry) && entry.baseline.is_a?(Cache::Descriptor) && entry.reads.is_a?(Hash)
 
         entry
       end
 
-      # Writes the slot for `files`. `dependencies` is the whole descriptor to validate; `signature` and `reads`
-      # the chain within it. Returns whether it wrote.
-      def write(store:, configuration:, files:, diagnostics:, dependencies:, signature:, reads:, snapshot:) # rubocop:disable Metrics/ParameterLists
-        slot_key = key(configuration: configuration, files: files)
+      # Writes `entry` as the slot for `target`, validated by `dependencies` (the whole descriptor, of which the
+      # entry's chain is a part). Returns whether it wrote.
+      def write(store:, configuration:, target:, entry:, dependencies:)
+        slot_key = key(configuration: configuration, target: target)
         return false if slot_key.nil?
 
         store.store_validated(
           producer_id: PRODUCER_ID, key_descriptor: slot_key, generation_cap: GENERATION_CAP,
-          value: Entry.new(diagnostics: diagnostics, signature: signature, reads: reads, snapshot: snapshot),
-          dependencies: dependencies
+          value: entry, dependencies: dependencies
         )
       end
 
-      def discard(store:, configuration:, files:)
-        slot_key = key(configuration: configuration, files: files)
+      def discard(store:, configuration:, target:)
+        slot_key = key(configuration: configuration, target: target)
         slot_key && store.discard(producer_id: PRODUCER_ID, key_descriptor: slot_key)
       end
 

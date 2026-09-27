@@ -54,21 +54,22 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
-  # One `rigor check --incremental` process: a fresh store, a fresh session, the real snapshot on disk.
-  def incremental_run(config = configuration, plugin: nil)
+  # One `rigor check --incremental` process: a fresh store, a fresh session, the real snapshot on disk. `paths`
+  # stands for the path arguments (`rigor check --incremental lib extra`); nil runs over the configuration's.
+  def incremental_run(config = configuration, plugin: nil, paths: nil)
     session = Rigor::Analysis::IncrementalSession.new(
-      configuration: config, cache_store: Rigor::Cache::Store.new(root: cache_root),
+      configuration: config, paths: paths, cache_store: Rigor::Cache::Store.new(root: cache_root),
       plugin_requirer: requirer_for(plugin)
     )
     guarded_run_incremental(
       session,
       snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root),
-      fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: config.paths)
+      fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: paths || config.paths)
     )
   end
 
-  def served(config = configuration)
-    described_class.serve(configuration: config, cache_root: cache_root, paths: config.paths)
+  def served(config = configuration, paths: nil)
+    described_class.serve(configuration: config, cache_root: cache_root, paths: paths || config.paths)
   end
 
   def cold(config = configuration, plugin: nil)
@@ -153,14 +154,6 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect_declined_then_recovered(config)
     end
 
-    # The auto-detected `sig/` appearing: only the existence row sees it. The full incremental path does not yet
-    # (its snapshot fingerprint digests a configured `signature_paths:` only, so it rechecks rather than
-    # rebuilding), so this asserts the decline alone.
-    it "declines for a signature root that appears after the run" do
-      write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
-      expect(served).to be_nil
-    end
-
     it "declines for a configuration change" do
       expect_declined_then_recovered(configuration("severity_profile" => "strict"))
     end
@@ -171,6 +164,78 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
       expect(served(config)).not_to be_nil
       FileUtils.mkdir_p("extra")
       expect_declined_then_recovered(config)
+    end
+  end
+
+  # The roots are part of the key: `lib extra` with `extra` missing analyses the files `lib` does, and only the
+  # first reports `extra` as missing. Keyed by the files alone, each run was served the other's answer.
+  describe "keying by the analysis roots" do
+    def missing_root_rows(diagnostics)
+      rows(diagnostics).select { |row| row["path"] == "extra" }
+    end
+
+    before { write_project }
+
+    it "does not serve a run over `lib` the answer of a run over `lib extra`" do
+      diagnostics, = incremental_run(paths: %w[lib extra])
+      expect(missing_root_rows(diagnostics)).not_to be_empty
+      expect(served(paths: %w[lib extra])).not_to be_nil
+
+      expect(served(paths: %w[lib])).to be_nil
+      diagnostics, = incremental_run(paths: %w[lib])
+      expect(missing_root_rows(diagnostics)).to be_empty
+      expect(rows(served(paths: %w[lib]).result.diagnostics)).to eq(rows(diagnostics))
+    end
+
+    it "does not serve a run over `lib extra` the answer of a run over `lib`" do
+      incremental_run(paths: %w[lib])
+      expect(served(paths: %w[lib])).not_to be_nil
+
+      expect(served(paths: %w[lib extra])).to be_nil
+      diagnostics, = incremental_run(paths: %w[lib extra])
+      expect(missing_root_rows(diagnostics)).not_to be_empty
+      expect(rows(served(paths: %w[lib extra]).result.diagnostics)).to eq(rows(diagnostics))
+    end
+  end
+
+  # Inputs a recheck does not re-derive ride the chain from the full run that recorded them. Recomputing them on a
+  # recheck would vouch for the tree the recheck saw while its answer still carries rows computed before the
+  # change, so the probe declines until the next full run: each arm checks it still declines after a full-path
+  # run over the changed tree.
+  describe "declining until the next full run, for an input a recheck does not re-derive" do
+    def expect_declined_through_a_recheck(config = configuration, paths: nil)
+      expect(served(config, paths: paths)).to be_nil
+      _, warm = incremental_run(config, paths: paths)
+      expect(warm).to be(true)
+      expect(served(config, paths: paths)).to be_nil
+    end
+
+    it "a discovered-not-analysed file (a run over `lib` with `ext` among the configured paths)" do
+      write_project
+      write("ext/helper.rb", "class Helper\n  def go\n    1\n  end\nend\n")
+      config = configuration("paths" => %w[lib ext])
+      incremental_run(config, paths: %w[lib])
+      expect(served(config, paths: %w[lib])).not_to be_nil
+      write("ext/helper.rb", "class Helper\n  def go\n    2\n  end\nend\n")
+      expect_declined_through_a_recheck(config, paths: %w[lib])
+    end
+
+    it "an auto-detected signature root that appears" do
+      write_project
+      incremental_run
+      expect(served).not_to be_nil
+      write("sig/widget.rbs", "class Widget\n  def price: () -> String\nend\n")
+      expect_declined_through_a_recheck
+    end
+
+    it "a `pre_eval:` file outside the analysed set" do
+      write_project
+      write("boot/constants.rb", "LIMIT = 3\n")
+      config = configuration("pre_eval" => ["boot/constants.rb"])
+      incremental_run(config)
+      expect(served(config)).not_to be_nil
+      write("boot/constants.rb", "LIMIT = \"three\"\n")
+      expect_declined_through_a_recheck(config)
     end
   end
 
@@ -233,6 +298,51 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     end
   end
 
+  # A plugin producer served from its own record-and-validate entry reads nothing, so its inputs reach neither this
+  # slot nor the plain one; the full path revalidates the producer, recomputes it, and moves the ADR-88 fact
+  # surface. Pending until #1558 replays a producer hit's recorded rows into the plugin's boundary.
+  describe "a plugin producer's input" do
+    let(:table_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "slot-table", version: "0.1.0")
+
+        producer :table do |_params|
+          io_boundary.read_file("schema.txt").strip
+        end
+
+        def prepare(_services)
+          @table = producer_value(:table)
+        end
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          return [] unless File.basename(path) == "c.rb"
+
+          [diagnostic(root, path: path, message: "table #{@table}", severity: :warning, rule: "table")]
+        end
+      end
+    end
+
+    def table_config
+      configuration("plugins" => ["rigor-slot-table"])
+    end
+
+    before do
+      stub_const("SlotTablePlugin", table_plugin)
+      write_project
+      write("schema.txt", "v1\n")
+    end
+
+    it "declines once the file a producer read changes, after a recheck the producer answered from its cache" do
+      pending "#1558: a producer cache hit replays none of the rows it recorded"
+      incremental_run(table_config, plugin: table_plugin)
+      write("lib/a.rb", "class Widget\n  def price\n    11\n  end\nend\n")
+      _, warm = incremental_run(table_config, plugin: table_plugin)
+      expect(warm).to be(true)
+      write("schema.txt", "v2\n")
+      expect(served(table_config)).to be_nil
+    end
+  end
+
   describe "the chain a recheck carries forward" do
     before do
       write_project
@@ -275,9 +385,8 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot do
     expect(served(config)).to be_nil
   end
 
-  # The keys can coincide — a project with no synthesised RBS and no template units gives the plain runner the
-  # key this slot uses — so the separation is the producer id, and the plain run must neither read nor replace
-  # the incremental entry.
+  # Two things keep them apart, each enough alone: the producer id, and the roots entry the plain key does not
+  # carry. The plain run must neither read nor replace the incremental entry, nor the reverse.
   it "keeps the plain and the incremental slots apart" do
     write_project
     incremental, = incremental_run

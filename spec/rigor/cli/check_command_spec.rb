@@ -233,6 +233,24 @@ RSpec.describe Rigor::CLI::CheckCommand do
         expect(served[2]).to include("silenced by baseline") if extra.include?("--baseline=baseline.yml")
       end
     end
+
+    # `extra` is missing, so both runs analyse the same files; only the first reports the missing root, which
+    # under `--fail-on=warning` is also the difference between exit 1 and exit 0.
+    it "answers `lib` and `lib extra` each from its own slot, in either order" do
+      write_slot_project
+      File.write(File.join("lib", "b.rb"), "class Shop\n  def total\n    Widget.new.price\n  end\nend\n")
+      File.write(File.join("lib", "c.rb"), "class Other\nend\n")
+      argv = ->(*roots) { ["--no-ci-detect", "--no-stats", "--incremental", "--fail-on=warning", *roots] }
+
+      2.times do
+        with_extra = run(argv.call("lib", "extra"))
+        without = run(argv.call("lib"))
+        expect(with_extra[0]).to eq(1)
+        expect(with_extra[1]).to include("extra")
+        expect(without[0]).to eq(0)
+        expect(without[1]).not_to include("extra")
+      end
+    end
   end
 
   it "allows parameter_inference: on a full (non-incremental) check" do

@@ -640,15 +640,16 @@ module Rigor
 
       # ADR-45 WD2 (#1507) — records this run's answer as the run-result slot a later `rigor check --incremental`
       # serves without loading the engine ({IncrementalRunSlot}). The slot's dependency descriptor must validate
-      # everything the answer was computed from, and after a narrowed recheck most of the answer was computed by
-      # earlier runs, so it is assembled from three sources:
+      # what the answer was computed from, and after a narrowed recheck most of the answer was computed by earlier
+      # runs, so it is assembled from three sources:
       #
       # - the analysed files, at the digest this session holds for each: the bytes its cached or fresh rows were
       #   computed from, never a re-digest taken after the fact;
-      # - what this run read itself ({Runner#incremental_slot_rows}' `run` rows);
-      # - the CHAIN: the signature-tree rows the last full run recorded, and the plugin reads each file's
-      #   analysis made, kept per file. A full run starts a chain; a recheck takes the previous slot's chain,
-      #   replaces the reads of every file it re-analysed with this run's, and drops the removed files'.
+      # - what this run read and re-derives every run ({Runner#incremental_slot_rows}' `run` rows);
+      # - the CHAIN: the rows the last full run recorded for inputs a recheck does not re-derive
+      #   ({Runner#baseline_dependency_rows}), and the plugin reads credited to each file's analysis. A full run
+      #   starts a chain; a recheck takes the previous slot's, replaces the reads of every file it re-analysed with
+      #   this run's, and drops the removed files'.
       #
       # A recheck writes only when the previous slot exists and was written against the very snapshot file it
       # restored: otherwise some run in between — a pool run, `--no-cache`, a write that failed — analysed files
@@ -660,24 +661,33 @@ module Rigor
       def write_run_slot(diagnostics, written_identity:)
         return unless run_slot_writable?
 
-        carried_from = @slot_carried_from
-        rows = @last_runner.incremental_slot_rows(files: @analyzed, roots: @paths || @configuration.paths)
-        chain = rows && (carried_from ? carry_chain(rows, carried_from) : start_chain(rows))
+        roots = @paths || @configuration.paths
+        rows = @last_runner.incremental_slot_rows(roots: roots)
+        chain = rows && (@slot_carried_from ? carry_chain(rows, roots) : start_chain(rows))
         analysed = chain && analysed_file_rows
         return if analysed.nil?
 
-        signature, reads = chain
+        baseline, reads = chain
+        target = IncrementalRunSlot::Target.new(files: @analyzed, roots: roots)
+        entry = IncrementalRunSlot::Entry.new(diagnostics: diagnostics, baseline: baseline, reads: reads,
+                                              snapshot: written_identity)
         wrote = IncrementalRunSlot.write(
-          store: @cache_store, configuration: @configuration, files: @analyzed, diagnostics: diagnostics,
-          dependencies: run_slot_dependencies(analysed, rows.run, signature, reads.values),
-          signature: signature, reads: reads, snapshot: written_identity
+          store: @cache_store, configuration: @configuration, target: target, entry: entry,
+          dependencies: run_slot_dependencies(analysed, rows.run, baseline, reads.values)
         )
-        # The previous slot is keyed by the previous path set; once this one stands, nothing asks for it again.
-        return unless wrote && carried_from && carried_from.sort != @analyzed.sort
-
-        IncrementalRunSlot.discard(store: @cache_store, configuration: @configuration, files: carried_from)
+        discard_previous_slot(roots) if wrote
       rescue StandardError
         nil
+      end
+
+      # The previous slot is keyed by the previous path set; once this run's stands, nothing asks for it again.
+      def discard_previous_slot(roots)
+        return if @slot_carried_from.nil? || @slot_carried_from.sort == @analyzed.sort
+
+        IncrementalRunSlot.discard(
+          store: @cache_store, configuration: @configuration,
+          target: IncrementalRunSlot::Target.new(files: @slot_carried_from, roots: roots)
+        )
       end
 
       # The runs whose answer the slot may hold: a writable store, no editor buffer (whose bytes exist only in
@@ -690,37 +700,41 @@ module Rigor
       end
 
       def start_chain(rows)
-        signature = @last_runner.signature_dependency_rows
-        signature && [signature, rows.by_file.slice(*@analyzed)]
+        baseline = @last_runner.baseline_dependency_rows(files: @analyzed)
+        baseline && [baseline, rows.by_file.slice(*@analyzed)]
       end
 
-      def carry_chain(rows, carried_from)
+      def carry_chain(rows, roots)
         return nil if @restored_snapshot_identity.nil?
 
         previous = IncrementalRunSlot.previous_entry(
-          store: @cache_store, configuration: @configuration, files: carried_from
+          store: @cache_store, configuration: @configuration,
+          target: IncrementalRunSlot::Target.new(files: @slot_carried_from, roots: roots)
         )
         return nil if previous.nil? || previous.snapshot != @restored_snapshot_identity
 
         served = previous.reads.except(*@last_runner.analyzed_files)
-        [previous.signature, served.merge(rows.by_file).slice(*@analyzed)]
+        [previous.baseline, served.merge(rows.by_file).slice(*@analyzed)]
       end
 
-      # One `:stat` row per analysed file, packed as this session recorded it (`#pack_digest`). nil when any
-      # file has no usable entry (it could not be read): no row could say what its answer was computed from.
+      # One `:stat` row per analysed file, from the entry this session recorded for it (`#pack_digest`), re-packed
+      # against the file's current stat when the bytes still hash to the recorded digest but the tuple moved (a
+      # `touch`, a checkout): the snapshot keeps the old tuple, and a row carrying it would cost every later probe
+      # a re-hash of the file. nil when any file has no usable entry (it could not be read): no row could say what
+      # its answer was computed from.
       def analysed_file_rows
         @analyzed.map do |path|
-          packed = @digests[path]
-          return nil if Cache::FileDigest.content_digest(packed).nil?
+          packed = Cache::FileDigest.refresh_stat(path, @digests[path])
+          return nil if packed.nil?
 
           Cache::Descriptor::FileEntry.new(path: path, comparator: :stat, value: packed)
         end
       end
 
-      def run_slot_dependencies(analysed, run, signature, reads)
+      def run_slot_dependencies(analysed, run, baseline, reads)
         Cache::Descriptor.new(
-          files: analysed + run.files + signature.files + reads.flat_map(&:files),
-          globs: (run.globs + signature.globs + reads.flat_map(&:globs)).uniq
+          files: analysed + run.files + baseline.files + reads.flat_map(&:files),
+          globs: (run.globs + baseline.globs + reads.flat_map(&:globs)).uniq
         )
       end
 

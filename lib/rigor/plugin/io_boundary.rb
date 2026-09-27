@@ -62,7 +62,8 @@ module Rigor
       #
       # A thread variable rather than a fiber-local, so a read a plugin makes from inside an `Enumerator` still
       # lands in the sink. The boundary's own table is unchanged by it, including its first-existence-row-stands
-      # rule: the sink records what each read observed.
+      # rule: the sink records what each read observed. Only reads are credited: a value a plugin memoised reaches
+      # later files without one, so the first file to trigger the read is the only one credited with it.
       def self.attributing(sink)
         previous = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
         Thread.current.thread_variable_set(ATTRIBUTION_KEY, sink)

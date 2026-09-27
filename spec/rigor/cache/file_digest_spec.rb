@@ -94,6 +94,56 @@ RSpec.describe Rigor::Cache::FileDigest do
   # A collecting run validates the effects entry and the diagnostics entry against the same
   # dependency descriptor; under the run's stable-filesystem premise the second stat pass is pure
   # repetition, so the validation side shares one stat per path per run scope.
+  # ADR-45 WD2 (#1507) — a writer re-recording an entry refreshes its tuple after a `touch`, so the next
+  # validation is a stat again; it must never turn a changed file's stale entry into a fresh one.
+  describe ".refresh_stat" do
+    def tuple(packed)
+      packed.split[1, 4]
+    end
+
+    # Moves mtime/ctime (and the inode) without changing the bytes, as a checkout does.
+    def rewrite_same_bytes
+      bytes = File.binread(path)
+      FileUtils.rm_f(path)
+      File.binwrite(path, bytes)
+      File.utime(Time.now - 10, Time.now - 10, path)
+    end
+
+    it "keeps an entry whose tuple still matches" do
+      entry = described_class.with_run { described_class.pack_stat(path, expected) }
+      expect(described_class.with_run { described_class.refresh_stat(path, entry) }).to eq(entry)
+    end
+
+    it "re-packs a touched file, whose bytes still match, against its current stat" do
+      entry = described_class.with_run { described_class.pack_stat(path, expected) }
+      rewrite_same_bytes
+      refreshed = described_class.with_run { described_class.refresh_stat(path, entry) }
+
+      expect(tuple(refreshed)).not_to eq(tuple(entry))
+      expect(refreshed.split.first).to eq(expected)
+      allow(described_class).to receive(:hexdigest).and_call_original
+      expect(described_class.stat_fresh?(path, refreshed)).to be(true)
+      expect(described_class).not_to have_received(:hexdigest)
+    end
+
+    it "leaves a changed file's entry as it was, so it stays stale" do
+      entry = described_class.with_run { described_class.pack_stat(path, expected) }
+      File.write(path, "x = 2\n")
+      File.utime(Time.now - 10, Time.now - 10, path)
+      refreshed = described_class.with_run { described_class.refresh_stat(path, entry) }
+
+      expect(refreshed).to eq(entry)
+      expect(described_class.stat_fresh?(path, refreshed)).to be(false)
+    end
+
+    it "answers nil for an entry that is not a stat pack, and the entry itself for a vanished file" do
+      entry = described_class.pack_stat(path, expected)
+      expect(described_class.refresh_stat(path, "missing")).to be_nil
+      FileUtils.rm_f(path)
+      expect(described_class.refresh_stat(path, entry)).to eq(entry)
+    end
+  end
+
   describe "the validation stat memo" do
     def packed
       described_class.pack_stat(path, expected)

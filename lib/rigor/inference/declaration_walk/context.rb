@@ -23,7 +23,8 @@ module Rigor
       #   still names its class re-anchors it.
       # - `nesting` — `Module.nesting` as the ancestry tables record it (issue #682): a nameable
       #   `class`/`module` keyword pushes, a `self::` header pushes the prefix its rebound self gives it, and
-      #   nothing else pushes. nil when the caller does not track it, and then no transition allocates one.
+      #   nothing else pushes. nil when the caller does not track it, or when it was lost below a header that
+      #   renders no name ({#lost_header_body}); only a `self::` header below a rebound self grows it again.
       # - `scope` — the census scope a collector types an rvalue under, carrying the chain
       #   {ScopeIndexer.scope_entering_declaration} stamps at each header. nil when the caller has none.
       # - `source_path` — the path of the file being walked, which an anonymous class's synthetic name carries
@@ -128,23 +129,49 @@ module Rigor
           Context.new(prefix, EMPTY_PREFIX, singleton_cref, nesting, scope, source_path, class_body)
         end
 
+        # The body of a `class` / `module` whose header renders no name (`class foo`, `module` followed by a
+        # `def`: parse-error shapes), under the `:body_with_lost_nesting` variant of the `unrendered_header`
+        # rule (see {DeclarationWalk::RULE_VARIANTS}). `self` is the class again; the chain is kept below an
+        # unnameable cref and lost (nil) otherwise, because nothing can be pushed for a header with no name.
+        def lost_header_body
+          Context.new(prefix, nil, singleton_cref, singleton_cref ? nesting : nil, scope, source_path, true)
+        end
+
+        # The prefix the meta-new and eval-family splits resolve against, under the variant of the
+        # `lexical_prefix` rule the asking collectors follow: `:prefix` is the walk's rule; `:nesting_head` is
+        # `walk_def_nestings`' — the innermost `Module.nesting` entry split into segments, or `[]`. The two
+        # differ below a compact header (`["Admin::Widget"]` against `["Admin", "Widget"]`, which resolve an
+        # eval receiver through different chains) and below an unnameable cref (`[]` against the enclosing
+        # entry) (#1521).
+        def lexical_prefix(variant = :prefix)
+          case variant
+          when :prefix then prefix
+          when :nesting_head then (head = nesting&.first) ? head.split("::") : EMPTY_PREFIX
+          else raise UnknownVariant, "no lexical_prefix variant #{variant.inspect}"
+          end
+        end
+
         # `[enclosing_parts, body, body_self]` for a `K = Class.new { … }`-shaped write, or nil when its
         # rvalue is not the idiom ({ScopeIndexer.meta_new_block_split}).
-        def meta_new_split(node)
-          ScopeIndexer.meta_new_block_split(node, prefix, self_owner, singleton_cref)
+        def meta_new_split(node, variant = :prefix)
+          ScopeIndexer.meta_new_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
         end
 
         # `[enclosing_parts, body, eval_self]` for an eval-family call with a block, or nil
         # ({ScopeIndexer.eval_block_split}).
-        def eval_split(node)
-          ScopeIndexer.eval_block_split(node, prefix, self_owner, singleton_cref)
+        def eval_split(node, variant = :prefix)
+          ScopeIndexer.eval_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
         end
 
         private
 
+        # A `self::` header pushes the prefix its rebound self gives it even below a lost chain, which is how
+        # `walk_def_nestings` has always read `[joined, *nil]`; any other header keeps a lost or untracked
+        # chain nil.
         def declaration_nesting(node, self_decl, child_cref)
-          return nesting if nesting.nil? || child_cref
+          return nesting if child_cref
           return [self_decl.join("::"), *nesting].freeze if self_decl
+          return nesting if nesting.nil?
 
           Source::ConstantPath.pushed_nesting(nesting, node.constant_path) || nesting
         end

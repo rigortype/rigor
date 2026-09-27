@@ -21,7 +21,8 @@ module Rigor
     # The arms, in the order the walk tries them:
     #
     # - `class` / `module` — {Collector#on_declaration}, then the body under {Context#declaration_body}. The
-    #   header's constant path and superclass expression are not walked.
+    #   header's constant path and superclass expression are not walked. A header that renders no name raises
+    #   no event and follows the `unrendered_header` rule (below).
     # - `class << expr` — the expression under the enclosing context, the body under
     #   {Context#singleton_class_body}.
     # - a constant write (the four spellings that can name a class) — {Collector#on_constant_write}; then, when
@@ -53,9 +54,10 @@ module Rigor
     #
     # Where the legacy walkers disagree on a context rule, a port keeps its walker's answer by naming a
     # variant of the rule in its class's `VARIANTS` (ADR-116 WD5; {RULE_VARIANTS} lists them). Collectors on
-    # different variants of a rule still share a run: at a bare factory block the walk goes down once per
-    # variant in use, each collector only in its own. A variant is a legacy answer kept on purpose, and #1521
-    # tracks converging each one.
+    # different variants of a rule still share a run: where the variants give a subtree different contexts
+    # (a bare factory block, a meta-new or eval-family body, a header that renders no name) the walk goes down
+    # once per variant in use, each collector only in its own, and once for all of them everywhere else. A
+    # variant is a legacy answer kept on purpose, and #1521 tracks converging each one.
     #
     # The rule walk stays separate (ADR-53 rejected folding rule collectors into indexing): this walk only
     # builds discovery tables.
@@ -77,9 +79,18 @@ module Rigor
       # - `anonymous_class_path` — the file path an anonymous class's synthetic name carries; answered by
       #   {Context#anonymous_class_path}, which documents `:whole_file` and `:outside_class_bodies` (#1521
       #   item 11).
+      # - `unrendered_header` — a `class` / `module` whose header renders no name, which only a parse error
+      #   produces (`class foo`, a `module` keyword followed by a `def`). `:children` walks every child, the
+      #   header's parts included, under the enclosing context (`walk_class_superclasses`' rule).
+      #   `:skip` walks nothing below it (the member-layout walkers'). `:body_with_lost_nesting` walks the body
+      #   alone under {Context#lost_header_body} (`walk_def_nestings`'). #1521 item 3.
+      # - `lexical_prefix` — the prefix meta-new and eval-family splits resolve against, answered by
+      #   {Context#lexical_prefix}: `:prefix` or `walk_def_nestings`' `:nesting_head` (#1521 item 1).
       RULE_VARIANTS = {
         factory_block: %i[unnamed_self ordinary_call].freeze,
-        anonymous_class_path: %i[whole_file outside_class_bodies].freeze
+        anonymous_class_path: %i[whole_file outside_class_bodies].freeze,
+        unrendered_header: %i[children skip body_with_lost_nesting].freeze,
+        lexical_prefix: %i[prefix nesting_head].freeze
       }.freeze
 
       # The event handlers a collector may override; each answers {DESCEND} until overridden.
@@ -177,13 +188,14 @@ module Rigor
           collectors.each { |collector| Collector.check_variants!(collector.class) }
           @ordinary_factories = collectors.any? { |collector| ordinary_factory?(collector) }
           @unnamed_factories = !collectors.all? { |collector| ordinary_factory?(collector) }
-          # Only a run that mixes the variants keeps its collectors, which a cached single-collector
-          # traversal must not hold on to.
-          if @ordinary_factories && @unnamed_factories
+          @unrendered_variants = collectors.any? { |collector| variant(collector, :unrendered_header) != :children }
+          @nesting_heads = collectors.any? { |collector| variant(collector, :lexical_prefix) == :nesting_head }
+          # Only a multi-collector run keeps its collectors, which a cached single-collector traversal must
+          # not hold on to, and the subsets it builds from them as it first needs each ({#subset}).
+          if collectors.size > 1
             @run = collectors
-            @factory_groups = factory_groups(collectors)
+            @subsets = {}
           end
-          @alone = alone_table(collectors)
           freeze
         end
 
@@ -220,62 +232,100 @@ module Rigor
           collectors.any? { |collector| Collector.events_of(collector.class).include?(event) }
         end
 
-        # The run's collectors split by `factory_block` variant, `[unnamed_self, ordinary_call]`, built once
-        # for a run that mixes them; a subset left by a decline is split on demand.
-        def factory_groups(collectors)
-          ordinary, unnamed = collectors.partition { |collector| ordinary_factory?(collector) }
-          [unnamed.freeze, ordinary.freeze].freeze
+        # A subset of a multi-collector run that its nodes keep asking for, built the first time and reused:
+        # each collector alone (a pair in which one declines), the run without each collector (a larger run in
+        # which one declines), and the run split by `factory_block` and `lexical_prefix` variant where it mixes
+        # them. `key` is a Symbol for a split, or `[kind, collector]` for the other two.
+        def subset(kind, collector = nil)
+          table = (@subsets[kind] ||= {}.compare_by_identity)
+          key = collector || kind
+          table.fetch(key) { table[key] = yield.freeze }
         end
 
-        # Each collector alone, for a pair of collectors in which one declines a node — the whole run, or what
-        # is left of a larger one. nil for a single-collector run, which never needs it.
-        def alone_table(collectors)
-          return nil if collectors.size < 2
+        def alone(collector)
+          subset(:alone, collector) { [collector] }
+        end
 
-          collectors.to_h { |collector| [collector, [collector].freeze] }.compare_by_identity
+        def variant_split(rule, &)
+          subset(rule) do
+            second, first = @run.partition(&)
+            [first.freeze, second.freeze]
+          end
+        end
+
+        def variant(collector, rule)
+          Collector.variant_of(collector.class, rule)
         end
 
         def ordinary_factory?(collector)
-          Collector.variant_of(collector.class, :factory_block) == :ordinary_call
+          variant(collector, :factory_block) == :ordinary_call
         end
 
         # The collectors that let the walk into the node the block asks each of them about. Every collector is
-        # asked, in order, whatever the others answer. One or two collectors allocate nothing; a larger run
-        # allocates one Array at a node some collector declines.
-        def descending(collectors)
+        # asked, in order, whatever the others answer. A run allocates nothing where at most one collector
+        # declines; where two or more of a run of three or more decline, one Array.
+        def descending(collectors, &)
           case collectors.size
           when 0 then collectors
           when 1 then yield(collectors.first) == DECLINE ? NO_COLLECTORS : collectors
           when 2 then descending_pair(collectors, yield(collectors.first), yield(collectors.last))
-          else
-            kept = nil
-            collectors.each_with_index do |collector, index|
-              if yield(collector) == DECLINE
-                kept ||= collectors.take(index)
-              else
-                kept&.push(collector)
-              end
-            end
-            kept || collectors
+          else descending_many(collectors, &)
           end
+        end
+
+        def descending_many(collectors)
+          declined = nil
+          kept = nil
+          collectors.each_with_index do |collector, index|
+            if yield(collector) != DECLINE
+              kept&.push(collector)
+            elsif declined.nil? && kept.nil?
+              declined = index
+            else
+              kept ||= collectors.take(index).tap { |list| list.delete_at(declined) }
+            end
+          end
+          kept || (declined.nil? ? collectors : without(collectors, declined))
+        end
+
+        def without(collectors, index)
+          declined = collectors[index]
+          if collectors.equal?(@run)
+            return subset(:without, declined) { @run.reject { |collector| collector.equal?(declined) } }
+          end
+
+          collectors.dup.tap { |list| list.delete_at(index) }
         end
 
         def descending_pair(collectors, first, last)
           if first == DECLINE
-            last == DECLINE ? NO_COLLECTORS : @alone.fetch(collectors.last)
+            last == DECLINE ? NO_COLLECTORS : alone(collectors.last)
           else
-            last == DECLINE ? @alone.fetch(collectors.first) : collectors
+            last == DECLINE ? alone(collectors.first) : collectors
           end
         end
 
-        # False only for a header that renders no prefix, which then walks its children like any node.
+        # False only for a header that renders no prefix while every collector here follows the walk's
+        # `unrendered_header` rule, which then walks the node's children like any node's.
         def walk_declaration?(node, collectors, context)
           body_context = context.declaration_body(node)
-          return false if body_context.nil?
+          return walk_unrendered_header?(node, collectors, context) if body_context.nil?
 
           collectors = descending(collectors) { |c| c.on_declaration(node, context, body_context) } if @declarations
           body = node.body
           walk(body, collectors, body_context) if body && !collectors.empty?
+          true
+        end
+
+        # The `unrendered_header` rule: `:children` collectors walk every child under the enclosing context,
+        # `:body_with_lost_nesting` ones the body alone under {Context#lost_header_body}, `:skip` ones nothing.
+        def walk_unrendered_header?(node, collectors, context)
+          return false unless @unrendered_variants
+
+          children = collectors.select { |collector| variant(collector, :unrendered_header) == :children }
+          node.rigor_each_child { |child| walk(child, children, context) } unless children.empty?
+          lost = collectors.select { |collector| variant(collector, :unrendered_header) == :body_with_lost_nesting }
+          walk(node.body, lost, context.lost_header_body) if node.body && !lost.empty?
           true
         end
 
@@ -290,8 +340,42 @@ module Rigor
           return false if enclosing.nil?
 
           enclosing.each { |part| walk(part, collectors, context) }
-          walk(body, collectors, context.meta_new_body(body_self)) if body
+          walk_rebound_body(node, body, collectors, context, body_self, :meta_new) if body
           true
+        end
+
+        # A meta-new or eval-family body, with `self` rebound to `owner`. The `lexical_prefix` rule decides
+        # `owner`, so where the run mixes its variants the `:nesting_head` collectors take the owner their
+        # prefix gives, and the body is walked once per distinct owner — once in all where the two agree.
+        def walk_rebound_body(node, body, collectors, context, owner, kind)
+          return walk(body, collectors, rebound(context, owner, kind)) unless @nesting_heads
+
+          prefixes, heads = prefix_groups(collectors)
+          head_owner = heads.empty? ? owner : split(node, context, kind, :nesting_head)[2]
+          if head_owner == owner
+            walk(body, collectors, rebound(context, owner, kind))
+          else
+            walk(body, prefixes, rebound(context, owner, kind)) unless prefixes.empty?
+            walk(body, heads, rebound(context, head_owner, kind))
+          end
+        end
+
+        def rebound(context, owner, kind)
+          kind == :eval ? context.eval_body(owner) : context.meta_new_body(owner)
+        end
+
+        def split(node, context, kind, lexical_variant)
+          kind == :eval ? context.eval_split(node, lexical_variant) : context.meta_new_split(node, lexical_variant)
+        end
+
+        # `[prefix, nesting_head]` collectors of a run that mixes the `lexical_prefix` variants.
+        def prefix_groups(collectors)
+          if collectors.equal?(@run)
+            return variant_split(:lexical_prefix) { |collector| variant(collector, :lexical_prefix) == :nesting_head }
+          end
+
+          heads, prefixes = collectors.partition { |collector| variant(collector, :lexical_prefix) == :nesting_head }
+          [prefixes, heads]
         end
 
         # The `factory_block` rule, for a call with a literal block. False when every collector here follows
@@ -316,15 +400,20 @@ module Rigor
 
         def unnamed_factory_group(collectors)
           return collectors unless @ordinary_factories
-          return @factory_groups.first if collectors.equal?(@run)
+          return factory_split.first if collectors.equal?(@run)
 
           collectors.reject { |collector| ordinary_factory?(collector) }
         end
 
         def ordinary_factory_group(collectors)
-          return @factory_groups.last if collectors.equal?(@run)
+          return factory_split.last if collectors.equal?(@run)
 
           collectors.select { |collector| ordinary_factory?(collector) }
+        end
+
+        # `[unnamed_self, ordinary_call]` collectors of the whole run.
+        def factory_split
+          variant_split(:factory_block) { |collector| ordinary_factory?(collector) }
         end
 
         def walk_eval_call?(node, collectors, context)
@@ -332,7 +421,7 @@ module Rigor
           return false if enclosing.nil?
 
           enclosing.each { |part| walk(part, collectors, context) }
-          walk(body, collectors, context.eval_body(eval_self)) if body
+          walk_rebound_body(node, body, collectors, context, eval_self, :eval) if body
           true
         end
       end

@@ -367,6 +367,24 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       expect(trio.map { |collector| labels(collector) })
         .to eq([%w[C m inside other], %w[C m], %w[C m inside other]])
     end
+
+    it "keeps every collector that descends where several of a larger run decline the same node" do
+      run = Array.new(5) { |index| recorder_class.new(decline: index.odd? ? [[:def_node, "m"]] : []) }
+      walk(source, run)
+      expect(run.map { |collector| labels(collector) })
+        .to eq([%w[C m inside], %w[C m], %w[C m inside], %w[C m], %w[C m inside]])
+      declined_first = Array.new(2) { recorder_class.new(decline: [[:def_node, "m"]]) }.push(recorder_class.new)
+      walk(source, declined_first)
+      expect(declined_first.map { |collector| labels(collector) }).to eq([%w[C m], %w[C m], %w[C m inside]])
+    end
+
+    it "hands each decliner of a larger run its own remainder, however often each declines" do
+      source = "def a\n  x\nend\ndef b\n  y\nend\ndef a\n  z\nend\n"
+      trio = [recorder_class.new(decline: [[:def_node, "a"]]), recorder_class.new(decline: [[:def_node, "b"]]),
+              recorder_class.new]
+      walk(source, trio)
+      expect(trio.map { |collector| labels(collector) }).to eq([%w[a b y a], %w[a x b a z], %w[a x b y a z]])
+    end
   end
 
   describe "variants" do
@@ -397,6 +415,58 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
         "class C\n  X.class_eval { Class.new(k) { |z = l| m } }\n  K = Class.new { Class.new(n) { o } }\nend\n",
         "module M\n  class << self\n    Struct.new(:a) { |w = p| q }\n  end\nend\n"
       ]
+    end
+    # Rebound bodies whose `self` the two `lexical_prefix` variants agree on.
+    let(:agreeing_source) do
+      <<~RUBY
+        module Admin
+          class W
+            W.class_eval do
+              def same; end
+            end
+            K = Class.new { def k; end }
+          end
+        end
+      RUBY
+    end
+    # Two eval bodies whose `self` the `lexical_prefix` variants answer differently: below a compact header,
+    # and below an unnameable cref.
+    let(:nesting_head_sources) do
+      [<<~COMPACT, <<~UNNAMEABLE]
+        class Admin::W
+          W.class_eval do
+            class self::U
+              def u; end
+            end
+          end
+        end
+      COMPACT
+        class C
+          class X; end
+          class << self
+            class D
+              X.class_eval do
+                class self::V
+                  def v; end
+                end
+              end
+            end
+          end
+        end
+      UNNAMEABLE
+    end
+    # `class foo` is a parse error Prism recovers from with a header that renders no name.
+    let(:unrendered_source) do
+      <<~RUBY
+        class foo < Base
+          def lost; end
+          X.class_eval do
+            class self::G
+              def regrown; end
+            end
+          end
+        end
+      RUBY
     end
 
     def labelled(collector)
@@ -468,6 +538,75 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       end
     end
 
+    def variant_class(variants)
+      Class.new(recorder_class) { const_set(:VARIANTS, variants.freeze) }
+    end
+
+    def nestings(collector)
+      collector.events.map { |e| e[:context].nesting }
+    end
+
+    it "walks a header that renders no name per each collector's unrendered_header variant" do
+      children, skip, lost = [{}, { unrendered_header: :skip }, { unrendered_header: :body_with_lost_nesting }]
+                             .map { |variants| variant_class(variants).new }
+      walk(unrendered_source, [children, skip, lost])
+      expect(labelled(children)).to eq([[:call, "foo"], [:def_node, "lost"], [:call, "class_eval"],
+                                        [:declaration, "self::G"], [:def_node, "regrown"]])
+      expect(skip.events).to be_empty
+      expect(labelled(lost)).to eq(labelled(children).drop(1))
+      expect(nestings(children)).to eq([[], [], [], [], %w[X::G]])
+      expect(nestings(lost)).to eq([nil, nil, nil, %w[X::G]])
+      expect(lost.events.map { |e| e[:context].self_owner }).to eq([nil, nil, %w[X], nil])
+    end
+
+    it "keeps the chain below `class <<` under the lost-nesting variant, with self the class again" do
+      source = "class C\n  class << self\n    class foo\n      def kept; end\n    end\n  end\nend\n"
+      children, lost = [{}, { unrendered_header: :body_with_lost_nesting }].map { |v| variant_class(v).new }
+      walk(source, [children, lost])
+      kept = ->(collector) { fields(collector.events.find { |e| e[:label] == "kept" }[:context]) }
+      expect(kept.call(lost)).to eq(prefix: %w[C], self_owner: nil, singleton_cref: true, nesting: %w[C])
+      expect(kept.call(children)).to eq(prefix: %w[C], self_owner: [], singleton_cref: true, nesting: %w[C])
+    end
+
+    it "splits an eval body against the head of the chain for a collector that names nesting_head" do
+      plain = recorder_class.new
+      head = variant_class(lexical_prefix: :nesting_head).new
+      compact, unnameable = nesting_head_sources
+      walk(compact, [plain, head])
+      expect(plain.events.last[:context].nesting).to eq(%w[W::U Admin::W])
+      expect(head.events.last[:context].nesting).to eq(%w[Admin::W::U Admin::W])
+      [plain, head].each { |collector| collector.events.clear }
+      walk(unnameable, [head, plain])
+      expect(plain.events.last[:context].nesting).to eq(%w[X::V C])
+      expect(head.events.last[:context].nesting).to eq(%w[C::X::V C])
+    end
+
+    it "walks a rebound body once where the lexical_prefix variants agree on its self, and once per self otherwise" do
+      run = -> { [recorder_class.new, variant_class(lexical_prefix: :nesting_head).new] }
+      expect(walked_nodes(agreeing_source, run.call).grep(Prism::DefNode).map(&:name).tally).to eq(same: 1, k: 1)
+      expect(walked_nodes(nesting_head_sources.first, run.call).grep(Prism::DefNode).map(&:name).tally)
+        .to eq(u: 2)
+    end
+
+    it "gives every collector of a run mixing every rule's variants the events, in order, of a run of its own" do
+      classes = [recorder_class, ordinary_class, variant_class(unrendered_header: :skip),
+                 variant_class(unrendered_header: :body_with_lost_nesting),
+                 variant_class(lexical_prefix: :nesting_head),
+                 variant_class(factory_block: :ordinary_call, lexical_prefix: :nesting_head,
+                               unrendered_header: :body_with_lost_nesting)]
+      sources = fork_sources + nesting_head_sources + [unrendered_source, agreeing_source,
+                                                       "module\n  def swallowed; end\nend\n"]
+      sources.each do |source|
+        solo = classes.map { |klass| walk(source, [klass.new]).first }
+        [classes, classes.reverse, classes.values_at(0, 3), classes.values_at(4, 1, 2)].each do |run_classes|
+          run = walk(source, run_classes.map(&:new))
+          run.each do |collector|
+            expect(trace(collector)).to eq(trace(solo[classes.index(collector.class)]))
+          end
+        end
+      end
+    end
+
     it "refuses a variant no rule has, as a broken walk contract" do
       misspelt = Class.new(recorder_class) { const_set(:VARIANTS, { factory_block: :ordinary }.freeze) }
       unknown = Class.new(recorder_class) { const_set(:VARIANTS, { nesting: :ordinary_call }.freeze) }
@@ -482,6 +621,8 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       expect(collector.variant_of(recorder_class, :factory_block)).to eq(:unnamed_self)
       expect(collector.variant_of(ordinary_class, :factory_block)).to eq(:ordinary_call)
       expect(collector.variant_of(ordinary_class, :anonymous_class_path)).to eq(:whole_file)
+      expect(collector.variant_of(ordinary_class, :unrendered_header)).to eq(:children)
+      expect(collector.variant_of(ordinary_class, :lexical_prefix)).to eq(:prefix)
     end
   end
 
@@ -510,6 +651,32 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
       expect(paths.call(c_body.singleton_class_body)).to eq(["app/x.rb", nil])
       expect(paths.call(c_body.factory_body)).to eq(["app/x.rb", nil])
       expect { root.anonymous_class_path(:nowhere) }.to raise_error(ArgumentError)
+    end
+
+    it "answers the prefix a split resolves against under each lexical_prefix variant" do
+      compact = Prism.parse("class Admin::W; end").value.statements.body.first
+      body = described_class.root(nesting: []).declaration_body(compact)
+      expect(body.lexical_prefix).to eq(%w[Admin::W])
+      expect(body.lexical_prefix(:nesting_head)).to eq(%w[Admin W])
+      expect(described_class.root(nesting: []).lexical_prefix(:nesting_head)).to eq([])
+      expect(described_class.root.lexical_prefix(:nesting_head)).to eq([])
+      expect { body.lexical_prefix(:nowhere) }.to raise_error(Rigor::Inference::DeclarationWalk::UnknownVariant)
+    end
+
+    it "loses the chain below a header that renders no name, except below `class <<`" do
+      root = described_class.root(nesting: %w[Outer])
+      expect(fields(root.lost_header_body)).to eq(prefix: [], self_owner: nil, singleton_cref: false, nesting: nil)
+      expect(fields(root.singleton_class_body.lost_header_body))
+        .to eq(prefix: [], self_owner: nil, singleton_cref: true, nesting: %w[Outer])
+      expect(root.eval_body(%w[X]).lost_header_body.class_body).to be(true)
+    end
+
+    it "grows a lost chain again only at a `self::` header below a rebound self" do
+      self_header, plain = Prism.parse("class self::G; end\nclass Plain; end\n").value.statements.body
+      lost = described_class.root(nesting: %w[Outer]).lost_header_body
+      expect(lost.eval_body(%w[X]).declaration_body(self_header).nesting).to eq(%w[X::G])
+      expect(lost.declaration_body(plain).nesting).to be_nil
+      expect(lost.eval_body(%w[X]).declaration_body(plain).nesting).to be_nil
     end
 
     it "tracks no nesting when the root carries none" do

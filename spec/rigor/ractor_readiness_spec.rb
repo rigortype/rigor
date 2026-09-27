@@ -363,6 +363,25 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
 
       expect(from_worker).to eq(interned)
     end
+
+    # Issue #1505 — the same hazard: `Type::Combinator` memoises each union member's sort key in a module-ivar
+    # `WeakMap` that only the main Ractor may touch. A worker renders the key itself, so it builds the same union.
+    it "Type::Combinator.union orders members in a non-main Ractor as the main one does" do
+      from_worker = Ractor.new do
+        combinator = Rigor::Type::Combinator
+        [
+          combinator.union(combinator.constant_of(2), combinator.constant_of(1)),
+          combinator.union(combinator.constant_of("b"), combinator.constant_of(:a), combinator.constant_of(3))
+        ].map(&:describe)
+      end.value
+      combinator = Rigor::Type::Combinator
+      from_main = [
+        combinator.union(combinator.constant_of(2), combinator.constant_of(1)),
+        combinator.union(combinator.constant_of("b"), combinator.constant_of(:a), combinator.constant_of(3))
+      ].map(&:describe)
+
+      expect(from_worker).to eq(from_main)
+    end
   end
 
   # Issue #1064 — the constant tail. A non-main Ractor may read a constant only when its value is deeply

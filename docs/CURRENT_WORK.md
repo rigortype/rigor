@@ -52,13 +52,13 @@ Released through #1490; the `v0.4.0` milestone is closed. Blockers: #1470, #1479
 
 ## What the next session should do
 
-0. **Performance campaign, #1507.** Decisions and results are recorded there. Merged: #1508, #1509 and #1511
-   (−9.3% allocations); #1512, the per-PR "Engine allocations" job; #1514, the dispatched `engine-wall.yml`;
-   #1515, the release gate on the frozen v0.4.0 tree with a 2% band, whose red-cut path is in the release-prep
-   skill. On CI Linux, master is +33% wall over v0.3.9 on the v0.3.9 `lib`; that is feature cost. #1197 is the
-   lever: #1517 (shadow harness, context model, `walk_class_cvars`) merged. ADR-116 WD5 now lets a collector
-   name a context-rule variant; convergence is #1521. Slice 2 (`walk_class_superclasses`) is in progress on
-   branch `scope-indexer-superclasses-walk`. Follow-ups: #1516 (perf gate), #1518–#1520 (walker bugs found).
+0. **Performance campaign, #1507** (decisions and results there). Cold: −9.3% allocations landed; per-PR
+   allocation job, `engine-wall.yml` and `engine-warm.yml` (Mastodon warm journeys) exist. #1197's walk merge
+   is NOT a wall lever (~0.2% of a cold run); its remaining ports are paused (#1531, Draft, awaiting the
+   maintainer; a Fable redesign of the walkers is being drafted). Warm path, in order: #1545 (rbs-inline
+   declaration gate, 311→1 files on a hub edit), #1546 (recording cost, −20% cold `--incremental` CPU), the
+   session writing an ADR-45 slot so `--incremental` null is engine-free, then #1537, #1532/#1533, and #120
+   as an ADR for the maintainer. Merged: #1530 (deflate level), #1535 (#1524 ordering).
 0. **In flight: #1499 (#1446, ivar class guards).** Round 1 of the adversarial review found one
    severe item (`for @ivar in …` kept the narrowing) plus a moderate (a call on a `bot` receiver was
    a restore point). Both are fixed and pushed as `9b8bc0c86` (rebased onto `3aae74259`; `for $g in`

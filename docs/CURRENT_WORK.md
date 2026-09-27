@@ -43,18 +43,28 @@ Maintainer decisions recorded on the issues:
 
 ## v0.4.0 shipped (2026-09-27)
 
-Released through #1490: RubyGems `0.4.0`, tag `v0.4.0`, GitHub Release. The `v0.4.0` milestone is
-closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468), #1483 (#1436).
+Released through #1490; the `v0.4.0` milestone is closed. Blockers: #1470, #1479, #1483.
 
 - **Perf baseline** was recalibrated at +80.5% allocations by maintainer ruling (#1046). The engine
-  share, +19.1% on a frozen v0.3.9 `lib`, is unattributed: #1469 is the per-merge sweep.
-- **Filed to `v0.4.x` during the cut**, each checked against v0.3.9 and judged non-blocking: #1474,
-  #1475, #1476 (regex group counting), #1480 (`y&.concat` result not reported), #1487 (sig-gen
-  observed `initialize` rewrite), #1488 (sig-gen duplicate inserts), #1489 (literal return for a
-  declared `-> untyped`). #1376 stays open; the #1381 slice fold documents its gap.
+  share, +19.1% on a frozen v0.3.9 `lib`, is attributed in #1506 (levers #1502–#1505); wall is not.
+- Issues filed during the cut and after it are in milestone `v0.4.x`; #1376 stays open (the #1381
+  slice fold documents its gap).
 
 ## What the next session should do
 
+0. **Performance campaign, #1507 — the maintainer's next priority.** First target: the analysis time
+   v0.4.0 lost (#1469). Read #1507 first; it holds the loop, the levers (#1502–#1504
+   `ready-for-agent`, #1505 `ready-for-human`) and three decisions to ask before building a
+   harness: where to measure (CI Linux or local), ratcheting the perf gate, and ordering against
+   ADR-116 (#1193–#1199).
+0. **In flight: #1499 (#1446, ivar class guards).** Round 1 of the adversarial review found one
+   severe item (`for @ivar in …` kept the narrowing) plus a moderate (a call on a `bot` receiver was
+   a restore point). The fixes are committed locally as `881fb03c2` in
+   `../rigor-wt/ivar-class-guard-1446` (rebased onto master), **not pushed** when the #1469 session
+   ended; the lane was re-running `make verify-changed`. Next: run that gate in the foreground,
+   push with `--force-with-lease`, run a round-2 delta review of the fix commit, merge on green CI.
+   #1500 (maintainer decision: a disjoint class guard reads the guarded class for ivar / global /
+   constant receivers, `bot` for locals; `ready-for-agent`) builds on #1499.
 1. **Pending user decision:** a one-line ruby/rbs PR adding `alias to_str to_s` to
    `stdlib/uri/0/generic.rbs`. Ruby has had it since 2018 (ruby/ruby `0164ce893f`), and rbs master
    still lacks it. It is an outward publication, so wait for a yes. It causes no Rigor report today.
@@ -69,10 +79,8 @@ closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468
    Phase 3, the handbook chapter, waits for #1366, #1426 and #1427.
 4. **`ready-for-agent` in `v0.4.x`, cheapest first:**
    - #1447: the ErrorInfo `$!` decline.
-   - #1446: ivar class guards.
    - #1437: the separators.
    - #1423: a singleton `def gets`.
-   - #1379: `!~`.
    - #1375: a loop back edge versus `$1`.
    - #1372: a failing `when` or `in`.
    - #1371: gsub-family blocks.
@@ -109,5 +117,3 @@ closed. Blockers fixed before the cut: #1470 (#1381, #1385, #1471), #1479 (#1468
   round's fixes had added, including a crash on invalid-UTF-8 literals in #1448's new census.
 - Selecting a `type_construction_spec` group by its `describe` line can run the previous group. Use
   `-e` or the `it` line when mutation-testing.
-- The corpus copy and base-engine arms lived in the session scratchpad (`g1429/`), which is gone.
-  Rebuild them per `docs/agents/measurement.md`.

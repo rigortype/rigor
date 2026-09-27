@@ -1,6 +1,7 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-06-16T15:15:00Z",
-  "max_diagnostics": 468,
-  "min_precision_ratio": 0.4284
+  "calibrated_at": "2026-09-27T01:38:00Z",
+  "max_diagnostics": 21,
+  "min_precision_ratio": 0.523,
+  "note": "Set by hand from release-gate run 36286123530 (release/0.4.0 @ 6503cd49a, the v0.4.0 release head): 21 diagnostics, including one info-level rbs.coverage.missing-gem row, and a precise ratio of 77,768 / 148,431 = 0.5239. The previous 468 / 0.4284 was calibrated on 2026-06-16 from a 445-row run; the scheduled sweep has reported between 21 and 29 rows since late June, so the old ceiling would have let a regression of several hundred rows through. max_diagnostics is exact: a rise means diffing the new rows for false positives before re-blessing, never raising the number blindly. min_precision_ratio keeps a band of about 130 precise expressions below the measured 0.5239, because an exact floor would fail on legitimate precision trade-offs (master moved by -14 precise expressions between 2026-09-21 and v0.4.0)."
 }

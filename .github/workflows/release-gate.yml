@@ -96,12 +96,12 @@ jobs:
           rm -f rigortype-*.gem
 
   # ── OSS-corpus sweep (reuses oss-sweep.yml) ─────────────────────
-  # Advisory: the sweep gate is uncalibrated today (max_diagnostics
-  # 999999), so it passes and uploads results. A reusable-workflow caller
-  # job cannot carry `continue-on-error` (GitHub rejects the workflow
+  # Advisory: the sweep gates against data/oss-sweep/mastodon-thresholds.json
+  # (an exact diagnostic count and a precision floor). A reusable-workflow
+  # caller job cannot carry `continue-on-error` (GitHub rejects the workflow
   # file), so "advisory" here means this workflow is simply not a required
-  # check in branch protection — a red sweep is a visible signal, not a
-  # publish blocker. Promote to required once the thresholds calibrate.
+  # check in branch protection: a red sweep is a visible signal, not a
+  # publish blocker.
   oss-sweep:
     name: OSS corpus sweep (advisory)
     uses: ./.github/workflows/oss-sweep.yml

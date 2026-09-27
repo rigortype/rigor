@@ -198,9 +198,10 @@ never chooses the cut.
         nestings, def nestings, and the `Data` and `Struct` member layouts.
       - Both production sites read those tables from that walk: the per-file index
         (`merge_project_method_indexes`) and the project pre-pass (`accumulate_project_index`).
-        Before this slice, each site walked the file four times for them. The standalone builders
-        remain for their other callers. Under `RIGOR_SHADOW_RULE_WALK`, each table is still checked
-        against its legacy walker.
+        Before this slice, each site walked the file four times for them. Nothing in `lib` calls the
+        standalone builders any longer. They stay for the specs, which compare each collector run alone
+        against the shared run. Under `RIGOR_SHADOW_RULE_WALK`, each table is still checked against its
+        legacy walker.
       - `unrendered_header` is a new traversal rule. It covers a `class` / `module` header that renders
         no name, which only a parse error produces (`class foo`, or a `module` keyword followed by a
         `def`). `:children` is the walk's rule, `walk_class_superclasses`': walk every child under the
@@ -208,9 +209,9 @@ never chooses the cut.
         `:body_with_lost_nesting` walks only the body, under `Context#lost_header_body`
         (`walk_def_nestings`). That context makes `self` the class again. It keeps the nesting chain
         below an unnameable cref and loses it (nil) elsewhere, and only a `self::` header below a
-        rebound `self` grows it again (#1521 item 3). Because of this, a nil nesting now means either
-        "not tracked" or "lost". A collector that reads the nesting follows one variant, so it never
-        sees both meanings.
+        rebound `self` grows it again (#1521 item 3). `Context#nesting` answers nil both for a lost
+        chain and for one the caller does not track. The context keeps the two apart: only a lost chain
+        grows again, and an untracked one stays nil everywhere.
       - `lexical_prefix` is a new value rule, and the traversal consults it. It picks the prefix that
         meta-new and eval-family splits resolve against, and `Context#lexical_prefix(variant)` answers
         it. `:prefix` is the walk's rule. `:nesting_head` is `walk_def_nestings`': the innermost
@@ -221,8 +222,12 @@ never chooses the cut.
         the body once per owner, and each collector goes down only with its own group.
       - No event was added. Multi-collector runs now build the collector subsets they need lazily and
         memoise them per run: a collector alone, the run without one collector, and the run split by
-        variant. A run of three therefore allocates nothing at a node where a single collector
-        declines.
+        variant. Asking the collectors allocates nothing, so a node costs no object where no collector
+        declines, or where one does and its remainder is already memoised. A decline inside a variant
+        fork's group of three or more, or two declines at one node, copies one Array.
+      - *Acceptance.* Every table stays equal, under the strict `Shadow` comparer, to what its legacy
+        walker builds. At landing this held for 67,137 files (this repo, the survey corpora and gitlab)
+        and 12,000 fuzzed programs, and `RIGOR_SHADOW_RULE_WALK` keeps checking it.
       - The other walkers that `merge_project_method_indexes` and the pre-pass call stay on their
         legacy walkers for now. Each needs a traversal contract beyond these events, so porting one
         requires amending this ADR first (the amendment rule above).

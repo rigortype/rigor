@@ -83,8 +83,9 @@ jobs:
       - name: Install vernier outside the bundle
         if: inputs.profile
         run: |
-          gem install vernier --no-document --install-dir /tmp/vernier-gems
-          echo "VERNIER_LIB=$(ls -d /tmp/vernier-gems/gems/vernier-*/lib | head -1)" >> "$GITHUB_ENV"
+          gem install vernier -v 1.11.0 --no-document --install-dir /tmp/vernier-gems
+          lib=$(ls -d /tmp/vernier-gems/gems/vernier-1.11.0/lib)
+          echo "VERNIER_LIB=$lib" >> "$GITHUB_ENV"
 
       - name: Run the journeys
         env:

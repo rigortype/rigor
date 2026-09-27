@@ -15,7 +15,9 @@
 #
 # Protocol, per mode and engine: remove the project's `.rigor/cache` and prime the cache with one cold run
 # (recorded); time `--reps` null runs; then for the leaf and the hub, `--reps` times, edit the file, time one run,
-# restore it, and run once more untimed to put the cache back.
+# restore it, and run once more untimed to put the cache back. With `--profile-dir`, each scenario then runs once
+# more, untimed, under vernier (see {PROFILER}). Each engine is laid out as an installed gem so that its result-cache
+# key is the released one (see {arm_dirs}).
 #
 # Every timed run is checked for being the run it is labelled as, from a marker the child process writes at exit
 # (`-r` on RUBYOPT; no engine change):
@@ -51,6 +53,7 @@
 #   ruby tool/engine_warm_ab.rb --project DIR --leaf PATH --hub PATH --head REV|WORKTREE [--base REV]
 #                               [--paths "app lib"] [--modes default,incremental] [--edit method|comment]
 #                               [--reps N] [--no-verify] [--summary FILE] [--json FILE]
+#                               [--profile-dir DIR --profile-lib VERNIER_LIB]
 
 require "digest"
 require "fileutils"
@@ -87,34 +90,64 @@ module EngineWarmAB
     end
   MARKER_RUBY
 
-  # With `--profile-dir`, loaded into one extra run per scenario (never a timed one): it wall-profiles the whole
-  # process with vernier (whose lib `RIGOR_WARM_VERNIER_LIB` names, outside the bundle) and at exit writes the main
-  # thread's inclusive and self sample counts per frame, so a row's time can be attributed without a profile viewer.
+  # With `--profile-dir`, loaded into one extra run per scenario (never a timed one): it wall-profiles the process
+  # with vernier (whose lib `RIGOR_WARM_VERNIER_LIB` names, outside the bundle) from the moment it loads, which is
+  # after Ruby's boot and `bundler/setup`, and vernier records GC as markers rather than samples. At exit it writes
+  # the sampled window, the GC time inside it, and a breakdown: the chain of frames that nearly every sample shares
+  # (descended while one child holds at least 90% of the samples, so a dominant phase is opened rather than hidden),
+  # the children at the level where the samples fan out, and the inclusive and self top lists.
   PROFILER = <<~'PROFILER_RUBY'
     if (out = ENV["RIGOR_WARM_PROFILE"]) && !out.empty?
-      $LOAD_PATH.unshift(ENV.fetch("RIGOR_WARM_VERNIER_LIB"))
-      require "vernier"
-      require "json"
+      begin
+        $LOAD_PATH.unshift(ENV.fetch("RIGOR_WARM_VERNIER_LIB"))
+        require "vernier"
+        require "json"
+      rescue LoadError => e
+        warn "rigor-warm: vernier unavailable (#{e.message}); no profile written"
+        out = nil
+      end
+    end
+    if out
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      gc_before = GC.stat(:time)
       Vernier.start_profile(mode: :wall, interval: 1000, allocation_interval: 0)
       at_exit do
         result = Vernier.stop_profile
+        window_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
         main = result.main_thread
         table = result.stack_table
+        stacks = Hash.new(0)
+        root_first = {}
+        main[:samples].zip(main[:weights]) do |index, weight|
+          stacks[root_first[index] ||= table.stack(index).frames.map(&:label).reverse] += weight
+        end
+        total = [stacks.values.sum, 1].max
+        chain = []
+        level = 0
+        current = stacks
+        loop do
+          groups = Hash.new(0)
+          current.each { |stack, weight| groups[stack[level]] += weight if stack[level] }
+          label, weight = groups.max_by { |_, w| w }
+          break if label.nil? || weight < 0.9 * total
+
+          chain << [label, weight]
+          current = current.select { |stack, _| stack[level] == label }
+          level += 1
+        end
+        phases = Hash.new(0)
+        current.each { |stack, weight| phases[stack[level] || "(self)"] += weight }
         inclusive = Hash.new(0)
         leaf = Hash.new(0)
-        total = 0
-        labels_of = {}
-        main[:samples].zip(main[:weights]) do |index, weight|
-          labels = labels_of[index] ||= table.stack(index).frames.map(&:label)
-          total += weight
-          labels.uniq.each { |label| inclusive[label] += weight }
-          leaf[labels.first] += weight if labels.first
+        stacks.each do |stack, weight|
+          stack.uniq.each { |label| inclusive[label] += weight }
+          leaf[stack.last] += weight
         end
         top = ->(counts, n) { counts.sort_by { |_, v| -v }.first(n) }
+        rigor = inclusive.select { |k, _| k.start_with?("Rigor::", "Rigor.") }
         File.write(out, JSON.generate(
-          "total" => total,
-          "inclusive_rigor" => top.(inclusive.select { |k, _| k.start_with?("Rigor::") }, 40),
-          "inclusive" => top.(inclusive, 60),
+          "sampled_ms" => stacks.values.sum, "window_ms" => window_ms, "gc_ms" => GC.stat(:time) - gc_before,
+          "chain" => chain, "phases" => top.(phases, 15), "inclusive_rigor" => top.(rigor, 40),
           "self" => top.(leaf, 40)
         ))
       end
@@ -216,9 +249,9 @@ module EngineWarmAB
   end
 
   # Both probe edits of `file` must parse, so a bad placement fails before any run is spent.
-  def assert_probe_editable(project, file, kind)
+  def assert_probe_editable(project, file, kind, reps = 1)
     text = File.read(File.join(project, file))
-    [1, 2].each do |n|
+    [1, 2, reps + 1].uniq.each do |n|
       abort("the #{kind} probe does not parse in #{file}") unless Prism.parse(edited(text, kind, n, file)).success?
     end
   end
@@ -321,22 +354,37 @@ module EngineWarmAB
           run_check(arm, mode_args(mode))
         end
       end
+      return unless @options[:profile_dir]
+
       @arms.each do |name, arm|
-        with_edit(arm, file, 1) { profile(mode, scenario, name, arm) }
+        with_edit(arm, file, @options.fetch(:reps) + 1) { profile(mode, scenario, name, arm) }
         run_check(arm, mode_args(mode))
       end
     end
 
-    # One extra, untimed run of the scenario under the profiler, in the same cache state as the timed ones.
+    # One extra, untimed run of the scenario under the profiler, in the same cache state as the timed ones. It must
+    # be the same hit or miss as its row, and a YJIT state that differs from the timed runs' is noted: the
+    # profiler's overhead can push a run past the deadline, and the profile then shows a compile burst the timed
+    # rows never paid. (Under a fork pool, analysis runs in children the profiler does not follow.)
     def profile(mode, scenario, name, arm)
       dir = @options[:profile_dir]
       return unless dir
 
-      out = File.join(dir, "#{mode}-#{scenario}-#{name}.json")
-      EngineWarmAB.check(arm[:engine], arm[:project], mode_args(mode), paths, scratch: @scratch,
-                         env_extra: { "RIGOR_WARM_PROFILE" => out,
-                                      "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib) })
-      @profiles["#{mode}/#{scenario}/#{name}"] = JSON.parse(File.read(out)) if File.exist?(out)
+      key = "#{mode}/#{scenario}/#{name}"
+      out = File.join(dir, "#{key.tr('/', '-')}.json")
+      FileUtils.rm_f(out)
+      result = EngineWarmAB.check(arm[:engine], arm[:project], mode_args(mode), paths, scratch: @scratch,
+                                  env_extra: { "RIGOR_WARM_PROFILE" => out,
+                                               "RIGOR_WARM_VERNIER_LIB" => @options.fetch(:profile_lib) })
+      assert_labelled(mode, scenario, "#{name} (profiled)", result)
+      timed_yjit = @yjit[[mode, scenario]][name] * 2 > @samples[[mode, scenario]][name].size
+      @notes << "#{key}: the profiled run ended with YJIT #{result['yjit'] ? 'on' : 'off'}, unlike most timed runs" if
+        result["yjit"] != timed_yjit
+      unless File.exist?(out)
+        @notes << "#{key}: no profile was written"
+        return
+      end
+      @profiles[key] = JSON.parse(File.read(out)).merge("wall_ms" => (result["wall_s"] * 1000).round)
     end
 
     def with_edit(arm, file, rep)
@@ -386,7 +434,11 @@ module EngineWarmAB
       tmp = File.realpath(scratch)
       File.write(File.join(tmp, "marker.rb"), MARKER)
       File.write(File.join(tmp, "profile.rb"), PROFILER)
-      FileUtils.mkdir_p(options[:profile_dir]) if options[:profile_dir]
+      if options[:profile_dir]
+        FileUtils.mkdir_p(options[:profile_dir])
+        abort("vernier does not load from #{options[:profile_lib]}") unless
+          system(RbConfig.ruby, "-I", options[:profile_lib], "-rvernier", "-e", "0", out: File::NULL, err: File::NULL)
+      end
       arms = arm_dirs(options, tmp)
       journey = Journey.new(arms, options, tmp)
       begin
@@ -404,8 +456,16 @@ module EngineWarmAB
   def arm_dirs(options, tmp)
     names = options[:base] ? %w[base head] : %w[head]
     names.to_h do |name|
-      engine = File.join(tmp, "engine-#{name}")
-      EngineAllocAB.materialise(options.fetch(name.to_sym), engine, EngineAllocAB::ENGINE_PATHS + ["exe"])
+      staging = File.join(tmp, "staging-#{name}")
+      EngineAllocAB.materialise(options.fetch(name.to_sym), staging, EngineAllocAB::ENGINE_PATHS + ["exe"])
+      # Laid out as an installed gem, `gems/rigortype-<VERSION>`, so the result-cache key identifies the engine by
+      # its version (`Cache::EngineSource.version_pinned?`) as a released install does, instead of digesting the
+      # engine's source on every run, a cost only a development checkout pays.
+      version = File.read(File.join(staging, "lib", "rigor", "version.rb"))[/VERSION\s*=\s*"([^"]+)"/, 1]
+      abort("no Rigor::VERSION in the #{name} engine") unless version
+      engine = File.join(tmp, "engine-#{name}", "gems", "rigortype-#{version}")
+      FileUtils.mkdir_p(File.dirname(engine))
+      File.rename(staging, engine)
       project = File.join(tmp, "project-#{name}")
       FileUtils.cp_r(File.join(options.fetch(:project), "."), project)
       FileUtils.rm_rf(File.join(project, ".rigor", "cache"))
@@ -453,18 +513,21 @@ module EngineWarmAB
     lines.join("\n")
   end
 
-  # The heaviest Rigor frames of each profiled scenario below the CLI entry chain, as a share of the run's samples
-  # (inclusive, so they nest).
+  # Each profiled scenario: its wall time, how much of it the profiler saw, the collapsed chain every sample shares,
+  # and where the samples fan out below it, as shares of the profiled run's wall time.
   def profile_notes(journey)
     return [] if journey.profiles.empty?
 
-    lines = ["", "<details><summary>Profiles: heaviest Rigor frames, inclusive share of wall samples</summary>", ""]
+    lines = ["", "<details><summary>Profiles: where each scenario's wall time goes</summary>", "",
+             "Shares are of the profiled run's wall time. The profiler starts after Ruby boot and `bundler/setup`, " \
+             "and GC is not sampled, so the shares do not add up to 100%.", ""]
     journey.profiles.each do |key, profile|
-      total = [profile.fetch("total"), 1].max
-      # Frames on nearly every sample are the CLI entry chain; the phases sit below it.
-      phases = profile.fetch("inclusive_rigor").reject { |_, n| n >= 0.9 * total }
-      frames = phases.first(12).map { |label, n| format("%s %.0f%%", label, 100.0 * n / total) }
-      lines << "- **#{key}**: #{frames.join('; ')}"
+      wall = [profile.fetch("wall_ms"), 1].max
+      share = ->(ms) { format("%.0f%%", 100.0 * ms / wall) }
+      chain = profile.fetch("chain").map(&:first).reject { |label| label.start_with?("<") }.last(3)
+      phases = profile.fetch("phases").first(8).map { |label, ms| "#{label} #{share.(ms)}" }
+      lines << "- **#{key}** (#{wall} ms; sampled #{share.(profile.fetch('sampled_ms'))}, GC #{profile.fetch('gc_ms')} ms): " \
+               "…#{chain.join(' › ')} › #{phases.join('; ')}"
     end
     lines << "" << "</details>"
   end
@@ -543,7 +606,7 @@ if $PROGRAM_NAME == __FILE__
   end.parse!
   abort("--project, --leaf, --hub and --head are required") unless options.values_at(:project, :leaf, :hub, :head).all?
   abort("--base must name a revision") if options[:base] == EngineAllocAB::WORKTREE
-  abort("--profile-dir needs --profile-lib (the vernier gem's lib)") if options[:profile_dir] && !options[:profile_lib]
+  abort("--profile-dir and --profile-lib go together") if options[:profile_dir].nil? != options[:profile_lib].nil?
   abort("--reps must be at least 1") if options[:reps] < 1
   abort("unknown mode in --modes") unless !options[:modes].empty? && (options[:modes] - EngineWarmAB::MODES).empty?
   %i[leaf hub].each do |key|
@@ -555,7 +618,7 @@ if $PROGRAM_NAME == __FILE__
     unless EngineWarmAB.within_paths?(options[:project], file, options[:paths])
       abort("#{key} #{file} is outside --paths, so editing it changes nothing the run analyses")
     end
-    EngineWarmAB.assert_probe_editable(options[:project], file, options[:edit])
+    EngineWarmAB.assert_probe_editable(options[:project], file, options[:edit], options[:reps])
   end
   exit EngineWarmAB.run(options)
 end

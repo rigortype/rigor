@@ -89,6 +89,7 @@ module SharedWalkCases
         end
       end
     RUBY
+    "a top-level anonymous class, keyed with the file's path" => "Class.new(Base) { def m; end }\n",
     "defs nest where the chain says, and nothing below a def is recorded" => <<~RUBY
       def top; end
       module Outer
@@ -157,6 +158,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       source = SharedWalkCases::CASES.fetch("defs nest where the chain says, and nothing below a def is recorded")
       expect(nestings_by_name(source))
         .to eq(top: [], m: %w[Outer::Inner Outer], in_meta: %w[Outer::Inner Outer], r: %w[Rooted Outer])
+    end
+
+    it "keys an anonymous class with the path the file is walked under" do
+      source = SharedWalkCases::CASES.fetch("a top-level anonymous class, keyed with the file's path")
+      walked = described_class.declaration_walk_tables(parse(source), "app/x.rb")
+      expect(walked.fetch(:superclasses)).to eq("#<Class:app/x.rb:1:0>" => "Base")
+      expect(nestings_by_name(source)).to eq(m: [])
     end
 
     it "keys a def-nesting entry by the def node itself" do

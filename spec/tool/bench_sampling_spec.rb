@@ -170,10 +170,12 @@ RSpec.describe "tool/bench.rb sampling and corpus (ADR-50 WD4, #987, #1507)" do
         corpus = File.realpath(dir)
         cwd = nil
         stub_check(1, JSON.generate("diagnostics" => [{}, {}])) { |pwd| cwd = pwd }
+        allow(Bench).to receive(:assert_engine_loads).and_call_original
 
         expect(Bench.measure("lib", corpus)).to include("diagnostics" => 2)
         expect(cwd).to eq(corpus)
         expect(Dir.pwd).not_to eq(corpus)
+        expect(Bench).to have_received(:assert_engine_loads).with(corpus)
       end
     end
 
@@ -182,6 +184,74 @@ RSpec.describe "tool/bench.rb sampling and corpus (ADR-50 WD4, #987, #1507)" do
         stub_check(64, "")
 
         expect { Bench.measure("lib", dir) }.to raise_error(SystemExit).and output(/exited 64/).to_stderr
+      end
+    end
+  end
+
+  # The corpus holds a complete older `lib/rigor`. A run that loaded any of it measured the old engine.
+  describe ".assert_engine_loads" do
+    let(:corpus) { "/tmp/rigor-bench-corpus-x/corpus" }
+
+    it "accepts a run whose rigor/cli is this checkout's and that loaded nothing from the corpus" do
+      expect(Bench.assert_engine_loads(corpus, [Bench::CHECKOUT_CLI, "/gems/json.rb"])).to be_nil
+    end
+
+    it "aborts when a feature was loaded from the corpus" do
+      features = [Bench::CHECKOUT_CLI, "#{corpus}/lib/rigor/scope.rb"]
+
+      expect { Bench.assert_engine_loads(corpus, features) }.to raise_error(SystemExit)
+        .and output(%r{loaded from the corpus.*lib/rigor/scope\.rb}m).to_stderr
+    end
+
+    it "aborts when rigor/cli came from anywhere else, or never loaded" do
+      expect { Bench.assert_engine_loads(corpus, ["/old/engine/lib/rigor/cli.rb"]) }.to raise_error(SystemExit)
+        .and output(%r{rigor/cli loaded from "/old/engine}).to_stderr
+      expect { Bench.assert_engine_loads(corpus, ["/gems/json.rb"]) }.to raise_error(SystemExit)
+        .and output(%r{rigor/cli loaded from nil}).to_stderr
+    end
+  end
+
+  # `tool/engine_alloc_ab.rb` owns the argv, and a change made there for the A/B would move the calibrated number.
+  describe "EngineAllocAB.run_check as the gate uses it" do
+    it "runs `rigor check --no-cache --no-stats --format json` over the target" do
+      require "rigor/cli"
+      out = StringIO.new
+      err = StringIO.new
+      allow(Rigor::CLI).to receive(:new).and_return(instance_double(Rigor::CLI, run: 0))
+
+      expect(EngineAllocAB.run_check("lib", out, err)).to eq(0)
+      expect(Rigor::CLI).to have_received(:new)
+        .with(%w[check --no-cache --no-stats --format json lib], out: out, err: err)
+    end
+  end
+
+  describe ".load_thresholds" do
+    def thresholds(content)
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "thresholds.yml")
+        File.write(path, content)
+        yield path
+      end
+    end
+
+    # The fallback mirrors the committed file, so a deleted key cannot silently loosen the gate.
+    it "falls back to the committed values" do
+      committed = File.expand_path("../../bench/thresholds.yml", __dir__)
+
+      expect(Bench.load_thresholds(committed)).to eq(Bench::DEFAULT_BAND)
+      expect(Bench.load_thresholds("/no/such/thresholds.yml")).to eq(Bench::DEFAULT_BAND)
+    end
+
+    it "keeps a fractional band and ignores keys it does not own" do
+      thresholds("allocations_pct: 1.5\npr_allocations_pct: 1\n") do |path|
+        expect(Bench.load_thresholds(path)).to eq(Bench::DEFAULT_BAND.merge("allocations_pct" => 1.5))
+      end
+    end
+
+    it "aborts on a band that is not a number" do
+      thresholds("stale_pct: often\n") do |path|
+        expect { Bench.load_thresholds(path) }.to raise_error(SystemExit)
+          .and output(/stale_pct is not a number/).to_stderr
       end
     end
   end
@@ -195,10 +265,14 @@ RSpec.describe "tool/bench.rb sampling and corpus (ADR-50 WD4, #987, #1507)" do
       expect(Bench.corpus_revision({ "calibrated" => true, "corpus" => "v0.4.0" }, "baseline.json")).to eq("v0.4.0")
     end
 
-    it "is named by the committed baseline, as a release tag" do
+    # The corpus-advance procedure passes through `"calibrated": false`; that state must never reach `master`, where
+    # the gate would pass everything.
+    it "is named by the committed baseline, which is calibrated" do
       path = File.expand_path("../../bench/baseline.json", __dir__)
+      baseline = Bench.load_baseline(path)
 
-      expect(Bench.corpus_revision(Bench.load_baseline(path), path)).to match(/\Av\d+\.\d+\.\d+\z/)
+      expect(baseline["calibrated"]).to be(true)
+      expect(Bench.corpus_revision(baseline, path)).to match(/\Av\d+\.\d+\.\d+\z/)
     end
 
     # No fallback to this checkout's tree: that is the growing corpus the gate moved away from.
@@ -238,10 +312,10 @@ RSpec.describe "tool/bench.rb sampling and corpus (ADR-50 WD4, #987, #1507)" do
     # The temporary directory is reached through a symlink, as macOS's `/tmp` is, so the example can tell a
     # realpath'd corpus from the spelling `Dir.mktmpdir` returned.
     it "unpacks the resolved commit into a realpath'd directory for the duration of the block" do
-      allow(EngineAllocAB).to receive(:materialise)
+      allow(EngineAllocAB).to receive(:materialise) { |_commit, dir| FileUtils.mkdir_p(dir) }
       head = Bench.resolve_corpus("HEAD")
       seen = nil
-      resolved = nil
+      present = nil
 
       Dir.mktmpdir do |outer|
         FileUtils.mkdir_p(File.join(outer, "real"))
@@ -251,14 +325,14 @@ RSpec.describe "tool/bench.rb sampling and corpus (ADR-50 WD4, #987, #1507)" do
         expect do
           Bench.with_corpus("HEAD") do |dir|
             seen = dir
-            resolved = File.join(File.realpath(File.dirname(dir)), "corpus")
+            present = File.directory?(dir)
           end
         end.to output(/Corpus: HEAD/).to_stderr
         expect(seen).to start_with(File.join(File.realpath(outer), "real", ""))
+        expect(present).to be(true)
+        expect(File.exist?(File.dirname(seen))).to be(false)
       end
       expect(EngineAllocAB).to have_received(:materialise).with(head, seen)
-      expect(seen).to eq(resolved)
-      expect(File.exist?(File.dirname(seen))).to be(false)
     end
 
     # The zero-work guard: a target the corpus lacks would finish fast and read as a large improvement.

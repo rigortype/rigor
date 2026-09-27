@@ -15,17 +15,20 @@
 # The real regression teeth are the deterministic allocations / RSS bands,
 # so wall stays only a coarse backstop rather than a flaky gate.
 #
-# allocations_pct is the engine-cost budget of one release cycle. Since
-# #1507 the gate reads a frozen corpus (the release tag bench/baseline.json
-# names), so the band absorbs no corpus growth, and it needs no room for
-# noise: on one corpus, allocations repeat to a few hundred objects (the
-# v0.4.0 corpus's two CI reps differed by 228 in 38.5M; #1469 saw at most
-# 802, under 0.003%), and macOS reads within 0.2% of the Linux CI number.
-# 2% is two per-PR warning bands (pr_allocations_pct below), and about what
-# v0.4.0's long tail of small merges added by itself (140 steps under 20K
-# objects each, +0.98% together). v0.4.0's +19.1% would have failed it, and
-# so would two unanswered per-PR warnings. It was 5% while the gate read
-# Rigor's own growing `lib`.
+# allocations_pct is the budget for engine cost added since the baseline was
+# last calibrated: on the corpus's advance after a release, at a refresh
+# measured on an improving PR's merge commit, or on the user's ruling at a
+# red cut, the only way one clears (bench/README.md). Since #1507 the gate
+# reads a frozen corpus (the release tag bench/baseline.json names), so the
+# band absorbs no corpus growth, and it needs no room for noise: on one
+# corpus, allocations repeat to a few hundred objects (the v0.4.0 corpus's
+# two CI reps differed by 228 in 38.5M; #1469 saw at most 802, under
+# 0.003%), and macOS reads within 0.2% of the Linux CI number. 2% is two
+# per-PR warning bands (pr_allocations_pct below), and about what v0.4.0's
+# long tail of small merges added by itself (140 steps under 20K objects
+# each, +0.98% together). v0.4.0's +19.1% would have failed it, and so would
+# two unanswered per-PR warnings. It was 5% while the gate read Rigor's own
+# growing `lib`.
 wall_pct: 20
 allocations_pct: 2
 rss_pct: 10
@@ -39,7 +42,8 @@ rss_pct: 10
 # make this fire spuriously.
 #
 # 1% on the frozen corpus: an improvement as large as a step the per-PR job
-# warns about asks for a refresh, and at a few hundred objects run to run the
+# warns about asks for a refresh (measured at the improving PR's merge
+# commit; bench/README.md), and at a few hundred objects run to run the
 # notice cannot fire on noise. Together with the band, an unrefreshed
 # improvement leaves at most about 3% over the real cost. It was 15% while
 # the corpus grew.

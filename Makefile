@@ -222,11 +222,12 @@ coverage:
 # --no-cache` in-process over `lib` of the frozen corpus bench/baseline.json
 # names (the previous release's tag, `git archive`d to a scratch directory;
 # #1507), measures wall / allocations / peak-RSS, and gates against
-# bench/baseline.json within bench/thresholds.yml. The committed baseline
-# ships uncalibrated, so the first run writes a suggested baseline
-# (bench/baseline.updated.json, gitignored) and passes — commit a
-# CI-measured baseline to activate. Deliberately NOT in `verify` (a full
-# analysis under measurement is slow); the release gate runs it (advisory).
+# bench/baseline.json within bench/thresholds.yml. Every run writes a
+# suggested baseline (bench/baseline.updated.json, gitignored); a
+# recalibration commits a Linux CI run's copy of it (bench/README.md). An
+# uncalibrated baseline passes, once its corpus tag resolves. Deliberately
+# NOT in `verify` (a full analysis under measurement is slow); the release
+# gate runs it.
 # Named `bench-perf` (not `bench`) so the target does not collide with the
 # `bench/` data directory — keeping the file's no-`.PHONY` convention and
 # its `check-*` / `test-*` hyphenated-target family.

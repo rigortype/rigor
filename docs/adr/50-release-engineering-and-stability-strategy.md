@@ -262,19 +262,35 @@ idiomatic corpus → it is a strengthening, not a new discipline.
   subsets of the established corpora (Mastodon `app/models`, Redmine `app`,
   a GitLab `app/{controllers,services,…}` subset — the trees ADR-44/45/46
   already profile), `--no-cache`, fixed worker count.
-- **Corpus (amended for #1507):** the implemented gate measures Rigor's own
-  `lib` rather than the external corpora above, and since #1507 it reads
-  that `lib` at the **previous release's tag** (`"corpus"` in
-  `bench/baseline.json`, unpacked with `git archive`) with the release
-  candidate's engine. Before, it read the checkout's own `lib`, which grows
-  with every PR (+9.3 %, +1.0 %, +6.3 % and +26.5 % over the four releases
-  through v0.4.0), so no band width could separate corpus growth from
-  engine cost: the v0.4.0 cut read +80.5 % and was accepted as a whole, and
-  the engine's own +19.1 % was separated only afterwards (#1469). On a
-  frozen tree allocations repeat to a few hundred objects, so the band can
-  be a tight budget for the cycle's engine cost and a refresh after each
-  improvement keeps it honest. After tagging, the corpus advances to the
-  new tag and the baseline is recalibrated on it.
+
+  > **Partially superseded by the "Corpus" bullet below (amended by
+  > [#1515](https://github.com/rigortype/rigor/pull/1515), 2026-09-27).** The
+  > implemented harness measures Rigor's own `lib` at the previous release's
+  > tag, not these external corpora.
+- **Corpus (amended for #1507):** the implemented gate runs the release
+  candidate's engine over Rigor's own `lib` at the **previous release's tag**
+  (`"corpus"` in `bench/baseline.json`, unpacked with `git archive`). Before
+  #1507 it read the checkout's own `lib`, which grows with every PR (+9.3 %,
+  +1.0 %, +6.3 % and +26.5 % over the four releases through v0.4.0), so no
+  band width could separate corpus growth from engine cost: the v0.4.0 cut
+  read +80.5 % and was accepted as a whole, and the engine's own +19.1 % was
+  separated only afterwards (#1469). On a frozen tree allocations repeat to
+  a few hundred objects, so the band can be a tight budget for the engine
+  cost added since the baseline was last calibrated.
+  - *Calibration.* After tagging, the corpus advances to the new tag and the
+    baseline is recalibrated on it. A refresh after an improvement
+    re-anchors the band on the same corpus and absorbs every engine change
+    merged before the commit it measures, so it measures the improving PR's
+    own merge commit and lists each per-PR allocation warning since the last
+    calibration with its answer. A red cut clears one way only: attribute
+    the rise, and on the user's ruling recalibrate on the same corpus.
+    `bench/README.md` carries the procedures.
+  - *Known limits.* The corpus has no `vendor/bundle`, so gems' own `sig/`
+    do not load (they add 1.02 % to allocations on the v0.4.0 corpus). The
+    core RBS and the Ruby come from the run (the `rbs` gem, CI's floating
+    `"4.0"` series), so a bump of either moves the number with no engine
+    change. A user-global `BUNDLE_PATH` in `~/.bundle/config` still reaches
+    the run, through bundle discovery's last resort.
 - **Metrics:** wall time, total allocations (`ObjectSpace`), peak RSS, and
   diagnostic count (a *count* change flags an unintended behaviour shift —
   the byte-identical-diagnostics check ADR-44/45/46 already use).

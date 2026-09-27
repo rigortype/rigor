@@ -14,19 +14,19 @@
 # ## Corpus: the previous release's tree (#1507)
 #
 # The analysed tree is not this checkout but the revision `bench/baseline.json` names as `corpus`, a release tag.
-# Rigor's own `lib` grows with every pull request (+9.3%, +1.0%, +6.3% and +26.5% over the four releases through
-# v0.4.0), so a band on this checkout's `lib` mixes corpus growth with engine cost at any width. On a frozen tree the
-# delta is the engine's alone, which is what makes a tight band and a refresh after every improvement meaningful. At
-# a cut the gate measures the release candidate's engine over the previous release's tree; after tagging, the corpus
-# advances to the new tag and the baseline is recalibrated on it.
+# Rigor's own `lib` grows with every pull request (ADR-50 WD4 records by how much), so a band on this checkout's `lib`
+# mixes corpus growth with engine cost at any width. On a frozen tree the delta is the engine's alone, which is what
+# makes a tight band and a refresh after every improvement meaningful. At a cut the gate measures the release
+# candidate's engine over the previous release's tree; after tagging, the corpus advances to the new tag and the
+# baseline is recalibrated on it.
 #
 # The method is `tool/engine_alloc_ab.rb`'s, and so is the code that unpacks the tree: `git archive` the revision into
 # a scratch directory, start each child in the repository root so Bundler resolves this checkout's bundle, then
-# change into the corpus (config discovery is cwd-based) and run the engine there. The corpus has no `vendor/bundle`,
-# so, as in the A/B, no gem-shipped `sig/` loads; the running bundle still supplies the core RBS, so a gem bump can
-# move the numbers without an engine change. A revision this clone lacks, a target the corpus lacks, and a `rigor
-# check` exit other than 0 or 1 or unparseable output all abort: a gate that measured a partial run would read as an
-# improvement.
+# change into the corpus (config discovery is cwd-based) and run the engine there. The fidelity limits are in
+# `bench/README.md` ("The corpus"): no gem-shipped `sig/` loads, the core RBS comes from the running bundle and Ruby,
+# and a user-global `BUNDLE_PATH` can still reach the run. A revision this clone lacks, a target the corpus lacks, a
+# `rigor check` exit other than 0 or 1, unparseable output, and a Rigor file loaded from anywhere but this checkout's
+# `lib` all abort: a gate that measured a partial run, or the corpus's own old engine, would read as an improvement.
 #
 # ## Sampling: every rep is a FRESH PROCESS (#987)
 #
@@ -70,6 +70,7 @@ require "optparse"
 require "rbconfig"
 require "stringio"
 require "tmpdir"
+require "yaml"
 
 # The A/B's tree unpacking and completed-run checks. Requiring it defines {EngineAllocAB} without running anything
 # (the `$PROGRAM_NAME` guard at its bottom).
@@ -103,6 +104,14 @@ module Bench
   # false-positive cost the analyzer's own rules are held to.
   STALENESS_METRIC = "allocations"
 
+  # The band when `thresholds.yml` or one of its keys is missing. It mirrors the committed values, so a deleted key
+  # cannot silently loosen the gate.
+  DEFAULT_BAND = { "wall_pct" => 20.0, "allocations_pct" => 2.0, "rss_pct" => 10.0, "stale_pct" => 1.0 }.freeze
+
+  # The engine under measurement. The corpus holds a complete older `lib/rigor`, so a load that resolved there would
+  # measure the old engine and still print plausible numbers.
+  CHECKOUT_CLI = File.join(ROOT, "lib", "rigor", "cli.rb")
+
   module_function
 
   # Peak RSS is read from /proc on Linux (the CI runner, which is the authoritative measurement host). On macOS /
@@ -132,6 +141,7 @@ module Bench
       allocated = GC.stat(:total_allocated_objects) - before
       diagnostics = EngineAllocAB.diagnostic_count(out.string)
       assert_completed(status, diagnostics, err.string)
+      assert_engine_loads(corpus_dir)
       {
         "wall_s" => wall.round(3),
         "allocations" => allocated,
@@ -148,6 +158,23 @@ module Bench
 
     abort("rigor check exited #{status.inspect} with #{diagnostics.nil? ? 'unparseable' : 'parseable'} " \
           "output:\n#{stderr}")
+  end
+
+  # Every Rigor file the run loaded came from this checkout: `rigor/cli` from `ROOT/lib`, and nothing from the corpus.
+  def assert_engine_loads(corpus_dir, features = $LOADED_FEATURES)
+    from_corpus = features.select { |feature| feature.start_with?(File.join(corpus_dir, "")) }
+    unless from_corpus.empty?
+      abort("loaded from the corpus instead of this checkout:\n#{from_corpus.first(5).join("\n")}")
+    end
+
+    cli = features.grep(%r{/rigor/cli\.rb\z}).first
+    abort("rigor/cli loaded from #{cli.inspect}, not #{CHECKOUT_CLI}") unless cli && same_file?(cli, CHECKOUT_CLI)
+  end
+
+  def same_file?(path, other)
+    File.realpath(path) == File.realpath(other)
+  rescue SystemCallError
+    false
   end
 
   # Collapse the reps into the single metric hash the gate and the suggested baseline both consume — the shape is
@@ -252,21 +279,24 @@ module Bench
     end
   end
 
-  # Tiny `key: int` reader so the gate stays dependency-free. Lines that are
-  # blank or start with `#` are ignored; only the known band keys are honoured.
+  # The band keys of `thresholds.yml`, as Floats so a `1.5` is not truncated. Other keys (the per-PR A/B's) are
+  # ignored; a band key that is not a number stops the run.
   def load_thresholds(path)
-    band = { "wall_pct" => 10, "allocations_pct" => 5, "rss_pct" => 10, "stale_pct" => 15 }
+    band = DEFAULT_BAND.dup
     return band unless File.readable?(path)
 
-    File.foreach(path, encoding: "UTF-8") do |line|
-      stripped = line.strip
-      next if stripped.empty? || stripped.start_with?("#")
+    (YAML.safe_load_file(path) || {}).each do |key, value|
+      next unless band.key?(key)
 
-      key, value = stripped.split(":", 2)
-      band[key.strip] = value.to_i if key && value && band.key?(key.strip)
+      band[key] = Float(value)
+    rescue ArgumentError, TypeError
+      abort("#{path}: #{key} is not a number (#{value.inspect})")
     end
     band
   end
+
+  # `2.0` prints as `2`, `1.5` as `1.5`.
+  def pct_label(pct) = format("%g", pct)
 
   # The notice text, or nil when the metric is not the deterministic one or the drop is inside `stale_pct`.
   # `headroom` is what actually matters to a reader: how far the current cost could grow before the unrefreshed
@@ -278,7 +308,7 @@ module Bench
     drop = ((1 - (now_value.to_f / base_value)) * 100).round(1)
     headroom = (((limit / now_value.to_f) - 1) * 100).round
     "STALE #{target} #{metric}: #{now_value} is #{drop}% below baseline #{base_value}; " \
-      "the +#{pct}% band still permits #{limit.round} (+#{headroom}% over the real cost)"
+      "the +#{pct_label(pct)}% band still permits #{limit.round} (+#{headroom}% over the real cost)"
   end
 
   def parse_options(argv)
@@ -378,7 +408,7 @@ module Bench
         if n > limit
           delta = (((n.to_f / b) - 1) * 100).round(1)
           regressions << "FAIL #{target} #{metric}: #{n} > #{limit.round} " \
-                         "(+#{delta}% vs baseline #{b}, band +#{pct}%)"
+                         "(+#{delta}% vs baseline #{b}, band +#{pct_label(pct)}%)"
         else
           puts "OK   #{target} #{metric}: #{n} ≤ #{limit.round} (baseline #{b})"
           notice = staleness_notice(target, metric, n, b, pct, limit, band["stale_pct"])

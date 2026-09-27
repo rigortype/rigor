@@ -378,23 +378,36 @@ commit.
 - Both baselines (`bench/baseline.json`,
   `data/oss-sweep/mastodon-thresholds.json`) are exact-count / banded with
   little headroom, so a precision or allocation change flips them red **by
-  design** until recalibrated. Recalibrate from the **CI-measured Linux**
-  values: allocations is the deterministic signal; **`wall_s` is a rerunnable
-  flake — `gh run rerun --failed` clears it; never recalibrate for wall
-  alone.** Diff the OSS-sweep diagnostics for FPs before blessing a higher
-  count; fix an FP at its root rather than blessing it in.
-- The perf gate runs the release candidate's engine over the **previous
-  release's tree** (the `corpus` tag in `bench/baseline.json`,
-  [`bench/README.md`](../../../bench/README.md)), not over the growing `lib`,
-  so an allocations failure is the cycle's engine cost with corpus growth
-  already out of it. Attribute it from the cycle's "Engine allocations" PR
-  summaries and put it to the user; do not recalibrate the old corpus to clear
-  it. The corpus advances after tagging ("Advance the perf-gate corpus" below).
+  design**. Any recalibration uses the **CI-measured Linux** values, and
+  **`wall_s` is a rerunnable flake — `gh run rerun --failed` clears it; never
+  recalibrate for wall alone.** For the OSS sweep, diff the diagnostics for
+  FPs before blessing a higher count, and fix an FP at its root rather than
+  blessing it in. For the perf baseline, the next bullet is the only path.
+- **A red perf gate has one way through.** It runs the release candidate's
+  engine over the **previous release's tree** (the `corpus` tag in
+  `bench/baseline.json`, [`bench/README.md`](../../../bench/README.md)), so an
+  allocations failure is engine cost with corpus growth already out of it. The
+  gate is planned as a required check, which makes this the only way to clear
+  it:
+  1. **Attribute the rise** since the baseline's `calibrated_at`: the
+     "Engine allocations" summaries of the PRs merged since, gem bumps
+     (`Gemfile.lock`; the `rbs` gem supplies the core RBS), and a Ruby change
+     (the gate run's Ruby against the one `calibrated_on` names; CI's
+     `ruby-version: "4.0"` floats to the latest patch with no PR). The
+     dependency-update and Ruby-bump PRs record their own shift.
+  2. **Put the attribution to the user.**
+  3. **On the user's ruling, recalibrate on the same corpus**, on the release
+     branch: commit that branch's `bench-baseline-<run-id>` artifact as
+     `bench/baseline.json`, with a `note` naming the ruling and the
+     attribution. The push re-runs the gate.
+  4. **Publish, then advance the corpus** ("Advance the perf-gate corpus"
+     below).
 - Perf-measurement comparability: warm numbers are only comparable within one
   process model (an in-process cold-then-warm chain is ~186k allocs cheaper
   than a fresh-process warm — a phantom regression otherwise). Self-check
   allocation numbers require `vendor/bundle` present (~8M allocs of vendored
-  sigs). A peak-RSS rise on a run over ~5s is the deadline **YJIT**, not a
+  sigs); the perf gate's corpus runs without it by design (`bench/README.md`).
+  A peak-RSS rise on a run over ~5s is the deadline **YJIT**, not a
   leak — A/B with `RIGOR_DISABLE_YJIT=1` before diagnosing. Details:
   [`docs/notes/20260713-corpus-perf-campaign.md`](../../../docs/notes/20260713-corpus-perf-campaign.md).
 
@@ -442,8 +455,7 @@ release **PR** you open next (it triggers on `pull_request`, not on a
   - A **`wall_s`-only** perf failure is CI wall-time noise — the deterministic
     `allocations` / `peak_rss_kb` bands are the real signal. Clear it with
     `gh run rerun --failed <run-id>`; never recalibrate for wall alone. An
-    allocations failure is engine cost on the previous release's tree (see
-    "Perf-gate gotchas").
+    allocations failure takes the one path in "Perf-gate gotchas".
   - An OSS-sweep diagnostic-count change needs a false-positive diff before it
     is blessed into `data/oss-sweep/*-thresholds.json`.
 
@@ -539,7 +551,9 @@ accepted by RubyGems, then run `rake release:github` once the tag is on
 
 Once the tag exists, the perf gate's corpus moves to it, so the next cycle's
 engine cost is measured on this release's tree. Recalibrate from a branch cut
-at the tag, so the baseline measures exactly the released engine:
+at the tag, so the baseline measures exactly the released engine. Open no PR
+until the last step: the first commit sets `"calibrated": false`, which passes
+every run, so it must never sit at the head of a PR that could merge.
 
 ```sh
 git switch -c bench-corpus-vX.Y.Z vX.Y.Z
@@ -547,15 +561,19 @@ git switch -c bench-corpus-vX.Y.Z vX.Y.Z
 git commit -am "Advance the perf-gate corpus to vX.Y.Z"
 git push origin HEAD:refs/heads/bench-corpus-vX.Y.Z
 gh workflow run release-gate.yml --ref bench-corpus-vX.Y.Z
+gh run list --workflow release-gate.yml --branch bench-corpus-vX.Y.Z --limit 1 --json databaseId
 gh run watch <run-id>
-gh run download <run-id> --name bench-baseline-<run-id>
+gh run view <run-id> --json status   # watch can return mid-run; wait for "completed"
+gh run download <run-id> --name bench-baseline-<run-id> -D <dir>
 ```
 
-Commit the downloaded `baseline.updated.json` as `bench/baseline.json`, adding
-`calibrated_on` (the run) and a `note` with the move from the previous corpus,
-and land it on `master` through a PR. `calibrated: false` in the first commit
-is what keeps that run from gating the new tree against the old tree's
-numbers.
+Commit `<dir>/baseline.updated.json` as `bench/baseline.json`, adding
+`calibrated_on` (the run, and the Ruby its setup step installed) and a `note`
+with the move from the previous corpus. Push, then open the PR to `master`.
+`calibrated: false` in the first commit is what keeps that run from gating the
+new tree against the old tree's numbers, and
+`spec/tool/bench_sampling_spec.rb` fails CI if it is ever committed as the
+head state.
 
 ## Quick Checklist
 

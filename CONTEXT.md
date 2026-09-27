@@ -109,7 +109,8 @@ define *behaviour*.
 - **WD** (working decision) / **slice** — a numbered sub-decision inside an ADR / an independently
   landable increment of one.
 - **corpus / survey project** — real OSS apps under `~/repo/ruby/rigor-survey/` used as FP gates;
-  "byte-identical on the corpus" is the standard no-regression claim.
+  "byte-identical on the corpus" is the standard no-regression claim. The **perf-gate corpus** is a
+  different sense: Rigor's own tree at a release tag, which `make bench-perf` measures (ADR-50 WD4).
 - **teeth** — a check's ability to actually fail (measured by mutation, ADR-62); its dual is the
   **false-positive discipline**: "the program works" outranks worst-case static reading.
 - **evaluation line** — the `0.2.x`/`0.3.x` releases: gather feedback, complete the feature set,

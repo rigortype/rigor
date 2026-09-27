@@ -1,0 +1,1649 @@
+[
+  [
+    "be73e08d6",
+    "999",
+    23717840,
+    12593,
+    1,
+    15.28,
+    "Check arity against a source-defined method's own signature"
+  ],
+  [
+    "d32ad0d96",
+    "1005",
+    23717964,
+    124,
+    1,
+    16.27,
+    "Distinguish an unresolvable inline type name from a duplicate one"
+  ],
+  [
+    "e747d0d5d",
+    "1000",
+    23717935,
+    -29,
+    1,
+    15.72,
+    "Propose the inferred return for a declared-untyped method"
+  ],
+  [
+    "3be3d8f13",
+    "1001",
+    23717909,
+    -26,
+    1,
+    15.01,
+    "Project Integer#to_s / Float#to_s to numeric-string refinements"
+  ],
+  [
+    "4d6ac3217",
+    "1006",
+    23829517,
+    111608,
+    1,
+    15.45,
+    "Absorb a union arm that another arm contains element-wise"
+  ],
+  [
+    "4922fb7fb",
+    "1010",
+    23940610,
+    111093,
+    1,
+    16.48,
+    "Arity-check a method the project defines in source and declares nowhere"
+  ],
+  [
+    "bc9808fa9",
+    "1012",
+    23941131,
+    521,
+    1,
+    16.49,
+    "Key the synthesizer and plugin-producer caches on the engine source"
+  ],
+  [
+    "caa258dcf",
+    "1013",
+    23941147,
+    16,
+    1,
+    14.55,
+    "Narrow to_s(base) and regex hex/octal producers to non-empty-string"
+  ],
+  [
+    "2b26e4f9b",
+    "1015",
+    24116196,
+    175049,
+    1,
+    16.32,
+    "Narrow a value-position conditional through the statement evaluator"
+  ],
+  [
+    "5922448f6",
+    "1018",
+    24116423,
+    227,
+    1,
+    17.73,
+    "Read the same-line %a{} inline annotation forms"
+  ],
+  [
+    "5b3a8196e",
+    "1022",
+    24092922,
+    -23501,
+    1,
+    16.59,
+    "Treat a union with an untyped member as imprecise in overload selection"
+  ],
+  [
+    "b73747d61",
+    "1020",
+    24319867,
+    226945,
+    1,
+    18.08,
+    "Narrow a value-position and/or through the statement evaluator"
+  ],
+  [
+    "826bef9fd",
+    "1023",
+    24319933,
+    66,
+    1,
+    15.81,
+    "Report the two inline-RBS spellings the reader still drops silently"
+  ],
+  [
+    "256a34ef7",
+    "1024",
+    24320082,
+    149,
+    1,
+    14.92,
+    "Narrow through a conditional used as a condition"
+  ],
+  [
+    "638959cbc",
+    "1031",
+    24320167,
+    85,
+    1,
+    15.27,
+    "Key the rbs.* producer caches on the engine source"
+  ],
+  [
+    "323e696d8",
+    "1032",
+    24320147,
+    -20,
+    1,
+    22.98,
+    "Render a project-declared RBS alias instead of its expansion"
+  ],
+  [
+    "839bcbc26",
+    "1029",
+    24320554,
+    407,
+    1,
+    20.8,
+    "Decline a compact-header rename collision the two crefs disagree about"
+  ],
+  [
+    "02d961898",
+    "1030",
+    24320862,
+    308,
+    1,
+    16.0,
+    "Model a define_method block's self as the class instance"
+  ],
+  [
+    "aa98a7d93",
+    "1034",
+    24320877,
+    15,
+    1,
+    16.18,
+    "Fold a concern's included-block scopes into the including model"
+  ],
+  [
+    "dd029e0eb",
+    "1035",
+    26555544,
+    2234667,
+    1,
+    14.82,
+    "Route the .freeze and ||= constant spellings to the meta-constant handler"
+  ],
+  [
+    "81133b8a5",
+    "1036",
+    26555627,
+    83,
+    1,
+    15.56,
+    "Write %a{pure} and effect envelopes from sig-gen"
+  ],
+  [
+    "6e4929d3b",
+    "1037",
+    26571097,
+    15470,
+    1,
+    15.28,
+    "Revive the ADR-16 Tier-D seam as template units"
+  ],
+  [
+    "22f5a1a71",
+    "1045",
+    24336177,
+    -2234920,
+    1,
+    15.15,
+    "Spell the meta-constant write arms out instead of splatting the list"
+  ],
+  [
+    "7eb23692b",
+    "1044",
+    24336647,
+    470,
+    1,
+    14.54,
+    "Add rigor-active-model-serializers plugin (object recognizer)"
+  ],
+  [
+    "0bd70a452",
+    "1042",
+    24336384,
+    -263,
+    1,
+    15.78,
+    "Resolve a Const.new effect edge to the class's #initialize"
+  ],
+  [
+    "cd550f313",
+    "1050",
+    24336944,
+    560,
+    1,
+    16.53,
+    "Compile app/views ERB into template units in rigor-actionpack"
+  ],
+  [
+    "36c0e2480",
+    "1052",
+    24336940,
+    -4,
+    1,
+    15.59,
+    "Fold delegate, concern associations and attachment macros into the model index"
+  ],
+  [
+    "98ef7f633",
+    "1054",
+    24336533,
+    -407,
+    1,
+    14.17,
+    "Emit a plugin's project-global disclosure once per run"
+  ],
+  [
+    "cd30c74b3",
+    "1053",
+    24336728,
+    195,
+    1,
+    14.21,
+    "Carry the compiled template-unit index on ProjectScan"
+  ],
+  [
+    "0a5865562",
+    "1062",
+    24337182,
+    454,
+    1,
+    14.45,
+    "Disclose the six discovery plugins' load errors once per run"
+  ],
+  [
+    "02f48ea40",
+    "1061",
+    24337265,
+    83,
+    1,
+    14.28,
+    "Stop the pool's workers dying on a class-ivar memo"
+  ],
+  [
+    "c03fd94d6",
+    "1063",
+    24337261,
+    -4,
+    1,
+    14.17,
+    "Let a plugin-supplied member veto the top-level def"
+  ],
+  [
+    "63bbfa33a",
+    "1057",
+    24337791,
+    530,
+    1,
+    15.58,
+    "Edge a controller action to the template it renders"
+  ],
+  [
+    "121620ed4",
+    "1066",
+    24337851,
+    60,
+    1,
+    14.89,
+    "Trace render-site locals, and compile layouts"
+  ],
+  [
+    "53edd83f9",
+    "1067",
+    24338029,
+    178,
+    1,
+    15.37,
+    "Emit a positioned plugin batch once per run"
+  ],
+  [
+    "b8a6051a7",
+    "1068",
+    24338112,
+    83,
+    1,
+    14.69,
+    "Make Ractor pool workers read only shareable constants and a parent-resolved lockfile"
+  ],
+  [
+    "81707d3e9",
+    "1070",
+    24338304,
+    192,
+    1,
+    15.35,
+    "Fall back to the HTML partial a .js template really renders"
+  ],
+  [
+    "c22278b79",
+    "1069",
+    24338309,
+    5,
+    1,
+    15.91,
+    "Route rigor type-of on a template through its compiled unit"
+  ],
+  [
+    "b50441d85",
+    "1087",
+    24338365,
+    56,
+    1,
+    15.65,
+    "Pure-Ruby xxh3-64 for lens anchors"
+  ],
+  [
+    "f65429a0b",
+    "1088",
+    24338311,
+    -54,
+    1,
+    15.62,
+    "Add Plugin::Base#declared_members for lens member enumeration"
+  ],
+  [
+    "7836b2e75",
+    "1091",
+    24338374,
+    63,
+    1,
+    16.51,
+    "Prune redundant comments across lib, plugins, and specs"
+  ],
+  [
+    "b587a70eb",
+    "1096",
+    24845536,
+    507162,
+    1,
+    16.93,
+    "Keep the receiver's type arguments on an RBS `-> self` return"
+  ],
+  [
+    "11455d5c0",
+    "1103",
+    25139921,
+    294385,
+    1,
+    15.5,
+    "Destructure a non-tuple Array[T] into per-slot T bindings"
+  ],
+  [
+    "608be0a98",
+    "1104",
+    25241033,
+    101112,
+    1,
+    16.12,
+    "Distribute destructuring over unions and wrap values without to_ary"
+  ],
+  [
+    "0c9c618f1",
+    "1105",
+    25241290,
+    257,
+    1,
+    16.47,
+    "Drop the callee's return when an exactly-once block never completes"
+  ],
+  [
+    "a18e54076",
+    "1112",
+    25334725,
+    93435,
+    1,
+    14.91,
+    "Auto-splat numbered block parameters as their explicit list"
+  ],
+  [
+    "1b916f3b0",
+    "1115",
+    25355251,
+    20526,
+    1,
+    16.96,
+    "Unload the rbs gem's unsound Enumerable#each_slice shim"
+  ],
+  [
+    "7bf685df6",
+    "1113",
+    25337302,
+    -17949,
+    1,
+    16.12,
+    "Type Kernel#loop as completing when its body may raise StopIteration"
+  ],
+  [
+    "40a084992",
+    "1114",
+    25480037,
+    142735,
+    1,
+    18.39,
+    "Destructure instance-variable targets through MultiTargetBinder"
+  ],
+  [
+    "ce48b4fa5",
+    "1106",
+    25466796,
+    -13241,
+    1,
+    18.99,
+    "Type the graphql-ruby class-level DSL in rigor-graphql"
+  ],
+  [
+    "faae62735",
+    "1111",
+    25607259,
+    140463,
+    1,
+    16.09,
+    "Add rigor-grape: type the Grape endpoint and entity DSLs"
+  ],
+  [
+    "9ec520016",
+    "1118",
+    25607195,
+    -64,
+    1,
+    15.42,
+    "Bind rigor-grape `desc` blocks to the route-attribute config context"
+  ],
+  [
+    "4f54815ba",
+    "1128",
+    25611296,
+    4101,
+    1,
+    15.55,
+    "Splat block parameters over an array carrier the binder cannot decompose"
+  ],
+  [
+    "54f120d9e",
+    "1129",
+    25860362,
+    249066,
+    1,
+    15.74,
+    "Dispatch a composite receiver per projected member"
+  ],
+  [
+    "51a190f7c",
+    "1127",
+    25860490,
+    128,
+    1,
+    16.11,
+    "Give the external-ancestor walk one owner"
+  ],
+  [
+    "e82cd076c",
+    "1131",
+    25953151,
+    92661,
+    1,
+    17.4,
+    "Resolve inherited calls into core and stdlib RBS"
+  ],
+  [
+    "9cc94876a",
+    "1133",
+    25953728,
+    577,
+    1,
+    15.75,
+    "Bound the class-graph memo to one slot"
+  ],
+  [
+    "b04e538f0",
+    "1136",
+    25962170,
+    8442,
+    1,
+    15.79,
+    "Bound the two remaining per-file memos in ExpressionTyper"
+  ],
+  [
+    "729037082",
+    "1142",
+    26034437,
+    72267,
+    1,
+    16.06,
+    "Read []= splice stores through the value's element types"
+  ],
+  [
+    "be733aaba",
+    "1144",
+    26034453,
+    16,
+    1,
+    15.7,
+    "Tidy the XXH3 follow-ups from the #1087 review"
+  ],
+  [
+    "79fa99cf7",
+    "1159",
+    26140377,
+    105924,
+    1,
+    15.45,
+    "Block parameters share the `-> self` substitution verdict"
+  ],
+  [
+    "9fd4b6d46",
+    "1160",
+    26140465,
+    88,
+    1,
+    14.95,
+    "Edge a respond_to format arm to the template that arm renders"
+  ],
+  [
+    "19c2af59f",
+    "1161",
+    26140368,
+    -97,
+    1,
+    17.12,
+    "Type enum-backed column readers as the enum key, not the storage type"
+  ],
+  [
+    "b5af5cf72",
+    "1135",
+    26860921,
+    720553,
+    1,
+    16.22,
+    "Type the Sorbet annotation DSL through bundled RBS and an extend bridge"
+  ],
+  [
+    "e763cf3ac",
+    "1163",
+    26898811,
+    37890,
+    1,
+    15.79,
+    "Keep Enumerator::Lazy lazy through a chained call"
+  ],
+  [
+    "66177b9ca",
+    "1166",
+    27301550,
+    402739,
+    1,
+    16.33,
+    "Read a double-splatted hash shape and `...` at the call site"
+  ],
+  [
+    "c5487a37d",
+    "1164",
+    27302277,
+    727,
+    1,
+    15.78,
+    "Bind `case/in` pattern names against the case subject"
+  ],
+  [
+    "a8396ced9",
+    "1165",
+    27321772,
+    19495,
+    1,
+    16.31,
+    "Order a prepended module ahead of the class it is prepended into (#1123)"
+  ],
+  [
+    "594e54f6d",
+    "1176",
+    27324014,
+    2242,
+    1,
+    15.95,
+    "Widen nil-collapsing predicate folds on optimistic carriers to bool (#1172)"
+  ],
+  [
+    "0765b45bb",
+    "1178",
+    27489751,
+    165737,
+    1,
+    16.9,
+    "Resolve calls through a discovered class's included RBS modules"
+  ],
+  [
+    "e890b0dc2",
+    "1179",
+    27534768,
+    45017,
+    1,
+    16.2,
+    "Seed compound ivar writes in the class-ivar accumulator"
+  ],
+  [
+    "c56c2ccf0",
+    "1190",
+    27534715,
+    -53,
+    1,
+    17.58,
+    "sig: declare Effects::Registry and the plugin effect row classes (#1181) (#1190)"
+  ],
+  [
+    "908a5c9a4",
+    "1201",
+    27534785,
+    70,
+    1,
+    16.39,
+    "Snapshot the full signature state on the pool's sequential fallback"
+  ],
+  [
+    "1e5695bc2",
+    "1206",
+    27534944,
+    159,
+    1,
+    16.68,
+    "Bind captured rebinds at every pair of the HashShape transform fold"
+  ],
+  [
+    "ebed1e534",
+    "1202",
+    27554545,
+    19601,
+    1,
+    16.67,
+    "Type a value-position index compound write as what it stores"
+  ],
+  [
+    "feaf058af",
+    "1204",
+    27564955,
+    10410,
+    1,
+    16.57,
+    "Widen rebound instance variables under the per-element fold"
+  ],
+  [
+    "bda0dfdae",
+    "1207",
+    27603782,
+    38827,
+    1,
+    17.03,
+    "Iterate a self-reading block store's evidence to a fixpoint"
+  ],
+  [
+    "416e205d3",
+    "1203",
+    27605834,
+    2052,
+    1,
+    18.7,
+    "Widen captured locals the per-element fold mutates in place"
+  ],
+  [
+    "362a6a493",
+    "1205",
+    27609736,
+    3902,
+    1,
+    16.57,
+    "Thread block returns through index writes in the prefix"
+  ],
+  [
+    "68ed39bb1",
+    "1209",
+    27617323,
+    7587,
+    1,
+    16.71,
+    "Widen a multi-assign index target's receiver"
+  ],
+  [
+    "04457555f",
+    "1211",
+    27617834,
+    511,
+    1,
+    16.07,
+    "Widen a for-index and rescue-reference index target's receiver"
+  ],
+  [
+    "ed1dff20d",
+    "1210",
+    27617767,
+    -67,
+    1,
+    16.41,
+    "Carry a block's instance-variable rebinds into the continuation"
+  ],
+  [
+    "74970d1ec",
+    "1213",
+    27617629,
+    -138,
+    1,
+    16.21,
+    "Floor nested per-element and per-pair folds on a stale tail"
+  ],
+  [
+    "bf5edbb31",
+    "1215",
+    27699225,
+    81596,
+    1,
+    16.56,
+    "Join a block's next and break paths into its captured rebinds"
+  ],
+  [
+    "15a29720d",
+    "1224",
+    27704052,
+    4827,
+    1,
+    16.96,
+    "Widen captured locals a rebinding block mutates in place"
+  ],
+  [
+    "ca80be0ce",
+    "1225",
+    27619261,
+    -84791,
+    1,
+    16.89,
+    "Floor unthreaded rebinds in block folds and the generic block-return pass"
+  ],
+  [
+    "06f540ff3",
+    "1212",
+    27619589,
+    328,
+    1,
+    16.78,
+    "Decline the HashShape transform fold on a mapping hash or a bang self-read"
+  ],
+  [
+    "a98bd9c86",
+    "1221",
+    27652472,
+    32883,
+    1,
+    17.14,
+    "Read a block store's rebound local as Dynamic[top]"
+  ],
+  [
+    "1149769db",
+    "1236",
+    27655452,
+    2980,
+    1,
+    20.87,
+    "Give a compound index write's [] read the call-site context"
+  ],
+  [
+    "52a8c0863",
+    "1242",
+    27655384,
+    -68,
+    1,
+    17.77,
+    "Decline the per-element Tuple fold on a find ifnone argument"
+  ],
+  [
+    "2dec06dfd",
+    "1243",
+    27762515,
+    107131,
+    1,
+    17.15,
+    "Type a constant compound write as the value it stores"
+  ],
+  [
+    "bd503e93b",
+    "1244",
+    27766816,
+    4301,
+    1,
+    17.74,
+    "Re-answer stale tail names in the generic block-return pass"
+  ],
+  [
+    "91c214bfd",
+    "1247",
+    27767030,
+    214,
+    1,
+    17.67,
+    "Join the mapping's values into transform_keys(mapping)'s key type"
+  ],
+  [
+    "0192519e6",
+    "1249",
+    27682304,
+    -84726,
+    1,
+    17.2,
+    "Widen captured contents a block mutates through a slot or a callee"
+  ],
+  [
+    "5f2a07d87",
+    "1245",
+    27683629,
+    1325,
+    1,
+    17.13,
+    "Shadow outer locals inside an unentered block's body"
+  ],
+  [
+    "ad70fe7d4",
+    "1248",
+    27698506,
+    14877,
+    1,
+    16.76,
+    "Join a loop body's next and break paths into its rebinds"
+  ],
+  [
+    "d61d41d47",
+    "1252",
+    27711480,
+    12974,
+    1,
+    17.06,
+    "Join splatted entries into a hash literal's Hash[K, V]"
+  ],
+  [
+    "5e51f5e5b",
+    "1253",
+    27711061,
+    -419,
+    1,
+    17.2,
+    "List Hash#shift as a Hash mutator"
+  ],
+  [
+    "0c4ad0f7b",
+    "1255",
+    27711078,
+    17,
+    1,
+    17.44,
+    "Accept provably non-empty literals against empty-witness refinements"
+  ],
+  [
+    "21d9fddcf",
+    "1254",
+    27711093,
+    15,
+    1,
+    19.66,
+    "Count a Tuple or HashShape seed as pinned in the unmoved-pin floor"
+  ],
+  [
+    "e41a43fbc",
+    "1266",
+    27710984,
+    -109,
+    1,
+    19.38,
+    "Load Hash#transform_keys replacements overloads on rbs 3.x"
+  ],
+  [
+    "6a0bb52c4",
+    "1250",
+    27845997,
+    135013,
+    1,
+    17.95,
+    "Thread writes nested in call operands into the post-statement scope"
+  ],
+  [
+    "0ea5ea6e9",
+    "1265",
+    27846012,
+    15,
+    1,
+    18.25,
+    "Fold constant-block Hash filters to an empty Hash, not an empty Array"
+  ],
+  [
+    "e54c4725b",
+    "1269",
+    27846075,
+    63,
+    1,
+    18.37,
+    "Give a rewritten empty-witness refinement the gradual arm"
+  ],
+  [
+    "e8bfe6040",
+    "1261",
+    27846749,
+    674,
+    1,
+    18.55,
+    "Count global, class-variable and it receivers as in-place mutations"
+  ],
+  [
+    "f1d1f964d",
+    "1274",
+    27850133,
+    3384,
+    1,
+    18.88,
+    "Give Enumerable#detect find's ifnone overloads"
+  ],
+  [
+    "a433a96f0",
+    "1275",
+    27850321,
+    188,
+    1,
+    18.53,
+    "Let a record answer maybe for a Hash whose entries went unread"
+  ],
+  [
+    "29e634a84",
+    "1273",
+    27853782,
+    3461,
+    1,
+    19.78,
+    "Leave a block-return variable untyped when a parameter names it"
+  ],
+  [
+    "847ec9c21",
+    "1279",
+    27865512,
+    11730,
+    1,
+    21.64,
+    "Stop counting a nested scope's own local as a captured rebind"
+  ],
+  [
+    "47208a6f4",
+    "1259",
+    27864672,
+    -840,
+    1,
+    18.12,
+    "Carry the primary body's rebinds across the retry edge"
+  ],
+  [
+    "441182fa1",
+    "1277",
+    27916610,
+    51938,
+    1,
+    19.31,
+    "Give a straight-line rewrite its gradual arm"
+  ],
+  [
+    "b59422318",
+    "1276",
+    27938835,
+    22225,
+    1,
+    18.03,
+    "Bind a constant compound write gradually when another file writes it"
+  ],
+  [
+    "4b70a574f",
+    "1270",
+    27941202,
+    2367,
+    1,
+    18.67,
+    "Complete the String mutator table and make it the only one"
+  ],
+  [
+    "be9a887f4",
+    "1284",
+    27941645,
+    443,
+    1,
+    17.97,
+    "Pin the refinement arm's exact type under a rewrite and a reorder"
+  ],
+  [
+    "997ddcd34",
+    "1280",
+    27946980,
+    5335,
+    1,
+    18.99,
+    "Stop reading a missing key as nil after Hash#default="
+  ],
+  [
+    "8426cf992",
+    "1278",
+    27961990,
+    15010,
+    1,
+    20.75,
+    "Read a computed key on a closed hash shape with its nil arm"
+  ],
+  [
+    "eef0de8d7",
+    "1294",
+    27962107,
+    117,
+    1,
+    20.32,
+    "Join each side of a mixed Array | Hash seed with its own evidence"
+  ],
+  [
+    "f8cce8399",
+    "1292",
+    27961616,
+    -491,
+    1,
+    18.76,
+    "Classify Hash#compare_by_identity as a receiver mutation"
+  ],
+  [
+    "0d6867fa4",
+    "1295",
+    28015612,
+    53996,
+    1,
+    19.15,
+    "Carry the optimistic mark through destructuring and safe navigation"
+  ],
+  [
+    "4f8d87560",
+    "1296",
+    28072549,
+    56937,
+    1,
+    19.06,
+    "Widen a mutator's receiver when the mutator is an operand"
+  ],
+  [
+    "8c1b8f4de",
+    "1293",
+    28073160,
+    611,
+    1,
+    19.52,
+    "Bind a shared block-return variable to the class both sides share"
+  ],
+  [
+    "3f069e0e5",
+    "1291",
+    28073605,
+    445,
+    1,
+    18.42,
+    "Stop a mutated constant's Hash or Array reading its literal contents"
+  ],
+  [
+    "7e42c48fe",
+    "1301",
+    28202908,
+    129303,
+    1,
+    18.95,
+    "Stop the constant ladder at a candidate another file writes"
+  ],
+  [
+    "91b83c66a",
+    "1303",
+    28202991,
+    83,
+    1,
+    21.99,
+    "Read Enumerable#sum's return at class level"
+  ],
+  [
+    "33dd2ef2b",
+    "1307",
+    28207091,
+    4100,
+    1,
+    20.0,
+    "Include Enumerable[String] in StringIO through the core overlay"
+  ],
+  [
+    "efaf86753",
+    "1306",
+    28207576,
+    485,
+    1,
+    19.1,
+    "Count new as an allocation only on a class object"
+  ],
+  [
+    "1d0f8dfe1",
+    "1308",
+    28207598,
+    22,
+    1,
+    18.32,
+    "Classify Enumerable blocks on IO, File and StringIO as non-escaping"
+  ],
+  [
+    "db80dfe37",
+    "1309",
+    28207608,
+    10,
+    1,
+    17.46,
+    "Bound Relation builders for the association proxy too"
+  ],
+  [
+    "07bf9cb1c",
+    "1310",
+    28317008,
+    109400,
+    1,
+    17.36,
+    "Type and record a later operand from the scope earlier ones left"
+  ],
+  [
+    "0ee3777cb",
+    "1312",
+    28316986,
+    -22,
+    1,
+    18.06,
+    "Accept the association proxy's delete_all argument"
+  ],
+  [
+    "4c48106c1",
+    "1314",
+    28316964,
+    -22,
+    1,
+    18.9,
+    "Name the read a Relation writer issues before its write"
+  ],
+  [
+    "79ef2ae21",
+    "1315",
+    28316964,
+    0,
+    1,
+    17.97,
+    "Declare insert, insert! and upsert on the bundled Relation"
+  ],
+  [
+    "02bc94670",
+    "1321",
+    28316977,
+    13,
+    1,
+    18.79,
+    "Type Relation#find with several ids as an Array"
+  ],
+  [
+    "6b008cb30",
+    "1316",
+    28317296,
+    319,
+    1,
+    18.25,
+    "Key an effect unit on the side Ruby defines it on"
+  ],
+  [
+    "2cdc9745d",
+    "1320",
+    28317290,
+    -6,
+    1,
+    17.97,
+    "Leave a singleton-class include out of the instance ancestry"
+  ],
+  [
+    "4240f48fb",
+    "1323",
+    28317270,
+    -20,
+    1,
+    18.67,
+    "Decline a view seed for a find that returns several records"
+  ],
+  [
+    "11902cb77",
+    "1326",
+    28318863,
+    1593,
+    1,
+    17.61,
+    "Declare Enumerable#many? and the other missing ActiveSupport core_ext rows"
+  ],
+  [
+    "71c94cf91",
+    "1327",
+    28318823,
+    -40,
+    1,
+    21.14,
+    "Type the block form of find as Enumerable#find"
+  ],
+  [
+    "17ff493e3",
+    "1328",
+    28318556,
+    -267,
+    1,
+    29.55,
+    "Keep the find note off a model's own self.find"
+  ],
+  [
+    "418089ef7",
+    "1330",
+    28322013,
+    3457,
+    1,
+    20.87,
+    "Declare deep_dup, the Hash aliases and core_ext/range in the ActiveSupport overlay"
+  ],
+  [
+    "fa4b3cbed",
+    "1334",
+    28344633,
+    22620,
+    1,
+    19.91,
+    "Declare the remaining ActiveSupport 8.1 Object, String and Symbol rows"
+  ],
+  [
+    "f35fdd4df",
+    "1331",
+    28349170,
+    4537,
+    1,
+    24.9,
+    "Keep a fold-stored slot out of the memoizing index ||= reading"
+  ],
+  [
+    "94d4a2cfe",
+    "1338",
+    28349354,
+    184,
+    1,
+    22.68,
+    "Read an unbound variable ||= guard as the binding it guards"
+  ],
+  [
+    "028b4fd1d",
+    "1340",
+    28348755,
+    -599,
+    1,
+    22.72,
+    "Read an unbound variable &&= as the unseen binding beside its rvalue"
+  ],
+  [
+    "b7213d23c",
+    "1343",
+    28350437,
+    1682,
+    1,
+    20.99,
+    "Make the op= ivar seed independent of source order"
+  ],
+  [
+    "5149b6560",
+    "1345",
+    28350508,
+    71,
+    1,
+    21.5,
+    "Probe for the Ruby::Box fix before re-exec'ing under RUBY_BOX=1"
+  ],
+  [
+    "e59b7b89a",
+    "1349",
+    28349784,
+    -724,
+    1,
+    23.16,
+    "Drop the inline experimental-features flag from nix commands"
+  ],
+  [
+    "9a1b40ace",
+    "1348",
+    28364274,
+    14490,
+    1,
+    18.46,
+    "Take a proven argument's arm in declared RBS order"
+  ],
+  [
+    "cdd97157c",
+    "1353",
+    28364864,
+    590,
+    1,
+    19.59,
+    "Never prove a module or stubbed parameter out in pass 0"
+  ],
+  [
+    "73bf3bfa6",
+    "1355",
+    28364427,
+    -437,
+    1,
+    21.99,
+    "Bind a bounded method type variable to the widened argument"
+  ],
+  [
+    "4c6ae4387",
+    "1370",
+    28394414,
+    29987,
+    1,
+    23.31,
+    "Forget the $~ narrowing a block or closure in the frame may rebind"
+  ],
+  [
+    "56ba5aadd",
+    "1354",
+    28410302,
+    15888,
+    1,
+    19.86,
+    "Select by a narrow Dynamic facet's members, not its wrapper"
+  ],
+  [
+    "6cd8395a2",
+    "1374",
+    28410777,
+    475,
+    1,
+    18.55,
+    "Keep the $~ narrowing across a call into a Ruby-defined method"
+  ],
+  [
+    "acce26ba9",
+    "1378",
+    28411363,
+    586,
+    1,
+    19.17,
+    "Read a call's match rebinding by what it calls and its operands' types"
+  ],
+  [
+    "d7a65e91f",
+    "1391",
+    28411377,
+    14,
+    1,
+    21.17,
+    "Drop nil from min_by / max_by on a non-empty receiver"
+  ],
+  [
+    "0c8a73564",
+    "1396",
+    28396594,
+    -14783,
+    1,
+    20.95,
+    "Keep a local's declaration mark across an in-place mutation"
+  ],
+  [
+    "f946c3b96",
+    "1390",
+    28396707,
+    113,
+    1,
+    18.24,
+    "Credit block returns in sig-gen and annotate return types"
+  ],
+  [
+    "78dba449b",
+    "1395",
+    28396743,
+    36,
+    1,
+    18.15,
+    "Declare test roots with a test_paths: key; sig-gen observes them instead of a hard-coded spec/"
+  ],
+  [
+    "79e666990",
+    "1392",
+    28396852,
+    109,
+    1,
+    30.58,
+    "Enter thread, fiber and define_method blocks with the match globals unbound"
+  ],
+  [
+    "96e383439",
+    "1401",
+    28397243,
+    391,
+    1,
+    20.11,
+    "Record a marked binding's miss answer beside its mark"
+  ],
+  [
+    "327accfde",
+    "1404",
+    28397101,
+    -142,
+    1,
+    22.8,
+    "Let a closed record answer maybe for an open hash shape"
+  ],
+  [
+    "d54393631",
+    "1409",
+    28397675,
+    574,
+    1,
+    20.58,
+    "Count an attr writer declaration as a write to its ivar"
+  ],
+  [
+    "b08656ecb",
+    "1405",
+    28417800,
+    20125,
+    1,
+    18.79,
+    "Treat $_ as frame-local and narrow it on a reader condition"
+  ],
+  [
+    "698604d1e",
+    "1414",
+    28417593,
+    -207,
+    1,
+    22.23,
+    "Amend ADR-2: a dynamic_return answer outranks the RBS return"
+  ],
+  [
+    "4c9161a6f",
+    "1419",
+    28417742,
+    149,
+    1,
+    20.44,
+    "Floor a mutated constant's literal shape to its gradual nominal"
+  ],
+  [
+    "23216d662",
+    "1420",
+    28515772,
+    98030,
+    1,
+    19.32,
+    "Treat a catalogued iterator on an unclassified receiver as repeating"
+  ],
+  [
+    "577aacb39",
+    "1428",
+    28516630,
+    858,
+    1,
+    20.21,
+    "Compare sig/ and inline declarations of one member (ADR-112 WD5)"
+  ],
+  [
+    "7d6da46ac",
+    "1425",
+    28580034,
+    63404,
+    1,
+    18.75,
+    "Bind $! and $@ in rescue clauses and $? after a subprocess"
+  ],
+  [
+    "5c76d7e8e",
+    "1424",
+    28582914,
+    2880,
+    1,
+    20.31,
+    "Scope refinement methods to their lexical using"
+  ],
+  [
+    "ed93188b3",
+    "1422",
+    28582832,
+    -82,
+    1,
+    20.77,
+    "Write inline-declared members to sig/ and add sig-gen --check"
+  ],
+  [
+    "42871afdd",
+    "1434",
+    28582863,
+    31,
+    1,
+    22.21,
+    "Bind a (?) method's parameters to Dynamic[top] instead of crashing"
+  ],
+  [
+    "904d371f0",
+    "1438",
+    28583783,
+    920,
+    1,
+    18.8,
+    "Declare Process.last_status and read $? through it"
+  ],
+  [
+    "d155a706f",
+    "1433",
+    28595092,
+    11309,
+    1,
+    17.13,
+    "Join a builtin global's declared type into its program-global seed"
+  ],
+  [
+    "0c89c2f86",
+    "1442",
+    28595609,
+    517,
+    1,
+    17.06,
+    "Stop labelling frame-local special-variable writes as global effects"
+  ],
+  [
+    "7e48c8705",
+    "1444",
+    28595488,
+    -121,
+    1,
+    20.5,
+    "Require DeclarationSourcedGuard where the evaluator uses it"
+  ],
+  [
+    "9b54f41eb",
+    "1441",
+    28355494,
+    -239994,
+    1,
+    18.28,
+    "Lay the content-mutation widening on every repeating body's entry"
+  ],
+  [
+    "a690a612b",
+    "1449",
+    28356870,
+    1376,
+    1,
+    18.43,
+    "Narrow $_ on an implicit-self gets unless the file shows another self"
+  ],
+  [
+    "407bd3ec7",
+    "1448",
+    28366677,
+    9807,
+    1,
+    23.02,
+    "Report writes a special global's setter rejects"
+  ],
+  [
+    "f7935458c",
+    "1453",
+    28229716,
+    -136961,
+    1,
+    20.73,
+    "Narrow global and constant receivers under guards, and keep disjoint class guards off unreachable-clause"
+  ],
+  [
+    "bbaed629e",
+    "1470",
+    28230522,
+    806,
+    1,
+    20.32,
+    "Fold a constant slice of the proven $~ to a Tuple, and fix the match narrowing it reads"
+  ],
+  [
+    "4e630c9e3",
+    "1479",
+    28237825,
+    7303,
+    1,
+    19.65,
+    "Read a safe-navigation call's arguments and block with the receiver non-nil"
+  ],
+  [
+    "493c4269f",
+    "1483",
+    28237843,
+    18,
+    1,
+    19.45,
+    "Keep the declared parameters in a sig-gen tighter-return proposal"
+  ],
+  [
+    "07f49bdb9",
+    "1490",
+    28238280,
+    437,
+    1,
+    21.66,
+    "Bump up version to 0.4.0"
+  ]
+]

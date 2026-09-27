@@ -1,0 +1,16 @@
+diff -r ../07f49bdb90e563a2387d0df35bc4640e32dd8a0e/lib/rigor/type/combinator.rb lib/rigor/type/combinator.rb
+993a994,999
+>         PROTO_SORT_KEYS = ObjectSpace::WeakMap.new
+> 
+>         def proto_sort_key(member)
+>           PROTO_SORT_KEYS[member] ||= member.describe(:short).freeze
+>         end
+> 
+995c1001,1005
+<           members.sort_by { |m| m.describe(:short) }
+---
+>           if members.size == 2
+>             a, b = members
+>             return (proto_sort_key(b) < proto_sort_key(a)) ? [b, a] : members
+>           end
+>           members.sort_by { |m| proto_sort_key(m) }

@@ -1,0 +1,9 @@
+diff -r ../07f49bdb90e563a2387d0df35bc4640e32dd8a0e/lib/rigor/inference/expression_typer.rb lib/rigor/inference/expression_typer.rb
+3867c3867,3871
+<         arguments_node.arguments.flat_map do |argument|
+---
+>         arguments = arguments_node.arguments
+>         # `...` is always the last argument; every other list maps one-to-one.
+>         return arguments.map { |argument| call_arg_type(argument) } unless arguments.last.is_a?(Prism::ForwardingArgumentsNode)
+> 
+>         arguments.flat_map do |argument|

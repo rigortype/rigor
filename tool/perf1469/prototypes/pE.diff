@@ -1,0 +1,10 @@
+diff -r ../07f49bdb90e563a2387d0df35bc4640e32dd8a0e/lib/rigor/inference/captured_locals.rb lib/rigor/inference/captured_locals.rb
+417,419c417,420
+<         case node
+<         when Prism::CallNode then node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
+<         when *INDEX_STORE_NODES then node.receiver
+---
+>         if node.is_a?(Prism::CallNode)
+>           node.receiver if MutationWidening::SHAPE_MUTATORS.include?(node.name)
+>         elsif INDEX_STORE_NODES.any? { |klass| klass === node }
+>           node.receiver

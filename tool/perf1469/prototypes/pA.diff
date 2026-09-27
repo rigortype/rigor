@@ -1,0 +1,19 @@
+diff -r ../07f49bdb90e563a2387d0df35bc4640e32dd8a0e/lib/rigor/inference/scope_indexer.rb lib/rigor/inference/scope_indexer.rb
+2870,2871c2870
+<         rebound = rebound_block_self(node, qualified_prefix, default_scope, nil,
+<                                      rebound_self_base(self_owner))
+---
+>         rebound = rebound_block_self(node, qualified_prefix, default_scope, nil, self_owner)
+2904c2903
+<         eval_receiver_self(node.receiver, qualified_prefix, default_scope, self_prefix)
+---
+>         eval_receiver_self(node.receiver, qualified_prefix, default_scope, rebound_self_base(self_prefix))
+5755c5754
+<                                      rebound_self_base(unnameable_self ? OPAQUE_SELF : current_class))
+---
+>                                      unnameable_self ? OPAQUE_SELF : current_class)
+7660,7661c7659
+<         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner,
+<                                      rebound_self_base(self_owner))
+---
+>         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner, self_owner)

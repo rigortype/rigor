@@ -1,0 +1,255 @@
+568138c239ec5b7b39833ed6a2a21fd027e3d319	0	1	Hand off with v0.3.9 cut and waiting on the RubyGems push
+8c74cbc61fbf0dd79b864b7985d2da7f4bf02af8	0	1	Add ADR-111 — inline refinement carrier, no Rigor-only comment dialect
+ea5b013767e0caad75d3a4496aeecb51358efba7	0	1	Name the issue ADR-111 WD5 routes its reader defect to
+84c32e5dce55d20594c501e344a8e45de1c0e73f	0	1	Close ADR-111's Steep precondition and record the @extrbs spelling
+44aac17537b4ef6cf258dfcc04fa9973526319b9	0	1	Hand off with the inference-gap batch held at Draft
+be73e08d6fac24a23cc7e74c9ceadeb35fbb14b4	3	2	Merge pull request #999 from rigortype/arity-declared-source-methods
+d32ad0d9601b9c403f4f530ff5c559ddafc7d31c	3	2	Merge pull request #1005 from rigortype/inline-annotation-parse-diagnostics
+e747d0d5d0cbae6a0d5e36e9c51583d0685e50bc	1	2	Merge pull request #1000 from rigortype/sig-gen-untyped-declared-return
+3be3d8f13f9072d7b601bc7e3815180bbd090c55	1	2	Merge pull request #1001 from rigortype/numeric-to-s-refinements
+4d6ac3217a47bbe62b6668a5192997b72f7dace1	1	2	Merge pull request #1006 from rigortype/tuple-union-absorption
+6bbc1187d75475745dcd405fab0b1fad66f22de1	0	1	Hand off with the inference-gap batch landed
+4922fb7fb848b539284b6363d84446a191749ad1	12	2	Merge pull request #1010 from rigortype/arity-undeclared-source-methods
+342630d09266426ec2b478c9e1f8855d462b5da7	0	1	Hand off with undeclared-method arity landed
+bc9808fa9f15363fad6a7c2ab5dc839c77d4a773	5	2	Merge pull request #1012 from rigortype/cross-build-synthesis-cache
+caa258dcf74d09da9ba4563f5d0f8f5e29d1ab8d	2	2	Merge pull request #1013 from rigortype/hex-octal-int-string-soundness
+2b26e4f9bf2b43f061aac925bc13b00abd05d70a	2	2	Merge pull request #1015 from rigortype/ternary-predicate-narrowing
+19d7105d5f617386778bda5d10ea577d0e828965	0	1	Hand off with the second follow-up wave landed
+5922448f623a1455bb9023cce3053a0cff3460bb	2	2	Merge pull request #1018 from rigortype/inline-sameline-annotation-forms
+5b3a8196e80e731d4c67a180389e883e508aa848	1	2	Merge pull request #1022 from rigortype/overload-optional-untyped-args
+b73747d61ac47d6374aceb86b5bb793978fa42af	2	2	Merge pull request #1020 from rigortype/and-or-value-position-narrowing
+826bef9fdd71c017994acec94e1586e7242d96ca	1	2	Merge pull request #1023 from rigortype/inline-silent-drop-remainder
+256a34ef77dd2f1820202d76b865621167ca44d3	1	2	Merge pull request #1024 from rigortype/nested-conditional-guard-narrowing
+d01a937b5d3d66d5ec4e6ba82036919d1bc91d10	0	1	Hand off with the third follow-up wave landed
+f561d7f08c1f140e47c551c335e441508e0fd4f1	0	2	Merge pull request #1026 from rigortype/bump-actions-node-24
+b0cb2bc5c3c16e5edb825b2c3ba0f63ba2fffb93	0	2	Merge pull request #990 from rigortype/fix-playground-editor-ux
+caf668fd2d39521081c59d30294e23c785069b0b	0	2	Merge pull request #1025 from rigortype/dependabot/bundler/rubocop-1.91.0
+547be5521ba1dbfa978b70530bc7433cd109d002	0	1	Replace the handoff with what is actually outstanding
+6e45355834d7b02336ff380d220790ffa223d6ad	0	2	Merge pull request #1027 from rigortype/claude/agents-md-optimization-29a546
+f947961493da9bffae25ae31fdc97733507fdfd2	0	2	Merge pull request #1028 from rigortype/gitignore-agent-skills
+1f3f605fc873e626e328d5dd55e1147a8bf57070	0	1	Correct the handoff's two pick-up lines to match the issues
+dbb1f80b86cb9140e0fd0a5bda0d6d802c314dfc	0	1	Hand off the four green Draft PRs and their landing order
+638959cbc27649f28acef6161e1c9d2310f50997	3	2	Merge pull request #1031 from rigortype/rbs-cache-engine-identity-1014
+323e696d828515e156581e7fd6426c131d9ff811	3	2	Merge pull request #1032 from rigortype/sig-gen-alias-rendering-1002
+839bcbc261c85e196a0dd55b79100c00619fceef	4	2	Merge pull request #1029 from rigortype/union-header-nesting-collision-986
+02d9618987b5c5bfb5e1e25ff5c6f6eab9d30f76	4	2	Merge pull request #1030 from rigortype/block-self-own-method-veto-963
+261f318a1bcd0c7ff2323c3b236abf6929d7ca74	0	2	Merge pull request #1033 from rigortype/measurement-cli-oracle-wrong-tree
+3edd2d9d807f1c744cb4afedbdb8f79b3d25de5e	0	1	Hand off the four landed PRs and retire the #1014 caveat
+b9e98a8fbf1a58dbfc71ce407103a591f10eb660	0	1	Record that the CLI-oracle report was a wrong-tree mistake
+aa98a7d93dae37bfd5ebcf7e06e9c8386ff84a28	1	2	Merge pull request #1034 from rigortype/concern-scopes-534
+dd029e0eb8867ecf753b5029fb9e1a7dcd57259e	2	2	Merge pull request #1035 from rigortype/struct-constant-spellings-963
+81133b8a54cdb7d9be8adbc1fe94e559402ea67c	17	2	Merge pull request #1036 from rigortype/sig-gen-pure-envelopes-391
+2658208bf63020fc47f889bcf402167c3560ebb3	0	2	Merge pull request #1041 from rigortype/release-gate-perf-sampling-987
+6e4929d3badb61684cb6bea9814a2709f062fe10	13	2	Merge pull request #1037 from rigortype/template-units-seam-392
+22f5a1a71e2c34e74b8955f7e6ab9c4a9a9a4b53	1	2	Merge pull request #1045 from rigortype/meta-constant-write-when-splat-963
+7eb23692b00702ade823520ae28123fccf074df8	16	2	Merge pull request #1044 from rigortype/ams-object-recognizer-534
+0bd70a452ec7d40fbbfc28e30ec432fe109cf7cb	6	2	Merge pull request #1042 from rigortype/const-new-initialize-edge-1039
+cd550f31398e5e2c02f384b1a84dfbd931228db0	11	2	Merge pull request #1050 from rigortype/erb-template-units-393
+007141548382bfd3d50fe2d09a99499d9a082803	0	1	Hand off the second batch and the follow-up issues it opened
+36c0e2480fcf454335db3baeb06532d90a5d5b7a	7	2	Merge pull request #1052 from rigortype/model-index-macro-families-1049
+98ef7f633e4093f1e86c29fa3f8be99a1d976e3c	8	2	Merge pull request #1054 from rigortype/run-scoped-plugin-disclosure-1051
+cd30c74b3459514df0e25730cc09fac9f2ce1ec1	7	2	Merge pull request #1053 from rigortype/template-units-project-scan-1038
+0a58655624c77c074b2898fea7c2ccb1a450d571	8	2	Merge pull request #1062 from rigortype/per-file-load-error-disclosures-1056
+02f48ea40a3e89850e01fd5441b6db06caf58304	5	2	Merge pull request #1061 from rigortype/template-units-ractor-isolation-1055
+c03fd94d6b3656e9c7fb5f9566d831d4c7f053be	3	2	Merge pull request #1063 from rigortype/plugin-member-veto-source-963
+63bbfa33a5b581eb00e26bdab07a6d4a96525982	11	2	Merge pull request #1057 from rigortype/controller-template-effect-edge-1048
+302b08cbad03434032682ea89a6c65adc5506361	0	1	Hand off batches three and four and the rulings they wait on
+121620ed4ca58de486d16809f8ad172f258575e9	11	2	Merge pull request #1066 from rigortype/render-locals-and-layouts-1047
+53edd83f90bb2eb2d65ac5fed9c4ddbe5b586c13	6	2	Merge pull request #1067 from rigortype/positioned-run-disclosures-1060
+b8a6051a7b4f444ff616d596ebdc79af8524915f	42	2	Merge pull request #1068 from rigortype/ractor-shareable-constants-1064
+81707d3e98e195c309587920c27025f788b20a51	12	2	Merge pull request #1070 from rigortype/js-format-html-fallback-1065
+c22278b79856badebef1db130b4d3775eba836c3	4	2	Merge pull request #1069 from rigortype/template-unit-position-probes-1040
+5fab9b52937efba652b9f6ecde1bb0a9954a9f77	0	1	Hand off batches five and six and the two open rulings
+1e553b8dcfc17b302f3d85d369a5e1156eb4ebe7	0	2	Merge pull request #1079 from rigortype/extrbs-channel-decisions
+0bfbd493a17bafb131db3bbe585dfd7c8cddfddb	0	2	Merge pull request #1086 from rigortype/rigor-lens-decisions
+b50441d8582e5b984d5a4fa6049706afca4f3a1d	1	2	Merge pull request #1087 from rigortype/xxh3-64-lens-anchors-1081
+f65429a0bd61987cde66121ff4cb07c78febfc18	3	2	Merge pull request #1088 from rigortype/plugin-declared-members-1082
+7836b2e751ceac7f77bbb4f8644d6b9a306c2ea3	20	2	Merge pull request #1091 from rigortype/comment-pruning
+b587a70ebb980ab4a0ec4275f2ecf0fd259dd981	2	2	Merge pull request #1096 from rigortype/self-dispatch-type-args-1092
+2fffa9ffae028d602c3edd6971925609b28a046f	0	1	Census survey-corpus typing holes — 32 targets, per-node Dynamic[top] locations
+11455d5c07430bdb305359227ad7be238c1cdb18	4	2	Merge pull request #1103 from rigortype/multi-assign-array-elem-1093
+608be0a98360f502f70fafd2a81363d8a3209f4e	5	2	Merge pull request #1104 from rigortype/multi-assign-union-scalar-1094
+0c9c618f13bee679f32b8ee5fe50c2d3dd6b9f55	3	2	Merge pull request #1105 from rigortype/block-timing-exactly-once-1095
+a18e54076a5245a3e00e02368184a6dcbbaaa931	1	2	Merge pull request #1112 from rigortype/numbered-params-autosplat-1108
+1b916f3b068c19a0a8d544d4f1300a1be9218f74	1	2	Merge pull request #1115 from rigortype/each-slice-enumerator-elem-1109
+7bf685df6ae74e8c7c9269c06d69d4851f116abb	2	2	Merge pull request #1113 from rigortype/loop-stopiteration-return-1107
+39c67fb92db7957dfabdf4f172a3897233d6f1be	0	1	Record the measured delta for #1100/#1099 on gitlab
+40a08499280b653ab6914eb9597c4e5cf675ccf8	3	2	Merge pull request #1114 from rigortype/ivar-multi-assign-decompose-1110
+ce48b4fa55d9e66e97dbf311308517d486c701dd	12	2	Merge pull request #1106 from rigortype/graphql-dsl-typing-1100
+faae6273532c1a48938458cacb382c1a40bedceb	11	2	Merge pull request #1111 from rigortype/grape-plugin-1099
+9ec520016e7530efc4ad68f30c9a97e94fe168ed	4	2	Merge pull request #1118 from rigortype/grape-desc-context
+2466107766a3e2322796a34600663c08579978a7	0	1	docs: record post-merge corpus sweep and desc-block fix results
+4f54815ba21acac61d6eed90cb1432b5aa944424	2	2	Merge pull request #1128 from rigortype/block-autosplat-opaque-carrier-1116
+54f120d9e3e4cdad1fd0cccec01cc92c7123d1c0	2	2	Merge pull request #1129 from rigortype/difference-receiver-dispatch-1101
+51a190f7cbfca8c98de6b019a20ac834262156a7	4	2	Merge pull request #1127 from rigortype/external-ancestor-resolver-527-s0
+e82cd076c57476caa2e96407a3b7a2aa5457d722	5	2	Merge pull request #1131 from rigortype/rbs-ancestor-walk-527-s1
+9cc94876a5622752678738406856c5722fc941db	1	2	Merge pull request #1133 from rigortype/class-graph-buckets-one-slot-527
+b04e538f0b9c7f64f9209efb7dc570ad2971c0a6	1	2	Merge pull request #1136 from rigortype/bound-per-file-memos-1134
+26f34ed1367dc04847117be4c878ba7ba526f6a8	0	2	Merge pull request #1137 from rigortype/worktree-references-nesting
+9aa1919570982a485638049590618bbcc59c1f5f	0	2	Merge pull request #1138 from rigortype/gate-vacuity-pins
+0f252e3218936e8dc7004b574c709a434b996d2a	0	2	Merge pull request #1139 from rigortype/gate-corpus-floors
+7290370821cec005a4f8e6c701a624be8712f163	3	2	Merge pull request #1142 from rigortype/array-splice-elements-1140
+d18dba67888e702d4ea9e569c72abff2f94aabc8	0	2	Merge pull request #1143 from rigortype/adr-115-pi-harness
+a4945437763efe188cdbea24829a4a82162e39cc	0	2	Merge pull request #1145 from rigortype/reference-clone-spec-maintenance-race
+be733aaba6cd912db15f06d2c3cc675edab2d40e	1	2	Merge pull request #1144 from rigortype/issue/1090-xxh3-tidy-rfa
+237e76dd9204f953d2d97043fc5a1e777746886c	0	2	Merge pull request #1146 from rigortype/harness/pi-improvements
+79fa99cf7641cc8361ca304af7bf7710b0f2a721	1	2	Merge pull request #1159 from rigortype/block-param-self-substitute-1130
+9fd4b6d4623b6615efa67c0ad7b2e85842a1c0ec	2	2	Merge pull request #1160 from rigortype/respond-to-format-arm-edges-1071
+19c2af59f4d67d14d6e486a638fb1f7c07d9c494	1	2	Merge pull request #1161 from rigortype/enum-column-key-type-1089
+3cbd3791f40b1e5ab354ca1006469942b86fc265	0	1	Update CURRENT_WORK after the 2026-09-21 queue-release land
+23e0685ec0b40a8205c0a3293a4ddd77676670a7	0	2	Merge pull request #1147 from rigortype/harness/lane-opencode-go-flash
+b5af5cf72f6b666f74479df959b1ee467feda5c6	18	2	Merge pull request #1135 from rigortype/sorbet-sig-typing-1097
+02f3e27cd58ade64e0177cbac9a05c31ba7ad9b6	0	1	Default Grok review to 4.6; keep 4.7 for deep RCA
+75c5ae91620178cccb889d93997ecc9dfc0467f5	0	2	Merge pull request #1169 from rigortype/sig-void-returns
+712062442da569aff00b6b96a484268dcc49ed87	0	2	Merge pull request #1171 from rigortype/sig-precise-returns
+82ecba02838447dde763be1e7b4158f2641fa09a	0	2	Merge pull request #1170 from rigortype/notes-untyped-void-top
+a2387d662690af02c52d8232f8f037273f4196c6	0	2	Merge pull request #1174 from rigortype/sig-named-returns
+b9fffeecd799fcfb54e06847ce3552f71af1e1c1	0	1	Correct unit_scan.rb:560 warning description in untyped/void/top note
+cf0da7c7ccdb75325b562a91d5915ad4e49a3201	0	2	Merge pull request #1158 from rigortype/sig-gen-gap-markers-1011
+e763cf3ac38c45748510d2fff118316d80b72b7d	2	2	Merge pull request #1163 from rigortype/enumerator-lazy-chain-1121
+66177b9cac89feea80fc9e542b4e6ae21e036dd7	1	2	Merge pull request #1166 from rigortype/kwarg-forwarding-1125
+c5487a37d8c4008d99fa2ab9385ab5629e07c926	2	2	Merge pull request #1164 from rigortype/pattern-binding-subject-1122
+a8396ced90836f932fa9bd10ff9d29aaab79087d	8	2	Merge pull request #1165 from rigortype/prepend-ancestor-1123
+594e54f6dcd77429f452add520768d3ecd67c495	1	2	Merge pull request #1176 from rigortype/optimistic-origin-nil-predicate
+0765b45bb8711eb4ca933c71b36ba6f0e66d08da	6	2	Merge pull request #1178 from rigortype/type-var-ancestor-fallback-1173
+e890b0dc248b27d8044465e2d10427bacea38508	1	2	Merge pull request #1179 from rigortype/ivar-compound-seed-1175
+b0dd3cc37565cb87f0b7d2ba016bf1ae9f446103	0	2	Merge pull request #1180 from rigortype/sig-precise-returns-batch2
+e7596e8a0b046f894065e533ccb94b337613f7a9	0	1	Refresh the session handoff and retire a stale incidental finding
+41b652e3c1d3e230f277ca2bfae741207cd4cbef	0	2	Merge pull request #1184 from rigortype/sig-baseline-driftrow
+25300e0139731095aca91a7b207fa54261722b45	0	2	Merge pull request #1185 from rigortype/sig-additional-initializer
+1b867b76730e7736ccb9c261dbb0f7b2364ba349	0	2	Merge pull request #1186 from rigortype/sig-protocol-contract
+0ba3165cc8ccc4077c61e1f4d58993a60fdf21d7	0	1	docs: handoff — sig audit through #1186
+4d06efee5f079562e92850f0a419fcc2dde22ca6	0	2	Merge pull request #1187 from rigortype/sig-project-scan
+76086c555bc42a910800f009a2efb8f52e054379	0	1	docs: handoff through #1187 + worktree push gotcha
+99ea44e59e84f7b56847bf76f6cde17eddc0dcaa	0	2	Merge pull request #1188 from rigortype/sig-effects-surface
+9b2d943eda7d1d5ed0b36c3cbe65895f8b58a490	0	2	Merge pull request #1189 from rigortype/sig-effects-collections
+168897289d6ef773b08f6e9a1fa54c5043153187	0	1	handoff: #1188/#1189 landed; Effects::* coverage complete
+c56c2ccf0a08b4ba3940e9a0562d2671858d0619	1	1	sig: declare Effects::Registry and the plugin effect row classes (#1181) (#1190)
+2f965b27d65b137816ae2ce5d9209c0082ee9218	0	1	handoff: #1190 landed; effect vocabulary slice complete
+908a5c9a47f53039cd40f09ab4368f1b636b8ce2	2	2	Merge pull request #1201 from rigortype/fallback-signature-state-snapshot
+58303f1d5cee3432fbb4ddb08b9e0c05d77e6a9d	0	1	Add ADR-116 — restructure the engine's hot files after v0.4.0
+78c3652317e7cc3aae0776a9c2ec5e2f418dcc2b	0	1	Link ADR-116's slices to their tracking issues
+1e5695bc2f9f0e39e27782b2e7d382076bb0b1a4	1	2	Merge pull request #1206 from rigortype/hash-shape-fold-captured-rebind
+ebed1e53415e98dd1e7cf011ff50157928555fc2	2	2	Merge pull request #1202 from rigortype/index-compound-write-value
+feaf058af71a34ac74e7e71cf40a87c11a7a6ee0	2	2	Merge pull request #1204 from rigortype/per-element-fold-ivar-captures
+bda0dfdae51c8fb7f36f22d578e0e3ce5206eedd	4	2	Merge pull request #1207 from rigortype/block-content-join-self-read-fixpoint
+416e205d344422b208aad56d577e9ccec6b80e2d	3	2	Merge pull request #1203 from rigortype/per-element-fold-content-mutation
+362a6a493c59b9c97577b475b74f3432f3000ac6	4	2	Merge pull request #1205 from rigortype/thread-block-return-through-index-writes
+76123a118296fc410ab44308caf8dfcdee7efe7c	0	2	Merge pull request #1222 from rigortype/refresh-stale-skill-guidance
+68ed39bb197e7bf629c6f2607d87ced3244703e3	5	2	Merge pull request #1209 from rigortype/multi-write-index-target-widening
+04457555f7e583e25e56e89348b393a6fb099f7a	4	2	Merge pull request #1211 from rigortype/for-rescue-index-target-widening
+ed1dff20d2bc038bd4672e70c56d69bfdfbb5a9c	2	2	Merge pull request #1210 from rigortype/block-writeback-ivar-captures
+74970d1ece5a858d82c9b2c8f1a5deb57831f984	1	2	Merge pull request #1213 from rigortype/nested-fold-tail-only-floor
+bf5edbb315768ceb886bd8b0a1227b4a430b94c7	3	2	Merge pull request #1215 from rigortype/fix-block-next-captured-rebind
+15a29720d75e7a13cf72b1e79327a1541f831ffe	3	2	Merge pull request #1224 from rigortype/block-rebind-reads-mutated-capture
+ca80be0cee4b1acf00a0c1018cc3cc463c71d096	4	2	Merge pull request #1225 from rigortype/fold-unthreaded-rebind-floor
+06f540ff3d820a81f13e539bf19bf3b77a7e0669	2	2	Merge pull request #1212 from rigortype/hash-shape-fold-mapping-arg-and-bang-self-read
+a98bd9c86c78d78a874dd5d9a73c94209bf84614	1	2	Merge pull request #1221 from rigortype/block-content-evidence-rebound-capture
+1149769dba1b531adc4c0b0cc5dd28d3d9117a21	2	2	Merge pull request #1236 from rigortype/index-compound-read-dispatch-context
+52a8c086376a295d520c3034da23a253a1c773cc	1	2	Merge pull request #1242 from rigortype/per-element-fold-find-ifnone
+2dec06dfd2f532b3086dabd4b4213de64b7dca7a	3	2	Merge pull request #1243 from rigortype/constant-compound-write-stored-value
+bd503e93b332c5249b3a7cfa88cae5feaaede79d	1	2	Merge pull request #1244 from rigortype/generic-block-return-stale-tail-floor
+91c214bfd1f357e50733c693b9bf765575e14efa	3	2	Merge pull request #1247 from rigortype/hash-transform-keys-mapping-key-type
+0192519e6d9af5d96acc78c9054110a27808e06b	5	2	Merge pull request #1249 from rigortype/block-capture-slot-and-callee-mutations
+5f2a07d875d9983c4e8533c73ee65e6e66937d4c	1	2	Merge pull request #1245 from rigortype/value-position-block-param-shadowing
+ad70fe7d4484e0c2873631425553368ac86cc679	2	2	Merge pull request #1248 from rigortype/loop-next-break-rebind
+d61d41d47399d36f7d30557d471325734fb60ff3	2	2	Merge pull request #1252 from rigortype/hash-literal-splat-entries
+5e51f5e5b44d830d189fd0ac96c2a1bc433902de	3	2	Merge pull request #1253 from rigortype/hash-shift-mutator
+0c4ad0f7b92dec017e6a33f39cfede46f034ad4f	1	2	Merge pull request #1255 from rigortype/non-empty-refinement-accepts-literal
+21d9fddcfe7f3c2942fb03174941f7a248739494	1	2	Merge pull request #1254 from rigortype/literal-shape-unmoved-pin-floor
+e41a43fbc9f25dd719ffeffe12635945f6825193	4	2	Merge pull request #1266 from rigortype/hash-transform-keys-rbs3-overlay
+6a0bb52c49f42235a0b5aa2f9f357d07f9e8f47a	7	2	Merge pull request #1250 from rigortype/thread-call-operand-writes
+0ea5ea6e97563e232268ff980d4805b479928f80	1	2	Merge pull request #1265 from rigortype/hash-filter-result-class
+e54c4725b200fa397044da5a4e6063f527bcfeb3	2	2	Merge pull request #1269 from rigortype/refinement-store-gradual-arm
+e8bfe6040b7d114d31d9263ed01f0a6a193f7387	4	2	Merge pull request #1261 from rigortype/global-cvar-it-mutation-receivers
+f1d1f964d99cb92569104eaa9ce90aafb2aeafa5	2	2	Merge pull request #1274 from rigortype/enumerable-detect-ifnone-overlay
+a433a96f0156363ff089b3119a8b3cc975f6d1c3	2	2	Merge pull request #1275 from rigortype/record-accepts-unread-hash
+29e634a84a0a1e073057e3f882c91ca0259c9e27	2	2	Merge pull request #1273 from rigortype/block-return-variable-gradual
+847ec9c214d8d633d4ad9d34073f33d73425493c	2	2	Merge pull request #1279 from rigortype/captured-binding-precision-nits
+47208a6f4440e3d5d2aafde152c7a7fec4f31ebb	1	2	Merge pull request #1259 from rigortype/retry-edge-primary-body-rebinds
+441182fa12c736e9c08aedfb6fc6e5520f592977	5	2	Merge pull request #1277 from rigortype/straight-line-unknown-store-arm
+b59422318d798616c3b7887a7e87ae4a01e292a5	5	2	Merge pull request #1276 from rigortype/compound-constant-write-foreign-binding
+4b70a574f211fe73735165664240cf0c1fff48bb	11	2	Merge pull request #1270 from rigortype/string-mutator-table-drift
+be9a887f4e0e3422fe3c780e4830f465d8fb3d0e	1	2	Merge pull request #1284 from rigortype/refinement-map-rewrites-element
+997ddcd3466f17679a531f30ba33f8c504e02dec	9	2	Merge pull request #1280 from rigortype/hash-lookup-mutation-widening
+8426cf992f42fe95c8ccd9b2a835b9be21e2fe6f	1	2	Merge pull request #1278 from rigortype/hash-shape-computed-key-nil
+eef0de8d761c611daf5e256a466c46a7ac41873a	2	2	Merge pull request #1294 from rigortype/mixed-collection-content-join
+f8cce8399f3d714623e19586a9d8b8368ed4ac73	4	2	Merge pull request #1292 from rigortype/hash-receiver-mutators-effect
+0d6867fa4b5f873f047f49f3e4589e8e1d08c965	4	2	Merge pull request #1295 from rigortype/optimistic-mark-through-destructuring
+4f8d8756071d66e350b1181554a16c2482b2011d	2	2	Merge pull request #1296 from rigortype/chained-mutator-widening
+8c1b8f4debf88ad7c49f099d6af5128171d9c985	1	2	Merge pull request #1293 from rigortype/block-return-argument-class-join
+3f069e0e5bf289c5e175e0abcf4b419e320a9f52	3	2	Merge pull request #1291 from rigortype/mutated-constant-census-reads
+7e42c48fe9ebf0ee9698f74b08d439c4d702c9fc	6	2	Merge pull request #1301 from rigortype/ladder-stops-at-written-constant
+91b83c66aa68549448de232c76e0a41b746b0f4e	1	2	Merge pull request #1303 from rigortype/enumerable-sum-class-level-return
+33dd2ef2b366376ec912e2de6813938966cbdd3e	2	2	Merge pull request #1307 from rigortype/stringio-enumerable-mixin
+efaf867531801a6d4154fc09c55b82b02e4def50	3	2	Merge pull request #1306 from rigortype/narrow-new-allocation-witness
+1d0f8dfe1099a9d5102322f02b16bdef647c2d07	1	2	Merge pull request #1308 from rigortype/io-enumerable-block-non-escaping
+db80dfe37bf24a3bb2b9662d3860ab435c394fba	3	2	Merge pull request #1309 from rigortype/association-proxy-builder-bounds
+07bf9cb1c490f56c590be513c19464a79db540bb	4	2	Merge pull request #1310 from rigortype/later-operand-threaded-scope
+0ee3777cb1cafff8c41dddd399de2b49d0d78891	2	2	Merge pull request #1312 from rigortype/collection-proxy-relation-arity
+4c48106c158d61a81e7b5c2fd2fa83957807774e	3	2	Merge pull request #1314 from rigortype/relation-write-bounds-read-first
+79ef2ae210f99a01a17c0cf5c943057e682687e5	3	2	Merge pull request #1315 from rigortype/relation-insert-effects
+02bc94670c90550ce0628f9f08e8fcd7dfa6e4eb	3	2	Merge pull request #1321 from rigortype/relation-find-several-ids
+6b008cb301ac008f9853eeec011cd253528ca8a2	4	2	Merge pull request #1316 from rigortype/effect-unit-definition-side
+2cdc9745dc3408c8e8582781b2eaf231c29f670b	4	2	Merge pull request #1320 from rigortype/singleton-include-invisible
+e7b29c723486bb10afbb41da70f6eadf34c7852e	0	2	Merge pull request #1324 from rigortype/unplaced-block-nested-class
+4240f48fb3ad6e64f9a96cc2588d9df02d616623	1	2	Merge pull request #1323 from rigortype/view-seed-find-arity
+11902cb77455ec3166a73ef1e1af4f0382882058	4	2	Merge pull request #1326 from rigortype/activesupport-enumerable-many
+71c94cf9128430c503b7cf34dafea439fd3ff3c2	3	2	Merge pull request #1327 from rigortype/block-form-find
+b5c5d9f7c47cf023b890153aee289c80d88af1dc	0	1	Link the singleton-mixin new bound to #1325
+17ff493e38e31975e136e120a093e7b1573b7ad1	3	2	Merge pull request #1328 from rigortype/model-own-find-note
+418089ef74b55cdbb1cbb4580c1566c054e2111c	3	2	Merge pull request #1330 from rigortype/activesupport-core-ext-aliases
+fa4b3cbed17fb9d5902f2f0ce5aba9d12699a30a	4	2	Merge pull request #1334 from rigortype/activesupport-core-ext-8-1-rows
+f35fdd4dfc39bae12986c18d4af9fafc5b08ebb0	5	2	Merge pull request #1331 from rigortype/one-line-memo-index-or-write
+fa57531f9488c87cd9e50d10e17051828e943ea0	0	2	Merge pull request #1337 from rigortype/shard-coverage-partial-rerun
+94d4a2cfe9a02c30ddedfa77e338623efb736f27	2	2	Merge pull request #1338 from rigortype/or-write-guard-without-truthy-rvalue
+028b4fd1d01988d311444bb643740f74f2c91053	3	2	Merge pull request #1340 from rigortype/unbound-and-write-value
+cfd42587a8383aa2847514469b06d3bcdd656292	0	2	Merge pull request #1339 from rigortype/local-gate-and-docs-ci
+cfa24f1e276eab78f7bcc8c9af157126e33f415d	0	2	Merge pull request #1341 from rigortype/agent-landing-loop
+32fcfb01032273679a99853a37f53a6e842b3330	0	2	Merge pull request #1342 from rigortype/rewrap-verify-changed-header
+b7213d23cfab2794b81192eb9c20bd5485a5e542	1	2	Merge pull request #1343 from rigortype/ivar-op-write-order-independent
+5149b6560aa4b382963d6a1c1c408634a8937bb5	1	2	Merge pull request #1345 from rigortype/ruby-box-fixed-ruby-gate
+e59b7b89a4f0c2afe768e80af862b383dbcc5d7a	11	2	Merge pull request #1349 from rigortype/nix-flakes-prerequisite
+9a1b40ace40ecd773502b6dbd7020133325880d5	2	2	Merge pull request #1348 from rigortype/rational-float-dispatch
+cdd97157c1e84b8012212136a44f56df721d1cc3	1	2	Merge pull request #1353 from rigortype/proven-overload-project-classes
+73bf3bfa62c84f34a963d24ffce4a518e6cc7651	1	2	Merge pull request #1355 from rigortype/bounded-type-var-binding
+4c6ae43870538303d2987f12f54df5af83dff1fd	7	2	Merge pull request #1370 from rigortype/regex-globals-block-frame
+56ba5aadda14454fd0861aad76074294bc35c2f7	3	2	Merge pull request #1354 from rigortype/strict-pass-dynamic-facet
+6cd8395a2a97a3e151291878e38bb2d06dd89733	6	2	Merge pull request #1374 from rigortype/regex-globals-callee-frame
+acce26ba95710f38837ee0cdc2c77406c3a67df8	7	2	Merge pull request #1378 from rigortype/regex-globals-rebinding-builtins
+c2b9cfd377b90f9261888d65e9aeb5b1af91b662	0	1	Define call-site evidence, unobserved parameter and test root in CONTEXT.md
+d7a65e91fb4cabd7dd94696e037192015da11ff8	1	2	Merge pull request #1391 from rigortype/min-max-by-nonempty-tuple-1333
+0c8a735647eb34fe78709b04d6c071798e90e249	5	2	Merge pull request #1396 from rigortype/mutation-rebind-keeps-mark-1287
+f946c3b96911841b8d7270025959a74856c1eaba	4	2	Merge pull request #1390 from rigortype/sig-gen-block-return-1382
+78dba449bd05526a9e06c38ba58f3c6b9b7d700e	5	2	Merge pull request #1395 from rigortype/test-paths-key
+79e666990830e0a98588256f39d12bd964cca780	4	2	Merge pull request #1392 from rigortype/fresh-frame-block-specials
+96e383439e7f21351eccdd3a29eb3515e53e9ba3	5	2	Merge pull request #1401 from rigortype/bound-predicate-miss-answer-1302
+327accfde970ad0ed5913c0a0f30193b6ac216c0	2	2	Merge pull request #1404 from rigortype/record-accepts-open-shape-1281
+d5439363131f98e6d77ecc757c6401c96ef877ff	1	2	Merge pull request #1409 from rigortype/attr-writer-ivar-seed-541
+b08656ecb323a1dc7cde30f10ac05e34283ab251	12	2	Merge pull request #1405 from rigortype/lastline-frame-local
+698604d1e13bf4f2508fc22c57cc617156339da9	1	2	Merge pull request #1414 from rigortype/adr2-plugin-precedence-700
+4c9161a6fa44aae7baa70b91383dc3ae15bf3778	1	2	Merge pull request #1419 from rigortype/mutated-constant-floor-1297
+6c6bc6726524b1047deae9d4c89c259bbaee65ae	0	2	Merge pull request #1418 from rigortype/standard-stream-reader-assumption
+23216d6626a9421862ace71e093e09f4536638de	4	2	Merge pull request #1420 from rigortype/unknown-iterator-repeat-1234
+577aacb3988c1d448b28e06a90adb8f6dc119184	10	2	Merge pull request #1428 from rigortype/sig-inline-consistency-1075
+7d6da46acd42479e374e510111b119c098705712	9	2	Merge pull request #1425 from rigortype/errinfo-status-narrowing
+5c76d7e8ec80053c836145c0c5faa286c2622389	12	2	Merge pull request #1424 from rigortype/refine-using-scope-1120
+ed93188b3294a264c7f7eaa96c21608ff1d1a070	12	2	Merge pull request #1422 from rigortype/sig-gen-inline-members-check-1076
+42871afddbf45f39091bb48c384acd4f6b009494	3	2	Merge pull request #1434 from rigortype/untyped-function-binder-1430
+904d371f0319476818c59c1c4cf90f414a48e605	4	2	Merge pull request #1438 from rigortype/process-last-status-overlay
+d155a706f33719370857c2277ea976d3069aefcf	9	2	Merge pull request #1433 from rigortype/interpreter-global-declared-seed
+0c89c2f868a0c201b36fe16933d085176a0910ea	2	2	Merge pull request #1442 from rigortype/effects-frame-local-specials
+7e48c8705e042c85bf7604c1f606c4f5e8aff8da	1	2	Merge pull request #1444 from rigortype/fix-type-of-declaration-guard-require
+56fe70be5226ad27f3002d1fd1212dbaa13176f9	0	1	handoff: special-variable semantics lanes landed; next steps
+9b54f41eb25b45383720e2f8d1ad4f4655c1e3cd	5	2	Merge pull request #1441 from rigortype/loop-content-mutation-entry-1412
+a690a612b8912edab17abf13010b08ad9e308159	6	2	Merge pull request #1449 from rigortype/implicit-self-gets-last-line-1415
+09110c9db1d20f190c4b635c81ee8d96007f4531	0	2	Merge pull request #1460 from rigortype/deepwiki-steering-config
+407bd3ec7cade37893b2f6fcda1cb2aa5f204130	20	2	Merge pull request #1448 from rigortype/global-write-check-1367
+f7935458c5c8a18898756e2cc7f20893630adbdb	9	2	Merge pull request #1453 from rigortype/global-receiver-class-guard-1429
+42d6e031257466de187cc9640b4896300473f9bb	0	1	handoff: special-variable second pass landed (#1449, #1448, #1453); next steps
+bbaed629e1fe19b223a7a17f37c105c87a0e6054	3	2	Merge pull request #1470 from rigortype/matchdata-range-slots-1381
+4e630c9e342f419878060fa41cb67f188708be4d	3	2	Merge pull request #1479 from rigortype/safe-nav-argument-narrowing-1468
+9cec1a5ca326c9527e4b0417bf58e1d48c84c2f0	0	2	Merge pull request #1478 from rigortype/special-variable-docs-1454
+a12aef3de06a520853d166699199b0036ee9a055	0	1	handoff: #1454 phase 2 landed (#1478); the issues its review filed
+493c4269f613710c00820f25fabcea3873ab97b0	4	2	Merge pull request #1483 from rigortype/sig-gen-keep-declared-params-1436
+07f49bdb90e563a2387d0df35bc4640e32dd8a0e	1	2	Merge pull request #1490 from rigortype/release/0.4.0

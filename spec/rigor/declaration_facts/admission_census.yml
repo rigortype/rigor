@@ -1,8 +1,8 @@
 # Discovery-table admission census (#1507, ADR-119 WD1): per Scope::DiscoveryIndex member, the files outside
-# scope.rb, scope/discovery_index.rb, scope_indexer.rb and runner/project_pre_passes.rb that read the whole
-# table ("reads") or copy it ("copies"), and the files that copy every member at once through a splat or a
-# computed name ("whole_index_copies"). admission_census_spec.rb computes it with Prism and compares it with
-# this file; `RIGOR_REGENERATE_GATES=1` rewrites it.
+# the table owners (scope.rb, scope/discovery_index.rb, scope_indexer.rb with its collectors under
+# scope_indexer/, and runner/project_pre_passes.rb) that read the whole table ("reads") or copy it ("copies"),
+# and the files that read or copy every member at once ("whole_index"). admission_census_spec.rb computes it
+# with Prism and compares it with this file; `RIGOR_REGENERATE_GATES=1` rewrites it.
 
 members:
   declared_types:
@@ -73,12 +73,14 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_def_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/expression_typer.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_singleton_def_nodes:
     reads:
     - lib/rigor/analysis/incremental_session.rb
@@ -90,6 +92,7 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_def_sources:
     reads:
     - lib/rigor/analysis/incremental_session.rb
@@ -97,18 +100,21 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_singleton_def_sources:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_method_visibilities:
     reads:
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_parameter_envelopes:
     reads:
     - lib/rigor/analysis/check_rules.rb
@@ -116,6 +122,7 @@ members:
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_superclasses:
     reads:
     - lib/rigor/analysis/check_rules.rb
@@ -130,24 +137,29 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_deferred_ranges:
     reads:
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_refinements:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_global_write_census:
     reads:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_header_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
@@ -163,11 +175,13 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/parameter_inference_collector.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_prepends:
     reads:
     - lib/rigor/analysis/runner.rb
     copies:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/protection/discovery_seed.rb
   discovered_extends:
     reads:
     - lib/rigor/analysis/check_rules/source_arity.rb
@@ -262,7 +276,7 @@ members:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
     copies: []
-whole_index_copies:
+whole_index:
 - lib/rigor/analysis/runner.rb
 - lib/rigor/analysis/worker_session.rb
 - lib/rigor/cli/coverage_mutation.rb

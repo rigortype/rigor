@@ -3,74 +3,88 @@
 require "spec_helper"
 require "yaml"
 
-# #1507 — ADR-119 WD6's producer tripwire (proposed). `DeclarationProducerScan` parses every Ruby file under `lib/`
-# and `plugins/*/lib/` with Prism and marks a method, or a class or module body, a producer when its code references
-# `Prism::ClassNode`, `Prism::ModuleNode` or `Prism::SingletonClassNode` (a `when` arm, `is_a?`, `===`, a bare read),
-# their node-type symbols (`:class_node`, …), a visibility or mixin keyword as a symbol (`:private`, `:include`, …),
-# or a constant the same file assigns from any of those (`CLASS_BODY_NODES`). A class whose ancestry includes
-# `DeclarationWalk::Collector` is a producer whatever it names. The set is compared with `producers.yml`, where each
-# file also says what it computes, so a new producer, even a new method in a listed file, fails until it is recorded.
+# #1507 — ADR-119 WD6's producer tripwire (proposed). `DeclarationProducerScan` (`spec/support/
+# declaration_fact_sources.rb`) parses every Ruby file under `lib/` and `plugins/*/lib/` with Prism and marks each
+# method, or class or module body, that decides what a declaration is: rules (i)–(v) and the collector rule in its
+# header. The set is compared with `producers.yml`. A new producer, even a new method in a listed file, fails until it
+# is recorded with a reason that says what it computes and why it does not go through `DeclarationWalk::Context` or
+# `ModuleFunctionState`. `RIGOR_REGENERATE_GATES=1` records new entries as `TODO`, which fails until justified;
+# entries present when the tripwire landed are `grandfathered`.
 #
-# What is not built: a producer that dispatches on `node.class.name` strings, on `Prism::Node#type` through a variable
-# or on a keyword spelled as a String is not found; a collector in a file the suite does not load is found only by
-# what it names; plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing about how
-# an entry computes its declaration context: sharing one helper is a review question, not a check here.
-# A collector the tripwire's own ancestry test finds; it lives outside lib/, so the tree's check ignores it.
-DeclarationFactSpecCollector = Class.new { include Rigor::Inference::DeclarationWalk::Collector }
-
+# Threat model: the tripwire catches a producer added by accident in the codebase's normal styles, not a deliberate
+# evasion. It does not see dispatch on `node.class.name` or other strings, on `Prism::Node#type` through a variable,
+# `Prism.const_get(:ClassNode)`, duck typing (`respond_to?(:superclass)`), a keyword spelled as a String, a constant
+# reached through a variable or `const_get`, or rule (v)'s writes outside `scope_indexer.rb` or through a local alias
+# of a parameter. Plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing about how
+# an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   let(:header) do
     <<~YAML
       # Declaration producers (#1507, ADR-119 WD6): every method, or class or module body, under lib/ and
       # plugins/*/lib/ whose code decides what a declaration is. producers_spec.rb computes the set with Prism and
-      # compares it with this file. Each file says what it computes; `RIGOR_REGENERATE_GATES=1` rewrites the
-      # producer lists and keeps the notes, and a new file's note is left empty for its author to write.
+      # compares it with this file. Each file says what it computes, and each entry why it computes a declaration
+      # context itself instead of going through DeclarationWalk::Context or ModuleFunctionState. `grandfathered`
+      # marks the entries present when the tripwire landed; they converge as bugs are filed. A new entry must say
+      # why; `RIGOR_REGENERATE_GATES=1` adds new entries as TODO, which the spec fails on.
 
     YAML
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|
-    DeclarationProducerScan.producers(parsed).merge(DeclarationProducerScan.collectors(paths: parsed.keys))
+    DeclarationProducerScan.producers(parsed)
   end
 
   define_method(:listed) do |recorded|
-    recorded.flat_map { |path, entry| entry.fetch("producers").map { |scope| "#{path}##{scope}" } }
+    recorded.flat_map { |path, entry| entry.fetch("producers").keys.map { |scope| "#{path}##{scope}" } }
   end
 
   define_method(:tripwire_problems) do |found, listed|
-    (found.keys - listed).sort.map { |key| "#{key}: a producer (#{found[key].join(', ')}) not in producers.yml" } +
+    (found.keys - listed).sort.map { |key| "#{key}: a producer (#{found[key].join(', ')}), not in producers.yml" } +
       (listed - found.keys).sort.map { |key| "#{key}: in producers.yml but no longer a producer" }
   end
 
+  # `recorded` brought in line with `found`: new files and entries as TODO, vanished ones dropped.
   define_method(:regenerated) do |found, recorded|
     found.keys.group_by { |key| key.split("#", 2).first }.sort.to_h do |path, keys|
-      [path, { "computes" => recorded.dig(path, "computes").to_s,
-               "producers" => keys.map { |key| key.split("#", 2).last }.sort }]
+      entries = keys.map { |key| key.split("#", 2).last }.sort.to_h do |scope|
+        [scope, recorded.dig(path, "producers", scope) || "TODO"]
+      end
+      [path, { "computes" => recorded.dig(path, "computes") || "TODO", "producers" => entries }]
+    end
+  end
+
+  define_method(:unjustified) do |recorded|
+    recorded.flat_map do |path, entry|
+      notes = [["#{path} computes", entry["computes"]]] +
+              entry.fetch("producers").map { |scope, reason| ["#{path}##{scope}", reason] }
+      notes.select { |_, text| text.to_s.strip.empty? || text.to_s.strip == "TODO" }.map(&:first)
     end
   end
 
   it "lists exactly the producers the tree has" do
-    recorded = YAML.load_file(snapshot)
     current = found
     if DeclarationFactSources.regenerate?
-      DeclarationFactSources.write_yaml(snapshot, header, regenerated(current, recorded))
-      recorded = YAML.load_file(snapshot)
+      DeclarationFactSources.write_yaml(snapshot, header, regenerated(current, YAML.load_file(snapshot)))
     end
 
-    problems = tripwire_problems(current, listed(recorded))
-    expect(problems).to eq([]), "#{problems.join("\n")}\n#{DeclarationFactSources.regenerate_hint('producers.yml')}"
+    problems = tripwire_problems(current, listed(YAML.load_file(snapshot)))
+    expect(problems).to eq([]), "#{problems.join("\n")}\nRecord each new producer in producers.yml with a reason, or " \
+                                "move it onto DeclarationWalk::Context / ModuleFunctionState. " \
+                                "#{DeclarationFactSources::REGENERATE_ENV}=1 adds the entries as TODO."
   end
 
-  it "says what each listed file computes" do
-    empty = YAML.load_file(snapshot).select { |_, entry| entry["computes"].to_s.strip.empty? }.keys
+  it "justifies every file and entry" do
+    missing = unjustified(YAML.load_file(snapshot))
 
-    expect(empty).to eq([]), "producers.yml: write a `computes:` note for #{empty.join(', ')}"
+    expect(missing).to eq([]), "Replace TODO in producers.yml: say what each file computes, and why each entry " \
+                               "computes a declaration context itself.\n#{missing.join("\n")}"
   end
 
   describe "the tripwire itself" do
     def producers_of(source, path = "lib/rigor/probe.rb")
       DeclarationProducerScan.producers(path => Prism.parse(source).value)
+                             .transform_keys { |key| key.split("#", 2).last }
     end
 
     it "marks a new method in a listed file, not only a new file" do
@@ -87,39 +101,81 @@ RSpec.describe "Declaration producers" do
       RUBY
 
       expect(producers_of(source, "lib/rigor/inference/scope_indexer.rb"))
-        .to eq("lib/rigor/inference/scope_indexer.rb#Rigor::ScopeIndexer#new_walk" => ["Prism::ClassNode"])
+        .to eq("Rigor::ScopeIndexer#new_walk" => ["Prism::ClassNode"])
     end
 
-    it "marks node-type symbols, keyword symbols and same-file constants, and skips keyword labels and comments" do
+    it "marks node-type symbols, keyword symbols, visitor hooks and same-file constants" do
       source = <<~RUBY
-        class Probe
+        class Probe < Prism::Visitor
           BODIES = [Prism::SingletonClassNode].freeze
           # Prism::ModuleNode in a comment
           def by_type(node) = node.type == :class_node
           def by_keyword(node) = node.name == :prepend
           def by_constant(node) = BODIES.include?(node.class)
           def by_label = call(include: true)
+          def visit_module_node(node) = super
+          define_method(:by_block) { |node| node.is_a?(Prism::ModuleNode) }
         end
       RUBY
 
-      expect(producers_of(source).transform_keys { |key| key.split("#", 2).last })
+      expect(producers_of(source))
         .to eq("Probe" => ["Prism::SingletonClassNode"], "Probe#by_type" => [":class_node"],
-               "Probe#by_keyword" => [":prepend"], "Probe#by_constant" => ["BODIES (a constant of this file)"])
+               "Probe#by_keyword" => [":prepend"], "Probe#by_constant" => ["Probe::BODIES (a constant built from one)"],
+               "Probe#visit_module_node" => [":visit_module_node (a Prism::Visitor hook)"],
+               "Probe#by_block" => ["Prism::ModuleNode"])
     end
 
-    it "marks a class by its ancestry, whatever it names, and only in the scanned files" do
-      key = "spec/rigor/declaration_facts/producers_spec.rb#DeclarationFactSpecCollector"
+    it "skips a keyword listed among Array or String mutators, and resolves a constant from another file" do
+      parsed = {
+        "lib/rigor/a.rb" => Prism.parse("module Rigor; MUTATORS = %i[push prepend unshift].freeze; " \
+                                        "BODIES = [Prism::ClassNode].freeze; end").value,
+        "lib/rigor/b.rb" => Prism.parse("module Rigor; class B; def f(n) = BODIES.include?(n.class) && " \
+                                        "MUTATORS.include?(n.name); end; end").value
+      }
 
-      expect(DeclarationProducerScan.collectors([DeclarationFactSpecCollector, String])).to eq(key => ["collector"])
-      expect(DeclarationProducerScan.collectors([DeclarationFactSpecCollector], paths: ["lib/a.rb"])).to eq({})
+      expect(DeclarationProducerScan.producers(parsed))
+        .to eq("lib/rigor/a.rb#Rigor" => ["Prism::ClassNode"],
+               "lib/rigor/b.rb#Rigor::B#f" => ["Rigor::BODIES (a constant built from one)"])
+    end
+
+    it "marks a collector from its include statement, whatever it names" do
+      source = "module Rigor; module Inference; module DeclarationWalk; class Q; include Collector; " \
+               "def on_def(_node, _context) = 1; end; end; end; end"
+
+      expect(producers_of(source))
+        .to eq("Rigor::Inference::DeclarationWalk::Q" => ["include DeclarationWalk::Collector"])
+    end
+
+    it "marks, by rule (v), a writer into a parameter reachable from index, directly or by delegation" do
+      source = <<~RUBY
+        module Rigor
+          module ScopeIndexer
+            def index(root) = walk(root, {})
+            def walk(root, acc) = record(acc, root)
+            def record(table, root) = (table[root] ||= []) << root
+            def unreached(table) = table[:x] = 1
+            def reader(table) = table[:x]
+          end
+        end
+      RUBY
+
+      expect(producers_of(source, DeclarationProducerScan::RULE_V_FILE).keys)
+        .to eq(%w[Rigor::ScopeIndexer#walk Rigor::ScopeIndexer#record])
     end
 
     it "reports a new producer and a vanished one" do
       found = { "lib/a.rb#A#x" => ["Prism::ClassNode"] }
 
       expect(tripwire_problems(found, ["lib/b.rb#B#y"]))
-        .to eq(["lib/a.rb#A#x: a producer (Prism::ClassNode) not in producers.yml",
+        .to eq(["lib/a.rb#A#x: a producer (Prism::ClassNode), not in producers.yml",
                 "lib/b.rb#B#y: in producers.yml but no longer a producer"])
+    end
+
+    it "regenerates a new entry as TODO, which the justification check rejects" do
+      regenerated = regenerated({ "lib/a.rb#A#x" => ["Prism::ClassNode"] }, {})
+
+      expect(regenerated).to eq("lib/a.rb" => { "computes" => "TODO", "producers" => { "A#x" => "TODO" } })
+      expect(unjustified(regenerated)).to eq(["lib/a.rb computes", "lib/a.rb#A#x"])
     end
   end
 end

@@ -50,9 +50,9 @@ define *behaviour*.
 - **frame-local special** — a special variable Ruby keeps in the special-variable slot of the
   method, class, module or file body that runs the code: `$~`, the match globals derived from it, and
   `$_`. A block shares its body's slot; a method defined in Ruby, and the root block of a thread,
-  fiber or ractor, have their own.
-  `$!` / `$@` (the rescue frame) and `$?` (the thread) are specials but not frame-local. The slot
-  table is `docs/type-specification/global-variables.md` § "Special-variable slots".
+  fiber or ractor, have their own. `$!` / `$@` (the rescue frame) and `$?` (the thread) are
+  specials but not frame-local. The slot table is `docs/type-specification/global-variables.md`
+  § "Special-variable slots".
 - **type-shaped comment** — a type written where Rigor never checks it: a YARD `[Type]` slot or a
   type in a doc sentence. Never written in this tree
   ([ADR-107](docs/adr/107-checked-types-and-typeless-comments.md), gated by

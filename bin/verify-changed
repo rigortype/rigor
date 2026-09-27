@@ -114,7 +114,8 @@ lines() { printf '%s' "$1" | sort -u; }
 # generator pass at file load, about 10s on an idle host.
 provenance_spec=spec/rigor/sig_gen/provenance_spec.rb
 # The declaration-fact gates (#1507) read every file under lib/ and plugins/*/lib/,
-# so any change there can move them; together they take well under a second.
+# so any change there can move them; together they take about 3s. Their own
+# fixtures, snapshots and support files run exactly these four.
 declaration_fact_specs=(
   spec/rigor/declaration_facts/admission_census_spec.rb
   spec/rigor/declaration_facts/member_classes_spec.rb
@@ -143,6 +144,9 @@ for path in ${changed[@]+"${changed[@]}"}; do
       ;;
   esac
   case "$path" in
+    spec/rigor/declaration_facts/* | spec/integration/fixtures/declaration_witness/* | spec/support/declaration_*)
+      for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
+      ;;
     spec/spec_helper.rb | spec/support/* | spec/*/support/*)
       uncovered+="$path (shared spec setup: the suite depends on it)"$'\n'
       # The G3 classifier and its helpers: provenance_spec is their only user.

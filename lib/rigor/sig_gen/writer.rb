@@ -78,10 +78,11 @@ module Rigor
         write_target(target, emittable, source_path: source_path)
       end
 
-      # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing` — i.e. at least one `untyped`
-      # slot becomes a concrete type AND no concrete slot becomes `untyped`. Word-boundary matching ensures we
-      # count `untyped` only as a type token, not as a substring inside identifiers. Public because the generator
-      # asks the same question before it lists a declared `initialize` at all (#1436).
+      # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing`. A count, not a slot-by-slot
+      # comparison: it reads as "at least one more position is concrete", and does not prove that no concrete
+      # position became `untyped` elsewhere. Word-boundary matching counts `untyped` only as a type token, not
+      # as a substring inside identifiers. Public because the generator asks the same question before it lists a
+      # declared `initialize` at all (#1436).
       def self.fewer_untyped?(proposed, existing)
         proposed.scan(/\buntyped\b/).size < existing.scan(/\buntyped\b/).size
       end

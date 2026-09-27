@@ -133,4 +133,30 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     expect(sig_gen("--check", "--overwrite").first(2)).to eq([0, "sig/ is up to date\n"])
   end
+
+  # The round-1 review of the fix: an ancestor's parameters must not be copied onto a subclass `def` that
+  # takes other arguments. Plain `--write` adds the override, so the damage would not even need `--overwrite`.
+  it "writes an override of an ancestor-only declaration from the subclass's own `def`, which `check` accepts" do
+    write("sig/c.rbs", "class Base\n  def m: (Integer x) -> Object\nend\n\nclass Sub < Base\nend\n")
+    write("lib/c.rb", <<~RUBY)
+      class Base
+        def m(x) = Object.new
+      end
+
+      class Sub < Base
+        def m(x, y = 1, *rest, &blk) = 1.0
+      end
+
+      Sub.new.m(1, 2)
+    RUBY
+
+    expect(sig_gen("--write").first).to eq(0)
+    expect(sig_file).to include("  def m: (untyped, ?untyped, *untyped) ?{ (*untyped) -> untyped } -> Float\n")
+
+    out = StringIO.new
+    status = Rigor::CLI.start(["check", "--no-cache", "--config=#{File.join(root, '.rigor.yml')}", "lib"],
+                              out: out, err: StringIO.new)
+    expect([status, out.string]).not_to include(a_string_matching(/wrong-arity|error/))
+    expect(status).to eq(0)
+  end
 end

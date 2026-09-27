@@ -57,10 +57,10 @@ module Rigor
     #   word about it — the opposite of `void`. It is treated like no declaration at all: the inferred return
     #   is proposed as `tighter-return`, carrying `untyped` as the declared spelling so `--diff` still shows a
     #   declaration existed (#995; see {#declared_untyped?}).
-    # - A `tighter-return` proposal replaces the return and nothing else: the parameter list is the
-    #   declaration's, spelled as written, so `--overwrite` never changes which calls the signature accepts. A
-    #   declaration with more than one overload is left alone, since one inferred return says nothing about
-    #   which overload produced it (#1436; see {#tighter_return_line}).
+    # - A `tighter-return` over the class's own declaration replaces the return and nothing else: the rest of
+    #   the line is the declaration's, spelled as written, so `--overwrite` never changes which calls the
+    #   signature accepts. A declaration with more than one overload, or one spelled as an `alias`, is left
+    #   alone (#1436; see {#tighter_return_line}).
     # - A proposal that erases to an RBS literal never tightens an existing declaration: the declared type is
     #   the author's abstraction over the body and the literal is what it hides (#837; see
     #   {#pins_literal_over_declaration?}). A method with no declaration is unaffected — clause 1 still emits
@@ -1153,11 +1153,16 @@ module Rigor
 
       # A member line's overloads, parsed with type names unresolved so the two sides compare as written.
       def member_types(source)
+        member_overloads(source)&.map(&:method_type)
+      end
+
+      # The same, with each overload's own annotations (`%a{pure} (Integer) -> String`).
+      def member_overloads(source)
         return nil if source.nil?
 
         _buffer, _directives, decls = ::RBS::Parser.parse_signature("class Rigor__SigGenProbe\n#{source}\nend\n")
         parsed = decls.first&.members&.first
-        parsed.is_a?(::RBS::AST::Members::MethodDefinition) ? parsed.overloads.map(&:method_type) : nil
+        parsed.is_a?(::RBS::AST::Members::MethodDefinition) ? parsed.overloads : nil
       rescue ::RBS::BaseError
         nil
       end
@@ -1248,9 +1253,9 @@ module Rigor
       # Both tightening branches end here. The proposal is the declaration with its return replaced
       # ({#tighter_return_line}); when there is no single declared overload to replace it in, the method is
       # `equivalent` — the declaration stands, as it does for any narrowing the generator declines. `declared_rbs`
-      # carries the declaration's own line so `--diff` and `--check` show what the proposal replaces.
+      # carries the class's own declaration so `--diff` and `--check` show the line the proposal replaces.
       def tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, declared_return, rendered) # rubocop:disable Metrics/ParameterLists
-        line = rendered || tighter_return_line(method_def, class_name, def_node.name, kind, inferred)
+        line = rendered || tighter_return_line(def_node, method_def, class_name, kind, inferred)
         return equivalent(path, def_node, class_name, kind, inferred, declared_return) if line.nil?
 
         build_candidate(
@@ -1261,7 +1266,7 @@ module Rigor
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
           declared_return_rbs: declared_return,
-          declared_rbs: declared_line(method_def, class_name, def_node.name, kind),
+          declared_rbs: declared_line(method_def, class_name),
           rbs: line
         )
       end
@@ -1270,39 +1275,56 @@ module Rigor
       # new method, from the `def`'s runtime shape: every parameter `untyped`, `(?)` spelled out as
       # `(*untyped)`, names and block types dropped. Under `--overwrite` that replaced a declared `(Integer x)`
       # with `(untyped)` — a change to which calls the signature accepts, made by a proposal that claims to be
-      # about the return. The parameters, type parameters and block stay as the declaration writes them.
+      # about the return. The class's own declaration is kept whole instead: its visibility, the overload's
+      # annotations, type parameters, parameters and block, with only the return replaced.
       #
-      # A declaration with several overloads is declined (`nil`). The body is typed once, so the inferred
-      # return covers every overload together and says nothing about which overload returns what: collapsing
-      # them into one line would drop the overloads, and giving each the joint return would widen the overloads
-      # the author wrote narrower.
-      def tighter_return_line(method_def, class_name, method_name, kind, inferred)
-        overload = sole_declared_overload(method_def, class_name, method_name)
+      # Three shapes are declined (`nil`):
+      # - several overloads. The body is typed once, so the inferred return covers every overload together and
+      #   says nothing about which overload returns what: collapsing them into one line would drop the
+      #   overloads, and giving each the joint return would widen the overloads the author wrote narrower.
+      # - a name the nearest declaration spells as an `alias`. Its parameters are the aliased method's, and a
+      #   proposal would read as a rewrite of that method's line rather than of the alias.
+      # - nothing else: when only an ancestor declares the method, the proposal is a new override on this
+      #   class, and is rendered from the `def`'s own shape like any new method. The ancestor's parameters
+      #   describe the ancestor's `def`, not this one, which may take other arguments (ADR-14 clause 2).
+      def tighter_return_line(def_node, method_def, class_name, kind, inferred)
+        return nil if method_def.alias_of
+
+        member = signature_member(method_def, class_name)
+        return render_rbs_line(def_node, inferred, class_name, kind) if member.nil?
+
+        overload = sole_declared_overload(member, method_def, def_node.name)
         return nil if overload.nil?
 
         returned = paren_wrap_union(elaborated_rbs(inferred, owner: class_name))
-        "#{method_def_prefix(class_name, method_name, kind)}#{method_name}: #{spell_with_return(overload, returned)}"
+        annotations = overload.annotations.map { |a| "#{a.location&.source || "%a{#{a.string}}"} " }.join
+        visibility = member.respond_to?(:visibility) && member.visibility ? "#{member.visibility} " : ""
+        "#{visibility}#{method_def_prefix(class_name, def_node.name, kind)}#{def_node.name}: " \
+          "#{annotations}#{spell_with_return(overload.method_type, returned)}"
       end
 
-      # The one overload declared for the method, parsed from the class's own `sig/` member so it keeps the
-      # spelling the author wrote (`Integer`, not the resolved `::Integer`). A declaration only an ancestor
-      # carries — the proposal then overrides it on this class — is read from the definition, whose resolved
-      # names mean the same thing wherever the line lands.
-      def sole_declared_overload(method_def, class_name, method_name)
+      # The one overload the class's own `sig/` member declares, parsed from its text with its annotations so it
+      # keeps the spelling the author wrote (`Integer`, not the resolved `::Integer`). An attribute declares one
+      # implicitly and carries no overload annotations.
+      def sole_declared_overload(member, method_def, method_name)
         return nil unless method_def.method_types.size == 1
 
-        member = signature_member(method_def, class_name)
-        written = member && existing_types(member, method_name)
-        written&.size == 1 ? written.first : method_def.method_types.first
+        overloads =
+          if member.is_a?(::RBS::AST::Members::MethodDefinition)
+            member_overloads(member.location&.source)
+          else
+            existing_types(member, method_name)&.map do |method_type|
+              ::RBS::AST::Members::MethodDefinition::Overload.new(method_type: method_type, annotations: [])
+            end
+          end
+        overloads&.size == 1 ? overloads.first : nil
       end
 
-      # The declaration a proposal replaces, as `--diff` shows it: the class's own member, or, for one only an
-      # ancestor declares, the definition's overloads.
-      def declared_line(method_def, class_name, method_name, kind)
-        member = signature_member(method_def, class_name)
-        return squish(member.location.source) if member&.location
-
-        "#{method_def_prefix(class_name, method_name, kind)}#{method_name}: #{method_def.method_types.join(' | ')}"
+      # The class's own declaration, as the `-` line of `--diff` and `--check` shows it. A method only an
+      # ancestor declares has none: the proposal adds an override rather than replacing a line.
+      def declared_line(method_def, class_name)
+        source = signature_member(method_def, class_name)&.location&.source
+        source && squish(source)
       end
 
       # Issue #836 — a declared `void` is return INTENT, never a wide value type waiting to be narrowed, so it
@@ -1342,7 +1364,7 @@ module Rigor
 
       # Proposed without {#compare_against_declared}'s tightening guards: a declared `untyped` return carries no
       # information to weigh {#tighter?} or {#literal_decline?} against, the same position a method with no
-      # declaration at all is in. The line is still the declaration's with its return replaced (#1436), and
+      # declaration at all is in. The line is built as for any tightening ({#tighter_return_line}), and
       # `declared_return_rbs` carries `"untyped"` so the `[tighter, was: untyped]` print tag says one existed.
       def declared_untyped_candidate(path, def_node, class_name, kind, inferred, method_def, rendered: nil)
         tighter_return_candidate(path, def_node, class_name, kind, inferred, method_def, "untyped", rendered)

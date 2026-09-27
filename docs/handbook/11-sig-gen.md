@@ -130,7 +130,7 @@ states:
 | `new-method` | RBS file declares the class but not this method. |
 | `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. The proposal is the declared line with only its return replaced; see [Tighter returns keep the declared parameters](#tighter-returns-keep-the-declared-parameters). |
 | `inline-overwrite` | Only under `--overwrite`: a method declared inline with `# @rbs` / `#:` whose `sig/` declaration disagrees with it; the whole `sig/` member is replaced by the inline one. See [Methods declared inline](#methods-declared-inline). |
-| `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void` or an overloaded declaration), or the method is an `initialize` the class already declares. Silently skipped. |
+| `equivalent` | Nothing for `sig-gen` to propose: the inferred return is identical, wider or unrelated, or it is a narrowing the generator declines (a literal under a wider declaration, anything under a declared `void`, an overloaded declaration or an `alias`), or the method is an `initialize` the class already declares. Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
 The `sig.skipped.*` reasons are:
@@ -173,9 +173,10 @@ The `sig.skipped.*` reasons are:
 ### Tighter returns keep the declared parameters
 
 A `tighter-return` changes the return and nothing else. The
-parameter list, the block and any method type parameters are
-copied from the declaration as written, so applying the
-proposal never changes which calls the signature accepts:
+visibility, the overload's annotations, the method type
+parameters, the parameter list and the block are copied from
+the declaration as written, so applying the proposal never
+changes which calls the signature accepts:
 
 ```
 $ rigor sig-gen --diff lib/c.rb
@@ -189,18 +190,24 @@ $ rigor sig-gen --diff lib/c.rb
 ```
 
 The `-` line is the declaration the proposal replaces. A method
-declared only on an ancestor is proposed as an override on its
-own class, with the ancestor's parameters spelled with fully
-qualified names (`::NS::Foo`), which mean the same thing in
-either class.
+declared only on an ancestor is different: the proposal adds an
+override to the method's own class, and it is written from that
+class's `def` like a new method, with `untyped` parameters. The
+ancestor's parameters describe the ancestor's `def`, and the
+override may take other arguments.
 
-A declaration with more than one overload
-(`def m: (Integer) -> untyped | (String) -> untyped`) gets no
-proposal. The body is typed once for all of its overloads, so
-the inferred return does not say which overload returns what.
-Merging the overloads into one line would drop them, and giving
-every overload the same return would widen the ones you wrote
-narrower.
+Two declarations get no proposal:
+
+- One with more than one overload
+  (`def m: (Integer) -> untyped | (String) -> untyped`). The
+  body is typed once for all of its overloads, so the inferred
+  return does not say which overload returns what. Merging the
+  overloads into one line would drop them, and giving every
+  overload the same return would widen the ones you wrote
+  narrower.
+- A name declared through `alias al m`. Its parameters are
+  `m`'s, and the proposal would read as a rewrite of `m`'s
+  line.
 
 An `initialize` your `sig/` already declares is `equivalent`
 too. sig-gen writes a constructor stub only for a class that
@@ -735,7 +742,7 @@ by side without coordination.
 - **Will not** replace an existing method declaration
   unless `--overwrite` is set AND the candidate is a
   `tighter-return`, and then only its return changes: the
-  declared parameters are kept. Without `--overwrite`,
+  rest of the declaration is kept. Without `--overwrite`,
   existing declarations are user-authored and the new method
   is silently skipped.
 - **Will not** change an existing method declaration that

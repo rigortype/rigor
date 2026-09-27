@@ -1135,33 +1135,57 @@ RSpec.describe Rigor::SigGen::Generator do
         .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def self.s: (String s) -> nil"])
     end
 
-    it "spells a declaration only an ancestor carries with its resolved names, which hold on the subclass too" do
+    # An ancestor's parameters describe the ancestor's `def`. The subclass's may take other arguments, and the
+    # proposal is a new override on the subclass, so it is rendered from the subclass's own `def` (ADR-14
+    # clause 2) — copying `(Integer x)` here would make `Sub.new.m(1, 2)` a wrong-arity call.
+    it "renders a declaration only an ancestor carries from the subclass's own `def`" do
       rbs = <<~RBS
-        module NS
-          class Foo
-          end
-          class Base
-            def m: (Foo x) -> Object
-          end
-          class Sub < Base
-          end
+        class Base
+          def m: (Integer x) -> Object
+          def k: (Integer x) -> untyped
+        end
+        class Sub < Base
         end
       RBS
       ruby = <<~RUBY
-        module NS
-          class Foo; end
-          class Base
-            def m(x) = Object.new
-          end
-          class Sub < Base
-            def m(x) = 1.0
-          end
+        class Base
+          def m(x) = Object.new
+          def k(x) = x
+        end
+        class Sub < Base
+          def m(x, y = 1, *rest, &blk) = 1.0
+          def k(x, flag: false) = 1
         end
       RUBY
-      method = candidate_for(rbs, ruby, :m, owner: "NS::Sub")
+      m = candidate_for(rbs, ruby, :m, owner: "Sub")
+      k = candidate_for(rbs, ruby, :k, owner: "Sub")
 
-      expect([method.classification, method.rbs])
-        .to eq([Rigor::SigGen::Classification::TIGHTER_RETURN, "def m: (::NS::Foo x) -> Float"])
+      expect([m.classification, m.rbs, m.declared_rbs]).to eq(
+        [Rigor::SigGen::Classification::TIGHTER_RETURN,
+         "def m: (untyped, ?untyped, *untyped) ?{ (*untyped) -> untyped } -> Float", nil]
+      )
+      expect(k.rbs).to eq("def k: (untyped, ?flag: untyped) -> 1")
+    end
+
+    it "keeps an overload's own annotation and the declaration's visibility" do
+      rbs = "class C\n  def a: %a{pure} (Integer x) -> untyped\n  private def pv: (Integer x) -> untyped\nend\n"
+      write_fixture("sig/c.rbs", rbs)
+      path = write_fixture("lib/c.rb", "class C\n  def a(x) = nil\n\n  private\n\n  def pv(x) = nil\nend\n")
+      config = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [path], "signature_paths" => [File.join(tmpdir, "sig")])
+      )
+      candidates = described_class.new(configuration: config, paths: [path], include_private: true).run
+
+      expect(candidates.select { |c| c.class_name == "C" }.map(&:rbs))
+        .to eq(["def a: %a{pure} (Integer x) -> nil", "private def pv: (Integer x) -> nil"])
+    end
+
+    # The alias's parameters are the aliased method's, and the proposal would read as a rewrite of `m`'s line.
+    it "declines a name the class's `sig/` declares only through an `alias`" do
+      al = candidate_for("class C\n  def m: (Integer x) -> untyped\n  alias al m\nend\n",
+                         "class C\n  def m(x) = 1.0\n  def al(x) = nil\nend\n", :al)
+
+      expect([al.classification, al.rbs, al.declared_rbs]).to eq([Rigor::SigGen::Classification::EQUIVALENT, nil, nil])
     end
 
     # One body answers for every overload at once, so the inferred return cannot be assigned to any one of

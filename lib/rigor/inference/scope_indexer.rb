@@ -23,6 +23,7 @@ require_relative "index_write_widening"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
 require_relative "narrowing"
+require_relative "operand_effects"
 require_relative "statement_evaluator"
 require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
@@ -8798,15 +8799,32 @@ module Rigor
       # set ({LastLine.block_entry}): this walk evaluates nothing, so no `gets` in the body forgets it. Issue #1360 —
       # and the block of a call that keeps it, a closure, reads `$!`, `$@` and `$?` unbound
       # ({FreshFrameBlocks.closure_entry}).
+      #
+      # Issue #1468 — the arguments and block of a safe-navigation call run only once its receiver is non-nil, so
+      # they inherit the scope with the receiver narrowed ({Narrowing.safe_navigation_scope},
+      # {Narrowing.safe_navigation_block_scope}); the receiver itself keeps the call's own. This walk hands every
+      # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
+      # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
+      # operand).
       def propagate_call(node, table, current_scope)
         block = node.block
+        operands =
+          OperandEffects.any?(node.arguments) ? current_scope : Narrowing.safe_navigation_scope(node, current_scope)
         entry = unentered_block_entry(node, block, table, current_scope)
-        if entry.equal?(current_scope)
+        if entry.equal?(current_scope) && operands.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
         end
 
-        node.rigor_each_child { |child| propagate(child, table, child.equal?(block) ? entry : current_scope) }
+        receiver = node.receiver
+        node.rigor_each_child do |child|
+          child_scope =
+            if child.equal?(receiver) then current_scope
+            elsif child.equal?(block) && block.is_a?(Prism::BlockNode) then entry
+            else operands
+            end
+          propagate(child, table, child_scope)
+        end
       end
 
       # Issue #1429 — an `END { }` body runs at exit, after any code that may rebind a guarded global or constant
@@ -8819,6 +8837,7 @@ module Rigor
       def unentered_block_entry(node, block, table, current_scope)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
 
+        current_scope = Narrowing.safe_navigation_block_scope(node, current_scope)
         # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
         current_scope = GuardRebinding.block_entry(current_scope, block, node)
         return FreshFrameBlocks.entry(current_scope, node) if FreshFrameBlocks.fresh_entry?(node, current_scope)

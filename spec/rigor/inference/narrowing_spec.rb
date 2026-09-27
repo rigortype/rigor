@@ -679,6 +679,53 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  # Issue #1468 — the operands of `x&.m(…) { … }` run only once `x` is non-nil.
+  describe ".safe_navigation_scope and .safe_navigation_block_scope" do
+    let(:union_int_nil) { Rigor::Type::Combinator.union(integer_nominal, constant_nil) }
+    let(:bound) { scope.with_local(:x, union_int_nil) }
+
+    it "removes nil from a local receiver, and nothing else" do
+      call = parse_predicate("x&.foo(x)")
+      expect(described_class.safe_navigation_scope(call, bound).local(:x)).to eq(integer_nominal)
+
+      with_false = scope.with_local(:x, Rigor::Type::Combinator.union(integer_nominal, constant_false, constant_nil))
+      expect(described_class.safe_navigation_scope(call, with_false).local(:x))
+        .to eq(Rigor::Type::Combinator.union(integer_nominal, constant_false))
+    end
+
+    it "answers the entry scope itself for a plain call and for a receiver that cannot be nil" do
+      expect(described_class.safe_navigation_scope(parse_predicate("x.foo(x)"), bound)).to equal(bound)
+
+      non_nil = scope.with_local(:x, Rigor::Type::Combinator.union(integer_nominal, string_nominal))
+      expect(described_class.safe_navigation_scope(parse_predicate("x&.foo(x)"), non_nil)).to equal(non_nil)
+    end
+
+    it "narrows through the `&.` links of a chain whose operands write nothing" do
+      chain = parse_predicate("x&.foo(x)&.bar(x)")
+      expect(described_class.safe_navigation_scope(chain, bound).local(:x)).to eq(integer_nominal)
+
+      rebinding = parse_predicate("x&.foo(x = nil)&.bar(x)")
+      expect(described_class.safe_navigation_scope(rebinding, bound)).to equal(bound)
+
+      plain_link = parse_predicate("x&.foo.bar&.baz(x)")
+      expect(described_class.safe_navigation_scope(plain_link, bound)).to equal(bound)
+    end
+
+    it "enters a block narrowed unless an argument or the block itself writes the receiver" do
+      reads = parse_predicate("x&.each { x.to_s }")
+      expect(described_class.safe_navigation_block_scope(reads, bound).local(:x)).to eq(integer_nominal)
+
+      shadowed = parse_predicate("x&.each { |x| x = nil }")
+      expect(described_class.safe_navigation_block_scope(shadowed, bound).local(:x)).to eq(integer_nominal)
+
+      rebinds = parse_predicate("x&.each { x.to_s; x = nil }")
+      expect(described_class.safe_navigation_block_scope(rebinds, bound)).to equal(bound)
+
+      argument_writes = parse_predicate("x&.each(y = 1) { x.to_s }")
+      expect(described_class.safe_navigation_block_scope(argument_writes, bound)).to equal(bound)
+    end
+  end
+
   describe ".narrow_for_fact (ADR-7 Slice 4-A public Fact-shaped narrowing entry)" do
     let(:env) { Rigor::Environment.default }
     let(:union_int_string) { Rigor::Type::Combinator.union(integer_nominal, string_nominal) }
